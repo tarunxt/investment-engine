@@ -9,7 +9,15 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Info, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ExternalLink,
+  Info,
+  X,
+} from "lucide-react";
 
 import {
   getBullpenLlmReviewState,
@@ -54,7 +62,10 @@ export type BullpenTableSortState = {
   direction: BullpenTableSortDirection;
 };
 
-type ResizableBullpenTableColumnId = Exclude<BullpenTableColumnId, "select" | "serialNumber">;
+type ResizableBullpenTableColumnId = Exclude<
+  BullpenTableColumnId,
+  "select" | "serialNumber"
+>;
 
 type ResizeState = {
   columnId: ResizableBullpenTableColumnId;
@@ -99,9 +110,11 @@ function formatMoney(value: number | null) {
 }
 
 function formatOutcomeSummary(question: BullpenQuestionRow) {
-  if (question.outcomeLabels.length > 0) return question.outcomeLabels.join(" / ");
+  if (question.outcomeLabels.length > 0)
+    return question.outcomeLabels.join(" / ");
   if (question.isBinaryYesNo) return "Yes / No";
-  if (question.outcomeCount !== null) return `${question.outcomeCount} outcomes`;
+  if (question.outcomeCount !== null)
+    return `${question.outcomeCount} outcomes`;
   return "—";
 }
 
@@ -260,10 +273,7 @@ function ColumnResizeHandle({
     columnId: ResizableBullpenTableColumnId,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) => void;
-  onResizeStep: (
-    columnId: ResizableBullpenTableColumnId,
-    step: number,
-  ) => void;
+  onResizeStep: (columnId: ResizableBullpenTableColumnId, step: number) => void;
   onReset: (columnId: ResizableBullpenTableColumnId) => void;
 }) {
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -331,10 +341,7 @@ function ResizableColumnHeader({
     columnId: ResizableBullpenTableColumnId,
     event: ReactPointerEvent<HTMLButtonElement>,
   ) => void;
-  onResizeStep: (
-    columnId: ResizableBullpenTableColumnId,
-    step: number,
-  ) => void;
+  onResizeStep: (columnId: ResizableBullpenTableColumnId, step: number) => void;
   onReset: (columnId: ResizableBullpenTableColumnId) => void;
 }) {
   return (
@@ -360,12 +367,7 @@ function ResizableColumnHeader({
   );
 }
 
-
-function AmountHighlightConditionsDialog({
-  onClose,
-}: {
-  onClose: () => void;
-}) {
+function AmountHighlightConditionsDialog({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="w-full max-w-lg overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -389,7 +391,8 @@ function AmountHighlightConditionsDialog({
         </div>
         <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-600">
           <p>
-            The amount cell turns pink only when the row qualifies as an invest candidate.
+            The amount cell turns pink only when the row qualifies as an invest
+            candidate.
           </p>
           <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-fuchsia-700">
@@ -427,7 +430,8 @@ function LlmOddsDisplay({
   question: BullpenQuestionRow;
   value: number | null;
 }) {
-  const reviewState = value === null ? null : getBullpenLlmReviewState(question);
+  const reviewState =
+    value === null ? null : getBullpenLlmReviewState(question);
   const fetchError = value === null ? question.llmNotes : null;
 
   return (
@@ -497,7 +501,13 @@ export function BullpenQuestionsTable({
   ).length;
   const allVisibleSelected =
     selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
-  const tableWidth = getBullpenTableWidth(columnWidths);
+  const visibleColumnIds = BULLPEN_TABLE_COLUMN_IDS.filter(
+    (columnId) => columnId !== "noOdds" && columnId !== "llmNoOdds",
+  );
+  const tableWidth =
+    getBullpenTableWidth(columnWidths) -
+    columnWidths.noOdds -
+    columnWidths.llmNoOdds;
   const updatedAtLabel = formatUpdatedAt(snapshot?.scannedAt);
 
   const setColumnWidth = (
@@ -615,7 +625,7 @@ export function BullpenQuestionsTable({
           style={{ width: tableWidth }}
         >
           <colgroup>
-            {BULLPEN_TABLE_COLUMN_IDS.map((columnId) => (
+            {visibleColumnIds.map((columnId) => (
               <col key={columnId} style={{ width: columnWidths[columnId] }} />
             ))}
           </colgroup>
@@ -688,7 +698,7 @@ export function BullpenQuestionsTable({
               />
               <ResizableColumnHeader
                 columnId="yesOdds"
-                label="Current Yes odds %"
+                label="Current Odds"
                 sortKey="yesOdds"
                 sortState={sortState}
                 onSortChange={onSortChange}
@@ -698,34 +708,12 @@ export function BullpenQuestionsTable({
                 onReset={resetColumnWidth}
               />
               <ResizableColumnHeader
-                columnId="noOdds"
-                label="Current No odds %"
-                sortKey="noOdds"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "noOdds"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
                 columnId="llmYesOdds"
-                label="LLM Yes Odds"
+                label="LLM Odds"
                 sortKey="llmYesOdds"
                 sortState={sortState}
                 onSortChange={onSortChange}
                 isResizing={resizingColumnId === "llmYesOdds"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="llmNoOdds"
-                label="LLM No Odds"
-                sortKey="llmNoOdds"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "llmNoOdds"}
                 onResizeStart={handleResizeStart}
                 onResizeStep={handleResizeStep}
                 onReset={resetColumnWidth}
@@ -818,7 +806,9 @@ export function BullpenQuestionsTable({
                       {rowIndex + 1}
                     </td>
                     <td className="px-4 py-3 font-medium text-slate-900">
-                      <div className="break-words leading-5">{question.question}</div>
+                      <div className="break-words leading-5">
+                        {question.question}
+                      </div>
                       {question.marketUrl ? (
                         <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
                           <a
@@ -833,69 +823,94 @@ export function BullpenQuestionsTable({
                         </div>
                       ) : null}
                     </td>
-                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={formatDate(question.closeTime) || undefined}>
+                    <td
+                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+                      title={formatDate(question.closeTime) || undefined}
+                    >
                       {formatDate(question.closeTime)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-slate-600">
                       {formatDays(question.daysUntilClose)}
                     </td>
-                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={question.category || undefined}>
+                    <td
+                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+                      title={question.category || undefined}
+                    >
                       {question.category}
                     </td>
-                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={formatOutcomeSummary(question)}>
+                    <td
+                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+                      title={formatOutcomeSummary(question)}
+                    >
                       {formatOutcomeSummary(question)}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-emerald-700">
-                      {formatOdds(question.yesOdds)}
+                    <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold">
+                      <div className="text-emerald-700">
+                        Yes: {formatOdds(question.yesOdds)}
+                      </div>
+                      <div className="mt-1 text-rose-700">
+                        No: {formatOdds(question.noOdds)}
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-rose-700">
-                      {formatOdds(question.noOdds)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-indigo-700">
+                    <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-violet-700">
                       {hasLlmAnalysis ? (
                         <button
                           type="button"
                           onClick={() => setBreakdownQuestion(question)}
                           aria-label={`Open LLM odds breakdown for ${question.question}`}
-                          className={cn(
-                            "rounded-md px-2 py-1 underline decoration-indigo-300 underline-offset-4 transition hover:text-indigo-900",
-                            getLlmOddsCellClass(question.llmYesOdds),
-                          )}
+                          className="rounded-md px-2 py-1 text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
                         >
-                          <LlmOddsDisplay question={question} value={question.llmYesOdds} />
+                          <span
+                            className={cn(
+                              "block",
+                              getLlmOddsCellClass(question.llmYesOdds),
+                            )}
+                          >
+                            Yes:{" "}
+                            <LlmOddsDisplay
+                              question={question}
+                              value={question.llmYesOdds}
+                            />
+                          </span>
+                          <span
+                            className={cn(
+                              "mt-1 block",
+                              getLlmOddsCellClass(question.llmNoOdds),
+                            )}
+                          >
+                            No:{" "}
+                            <LlmOddsDisplay
+                              question={question}
+                              value={question.llmNoOdds}
+                            />
+                          </span>
                         </button>
                       ) : (
-                        <span
-                          className={cn(
-                            "rounded-md px-2 py-1",
-                            getLlmOddsCellClass(question.llmYesOdds),
-                          )}
-                        >
-                          <LlmOddsDisplay question={question} value={question.llmYesOdds} />
-                        </span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-violet-700">
-                      {hasLlmAnalysis ? (
-                        <button
-                          type="button"
-                          onClick={() => setBreakdownQuestion(question)}
-                          aria-label={`Open LLM odds breakdown for ${question.question}`}
-                          className={cn(
-                            "rounded-md px-2 py-1 underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900",
-                            getLlmOddsCellClass(question.llmNoOdds),
-                          )}
-                        >
-                          <LlmOddsDisplay question={question} value={question.llmNoOdds} />
-                        </button>
-                      ) : (
-                        <span
-                          className={cn(
-                            "rounded-md px-2 py-1",
-                            getLlmOddsCellClass(question.llmNoOdds),
-                          )}
-                        >
-                          <LlmOddsDisplay question={question} value={question.llmNoOdds} />
+                        <span className="rounded-md px-2 py-1">
+                          <span
+                            className={cn(
+                              "block",
+                              getLlmOddsCellClass(question.llmYesOdds),
+                            )}
+                          >
+                            Yes:{" "}
+                            <LlmOddsDisplay
+                              question={question}
+                              value={question.llmYesOdds}
+                            />
+                          </span>
+                          <span
+                            className={cn(
+                              "mt-1 block",
+                              getLlmOddsCellClass(question.llmNoOdds),
+                            )}
+                          >
+                            No:{" "}
+                            <LlmOddsDisplay
+                              question={question}
+                              value={question.llmNoOdds}
+                            />
+                          </span>
                         </span>
                       )}
                     </td>
@@ -912,10 +927,16 @@ export function BullpenQuestionsTable({
                     >
                       {formatMoney(question.amountToBeInvested)}
                     </td>
-                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={question.volume || "—"}>
+                    <td
+                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+                      title={question.volume || "—"}
+                    >
                       {question.volume || "—"}
                     </td>
-                    <td className="truncate whitespace-nowrap px-4 py-3 text-slate-600" title={question.liquidity || "—"}>
+                    <td
+                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+                      title={question.liquidity || "—"}
+                    >
                       {question.liquidity || "—"}
                     </td>
                   </tr>

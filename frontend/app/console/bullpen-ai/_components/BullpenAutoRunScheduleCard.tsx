@@ -297,12 +297,30 @@ function formatOddsPercent(value: number | null) {
   return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
 }
 
+function formatOddsPair(yesOdds: number | null, noOdds: number | null) {
+  return (
+    <div className="space-y-1 text-xs font-semibold">
+      <div>
+        <span className="text-slate-500">Yes:</span>{" "}
+        {formatOddsPercent(yesOdds)}
+      </div>
+      <div>
+        <span className="text-slate-500">No:</span> {formatOddsPercent(noOdds)}
+      </div>
+    </div>
+  );
+}
+
 function getLlmOddsHighlightClass(value: number | null) {
   if (value === null) return "font-semibold text-violet-700";
-  if (value >= 95) return "rounded-md bg-lime-400 px-2 py-1 font-extrabold text-slate-950";
-  if (value >= 90) return "rounded-md bg-lime-300 px-2 py-1 font-extrabold text-slate-950";
-  if (value >= 85) return "rounded-md bg-emerald-300 px-2 py-1 font-extrabold text-slate-950";
-  if (value >= 80) return "rounded-md bg-emerald-200 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 95)
+    return "rounded-md bg-lime-400 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 90)
+    return "rounded-md bg-lime-300 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 85)
+    return "rounded-md bg-emerald-300 px-2 py-1 font-extrabold text-slate-950";
+  if (value >= 80)
+    return "rounded-md bg-emerald-200 px-2 py-1 font-extrabold text-slate-950";
   return "font-semibold text-violet-700";
 }
 
@@ -371,10 +389,7 @@ function areProviderTargetsEqual(
   if (left.length !== right.length) return false;
   return left.every((target, index) => {
     const other = right[index];
-    return (
-      other?.provider === target.provider &&
-      other?.model === target.model
-    );
+    return other?.provider === target.provider && other?.model === target.model;
   });
 }
 
@@ -482,7 +497,8 @@ function getStageTwoLlmOutcomeCounts(
     readStageOutputNumber(stage.outputs.llm_failed_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llm_failed_model_count);
   if (explicitPassed !== null || explicitFailed !== null) {
-    const passed = explicitPassed ?? Math.max(0, completedCount - (explicitFailed ?? 0));
+    const passed =
+      explicitPassed ?? Math.max(0, completedCount - (explicitFailed ?? 0));
     const failed = explicitFailed ?? Math.max(0, completedCount - passed);
     return { passed, failed };
   }
@@ -506,8 +522,12 @@ function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
     return targetRuns.filter((run) => {
-      const status = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
-      return status === "completed" || status === "partial" || status === "failed";
+      const status = normalizeStageTwoRunStatus(
+        readLlmContextString(run, "status"),
+      );
+      return (
+        status === "completed" || status === "partial" || status === "failed"
+      );
     }).length;
   }
 
@@ -521,7 +541,8 @@ function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
   const addTarget = (value: unknown) => {
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
-    const provider = typeof record.provider === "string" ? record.provider.trim() : "";
+    const provider =
+      typeof record.provider === "string" ? record.provider.trim() : "";
     const model = typeof record.model === "string" ? record.model.trim() : "";
     if (provider || model) completedTargets.add(`${provider}/${model}`);
   };
@@ -538,9 +559,7 @@ function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
   return completedTargets.size;
 }
 
-function getStageTwoInvestableDecisions(
-  decisions: BullpenAutoLiveDecision[],
-) {
+function getStageTwoInvestableDecisions(decisions: BullpenAutoLiveDecision[]) {
   return decisions.filter((decision) => {
     const orderPlan = decision.order_plan;
     if (orderPlan) {
@@ -609,7 +628,9 @@ function StageOneRunStats({
       )}
       <div className="pt-2">
         Total Events Scanned:{" "}
-        <span className="font-semibold tabular-nums">{displayStat(stats.totalScanned)}</span>
+        <span className="font-semibold tabular-nums">
+          {displayStat(stats.totalScanned)}
+        </span>
       </div>
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center justify-between gap-2">
@@ -781,7 +802,10 @@ function StageTwoRunStats({
             New Opportunities
             {deDuplicatedCount > 0 ? (
               <>
-                , <span className="font-semibold tabular-nums">{displayStat(deDuplicatedCount)}</span>{" "}
+                ,{" "}
+                <span className="font-semibold tabular-nums">
+                  {displayStat(deDuplicatedCount)}
+                </span>{" "}
                 overlap/de-duped
               </>
             ) : null}
@@ -789,9 +813,16 @@ function StageTwoRunStats({
           </button>
         ) : (
           <>
-            LLM ran on: <span className="font-semibold tabular-nums">{displayStat(stats.llmRanOn)}</span>{" "}
-            unique rows ({displayStat(stats.activePositions)} Active + {displayStat(stats.newOpportunities)} New Opportunities
-            {deDuplicatedCount > 0 ? `, ${displayStat(deDuplicatedCount)} overlap/de-duped` : ""})
+            LLM ran on:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmRanOn)}
+            </span>{" "}
+            unique rows ({displayStat(stats.activePositions)} Active +{" "}
+            {displayStat(stats.newOpportunities)} New Opportunities
+            {deDuplicatedCount > 0
+              ? `, ${displayStat(deDuplicatedCount)} overlap/de-duped`
+              : ""}
+            )
           </>
         )}
       </div>
@@ -811,8 +842,15 @@ function StageTwoRunStats({
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmsSelected)}
             </span>{" "}
-            (Passed: <span className="font-semibold tabular-nums">{displayStat(stats.llmsPassed)}</span> | Failed:{" "}
-            <span className="font-semibold tabular-nums">{displayStat(stats.llmsFailed)}</span>)
+            (Passed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsPassed)}
+            </span>{" "}
+            | Failed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsFailed)}
+            </span>
+            )
           </button>
         ) : (
           <>
@@ -824,8 +862,15 @@ function StageTwoRunStats({
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmsSelected)}
             </span>{" "}
-            (Passed: <span className="font-semibold tabular-nums">{displayStat(stats.llmsPassed)}</span> | Failed:{" "}
-            <span className="font-semibold tabular-nums">{displayStat(stats.llmsFailed)}</span>)
+            (Passed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsPassed)}
+            </span>{" "}
+            | Failed:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.llmsFailed)}
+            </span>
+            )
           </>
         )}
       </div>
@@ -837,14 +882,14 @@ function StageTwoRunStats({
             className="text-left font-medium text-emerald-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
             aria-label={`Open details for ${displayStat(stats.newEventsToInvestIn)} new events to invest in`}
           >
-            New Events to Invest in: {" "}
+            New Events to Invest in:{" "}
             <span className="font-semibold tabular-nums">
               {displayStat(stats.newEventsToInvestIn)}
             </span>
           </button>
         ) : (
           <>
-            New Events to Invest in: {" "}
+            New Events to Invest in:{" "}
             <span className="font-semibold tabular-nums">
               {displayStat(stats.newEventsToInvestIn)}
             </span>
@@ -984,7 +1029,12 @@ function buildScanCandidateDialogRows({
     const llmNoOdds = readStageOutputNumber(decision.fair_no_probability_pct);
     const returnsPerDay = getDecisionReturnsPerDay(decision);
     addReviewedCandidateLookup(
-      [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title],
+      [
+        decision.market_id,
+        decision.slug ?? null,
+        decision.market_url ?? null,
+        decision.market_title,
+      ],
       {
         llmYesOdds,
         llmNoOdds,
@@ -1095,7 +1145,6 @@ function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
   );
 }
 
-
 function isSubmittedOrSuccessfulOrderPlan(
   orderPlan: BullpenAutoLiveDecision["order_plan"],
 ) {
@@ -1107,8 +1156,12 @@ function isSubmittedOrSuccessfulOrderPlan(
   const response = orderPlan.execution_response?.trim() ?? "";
   const successText = `${detail}\n${response}`;
   return (
-    /successfully|submitted|filled|redeemed|claimed|executed/i.test(successText) &&
-    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(successText)
+    /successfully|submitted|filled|redeemed|claimed|executed/i.test(
+      successText,
+    ) &&
+    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(
+      successText,
+    )
   );
 }
 
@@ -1355,8 +1408,12 @@ function getInvestStageExecutionSteps(
           step.forced_exit_planned_orders,
         ),
         redeemPlannedOrders: readStageOutputNumber(step.redeem_planned_orders),
-        redeemProcessedOrders: readStageOutputNumber(step.redeem_processed_orders),
-        redeemSubmittedOrders: readStageOutputNumber(step.redeem_submitted_orders),
+        redeemProcessedOrders: readStageOutputNumber(
+          step.redeem_processed_orders,
+        ),
+        redeemSubmittedOrders: readStageOutputNumber(
+          step.redeem_submitted_orders,
+        ),
       };
     })
     .filter((step): step is InvestExecutionStepView => step !== null);
@@ -1389,8 +1446,12 @@ function getLastInvestExecutionStep(
         rawStep.forced_exit_planned_orders,
       ),
       redeemPlannedOrders: readStageOutputNumber(rawStep.redeem_planned_orders),
-      redeemProcessedOrders: readStageOutputNumber(rawStep.redeem_processed_orders),
-      redeemSubmittedOrders: readStageOutputNumber(rawStep.redeem_submitted_orders),
+      redeemProcessedOrders: readStageOutputNumber(
+        rawStep.redeem_processed_orders,
+      ),
+      redeemSubmittedOrders: readStageOutputNumber(
+        rawStep.redeem_submitted_orders,
+      ),
     };
   }
 
@@ -1409,9 +1470,15 @@ function getLastInvestExecutionStep(
     forcedExitPlannedOrders: readStageOutputNumber(
       investStage.outputs.event_exit_forced_planned,
     ),
-    redeemPlannedOrders: readStageOutputNumber(investStage.outputs.redeem_planned),
-    redeemProcessedOrders: readStageOutputNumber(investStage.outputs.redeem_processed),
-    redeemSubmittedOrders: readStageOutputNumber(investStage.outputs.redeem_submitted),
+    redeemPlannedOrders: readStageOutputNumber(
+      investStage.outputs.redeem_planned,
+    ),
+    redeemProcessedOrders: readStageOutputNumber(
+      investStage.outputs.redeem_processed,
+    ),
+    redeemSubmittedOrders: readStageOutputNumber(
+      investStage.outputs.redeem_submitted,
+    ),
   };
 }
 
@@ -2345,7 +2412,9 @@ function StageTwoExecutionShortlist({
   if (steps.length === 0) return null;
 
   const sellDecisions = decisions.filter(
-    (decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem",
+    (decision) =>
+      decision.order_plan?.action === "sell" ||
+      decision.order_plan?.action === "redeem",
   );
   const buyDecisions = decisions.filter(
     (decision) => decision.order_plan?.action === "buy",
@@ -2926,7 +2995,6 @@ function RunDetailDialog({
               </section>
             ))}
           </div>
-
         </div>
       </div>
       {warningsDialogOpen ? (
@@ -2963,17 +3031,35 @@ function RunWarningsDialog({
       <div className="flex max-h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-amber-100 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">Brief warnings / errors</p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">Detailed messages</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+              Brief warnings / errors
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">
+              Detailed messages
+            </h3>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close warnings"><X className="h-4 w-4" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close warnings"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <div className="overflow-y-auto px-6 py-5">
           <div className="space-y-3">
             {warnings.map((warning, index) => (
-              <div key={`${warning.label}-${index}`} className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">{warning.label}</p>
-                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{warning.detail}</p>
+              <div
+                key={`${warning.label}-${index}`}
+                className="rounded-2xl border border-amber-100 bg-amber-50/60 p-4"
+              >
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-800">
+                  {warning.label}
+                </p>
+                <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">
+                  {warning.detail}
+                </p>
               </div>
             ))}
           </div>
@@ -2996,30 +3082,61 @@ function DecisionLlmOddsDialog({
       <div className="flex max-h-[82vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-700">LLM Odds Breakdown</p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">{decision.market_title}</h3>
-            <p className="mt-2 text-sm text-slate-600">Consensus Yes {formatOddsPercent(decision.fair_yes_probability_pct ?? null)} · Consensus No {formatOddsPercent(decision.fair_no_probability_pct ?? null)}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-violet-700">
+              LLM Odds Breakdown
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">
+              {decision.market_title}
+            </h3>
+            <p className="mt-2 text-sm text-slate-600">
+              Consensus Yes{" "}
+              {formatOddsPercent(decision.fair_yes_probability_pct ?? null)} ·
+              Consensus No{" "}
+              {formatOddsPercent(decision.fair_no_probability_pct ?? null)}
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close LLM odds breakdown"><X className="h-4 w-4" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close LLM odds breakdown"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <div className="overflow-y-auto px-6 py-5">
           {decision.llm_outputs.length ? (
             <div className="space-y-3">
               {decision.llm_outputs.map((output, index) => (
-                <div key={`${output.provider}-${output.model}-${index}`} className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4">
+                <div
+                  key={`${output.provider}-${output.model}-${index}`}
+                  className="rounded-2xl border border-violet-100 bg-violet-50/40 p-4"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-950">{output.provider} · {output.model}</p>
+                    <p className="text-sm font-semibold text-slate-950">
+                      {output.provider} · {output.model}
+                    </p>
                     <div className="flex gap-2 text-xs font-semibold">
-                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">Yes {formatOddsPercent(output.llm_yes_odds ?? null)}</span>
-                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">No {formatOddsPercent(output.llm_no_odds ?? null)}</span>
+                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">
+                        Yes {formatOddsPercent(output.llm_yes_odds ?? null)}
+                      </span>
+                      <span className="rounded-full border border-violet-200 bg-white px-2.5 py-1 text-violet-800">
+                        No {formatOddsPercent(output.llm_no_odds ?? null)}
+                      </span>
                     </div>
                   </div>
-                  {output.rationale ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{output.rationale}</p> : null}
+                  {output.rationale ? (
+                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                      {output.rationale}
+                    </p>
+                  ) : null}
                 </div>
               ))}
             </div>
           ) : (
-            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No per-model LLM outputs were recorded for this decision.</p>
+            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              No per-model LLM outputs were recorded for this decision.
+            </p>
           )}
         </div>
       </div>
@@ -3039,14 +3156,27 @@ function PlannedOrderDetailDialog({
       <div className="flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Planned but not submitted</p>
-            <h3 className="mt-1 text-lg font-semibold text-slate-950">{state.title}</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Planned but not submitted
+            </p>
+            <h3 className="mt-1 text-lg font-semibold text-slate-950">
+              {state.title}
+            </h3>
             <p className="mt-2 text-sm text-slate-600">{state.summary}</p>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close planned order detail"><X className="h-4 w-4" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close planned order detail"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <div className="overflow-y-auto px-6 py-5">
-          <pre className="whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">{state.detail}</pre>
+          <pre className="whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm leading-6 text-slate-700">
+            {state.detail}
+          </pre>
         </div>
       </div>
     </div>
@@ -3093,7 +3223,9 @@ function Stage3DecisionTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/60">
       <div className="border-b border-white/80 px-4 py-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">{title}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700">
+          {title}
+        </p>
       </div>
       {rows.length ? (
         <div className="overflow-x-auto">
@@ -3117,33 +3249,120 @@ function Stage3DecisionTable({
             </thead>
             <tbody className="divide-y divide-white/80 bg-white/50">
               {rows.map((decision) => {
-                const detail = plannedButNotSubmitted ? getPlannedOrderBrief(decision) : decision.order_plan?.detail ?? "Submitted without extra execution detail.";
+                const detail = plannedButNotSubmitted
+                  ? getPlannedOrderBrief(decision)
+                  : (decision.order_plan?.detail ??
+                    "Submitted without extra execution detail.");
                 return (
                   <tr key={decision.id} className="align-top hover:bg-white/70">
                     <td className="min-w-72 px-4 py-3">
                       <div className="font-semibold text-slate-950 line-clamp-2">
-                        {decision.market_url ? <a className="hover:text-sky-700 hover:underline" href={decision.market_url} target="_blank" rel="noreferrer">{decision.market_title}</a> : decision.market_title}
+                        {decision.market_url ? (
+                          <a
+                            className="hover:text-sky-700 hover:underline"
+                            href={decision.market_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {decision.market_title}
+                          </a>
+                        ) : (
+                          decision.market_title
+                        )}
                       </div>
                     </td>
-                    <td className="px-4 py-3 font-semibold uppercase text-slate-800">{decision.order_plan?.side ?? decision.side}</td>
-                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-950">{formatMoney(decision.order_plan?.order_size_usd ?? null)}<div className="mt-1 text-[11px] font-normal text-slate-500">{decision.order_plan?.shares.toLocaleString("en-IN", { maximumFractionDigits: 4 }) ?? "—"} shares</div></td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatPriceCents(decision.order_plan?.limit_price_cents ?? null)}</td>
-                    <td className="px-4 py-3 whitespace-nowrap text-slate-700">{formatIstDateTime(decision.close_time)}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">{getDecisionDaysLeft(decision)}</td>
-                    <td className="px-4 py-3 text-slate-700">{decision.theme || "—"}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatOddsPercent(decision.current_yes_odds ?? null)}</td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatOddsPercent(decision.current_no_odds ?? null)}</td>
-                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800"><button type="button" onClick={() => onOpenLlmOdds?.(decision)} className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950">{formatOddsPercent(decision.fair_yes_probability_pct ?? null)}</button></td>
-                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800"><button type="button" onClick={() => onOpenLlmOdds?.(decision)} className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950">{formatOddsPercent(decision.fair_no_probability_pct ?? null)}</button></td>
-                    <td className="px-4 py-3 tabular-nums text-slate-700">{formatReturnsPerDay(getDecisionReturnsPerDay(decision))}</td>
+                    <td className="px-4 py-3 font-semibold uppercase text-slate-800">
+                      {decision.order_plan?.side ?? decision.side}
+                    </td>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-slate-950">
+                      {formatMoney(decision.order_plan?.order_size_usd ?? null)}
+                      <div className="mt-1 text-[11px] font-normal text-slate-500">
+                        {decision.order_plan?.shares.toLocaleString("en-IN", {
+                          maximumFractionDigits: 4,
+                        }) ?? "—"}{" "}
+                        shares
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatPriceCents(
+                        decision.order_plan?.limit_price_cents ?? null,
+                      )}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap text-slate-700">
+                      {formatIstDateTime(decision.close_time)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {getDecisionDaysLeft(decision)}
+                    </td>
+                    <td className="px-4 py-3 text-slate-700">
+                      {decision.theme || "—"}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatOddsPercent(decision.current_yes_odds ?? null)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatOddsPercent(decision.current_no_odds ?? null)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800">
+                      <button
+                        type="button"
+                        onClick={() => onOpenLlmOdds?.(decision)}
+                        className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950"
+                      >
+                        {formatOddsPercent(
+                          decision.fair_yes_probability_pct ?? null,
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums font-semibold text-violet-800">
+                      <button
+                        type="button"
+                        onClick={() => onOpenLlmOdds?.(decision)}
+                        className="underline decoration-violet-300 underline-offset-4 hover:text-violet-950"
+                      >
+                        {formatOddsPercent(
+                          decision.fair_no_probability_pct ?? null,
+                        )}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 tabular-nums text-slate-700">
+                      {formatReturnsPerDay(getDecisionReturnsPerDay(decision))}
+                    </td>
                     <td className="min-w-64 px-4 py-3 text-slate-700">
                       {plannedButNotSubmitted && onOpenPlannedOrderDetail ? (
                         <div className="flex items-start gap-2">
-                          <span className="line-clamp-2 break-words">{detail}</span>
-                          <button type="button" onClick={() => onOpenPlannedOrderDetail({ title: decision.market_title, summary: detail, detail: [decision.order_plan?.detail, decision.order_plan?.execution_response, decision.reason, decision.summary].filter(Boolean).join("\n\n") || detail })} className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100" aria-label="Open detailed planned order error" title="Open detailed planned order error"><Info className="h-3.5 w-3.5" /></button>
+                          <span className="line-clamp-2 break-words">
+                            {detail}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onOpenPlannedOrderDetail({
+                                title: decision.market_title,
+                                summary: detail,
+                                detail:
+                                  [
+                                    decision.order_plan?.detail,
+                                    decision.order_plan?.execution_response,
+                                    decision.reason,
+                                    decision.summary,
+                                  ]
+                                    .filter(Boolean)
+                                    .join("\n\n") || detail,
+                              })
+                            }
+                            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100"
+                            aria-label="Open detailed planned order error"
+                            title="Open detailed planned order error"
+                          >
+                            <Info className="h-3.5 w-3.5" />
+                          </button>
                         </div>
                       ) : (
-                        <ErrorCodeWithDetails detail={detail} detailClassName="text-slate-700" />
+                        <ErrorCodeWithDetails
+                          detail={detail}
+                          detailClassName="text-slate-700"
+                        />
                       )}
                     </td>
                   </tr>
@@ -3159,17 +3378,31 @@ function Stage3DecisionTable({
   );
 }
 
-type SubmittedExecutionStatus = "not-submitted" | "submitted" | "in-progress" | "partial";
+type SubmittedExecutionStatus =
+  | "not-submitted"
+  | "submitted"
+  | "in-progress"
+  | "partial";
 
-function getSubmittedExecutionStatus(totalOrders: number, submittedOrders: number): SubmittedExecutionStatus {
+function getSubmittedExecutionStatus(
+  totalOrders: number,
+  submittedOrders: number,
+): SubmittedExecutionStatus {
   if (totalOrders < 1) return "in-progress";
   if (submittedOrders >= totalOrders) return "submitted";
   if (submittedOrders < 1) return "not-submitted";
   return "partial";
 }
 
-function SubmittedExecutionStatusIcon({ status }: { status: SubmittedExecutionStatus }) {
-  const config: Record<SubmittedExecutionStatus, { label: string; className: string; icon: ReactNode }> = {
+function SubmittedExecutionStatusIcon({
+  status,
+}: {
+  status: SubmittedExecutionStatus;
+}) {
+  const config: Record<
+    SubmittedExecutionStatus,
+    { label: string; className: string; icon: ReactNode }
+  > = {
     "not-submitted": {
       label: "All not submitted",
       className: "border-rose-200 bg-rose-50 text-rose-700",
@@ -3214,7 +3447,9 @@ function SubmittedExecutionCountPill({
   status?: SubmittedExecutionStatus;
 }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 ${className}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 ${className}`}
+    >
       <span>{children}</span>
       {status ? <SubmittedExecutionStatusIcon status={status} /> : null}
     </span>
@@ -3230,43 +3465,91 @@ function SubmittedExecutionEventsTable({
   onOpenPlannedOrderDetail: (state: PlannedOrderDetailState) => void;
   onOpenLlmOdds: (decision: BullpenAutoLiveDecision) => void;
 }) {
-  const submittedDecisions = decisions.filter((decision) => isSubmittedOrSuccessfulDecision(decision));
-  const exitDecisions = decisions.filter((decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem");
-  const buyDecisions = decisions.filter((decision) => decision.order_plan?.action === "buy");
-  const submittedExitDecisions = submittedDecisions.filter((decision) => decision.order_plan?.action === "sell" || decision.order_plan?.action === "redeem");
-  const submittedBuyDecisions = submittedDecisions.filter((decision) => decision.order_plan?.action === "buy");
-  const plannedButNotSubmittedBuys = buyDecisions.filter((decision) => !isSubmittedOrSuccessfulDecision(decision));
-  const exitStatus = getSubmittedExecutionStatus(exitDecisions.length, submittedExitDecisions.length);
-  const buyStatus = getSubmittedExecutionStatus(buyDecisions.length, submittedBuyDecisions.length);
+  const submittedDecisions = decisions.filter((decision) =>
+    isSubmittedOrSuccessfulDecision(decision),
+  );
+  const exitDecisions = decisions.filter(
+    (decision) =>
+      decision.order_plan?.action === "sell" ||
+      decision.order_plan?.action === "redeem",
+  );
+  const buyDecisions = decisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+  const submittedExitDecisions = submittedDecisions.filter(
+    (decision) =>
+      decision.order_plan?.action === "sell" ||
+      decision.order_plan?.action === "redeem",
+  );
+  const submittedBuyDecisions = submittedDecisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+  const plannedButNotSubmittedBuys = buyDecisions.filter(
+    (decision) => !isSubmittedOrSuccessfulDecision(decision),
+  );
+  const exitStatus = getSubmittedExecutionStatus(
+    exitDecisions.length,
+    submittedExitDecisions.length,
+  );
+  const buyStatus = getSubmittedExecutionStatus(
+    buyDecisions.length,
+    submittedBuyDecisions.length,
+  );
 
   return (
     <section className="mt-5 overflow-hidden rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-sky-50 to-violet-50">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/80 px-4 py-4">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Executed Stage 3 Events</p>
-          <h3 className="mt-1 text-sm font-semibold text-slate-950">Step 1 Exit and Step 2 Buy execution results</h3>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+            Executed Stage 3 Events
+          </p>
+          <h3 className="mt-1 text-sm font-semibold text-slate-950">
+            Step 1 Exit and Step 2 Buy execution results
+          </h3>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
           <SubmittedExecutionCountPill className="border-emerald-200 bg-white/80 text-emerald-800">
             {submittedDecisions.length.toLocaleString("en-IN")} total
           </SubmittedExecutionCountPill>
-          <SubmittedExecutionCountPill className="border-rose-200 bg-rose-50 text-rose-800" status={exitStatus}>
+          <SubmittedExecutionCountPill
+            className="border-rose-200 bg-rose-50 text-rose-800"
+            status={exitStatus}
+          >
             {submittedExitDecisions.length.toLocaleString("en-IN")} exits
           </SubmittedExecutionCountPill>
-          <SubmittedExecutionCountPill className="border-blue-200 bg-blue-50 text-blue-800" status={buyStatus}>
+          <SubmittedExecutionCountPill
+            className="border-blue-200 bg-blue-50 text-blue-800"
+            status={buyStatus}
+          >
             {submittedBuyDecisions.length.toLocaleString("en-IN")} buys
           </SubmittedExecutionCountPill>
         </div>
       </div>
       <div className="space-y-4 p-4">
-        <Stage3DecisionTable title="Step 1 Exit" rows={submittedExitDecisions} emptyMessage="No submitted Step 1 Exit events were returned for this run." onOpenLlmOdds={onOpenLlmOdds} />
-        <Stage3DecisionTable title="Step 2 Buy" rows={submittedBuyDecisions} emptyMessage="No submitted Step 2 Buy events were returned for this run." onOpenLlmOdds={onOpenLlmOdds} />
-        <Stage3DecisionTable title="Events Planned but not Submitted" rows={plannedButNotSubmittedBuys} emptyMessage="No planned buy orders were left unsubmitted for this run." plannedButNotSubmitted onOpenPlannedOrderDetail={onOpenPlannedOrderDetail} onOpenLlmOdds={onOpenLlmOdds} />
+        <Stage3DecisionTable
+          title="Step 1 Exit"
+          rows={submittedExitDecisions}
+          emptyMessage="No submitted Step 1 Exit events were returned for this run."
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        <Stage3DecisionTable
+          title="Step 2 Buy"
+          rows={submittedBuyDecisions}
+          emptyMessage="No submitted Step 2 Buy events were returned for this run."
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        <Stage3DecisionTable
+          title="Events Planned but not Submitted"
+          rows={plannedButNotSubmittedBuys}
+          emptyMessage="No planned buy orders were left unsubmitted for this run."
+          plannedButNotSubmitted
+          onOpenPlannedOrderDetail={onOpenPlannedOrderDetail}
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
       </div>
     </section>
   );
 }
-
 
 type RunHistoryMetricTilesProps = {
   run: BullpenAutoLiveRun;
@@ -3276,13 +3559,20 @@ type RunHistoryMetricTilesProps = {
 
 function getInvestFailureCode(decisions: BullpenAutoLiveDecision[]) {
   const failureText = decisions
-    .map((decision) => `${decision.order_plan?.detail ?? ""}\n${decision.order_plan?.execution_response ?? ""}`)
+    .map(
+      (decision) =>
+        `${decision.order_plan?.detail ?? ""}\n${decision.order_plan?.execution_response ?? ""}`,
+    )
     .join("\n")
     .trim();
   if (!failureText) return null;
-  const quotedReason = failureText.match(/reason\s*[:=]\s*["']([^"']+)["']/i)?.[1];
+  const quotedReason = failureText.match(
+    /reason\s*[:=]\s*["']([^"']+)["']/i,
+  )?.[1];
   if (quotedReason) return quotedReason;
-  const snakeCode = failureText.match(/\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b/i)?.[1];
+  const snakeCode = failureText.match(
+    /\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b/i,
+  )?.[1];
   return snakeCode ?? null;
 }
 
@@ -3298,11 +3588,14 @@ function RunHistoryMetricButton({
   tone?: "slate" | "rose" | "blue" | "emerald" | "amber";
 }) {
   const toneClass = {
-    slate: "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+    slate:
+      "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
     rose: "border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300 hover:bg-rose-100",
     blue: "border-blue-200 bg-blue-50 text-blue-800 hover:border-blue-300 hover:bg-blue-100",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100",
-    amber: "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100",
+    emerald:
+      "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100",
+    amber:
+      "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100",
   }[tone];
 
   return (
@@ -3314,7 +3607,9 @@ function RunHistoryMetricButton({
       }}
       className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${toneClass}`}
     >
-      <span className="text-sm tabular-nums text-slate-950">{value.toLocaleString("en-IN")}</span>{" "}
+      <span className="text-sm tabular-nums text-slate-950">
+        {value.toLocaleString("en-IN")}
+      </span>{" "}
       {label}
     </button>
   );
@@ -3325,12 +3620,30 @@ function RunHistoryMetricTiles({
   decisions,
   onOpenMetricDetails,
 }: RunHistoryMetricTilesProps) {
-  const availableForClaimCount = getInvestMetricRows("sell-redeem", decisions).length;
-  const eventOutOfTopTenCount = getInvestMetricRows("sell-ranking-llm", decisions).length;
-  const forcedExitCount = getInvestMetricRows("sell-forced-exit", decisions).length;
-  const newEventsToInvestCount = getInvestMetricRows("buy-planned", decisions).length;
-  const newEventsInvestedCount = getInvestMetricRows("buy-submitted", decisions).length;
-  const investmentFailedRows = getInvestMetricRows("buy-planned", decisions).filter(
+  const availableForClaimCount = getInvestMetricRows(
+    "sell-redeem",
+    decisions,
+  ).length;
+  const eventOutOfTopTenCount = getInvestMetricRows(
+    "sell-ranking-llm",
+    decisions,
+  ).length;
+  const forcedExitCount = getInvestMetricRows(
+    "sell-forced-exit",
+    decisions,
+  ).length;
+  const newEventsToInvestCount = getInvestMetricRows(
+    "buy-planned",
+    decisions,
+  ).length;
+  const newEventsInvestedCount = getInvestMetricRows(
+    "buy-submitted",
+    decisions,
+  ).length;
+  const investmentFailedRows = getInvestMetricRows(
+    "buy-planned",
+    decisions,
+  ).filter(
     (decision) =>
       decision.order_plan &&
       !isSubmittedOrSuccessfulDecision(decision) &&
@@ -3339,7 +3652,10 @@ function RunHistoryMetricTiles({
   const failureCode = getInvestFailureCode(investmentFailedRows);
 
   return (
-    <div className="mt-3 space-y-3 text-xs" onClick={(event) => event.stopPropagation()}>
+    <div
+      className="mt-3 space-y-3 text-xs"
+      onClick={(event) => event.stopPropagation()}
+    >
       <button
         type="button"
         onClick={() => onOpenMetricDetails("decisions")}
@@ -3350,41 +3666,100 @@ function RunHistoryMetricTiles({
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
-          <RunHistoryMetricButton label="Planned" value={run.orders_planned} onClick={() => onOpenMetricDetails("planned")} tone="amber" />
+          <RunHistoryMetricButton
+            label="Planned"
+            value={run.orders_planned}
+            onClick={() => onOpenMetricDetails("planned")}
+            tone="amber"
+          />
           <div className="mt-3 grid gap-2">
             <div className="rounded-xl border border-rose-100 bg-white/85 p-3">
-              <p className="font-semibold text-rose-900">Step 1 of 2 Event Exits</p>
+              <p className="font-semibold text-rose-900">
+                Step 1 of 2 Event Exits
+              </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <RunHistoryMetricButton label="Available for Claim" value={availableForClaimCount} onClick={() => onOpenMetricDetails("sell-redeem")} tone="emerald" />
-                <RunHistoryMetricButton label="Event out of Top 10" value={eventOutOfTopTenCount} onClick={() => onOpenMetricDetails("sell-ranking-llm")} tone="rose" />
-                <RunHistoryMetricButton label="Forced Exit" value={forcedExitCount} onClick={() => onOpenMetricDetails("sell-forced-exit")} tone="rose" />
+                <RunHistoryMetricButton
+                  label="Available for Claim"
+                  value={availableForClaimCount}
+                  onClick={() => onOpenMetricDetails("sell-redeem")}
+                  tone="emerald"
+                />
+                <RunHistoryMetricButton
+                  label="Event out of Top 10"
+                  value={eventOutOfTopTenCount}
+                  onClick={() => onOpenMetricDetails("sell-ranking-llm")}
+                  tone="rose"
+                />
+                <RunHistoryMetricButton
+                  label="Forced Exit"
+                  value={forcedExitCount}
+                  onClick={() => onOpenMetricDetails("sell-forced-exit")}
+                  tone="rose"
+                />
               </div>
             </div>
             <div className="rounded-xl border border-blue-100 bg-white/85 p-3">
               <p className="font-semibold text-blue-900">Step 2</p>
               <div className="mt-2">
-                <RunHistoryMetricButton label="New Events to Invest in" value={newEventsToInvestCount} onClick={() => onOpenMetricDetails("buy-planned")} tone="blue" />
+                <RunHistoryMetricButton
+                  label="New Events to Invest in"
+                  value={newEventsToInvestCount}
+                  onClick={() => onOpenMetricDetails("buy-planned")}
+                  tone="blue"
+                />
               </div>
             </div>
           </div>
         </div>
 
         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3">
-          <RunHistoryMetricButton label="Submitted" value={run.orders_submitted} onClick={() => onOpenMetricDetails("submitted")} tone="emerald" />
+          <RunHistoryMetricButton
+            label="Submitted"
+            value={run.orders_submitted}
+            onClick={() => onOpenMetricDetails("submitted")}
+            tone="emerald"
+          />
           <div className="mt-3 grid gap-2">
             <div className="rounded-xl border border-rose-100 bg-white/85 p-3">
-              <p className="font-semibold text-rose-900">Step 1 of 2 Event Exits</p>
+              <p className="font-semibold text-rose-900">
+                Step 1 of 2 Event Exits
+              </p>
               <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <RunHistoryMetricButton label="Available for Claim" value={availableForClaimCount} onClick={() => onOpenMetricDetails("sell-redeem")} tone="emerald" />
-                <RunHistoryMetricButton label="Event out of Top 10" value={eventOutOfTopTenCount} onClick={() => onOpenMetricDetails("sell-ranking-llm")} tone="rose" />
-                <RunHistoryMetricButton label="Forced Exit" value={forcedExitCount} onClick={() => onOpenMetricDetails("sell-forced-exit")} tone="rose" />
+                <RunHistoryMetricButton
+                  label="Available for Claim"
+                  value={availableForClaimCount}
+                  onClick={() => onOpenMetricDetails("sell-redeem")}
+                  tone="emerald"
+                />
+                <RunHistoryMetricButton
+                  label="Event out of Top 10"
+                  value={eventOutOfTopTenCount}
+                  onClick={() => onOpenMetricDetails("sell-ranking-llm")}
+                  tone="rose"
+                />
+                <RunHistoryMetricButton
+                  label="Forced Exit"
+                  value={forcedExitCount}
+                  onClick={() => onOpenMetricDetails("sell-forced-exit")}
+                  tone="rose"
+                />
               </div>
             </div>
             <div className="rounded-xl border border-blue-100 bg-white/85 p-3">
               <p className="font-semibold text-blue-900">Step 2</p>
               <div className="mt-2 flex flex-wrap gap-2">
-                <RunHistoryMetricButton label="New Events Invested in" value={newEventsInvestedCount} onClick={() => onOpenMetricDetails("buy-submitted")} tone="blue" />
-                <RunHistoryMetricButton label={`Investments failed${failureCode ? ` (${failureCode})` : ""}`} value={investmentFailedRows.length} onClick={() => onOpenMetricDetails("buy-planned")} tone="rose" />
+                <RunHistoryMetricButton
+                  label="New Events Invested in"
+                  value={newEventsInvestedCount}
+                  onClick={() => onOpenMetricDetails("buy-submitted")}
+                  tone="blue"
+                />
+                <RunHistoryMetricButton
+                  label={`Investments failed${failureCode ? ` (${failureCode})` : ""}`}
+                  value={investmentFailedRows.length}
+                  onClick={() => onOpenMetricDetails("buy-planned")}
+                  tone="rose"
+                />
               </div>
             </div>
           </div>
@@ -3394,20 +3769,29 @@ function RunHistoryMetricTiles({
   );
 }
 
-
-
-function readLlmContextString(record: Record<string, unknown> | null, key: string) {
+function readLlmContextString(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
   if (!record) return null;
   const value = record[key];
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
 }
 
-function readLlmContextNumber(record: Record<string, unknown> | null, key: string) {
+function readLlmContextNumber(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
   if (!record) return null;
   return readStageOutputNumber(record[key]);
 }
 
-function readLlmContextRecord(record: Record<string, unknown> | null, key: string) {
+function readLlmContextRecord(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
   if (!record) return null;
   const value = record[key];
   return value && typeof value === "object" && !Array.isArray(value)
@@ -3431,7 +3815,10 @@ function readStageTwoLlmTimestamp(
   );
 }
 
-function readLlmContextArray(record: Record<string, unknown> | null, key: string) {
+function readLlmContextArray(
+  record: Record<string, unknown> | null,
+  key: string,
+) {
   if (!record) return [];
   const value = record[key];
   return Array.isArray(value) ? value : [];
@@ -3442,7 +3829,8 @@ function getStageTwoLlmReviewedRows(stage: WorkflowStageView) {
     ? stage.outputs.llm_reviewed_candidates
     : [];
   return rows.filter(
-    (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object",
+    (row): row is Record<string, unknown> =>
+      Boolean(row) && typeof row === "object",
   );
 }
 
@@ -3450,7 +3838,8 @@ function getStageTwoLlmOutputs(row: Record<string, unknown>) {
   const outputs = row.llm_outputs;
   if (!Array.isArray(outputs)) return [];
   return outputs.filter(
-    (output): output is Record<string, unknown> => Boolean(output) && typeof output === "object",
+    (output): output is Record<string, unknown> =>
+      Boolean(output) && typeof output === "object",
   );
 }
 
@@ -3458,17 +3847,31 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
   const rows = getStageTwoLlmReviewedRows(state.stage);
   const decisionByKey = new Map<string, BullpenAutoLiveDecision>();
   state.decisions.forEach((decision) => {
-    [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title]
+    [
+      decision.market_id,
+      decision.slug ?? null,
+      decision.market_url ?? null,
+      decision.market_title,
+    ]
       .map(getStageTwoBreakupMatchKey)
       .filter((key): key is string => Boolean(key))
       .forEach((key) => decisionByKey.set(key, decision));
   });
 
   return rows.flatMap((row, rowIndex) => {
-    const rowKeys = [row.market_id, row.slug, row.market_url, row.question, row.market_title]
-      .map((value) => getStageTwoBreakupMatchKey(typeof value === "string" ? value : null))
+    const rowKeys = [
+      row.market_id,
+      row.slug,
+      row.market_url,
+      row.question,
+      row.market_title,
+    ]
+      .map((value) =>
+        getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
+      )
       .filter((key): key is string => Boolean(key));
-    const decision = rowKeys.map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
+    const decision =
+      rowKeys.map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
     const outputs = getStageTwoLlmOutputs(row);
     const title =
       readLlmContextString(row, "question") ??
@@ -3488,7 +3891,9 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
     const currentNoOdds =
       readLlmContextNumber(row, "current_no_odds") ??
       readLlmContextNumber(row, "current_no_odds_pct") ??
-      (currentYesOdds === null ? null : Number((100 - currentYesOdds).toFixed(4)));
+      (currentYesOdds === null
+        ? null
+        : Number((100 - currentYesOdds).toFixed(4)));
     const base = outputs.length ? outputs : [null];
     return base.map((output, outputIndex) => {
       const outputYesOdds =
@@ -3511,29 +3916,41 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
         question: title,
         closeTime,
         daysLeft: calculateDaysUntilClose(closeTime),
-        category: readLlmContextString(row, "category") ?? readLlmContextString(row, "theme") ?? "—",
-        outcomes: readLlmContextString(row, "outcomes") ?? readLlmContextString(row, "outcome") ?? "Yes / No",
+        category:
+          readLlmContextString(row, "category") ??
+          readLlmContextString(row, "theme") ??
+          "—",
+        outcomes:
+          readLlmContextString(row, "outcomes") ??
+          readLlmContextString(row, "outcome") ??
+          "Yes / No",
         currentYesOdds,
         currentNoOdds,
         yesOdds: hasProviderOutput
-          ? outputYesOdds ?? null
-          : readLlmContextNumber(row, "llm_yes_odds") ??
+          ? (outputYesOdds ?? null)
+          : (readLlmContextNumber(row, "llm_yes_odds") ??
             decision?.fair_yes_probability_pct ??
-            (decision?.side === "YES" ? decision?.fair_probability_pct : null) ??
-            null,
+            (decision?.side === "YES"
+              ? decision?.fair_probability_pct
+              : null) ??
+            null),
         noOdds: hasProviderOutput
-          ? outputNoOdds ?? null
-          : readLlmContextNumber(row, "llm_no_odds") ??
+          ? (outputNoOdds ?? null)
+          : (readLlmContextNumber(row, "llm_no_odds") ??
             decision?.fair_no_probability_pct ??
             (decision?.side === "NO" ? decision?.fair_probability_pct : null) ??
-            null,
+            null),
         returnsPerDay:
           readLlmContextNumber(row, "returns_per_day") ??
           getBullpenReturnsPerDayBreakdown({
             yesOdds: currentYesOdds,
             noOdds: currentNoOdds,
-            llmYesOdds: hasProviderOutput ? outputYesOdds ?? null : readLlmContextNumber(row, "llm_yes_odds"),
-            llmNoOdds: hasProviderOutput ? outputNoOdds ?? null : readLlmContextNumber(row, "llm_no_odds"),
+            llmYesOdds: hasProviderOutput
+              ? (outputYesOdds ?? null)
+              : readLlmContextNumber(row, "llm_yes_odds"),
+            llmNoOdds: hasProviderOutput
+              ? (outputNoOdds ?? null)
+              : readLlmContextNumber(row, "llm_no_odds"),
             daysUntilClose: calculateDaysUntilClose(closeTime),
           }).result,
         action:
@@ -3541,7 +3958,10 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
           readLlmContextString(output, "action") ??
           decision?.decision ??
           "—",
-        risk: readLlmContextString(output, "risk_status") ?? decision?.risk_status ?? "—",
+        risk:
+          readLlmContextString(output, "risk_status") ??
+          decision?.risk_status ??
+          "—",
         summary:
           readLlmContextString(output, "summary") ??
           readLlmContextString(row, "summary") ??
@@ -3558,7 +3978,9 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
   });
 }
 
-function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTableRows>) {
+function groupStageTwoLlmRowsByModel(
+  rows: ReturnType<typeof getStageTwoLlmTableRows>,
+) {
   const groups = new Map<
     string,
     {
@@ -3577,9 +3999,11 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
     const existing = groups.get(key);
     if (existing) {
       existing.rows.push(row);
-      existing.sourceTimestamp = existing.sourceTimestamp ?? row.sourceTimestamp;
+      existing.sourceTimestamp =
+        existing.sourceTimestamp ?? row.sourceTimestamp;
       const rowCost = readStageTwoLlmOutputCost(row.output);
-      existing.cost = rowCost === null ? existing.cost : (existing.cost ?? 0) + rowCost;
+      existing.cost =
+        rowCost === null ? existing.cost : (existing.cost ?? 0) + rowCost;
       return;
     }
     groups.set(key, {
@@ -3591,7 +4015,9 @@ function groupStageTwoLlmRowsByModel(rows: ReturnType<typeof getStageTwoLlmTable
     });
   });
 
-  return [...groups.values()].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
+  return [...groups.values()].sort(
+    (left, right) => (right.cost ?? 0) - (left.cost ?? 0),
+  );
 }
 
 function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
@@ -3602,7 +4028,12 @@ function readStageTwoLlmOutputCost(output: Record<string, unknown> | null) {
   );
 }
 
-type StageTwoRunSummaryStatus = "completed" | "failed" | "partial" | "pending" | "running";
+type StageTwoRunSummaryStatus =
+  | "completed"
+  | "failed"
+  | "partial"
+  | "pending"
+  | "running";
 
 type StageTwoLlmRunSummaryRow = {
   key: string;
@@ -3634,8 +4065,17 @@ function formatStageTwoRuntimeSeconds(value: number | null) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function normalizeStageTwoRunStatus(value: string | null): StageTwoRunSummaryStatus {
-  if (value === "completed" || value === "partial" || value === "failed" || value === "pending" || value === "running") return value;
+function normalizeStageTwoRunStatus(
+  value: string | null,
+): StageTwoRunSummaryStatus {
+  if (
+    value === "completed" ||
+    value === "partial" ||
+    value === "failed" ||
+    value === "pending" ||
+    value === "running"
+  )
+    return value;
   if (value === "processing") return "running";
   if (value === "queued") return "pending";
   return "completed";
@@ -3645,7 +4085,8 @@ function getStageTwoLlmTargets(stage: WorkflowStageView) {
   const targets = stage.outputs.llm_targets ?? stage.inputs.llm_targets;
   if (!Array.isArray(targets)) return [];
   return targets.filter(
-    (target): target is Record<string, unknown> => Boolean(target) && typeof target === "object",
+    (target): target is Record<string, unknown> =>
+      Boolean(target) && typeof target === "object",
   );
 }
 
@@ -3653,7 +4094,8 @@ function getStageTwoLlmTargetRuns(stage: WorkflowStageView) {
   const runs = stage.outputs.llm_target_runs;
   if (!Array.isArray(runs)) return [];
   return runs.filter(
-    (run): run is Record<string, unknown> => Boolean(run) && typeof run === "object",
+    (run): run is Record<string, unknown> =>
+      Boolean(run) && typeof run === "object",
   );
 }
 
@@ -3686,7 +4128,9 @@ function getStageTwoLlmRunSummaryRows(
         requestedModel: readLlmContextString(run, "requested_model") ?? model,
         status: normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
         runtime: (() => {
-          const status = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+          const status = normalizeStageTwoRunStatus(
+            readLlmContextString(run, "status"),
+          );
           const elapsedSeconds = readLlmContextNumber(run, "elapsed_seconds");
           if (status === "running" || status === "pending") {
             const startedAt =
@@ -3705,18 +4149,25 @@ function getStageTwoLlmRunSummaryRows(
         error:
           readLlmContextString(run, "error") ??
           readLlmContextString(run, "error_summary") ??
-          readLlmContextString(readLlmContextRecord(run, "first_error"), "safe_message") ??
+          readLlmContextString(
+            readLlmContextRecord(run, "first_error"),
+            "safe_message",
+          ) ??
           readLlmContextString(run, "message") ??
           null,
         failureCategory:
           readLlmContextString(run, "failure_category") ??
-          readLlmContextString(readLlmContextRecord(run, "first_error"), "execution_phase") ??
+          readLlmContextString(
+            readLlmContextRecord(run, "first_error"),
+            "execution_phase",
+          ) ??
           null,
         firstError: readLlmContextRecord(run, "first_error"),
         lastError: readLlmContextRecord(run, "last_error"),
         batchErrors:
           readLlmContextArray(run, "batch_errors").filter(
-            (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+            (item): item is Record<string, unknown> =>
+              Boolean(item) && typeof item === "object",
           ) ?? [],
         failedEventCount: readLlmContextNumber(run, "failed_event_count"),
         invalidEventCount: readLlmContextNumber(run, "invalid_event_count"),
@@ -3725,7 +4176,11 @@ function getStageTwoLlmRunSummaryRows(
         recoveryBatchCount: readLlmContextNumber(run, "recovery_batch_count"),
       };
     });
-    const runKeys = new Set(runRows.map((row) => `${row.provider}::${row.requestedModel ?? row.model}`));
+    const runKeys = new Set(
+      runRows.map(
+        (row) => `${row.provider}::${row.requestedModel ?? row.model}`,
+      ),
+    );
     const pendingRunRows = getStageTwoLlmTargets(stage)
       .filter((target) => {
         const provider = readLlmContextString(target, "provider") ?? "—";
@@ -3755,7 +4210,9 @@ function getStageTwoLlmRunSummaryRows(
           recoveryBatchCount: null,
         };
       });
-    return [...runRows, ...pendingRunRows].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
+    return [...runRows, ...pendingRunRows].sort(
+      (left, right) => (right.cost ?? 0) - (left.cost ?? 0),
+    );
   }
 
   const knownKeys = new Set(groups.map((group) => group.key));
@@ -3788,42 +4245,53 @@ function getStageTwoLlmRunSummaryRows(
     };
   });
 
-  return [...groups.map((group) => ({
-    key: group.key,
-    provider: group.rows[0]?.provider ?? "—",
-    model: group.rows[0]?.model ?? group.label,
-    requestedModel: group.rows[0]?.model ?? group.label,
-    status: "completed" as StageTwoRunSummaryStatus,
-    runtime: "—",
-    cost: groupCostByKey.get(group.key) ?? null,
-    error: readLlmContextString(
-      group.rows.find((row) => readLlmContextString(row.output, "error"))?.output ?? null,
-      "error",
-    ),
-    failureCategory: null,
-    firstError: null,
-    lastError: null,
-    batchErrors: [],
-    failedEventCount: null,
-    invalidEventCount: null,
-    blockedEventCount: null,
-    retryRequestCount: null,
-    recoveryBatchCount: null,
-  })), ...pendingRows].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
+  return [
+    ...groups.map((group) => ({
+      key: group.key,
+      provider: group.rows[0]?.provider ?? "—",
+      model: group.rows[0]?.model ?? group.label,
+      requestedModel: group.rows[0]?.model ?? group.label,
+      status: "completed" as StageTwoRunSummaryStatus,
+      runtime: "—",
+      cost: groupCostByKey.get(group.key) ?? null,
+      error: readLlmContextString(
+        group.rows.find((row) => readLlmContextString(row.output, "error"))
+          ?.output ?? null,
+        "error",
+      ),
+      failureCategory: null,
+      firstError: null,
+      lastError: null,
+      batchErrors: [],
+      failedEventCount: null,
+      invalidEventCount: null,
+      blockedEventCount: null,
+      retryRequestCount: null,
+      recoveryBatchCount: null,
+    })),
+    ...pendingRows,
+  ].sort((left, right) => (right.cost ?? 0) - (left.cost ?? 0));
 }
-
 
 function getStageTwoLlmFailureFixAdvice(row: StageTwoLlmFailureDialogRow) {
   const error = (row.error ?? "").toLowerCase();
   const provider = row.provider.toLowerCase();
 
-  if (/api key|authentication|unauthorized|permission|credential|token/.test(error)) {
+  if (
+    /api key|authentication|unauthorized|permission|credential|token/.test(
+      error,
+    )
+  ) {
     return `Check the ${row.provider} API key/credentials in the backend environment, restart investor-backend and investor-celery-worker, then rerun Stage 2.`;
   }
   if (/rate limit|quota|429|resource exhausted|too many requests/.test(error)) {
     return `Reduce ${row.provider} concurrency or selected models, wait for quota to recover, verify billing/quota, then rerun this LLM.`;
   }
-  if (/timeout|timed out|deadline|network|fetch failed|connection|econnreset/.test(error)) {
+  if (
+    /timeout|timed out|deadline|network|fetch failed|connection|econnreset/.test(
+      error,
+    )
+  ) {
     return `Check provider connectivity from the worker, increase/retry-safe task timeout if needed, and rerun after the network/provider stabilizes.`;
   }
   if (/json|parse|schema|invalid|malformed|unusable/.test(error)) {
@@ -3848,7 +4316,8 @@ function StageTwoLlmFailureDialog({
   row: StageTwoLlmFailureDialogRow;
   onClose: () => void;
 }) {
-  const errorMessage = row.error || "No safe provider error was captured for this target.";
+  const errorMessage =
+    row.error || "No safe provider error was captured for this target.";
   const diagnosticJson = JSON.stringify(
     {
       provider: row.provider,
@@ -3872,7 +4341,10 @@ function StageTwoLlmFailureDialog({
     ["Invalid events", row.invalidEventCount?.toLocaleString("en-IN") ?? "—"],
     ["Blocked events", row.blockedEventCount?.toLocaleString("en-IN") ?? "—"],
     ["Retry requests", row.retryRequestCount?.toLocaleString("en-IN") ?? "—"],
-    ["Recovery batches", row.recoveryBatchCount?.toLocaleString("en-IN") ?? "—"],
+    [
+      "Recovery batches",
+      row.recoveryBatchCount?.toLocaleString("en-IN") ?? "—",
+    ],
   ];
 
   return (
@@ -3880,36 +4352,66 @@ function StageTwoLlmFailureDialog({
       <div className="w-full max-w-2xl overflow-hidden rounded-3xl border border-red-200 bg-white shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-6 py-5">
           <div>
-            <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">LLM failure details</p>
-            <h3 className="mt-1 text-xl font-extrabold text-slate-950">{row.provider} · {row.model}</h3>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-red-600">
+              LLM failure details
+            </p>
+            <h3 className="mt-1 text-xl font-extrabold text-slate-950">
+              {row.provider} · {row.model}
+            </h3>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-100" aria-label="Close LLM failure details">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 transition hover:bg-red-100"
+            aria-label="Close LLM failure details"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="space-y-5 px-6 py-5">
           <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Why it failed / error</p>
-            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-800">{errorMessage}</pre>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Why it failed / error
+            </p>
+            <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-2xl border border-red-100 bg-red-50 p-4 text-sm font-semibold text-red-800">
+              {errorMessage}
+            </pre>
           </section>
           <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">What to do to fix it</p>
-            <p className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">{getStageTwoLlmFailureFixAdvice(row)}</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              What to do to fix it
+            </p>
+            <p className="mt-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-semibold text-amber-900">
+              {getStageTwoLlmFailureFixAdvice(row)}
+            </p>
           </section>
           <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Run diagnostics</p>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Run diagnostics
+            </p>
             <dl className="mt-2 grid gap-2 sm:grid-cols-2">
               {diagnostics.map(([label, value]) => (
-                <div key={label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</dt>
-                  <dd className="mt-1 font-mono text-sm font-bold text-slate-900">{value}</dd>
+                <div
+                  key={label}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3"
+                >
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                    {label}
+                  </dt>
+                  <dd className="mt-1 font-mono text-sm font-bold text-slate-900">
+                    {value}
+                  </dd>
                 </div>
               ))}
             </dl>
           </section>
           <section>
-            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Copyable diagnostic JSON</p>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-800">{diagnosticJson}</pre>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+              Copyable diagnostic JSON
+            </p>
+            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs leading-5 text-slate-800">
+              {diagnosticJson}
+            </pre>
           </section>
         </div>
       </div>
@@ -3918,10 +4420,13 @@ function StageTwoLlmFailureDialog({
 }
 
 function getStageTwoRunSummaryStatusClass(status: StageTwoRunSummaryStatus) {
-  if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "completed")
+    return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "partial") return "border-sky-200 bg-sky-50 text-sky-700";
-  if (status === "running") return "border-amber-200 bg-amber-50 text-amber-700";
-  if (status === "pending") return "border-slate-200 bg-slate-50 text-slate-600";
+  if (status === "running")
+    return "border-amber-200 bg-amber-50 text-amber-700";
+  if (status === "pending")
+    return "border-slate-200 bg-slate-50 text-slate-600";
   return "border-red-200 bg-red-50 text-red-700";
 }
 
@@ -3948,7 +4453,8 @@ function StageTwoLlmRunDetailsDialog({
   } | null>(null);
   const [eventInputDialog, setEventInputDialog] =
     useState<StageTwoLlmEventInputDialogState | null>(null);
-  const [stageTwoPromptDialogOpen, setStageTwoPromptDialogOpen] = useState(false);
+  const [stageTwoPromptDialogOpen, setStageTwoPromptDialogOpen] =
+    useState(false);
   const [selectedFailureRow, setSelectedFailureRow] =
     useState<StageTwoLlmFailureDialogRow | null>(null);
   const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
@@ -3959,13 +4465,28 @@ function StageTwoLlmRunDetailsDialog({
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
-  const summaryRows = getStageTwoLlmRunSummaryRows(state.stage, llmModelGroups, dialogNowMs);
-  const completedSummaryCount = summaryRows.filter((row) => row.status === "completed").length;
-  const partialSummaryCount = summaryRows.filter((row) => row.status === "partial").length;
-  const failedSummaryCount = summaryRows.filter((row) => row.status === "failed").length;
-  const runningSummaryCount = summaryRows.filter((row) => row.status === "running").length;
-  const explicitPendingSummaryCount = summaryRows.filter((row) => row.status === "pending").length;
-  const returnedSummaryCount = completedSummaryCount + partialSummaryCount + failedSummaryCount;
+  const summaryRows = getStageTwoLlmRunSummaryRows(
+    state.stage,
+    llmModelGroups,
+    dialogNowMs,
+  );
+  const completedSummaryCount = summaryRows.filter(
+    (row) => row.status === "completed",
+  ).length;
+  const partialSummaryCount = summaryRows.filter(
+    (row) => row.status === "partial",
+  ).length;
+  const failedSummaryCount = summaryRows.filter(
+    (row) => row.status === "failed",
+  ).length;
+  const runningSummaryCount = summaryRows.filter(
+    (row) => row.status === "running",
+  ).length;
+  const explicitPendingSummaryCount = summaryRows.filter(
+    (row) => row.status === "pending",
+  ).length;
+  const returnedSummaryCount =
+    completedSummaryCount + partialSummaryCount + failedSummaryCount;
   const pendingSummaryCount = Math.max(
     explicitPendingSummaryCount,
     stats.llmsSelected - returnedSummaryCount,
@@ -3977,9 +4498,16 @@ function StageTwoLlmRunDetailsDialog({
   const stageRuntime = formatStageElapsedTime(
     state.stage.timerStartedAt,
     state.stage.timerCompletedAt,
-    Date.parse(state.run?.completed_at ?? state.run?.started_at ?? state.stage.timerCompletedAt ?? state.stage.timerStartedAt ?? "") || 0,
+    Date.parse(
+      state.run?.completed_at ??
+        state.run?.started_at ??
+        state.stage.timerCompletedAt ??
+        state.stage.timerStartedAt ??
+        "",
+    ) || 0,
   );
-  const stageTwoPromptContext = llmTableRows.find((row) => row.row)?.row ?? null;
+  const stageTwoPromptContext =
+    llmTableRows.find((row) => row.row)?.row ?? null;
   const stagePromptTemplate = getStageTwoRunPromptTemplate(state.stage);
   const shouldTickDialogTimers = summaryRows.some(
     (row) => row.status === "running" || row.status === "pending",
@@ -3987,7 +4515,10 @@ function StageTwoLlmRunDetailsDialog({
 
   useEffect(() => {
     if (!shouldTickDialogTimers) return;
-    const intervalId = window.setInterval(() => setDialogNowMs(Date.now()), RUN_TIMER_INTERVAL_MS);
+    const intervalId = window.setInterval(
+      () => setDialogNowMs(Date.now()),
+      RUN_TIMER_INTERVAL_MS,
+    );
     return () => window.clearInterval(intervalId);
   }, [shouldTickDialogTimers]);
 
@@ -4031,25 +4562,36 @@ function StageTwoLlmRunDetailsDialog({
                   Last Run Summary
                 </p>
                 <h4 className="mt-2 text-lg font-extrabold text-slate-950">
-                  Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} · {formatIstDateTime(state.run?.started_at ?? state.stage.timerStartedAt)}
+                  Bullpen AI Run {state.run ? `#${state.run.id}` : "latest"} ·{" "}
+                  {formatIstDateTime(
+                    state.run?.started_at ?? state.stage.timerStartedAt,
+                  )}
                   <span className="block text-sm font-semibold text-slate-600 sm:ml-2 sm:inline">
-                    LLM progress: {returnedSummaryCount}/{stats.llmsSelected || summaryRows.length} returned{runningSummaryCount ? ` · ${runningSummaryCount} running` : ""}
+                    LLM progress: {returnedSummaryCount}/
+                    {stats.llmsSelected || summaryRows.length} returned
+                    {runningSummaryCount
+                      ? ` · ${runningSummaryCount} running`
+                      : ""}
                     {stageRuntime ? ` · Runtime: ${stageRuntime}` : ""}
                   </span>
                 </h4>
               </div>
               <div className="grid grid-cols-4 gap-2 text-center text-xs font-bold uppercase tracking-[0.14em]">
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 text-emerald-700">
-                  <span className="block text-xl">{completedSummaryCount}</span>Completed
+                  <span className="block text-xl">{completedSummaryCount}</span>
+                  Completed
                 </div>
                 <div className="rounded-2xl border border-sky-200 bg-sky-50 px-5 py-3 text-sky-700">
-                  <span className="block text-xl">{partialSummaryCount}</span>Partial
+                  <span className="block text-xl">{partialSummaryCount}</span>
+                  Partial
                 </div>
                 <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-red-700">
-                  <span className="block text-xl">{failedSummaryCount}</span>Failed
+                  <span className="block text-xl">{failedSummaryCount}</span>
+                  Failed
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-slate-600">
-                  <span className="block text-xl">{pendingSummaryCount}</span>Pending
+                  <span className="block text-xl">{pendingSummaryCount}</span>
+                  Pending
                 </div>
               </div>
             </div>
@@ -4071,43 +4613,64 @@ function StageTwoLlmRunDetailsDialog({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {summaryRows.length ? summaryRows.map((row) => (
-                      <tr key={`stage-two-summary-${row.key}`} className="bg-white">
-                        <td className="px-4 py-3 font-bold capitalize text-slate-900">{row.provider}</td>
-                        <td className="px-4 py-3 font-semibold text-slate-700">{row.model}</td>
-                        <td className="px-4 py-3">
-                          {row.status === "failed" ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedFailureRow(row)}
-                              className={`rounded-full border px-2.5 py-1 text-xs font-bold transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-red-300 ${getStageTwoRunSummaryStatusClass(row.status)}`}
-                              aria-label={`Open failure details for ${row.provider} ${row.model}`}
-                              title="Click to see why this LLM failed"
-                            >
-                              {getStageTwoRunSummaryStatusLabel(row.status)}
-                            </button>
-                          ) : (
-                            <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getStageTwoRunSummaryStatusClass(row.status)}`}>
-                              {getStageTwoRunSummaryStatusLabel(row.status)}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-slate-600">{row.runtime}</td>
-                        <td className="px-4 py-3 font-bold text-slate-700">{formatUsdCost(row.cost)}</td>
-                      </tr>
-                    )) : (
+                    {summaryRows.length ? (
+                      summaryRows.map((row) => (
+                        <tr
+                          key={`stage-two-summary-${row.key}`}
+                          className="bg-white"
+                        >
+                          <td className="px-4 py-3 font-bold capitalize text-slate-900">
+                            {row.provider}
+                          </td>
+                          <td className="px-4 py-3 font-semibold text-slate-700">
+                            {row.model}
+                          </td>
+                          <td className="px-4 py-3">
+                            {row.status === "failed" ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedFailureRow(row)}
+                                className={`rounded-full border px-2.5 py-1 text-xs font-bold transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-red-300 ${getStageTwoRunSummaryStatusClass(row.status)}`}
+                                aria-label={`Open failure details for ${row.provider} ${row.model}`}
+                                title="Click to see why this LLM failed"
+                              >
+                                {getStageTwoRunSummaryStatusLabel(row.status)}
+                              </button>
+                            ) : (
+                              <span
+                                className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getStageTwoRunSummaryStatusClass(row.status)}`}
+                              >
+                                {getStageTwoRunSummaryStatusLabel(row.status)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-600">
+                            {row.runtime}
+                          </td>
+                          <td className="px-4 py-3 font-bold text-slate-700">
+                            {formatUsdCost(row.cost)}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-sm text-slate-500">
-                          No model-level summary was returned for this Stage 2 run.
+                        <td
+                          colSpan={5}
+                          className="px-4 py-6 text-center text-sm text-slate-500"
+                        >
+                          No model-level summary was returned for this Stage 2
+                          run.
                         </td>
                       </tr>
                     )}
                   </tbody>
-                  </table>
+                </table>
               </div>
             </div>
             <p className="mt-4 text-xs text-slate-500">
-              Stage 2 model rows come from backend target-run progress first, then fall back to stored LLM-reviewed candidate outputs when legacy runs do not include target-run metadata.
+              Stage 2 model rows come from backend target-run progress first,
+              then fall back to stored LLM-reviewed candidate outputs when
+              legacy runs do not include target-run metadata.
             </p>
           </section>
 
@@ -4148,8 +4711,12 @@ function StageTwoLlmRunDetailsDialog({
                 className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:-translate-y-0.5 hover:border-amber-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-300"
                 aria-label={`Open breakup details for ${tile.label}`}
               >
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{tile.label}</p>
-                <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">{tile.value}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  {tile.label}
+                </p>
+                <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950">
+                  {tile.value}
+                </p>
               </button>
             ))}
           </div>
@@ -4160,167 +4727,284 @@ function StageTwoLlmRunDetailsDialog({
               </p>
             </div>
             <div className="space-y-4 p-4">
-              {llmModelGroups.length ? llmModelGroups.map((group) => {
-                const promptContext = group.rows.find((row) => row.row)?.row ?? null;
-                return (
-                  <section key={group.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
-                            {group.label}
-                          </p>
-                          {group.sourceTimestamp ? (
-                            <span
-                              className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-slate-500"
-                              title="Timestamp for the LLM output values shown in this model table"
+              {llmModelGroups.length ? (
+                llmModelGroups.map((group) => {
+                  const promptContext =
+                    group.rows.find((row) => row.row)?.row ?? null;
+                  return (
+                    <section
+                      key={group.key}
+                      className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-600">
+                              {group.label}
+                            </p>
+                            {group.sourceTimestamp ? (
+                              <span
+                                className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-slate-500"
+                                title="Timestamp for the LLM output values shown in this model table"
+                              >
+                                {formatIstDateTime(group.sourceTimestamp)}
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEventInputDialog({
+                                  title: group.label,
+                                  llmContext: promptContext,
+                                })
+                              }
+                              className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                              aria-label={`Open full prompt for ${group.label}`}
+                              title="Show full prompt definition sent to this LLM model"
                             >
-                              {formatIstDateTime(group.sourceTimestamp)}
-                            </span>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => setEventInputDialog({ title: group.label, llmContext: promptContext })}
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
-                            aria-label={`Open full prompt for ${group.label}`}
-                            title="Show full prompt definition sent to this LLM model"
-                          >
-                            <Info className="h-3.5 w-3.5" />
-                          </button>
+                              <Info className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {group.rows.length} event/provider{" "}
+                            {group.rows.length === 1 ? "row" : "rows"}
+                            {group.cost !== null
+                              ? ` · Cost: ${formatUsdCost(group.cost)}`
+                              : ""}
+                          </p>
                         </div>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {group.rows.length} event/provider {group.rows.length === 1 ? "row" : "rows"}
-                          {group.cost !== null ? ` · Cost: ${formatUsdCost(group.cost)}` : ""}
-                        </p>
                       </div>
-                    </div>
-                    <div className="overflow-auto">
-                      <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
-                        <thead className="bg-white text-[11px] uppercase tracking-[0.14em] text-slate-500">
-                          <tr>
-                            <th className="px-3 py-3">Event info</th>
-                            <th className="px-3 py-3">S. No</th>
-                            <th className="min-w-64 px-3 py-3">Question</th>
-                            <th className="px-3 py-3">Closing time</th>
-                            <th className="px-3 py-3">Days left</th>
-                            <th className="px-3 py-3">Category</th>
-                            <th className="px-3 py-3">Outcomes</th>
-                            <th className="px-3 py-3">Current Yes odds %</th>
-                            <th className="px-3 py-3">Current No odds %</th>
-                            <th className="px-3 py-3">LLM Yes Odds</th>
-                            <th className="px-3 py-3">LLM No Odds</th>
-                            <th className="px-3 py-3">Returns/day</th>
-                            <th className="px-3 py-3">Action</th>
-                            <th className="px-3 py-3">Risk</th>
-                            <th className="min-w-80 px-3 py-3">Summary / rationale</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
-                          {group.rows.map((row) => {
-                            const dialogState = row.decision ? { decision: row.decision, llmContext: row.row } : null;
-                            return (
-                              <tr key={row.id} className="align-top hover:bg-amber-50/40">
-                                <td className="px-3 py-3">
-                                  <button
-                                    type="button"
-                                    onClick={() => setEventInputDialog({ title: row.title, llmContext: row.row })}
-                                    className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
-                                    aria-label={`Open LLM input details for ${row.title}`}
-                                    title="Show event input and common LLM prompt"
-                                  >
-                                    <Info className="h-3.5 w-3.5" />
-                                  </button>
-                                </td>
-                                <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{row.serialNumber}</td>
-                                <td className="px-3 py-3 font-semibold text-slate-950">{row.question}</td>
-                                <td className="px-3 py-3 text-slate-600">{formatIstDateTime(row.closeTime)}</td>
-                                <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{row.daysLeft === null ? "—" : `${row.daysLeft}d`}</td>
-                                <td className="px-3 py-3 text-slate-600">{row.category}</td>
-                                <td className="px-3 py-3 text-slate-600">{row.outcomes}</td>
-                                <td className="px-3 py-3 font-semibold tabular-nums text-emerald-700">{formatOddsPercent(row.currentYesOdds)}</td>
-                                <td className="px-3 py-3 font-semibold tabular-nums text-rose-700">{formatOddsPercent(row.currentNoOdds)}</td>
-                                <td className="px-3 py-3 tabular-nums"><span className={getLlmOddsHighlightClass(row.yesOdds)}>{formatOddsPercent(row.yesOdds)}</span></td>
-                                <td className="px-3 py-3 tabular-nums"><span className={getLlmOddsHighlightClass(row.noOdds)}>{formatOddsPercent(row.noOdds)}</span></td>
-                                <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">{formatReturnsPerDay(row.returnsPerDay)}</td>
-                                <td className="px-3 py-3">
-                                  {dialogState ? (
+                      <div className="overflow-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-left text-xs">
+                          <thead className="bg-white text-[11px] uppercase tracking-[0.14em] text-slate-500">
+                            <tr>
+                              <th className="px-3 py-3">Event info</th>
+                              <th className="px-3 py-3">S. No</th>
+                              <th className="min-w-64 px-3 py-3">Question</th>
+                              <th className="px-3 py-3">Closing time</th>
+                              <th className="px-3 py-3">Days left</th>
+                              <th className="px-3 py-3">Category</th>
+                              <th className="px-3 py-3">Outcomes</th>
+                              <th className="px-3 py-3">Current Yes odds %</th>
+                              <th className="px-3 py-3">Current No odds %</th>
+                              <th className="px-3 py-3">LLM Yes Odds</th>
+                              <th className="px-3 py-3">LLM No Odds</th>
+                              <th className="px-3 py-3">Returns/day</th>
+                              <th className="px-3 py-3">Action</th>
+                              <th className="px-3 py-3">Risk</th>
+                              <th className="min-w-80 px-3 py-3">
+                                Summary / rationale
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white text-slate-700">
+                            {group.rows.map((row) => {
+                              const dialogState = row.decision
+                                ? {
+                                    decision: row.decision,
+                                    llmContext: row.row,
+                                  }
+                                : null;
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className="align-top hover:bg-amber-50/40"
+                                >
+                                  <td className="px-3 py-3">
                                     <button
                                       type="button"
-                                      onClick={() => setDecisionDialog({ mode: "tag", state: dialogState })}
-                                      className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
-                                      aria-label={`Explain action ${row.action} for ${row.title}`}
-                                      title="Show reason and details behind this action tag"
+                                      onClick={() =>
+                                        setEventInputDialog({
+                                          title: row.title,
+                                          llmContext: row.row,
+                                        })
+                                      }
+                                      className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-sky-200 bg-sky-50 text-sky-700 transition hover:border-sky-300 hover:bg-sky-100"
+                                      aria-label={`Open LLM input details for ${row.title}`}
+                                      title="Show event input and common LLM prompt"
                                     >
-                                      {row.action}
+                                      <Info className="h-3.5 w-3.5" />
                                     </button>
-                                  ) : row.action}
-                                </td>
-                                <td className="px-3 py-3">
-                                  {dialogState ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => setDecisionDialog({ mode: "tag", state: dialogState })}
-                                      className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
-                                      aria-label={`Explain risk ${row.risk} for ${row.title}`}
-                                      title="Show reason and details behind this risk tag"
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
+                                    {row.serialNumber}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold text-slate-950">
+                                    {row.question}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                    {formatIstDateTime(row.closeTime)}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
+                                    {row.daysLeft === null
+                                      ? "—"
+                                      : `${row.daysLeft}d`}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                    {row.category}
+                                  </td>
+                                  <td className="px-3 py-3 text-slate-600">
+                                    {row.outcomes}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-emerald-700">
+                                    {formatOddsPercent(row.currentYesOdds)}
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-rose-700">
+                                    {formatOddsPercent(row.currentNoOdds)}
+                                  </td>
+                                  <td className="px-3 py-3 tabular-nums">
+                                    <span
+                                      className={getLlmOddsHighlightClass(
+                                        row.yesOdds,
+                                      )}
                                     >
-                                      {row.risk}
-                                    </button>
-                                  ) : row.risk}
-                                </td>
-                                <td className="px-3 py-3"><span className="font-semibold">{row.summary}</span><br /><span className="text-slate-500">{row.rationale}</span></td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                );
-              }) : (
-                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">No LLM row-level output was returned for this run.</div>
+                                      {formatOddsPercent(row.yesOdds)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 tabular-nums">
+                                    <span
+                                      className={getLlmOddsHighlightClass(
+                                        row.noOdds,
+                                      )}
+                                    >
+                                      {formatOddsPercent(row.noOdds)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
+                                    {formatReturnsPerDay(row.returnsPerDay)}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    {dialogState ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDecisionDialog({
+                                            mode: "tag",
+                                            state: dialogState,
+                                          })
+                                        }
+                                        className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+                                        aria-label={`Explain action ${row.action} for ${row.title}`}
+                                        title="Show reason and details behind this action tag"
+                                      >
+                                        {row.action}
+                                      </button>
+                                    ) : (
+                                      row.action
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    {dialogState ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDecisionDialog({
+                                            mode: "tag",
+                                            state: dialogState,
+                                          })
+                                        }
+                                        className="rounded-md underline decoration-slate-300 underline-offset-4 transition hover:text-sky-700"
+                                        aria-label={`Explain risk ${row.risk} for ${row.title}`}
+                                        title="Show reason and details behind this risk tag"
+                                      >
+                                        {row.risk}
+                                      </button>
+                                    ) : (
+                                      row.risk
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-3">
+                                    <span className="font-semibold">
+                                      {row.summary}
+                                    </span>
+                                    <br />
+                                    <span className="text-slate-500">
+                                      {row.rationale}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                  );
+                })
+              ) : (
+                <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+                  No LLM row-level output was returned for this run.
+                </div>
               )}
             </div>
           </div>
 
           <div className="mt-5 space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Indepth details ({state.decisions.length} decisions currently returned)
+              Indepth details ({state.decisions.length} decisions currently
+              returned)
             </p>
-            {state.decisions.length ? state.decisions.map((decision) => {
-              const llmContext = getStageTwoDecisionLlmContext(state, decision);
-              const dialogState = { decision, llmContext };
-              return (
-              <article key={decision.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <h3 className="font-semibold text-slate-950">{decision.market_title}</h3>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setDecisionDialog({ mode: "llm-inputs", state: dialogState })}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
-                      aria-label={`Open LLM prompt and inputs for ${decision.market_title}`}
-                      title="Show LLM prompt and input packet"
-                    >
-                      <Bot className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDecisionDialog({ mode: "tag", state: dialogState })}
-                      className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
-                      aria-label={`Explain ${decision.decision} ${decision.risk_status} tag for ${decision.market_title}`}
-                    >
-                      {decision.decision} · {decision.risk_status}
-                    </button>
-                  </div>
-                </div>
-                <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {decision.summary || decision.reason}</p>
-                <p className="mt-2 leading-6"><span className="font-semibold">Indepth details:</span> {decision.rationale || decision.reason}</p>
-              </article>
-              );
-            }) : (
+            {state.decisions.length ? (
+              state.decisions.map((decision) => {
+                const llmContext = getStageTwoDecisionLlmContext(
+                  state,
+                  decision,
+                );
+                const dialogState = { decision, llmContext };
+                return (
+                  <article
+                    key={decision.id}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <h3 className="font-semibold text-slate-950">
+                        {decision.market_title}
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDecisionDialog({
+                              mode: "llm-inputs",
+                              state: dialogState,
+                            })
+                          }
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-violet-200 bg-violet-50 text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
+                          aria-label={`Open LLM prompt and inputs for ${decision.market_title}`}
+                          title="Show LLM prompt and input packet"
+                        >
+                          <Bot className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setDecisionDialog({
+                              mode: "tag",
+                              state: dialogState,
+                            })
+                          }
+                          className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
+                          aria-label={`Explain ${decision.decision} ${decision.risk_status} tag for ${decision.market_title}`}
+                        >
+                          {decision.decision} · {decision.risk_status}
+                        </button>
+                      </div>
+                    </div>
+                    <p className="mt-2 leading-6">
+                      <span className="font-semibold">Summary:</span>{" "}
+                      {decision.summary || decision.reason}
+                    </p>
+                    <p className="mt-2 leading-6">
+                      <span className="font-semibold">Indepth details:</span>{" "}
+                      {decision.rationale || decision.reason}
+                    </p>
+                  </article>
+                );
+              })
+            ) : (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                Decision rows are still loading or have not been returned yet for this run.
+                Decision rows are still loading or have not been returned yet
+                for this run.
               </p>
             )}
           </div>
@@ -4368,15 +5052,27 @@ function getStageTwoDecisionLlmContext(
   const rows = Array.isArray(state.stage.outputs.llm_reviewed_candidates)
     ? state.stage.outputs.llm_reviewed_candidates
     : [];
-  const decisionKeys = [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title]
+  const decisionKeys = [
+    decision.market_id,
+    decision.slug ?? null,
+    decision.market_url ?? null,
+    decision.market_title,
+  ]
     .map(getStageTwoBreakupMatchKey)
     .filter((key): key is string => Boolean(key));
   return (
     rows.find((row): row is Record<string, unknown> => {
       if (!row || typeof row !== "object") return false;
       const candidate = row as Record<string, unknown>;
-      const rowKeys = [candidate.market_id, candidate.slug, candidate.market_url, candidate.question]
-        .map((value) => getStageTwoBreakupMatchKey(typeof value === "string" ? value : null))
+      const rowKeys = [
+        candidate.market_id,
+        candidate.slug,
+        candidate.market_url,
+        candidate.question,
+      ]
+        .map((value) =>
+          getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
+        )
         .filter((key): key is string => Boolean(key));
       return rowKeys.some((key) => decisionKeys.includes(key));
     }) ?? null
@@ -4426,21 +5122,29 @@ function getStageTwoDisplayedPrompt(
   return readFirstReturnedValue(llmContext?.llm_prompt, promptTemplate);
 }
 
-function getStageTwoLlmPromptInputs(llmContext: Record<string, unknown> | null) {
+function getStageTwoLlmPromptInputs(
+  llmContext: Record<string, unknown> | null,
+) {
   return readFirstReturnedValue(
     llmContext?.llm_prompt_inputs,
     llmContext?.prompt_inputs,
   );
 }
 
-function getStageTwoLlmPromptInputMarket(llmContext: Record<string, unknown> | null) {
+function getStageTwoLlmPromptInputMarket(
+  llmContext: Record<string, unknown> | null,
+) {
   return readNestedRecord(getStageTwoLlmPromptInputs(llmContext), ["market"]);
 }
 
-function getStageTwoLlmPromptInputEvidencePacket(llmContext: Record<string, unknown> | null) {
+function getStageTwoLlmPromptInputEvidencePacket(
+  llmContext: Record<string, unknown> | null,
+) {
   return readFirstReturnedValue(
     llmContext?.evidence_packet,
-    readNestedRecord(getStageTwoLlmPromptInputs(llmContext), ["evidence_packet"]),
+    readNestedRecord(getStageTwoLlmPromptInputs(llmContext), [
+      "evidence_packet",
+    ]),
   );
 }
 
@@ -4498,14 +5202,29 @@ function StageTwoInputPromptDialog({
       <div className="flex max-h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Stage 2 Input prompt</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">Stage 2 Input prompt</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 2 Input prompt
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              Stage 2 Input prompt
+            </h2>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close Stage 2 input prompt"><X className="h-4 w-4" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 2 input prompt"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
-          <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
-          {missingReason ? <MissingValueNote>{missingReason}</MissingValueNote> : null}
+          <pre className="max-h-[62vh] overflow-auto whitespace-pre-wrap rounded-2xl border border-violet-200 bg-violet-50/60 p-4 text-xs leading-5 text-slate-800">
+            {formatJsonForDisplay(prompt)}
+          </pre>
+          {missingReason ? (
+            <MissingValueNote>{missingReason}</MissingValueNote>
+          ) : null}
         </div>
       </div>
     </div>
@@ -4534,12 +5253,28 @@ function StageTwoLlmEventInputDialog({
   const eventInputEntries = [
     ["market_id", llmContext?.market_id, promptInputMarket?.market_id],
     ["slug", llmContext?.slug, promptInputMarket?.slug],
-    ["question", llmContext?.question ?? llmContext?.market_title, promptInputMarket?.question],
+    [
+      "question",
+      llmContext?.question ?? llmContext?.market_title,
+      promptInputMarket?.question,
+    ],
     ["market_url", llmContext?.market_url, promptInputMarket?.market_url],
-    ["current_yes_odds", llmContext?.current_yes_odds, promptInputMarket?.current_yes_odds],
-    ["current_no_odds", llmContext?.current_no_odds, promptInputMarket?.current_no_odds],
+    [
+      "current_yes_odds",
+      llmContext?.current_yes_odds,
+      promptInputMarket?.current_yes_odds,
+    ],
+    [
+      "current_no_odds",
+      llmContext?.current_no_odds,
+      promptInputMarket?.current_no_odds,
+    ],
     ["volume_usd", llmContext?.volume_usd, promptInputMarket?.volume_usd],
-    ["liquidity_usd", llmContext?.liquidity_usd, promptInputMarket?.liquidity_usd],
+    [
+      "liquidity_usd",
+      llmContext?.liquidity_usd,
+      promptInputMarket?.liquidity_usd,
+    ],
     ["close_time", llmContext?.close_time, promptInputMarket?.close_time],
     ["theme", llmContext?.theme, promptInputMarket?.theme],
     ["source", llmContext?.source, promptInputMarket?.source],
@@ -4550,19 +5285,38 @@ function StageTwoLlmEventInputDialog({
       <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Event LLM input</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">{title}</h2>
-            <p className="mt-2 text-sm text-slate-600">Input data and common prompt used for the LLM review of this event.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Event LLM input
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              {title}
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Input data and common prompt used for the LLM review of this
+              event.
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close event LLM input"><X className="h-4 w-4" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close event LLM input"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="rounded-2xl border border-sky-200 bg-sky-50/60 p-4">
-              <p className="font-semibold text-sky-950">Easy-read event input</p>
+              <p className="font-semibold text-sky-950">
+                Easy-read event input
+              </p>
               <dl className="mt-3 space-y-2">
                 {eventInputEntries.map(([key, primaryValue, fallbackValue]) => {
-                  const value = readFirstReturnedValue(primaryValue, fallbackValue);
+                  const value = readFirstReturnedValue(
+                    primaryValue,
+                    fallbackValue,
+                  );
                   const missingReason = getStageTwoLlmMissingValueReason(
                     key.replaceAll("_", " "),
                     primaryValue,
@@ -4570,29 +5324,57 @@ function StageTwoLlmEventInputDialog({
                   );
                   return (
                     <div key={key} className="rounded-xl bg-white/80 px-3 py-2">
-                      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{key.replaceAll("_", " ")}</dt>
-                      <dd className="mt-1 break-words font-medium text-slate-900">{formatJsonForDisplay(value)}</dd>
-                      {missingReason ? <MissingValueNote>{missingReason}</MissingValueNote> : null}
+                      <dt className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        {key.replaceAll("_", " ")}
+                      </dt>
+                      <dd className="mt-1 break-words font-medium text-slate-900">
+                        {formatJsonForDisplay(value)}
+                      </dd>
+                      {missingReason ? (
+                        <MissingValueNote>{missingReason}</MissingValueNote>
+                      ) : null}
                     </div>
                   );
                 })}
               </dl>
             </section>
             <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
-              <p className="font-semibold text-violet-950">Common prompt sent to LLM</p>
-              <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
-              {promptMissingReason ? <MissingValueNote>{promptMissingReason}</MissingValueNote> : null}
+              <p className="font-semibold text-violet-950">
+                Common prompt sent to LLM
+              </p>
+              <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+                {formatJsonForDisplay(prompt)}
+              </pre>
+              {promptMissingReason ? (
+                <MissingValueNote>{promptMissingReason}</MissingValueNote>
+              ) : null}
             </section>
           </div>
           <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-            <p className="font-semibold text-slate-950">Full organised prompt inputs</p>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(promptInputs)}</pre>
+            <p className="font-semibold text-slate-950">
+              Full organised prompt inputs
+            </p>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">
+              {formatJsonForDisplay(promptInputs)}
+            </pre>
           </section>
           <section className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
             <p className="font-semibold text-amber-950">Evidence packet</p>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(evidencePacket)}</pre>
-            {getStageTwoLlmMissingValueReason("Evidence packet", llmContext?.evidence_packet, evidencePacket) ? (
-              <MissingValueNote>{getStageTwoLlmMissingValueReason("Evidence packet", llmContext?.evidence_packet, evidencePacket)}</MissingValueNote>
+            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+              {formatJsonForDisplay(evidencePacket)}
+            </pre>
+            {getStageTwoLlmMissingValueReason(
+              "Evidence packet",
+              llmContext?.evidence_packet,
+              evidencePacket,
+            ) ? (
+              <MissingValueNote>
+                {getStageTwoLlmMissingValueReason(
+                  "Evidence packet",
+                  llmContext?.evidence_packet,
+                  evidencePacket,
+                )}
+              </MissingValueNote>
             ) : null}
           </section>
         </div>
@@ -4616,7 +5398,8 @@ function StageTwoDecisionDetailDialog({
   const prompt = getStageTwoDisplayedPrompt(llmContext, promptTemplate);
   const promptInputs = getStageTwoLlmPromptInputs(llmContext);
   const evidencePacket = getStageTwoLlmPromptInputEvidencePacket(llmContext);
-  const title = mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
+  const title =
+    mode === "tag" ? "Decision tag details" : "LLM prompt + input packet";
   const promptMissingReason = getStageTwoPromptMissingValueReason(
     "Prompt sent to the LLM",
     llmContext,
@@ -4628,44 +5411,103 @@ function StageTwoDecisionDetailDialog({
       <div className="flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">{title}</p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">{decision.market_title}</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              {title}
+            </p>
+            <h2 className="mt-1 text-xl font-semibold text-slate-950">
+              {decision.market_title}
+            </h2>
             <p className="mt-2 text-sm text-slate-600">
-              {decision.decision} · {decision.risk_status} · {decision.side} side · Current YES/NO {formatPriceCents(decision.current_yes_odds ?? null)} / {formatPriceCents(decision.current_no_odds ?? null)}
+              {decision.decision} · {decision.risk_status} · {decision.side}{" "}
+              side · Current YES/NO{" "}
+              {formatPriceCents(decision.current_yes_odds ?? null)} /{" "}
+              {formatPriceCents(decision.current_no_odds ?? null)}
             </p>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close decision details"><X className="h-4 w-4" /></button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close decision details"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5 text-sm text-slate-700">
           {mode === "tag" ? (
             <div className="space-y-4">
               <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="font-semibold text-slate-950">What this tag means</p>
-                <p className="mt-2 leading-6">Action <b>{decision.decision}</b> with risk status <b>{decision.risk_status}</b> means the Stage 2 LLM/rules pipeline classified this event as {decision.decision === "EXIT" ? "an event exit candidate that should move to the exit flow" : decision.decision === "SKIP" ? "not currently actionable for investment" : "an actionable portfolio decision"}.</p>
+                <p className="font-semibold text-slate-950">
+                  What this tag means
+                </p>
+                <p className="mt-2 leading-6">
+                  Action <b>{decision.decision}</b> with risk status{" "}
+                  <b>{decision.risk_status}</b> means the Stage 2 LLM/rules
+                  pipeline classified this event as{" "}
+                  {decision.decision === "EXIT"
+                    ? "an event exit candidate that should move to the exit flow"
+                    : decision.decision === "SKIP"
+                      ? "not currently actionable for investment"
+                      : "an actionable portfolio decision"}
+                  .
+                </p>
               </section>
               <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="font-semibold text-slate-950">Why this event was tagged this way</p>
-                <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {decision.summary || decision.reason}</p>
-                <p className="mt-2 leading-6"><span className="font-semibold">Rationale:</span> {decision.rationale || decision.reason}</p>
-                {decision.exit_signals.length ? <ul className="mt-3 list-disc space-y-1 pl-5">{decision.exit_signals.map((signal, index) => <li key={`${signal.reasonCode}-${index}`}><b>{signal.label}:</b> {signal.description}</li>)}</ul> : null}
+                <p className="font-semibold text-slate-950">
+                  Why this event was tagged this way
+                </p>
+                <p className="mt-2 leading-6">
+                  <span className="font-semibold">Summary:</span>{" "}
+                  {decision.summary || decision.reason}
+                </p>
+                <p className="mt-2 leading-6">
+                  <span className="font-semibold">Rationale:</span>{" "}
+                  {decision.rationale || decision.reason}
+                </p>
+                {decision.exit_signals.length ? (
+                  <ul className="mt-3 list-disc space-y-1 pl-5">
+                    {decision.exit_signals.map((signal, index) => (
+                      <li key={`${signal.reasonCode}-${index}`}>
+                        <b>{signal.label}:</b> {signal.description}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </section>
             </div>
           ) : (
             <div className="space-y-4">
               <section className="rounded-2xl border border-violet-200 bg-violet-50/60 p-4">
-                <p className="font-semibold text-violet-950">Prompt sent to the LLM</p>
-                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(prompt)}</pre>
-                {promptMissingReason ? <MissingValueNote>{promptMissingReason}</MissingValueNote> : null}
+                <p className="font-semibold text-violet-950">
+                  Prompt sent to the LLM
+                </p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+                  {formatJsonForDisplay(prompt)}
+                </pre>
+                {promptMissingReason ? (
+                  <MissingValueNote>{promptMissingReason}</MissingValueNote>
+                ) : null}
               </section>
               <section className="rounded-2xl border border-slate-200 bg-white p-4">
-                <p className="font-semibold text-slate-950">Organised prompt inputs</p>
-                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(promptInputs)}</pre>
+                <p className="font-semibold text-slate-950">
+                  Organised prompt inputs
+                </p>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-xs leading-5 text-slate-800">
+                  {formatJsonForDisplay(promptInputs)}
+                </pre>
               </section>
               <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
                 <p className="font-semibold text-amber-950">Evidence packet</p>
-                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">{formatJsonForDisplay(evidencePacket)}</pre>
+                <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-4 text-xs leading-5 text-slate-800">
+                  {formatJsonForDisplay(evidencePacket)}
+                </pre>
               </section>
-              {!llmContext ? <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">This run did not return a matching Stage 2 LLM review context for this decision.</p> : null}
+              {!llmContext ? (
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-slate-600">
+                  This run did not return a matching Stage 2 LLM review context
+                  for this decision.
+                </p>
+              ) : null}
             </div>
           )}
         </div>
@@ -4687,17 +5529,29 @@ function getStageTwoBreakupRows(
     title: position.marketTitle,
     summary: `${position.isClaimable ? "Claimable" : "Open"} ${position.side ?? "position"} position${position.exposureUsd !== null ? ` · ${formatMoney(position.exposureUsd)} exposure` : ""}.`,
     detail: `Shares: ${formatShares(position.shares)} · Avg price: ${formatPriceCents(position.averagePriceCents)} · Current YES/NO: ${formatPriceCents(position.currentYesOdds)} / ${formatPriceCents(position.currentNoOdds)}${position.closeTime ? ` · Closes ${formatIstDateTime(position.closeTime)}` : ""}.`,
-    keys: [position.marketId, position.slug, position.marketUrl, position.marketTitle],
+    keys: [
+      position.marketId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ],
   }));
   const newRows = state.stage.scanCandidates.map((candidate) => ({
     id: `candidate-${candidate.marketId ?? candidate.questionId ?? candidate.question}`,
     title: candidate.question,
     summary: `${candidate.forceInclude ? "Force-included" : "Passed filters"} opportunity${candidate.theme ? ` · ${candidate.theme}` : ""}.`,
     detail: `Current YES/NO: ${formatPriceCents(candidate.currentYesOdds)} / ${formatPriceCents(candidate.currentNoOdds)} · Volume: ${formatMoney(candidate.volumeUsd)} · Liquidity: ${formatMoney(candidate.liquidityUsd)}${candidate.closeTime ? ` · Closes ${formatIstDateTime(candidate.closeTime)}` : ""}.`,
-    keys: [candidate.marketId, candidate.slug, candidate.marketUrl, candidate.question],
+    keys: [
+      candidate.marketId,
+      candidate.slug,
+      candidate.marketUrl,
+      candidate.question,
+    ],
   }));
   const newRowKeySet = new Set(
-    newRows.flatMap((row) => row.keys.map(getStageTwoBreakupMatchKey)).filter((key): key is string => Boolean(key)),
+    newRows
+      .flatMap((row) => row.keys.map(getStageTwoBreakupMatchKey))
+      .filter((key): key is string => Boolean(key)),
   );
   const overlappingActiveRows = activeRows.filter((row) =>
     row.keys.some((key) => {
@@ -4713,11 +5567,29 @@ function getStageTwoBreakupRows(
   const decisionRows = state.decisions.map((decision) => ({
     id: `decision-${decision.id}`,
     title: decision.market_title,
-    summary: decision.summary || decision.reason || `${decision.decision} · ${decision.risk_status}`,
-    detail: decision.rationale || decision.reason || "No LLM rationale returned for this row yet.",
-    keys: [decision.market_id, decision.slug ?? null, decision.market_url ?? null, decision.market_title],
+    summary:
+      decision.summary ||
+      decision.reason ||
+      `${decision.decision} · ${decision.risk_status}`,
+    detail:
+      decision.rationale ||
+      decision.reason ||
+      "No LLM rationale returned for this row yet.",
+    keys: [
+      decision.market_id,
+      decision.slug ?? null,
+      decision.market_url ?? null,
+      decision.market_title,
+    ],
   }));
-  return decisionRows.length ? decisionRows : [...activeRows, ...newRows].slice(0, state.stage.outputs.llm_candidate_count ? Number(state.stage.outputs.llm_candidate_count) : undefined);
+  return decisionRows.length
+    ? decisionRows
+    : [...activeRows, ...newRows].slice(
+        0,
+        state.stage.outputs.llm_candidate_count
+          ? Number(state.stage.outputs.llm_candidate_count)
+          : undefined,
+      );
 }
 
 function StageTwoLlmRunBreakupDialog({
@@ -4737,22 +5609,26 @@ function StageTwoLlmRunBreakupDialog({
     "active-positions": {
       title: "Active positions",
       count: stats.activePositions,
-      summary: "Open wallet position rows that Stage 2 considers alongside fresh scan opportunities.",
+      summary:
+        "Open wallet position rows that Stage 2 considers alongside fresh scan opportunities.",
     },
     "new-opportunities": {
       title: "New opportunities",
       count: stats.newOpportunities,
-      summary: "Fresh Stage 1 scan candidates that passed filters and were eligible for Stage 2 review.",
+      summary:
+        "Fresh Stage 1 scan candidates that passed filters and were eligible for Stage 2 review.",
     },
     overlap: {
       title: "Overlap / de-duped",
       count: overlapCount,
-      summary: "Rows that appear in both active positions and new opportunities and are counted once for the LLM.",
+      summary:
+        "Rows that appear in both active positions and new opportunities and are counted once for the LLM.",
     },
     "unique-llm-rows": {
       title: "Unique LLM rows",
       count: stats.llmRanOn,
-      summary: "The de-duplicated Stage 2 review set after active positions and new opportunities are unioned.",
+      summary:
+        "The de-duplicated Stage 2 review set after active positions and new opportunities are unioned.",
     },
   }[kind];
   const rows = getStageTwoBreakupRows(state, kind);
@@ -4762,29 +5638,60 @@ function StageTwoLlmRunBreakupDialog({
       <div className="flex max-h-[82vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Tile breakup</p>
-            <h3 className="mt-1 text-xl font-semibold text-slate-950">{config.title}: {config.count}</h3>
-            <p className="mt-2 text-sm leading-6 text-slate-600">{config.summary}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Tile breakup
+            </p>
+            <h3 className="mt-1 text-xl font-semibold text-slate-950">
+              {config.title}: {config.count}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              {config.summary}
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close tile breakup details">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close tile breakup details"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
             <p className="font-semibold">Summary</p>
-            <p className="mt-1 leading-6">{config.summary} Displayed count: <span className="font-semibold tabular-nums">{config.count}</span>. Rows available below: <span className="font-semibold tabular-nums">{rows.length}</span>.</p>
+            <p className="mt-1 leading-6">
+              {config.summary} Displayed count:{" "}
+              <span className="font-semibold tabular-nums">{config.count}</span>
+              . Rows available below:{" "}
+              <span className="font-semibold tabular-nums">{rows.length}</span>.
+            </p>
           </div>
           <div className="mt-5 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Indepth details</p>
-            {rows.length ? rows.map((row) => (
-              <article key={row.id} className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
-                <h4 className="font-semibold text-slate-950">{row.title}</h4>
-                <p className="mt-2 leading-6"><span className="font-semibold">Summary:</span> {row.summary}</p>
-                <p className="mt-2 leading-6"><span className="font-semibold">Indepth details:</span> {row.detail}</p>
-              </article>
-            )) : (
-              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No row-level details have been returned for this tile yet.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Indepth details
+            </p>
+            {rows.length ? (
+              rows.map((row) => (
+                <article
+                  key={row.id}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                >
+                  <h4 className="font-semibold text-slate-950">{row.title}</h4>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Summary:</span>{" "}
+                    {row.summary}
+                  </p>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Indepth details:</span>{" "}
+                    {row.detail}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No row-level details have been returned for this tile yet.
+              </p>
             )}
           </div>
         </div>
@@ -4812,7 +5719,8 @@ function StageTwoInvestEventsDialog({
               New Events to Invest in: {state.decisions.length}
             </h2>
             <p className="mt-2 text-sm text-slate-600">
-              Stage 2-qualified events that have a buy plan ready for the Stage 3 invest pass.
+              Stage 2-qualified events that have a buy plan ready for the Stage
+              3 invest pass.
             </p>
           </div>
           <button
@@ -4842,32 +5750,45 @@ function StageTwoInvestEventsDialog({
                       </h3>
                     </div>
                     <span className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-800">
-                      {decision.side} · {decision.order_plan?.status ?? decision.decision}
+                      {decision.side} ·{" "}
+                      {decision.order_plan?.status ?? decision.decision}
                     </span>
                   </div>
                   <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                       Summary
                     </p>
-                    <p className="mt-1 leading-6">{decision.summary || decision.reason}</p>
+                    <p className="mt-1 leading-6">
+                      {decision.summary || decision.reason}
+                    </p>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
                     <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Price / fair</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Price / fair
+                      </p>
                       <p className="mt-1 font-semibold text-slate-950">
-                        {decision.price_cents.toFixed(1)}¢ / {decision.fair_probability_pct.toFixed(1)}%
+                        {decision.price_cents.toFixed(1)}¢ /{" "}
+                        {decision.fair_probability_pct.toFixed(1)}%
                       </p>
                     </div>
                     <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Edge / score</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Edge / score
+                      </p>
                       <p className="mt-1 font-semibold text-slate-950">
-                        {decision.edge_pp.toFixed(1)} pp / {decision.score.toFixed(1)}
+                        {decision.edge_pp.toFixed(1)} pp /{" "}
+                        {decision.score.toFixed(1)}
                       </p>
                     </div>
                     <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Planned amount</p>
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Planned amount
+                      </p>
                       <p className="mt-1 font-semibold text-slate-950">
-                        ${decision.order_plan?.order_size_usd.toFixed(2) ?? decision.target_exposure_usd.toFixed(2)}
+                        $
+                        {decision.order_plan?.order_size_usd.toFixed(2) ??
+                          decision.target_exposure_usd.toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -4875,7 +5796,9 @@ function StageTwoInvestEventsDialog({
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                       Indepth details
                     </p>
-                    <p className="mt-1 leading-6">{decision.rationale || decision.reason}</p>
+                    <p className="mt-1 leading-6">
+                      {decision.rationale || decision.reason}
+                    </p>
                     {decision.key_evidence.length ? (
                       <ul className="mt-2 list-disc space-y-1 pl-5">
                         {decision.key_evidence.map((item) => (
@@ -4954,8 +5877,8 @@ function InvestMetricDetailsDialog({
   const filteredProcessedCount = rows.filter((decision) =>
     isProcessedInvestOrderPlan(decision.order_plan),
   ).length;
-  const filteredSubmittedCount = rows.filter(
-    (decision) => isSubmittedOrSuccessfulDecision(decision),
+  const filteredSubmittedCount = rows.filter((decision) =>
+    isSubmittedOrSuccessfulDecision(decision),
   ).length;
   const filteredUnsubmittedRows = rows.filter(
     (decision) =>
@@ -5166,126 +6089,135 @@ function InvestMetricDetailsDialog({
             {rows.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="min-w-[78rem] divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Event</th>
-                    <th className="px-4 py-3">Decision</th>
-                    <th className="px-4 py-3">Edge & score</th>
-                    <th className="px-4 py-3">Exposure</th>
-                    <th className="px-4 py-3">LLM Yes Odds</th>
-                    <th className="px-4 py-3">LLM No Odds</th>
-                    <th className="px-4 py-3">Returns/day</th>
-                    <th className="px-4 py-3">Exit Type</th>
-                    <th className="px-4 py-3">Order</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {rows.map((decision) => (
-                    <tr key={decision.id}>
-                      <td className="px-4 py-3 align-top">
-                        <div className="font-semibold text-slate-950">
-                          {decision.market_url ? (
-                            <a
-                              className="hover:text-sky-700 hover:underline"
-                              href={decision.market_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {decision.market_title}
-                            </a>
-                          ) : (
-                            decision.market_title
+                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Event</th>
+                      <th className="px-4 py-3">Decision</th>
+                      <th className="px-4 py-3">Edge & score</th>
+                      <th className="px-4 py-3">Exposure</th>
+                      <th className="px-4 py-3">LLM Yes Odds</th>
+                      <th className="px-4 py-3">LLM No Odds</th>
+                      <th className="px-4 py-3">Returns/day</th>
+                      <th className="px-4 py-3">Exit Type</th>
+                      <th className="px-4 py-3">Order</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {rows.map((decision) => (
+                      <tr key={decision.id}>
+                        <td className="px-4 py-3 align-top">
+                          <div className="font-semibold text-slate-950">
+                            {decision.market_url ? (
+                              <a
+                                className="hover:text-sky-700 hover:underline"
+                                href={decision.market_url}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                {decision.market_title}
+                              </a>
+                            ) : (
+                              decision.market_title
+                            )}
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {decision.theme} · closes{" "}
+                            {formatIstDateTime(decision.close_time)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 align-top text-slate-700">
+                          <span className="font-semibold capitalize text-slate-950">
+                            {decision.decision.replaceAll("_", " ")}
+                          </span>
+                          <br />
+                          Side {decision.side} · {decision.confidence}
+                          <br />
+                          {decision.risk_status.replaceAll("_", " ")}
+                        </td>
+                        <td className="px-4 py-3 align-top text-slate-700">
+                          Edge{" "}
+                          {decision.edge_pp.toLocaleString("en-IN", {
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          pp
+                          <br />
+                          Score{" "}
+                          {decision.score.toLocaleString("en-IN", {
+                            maximumFractionDigits: 2,
+                          })}
+                          <br />
+                          Fair{" "}
+                          {formatOddsPercent(decision.fair_probability_pct)}
+                        </td>
+                        <td className="px-4 py-3 align-top text-slate-700">
+                          Current {formatMoney(decision.current_exposure_usd)}
+                          <br />
+                          Target {formatMoney(decision.target_exposure_usd)}
+                        </td>
+                        <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                          {formatOddsPercent(
+                            decision.fair_yes_probability_pct ?? null,
                           )}
-                        </div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          {decision.theme} · closes{" "}
-                          {formatIstDateTime(decision.close_time)}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        <span className="font-semibold capitalize text-slate-950">
-                          {decision.decision.replaceAll("_", " ")}
-                        </span>
-                        <br />
-                        Side {decision.side} · {decision.confidence}
-                        <br />
-                        {decision.risk_status.replaceAll("_", " ")}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        Edge{" "}
-                        {decision.edge_pp.toLocaleString("en-IN", {
-                          maximumFractionDigits: 2,
-                        })}{" "}
-                        pp
-                        <br />
-                        Score{" "}
-                        {decision.score.toLocaleString("en-IN", {
-                          maximumFractionDigits: 2,
-                        })}
-                        <br />
-                        Fair {formatOddsPercent(decision.fair_probability_pct)}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        Current {formatMoney(decision.current_exposure_usd)}
-                        <br />
-                        Target {formatMoney(decision.target_exposure_usd)}
-                      </td>
-                      <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
-                        {formatOddsPercent(decision.fair_yes_probability_pct ?? null)}
-                      </td>
-                      <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
-                        {formatOddsPercent(decision.fair_no_probability_pct ?? null)}
-                      </td>
-                      <td className="px-4 py-3 align-top tabular-nums text-slate-700">
-                        {formatReturnsPerDay(getDecisionReturnsPerDay(decision))}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        {(() => {
-                          const exitType = getDecisionExitTypeDetails(decision);
-                          return exitType ? (
+                        </td>
+                        <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                          {formatOddsPercent(
+                            decision.fair_no_probability_pct ?? null,
+                          )}
+                        </td>
+                        <td className="px-4 py-3 align-top tabular-nums text-slate-700">
+                          {formatReturnsPerDay(
+                            getDecisionReturnsPerDay(decision),
+                          )}
+                        </td>
+                        <td className="px-4 py-3 align-top text-slate-700">
+                          {(() => {
+                            const exitType =
+                              getDecisionExitTypeDetails(decision);
+                            return exitType ? (
+                              <>
+                                <span className="font-semibold text-slate-950">
+                                  {exitType.label}
+                                </span>
+                                <br />
+                                <span className="whitespace-pre-line text-xs leading-5">
+                                  {exitType.details}
+                                </span>
+                              </>
+                            ) : (
+                              "—"
+                            );
+                          })()}
+                        </td>
+                        <td className="px-4 py-3 align-top text-slate-700">
+                          <span className="font-semibold capitalize">
+                            {formatInvestMetricOrderStatus(decision)}
+                          </span>
+                          {decision.order_plan ? (
                             <>
-                              <span className="font-semibold text-slate-950">
-                                {exitType.label}
-                              </span>
                               <br />
-                              <span className="whitespace-pre-line text-xs leading-5">
-                                {exitType.details}
-                              </span>
+                              {formatMoney(
+                                decision.order_plan.order_size_usd,
+                              )}{" "}
+                              at{" "}
+                              {formatPriceCents(
+                                decision.order_plan.limit_price_cents,
+                              )}
+                              <br />
+                              <ErrorCodeWithDetails
+                                detail={decision.order_plan.detail}
+                                detailClassName="text-slate-700"
+                              />
                             </>
                           ) : (
-                            "—"
-                          );
-                        })()}
-                      </td>
-                      <td className="px-4 py-3 align-top text-slate-700">
-                        <span className="font-semibold capitalize">
-                          {formatInvestMetricOrderStatus(decision)}
-                        </span>
-                        {decision.order_plan ? (
-                          <>
-                            <br />
-                            {formatMoney(
-                              decision.order_plan.order_size_usd,
-                            )} at{" "}
-                            {formatPriceCents(
-                              decision.order_plan.limit_price_cents,
-                            )}
-                            <br />
-                            <ErrorCodeWithDetails
-                              detail={decision.order_plan.detail}
-                              detailClassName="text-slate-700"
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <br />
-                            {decision.reason}
-                          </>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                            <>
+                              <br />
+                              {decision.reason}
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
                 </table>
               </div>
             ) : (
@@ -5455,7 +6387,6 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {
   };
 }
 
-
 function isUsableBullpenBalance(
   balance: PolymarketBotState["live"]["balance"] | null | undefined,
 ): balance is PolymarketBotState["live"]["balance"] & { status: "ready" } {
@@ -5473,7 +6404,9 @@ function BullpenPortfolioSnapshot({
   onRefresh,
 }: {
   state: PolymarketBotState | null;
-  lastUsableBalance: (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null;
+  lastUsableBalance:
+    | (PolymarketBotState["live"]["balance"] & { status: "ready" })
+    | null;
   activePositions: BullpenActivePositionView[];
   activePositionQuestions: BullpenQuestionRow[];
   hasActivePositionsSnapshot: boolean;
@@ -5483,10 +6416,16 @@ function BullpenPortfolioSnapshot({
 }) {
   const [isActivePositionsPopupOpen, setIsActivePositionsPopupOpen] =
     useState(false);
+  const [activePositionDetail, setActivePositionDetail] =
+    useState<BullpenActivePositionView | null>(null);
   const liveBalance = state?.live.balance ?? null;
-  const balance = isUsableBullpenBalance(liveBalance) ? liveBalance : lastUsableBalance;
+  const balance = isUsableBullpenBalance(liveBalance)
+    ? liveBalance
+    : lastUsableBalance;
   const usableBalance = isUsableBullpenBalance(balance);
-  const accountValue = usableBalance ? (balance.account_value_usd ?? null) : null;
+  const accountValue = usableBalance
+    ? (balance.account_value_usd ?? null)
+    : null;
   const cash = usableBalance ? (balance.available_balance_usd ?? null) : null;
   const pnl = usableBalance ? (balance.pnl_usd ?? null) : null;
   const upnl = usableBalance ? (balance.upnl_usd ?? null) : null;
@@ -5496,21 +6435,36 @@ function BullpenPortfolioSnapshot({
     : openPositions.filter((position) => position.shares > 0).length;
   const activeInvested = hasActivePositionsSnapshot
     ? activePositions.reduce((total, position) => {
-        const amount = typeof position.costBasis === "number" ? position.costBasis : 0;
+        const amount =
+          typeof position.costBasis === "number" ? position.costBasis : 0;
         return total + amount;
       }, 0)
-    : openPositions.reduce((total, position) => total + (position.cost_basis || 0), 0);
+    : openPositions.reduce(
+        (total, position) => total + (position.cost_basis || 0),
+        0,
+      );
   const claimableRows = (state?.live.redeemed_trades ?? []).filter((trade) => {
     const text = `${trade.status ?? ""} ${trade.detail ?? ""}`.toLowerCase();
-    return text.includes("claim") || text.includes("redeem") || text.includes("pending");
+    return (
+      text.includes("claim") ||
+      text.includes("redeem") ||
+      text.includes("pending")
+    );
   });
-  const claimableAmount = claimableRows.reduce((total, trade) => total + Math.max(0, trade.amount || 0), 0);
-  const lastRefresh = balance?.checked_at ? formatIstDateTime(balance.checked_at) : "—";
-  const pendingConfirmationsCount = state?.live.pending_confirmations.length ?? 0;
+  const claimableAmount = claimableRows.reduce(
+    (total, trade) => total + Math.max(0, trade.amount || 0),
+    0,
+  );
+  const lastRefresh = balance?.checked_at
+    ? formatIstDateTime(balance.checked_at)
+    : "—";
+  const pendingConfirmationsCount =
+    state?.live.pending_confirmations.length ?? 0;
   const balanceStatus = liveBalance?.status ?? balance?.status ?? "not loaded";
   const currentInvestmentsValue = hasActivePositionsSnapshot
     ? activePositions.reduce((total, position) => {
-        const value = typeof position.currentValue === "number" ? position.currentValue : 0;
+        const value =
+          typeof position.currentValue === "number" ? position.currentValue : 0;
         return total + value;
       }, 0)
     : accountValue;
@@ -5538,15 +6492,86 @@ function BullpenPortfolioSnapshot({
     })),
   ];
 
+  const latestDecisionByPositionKey = new Map<
+    string,
+    BullpenAutoLiveDecision
+  >();
+  for (const decision of recentDecisions) {
+    const side = decision.side?.trim().toUpperCase();
+    const keys = [
+      decision.market_id && side ? `${decision.market_id}::${side}` : null,
+      decision.market_id && decision.order_plan?.side
+        ? `${decision.market_id}::${decision.order_plan.side.trim().toUpperCase()}`
+        : null,
+    ].filter((key): key is string => Boolean(key));
+    for (const key of keys) {
+      const existing = latestDecisionByPositionKey.get(key);
+      if (
+        !existing ||
+        Date.parse(decision.updated_at) >= Date.parse(existing.updated_at)
+      ) {
+        latestDecisionByPositionKey.set(key, decision);
+      }
+    }
+  }
+
+  function getPositionLlmOdds(
+    position: BullpenActivePositionView,
+    question?: BullpenQuestionRow,
+  ) {
+    const decision = latestDecisionByPositionKey.get(position.key);
+    return {
+      yes: question?.llmYesOdds ?? decision?.fair_yes_probability_pct ?? null,
+      no: question?.llmNoOdds ?? decision?.fair_no_probability_pct ?? null,
+      completedAt: question?.llmCompletedAt ?? decision?.updated_at ?? null,
+    };
+  }
+
+  function getPositionCategory(
+    position: BullpenActivePositionView,
+    question?: BullpenQuestionRow,
+  ) {
+    return (
+      question?.category ||
+      latestDecisionByPositionKey.get(position.key)?.theme ||
+      position.marketContext ||
+      "—"
+    );
+  }
+
   const metricCards = [
-    { label: "Investment Value", value: formatMoney(currentInvestmentsValue), detail: "Current Investments Value" },
-    { label: "Cash in hand", value: formatMoney(cash), detail: "Available pUSD balance" },
-    { label: "Events available for claim", value: claimableRows.length.toLocaleString("en-IN"), detail: formatMoney(claimableAmount) },
-    { label: "Active positions", value: activePositionCount.toLocaleString("en-IN"), detail: `${formatMoney(activeInvested)} invested` },
+    {
+      label: "Investment Value",
+      value: formatMoney(currentInvestmentsValue),
+      detail: "Current Investments Value",
+    },
+    {
+      label: "Cash in hand",
+      value: formatMoney(cash),
+      detail: "Available pUSD balance",
+    },
+    {
+      label: "Events available for claim",
+      value: claimableRows.length.toLocaleString("en-IN"),
+      detail: formatMoney(claimableAmount),
+    },
+    {
+      label: "Active positions",
+      value: activePositionCount.toLocaleString("en-IN"),
+      detail: `${formatMoney(activeInvested)} invested`,
+    },
     { label: "PnL", value: formatMoney(pnl), detail: "Realized PnL" },
     { label: "uPnL", value: formatMoney(upnl), detail: "Unrealized PnL" },
-    { label: "Live trades today", value: (state?.live.live_trades_today ?? 0).toLocaleString("en-IN"), detail: `Mode: ${state?.mode ?? "—"}` },
-    { label: "Pending confirmations", value: pendingConfirmationsCount.toLocaleString("en-IN"), detail: balanceStatus },
+    {
+      label: "Live trades today",
+      value: (state?.live.live_trades_today ?? 0).toLocaleString("en-IN"),
+      detail: `Mode: ${state?.mode ?? "—"}`,
+    },
+    {
+      label: "Pending confirmations",
+      value: pendingConfirmationsCount.toLocaleString("en-IN"),
+      detail: balanceStatus,
+    },
   ];
 
   return (
@@ -5556,30 +6581,50 @@ function BullpenPortfolioSnapshot({
           <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-100">
             <Wallet className="size-3.5" /> Bullpen Portfolio
           </div>
-          <h3 className="mt-3 text-2xl font-semibold tracking-tight">{formatMoney(displayedTotalPortfolioValue)} Total Portfolio Value</h3>
+          <h3 className="mt-3 text-2xl font-semibold tracking-tight">
+            {formatMoney(displayedTotalPortfolioValue)} Total Portfolio Value
+          </h3>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          <Button type="button" size="sm" variant="outline" onClick={onRefresh} disabled={refreshing} className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400">
-            <RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`} /> Refresh
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:border-sky-200 hover:bg-sky-300/20 hover:text-white disabled:border-slate-500 disabled:bg-slate-700 disabled:text-slate-400"
+          >
+            <RefreshCw
+              className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`}
+            />{" "}
+            Refresh
           </Button>
-          <span className="text-right text-[11px] text-slate-400">Last successful refresh: {lastRefresh}</span>
+          <span className="text-right text-[11px] text-slate-400">
+            Last successful refresh: {lastRefresh}
+          </span>
         </div>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {metricCards.map((metric) => {
           const isActivePositionsMetric = metric.label === "Active positions";
           return (
-          <button
-            key={metric.label}
-            type="button"
-            onClick={isActivePositionsMetric ? () => setIsActivePositionsPopupOpen(true) : undefined}
-            className={`rounded-[20px] border border-white/10 bg-white/10 px-4 py-3 text-left ${isActivePositionsMetric ? "transition hover:border-sky-200/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-sky-200/70" : "cursor-default"}`}
-            disabled={!isActivePositionsMetric}
-          >
-            <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">{metric.label}</div>
-            <div className="mt-2 text-xl font-semibold">{metric.value}</div>
-            <div className="mt-1 text-xs text-slate-400">{metric.detail}</div>
-          </button>
+            <button
+              key={metric.label}
+              type="button"
+              onClick={
+                isActivePositionsMetric
+                  ? () => setIsActivePositionsPopupOpen(true)
+                  : undefined
+              }
+              className={`rounded-[20px] border border-white/10 bg-white/10 px-4 py-3 text-left ${isActivePositionsMetric ? "transition hover:border-sky-200/70 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-sky-200/70" : "cursor-default"}`}
+              disabled={!isActivePositionsMetric}
+            >
+              <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">
+                {metric.label}
+              </div>
+              <div className="mt-2 text-xl font-semibold">{metric.value}</div>
+              <div className="mt-1 text-xs text-slate-400">{metric.detail}</div>
+            </button>
           );
         })}
       </div>
@@ -5588,11 +6633,23 @@ function BullpenPortfolioSnapshot({
           <div className="flex max-h-[88vh] w-full max-w-7xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">Active Bullpen Positions</p>
-                <h3 className="mt-1 text-xl font-semibold">Active positions: {popupRows.length}</h3>
-                <p className="mt-2 text-sm text-slate-600">Shows green active positions and red Event Exit positions only.</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">
+                  Active Bullpen Positions
+                </p>
+                <h3 className="mt-1 text-xl font-semibold">
+                  Active positions: {popupRows.length}
+                </h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  Shows green active positions and red Event Exit positions
+                  only.
+                </p>
               </div>
-              <button type="button" onClick={() => setIsActivePositionsPopupOpen(false)} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close active positions details">
+              <button
+                type="button"
+                onClick={() => setIsActivePositionsPopupOpen(false)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close active positions details"
+              >
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -5601,29 +6658,76 @@ function BullpenPortfolioSnapshot({
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                     <tr>
-                      {["S. No", "Question", "Amount Invested", "Current Value", "Days left", "Closing time", "Category", "Outcomes", "Current Yes odds %", "Current No odds %", "LLM Yes Odds", "LLM No Odds", "Returns/day", "Volume", "Liquidity"].map((heading) => (
-                        <th key={heading} className="px-4 py-3">{heading}</th>
+                      {[
+                        "S. No",
+                        "Question",
+                        "Amount Invested",
+                        "Current Value",
+                        "Days left",
+                        "Closing time",
+                        "Category",
+                        "Outcomes",
+                        "Current Odds",
+                        "LLM Odds",
+                        "Returns/day",
+                        "Volume",
+                        "Liquidity",
+                      ].map((heading) => (
+                        <th key={heading} className="px-4 py-3">
+                          {heading}
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
                     {popupRows.map(({ tone, position }, index) => {
-                      const question = activePositionQuestionByKey.get(position.key);
+                      const question = activePositionQuestionByKey.get(
+                        position.key,
+                      );
+                      const llmOdds = getPositionLlmOdds(position, question);
                       return (
-                        <tr key={`${tone}-${position.key}`} className={tone === "active" ? "bg-emerald-50/50" : "bg-red-50/60"}>
-                          <td className="px-4 py-3 font-semibold tabular-nums">{index + 1}</td>
-                          <td className="min-w-[18rem] px-4 py-3 font-semibold text-slate-950">{position.marketUrl ? <a href={position.marketUrl} target="_blank" rel="noreferrer" className="hover:text-sky-700 hover:underline">{position.marketTitle}</a> : position.marketTitle}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatMoney(position.costBasis)}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatMoney(position.currentValue)}</td>
-                          <td className="px-4 py-3 tabular-nums">{calculateDaysUntilClose(position.closeTime) ?? "—"}</td>
-                          <td className="px-4 py-3">{formatIstDateTime(position.closeTime)}</td>
-                          <td className="px-4 py-3">{tone === "active" ? "Active Position" : "Event Exit"}</td>
-                          <td className="px-4 py-3">{position.outcome || "—"}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(position.yesOdds)}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(position.noOdds)}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(question?.llmYesOdds ?? null)}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatOddsPercent(question?.llmNoOdds ?? null)}</td>
-                          <td className="px-4 py-3 tabular-nums">{formatReturnsPerDay(position.returnsPerDay)}</td>
+                        <tr
+                          key={`${tone}-${position.key}`}
+                          onClick={() => setActivePositionDetail(position)}
+                          className={`cursor-pointer transition hover:bg-slate-100 ${
+                            tone === "active"
+                              ? "bg-emerald-50/50"
+                              : "bg-red-50/60"
+                          }`}
+                        >
+                          <td className="px-4 py-3 font-semibold tabular-nums">
+                            {index + 1}
+                          </td>
+                          <td className="min-w-[18rem] px-4 py-3 font-semibold text-slate-950">
+                            {position.marketTitle}
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">
+                            {formatMoney(position.costBasis)}
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">
+                            {formatMoney(position.currentValue)}
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">
+                            {calculateDaysUntilClose(position.closeTime) ?? "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {formatIstDateTime(position.closeTime)}
+                          </td>
+                          <td className="min-w-56 px-4 py-3">
+                            {getPositionCategory(position, question)}
+                          </td>
+                          <td className="px-4 py-3">
+                            {position.outcome || "—"}
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">
+                            {formatOddsPair(position.yesOdds, position.noOdds)}
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">
+                            {formatOddsPair(llmOdds.yes, llmOdds.no)}
+                          </td>
+                          <td className="px-4 py-3 tabular-nums">
+                            {formatReturnsPerDay(position.returnsPerDay)}
+                          </td>
                           <td className="px-4 py-3 tabular-nums">—</td>
                           <td className="px-4 py-3 tabular-nums">—</td>
                         </tr>
@@ -5632,9 +6736,99 @@ function BullpenPortfolioSnapshot({
                   </tbody>
                 </table>
               ) : (
-                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No active Bullpen positions are available.</p>
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  No active Bullpen positions are available.
+                </p>
               )}
             </div>
+          </div>
+        </div>
+      ) : null}
+      {activePositionDetail ? (
+        <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+          <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">
+                  Active position details
+                </p>
+                <h3 className="mt-2 text-xl font-semibold">
+                  {activePositionDetail.marketTitle}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePositionDetail(null)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                aria-label="Close active position details"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              {[
+                [
+                  "Category",
+                  getPositionCategory(
+                    activePositionDetail,
+                    activePositionQuestionByKey.get(activePositionDetail.key),
+                  ),
+                ],
+                ["Outcome", activePositionDetail.outcome || "—"],
+                [
+                  "Amount invested",
+                  formatMoney(activePositionDetail.costBasis),
+                ],
+                [
+                  "Current value",
+                  formatMoney(activePositionDetail.currentValue),
+                ],
+                [
+                  "Current odds",
+                  `Yes: ${formatOddsPercent(activePositionDetail.yesOdds)} · No: ${formatOddsPercent(activePositionDetail.noOdds)}`,
+                ],
+                [
+                  "LLM odds",
+                  (() => {
+                    const odds = getPositionLlmOdds(
+                      activePositionDetail,
+                      activePositionQuestionByKey.get(activePositionDetail.key),
+                    );
+                    return `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)}`;
+                  })(),
+                ],
+                [
+                  "Closing time",
+                  formatIstDateTime(activePositionDetail.closeTime),
+                ],
+                [
+                  "Returns/day",
+                  formatReturnsPerDay(activePositionDetail.returnsPerDay),
+                ],
+              ].map(([label, value]) => (
+                <div
+                  key={label}
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    {label}
+                  </p>
+                  <p className="mt-2 text-sm font-semibold text-slate-900">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {activePositionDetail.marketUrl ? (
+              <a
+                href={activePositionDetail.marketUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-5 inline-flex text-sm font-semibold text-purple-700 hover:text-purple-900 hover:underline"
+              >
+                Open market
+              </a>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -5704,9 +6898,9 @@ export function BullpenAutoRunScheduleCard({
   const [scheduleSavedSummary, setScheduleSavedSummary] = useState<
     string | null
   >(null);
-  const [selectedLlmTargets, setSelectedLlmTargets] = useState<ProviderModelTarget[]>(
-    [],
-  );
+  const [selectedLlmTargets, setSelectedLlmTargets] = useState<
+    ProviderModelTarget[]
+  >([]);
   const [llmExecutionMode, setLlmExecutionMode] =
     useState<BullpenLlmExecutionMode>(DEFAULT_LLM_EXECUTION_MODE);
   const [llmEventsPerPromptInput, setLlmEventsPerPromptInput] = useState(
@@ -5722,8 +6916,11 @@ export function BullpenAutoRunScheduleCard({
   const [selectedRunSummaryTile, setSelectedRunSummaryTile] = useState<
     "last" | "next"
   >("last");
-  const [portfolioState, setPortfolioState] = useState<PolymarketBotState | null>(null);
-  const [lastUsablePortfolioBalance, setLastUsablePortfolioBalance] = useState<(PolymarketBotState["live"]["balance"] & { status: "ready" }) | null>(null);
+  const [portfolioState, setPortfolioState] =
+    useState<PolymarketBotState | null>(null);
+  const [lastUsablePortfolioBalance, setLastUsablePortfolioBalance] = useState<
+    (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null
+  >(null);
   const [, setPortfolioLoading] = useState(true);
 
   const savedConsoleOrderUsd =
@@ -5832,7 +7029,6 @@ export function BullpenAutoRunScheduleCard({
       setConsoleOrderSaveBusy(false);
     }
   }
-
 
   async function handleSelectedLlmTargetsChange(
     nextTargets: ProviderModelTarget[],
@@ -5951,29 +7147,31 @@ export function BullpenAutoRunScheduleCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-
-  const refreshPortfolioSnapshot = useCallback(async (forceBalanceRefresh: boolean) => {
-    if (forceBalanceRefresh) {
-      setAction("balance");
-    }
-    setPortfolioLoading(true);
-    try {
-      const nextState = forceBalanceRefresh
-        ? await apiService.polymarketLiveBalanceRefresh()
-        : await apiService.polymarketState();
-      setPortfolioState(nextState);
-      if (isUsableBullpenBalance(nextState.live.balance)) {
-        setLastUsablePortfolioBalance(nextState.live.balance);
-      }
-    } catch (nextError) {
-      setError(normalizeError(nextError));
-    } finally {
-      setPortfolioLoading(false);
+  const refreshPortfolioSnapshot = useCallback(
+    async (forceBalanceRefresh: boolean) => {
       if (forceBalanceRefresh) {
-        setAction(null);
+        setAction("balance");
       }
-    }
-  }, []);
+      setPortfolioLoading(true);
+      try {
+        const nextState = forceBalanceRefresh
+          ? await apiService.polymarketLiveBalanceRefresh()
+          : await apiService.polymarketState();
+        setPortfolioState(nextState);
+        if (isUsableBullpenBalance(nextState.live.balance)) {
+          setLastUsablePortfolioBalance(nextState.live.balance);
+        }
+      } catch (nextError) {
+        setError(normalizeError(nextError));
+      } finally {
+        setPortfolioLoading(false);
+        if (forceBalanceRefresh) {
+          setAction(null);
+        }
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const initialTimeoutId = window.setTimeout(() => {
@@ -6176,7 +7374,9 @@ export function BullpenAutoRunScheduleCard({
                 require_manual_confirmation: false,
                 strategy_profile: CONSOLE_PROFILE_ID,
                 console_order_usd: nextConsoleOrderUsd,
-                console_auto_start_at: startWasNow ? null : normalizedStart || null,
+                console_auto_start_at: startWasNow
+                  ? null
+                  : normalizedStart || null,
                 console_auto_refresh_minutes: refreshMinutes,
               },
             }
@@ -6950,7 +8150,8 @@ export function BullpenAutoRunScheduleCard({
               {formatIstDateTime(
                 runIsActive
                   ? runTimerStartedAt
-                  : latestCompletedRun?.started_at ?? summary?.state.last_run_at,
+                  : (latestCompletedRun?.started_at ??
+                      summary?.state.last_run_at),
               )}
             </span>
             {runIsActive && workflowRunNeedsLogin ? (
@@ -6969,7 +8170,9 @@ export function BullpenAutoRunScheduleCard({
                     className="rounded-full border border-rose-200 bg-white p-1.5 text-rose-700 transition hover:bg-rose-100"
                     onClick={(event) => {
                       event.stopPropagation();
-                      void navigator.clipboard?.writeText(BULLPEN_LOGIN_COMMAND);
+                      void navigator.clipboard?.writeText(
+                        BULLPEN_LOGIN_COMMAND,
+                      );
                     }}
                   >
                     <Copy className="h-3.5 w-3.5" aria-hidden="true" />
@@ -7393,7 +8596,8 @@ export function BullpenAutoRunScheduleCard({
                           </>
                         )}
                       </button>
-                      {!investOnlyDisabledReason && investOnlyPlan.readyCandidateCount > 0 ? (
+                      {!investOnlyDisabledReason &&
+                      investOnlyPlan.readyCandidateCount > 0 ? (
                         <p
                           className={`text-[11px] leading-5 ${toneClasses.muted}`}
                         >
@@ -7456,7 +8660,9 @@ export function BullpenAutoRunScheduleCard({
                           buttonLabel="Run LLM"
                           containerClassName="gap-0"
                           selectionMode="multiple"
-                          defaultTargets={summary?.settings.console_llm_targets ?? null}
+                          defaultTargets={
+                            summary?.settings.console_llm_targets ?? null
+                          }
                           onRunMultiple={() => undefined}
                           onSelectionChange={handleSelectedLlmTargetsChange}
                           pickerDialogLabel="Select LLMs"
@@ -7468,7 +8674,9 @@ export function BullpenAutoRunScheduleCard({
                           <button
                             type="button"
                             onClick={() =>
-                              setIsLlmExecutionModePickerOpen((isOpen) => !isOpen)
+                              setIsLlmExecutionModePickerOpen(
+                                (isOpen) => !isOpen,
+                              )
                             }
                             disabled={llmExecutionSettingsSaveBusy}
                             className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-2 font-semibold text-slate-800 shadow-sm transition hover:border-slate-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:cursor-not-allowed disabled:opacity-60"
@@ -7493,9 +8701,13 @@ export function BullpenAutoRunScheduleCard({
                                   type="radio"
                                   name="stage-2-llm-execution-mode"
                                   value="single_combined"
-                                  checked={llmExecutionMode === "single_combined"}
+                                  checked={
+                                    llmExecutionMode === "single_combined"
+                                  }
                                   onChange={() => {
-                                    handleLlmExecutionModeChange("single_combined");
+                                    handleLlmExecutionModeChange(
+                                      "single_combined",
+                                    );
                                     setIsLlmExecutionModePickerOpen(false);
                                   }}
                                   disabled={llmExecutionSettingsSaveBusy}
@@ -7508,8 +8720,14 @@ export function BullpenAutoRunScheduleCard({
                                   type="radio"
                                   name="stage-2-llm-execution-mode"
                                   value="chunked_parallel"
-                                  checked={llmExecutionMode === "chunked_parallel"}
-                                  onChange={() => handleLlmExecutionModeChange("chunked_parallel")}
+                                  checked={
+                                    llmExecutionMode === "chunked_parallel"
+                                  }
+                                  onChange={() =>
+                                    handleLlmExecutionModeChange(
+                                      "chunked_parallel",
+                                    )
+                                  }
                                   disabled={llmExecutionSettingsSaveBusy}
                                   className="h-3.5 w-3.5 accent-slate-950"
                                 />
@@ -7525,7 +8743,9 @@ export function BullpenAutoRunScheduleCard({
                                   className="h-7 w-16 rounded-lg border border-slate-200 bg-white px-2 text-center text-sm font-bold text-slate-900 outline-none transition focus:border-slate-400"
                                   aria-label="Stage 2 events per prompt"
                                 />
-                                <span className="basis-full pl-5 text-[11px] text-slate-500">Events/prompt</span>
+                                <span className="basis-full pl-5 text-[11px] text-slate-500">
+                                  Events/prompt
+                                </span>
                               </label>
                             </div>
                           ) : null}
@@ -7657,7 +8877,9 @@ export function BullpenAutoRunScheduleCard({
                               <p className="mt-2 text-sm font-semibold leading-5 text-slate-950 line-clamp-2">
                                 {run.summary || "Run summary unavailable."}
                               </p>
-                              <p className="mt-1 text-xs text-slate-600">Run {run.id}</p>
+                              <p className="mt-1 text-xs text-slate-600">
+                                Run {run.id}
+                              </p>
                             </div>
                             <RunHistoryMetricTiles
                               run={run}
@@ -7740,9 +8962,9 @@ export function BullpenAutoRunScheduleCard({
                   <li>
                     Stage 2 must first keep the event{" "}
                     <span className="font-semibold">qualified</span>: rules
-                    parsing, disagreement, adjudication, and manual selection are
-                    shown for review, but only a strong LLM side and computable
-                    returns/day are required before Stage 3 ranking.
+                    parsing, disagreement, adjudication, and manual selection
+                    are shown for review, but only a strong LLM side and
+                    computable returns/day are required before Stage 3 ranking.
                   </li>
                   <li>
                     Those qualified candidates are then ranked together with
@@ -7762,10 +8984,11 @@ export function BullpenAutoRunScheduleCard({
                     submission.
                   </li>
                   <li>
-                    In invest-only reuse mode, Stage 3 uses the latest Stage 2-qualified rows and skips the Bullpen rescan plus LLM rerun; markets
-                    that are already in the Bullpen wallet or were already
-                    submitted from the saved run are skipped instead of being
-                    re-planned.
+                    In invest-only reuse mode, Stage 3 uses the latest Stage
+                    2-qualified rows and skips the Bullpen rescan plus LLM
+                    rerun; markets that are already in the Bullpen wallet or
+                    were already submitted from the saved run are skipped
+                    instead of being re-planned.
                   </li>
                 </ul>
               </div>
@@ -7811,7 +9034,9 @@ export function BullpenAutoRunScheduleCard({
           <InvestMetricDetailsDialog
             state={investMetricDialog}
             onClose={() => setInvestMetricDialog(null)}
-            onSelectKind={(kind) => openRunInvestMetricDialog(investMetricDialog.run, kind)}
+            onSelectKind={(kind) =>
+              openRunInvestMetricDialog(investMetricDialog.run, kind)
+            }
             onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
             onOpenInvestEligibilityInfo={() =>
               setIsInvestEligibilityInfoDialogOpen(true)
@@ -7835,7 +9060,6 @@ export function BullpenAutoRunScheduleCard({
             ) : null}
           </div>
         ) : null}
-
 
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-slate-600">
