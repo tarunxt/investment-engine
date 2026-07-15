@@ -462,6 +462,8 @@ const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
+const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 1;
+const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
 type CachedFinalActionablesRuns = {
@@ -541,6 +543,47 @@ function selectCacheableFinalActionablesRuns(runs: RunResponse[], market: SwingT
 
 function cacheFinalActionablesRuns(cacheKey: string, runs: RunResponse[], market: SwingTradeMarket) {
   writeFinalActionablesRunCache(cacheKey, selectCacheableFinalActionablesRuns(runs, market));
+}
+
+function getHistoricalActionRowsCacheKey(market: SwingTradeMarket) {
+  return `investment-engine:final-actionables:historical-rows:${market}:v${HISTORICAL_ACTION_ROWS_CACHE_VERSION}`;
+}
+
+function readHistoricalActionRowsCache(market: SwingTradeMarket) {
+  if (typeof window === "undefined") return [] as HistoricalDashboardActionRow[];
+
+  try {
+    const raw = window.localStorage.getItem(getHistoricalActionRowsCacheKey(market));
+    if (!raw) return [] as HistoricalDashboardActionRow[];
+
+    const parsed = JSON.parse(raw) as { version?: number; rows?: HistoricalDashboardActionRow[] };
+    if (parsed.version !== HISTORICAL_ACTION_ROWS_CACHE_VERSION || !Array.isArray(parsed.rows)) {
+      return [] as HistoricalDashboardActionRow[];
+    }
+
+    return parsed.rows;
+  } catch (error) {
+    console.warn("Failed to restore cached final actionables history rows:", error);
+    return [] as HistoricalDashboardActionRow[];
+  }
+}
+
+function writeHistoricalActionRowsCache(market: SwingTradeMarket, rows: HistoricalDashboardActionRow[]) {
+  if (typeof window === "undefined") return;
+
+  try {
+    const cacheableRows = rows.slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
+    window.localStorage.setItem(
+      getHistoricalActionRowsCacheKey(market),
+      JSON.stringify({
+        version: HISTORICAL_ACTION_ROWS_CACHE_VERSION,
+        cachedAt: Date.now(),
+        rows: cacheableRows,
+      }),
+    );
+  } catch (error) {
+    console.warn("Failed to cache final actionables history rows:", error);
+  }
 }
 
 
@@ -3681,7 +3724,7 @@ export function StockDetailsButton({
   technicalScan: TechnicalScanResult | null;
   detailsData: StockDetailsData;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
-  historicalRows?: Array<DashboardActionRow & { coveredAt: string; runId: number }>;
+  historicalRows?: HistoricalDashboardActionRow[];
   formulaConfig?: ScoreMatrixFormulaConfig;
   onMatrixDetailOpen?: (detail: ScoreMatrixDetail) => void;
 }) {
@@ -3699,9 +3742,13 @@ export function StockDetailsButton({
     stock,
   );
   const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
+  const effectiveHistoricalRows = useMemo(
+    () => (historicalRows.length ? historicalRows : readHistoricalActionRowsCache(market)),
+    [historicalRows, market],
+  );
   const matchingHistoricalRows = useMemo(
-    () => historicalRows.filter((row) => stockConsensusMatches(row.stock, stock)),
-    [historicalRows, stock],
+    () => effectiveHistoricalRows.filter((row) => stockConsensusMatches(row.stock, stock)),
+    [effectiveHistoricalRows, stock],
   );
   const directHistoricalEvidenceRows = useMemo(() => {
     const seen = new Set<string>();
@@ -4091,6 +4138,7 @@ function ActionSummarySections({
   technicalScans,
   setupGroups,
   detailsData,
+  historicalRows,
   onSetupClick,
   onFocusCalculation,
 }: {
@@ -4099,6 +4147,7 @@ function ActionSummarySections({
   technicalScans: TechnicalScanMap;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   onSetupClick: (group: SetupStockGroup) => void;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
@@ -4135,6 +4184,7 @@ function ActionSummarySections({
                       technicalScan={getTechnicalScanForStock(technicalScans, stock)}
                       setupGroups={setupGroups}
                       detailsData={detailsData}
+                      historicalRows={historicalRows}
                       onSetupClick={onSetupClick}
                       onFocusCalculation={onFocusCalculation}
                     />
@@ -4158,6 +4208,7 @@ function ActionSummaryStockTile({
   technicalScan,
   setupGroups,
   detailsData,
+  historicalRows,
   onSetupClick,
   onFocusCalculation,
 }: {
@@ -4167,6 +4218,7 @@ function ActionSummaryStockTile({
   technicalScan: TechnicalScanResult | null;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   onSetupClick: (group: SetupStockGroup) => void;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
 }) {
@@ -4185,6 +4237,7 @@ function ActionSummaryStockTile({
               market={market}
               technicalScan={technicalScan}
               detailsData={detailsData}
+              historicalRows={historicalRows}
               onFocusCalculation={onFocusCalculation}
             />
             <TradingViewSymbolLink
@@ -5600,6 +5653,7 @@ function renderStockInfoBlock(
   detailsData?: StockDetailsData,
   market?: SwingTradeMarket,
   technicalScan?: TechnicalScanResult | null,
+  historicalRows?: HistoricalDashboardActionRow[],
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
 ) {
   const stockName = stock.representative["Stock Name"] || stock.symbol;
@@ -5611,6 +5665,7 @@ function renderStockInfoBlock(
           market={market}
           technicalScan={technicalScan ?? null}
           detailsData={detailsData}
+          historicalRows={historicalRows}
           onFocusCalculation={onFocusCalculation}
         />
       ) : null}
@@ -5831,6 +5886,7 @@ function buildActionablesCalculationRowGroups(
   market: SwingTradeMarket,
   technicalScans: TechnicalScanMap,
   detailsData?: StockDetailsData,
+  historicalRows?: HistoricalDashboardActionRow[],
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void,
 ): ActionablesCalculationRowGroup[] {
   const groupMap = new Map<string, ActionablesCalculationRowGroup>();
@@ -5850,6 +5906,7 @@ function buildActionablesCalculationRowGroups(
         detailsData,
         market,
         getTechnicalScanForStock(technicalScans, row.stock),
+        historicalRows,
         onFocusCalculation,
       ),
       sortValues: row.sortValues,
@@ -6332,6 +6389,16 @@ function ActionablesCalculationsModal({
     () => hasSelectableTechnicalInputs ? buildTechnicalScanMap(selectedTechnicalRuns) : technicalScans,
     [hasSelectableTechnicalInputs, selectedTechnicalRuns, technicalScans],
   );
+  const historicalActionRows = useMemo(
+    () => buildHistoricalDashboardActionRows(
+      allRuns,
+      market,
+      detailsData?.portfolioSnapshot ?? null,
+      buildTechnicalScanMap(allRuns),
+      formulaConfig,
+    ),
+    [allRuns, detailsData?.portfolioSnapshot, formulaConfig, market],
+  );
   const displayedSetupGroups = useMemo(
     () => getSetupStockGroups(displayedStocks, displayedTechnicalScans, market),
     [displayedStocks, displayedTechnicalScans, market],
@@ -6341,8 +6408,8 @@ function ActionablesCalculationsModal({
     [displayedSetupGroups, displayedStocks, displayedTechnicalScans, formulaConfig, market, onSetupClick, setupGroups],
   );
   const rowGroups = useMemo(
-    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, setInternalFocusTarget),
-    [detailsData, displayedTechnicalScans, market, rows, sortState],
+    () => buildActionablesCalculationRowGroups(rows, sortState, market, displayedTechnicalScans, detailsData, historicalActionRows, setInternalFocusTarget),
+    [detailsData, displayedTechnicalScans, historicalActionRows, market, rows, sortState],
   );
 
   useEffect(() => {
@@ -6645,6 +6712,11 @@ export type DashboardActionRow = {
   detail: ScoreMatrixDetail;
 };
 
+export type HistoricalDashboardActionRow = DashboardActionRow & {
+  coveredAt: string;
+  runId: number;
+};
+
 type DashboardActionSortKey =
   | "selected"
   | "stock"
@@ -6744,13 +6816,13 @@ type DashboardActionSortState = {
   direction: "asc" | "desc";
 };
 
-function buildHistoricalDashboardActionRows(
+export function buildHistoricalDashboardActionRows(
   runs: RunResponse[],
   market: SwingTradeMarket,
   portfolioSnapshot: ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null,
   technicalScans: TechnicalScanMap,
   formulaConfig: ScoreMatrixFormulaConfig,
-) {
+): HistoricalDashboardActionRow[] {
   return runs
     .filter((run) => isCompletedRebalanceRun(run, market))
     .sort((a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at))
@@ -7068,6 +7140,22 @@ export function DashboardFinalActionablesTables() {
   }, []);
 
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const historicalActionRowsByMarket = useMemo(() => ({
+    india: buildHistoricalDashboardActionRows(
+      runs,
+      "india",
+      portfolioSnapshots.india,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    us: buildHistoricalDashboardActionRows(
+      runs,
+      "us",
+      portfolioSnapshots.us,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
 
   useEffect(() => {
     let ignore = false;
@@ -7117,6 +7205,12 @@ export function DashboardFinalActionablesTables() {
   useEffect(() => {
     saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
   }, [scoreMatrixFormulaConfig]);
+
+  useEffect(() => {
+    if (!runs.length) return;
+    writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
+    writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
+  }, [historicalActionRowsByMarket, runs.length]);
 
   const actionRowsByMarket = useMemo(() => ({
     india: buildDashboardActionRows(
@@ -7197,13 +7291,7 @@ export function DashboardFinalActionablesTables() {
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
-    const historicalActionRows = buildHistoricalDashboardActionRows(
-      runs,
-      market,
-      market === "india" ? portfolioSnapshots.india : portfolioSnapshots.us,
-      technicalScans,
-      scoreMatrixFormulaConfig,
-    );
+    const historicalActionRows = historicalActionRowsByMarket[market];
     const detailsData = detailsDataByMarket[market];
     const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
     const latestTechnicalAt = Object.values(technicalScans)
@@ -7698,6 +7786,16 @@ export function FinalActionablesConsole({
   );
   const totalStocksConsolidated = consensus.length;
   const technicalScans = useMemo(() => buildTechnicalScanMap(runs), [runs]);
+  const historicalActionRows = useMemo(
+    () => buildHistoricalDashboardActionRows(
+      runs,
+      market,
+      detailsData.portfolioSnapshot,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    [detailsData.portfolioSnapshot, market, runs, scoreMatrixFormulaConfig, technicalScans],
+  );
   const setupStockGroups = useMemo(
     () => getSetupStockGroups(consensus, technicalScans, market),
     [consensus, market, technicalScans],
@@ -7714,6 +7812,11 @@ export function FinalActionablesConsole({
 
     return () => window.clearInterval(interval);
   }, [loadRuns, technicalScanIsActive, technicalScanRunning]);
+
+  useEffect(() => {
+    if (!runs.length) return;
+    writeHistoricalActionRowsCache(market, historicalActionRows);
+  }, [historicalActionRows, market, runs.length]);
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
@@ -7868,6 +7971,7 @@ export function FinalActionablesConsole({
               technicalScans={technicalScans}
               setupGroups={setupStockGroups}
               detailsData={detailsData}
+              historicalRows={historicalActionRows}
               onSetupClick={setSelectedSetupGroup}
               onFocusCalculation={(target) => {
                 setCalculationFocusTarget(target);
@@ -7942,6 +8046,7 @@ export function FinalActionablesConsole({
                             formulaConfig={scoreMatrixFormulaConfig}
                             setupGroups={setupStockGroups}
                             detailsData={detailsData}
+                            historicalRows={historicalActionRows}
                             onSetupClick={setSelectedSetupGroup}
                             onMatrixDetailOpen={setSelectedMatrixDetail}
                             onFocusCalculation={(target) => {
@@ -8096,6 +8201,7 @@ function FragmentRows({
   formulaConfig,
   setupGroups,
   detailsData,
+  historicalRows,
   onSetupClick,
   onMatrixDetailOpen,
   onFocusCalculation,
@@ -8108,6 +8214,7 @@ function FragmentRows({
   formulaConfig: ScoreMatrixFormulaConfig;
   setupGroups: Record<string, SetupStockGroup>;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   onSetupClick: (group: SetupStockGroup) => void;
   onMatrixDetailOpen: (detail: ScoreMatrixDetail) => void;
   onFocusCalculation?: (target: ActionablesCalculationFocusTarget) => void;
@@ -8140,6 +8247,7 @@ function FragmentRows({
               market={market}
               technicalScan={technicalScan}
               detailsData={detailsData}
+              historicalRows={historicalRows}
               onFocusCalculation={onFocusCalculation}
             />
             <div>
@@ -8168,6 +8276,7 @@ function FragmentRows({
                   market={market}
                   technicalScan={technicalScan}
                   detailsData={detailsData}
+                  historicalRows={historicalRows}
                   onFocusCalculation={onFocusCalculation}
                 />
                 <RebalanceCell

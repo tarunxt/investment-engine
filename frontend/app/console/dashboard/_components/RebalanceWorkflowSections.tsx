@@ -17,6 +17,7 @@ import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, 
 import {
   buildConsensusRows,
   buildDashboardActionRows,
+  buildHistoricalDashboardActionRows,
   buildTechnicalScanMap,
   buildTechnicalScanPrompt,
   ConsensusBreakupButton,
@@ -34,6 +35,7 @@ import {
   fetchAllFullRuns,
   isCompletedRebalanceRun,
   type DashboardActionRow,
+  type HistoricalDashboardActionRow,
   type ScoreMatrixDetail,
   type StockDetailsData,
   type TechnicalScanResult,
@@ -3078,6 +3080,7 @@ function ZerodhaBasketPreviewDialog({
   ltpRefreshedAt,
   submission,
   detailsData,
+  historicalRows,
   formulaConfig,
   onFormulaConfigChange,
   buyThreshold,
@@ -3116,6 +3119,7 @@ function ZerodhaBasketPreviewDialog({
   ltpRefreshedAt: string | null;
   submission: ZerodhaBasketSubmission | null;
   detailsData: StockDetailsData;
+  historicalRows: HistoricalDashboardActionRow[];
   formulaConfig: ScoreMatrixFormulaConfig;
   onFormulaConfigChange: (updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => void;
   buyThreshold: number;
@@ -3453,14 +3457,15 @@ function ZerodhaBasketPreviewDialog({
                                   <div className="inline-flex items-center gap-1.5">
                                     <StockDetailsButton
                                       stock={order.stock}
-                                      market="india"
+                                      market={tradingViewMarket}
                                       technicalScan={order.technicalScan}
                                       detailsData={detailsData}
+                                      historicalRows={historicalRows}
                                     />
                                     <span className="text-xs font-semibold text-slate-500">{order.exchange}</span>
                                     <TradingViewSymbolLink
                                       symbol={order.symbol}
-                                      market="india"
+                                      market={tradingViewMarket}
                                       exchange={order.exchange}
                                       className="underline-offset-4 transition hover:text-blue-700 hover:underline"
                                     >
@@ -5404,6 +5409,7 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketSubmission, setZerodhaBasketSubmission] = useState<ZerodhaBasketSubmission | null>(null);
   const [zerodhaBasketError, setZerodhaBasketError] = useState<string | null>(null);
   const [zerodhaBasketOrders, setZerodhaBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
+  const [zerodhaBasketHistoryRuns, setZerodhaBasketHistoryRuns] = useState<RunResponse[]>([]);
   const [zerodhaExecutionMode, setZerodhaExecutionMode] = useState<ZerodhaExecutionMode>("publisher_limit");
   const [zerodhaDirectMarketAvailable, setZerodhaDirectMarketAvailable] = useState(false);
   const [zerodhaBasketLtpRefreshing, setZerodhaBasketLtpRefreshing] = useState(false);
@@ -5424,6 +5430,7 @@ export function RebalanceWorkflowSections({
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
   const [indmoneyBasketError, setIndmoneyBasketError] = useState<string | null>(null);
   const [indmoneyBasketOrders, setIndmoneyBasketOrders] = useState<ZerodhaBasketPreviewOrder[]>([]);
+  const [indmoneyBasketHistoryRuns, setIndmoneyBasketHistoryRuns] = useState<RunResponse[]>([]);
   const [indmoneyBasketDetailsData, setIndmoneyBasketDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
     eventsAnalysis: null,
@@ -5508,6 +5515,28 @@ export function RebalanceWorkflowSections({
     saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
   }, [scoreMatrixFormulaConfig]);
 
+  const zerodhaBasketHistoricalRows = useMemo(
+    () => buildHistoricalDashboardActionRows(
+      zerodhaBasketHistoryRuns,
+      "india",
+      zerodhaBasketDetailsData.portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null,
+      buildTechnicalScanMap(zerodhaBasketHistoryRuns),
+      scoreMatrixFormulaConfig,
+    ),
+    [scoreMatrixFormulaConfig, zerodhaBasketDetailsData.portfolioSnapshot, zerodhaBasketHistoryRuns],
+  );
+
+  const indmoneyBasketHistoricalRows = useMemo(
+    () => buildHistoricalDashboardActionRows(
+      indmoneyBasketHistoryRuns,
+      "us",
+      indmoneyBasketDetailsData.portfolioSnapshot as IndMoneyUsPortfolioSnapshotDetail | null,
+      buildTechnicalScanMap(indmoneyBasketHistoryRuns),
+      scoreMatrixFormulaConfig,
+    ),
+    [indmoneyBasketDetailsData.portfolioSnapshot, indmoneyBasketHistoryRuns, scoreMatrixFormulaConfig],
+  );
+
   const handleScoreMatrixFormulaConfigChange = useCallback((updater: (current: ScoreMatrixFormulaConfig) => ScoreMatrixFormulaConfig) => {
     setScoreMatrixFormulaConfig((current) => {
       const next = updater(current);
@@ -5581,6 +5610,7 @@ export function RebalanceWorkflowSections({
         apiService.zerodhaStatus(),
         apiService.zerodhaLoginUrl(),
       ]);
+      setZerodhaBasketHistoryRuns(runs);
       const directMarketEnabled = Boolean(
         status.connected
           && login.configured
@@ -5621,6 +5651,7 @@ export function RebalanceWorkflowSections({
       );
     } catch (error) {
       setZerodhaBasketOrders([]);
+      setZerodhaBasketHistoryRuns([]);
       setZerodhaDirectMarketAvailable(false);
       setZerodhaBasketDetailsData((current) => ({
         ...current,
@@ -5645,6 +5676,7 @@ export function RebalanceWorkflowSections({
         apiService.indmoneyUsEventsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
         apiService.indmoneyUsThreatsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
       ]);
+      setIndmoneyBasketHistoryRuns(runs);
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "us"),
         "us",
@@ -5676,6 +5708,7 @@ export function RebalanceWorkflowSections({
       );
     } catch (error) {
       setIndmoneyBasketOrders([]);
+      setIndmoneyBasketHistoryRuns([]);
       setIndmoneyBasketDetailsData((current) => ({
         ...current,
         error: normalizeError(error),
@@ -8240,6 +8273,7 @@ ${zerodhaExecutionMode === "direct_market"
         ltpRefreshedAt={zerodhaBasketLtpRefreshedAt}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
+        historicalRows={zerodhaBasketHistoricalRows}
         formulaConfig={scoreMatrixFormulaConfig}
         onFormulaConfigChange={handleScoreMatrixFormulaConfigChange}
         buyThreshold={zerodhaBasketBuyThreshold}
@@ -8270,6 +8304,7 @@ ${zerodhaExecutionMode === "direct_market"
         ltpRefreshedAt={null}
         submission={null}
         detailsData={indmoneyBasketDetailsData}
+        historicalRows={indmoneyBasketHistoricalRows}
         formulaConfig={scoreMatrixFormulaConfig}
         onFormulaConfigChange={setScoreMatrixFormulaConfig}
         buyThreshold={indmoneyBasketBuyThreshold}
