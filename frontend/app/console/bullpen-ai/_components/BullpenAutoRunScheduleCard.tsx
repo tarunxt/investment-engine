@@ -144,6 +144,47 @@ type StageTwoLlmRunDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+function resolveStageTwoLlmRunDialogState({
+  currentState,
+  fallbackRun,
+  summary,
+}: {
+  currentState: StageTwoLlmRunDialogState | null;
+  fallbackRun: BullpenAutoLiveRun | null;
+  summary: BullpenAutoLiveSummaryResponse | null;
+}): StageTwoLlmRunDialogState | null {
+  if (!currentState) return null;
+
+  const selectedRunId = currentState.run?.id ?? fallbackRun?.id ?? null;
+  const selectedRun =
+    (selectedRunId
+      ? [
+          ...(summary?.recent_runs ?? []),
+          summary?.latest_run ?? null,
+          fallbackRun,
+          currentState.run,
+        ].find((run) => run?.id === selectedRunId)
+      : null) ??
+    currentState.run ??
+    fallbackRun;
+
+  const stage = selectedRun
+    ? (buildBullpenAutoRunWorkflowView(selectedRun).stages.find(
+        (workflowStage) => workflowStage.key === "llm",
+      ) ?? currentState.stage)
+    : currentState.stage;
+
+  return {
+    run: selectedRun,
+    stage,
+    decisions: selectedRun?.id
+      ? (summary?.recent_decisions.filter(
+          (decision) => decision.run_id === selectedRun.id,
+        ) ?? currentState.decisions)
+      : currentState.decisions,
+  };
+}
+
 type StageTwoDecisionDialogState = {
   decision: BullpenAutoLiveDecision;
   llmContext: Record<string, unknown> | null;
@@ -7791,15 +7832,11 @@ export function BullpenAutoRunScheduleCard({
           ),
         })
       : [];
-  const refreshedStageTwoLlmRunDialog = stageTwoLlmRunDialog
-    ? {
-        run: workflowRunForMonitor,
-        stage:
-          workflowView.stages.find((stage) => stage.key === "llm") ??
-          stageTwoLlmRunDialog.stage,
-        decisions: investRunDecisions,
-      }
-    : null;
+  const refreshedStageTwoLlmRunDialog = resolveStageTwoLlmRunDialogState({
+    currentState: stageTwoLlmRunDialog,
+    fallbackRun: workflowRunForMonitor,
+    summary,
+  });
   const openInvestMetricDialog = (kind: InvestMetricDialogKind) => {
     if (!workflowRunForMonitor) return;
     setInvestMetricDialog({
