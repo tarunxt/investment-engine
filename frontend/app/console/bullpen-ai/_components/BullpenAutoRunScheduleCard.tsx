@@ -3871,13 +3871,113 @@ function readLlmContextArray(
 }
 
 function getStageTwoLlmReviewedRows(stage: WorkflowStageView) {
-  const rows = Array.isArray(stage.outputs.llm_reviewed_candidates)
-    ? stage.outputs.llm_reviewed_candidates
+  const persistedRows = Array.isArray(stage.outputs.llm_reviewed_candidates)
+    ? stage.outputs.llm_reviewed_candidates.filter(
+        (row): row is Record<string, unknown> =>
+          Boolean(row) && typeof row === "object",
+      )
     : [];
-  return rows.filter(
-    (row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object",
-  );
+  const rowsByKey = new Map<string, Record<string, unknown>>();
+
+  const addRow = (row: Record<string, unknown>) => {
+    const keys = [
+      row.market_id,
+      row.marketId,
+      row.question_id,
+      row.questionId,
+      row.slug,
+      row.market_url,
+      row.marketUrl,
+      row.question,
+      row.market_title,
+    ]
+      .map((value) =>
+        getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
+      )
+      .filter((key): key is string => Boolean(key));
+    rowsByKey.set(keys[0] ?? `row-${rowsByKey.size}`, row);
+  };
+
+  persistedRows.forEach(addRow);
+
+  const candidateRows = stage.scanCandidates.map((candidate) => ({
+    market_id: candidate.marketId,
+    question_id: candidate.questionId,
+    question: candidate.question,
+    market_title: candidate.question,
+    close_time: candidate.closeTime,
+    category: candidate.theme,
+    theme: candidate.theme,
+    current_yes_odds: candidate.currentYesOdds,
+    current_no_odds: candidate.currentNoOdds,
+    market_url: candidate.marketUrl,
+    slug: candidate.slug,
+  }));
+  const candidateByKey = new Map<string, Record<string, unknown>>();
+  candidateRows.forEach((candidate) => {
+    [
+      candidate.market_id,
+      candidate.question_id,
+      candidate.slug,
+      candidate.market_url,
+      candidate.question,
+    ]
+      .map((value) =>
+        getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
+      )
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => candidateByKey.set(key, candidate));
+  });
+
+  getStageTwoLlmTargetRuns(stage).forEach((run) => {
+    const eventOutputs = readLlmContextArray(run, "event_outputs");
+    const runCost =
+      readLlmContextNumber(run, "estimated_cost") ??
+      readLlmContextNumber(run, "cost");
+    const perEventCost =
+      eventOutputs.length > 0 && runCost !== null
+        ? runCost / eventOutputs.length
+        : null;
+    eventOutputs.forEach((item) => {
+      if (!item || typeof item !== "object") return;
+      const record = item as Record<string, unknown>;
+      const output = readLlmContextRecord(record, "output");
+      if (!output) return;
+      const outputKeys = [record.market_id, record.question_id]
+        .map((value) =>
+          getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
+        )
+        .filter((key): key is string => Boolean(key));
+      const existingRow = outputKeys
+        .map((key) => rowsByKey.get(key))
+        .find(Boolean);
+      const candidateRow = outputKeys
+        .map((key) => candidateByKey.get(key))
+        .find(Boolean);
+      const row = existingRow ?? { ...(candidateRow ?? {}) };
+      row.llm_outputs = [
+        ...getStageTwoLlmOutputs(row),
+        {
+          ...output,
+          provider:
+            readLlmContextString(output, "provider") ??
+            readLlmContextString(run, "provider"),
+          model:
+            readLlmContextString(output, "model") ??
+            readLlmContextString(run, "model"),
+          estimated_cost:
+            readStageTwoLlmOutputCost(output) ?? perEventCost ?? undefined,
+        },
+      ];
+      if (!row.market_id && typeof record.market_id === "string")
+        row.market_id = record.market_id;
+      if (!row.question_id && typeof record.question_id === "string")
+        row.question_id = record.question_id;
+      addRow(row);
+    });
+  });
+
+  return [...rowsByKey.values()];
 }
 
 function getStageTwoLlmOutputs(row: Record<string, unknown>) {
@@ -4510,6 +4610,9 @@ function StageTwoLlmRunDetailsDialog({
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
+  const availableLlmDecisionRows = llmTableRows.filter(
+    (row) => row.output && !readLlmContextString(row.output, "error"),
+  );
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
   const summaryRows = getStageTwoLlmRunSummaryRows(
     state.stage,
@@ -4987,8 +5090,9 @@ function StageTwoLlmRunDetailsDialog({
 
           <div className="mt-5 space-y-3">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Indepth details ({state.decisions.length} decisions currently
-              returned)
+              Indepth details (
+              {state.decisions.length || availableLlmDecisionRows.length} decisions
+              currently returned)
             </p>
             {state.decisions.length ? (
               state.decisions.map((decision) => {
@@ -5047,6 +5151,30 @@ function StageTwoLlmRunDetailsDialog({
                   </article>
                 );
               })
+            ) : availableLlmDecisionRows.length ? (
+              availableLlmDecisionRows.map((row) => (
+                <article
+                  key={`llm-decision-${row.id}`}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <h3 className="font-semibold text-slate-950">
+                      {row.question}
+                    </h3>
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                      {row.provider} · {row.model}
+                    </span>
+                  </div>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Summary:</span>{" "}
+                    {row.summary}
+                  </p>
+                  <p className="mt-2 leading-6">
+                    <span className="font-semibold">Indepth details:</span>{" "}
+                    {row.rationale}
+                  </p>
+                </article>
+              ))
             ) : (
               <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                 Decision rows are still loading or have not been returned yet
