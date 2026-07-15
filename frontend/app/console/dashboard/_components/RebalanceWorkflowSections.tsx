@@ -3616,8 +3616,31 @@ function IndMoneySnapshotDialog({
     payload?: IndMoneyUsPortfolioSnapshotCreateRequest,
   ) => void;
 }) {
-  const [mode, setMode] = useState<IndMoneySyncMode>("reuse");
+  const [mode, setMode] = useState<IndMoneySyncMode>("paste");
   const [rawText, setRawText] = useState("");
+  const pasteInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleContinue = useCallback(() => {
+    onContinue(
+      mode,
+      mode === "paste"
+        ? {
+            raw_text: rawText.trim(),
+            captured_at: new Date().toISOString(),
+          }
+        : undefined,
+    );
+  }, [mode, onContinue, rawText]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    window.requestAnimationFrame(() => {
+      const pasteInput = pasteInputRef.current;
+      pasteInput?.focus();
+      pasteInput?.select();
+    });
+  }, [open]);
 
   if (!open) return null;
 
@@ -3644,16 +3667,14 @@ function IndMoneySnapshotDialog({
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <label className="rounded-2xl border border-slate-200 p-4 text-sm font-semibold text-slate-800">
-            <input
-              className="mr-2"
-              type="radio"
-              checked={mode === "reuse"}
-              onChange={() => setMode("reuse")}
-            />
-            Continue with last snapshot
-          </label>
-          <label className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-900">
+          <label
+            className={cn(
+              "rounded-2xl border p-4 text-sm font-semibold",
+              mode === "paste"
+                ? "border-blue-200 bg-blue-50 text-blue-900"
+                : "border-slate-200 text-slate-800",
+            )}
+          >
             <input
               className="mr-2"
               type="radio"
@@ -3662,12 +3683,37 @@ function IndMoneySnapshotDialog({
             />
             Paste latest INDmoney snapshot
           </label>
+          <label
+            className={cn(
+              "rounded-2xl border p-4 text-sm font-semibold",
+              mode === "reuse"
+                ? "border-blue-200 bg-blue-50 text-blue-900"
+                : "border-slate-200 text-slate-800",
+            )}
+          >
+            <input
+              className="mr-2"
+              type="radio"
+              checked={mode === "reuse"}
+              onChange={() => setMode("reuse")}
+            />
+            Continue with last snapshot
+          </label>
         </div>
 
         {mode === "paste" ? (
           <textarea
+            ref={pasteInputRef}
             value={rawText}
             onChange={(event) => setRawText(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.shiftKey || !rawText.trim() || saving) {
+                return;
+              }
+
+              event.preventDefault();
+              handleContinue();
+            }}
             placeholder="Paste the copied INDmoney portfolio screen here..."
             className="mt-4 min-h-64 w-full resize-y rounded-2xl border border-blue-200 bg-white p-3 text-sm outline-none focus:border-blue-400"
           />
@@ -3692,17 +3738,7 @@ function IndMoneySnapshotDialog({
           <Button
             type="button"
             disabled={saving || (mode === "paste" && !rawText.trim())}
-            onClick={() =>
-              onContinue(
-                mode,
-                mode === "paste"
-                  ? {
-                      raw_text: rawText.trim(),
-                      captured_at: new Date().toISOString(),
-                    }
-                  : undefined,
-              )
-            }
+            onClick={handleContinue}
             className="rounded-full bg-slate-950 px-7 font-extrabold uppercase tracking-[0.18em] text-white hover:bg-slate-800"
           >
             {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
@@ -8327,17 +8363,19 @@ ${zerodhaExecutionMode === "direct_market"
         </div>
       ) : null}
 
-      <IndMoneySnapshotDialog
-        open={dialogOpen}
-        saving={runningPortfolio === "indmoneyUs"}
-        error={dialogError}
-        onClose={() => {
-          if (runningPortfolio === "indmoneyUs") return;
-          setDialogOpen(false);
-          setIndMoneySyncOnly(false);
-        }}
-        onContinue={handleIndMoneyContinue}
-      />
+      {dialogOpen ? (
+        <IndMoneySnapshotDialog
+          open={dialogOpen}
+          saving={runningPortfolio === "indmoneyUs"}
+          error={dialogError}
+          onClose={() => {
+            if (runningPortfolio === "indmoneyUs") return;
+            setDialogOpen(false);
+            setIndMoneySyncOnly(false);
+          }}
+          onContinue={handleIndMoneyContinue}
+        />
+      ) : null}
     </>
   );
 }
