@@ -6509,7 +6509,15 @@ function getVisibleRun(
     );
   }
   if (summary.latest_run?.status === "running") return summary.latest_run;
-  return summary.recent_runs.find((run) => run.status === "running") ?? null;
+  const runningRun = summary.recent_runs.find((run) => run.status === "running");
+  if (runningRun) return runningRun;
+
+  // On page refresh there is usually no pending/running run to track, but the
+  // console still needs the most recent completed run payload so the parent can
+  // rebuild the Events Summary and Events to invest in tables with persisted LLM
+  // odds/returns until a newer scan replaces them.
+  if (summary.latest_run?.status === "completed") return summary.latest_run;
+  return summary.recent_runs.find((run) => run.status === "completed") ?? null;
 }
 
 function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {

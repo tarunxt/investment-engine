@@ -777,6 +777,26 @@ test("Bullpen x AI treats saved odds or timestamps as clickable LLM analysis", a
   assert.match(questionsTableSource, /hasBullpenLlmAnalysis/);
 });
 
+
+test("Bullpen auto-run summary sync keeps completed run visible after refresh", () => {
+  const scheduleCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    scheduleCardSource,
+    /summary\.latest_run\?\.status === "completed"\) return summary\.latest_run/,
+  );
+  assert.match(
+    scheduleCardSource,
+    /recent_runs\.find\(\(run\) => run\.status === "completed"\)/,
+  );
+});
+
 test("Bullpen x AI stale fact validation excludes contradictory public-listing claims", async () => {
   const { validateBullpenStaleFacts } = await loadBullpenAiModule();
 
