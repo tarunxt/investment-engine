@@ -463,6 +463,8 @@ function LlmOddsDisplay({
 
 export function BullpenQuestionsTable({
   snapshot,
+  rowsOverride,
+  rowHighlightById,
   emptyMessage,
   headerContent,
   isLoading,
@@ -474,6 +476,11 @@ export function BullpenQuestionsTable({
   onToggleSelectAll,
 }: {
   snapshot: BullpenScanSnapshot | null;
+  rowsOverride?: BullpenQuestionRow[];
+  rowHighlightById?: Record<
+    string,
+    "active-retained" | "event-exit" | "new-opportunity"
+  >;
   emptyMessage: string;
   headerContent?: ReactNode;
   isLoading: boolean;
@@ -494,7 +501,9 @@ export function BullpenQuestionsTable({
   const [resizingColumnId, setResizingColumnId] =
     useState<ResizableBullpenTableColumnId | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
-  const rows = snapshot ? sortQuestions(snapshot.questions, sortState) : [];
+  const rows =
+    rowsOverride ??
+    (snapshot ? sortQuestions(snapshot.questions, sortState) : []);
   const selectableRowCount = selectionEnabled ? rows.length : 0;
   const selectedVisibleCount = rows.filter((question) =>
     selectedQuestionIds.has(question.id),
@@ -610,7 +619,7 @@ export function BullpenQuestionsTable({
       <div className="border-b border-slate-200 bg-white px-4 py-3 text-left">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <h2 className="text-sm font-semibold text-slate-950">
-            Fresh Bullpen Opportunities
+            Events Summary
           </h2>
           <span className="text-xs font-medium text-slate-500">
             Updated {updatedAtLabel}
@@ -791,8 +800,20 @@ export function BullpenQuestionsTable({
               rows.map((question, rowIndex) => {
                 const hasLlmAnalysis = hasBullpenLlmAnalysis(question);
 
+                const rowHighlight = rowHighlightById?.[question.id] ?? null;
                 return (
-                  <tr key={question.id} className="align-top hover:bg-slate-50">
+                  <tr
+                    key={question.id}
+                    className={cn(
+                      "align-top hover:bg-slate-50",
+                      rowHighlight === "active-retained" &&
+                        "bg-emerald-50 hover:bg-emerald-100/70",
+                      rowHighlight === "event-exit" &&
+                        "bg-rose-50 hover:bg-rose-100/70",
+                      rowHighlight === "new-opportunity" &&
+                        "bg-fuchsia-50 hover:bg-fuchsia-100/70",
+                    )}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
