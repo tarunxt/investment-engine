@@ -29,7 +29,9 @@ def _question(index: int) -> PolymarketEventQuestionPayload:
 def test_oversized_single_combined_auto_falls_back_to_chunked_parallel(monkeypatch):
     calls: list[str] = []
 
-    def fake_execute_provider_batch_call(*, provider_name: str, model_name: str, prompt: str):
+    def fake_execute_provider_batch_call(
+        *, provider_name: str, model_name: str, prompt: str
+    ):
         calls.append(prompt)
         payload = json.loads(prompt.split("Selected questions:\n", 1)[1])
         markets = []
@@ -86,7 +88,9 @@ def test_oversized_single_combined_auto_falls_back_to_chunked_parallel(monkeypat
     context = PolymarketEventRunContext(
         prompt_template="Selected questions:\n{{SELECTED_QUESTIONS}}",
         question_payload=[_question(index) for index in range(3)],
-        evidence_options=PolymarketEventEvidenceOptions(require_fresh_internet_evidence=False),
+        evidence_options=PolymarketEventEvidenceOptions(
+            require_fresh_internet_evidence=False
+        ),
         execution_options=BullpenLlmExecutionOptions(
             execution_mode="single_combined",
             events_per_prompt=1,
@@ -106,6 +110,73 @@ def test_oversized_single_combined_auto_falls_back_to_chunked_parallel(monkeypat
     assert result.primary_request_count == 3
     assert result.blocked_event_count == 0
     assert result.runtime_metadata["llm_execution_mode"] == "chunked_parallel"
-    assert "automatically switched to Batched parallel" in result.runtime_metadata[
-        "llm_execution_mode_reason"
+    assert (
+        "automatically switched to Batched parallel"
+        in result.runtime_metadata["llm_execution_mode_reason"]
+    )
+
+
+def test_missing_event_failures_include_copyable_batch_error_details(monkeypatch):
+    def fake_execute_provider_batch_call(
+        *, provider_name: str, model_name: str, prompt: str
+    ):
+        return type(
+            "BatchCall",
+            (),
+            {
+                "provider": provider_name,
+                "model": model_name,
+                "response": AIProviderResponse(
+                    content=json.dumps({"markets": []}),
+                    tokens_in=10,
+                    tokens_out=5,
+                    cost=0.001,
+                    provider=provider_name,
+                    model=model_name,
+                ),
+                "attempts": 1,
+                "retry_count": 0,
+                "elapsed_seconds": 0.01,
+                "error": None,
+                "actual_model": model_name,
+            },
+        )()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket.bullpen_llm_execution.execute_provider_batch_call",
+        fake_execute_provider_batch_call,
+    )
+
+    context = PolymarketEventRunContext(
+        prompt_template="Selected questions:\n{{SELECTED_QUESTIONS}}",
+        question_payload=[_question(1)],
+        evidence_options=PolymarketEventEvidenceOptions(
+            require_fresh_internet_evidence=False
+        ),
+        execution_options=BullpenLlmExecutionOptions(
+            execution_mode="chunked_parallel",
+            events_per_prompt=1,
+            max_concurrent_requests=1,
+            target_count=1,
+        ),
+    )
+
+    result = execute_bullpen_llm_target(
+        context,
+        provider_name="gemini",
+        model_name="gemini-test",
+    )
+
+    error_batches = [
+        batch
+        for batch in result.runtime_metadata["llm_batches"]
+        if batch.get("error_details")
     ]
+    assert result.status == "failed"
+    assert error_batches
+    assert error_batches[-1]["error_details"]["category"] == "response_validation"
+    assert "missing event row" in error_batches[-1]["error_details"]["safe_message"]
+    assert {
+        event["status"]
+        for event in result.runtime_metadata["llm_event_results"].values()
+    } == {"missing_event"}

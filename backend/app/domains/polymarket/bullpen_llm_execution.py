@@ -255,6 +255,38 @@ class BullpenLlmBatchRuntimeMetadata:
     recovered_from_batch_id: str | None = None
 
 
+def _build_batch_diagnostic_metadata(
+    *,
+    category: str,
+    safe_message: str | None,
+    provider_name: str,
+    model_name: str,
+    actual_model: str | None = None,
+    batch_id: str | None = None,
+    attempts: int | None = None,
+    elapsed_seconds: float | None = None,
+    recovery_attempt: int | None = None,
+    recovered_from_batch_id: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "category": category,
+        "safe_message": safe_message
+        or "LLM batch did not produce a usable terminal result.",
+        "provider": provider_name,
+        "requested_model": model_name,
+        "actual_model": actual_model,
+        "batch_id": batch_id,
+        "attempts": attempts,
+        "elapsed_seconds": elapsed_seconds,
+        "recovery_attempt": recovery_attempt,
+        "recovered_from_batch_id": recovered_from_batch_id,
+    }
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
 @dataclass
 class BullpenLlmTargetExecutionResult:
     provider: str
@@ -421,11 +453,11 @@ def _build_prompt(
         isinstance(item, dict) and isinstance(item.get("stage2_context"), dict)
         for item in question_payload
     )
-    if has_stage2_context and "[stage2_shared_evidence_only]" not in normalized_template.lower():
-        normalized_template = (
-            "[STAGE2_SHARED_EVIDENCE_ONLY]\n"
-            f"{normalized_template}"
-        )
+    if (
+        has_stage2_context
+        and "[stage2_shared_evidence_only]" not in normalized_template.lower()
+    ):
+        normalized_template = "[STAGE2_SHARED_EVIDENCE_ONLY]\n" f"{normalized_template}"
     if placeholder in normalized_template:
         return normalized_template.replace(placeholder, selected_questions_json)
     return f"{normalized_template}\n\nSelected questions:\n{selected_questions_json}"
@@ -470,10 +502,16 @@ def estimate_batch_prompt_tokens(
     events: list[PreparedBullpenLlmEvent],
 ) -> int:
     # Coarse but stable cross-provider estimate used only for batching diagnostics.
-    return max(1, math.ceil(estimate_batch_prompt_size_chars(
-        prompt_template=prompt_template,
-        events=events,
-    ) / 4))
+    return max(
+        1,
+        math.ceil(
+            estimate_batch_prompt_size_chars(
+                prompt_template=prompt_template,
+                events=events,
+            )
+            / 4
+        ),
+    )
 
 
 def plan_bullpen_llm_execution(
@@ -573,7 +611,9 @@ def _extract_json_value(text: str) -> object:
         if normalized and normalized not in candidates:
             candidates.append(normalized)
 
-    for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", trimmed, flags=re.IGNORECASE):
+    for match in re.finditer(
+        r"```(?:json)?\s*([\s\S]*?)```", trimmed, flags=re.IGNORECASE
+    ):
         register(match.group(1))
     register(trimmed)
 
@@ -725,7 +765,9 @@ def parse_bullpen_batch_response(
         return response
 
     for record in markets:
-        normalized_event_id = _normalize_lookup_value(_read_str(record, "event_id", "eventId"))
+        normalized_event_id = _normalize_lookup_value(
+            _read_str(record, "event_id", "eventId")
+        )
         matched_event_id = None
         if normalized_event_id and normalized_event_id in event_by_id:
             matched_event_id = normalized_event_id
@@ -778,7 +820,9 @@ def parse_bullpen_batch_response(
                     or event.question_payload.question_id,
                     "market_id": _read_str(record, "market_id", "marketId")
                     or event.question_payload.market_id,
-                    "yes_definition": _read_str(record, "yes_definition", "yesDefinition"),
+                    "yes_definition": _read_str(
+                        record, "yes_definition", "yesDefinition"
+                    ),
                     "deadline_utc": _read_str(record, "deadline_utc", "deadlineUtc"),
                     "resolution_timezone": _read_str(
                         record,
@@ -1010,7 +1054,9 @@ def _build_question_runtime_entry(
     error_reason: str | None = None,
 ) -> tuple[dict[str, Any], bool, str | None]:
     question_runtime = dict(event.question_runtime)
-    model_web_search_used = bool(batch_call and batch_call.response and batch_call.response.web_search_used)
+    model_web_search_used = bool(
+        batch_call and batch_call.response and batch_call.response.web_search_used
+    )
     model_web_search_queries = (
         batch_call.response.web_search_queries
         if batch_call and batch_call.response
@@ -1066,8 +1112,8 @@ def _build_question_runtime_entry(
         or question_runtime.get("evidence_block_used")
     )
     if event.question_payload.stage2_context is not None:
-        question_runtime["stage2_context"] = event.question_payload.stage2_context.model_dump(
-            mode="json"
+        question_runtime["stage2_context"] = (
+            event.question_payload.stage2_context.model_dump(mode="json")
         )
     if event.question_payload.evidence_packet_v2 is not None:
         question_runtime["evidence_packet_v2"] = (
@@ -1088,30 +1134,46 @@ def _serialize_final_market_row(
         rationale = (
             event_result.invalid_reason
             if event_result and event_result.invalid_reason
-            else event_result.error
-            if event_result and event_result.error
-            else None
+            else event_result.error if event_result and event_result.error else None
         )
     return {
         "event_id": event.event_id,
-        "question_ref": row.question_ref if row is not None else event.question_payload.question_ref,
-        "question_id": row.question_id if row is not None else event.question_payload.question_id,
-        "market_id": row.market_id if row is not None else event.question_payload.market_id,
-        "question": row.question if row is not None else event.question_payload.question,
+        "question_ref": (
+            row.question_ref if row is not None else event.question_payload.question_ref
+        ),
+        "question_id": (
+            row.question_id if row is not None else event.question_payload.question_id
+        ),
+        "market_id": (
+            row.market_id if row is not None else event.question_payload.market_id
+        ),
+        "question": (
+            row.question if row is not None else event.question_payload.question
+        ),
         "yes_definition": row.yes_definition if row is not None else None,
-        "deadline_et": row.deadline_et if row is not None else event.question_payload.deadline_et,
+        "deadline_et": (
+            row.deadline_et if row is not None else event.question_payload.deadline_et
+        ),
         "deadline_utc": row.deadline_utc if row is not None else None,
         "resolution_timezone": row.resolution_timezone if row is not None else None,
-        "hours_remaining": row.hours_remaining if row is not None else event.question_payload.hours_remaining,
+        "hours_remaining": (
+            row.hours_remaining
+            if row is not None
+            else event.question_payload.hours_remaining
+        ),
         "evidence_status": row.evidence_status if row is not None else None,
         "event_state": row.event_state if row is not None else None,
         "llm_yes_odds": row.llm_yes_odds if row is not None else None,
         "llm_no_odds": row.llm_no_odds if row is not None else None,
         "confidence": row.confidence if row is not None else None,
         "key_evidence": row.key_evidence if row is not None else [],
-        "key_evidence_source_ids": row.key_evidence_source_ids if row is not None else [],
+        "key_evidence_source_ids": (
+            row.key_evidence_source_ids if row is not None else []
+        ),
         "red_flags": row.red_flags if row is not None else [],
-        "status": event_result.status if event_result is not None else "provider_failed",
+        "status": (
+            event_result.status if event_result is not None else "provider_failed"
+        ),
         "rationale": rationale,
     }
 
@@ -1126,9 +1188,11 @@ def execute_bullpen_llm_target(
     prepared_context = (
         prepared_context
         if prepared_context is not None
-        else context.prepared_context
-        if context.prepared_context is not None
-        else prepare_polymarket_event_context(context)
+        else (
+            context.prepared_context
+            if context.prepared_context is not None
+            else prepare_polymarket_event_context(context)
+        )
     )
     prepared_events = build_prepared_bullpen_events(prepared_context)
     target_health = ProviderFactory.validate_target(provider_name, model_name)
@@ -1155,7 +1219,11 @@ def execute_bullpen_llm_target(
             "estimated_chars": batch.estimated_chars,
             "estimated_prompt_tokens": estimate_batch_prompt_tokens(
                 prompt_template=context.prompt_template,
-                events=[event for event in prepared_events if event.event_id in batch.event_ids],
+                events=[
+                    event
+                    for event in prepared_events
+                    if event.event_id in batch.event_ids
+                ],
             ),
             "event_count": len(batch.event_ids),
             "budget_chars": safe_prompt_budget_chars,
@@ -1188,7 +1256,11 @@ def execute_bullpen_llm_target(
                 "estimated_chars": batch.estimated_chars,
                 "estimated_prompt_tokens": estimate_batch_prompt_tokens(
                     prompt_template=context.prompt_template,
-                    events=[event for event in prepared_events if event.event_id in batch.event_ids],
+                    events=[
+                        event
+                        for event in prepared_events
+                        if event.event_id in batch.event_ids
+                    ],
                 ),
                 "event_count": len(batch.event_ids),
                 "budget_chars": safe_prompt_budget_chars,
@@ -1219,6 +1291,7 @@ def execute_bullpen_llm_target(
             safe_message=target_health.reason or "Provider target is unavailable.",
             retryable=False,
         )
+        unavailable_diagnostic = unavailable_error.to_metadata()
         for event in prepared_events:
             event_results[event.event_id] = BullpenLlmEventProviderResult(
                 event_id=event.event_id,
@@ -1227,14 +1300,29 @@ def execute_bullpen_llm_target(
                 status="provider_unavailable",
                 error=unavailable_error.safe_message,
                 attempts=1,
-                diagnostic=unavailable_error.to_metadata(),
+                diagnostic=unavailable_diagnostic,
             )
+        batch_metadata = [
+            BullpenLlmBatchRuntimeMetadata(
+                batch_id="target-capability-check",
+                provider=provider_name,
+                model=model_name,
+                event_ids=[event.event_id for event in prepared_events],
+                event_count=len(prepared_events),
+                status="failed",
+                attempts=1,
+                elapsed_seconds=0.0,
+                error_summary=unavailable_error.safe_message,
+                error_category=unavailable_error.execution_phase,
+                error_details=unavailable_diagnostic,
+            )
+        ]
         runtime_metadata = _build_runtime_metadata(
             context=context,
             execution_options=execution_options,
             event_lookup=event_lookup,
             event_results=event_results,
-            batch_metadata=[],
+            batch_metadata=batch_metadata,
             provider_name=provider_name,
             model_name=model_name,
             prompt_size_estimates=prompt_size_estimates,
@@ -1246,8 +1334,12 @@ def execute_bullpen_llm_target(
         response_text = json.dumps(
             {
                 "markets": [
-                    _serialize_final_market_row(event, event_results.get(event.event_id))
-                    for event in sorted(prepared_events, key=lambda item: item.original_index)
+                    _serialize_final_market_row(
+                        event, event_results.get(event.event_id)
+                    )
+                    for event in sorted(
+                        prepared_events, key=lambda item: item.original_index
+                    )
                 ]
             },
             ensure_ascii=False,
@@ -1278,7 +1370,9 @@ def execute_bullpen_llm_target(
             prompt_size_estimates=prompt_size_estimates,
         )
 
-    def run_batch(batch: BullpenLlmBatch) -> tuple[BullpenLlmBatch, BullpenProviderBatchCall]:
+    def run_batch(
+        batch: BullpenLlmBatch,
+    ) -> tuple[BullpenLlmBatch, BullpenProviderBatchCall]:
         batch_events = [event_lookup[event_id] for event_id in batch.event_ids]
         prompt = _build_batch_prompt(
             prompt_template=context.prompt_template,
@@ -1291,8 +1385,13 @@ def execute_bullpen_llm_target(
         )
 
     pending_batches: list[BullpenLlmBatch] = list(plan.batches)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=target_concurrency_limit) as executor:
-        running: dict[concurrent.futures.Future[tuple[BullpenLlmBatch, BullpenProviderBatchCall]], BullpenLlmBatch] = {}
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=target_concurrency_limit
+    ) as executor:
+        running: dict[
+            concurrent.futures.Future[tuple[BullpenLlmBatch, BullpenProviderBatchCall]],
+            BullpenLlmBatch,
+        ] = {}
         while pending_batches or running:
             if circuit_open and not running:
                 break
@@ -1333,12 +1432,22 @@ def execute_bullpen_llm_target(
                 if batch_call.response is not None:
                     total_tokens_in += int(batch_call.response.tokens_in or 0)
                     total_tokens_out += int(batch_call.response.tokens_out or 0)
-                    total_cost = round(total_cost + float(batch_call.response.cost or 0.0), 6)
-                batch_events = [event_lookup[event_id] for event_id in completed_batch.event_ids]
+                    total_cost = round(
+                        total_cost + float(batch_call.response.cost or 0.0), 6
+                    )
+                batch_events = [
+                    event_lookup[event_id] for event_id in completed_batch.event_ids
+                ]
                 batch_status = "completed"
-                batch_error_summary = batch_call.error.safe_message if batch_call.error else None
-                batch_error_category = batch_call.error.execution_phase if batch_call.error else None
-                batch_error_details = batch_call.error.to_metadata() if batch_call.error else None
+                batch_error_summary = (
+                    batch_call.error.safe_message if batch_call.error else None
+                )
+                batch_error_category = (
+                    batch_call.error.execution_phase if batch_call.error else None
+                )
+                batch_error_details = (
+                    batch_call.error.to_metadata() if batch_call.error else None
+                )
                 if batch_call.response is None:
                     batch_status = "failed"
                     terminal_status: Literal[
@@ -1383,31 +1492,39 @@ def execute_bullpen_llm_target(
                             "actual_model": getattr(batch_call, "actual_model", None),
                             "batch_id": completed_batch.id,
                         }
-                        if completed_batch.recovery_attempt < BULLPEN_LLM_MAX_RECOVERY_BATCHES:
+                        if (
+                            completed_batch.recovery_attempt
+                            < BULLPEN_LLM_MAX_RECOVERY_BATCHES
+                        ):
                             recovery_batch_count += 1
                             pending_batches.append(
                                 BullpenLlmBatch(
                                     id=f"{completed_batch.id}-recovery-{completed_batch.recovery_attempt + 1}",
-                                    event_ids=[event.event_id for event in batch_events],
+                                    event_ids=[
+                                        event.event_id for event in batch_events
+                                    ],
                                     estimated_chars=estimate_batch_prompt_size_chars(
                                         prompt_template=context.prompt_template,
                                         events=batch_events,
                                     ),
                                     recovery_of_batch_id=completed_batch.id,
-                                    recovery_attempt=completed_batch.recovery_attempt + 1,
+                                    recovery_attempt=completed_batch.recovery_attempt
+                                    + 1,
                                 )
                             )
                         else:
                             for event in batch_events:
-                                event_results[event.event_id] = BullpenLlmEventProviderResult(
-                                    event_id=event.event_id,
-                                    provider=provider_name,
-                                    model=model_name,
-                                    status="invalid_json",
-                                    error=str(exc),
-                                    attempts=batch_call.attempts,
-                                    batch_id=completed_batch.id,
-                                    diagnostic=batch_error_details,
+                                event_results[event.event_id] = (
+                                    BullpenLlmEventProviderResult(
+                                        event_id=event.event_id,
+                                        provider=provider_name,
+                                        model=model_name,
+                                        status="invalid_json",
+                                        error=str(exc),
+                                        attempts=batch_call.attempts,
+                                        batch_id=completed_batch.id,
+                                        diagnostic=batch_error_details,
+                                    )
                                 )
                         batch_metadata.append(
                             BullpenLlmBatchRuntimeMetadata(
@@ -1432,7 +1549,11 @@ def execute_bullpen_llm_target(
                         *parsed_response.missing_event_ids,
                         *parsed_response.invalid_event_errors.keys(),
                     ]
-                    if recovery_event_ids and completed_batch.recovery_attempt < BULLPEN_LLM_MAX_RECOVERY_BATCHES:
+                    if (
+                        recovery_event_ids
+                        and completed_batch.recovery_attempt
+                        < BULLPEN_LLM_MAX_RECOVERY_BATCHES
+                    ):
                         recovery_batch_count += 1
                         pending_batches.append(
                             BullpenLlmBatch(
@@ -1440,7 +1561,10 @@ def execute_bullpen_llm_target(
                                 event_ids=recovery_event_ids,
                                 estimated_chars=estimate_batch_prompt_size_chars(
                                     prompt_template=context.prompt_template,
-                                    events=[event_lookup[event_id] for event_id in recovery_event_ids],
+                                    events=[
+                                        event_lookup[event_id]
+                                        for event_id in recovery_event_ids
+                                    ],
                                 ),
                                 recovery_of_batch_id=completed_batch.id,
                                 recovery_attempt=completed_batch.recovery_attempt + 1,
@@ -1448,7 +1572,9 @@ def execute_bullpen_llm_target(
                         )
                     for event in batch_events:
                         row = parsed_response.rows_by_event_id.get(event.event_id)
-                        invalid_reason = parsed_response.invalid_event_errors.get(event.event_id)
+                        invalid_reason = parsed_response.invalid_event_errors.get(
+                            event.event_id
+                        )
                         error_reason = None
                         status: Literal[
                             "success",
@@ -1464,16 +1590,20 @@ def execute_bullpen_llm_target(
                                 else "success"
                             )
                         elif invalid_reason:
-                            if completed_batch.recovery_attempt >= BULLPEN_LLM_MAX_RECOVERY_BATCHES:
+                            if (
+                                completed_batch.recovery_attempt
+                                >= BULLPEN_LLM_MAX_RECOVERY_BATCHES
+                            ):
                                 status = "invalid_schema"
                             else:
                                 continue
                         elif event.event_id in parsed_response.missing_event_ids:
-                            if completed_batch.recovery_attempt >= BULLPEN_LLM_MAX_RECOVERY_BATCHES:
+                            if (
+                                completed_batch.recovery_attempt
+                                >= BULLPEN_LLM_MAX_RECOVERY_BATCHES
+                            ):
                                 status = "missing_event"
-                                error_reason = (
-                                    "Model did not return this event even after targeted recovery."
-                                )
+                                error_reason = "Model did not return this event even after targeted recovery."
                             else:
                                 continue
                         else:
@@ -1503,7 +1633,9 @@ def execute_bullpen_llm_target(
                             stale_fact_detected=stale_fact_detected,
                             stale_fact_reason=stale_fact_reason,
                             web_search_used=bool(batch_call.response.web_search_used),
-                            web_search_queries=list(batch_call.response.web_search_queries),
+                            web_search_queries=list(
+                                batch_call.response.web_search_queries
+                            ),
                             web_sources=list(batch_call.response.web_sources),
                             attempts=batch_call.attempts,
                             batch_id=completed_batch.id,
@@ -1511,7 +1643,9 @@ def execute_bullpen_llm_target(
                                 "category": status,
                                 "provider": provider_name,
                                 "requested_model": model_name,
-                                "actual_model": getattr(batch_call, "actual_model", None),
+                                "actual_model": getattr(
+                                    batch_call, "actual_model", None
+                                ),
                                 "batch_id": completed_batch.id,
                             },
                         )
@@ -1540,6 +1674,42 @@ def execute_bullpen_llm_target(
                                 f"{len(parsed_response.missing_event_ids)} missing event row(s)"
                             )
                         batch_error_summary = ", ".join(details) if details else None
+                        if batch_error_summary and batch_error_details is None:
+                            batch_error_category = "response_validation"
+                            batch_error_details = _build_batch_diagnostic_metadata(
+                                category="response_validation",
+                                safe_message=batch_error_summary,
+                                provider_name=provider_name,
+                                model_name=model_name,
+                                actual_model=getattr(batch_call, "actual_model", None),
+                                batch_id=completed_batch.id,
+                                attempts=batch_call.attempts,
+                                elapsed_seconds=batch_call.elapsed_seconds,
+                                recovery_attempt=completed_batch.recovery_attempt,
+                                recovered_from_batch_id=completed_batch.recovery_of_batch_id,
+                                extra={
+                                    "duplicate_event_count": len(
+                                        parsed_response.duplicate_event_ids
+                                    ),
+                                    "unexpected_row_count": len(
+                                        parsed_response.unexpected_rows
+                                    ),
+                                    "invalid_event_count": len(
+                                        parsed_response.invalid_event_errors
+                                    ),
+                                    "missing_event_count": len(
+                                        parsed_response.missing_event_ids
+                                    ),
+                                    "missing_event_ids": parsed_response.missing_event_ids[
+                                        :25
+                                    ],
+                                    "invalid_event_errors": dict(
+                                        list(
+                                            parsed_response.invalid_event_errors.items()
+                                        )[:25]
+                                    ),
+                                },
+                            )
 
                 batch_metadata.append(
                     BullpenLlmBatchRuntimeMetadata(
@@ -1601,15 +1771,49 @@ def execute_bullpen_llm_target(
                 )
             )
 
+    unrecorded_event_ids: list[str] = []
     for event in prepared_events:
         if event.event_id not in event_results:
+            unrecorded_event_ids.append(event.event_id)
+            diagnostic = _build_batch_diagnostic_metadata(
+                category="missing_terminal_result",
+                safe_message="No terminal result was recorded for this event.",
+                provider_name=provider_name,
+                model_name=model_name,
+                batch_id="missing-terminal-results",
+                extra={"event_id": event.event_id},
+            )
             event_results[event.event_id] = BullpenLlmEventProviderResult(
                 event_id=event.event_id,
                 provider=provider_name,
                 model=model_name,
                 status="provider_failed",
                 error="No terminal result was recorded for this event.",
+                diagnostic=diagnostic,
             )
+    if unrecorded_event_ids:
+        batch_metadata.append(
+            BullpenLlmBatchRuntimeMetadata(
+                batch_id="missing-terminal-results",
+                provider=provider_name,
+                model=model_name,
+                event_ids=unrecorded_event_ids,
+                event_count=len(unrecorded_event_ids),
+                status="failed",
+                attempts=0,
+                elapsed_seconds=0.0,
+                error_summary="No terminal result was recorded for one or more events.",
+                error_category="missing_terminal_result",
+                error_details=_build_batch_diagnostic_metadata(
+                    category="missing_terminal_result",
+                    safe_message="No terminal result was recorded for one or more events.",
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    batch_id="missing-terminal-results",
+                    extra={"event_ids": unrecorded_event_ids[:25]},
+                ),
+            )
+        )
 
     runtime_metadata = _build_runtime_metadata(
         context=context,
@@ -1634,7 +1838,9 @@ def execute_bullpen_llm_target(
         {
             "markets": [
                 _serialize_final_market_row(event, event_results.get(event.event_id))
-                for event in sorted(prepared_events, key=lambda item: item.original_index)
+                for event in sorted(
+                    prepared_events, key=lambda item: item.original_index
+                )
             ]
         },
         ensure_ascii=False,
@@ -1642,12 +1848,15 @@ def execute_bullpen_llm_target(
     )
 
     recovered_event_count = sum(
-        1 for event_result in event_results.values() if event_result.status == "recovered"
+        1
+        for event_result in event_results.values()
+        if event_result.status == "recovered"
     )
     failed_event_count = sum(
         1
         for event_result in event_results.values()
-        if event_result.status in {"provider_failed", "provider_unavailable", "timed_out", "circuit_open"}
+        if event_result.status
+        in {"provider_failed", "provider_unavailable", "timed_out", "circuit_open"}
     )
     blocked_event_count = sum(
         1
@@ -1739,7 +1948,10 @@ def _build_runtime_metadata(
                 entry.get("web_search_used") or event_result.web_search_used
             )
             entry["web_search_queries"] = _merge_unique_strings(
-                [*(entry.get("web_search_queries") or []), *event_result.web_search_queries]
+                [
+                    *(entry.get("web_search_queries") or []),
+                    *event_result.web_search_queries,
+                ]
             )
             entry["web_sources"] = _merge_unique_strings(
                 [*(entry.get("web_sources") or []), *event_result.web_sources]
@@ -1781,11 +1993,14 @@ def _build_runtime_metadata(
             bool((event.question_payload.preflight_evidence_block or "").strip())
             for event in event_lookup.values()
         ),
-        "internet_verified": all(
-            bool(entry.get("internet_verified")) for entry in question_runtime.values()
-        )
-        if question_runtime
-        else False,
+        "internet_verified": (
+            all(
+                bool(entry.get("internet_verified"))
+                for entry in question_runtime.values()
+            )
+            if question_runtime
+            else False
+        ),
         "stale_fact_detected": stale_fact_detected,
         "invalid_reason": invalid_reasons[0] if invalid_reasons else None,
         "model_side_search_used": any(
@@ -1810,7 +2025,8 @@ def _build_runtime_metadata(
         "llm_failed_event_count": sum(
             1
             for result in event_results.values()
-            if result.status in {"provider_failed", "provider_unavailable", "timed_out", "circuit_open"}
+            if result.status
+            in {"provider_failed", "provider_unavailable", "timed_out", "circuit_open"}
         ),
         "llm_invalid_event_count": sum(
             1
