@@ -631,9 +631,33 @@ async def _execute_console_stage_two_shared_llm(
             )
             elapsed_seconds = round(time.perf_counter() - started_monotonic, 3)
             target_status = getattr(target_result, "status", "completed")
+            completed_at = utc_now_iso()
+            incremental_event_outputs: list[dict[str, Any]] = []
+            for market_id, event in prepared_event_by_market_id.items():
+                event_result = target_result.event_results.get(event.event_id)
+                output = (
+                    event_result_to_auto_live_output(
+                        event_result,
+                        completed_at=completed_at,
+                    )
+                    if event_result is not None
+                    else BullpenAutoLiveLlmOutput(
+                        provider=provider_name,
+                        model=model_name,
+                        error="No terminal result was recorded for this event.",
+                        completed_at=completed_at,
+                    )
+                )
+                incremental_event_outputs.append(
+                    {
+                        "market_id": market_id,
+                        "question_id": event.question_payload.question_id,
+                        "output": output.model_dump(),
+                    }
+                )
             target_run_progress[target_key].update({
                 "status": target_status if target_status in {"completed", "partial", "failed"} else "completed",
-                "completed_at": utc_now_iso(),
+                "completed_at": completed_at,
                 "elapsed_seconds": elapsed_seconds,
                 "estimated_cost": getattr(target_result, "estimated_cost", None),
                 "failed_event_count": getattr(target_result, "failed_event_count", None),
@@ -641,6 +665,7 @@ async def _execute_console_stage_two_shared_llm(
                 "blocked_event_count": getattr(target_result, "blocked_event_count", None),
                 "retry_request_count": getattr(target_result, "retry_request_count", None),
                 "recovery_batch_count": getattr(target_result, "recovery_batch_count", None),
+                "event_outputs": incremental_event_outputs,
             })
             return provider_name, model_name, target_result
         except Exception as exc:  # pragma: no cover - defensive guardrail
