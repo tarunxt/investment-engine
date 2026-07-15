@@ -69,6 +69,7 @@ import { formatApiErrorSummary, formatUnknownError } from "@/lib/apiErrors";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { getResolvedProviderInternetAccess } from "@/lib/llmInternetAccess";
+import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
@@ -138,8 +139,7 @@ const SNAPSHOT_SOURCE_TABS: {
   {
     source: "auto",
     label: "Auto Scan",
-    description:
-      "Shows results produced by the Run Scans and Invest Now flow above.",
+    description: "",
   },
   {
     source: "manual",
@@ -1811,6 +1811,59 @@ function BullpenAiPageContent() {
       )
     : [];
   const selectedInvestmentQuestionIdSet = new Set(selectedInvestmentQuestionIds);
+  const investmentDisplay = buildBullpenInvestmentDisplay({
+    activePositions: openActivePositions,
+    activePositionQuestions: activePositionQuestionsForLlm,
+    candidates: visibleInvestmentCandidates,
+    recentDecisions: recentAutoRunDecisions,
+  });
+  const eventExitPositionKeys = new Set(
+    investmentDisplay.activePositionsNeedingAttention.map(
+      (entry) => entry.position.key,
+    ),
+  );
+  const activeRetainedRows = activePositionQuestionsForLlm.filter(
+    (question) => !eventExitPositionKeys.has(question.id),
+  );
+  const eventExitRows = investmentDisplay.activePositionsNeedingAttention
+    .map(
+      (entry) =>
+        entry.question ??
+        activePositionQuestionsForLlm.find(
+          (question) => question.id === entry.position.key,
+        ) ??
+        null,
+    )
+    .filter((question): question is BullpenQuestionRow => Boolean(question));
+  const selectedNewOpportunityRows = visibleInvestmentCandidates.filter((question) =>
+    selectedInvestmentQuestionIdSet.has(question.id),
+  );
+  const prioritizedTableRows = [
+    ...activeRetainedRows,
+    ...eventExitRows,
+    ...selectedNewOpportunityRows,
+  ];
+  const prioritizedTableRowIds = new Set(
+    prioritizedTableRows.map((question) => question.id),
+  );
+  const orderedVisibleTableRows = activeVisibleSnapshot
+    ? [
+        ...prioritizedTableRows,
+        ...activeVisibleSnapshot.questions.filter(
+          (question) => !prioritizedTableRowIds.has(question.id),
+        ),
+      ]
+    : [];
+  const tableRowHighlightById = Object.fromEntries([
+    ...activeRetainedRows.map((question) =>
+      [question.id, "active-retained"] as const,
+    ),
+    ...eventExitRows.map((question) => [question.id, "event-exit"] as const),
+    ...selectedNewOpportunityRows.map((question) =>
+      [question.id, "new-opportunity"] as const,
+    ),
+  ]);
+
   const visibleSelectedQuestionIdSet = selectionEnabled
     ? selectedQuestionIdSet
     : EMPTY_SELECTED_IDS;
@@ -4196,6 +4249,8 @@ function BullpenAiPageContent() {
 
           <BullpenQuestionsTable
             snapshot={activeVisibleSnapshot}
+            rowsOverride={orderedVisibleTableRows}
+            rowHighlightById={tableRowHighlightById}
             emptyMessage={currentTableEmptyMessage}
             headerContent={
               <>
@@ -4229,24 +4284,32 @@ function BullpenAiPageContent() {
                           {tab.label}
                         </button>
                         <div className="space-y-0.5 text-xs font-medium leading-5 text-slate-600">
-                          <p>
-                            Total Events Scanned: {tabSnapshot?.totalCandidates ?? 0}
-                          </p>
-                          <p>
-                            Events that passed Filters: {tabSnapshot?.questions.length ?? 0}
-                          </p>
+                          {activeSnapshotSource === tab.source ? (
+                            <>
+                              <p>
+                                Total Events Scanned: {tabSnapshot?.totalCandidates ?? 0}
+                              </p>
+                              <p>
+                                Events that passed Filters: {tabSnapshot?.questions.length ?? 0}
+                              </p>
+                            </>
+                          ) : null}
                         </div>
                       </div>
                     );
                   })}
                 </div>
-                <p className="mt-2 text-xs text-slate-500">
-                  {
-                    SNAPSHOT_SOURCE_TABS.find(
-                      (tab) => tab.source === activeSnapshotSource,
-                    )?.description
-                  }
-                </p>
+                {SNAPSHOT_SOURCE_TABS.find(
+                  (tab) => tab.source === activeSnapshotSource,
+                )?.description ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    {
+                      SNAPSHOT_SOURCE_TABS.find(
+                        (tab) => tab.source === activeSnapshotSource,
+                      )?.description
+                    }
+                  </p>
+                ) : null}
               </>
             }
             isLoading={isManualScanView && isScanning}
