@@ -11,16 +11,14 @@ import {
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
-import {
-  getInternetAccessBadgeText,
-  getInternetAccessTooltipText,
-  getResolvedProviderInternetAccess,
-  isWebCapableInternetAccess,
-} from "@/lib/llmInternetAccess";
+import type { BullpenAutoLiveDecision, BullpenAutoLiveRun } from "@/types/api";
+import { BullpenEventHistoricalAssessmentTable } from "./BullpenEventHistoricalAssessmentTable";
 
 type BullpenLlmBreakdownDialogProps = {
   question: BullpenQuestionRow;
   onClose: () => void;
+  historicalRuns?: BullpenAutoLiveRun[] | null;
+  historicalDecisions?: BullpenAutoLiveDecision[] | null;
 };
 
 function formatDate(value: string | null) {
@@ -52,29 +50,6 @@ function formatDisagreementLabel(value: string | null) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-function formatDirection(value: string | null | undefined) {
-  switch (value) {
-    case "YES_CAMP":
-      return "Yes camp";
-    case "NO_CAMP":
-      return "No camp";
-    case "UNCERTAIN":
-      return "Uncertain";
-    default:
-      return "—";
-  }
-}
-
-function formatYesNo(value: boolean | null | undefined) {
-  if (value === true) return "Yes";
-  if (value === false) return "No";
-  return "—";
-}
-
-function isLikelyUrl(value: string) {
-  return /^https?:\/\//i.test(value);
 }
 
 function StatCard({
@@ -297,6 +272,8 @@ function HighDisagreementCriteriaDialog({
 export function BullpenLlmBreakdownDialog({
   question,
   onClose,
+  historicalRuns,
+  historicalDecisions,
 }: BullpenLlmBreakdownDialogProps) {
   const [isCriteriaOpen, setIsCriteriaOpen] = useState(false);
   const [metricExplanation, setMetricExplanation] =
@@ -494,185 +471,11 @@ export function BullpenLlmBreakdownDialog({
               {preflightEvidenceBlock}
             </pre>
           </div>
-          {question.llmBreakdown.length > 0 ? (
-            <div className="overflow-hidden rounded-2xl border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">Provider</th>
-                    <th className="px-4 py-3">Model</th>
-                    <th className="px-4 py-3">Direction</th>
-                    <th className="px-4 py-3">LLM Yes Odds</th>
-                    <th className="px-4 py-3">LLM No Odds</th>
-                    <th className="px-4 py-3">Timestamp</th>
-                    <th className="px-4 py-3">Rationale</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {question.llmBreakdown.map((entry) => (
-                    <tr key={`${entry.provider}::${entry.model}::${entry.jobId ?? "job"}`}>
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">
-                        {entry.provider}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {entry.model}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {formatDirection(entry.direction)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-indigo-700">
-                        {formatOdds(entry.llmYesOdds)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-violet-700">
-                        {formatOdds(entry.llmNoOdds)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                        {formatDate(entry.timestamp)}
-                      </td>
-                      <td className="min-w-[320px] px-4 py-3 leading-6 text-slate-700">
-                        {(() => {
-                          const internetAccess = getResolvedProviderInternetAccess(
-                            entry.provider,
-                          );
-                          const webCapable =
-                            isWebCapableInternetAccess(internetAccess);
-                          const internetVerified =
-                            entry.internetVerified ??
-                            entry.webSearchUsed ??
-                            entry.evidenceBlockUsed;
-                          const invalidWarning =
-                            entry.invalidReason ||
-                            (entry.staleFactDetected
-                              ? entry.staleFactReason
-                              : null);
-                          const showNoSearchWarning =
-                            webCapable && entry.webSearchUsed === false;
-                          const showNoSourcesWarning =
-                            entry.webSearchUsed === true &&
-                            (entry.webSources?.length || 0) === 0;
-
-                          return (
-                            <div className="space-y-2">
-                              <p>{entry.rationale || "—"}</p>
-                              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-xs leading-5 text-slate-600">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span
-                                    title={getInternetAccessTooltipText(
-                                      internetAccess,
-                                    )}
-                                    className="rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-700 ring-1 ring-sky-100"
-                                  >
-                                    {getInternetAccessBadgeText(internetAccess)}
-                                  </span>
-                                  {entry.staleFactDetected ? (
-                                    <span className="rounded-full bg-rose-50 px-2 py-0.5 font-medium text-rose-700 ring-1 ring-rose-100">
-                                      Invalid stale fact
-                                    </span>
-                                  ) : null}
-                                  {entry.invalidReason &&
-                                  !entry.staleFactDetected ? (
-                                    <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-100">
-                                      Excluded from consensus
-                                    </span>
-                                  ) : null}
-                                  {entry.rationaleOddsMismatch ? (
-                                    <span className="rounded-full bg-orange-50 px-2 py-0.5 font-medium text-orange-700 ring-1 ring-orange-100">
-                                      Rationale/odds mismatch
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div>Direction: {formatDirection(entry.direction)}</div>
-                                <div>
-                                  Effective weight:{" "}
-                                  {entry.effectiveWeight?.toLocaleString(undefined, {
-                                    maximumFractionDigits: 2,
-                                  }) || "—"}
-                                </div>
-                                <div>Web used: {formatYesNo(entry.webSearchUsed)}</div>
-                                <div>
-                                  Internet verified: {formatYesNo(internetVerified)}
-                                </div>
-                                <div>
-                                  Evidence block used:{" "}
-                                  {formatYesNo(entry.evidenceBlockUsed)}
-                                </div>
-                                <div>
-                                  Sources count:{" "}
-                                  {(entry.webSources || []).length.toLocaleString()}
-                                </div>
-                                {entry.webSearchQueries.length > 0 ? (
-                                  <div>
-                                    Search queries:{" "}
-                                    {entry.webSearchQueries.join(" | ")}
-                                  </div>
-                                ) : null}
-                                {entry.webSources.length > 0 ? (
-                                  <div className="space-y-1">
-                                    <div>Sources:</div>
-                                    {entry.webSources.slice(0, 4).map((source) =>
-                                      isLikelyUrl(source) ? (
-                                        <a
-                                          key={source}
-                                          href={source}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="block break-all text-sky-700 underline decoration-sky-300 underline-offset-2"
-                                        >
-                                          {source}
-                                        </a>
-                                      ) : (
-                                        <div key={source} className="break-words">
-                                          {source}
-                                        </div>
-                                      ),
-                                    )}
-                                    {entry.webSources.length > 4 ? (
-                                      <div>
-                                        +{entry.webSources.length - 4} more source
-                                        {entry.webSources.length - 4 === 1
-                                          ? ""
-                                          : "s"}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                                {showNoSearchWarning ? (
-                                  <div className="font-medium text-amber-700">
-                                    Warning: This model can use live web data, but no
-                                    search was actually used in this run.
-                                  </div>
-                                ) : null}
-                                {showNoSourcesWarning ? (
-                                  <div className="font-medium text-amber-700">
-                                    Warning: Live web/search ran, but no sources were
-                                    returned or saved.
-                                  </div>
-                                ) : null}
-                                {invalidWarning ? (
-                                  <div className="font-medium text-rose-700">
-                                    Invalid/stale warning: {invalidWarning}
-                                  </div>
-                                ) : null}
-                                {entry.rationaleOddsMismatchReason ? (
-                                  <div className="font-medium text-orange-700">
-                                    Mismatch warning: {entry.rationaleOddsMismatchReason}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
-              No per-model LLM breakdown is available for this question yet.
-            </div>
-          )}
+          <BullpenEventHistoricalAssessmentTable
+            question={question}
+            runs={historicalRuns}
+            decisions={historicalDecisions}
+          />
         </div>
       </div>
       {isCriteriaOpen ? (

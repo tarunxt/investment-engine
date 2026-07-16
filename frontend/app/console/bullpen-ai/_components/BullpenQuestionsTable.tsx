@@ -27,6 +27,7 @@ import {
 } from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import type { BullpenAutoLiveDecision, BullpenAutoLiveRun } from "@/types/api";
 import {
   BULLPEN_TABLE_COLUMN_IDS,
   DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS,
@@ -716,6 +717,8 @@ export function BullpenQuestionsTable({
   emptyMessage,
   headerContent,
   isLoading,
+  historicalRuns,
+  historicalDecisions,
   onSortChange,
   selectedQuestionIds,
   selectionEnabled,
@@ -732,6 +735,8 @@ export function BullpenQuestionsTable({
   emptyMessage: string;
   headerContent?: ReactNode;
   isLoading: boolean;
+  historicalRuns?: BullpenAutoLiveRun[];
+  historicalDecisions?: BullpenAutoLiveDecision[];
   onSortChange: (key: BullpenTableSortKey) => void;
   selectedQuestionIds: Set<string>;
   selectionEnabled: boolean;
@@ -1117,6 +1122,8 @@ export function BullpenQuestionsTable({
       {breakdownQuestion ? (
         <BullpenLlmBreakdownDialog
           question={breakdownQuestion}
+          historicalRuns={historicalRuns}
+          historicalDecisions={historicalDecisions}
           onClose={() => setBreakdownQuestion(null)}
         />
       ) : null}

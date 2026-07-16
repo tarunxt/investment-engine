@@ -1451,6 +1451,9 @@ function BullpenAiPageContent() {
   const [recentAutoRunDecisions, setRecentAutoRunDecisions] = useState<
     BullpenAutoLiveDecision[]
   >([]);
+  const [historicalAutoRunRuns, setHistoricalAutoRunRuns] = useState<
+    BullpenAutoLiveRun[]
+  >([]);
   const [activePositions, setActivePositions] = useState<
     BullpenActivePositionView[]
   >([]);
@@ -3627,6 +3630,7 @@ function BullpenAiPageContent() {
             summary.settings.llm_events_per_prompt ??
               DEFAULT_BULLPEN_LLM_EVENTS_PER_PROMPT,
           );
+          setHistoricalAutoRunRuns(summary.recent_runs ?? []);
           setRecentAutoRunDecisions(summary.recent_decisions ?? []);
           setAutoRunLastCompletedAt(getLatestBullpenAutoRunCompletedAt(summary));
           setAutoSnapshotsByMode((current) =>
@@ -4216,6 +4220,7 @@ function BullpenAiPageContent() {
               )}
               positionsSource={positionsSource}
               progressMessage={isManualScanView ? investmentProgress : null}
+              historicalRuns={historicalAutoRunRuns}
               recentDecisions={recentAutoRunDecisions}
               resultMessage={isManualScanView ? investmentNotice : null}
               latestCompletedLlmRunId={latestCompletedLlmRunId}
@@ -4305,6 +4310,8 @@ function BullpenAiPageContent() {
               </>
             }
             isLoading={isManualScanView && isScanning}
+            historicalRuns={historicalAutoRunRuns}
+            historicalDecisions={recentAutoRunDecisions}
             onSortChange={setActiveSort}
             selectedQuestionIds={visibleSelectedQuestionIdSet}
             selectionEnabled={selectionEnabled}

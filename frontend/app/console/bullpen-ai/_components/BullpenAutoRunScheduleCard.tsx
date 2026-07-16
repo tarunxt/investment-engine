@@ -76,6 +76,7 @@ import {
 } from "./bullpenAutoRunInvestMetrics";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
+import { BullpenEventHistoricalAssessmentTable } from "./BullpenEventHistoricalAssessmentTable";
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
@@ -6712,6 +6713,7 @@ function BullpenPortfolioSnapshot({
   activePositionQuestions,
   hasActivePositionsSnapshot,
   refreshing,
+  historicalRuns,
   recentDecisions,
   onRefresh,
 }: {
@@ -6723,6 +6725,7 @@ function BullpenPortfolioSnapshot({
   activePositionQuestions: BullpenQuestionRow[];
   hasActivePositionsSnapshot: boolean;
   refreshing: boolean;
+  historicalRuns: BullpenAutoLiveRun[];
   recentDecisions: BullpenAutoLiveDecision[];
   onRefresh: () => void;
 }) {
@@ -7169,8 +7172,8 @@ function BullpenPortfolioSnapshot({
       ) : null}
       {activePositionDetail ? (
         <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
-          <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
+          <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">
                   Active position details
@@ -7188,72 +7191,84 @@ function BullpenPortfolioSnapshot({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              {[
-                [
-                  "Category",
-                  getPositionCategory(
-                    activePositionDetail,
-                    activePositionQuestionByKey.get(activePositionDetail.key),
-                  ),
-                ],
-                ["Outcome", activePositionDetail.outcome || "—"],
-                [
-                  "Amount invested",
-                  formatMoney(activePositionDetail.costBasis),
-                ],
-                [
-                  "Current value",
-                  formatMoney(activePositionDetail.currentValue),
-                ],
-                [
-                  "Current odds",
-                  `Yes: ${formatOddsPercent(activePositionDetail.yesOdds)} · No: ${formatOddsPercent(activePositionDetail.noOdds)}`,
-                ],
-                [
-                  "LLM odds",
-                  (() => {
-                    const odds = getPositionLlmOdds(
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  [
+                    "Category",
+                    getPositionCategory(
                       activePositionDetail,
                       activePositionQuestionByKey.get(activePositionDetail.key),
-                    );
-                    return odds.completedAt
-                      ? `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.source} at ${formatIstDateTime(odds.completedAt)}`
-                      : `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.error ?? "LLM odds are unavailable."}`;
-                  })(),
-                ],
-                [
-                  "Closing time",
-                  formatIstDateTime(activePositionDetail.closeTime),
-                ],
-                [
-                  "Returns/day",
-                  formatReturnsPerDay(activePositionDetail.returnsPerDay),
-                ],
-              ].map(([label, value]) => (
-                <div
-                  key={label}
-                  className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                    ),
+                  ],
+                  ["Outcome", activePositionDetail.outcome || "—"],
+                  [
+                    "Amount invested",
+                    formatMoney(activePositionDetail.costBasis),
+                  ],
+                  [
+                    "Current value",
+                    formatMoney(activePositionDetail.currentValue),
+                  ],
+                  [
+                    "Current odds",
+                    `Yes: ${formatOddsPercent(activePositionDetail.yesOdds)} · No: ${formatOddsPercent(activePositionDetail.noOdds)}`,
+                  ],
+                  [
+                    "LLM odds",
+                    (() => {
+                      const odds = getPositionLlmOdds(
+                        activePositionDetail,
+                        activePositionQuestionByKey.get(activePositionDetail.key),
+                      );
+                      return odds.completedAt
+                        ? `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.source} at ${formatIstDateTime(odds.completedAt)}`
+                        : `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.error ?? "LLM odds are unavailable."}`;
+                    })(),
+                  ],
+                  [
+                    "Closing time",
+                    formatIstDateTime(activePositionDetail.closeTime),
+                  ],
+                  [
+                    "Returns/day",
+                    formatReturnsPerDay(activePositionDetail.returnsPerDay),
+                  ],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                  >
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                      {label}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              {activePositionDetail.marketUrl ? (
+                <a
+                  href={activePositionDetail.marketUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-5 inline-flex text-sm font-semibold text-purple-700 hover:text-purple-900 hover:underline"
                 >
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                    {label}
-                  </p>
-                  <p className="mt-2 text-sm font-semibold text-slate-900">
-                    {value}
-                  </p>
-                </div>
-              ))}
+                  Open market
+                </a>
+              ) : null}
+              <div className="mt-6">
+                <BullpenEventHistoricalAssessmentTable
+                  question={
+                    activePositionQuestionByKey.get(activePositionDetail.key) ?? null
+                  }
+                  position={activePositionDetail}
+                  runs={historicalRuns}
+                  decisions={recentDecisions}
+                />
+              </div>
             </div>
-            {activePositionDetail.marketUrl ? (
-              <a
-                href={activePositionDetail.marketUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-5 inline-flex text-sm font-semibold text-purple-700 hover:text-purple-900 hover:underline"
-              >
-                Open market
-              </a>
-            ) : null}
           </div>
         </div>
       ) : null}
@@ -7543,7 +7558,28 @@ export function BullpenAutoRunScheduleCard({
       setLoading(true);
     }
     try {
-      const nextSummary = await apiService.getBullpenAutoLiveSummary();
+      const [summaryResult, runsResult, decisionsResult] = await Promise.allSettled([
+        apiService.getBullpenAutoLiveSummary(),
+        apiService.getBullpenAutoLiveRuns(),
+        apiService.getBullpenAutoLiveDecisions(),
+      ]);
+      if (summaryResult.status !== "fulfilled") {
+        throw summaryResult.reason;
+      }
+      const nextSummary = {
+        ...summaryResult.value,
+        latest_run:
+          summaryResult.value.latest_run ??
+          (runsResult.status === "fulfilled" ? runsResult.value[0] ?? null : null),
+        recent_runs:
+          runsResult.status === "fulfilled"
+            ? runsResult.value
+            : summaryResult.value.recent_runs,
+        recent_decisions:
+          decisionsResult.status === "fulfilled"
+            ? decisionsResult.value
+            : summaryResult.value.recent_decisions,
+      };
       setSummary(nextSummary);
       setError(null);
       const nextTrackedRun = getVisibleRun(
@@ -8206,6 +8242,7 @@ export function BullpenAutoRunScheduleCard({
           activePositionQuestions={activePositionQuestions}
           hasActivePositionsSnapshot={hasActivePositionsSnapshot}
           refreshing={action === "balance"}
+          historicalRuns={summary?.recent_runs ?? []}
           recentDecisions={recentDecisions}
           onRefresh={() => void refreshPortfolioSnapshot(true)}
         />

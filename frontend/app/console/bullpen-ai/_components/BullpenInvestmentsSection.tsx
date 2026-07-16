@@ -29,7 +29,7 @@ import type {
   BullpenPositionsSource,
 } from "@/lib/bullpenPositions";
 import { cn } from "@/lib/utils";
-import type { BullpenAutoLiveDecision } from "@/types/api";
+import type { BullpenAutoLiveDecision, BullpenAutoLiveRun } from "@/types/api";
 import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
@@ -64,6 +64,7 @@ type BullpenInvestmentsSectionProps = {
   sectionsLastRefreshedAt?: string | null;
   positionsSource: BullpenPositionsSource | null;
   progressMessage: string | null;
+  historicalRuns: BullpenAutoLiveRun[];
   recentDecisions: BullpenAutoLiveDecision[];
   resultMessage: string | null;
   latestCompletedLlmRunId?: string | number | null;
@@ -556,6 +557,7 @@ export function BullpenInvestmentsSection({
   sectionsLastRefreshedAt,
   positionsSource,
   progressMessage,
+  historicalRuns,
   recentDecisions,
   resultMessage,
   latestCompletedLlmRunId,
@@ -1086,6 +1088,8 @@ export function BullpenInvestmentsSection({
       {breakdownQuestion ? (
         <BullpenLlmBreakdownDialog
           question={breakdownQuestion}
+          historicalRuns={historicalRuns}
+          historicalDecisions={recentDecisions}
           onClose={() => setBreakdownQuestion(null)}
         />
       ) : null}
