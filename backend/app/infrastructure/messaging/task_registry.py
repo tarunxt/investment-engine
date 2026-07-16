@@ -85,6 +85,11 @@ def _revoke_task(task_id: str) -> None:
         logger.exception("Failed to revoke Celery task %s", task_id)
 
 
+def revoke_auto_live_run_task_sync(task_id: str) -> None:
+    """Terminate a known Auto-Live task after its run has exceeded its safety limit."""
+    _revoke_task(task_id)
+
+
 async def register_job_task(job_id: int, task_id: str) -> None:
     await _store_task_id_async(_job_task_key(job_id), task_id)
 
