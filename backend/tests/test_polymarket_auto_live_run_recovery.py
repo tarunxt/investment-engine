@@ -192,6 +192,54 @@ def test_reconcile_running_auto_live_run_keeps_healthy_worker_running():
     assert run.status == "running"
 
 
+def test_reconcile_running_auto_live_run_terminates_active_worker_at_maximum_runtime(
+    monkeypatch,
+):
+    run = BullpenAutoLiveRun(
+        id="run-over-limit",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 2 started.",
+        stage_results=[
+            _stage_result(
+                stage_number=2,
+                workflow_stage_key="llm",
+                phase_status="running",
+                reason="Stage 2 reviewed 1 of 15 events.",
+                completed_at=None,
+            )
+        ],
+    )
+    revoked_task_ids: list[str] = []
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.revoke_auto_live_run_task_sync",
+        revoked_task_ids.append,
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 14, 1, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 14, 1, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-task-over-limit",
+            state="STARTED",
+            is_active=True,
+            inspect_succeeded=True,
+        ),
+    )
+
+    assert recovered is run
+    assert revoked_task_ids == ["celery-task-over-limit"]
+    assert recovered.status == "failed"
+    assert recovered.error_message is not None
+    assert "120-minute maximum runtime" in recovered.error_message
+    assert "termination was requested" in recovered.error_message
+    assert recovered.stage_results[-1].outputs["phase_status"] == "failed"
+
+
 def test_reconcile_running_auto_live_run_surfaces_terminal_celery_failure_detail():
     run = BullpenAutoLiveRun(
         id="run-terminal-failure",

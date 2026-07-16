@@ -12,12 +12,17 @@ from app.domains.polymarket_auto_live.schemas import (
 from app.infrastructure.messaging.celery_app import celery
 from app.infrastructure.messaging.task_registry import (
     get_registered_auto_live_run_task_id_sync,
+    revoke_auto_live_run_task_sync,
 )
 
 logger = get_logger("app.domains.polymarket_auto_live.run_recovery")
 
 AUTO_LIVE_RUN_HEARTBEAT_TIMEOUT = timedelta(minutes=15)
-AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT = timedelta(hours=6)
+# A run that has not reached a terminal state by this point is unsafe to leave
+# executing, even when Celery still reports its process as active.  Individual
+# provider calls have much shorter timeouts, so this is a workflow circuit
+# breaker rather than the normal execution path.
+AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT = timedelta(hours=2)
 TASK_INSPECT_TIMEOUT_SECONDS = 1.0
 
 _PENDING_STAGE3_ORDER_DETAIL = "Order planned but not executed yet."
@@ -454,6 +459,18 @@ def _build_stalled_run_failure_message(
     task_snapshot: AutoLiveTaskRuntimeSnapshot,
 ) -> str | None:
     normalized_state = (task_snapshot.state or "").strip().upper()
+    if absolute_age >= AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT:
+        elapsed_minutes = max(1, int(absolute_age.total_seconds() // 60))
+        task_detail = (
+            f" Worker task {task_snapshot.task_id} termination was requested."
+            if task_snapshot.task_id
+            else ""
+        )
+        return (
+            f"Auto-Live exceeded its {int(AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT.total_seconds() // 60)}-minute "
+            f"maximum runtime ({elapsed_minutes} minutes)."
+            f"{task_detail} Please rerun."
+        )
     if task_snapshot.is_live:
         return None
 
@@ -515,6 +532,17 @@ def reconcile_running_auto_live_run(
     )
     if failure_message is None:
         return None
+
+    # Do not leave an over-limit task executing after the persisted run has
+    # been marked failed; it could otherwise continue into later workflow
+    # stages or submit orders after the dashboard reports failure.
+    absolute_age = max(reference_now - normalized_started_at, timedelta())
+    if (
+        absolute_age >= AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT
+        and runtime_snapshot.task_id
+        and runtime_snapshot.is_live
+    ):
+        revoke_auto_live_run_task_sync(runtime_snapshot.task_id)
 
     completed_at = reference_now.isoformat()
     run.status = "failed"

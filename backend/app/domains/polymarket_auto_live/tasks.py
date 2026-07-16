@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy import and_, select
 
 from app.core.logging import get_logger
@@ -130,8 +131,11 @@ def _synchronize_state(
     bind=True,
     max_retries=2,
     default_retry_delay=30,
-    soft_time_limit=60 * 60 * 6,
-    time_limit=(60 * 60 * 6) + (5 * 60),
+    # Keep this aligned with AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT.  The soft limit
+    # lets the task persist a failed run; the hard limit is the final guard
+    # against a worker process stuck in an uninterruptible call.
+    soft_time_limit=60 * 60 * 2,
+    time_limit=(60 * 60 * 2) + 60,
     name="app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run",
     queue="ai",
 )
@@ -175,7 +179,7 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             sanitized_error = redact_secrets(str(exc))
             current_retries = int(getattr(self.request, "retries", 0) or 0)
             max_retries = int(getattr(self, "max_retries", 0) or 0)
-            if current_retries < max_retries:
+            if current_retries < max_retries and not isinstance(exc, SoftTimeLimitExceeded):
                 retry_number = current_retries + 1
                 run.status = "running"
                 run.completed_at = None
