@@ -257,11 +257,22 @@ export function BullpenEventHistoricalAssessmentTable({
       }),
     [decisions, position, question, runs],
   );
-  const visibleRows = hideInvalidRows
-    ? historicalRows.filter((row) => !isBullpenHistoricalAssessmentRowInvalid(row))
-    : historicalRows;
-  const groups = buildBullpenHistoricalAssessmentGroups(visibleRows);
-  const hiddenInvalidCount = historicalRows.length - visibleRows.length;
+  const groups = useMemo(() => {
+    const historicalGroups = buildBullpenHistoricalAssessmentGroups(historicalRows);
+
+    if (!hideInvalidRows) return historicalGroups;
+
+    return historicalGroups.flatMap((group) => {
+      const visibleRows = group.rows.filter(
+        (row) => !isBullpenHistoricalAssessmentRowInvalid(row),
+      );
+
+      return visibleRows.length > 0 ? [{ ...group, rows: visibleRows }] : [];
+    });
+  }, [hideInvalidRows, historicalRows]);
+  const hiddenInvalidCount = hideInvalidRows
+    ? historicalRows.length - groups.reduce((count, group) => count + group.rows.length, 0)
+    : 0;
 
   return (
     <div
