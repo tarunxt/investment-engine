@@ -13,6 +13,7 @@ import pytest
 from app.domains.polymarket_auto_live.bot import BullpenAutoLiveBot
 from app.domains.polymarket_auto_live.run_recovery import (
     AutoLiveTaskRuntimeSnapshot,
+    inspect_auto_live_run_task_sync,
     reconcile_running_auto_live_run,
 )
 from app.domains.polymarket_auto_live.schemas import (
@@ -107,6 +108,53 @@ def test_reconcile_running_auto_live_run_completes_when_stage3_is_already_termin
         recovered.summary
         == "Auto-Live completed with 15 decisions, 2 planned orders, and 2 submitted orders."
     )
+
+
+def test_task_inspection_reuses_a_recent_snapshot(monkeypatch):
+    calls = {"query_task": 0}
+
+    class _FakeAsyncResult:
+        state = "STARTED"
+
+    class _FakeInspector:
+        def query_task(self, task_id: str):
+            calls["query_task"] += 1
+            return {"worker": {"id": task_id}}
+
+        def reserved(self):
+            return {}
+
+        def scheduled(self):
+            return {}
+
+    class _FakeControl:
+        def inspect(self, *, timeout: float):
+            assert timeout == 1.0
+            return _FakeInspector()
+
+    class _FakeCelery:
+        control = _FakeControl()
+
+        @staticmethod
+        def AsyncResult(task_id: str):
+            assert task_id == "task-cache-test"
+            return _FakeAsyncResult()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.get_registered_auto_live_run_task_id_sync",
+        lambda run_id: "task-cache-test",
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.celery",
+        _FakeCelery(),
+    )
+
+    first = inspect_auto_live_run_task_sync("run-cache-test")
+    second = inspect_auto_live_run_task_sync("run-cache-test")
+
+    assert first is second
+    assert first.is_active is True
+    assert calls == {"query_task": 1}
 
 
 def test_reconcile_running_auto_live_run_marks_stalled_worker_failed():

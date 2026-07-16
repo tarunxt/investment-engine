@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -24,6 +26,10 @@ AUTO_LIVE_RUN_HEARTBEAT_TIMEOUT = timedelta(minutes=15)
 # breaker rather than the normal execution path.
 AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT = timedelta(hours=2)
 TASK_INSPECT_TIMEOUT_SECONDS = 1.0
+# Dashboard polling must not turn a running workflow into repeated Celery
+# broadcast inspections. Cache the result briefly; a fresh inspection still
+# occurs quickly enough for recovery while concurrent HTTP requests share it.
+TASK_INSPECTION_CACHE_TTL_SECONDS = 10.0
 
 _PENDING_STAGE3_ORDER_DETAIL = "Order planned but not executed yet."
 _TERMINAL_CELERY_STATES = frozenset({"SUCCESS", "FAILURE", "REVOKED"})
@@ -56,6 +62,10 @@ class AutoLiveTaskRuntimeSnapshot:
             or self.is_reserved
             or self.is_scheduled
         )
+
+
+_task_inspection_cache: dict[str, tuple[float, AutoLiveTaskRuntimeSnapshot]] = {}
+_task_inspection_cache_lock = threading.Lock()
 
 
 def _utc_now() -> datetime:
@@ -325,6 +335,30 @@ def finalize_failed_run_progress(
 
 
 def inspect_auto_live_run_task_sync(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
+    """Read one run's Celery state without multiplying broker inspections.
+
+    The Auto-Live console polls while a run is executing. Celery inspect uses
+    broadcast RPCs, so duplicate polling requests can otherwise accumulate
+    faster than workers reply and make the API unavailable behind nginx.
+    """
+    now = time.monotonic()
+    with _task_inspection_cache_lock:
+        cached = _task_inspection_cache.get(run_id)
+        if cached is not None and now - cached[0] < TASK_INSPECTION_CACHE_TTL_SECONDS:
+            return cached[1]
+
+        snapshot = _inspect_auto_live_run_task_uncached(run_id)
+        _task_inspection_cache[run_id] = (now, snapshot)
+        # Keep the process-local cache bounded when many historical runs have
+        # been inspected. Expired entries are never needed for recovery.
+        expired_before = now - TASK_INSPECTION_CACHE_TTL_SECONDS
+        for cached_run_id, (cached_at, _) in tuple(_task_inspection_cache.items()):
+            if cached_at < expired_before:
+                _task_inspection_cache.pop(cached_run_id, None)
+        return snapshot
+
+
+def _inspect_auto_live_run_task_uncached(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
     task_id = get_registered_auto_live_run_task_id_sync(run_id)
     if not task_id:
         return AutoLiveTaskRuntimeSnapshot(

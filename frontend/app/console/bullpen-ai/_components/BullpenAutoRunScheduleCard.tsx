@@ -239,7 +239,10 @@ const DEFAULT_CONSOLE_ORDER_USD = 5;
 const CONSOLE_MAX_ACTIVE_POSITIONS = 10;
 const DEFAULT_LLM_EXECUTION_MODE: BullpenLlmExecutionMode = "chunked_parallel";
 const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
-const POLL_INTERVAL_MS = 4_000;
+// The summary already includes the recent runs and decisions. Refreshing it at
+// this cadence keeps run progress visible without saturating the backend while
+// a long-running Auto-Live task is active.
+const POLL_INTERVAL_MS = 10_000;
 const RUN_TIMER_INTERVAL_MS = 1_000;
 
 function formatIstScheduleSummaryDate(value: string) {
@@ -6860,6 +6863,7 @@ export function BullpenAutoRunScheduleCard({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
+  const summaryLoadInFlightRef = useRef(false);
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
@@ -7047,54 +7051,30 @@ export function BullpenAutoRunScheduleCard({
     preserveLoading?: boolean;
     nextPendingRunId?: string | null;
   }) {
+    // setInterval does not wait for an async callback. Do not pile up requests
+    // if the API is slow (for example while Celery is reporting run status).
+    if (summaryLoadInFlightRef.current) return null;
+    summaryLoadInFlightRef.current = true;
+
     let loadingCleared = Boolean(options?.preserveLoading);
     const resolvedPendingRunId = options?.nextPendingRunId ?? pendingRunId;
     if (!options?.preserveLoading) {
       setLoading(true);
     }
     try {
-      const summaryPromise = apiService.getBullpenAutoLiveSummary();
-      const runsPromise = apiService.getBullpenAutoLiveRuns();
-      const decisionsPromise = apiService.getBullpenAutoLiveDecisions();
-      const baseSummary = await summaryPromise;
-      setSummary(baseSummary);
-      setError(null);
-      const baseTrackedRun = getVisibleRun(baseSummary, resolvedPendingRunId);
-      onSummaryUpdated?.({
-        summary: baseSummary,
-        run: baseTrackedRun,
-        pendingRunId: resolvedPendingRunId,
-      });
-      if (!loadingCleared) {
-        setLoading(false);
-        loadingCleared = true;
-      }
-
-      const [runsResult, decisionsResult] = await Promise.allSettled([
-        runsPromise,
-        decisionsPromise,
-      ]);
-      const nextSummary = {
-        ...baseSummary,
-        latest_run:
-          baseSummary.latest_run ??
-          (runsResult.status === "fulfilled" ? runsResult.value[0] ?? null : null),
-        recent_runs:
-          runsResult.status === "fulfilled"
-            ? runsResult.value
-            : baseSummary.recent_runs,
-        recent_decisions:
-          decisionsResult.status === "fulfilled"
-            ? decisionsResult.value
-            : baseSummary.recent_decisions,
-      };
+      const nextSummary = await apiService.getBullpenAutoLiveSummary();
       setSummary(nextSummary);
+      setError(null);
       const nextTrackedRun = getVisibleRun(nextSummary, resolvedPendingRunId);
       onSummaryUpdated?.({
         summary: nextSummary,
         run: nextTrackedRun,
         pendingRunId: resolvedPendingRunId,
       });
+      if (!loadingCleared) {
+        setLoading(false);
+        loadingCleared = true;
+      }
       return nextSummary;
     } catch (nextError) {
       setError(normalizeError(nextError));
@@ -7103,6 +7083,7 @@ export function BullpenAutoRunScheduleCard({
       if (!loadingCleared) {
         setLoading(false);
       }
+      summaryLoadInFlightRef.current = false;
     }
   }
 
