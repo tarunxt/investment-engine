@@ -76,3 +76,8 @@ assert.match(source, /selectedRows.*SELL|side === "SELL"/s);
 assert.match(source, /allowFractionalSellUnits\?: boolean/);
 assert.match(source, /allowFractionalUnits \? availableUnits : Math\.floor\(availableUnits\)/);
 assert.match(source, /buildZerodhaBasketPreviewOrders\(actionRows, technicalScans, null, \{ allowFractionalSellUnits: true \}\)/);
+
+assert.match(source, /function hasActiveWorkflowStage\(/);
+assert.match(source, /\["queued", "running"\]\.includes\(states\[portfolio\]\[stage\]\.state\)/);
+assert.match(source, /const showPauseKillControls = isSectionRunning \|\| hasActiveStage;/);
+assert.match(source, /showPauseKillControls \? \(/);
