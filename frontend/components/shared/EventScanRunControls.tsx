@@ -52,6 +52,7 @@ interface EventScanRunControlsBaseProps {
   historicalEstimatedCostInrByTarget?: Record<string, number>;
   pickerHeaderContent?: ReactNode;
   pickerButtonClassName?: string;
+  pickerDescription?: string;
   pickerDialogLabel?: string;
   pickerIcon?: ReactNode;
   pickerPlacement?: "anchored" | "center";
@@ -369,6 +370,7 @@ export function EventScanRunControls({
   historicalEstimatedCostInrByTarget,
   pickerHeaderContent,
   pickerButtonClassName,
+  pickerDescription,
   pickerDialogLabel = "Select LLMs",
   pickerIcon,
   pickerPlacement = "anchored",
@@ -791,9 +793,10 @@ export function EventScanRunControls({
                       {pickerDialogLabel}
                     </h2>
                     <p className="text-sm text-slate-500">
-                      {selectionMode === "multiple"
-                        ? "Choose one or more models for this run."
-                        : "Choose the model for this run."}
+                      {pickerDescription ??
+                        (selectionMode === "multiple"
+                          ? "Choose one or more models for this run."
+                          : "Choose the model for this run.")}
                     </p>
                   </div>
                   <button

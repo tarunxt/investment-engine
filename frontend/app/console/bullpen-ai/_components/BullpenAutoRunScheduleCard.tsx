@@ -8810,6 +8810,11 @@ export function BullpenAutoRunScheduleCard({
                           onRunMultiple={() => undefined}
                           onSelectionChange={handleSelectedLlmTargetsChange}
                           pickerDialogLabel="Select LLMs"
+                          pickerDescription={
+                            stage.isCurrent
+                              ? "Changes are saved for the next run. The running Stage 2 job uses the frozen target list shown in its progress details."
+                              : undefined
+                          }
                           pickerIcon={<Bot className="h-5 w-5" />}
                           pickerPlacement="center"
                           pickerButtonClassName={`h-10 w-10 rounded-full bg-white/75 dark:bg-slate-950/80 ${toneClasses.badge}`}
