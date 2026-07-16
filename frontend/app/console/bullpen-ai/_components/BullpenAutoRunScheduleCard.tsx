@@ -7705,12 +7705,6 @@ export function BullpenAutoRunScheduleCard({
       summary?.state.last_console_trade_max_positions ?? null,
   });
   const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
-  const tradeAmountHelperMessage =
-    tradeAmountView.source === "live"
-      ? "Uses current cash in hand divided by the remaining open top-10 slots."
-      : tradeAmountView.source === "last-calculated"
-        ? "Showing the last calculated amount until the next fresh balance sync finishes."
-        : "Waiting for Bullpen cash in hand and active positions to calculate this amount.";
   const tradeAmountSummaryLabel =
     tradeAmountView.source === "live"
       ? "Auto-calculated from current portfolio"
@@ -7850,9 +7844,6 @@ export function BullpenAutoRunScheduleCard({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                 <span>Trade amount per new opportunity</span>
-                <span className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] tracking-[0.12em] text-white">
-                  {tradeAmountDisplay}
-                </span>
                 <button
                   type="button"
                   onClick={() => setIsTradeAmountInfoDialogOpen(true)}
@@ -7870,9 +7861,6 @@ export function BullpenAutoRunScheduleCard({
                   {tradeAmountDisplay}
                 </span>
               </div>
-              <p className="mt-2 text-xs leading-5 text-slate-600">
-                {tradeAmountHelperMessage}
-              </p>
             </div>
             <div className="min-w-0">
               <label
