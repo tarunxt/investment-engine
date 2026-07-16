@@ -85,6 +85,11 @@ import {
   type BullpenTableSortState,
 } from "./BullpenQuestionsTable";
 import {
+  buildStageTwoEventsSummaryRows as buildHistoricalStageTwoEventsSummaryRows,
+  getStageTwoLlmReviewedRows as getHistoricalStageTwoLlmReviewedRows,
+  getStageTwoLlmTableRows as getHistoricalStageTwoLlmTableRows,
+} from "./bullpenAutoRunStageTwoHistory";
+import {
   formatElapsedRunTime,
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
@@ -3851,22 +3856,6 @@ function readLlmContextRecord(
     : null;
 }
 
-function readStageTwoLlmTimestamp(
-  output: Record<string, unknown> | null,
-  row: Record<string, unknown> | null,
-) {
-  return (
-    readLlmContextString(output, "completed_at") ??
-    readLlmContextString(output, "created_at") ??
-    readLlmContextString(output, "started_at") ??
-    readLlmContextString(row, "llm_completed_at") ??
-    readLlmContextString(row, "completed_at") ??
-    readLlmContextString(row, "llm_run_at") ??
-    readLlmContextString(row, "scanned_at") ??
-    null
-  );
-}
-
 function readLlmContextArray(
   record: Record<string, unknown> | null,
   key: string,
@@ -3880,122 +3869,7 @@ function getStageTwoLlmReviewedRows(
   stage: WorkflowStageView,
   scanCandidates: WorkflowStageView["scanCandidates"] = [],
 ) {
-  const persistedRows = Array.isArray(stage.outputs.llm_reviewed_candidates)
-    ? stage.outputs.llm_reviewed_candidates.filter(
-        (row): row is Record<string, unknown> =>
-          Boolean(row) && typeof row === "object",
-      )
-    : [];
-  const rowsByKey = new Map<string, Record<string, unknown>>();
-
-  const addRow = (row: Record<string, unknown>) => {
-    const keys = [
-      row.market_id,
-      row.marketId,
-      row.question_id,
-      row.questionId,
-      row.slug,
-      row.market_url,
-      row.marketUrl,
-      row.question,
-      row.market_title,
-    ]
-      .map((value) =>
-        getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
-      )
-      .filter((key): key is string => Boolean(key));
-    rowsByKey.set(keys[0] ?? `row-${rowsByKey.size}`, row);
-  };
-
-  persistedRows.forEach(addRow);
-
-  const candidateRows = scanCandidates.map((candidate) => ({
-    market_id: candidate.marketId,
-    question_id: candidate.questionId,
-    question: candidate.question,
-    market_title: candidate.question,
-    close_time: candidate.closeTime,
-    category: candidate.theme,
-    theme: candidate.theme,
-    current_yes_odds: candidate.currentYesOdds,
-    current_no_odds: candidate.currentNoOdds,
-    market_url: candidate.marketUrl,
-    slug: candidate.slug,
-  }));
-  const candidateByKey = new Map<string, Record<string, unknown>>();
-  candidateRows.forEach((candidate) => {
-    [
-      candidate.market_id,
-      candidate.question_id,
-      candidate.slug,
-      candidate.market_url,
-      candidate.question,
-    ]
-      .map((value) =>
-        getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
-      )
-      .filter((key): key is string => Boolean(key))
-      .forEach((key) => candidateByKey.set(key, candidate));
-  });
-
-  getStageTwoLlmTargetRuns(stage).forEach((run) => {
-    const eventOutputs = readLlmContextArray(run, "event_outputs");
-    const runCost =
-      readLlmContextNumber(run, "estimated_cost") ??
-      readLlmContextNumber(run, "cost");
-    const perEventCost =
-      eventOutputs.length > 0 && runCost !== null
-        ? runCost / eventOutputs.length
-        : null;
-    eventOutputs.forEach((item) => {
-      if (!item || typeof item !== "object") return;
-      const record = item as Record<string, unknown>;
-      const output = readLlmContextRecord(record, "output");
-      if (!output) return;
-      const outputKeys = [record.market_id, record.question_id]
-        .map((value) =>
-          getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
-        )
-        .filter((key): key is string => Boolean(key));
-      const existingRow = outputKeys
-        .map((key) => rowsByKey.get(key))
-        .find(Boolean);
-      const candidateRow = outputKeys
-        .map((key) => candidateByKey.get(key))
-        .find(Boolean);
-      const row = existingRow ?? { ...(candidateRow ?? {}) };
-      row.llm_outputs = [
-        ...getStageTwoLlmOutputs(row),
-        {
-          ...output,
-          provider:
-            readLlmContextString(output, "provider") ??
-            readLlmContextString(run, "provider"),
-          model:
-            readLlmContextString(output, "model") ??
-            readLlmContextString(run, "model"),
-          estimated_cost:
-            readStageTwoLlmOutputCost(output) ?? perEventCost ?? undefined,
-        },
-      ];
-      if (!row.market_id && typeof record.market_id === "string")
-        row.market_id = record.market_id;
-      if (!row.question_id && typeof record.question_id === "string")
-        row.question_id = record.question_id;
-      addRow(row);
-    });
-  });
-
-  return [...rowsByKey.values()];
-}
-
-function getStageTwoLlmOutputs(row: Record<string, unknown>) {
-  const outputs = row.llm_outputs;
-  if (!Array.isArray(outputs)) return [];
-  return outputs.filter(
-    (output): output is Record<string, unknown> =>
-      Boolean(output) && typeof output === "object",
-  );
+  return getHistoricalStageTwoLlmReviewedRows(stage, scanCandidates);
 }
 
 function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
@@ -4005,222 +3879,26 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
           (workflowStage) => workflowStage.key === "scan",
         )?.scanCandidates ?? [])
       : [];
-  const rows = getStageTwoLlmReviewedRows(state.stage, scanCandidates);
-  const decisionByKey = new Map<string, BullpenAutoLiveDecision>();
-  state.decisions.forEach((decision) => {
-    [
-      decision.market_id,
-      decision.slug ?? null,
-      decision.market_url ?? null,
-      decision.market_title,
-    ]
-      .map(getStageTwoBreakupMatchKey)
-      .filter((key): key is string => Boolean(key))
-      .forEach((key) => decisionByKey.set(key, decision));
-  });
-
-  return rows.flatMap((row, rowIndex) => {
-    const rowKeys = [
-      row.market_id,
-      row.slug,
-      row.market_url,
-      row.question,
-      row.market_title,
-    ]
-      .map((value) =>
-        getStageTwoBreakupMatchKey(typeof value === "string" ? value : null),
-      )
-      .filter((key): key is string => Boolean(key));
-    const decision =
-      rowKeys.map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
-    const outputs = getStageTwoLlmOutputs(row);
-    const title =
-      readLlmContextString(row, "question") ??
-      readLlmContextString(row, "market_title") ??
-      decision?.market_title ??
-      `Event ${rowIndex + 1}`;
-    const closeTime =
-      readLlmContextString(row, "close_time") ??
-      readLlmContextString(row, "end_date") ??
-      decision?.close_time ??
-      null;
-    const currentYesOdds =
-      readLlmContextNumber(row, "current_yes_odds") ??
-      readLlmContextNumber(row, "current_yes_odds_pct") ??
-      readLlmContextNumber(row, "yes_price_pct") ??
-      decision?.current_yes_odds ??
-      null;
-    const currentNoOdds =
-      readLlmContextNumber(row, "current_no_odds") ??
-      readLlmContextNumber(row, "current_no_odds_pct") ??
-      decision?.current_no_odds ??
-      (currentYesOdds === null
-        ? null
-        : Number((100 - currentYesOdds).toFixed(4)));
-    const base = outputs.length ? outputs : [null];
-    return base.map((output, outputIndex) => {
-      const outputYesOdds =
-        readLlmContextNumber(output, "yes_odds") ??
-        readLlmContextNumber(output, "llm_yes_odds");
-      const outputNoOdds =
-        readLlmContextNumber(output, "no_odds") ??
-        readLlmContextNumber(output, "llm_no_odds");
-      const hasProviderOutput = Boolean(output);
-      return {
-        id: `${rowIndex}-${outputIndex}-${title}`,
-        title,
-        row,
-        output,
-        decision,
-        provider: readLlmContextString(output, "provider") ?? "—",
-        model: readLlmContextString(output, "model") ?? "—",
-        sourceTimestamp: readStageTwoLlmTimestamp(output, row),
-        serialNumber: rowIndex + 1,
-        question: title,
-        closeTime,
-        daysLeft: calculateDaysUntilClose(closeTime),
-        category:
-          readLlmContextString(row, "category") ??
-          readLlmContextString(row, "theme") ??
-          "—",
-        outcomes:
-          readLlmContextString(row, "outcomes") ??
-          readLlmContextString(row, "outcome") ??
-          "Yes / No",
-        currentYesOdds,
-        currentNoOdds,
-        yesOdds: hasProviderOutput
-          ? (outputYesOdds ?? null)
-          : (readLlmContextNumber(row, "llm_yes_odds") ??
-            decision?.fair_yes_probability_pct ??
-            (decision?.side === "YES"
-              ? decision?.fair_probability_pct
-              : null) ??
-            null),
-        noOdds: hasProviderOutput
-          ? (outputNoOdds ?? null)
-          : (readLlmContextNumber(row, "llm_no_odds") ??
-            decision?.fair_no_probability_pct ??
-            (decision?.side === "NO" ? decision?.fair_probability_pct : null) ??
-            null),
-        returnsPerDay:
-          readLlmContextNumber(row, "returns_per_day") ??
-          getBullpenReturnsPerDayBreakdown({
-            yesOdds: currentYesOdds,
-            noOdds: currentNoOdds,
-            llmYesOdds: hasProviderOutput
-              ? (outputYesOdds ?? null)
-              : readLlmContextNumber(row, "llm_yes_odds"),
-            llmNoOdds: hasProviderOutput
-              ? (outputNoOdds ?? null)
-              : readLlmContextNumber(row, "llm_no_odds"),
-            daysUntilClose: calculateDaysUntilClose(closeTime),
-          }).result,
-        action:
-          readLlmContextString(output, "decision") ??
-          readLlmContextString(output, "action") ??
-          decision?.decision ??
-          "—",
-        risk:
-          readLlmContextString(output, "risk_status") ??
-          decision?.risk_status ??
-          "—",
-        summary:
-          readLlmContextString(output, "summary") ??
-          readLlmContextString(row, "summary") ??
-          decision?.summary ??
-          decision?.reason ??
-          "—",
-        rationale:
-          readLlmContextString(output, "rationale") ??
-          readLlmContextString(row, "rationale") ??
-          decision?.rationale ??
-          "—",
-      };
-    });
+  const reviewedRows = getHistoricalStageTwoLlmReviewedRows(
+    state.stage,
+    scanCandidates,
+  );
+  return getHistoricalStageTwoLlmTableRows({
+    reviewedRows,
+    decisions: state.decisions,
   });
 }
 
 function buildStageTwoEventsSummaryRows(
-  rows: ReturnType<typeof getStageTwoLlmTableRows>,
+  reviewedRows: ReturnType<typeof getStageTwoLlmReviewedRows>,
+  decisions: BullpenAutoLiveDecision[],
   runId: string | number | null,
 ): BullpenQuestionRow[] {
-  const eventRowsByKey = new Map<string, BullpenQuestionRow>();
-
-  rows.forEach((row) => {
-    const sourceUrl =
-      readLlmContextString(row.row, "source_url") ??
-      readLlmContextString(row.row, "url") ??
-      readLlmContextString(row.row, "market_url") ??
-      row.decision?.market_url ??
-      "";
-    const id =
-      readLlmContextString(row.row, "id") ??
-      readLlmContextString(row.row, "question_id") ??
-      readLlmContextString(row.row, "market_id") ??
-      row.decision?.market_id ??
-      row.id;
-
-    if (eventRowsByKey.has(id)) return;
-
-    eventRowsByKey.set(id, {
-      id,
-      question: row.question,
-      closeTime: row.closeTime,
-      category: row.category,
-      yesOdds: row.currentYesOdds,
-      noOdds: row.currentNoOdds,
-      currentOddsUpdatedAt: null,
-      investmentTableAddedAt: null,
-      volume: readLlmContextString(row.row, "volume"),
-      liquidity: readLlmContextString(row.row, "liquidity"),
-      sourceUrl,
-      slug: readLlmContextString(row.row, "slug") ?? row.decision?.slug ?? null,
-      marketUrl:
-        readLlmContextString(row.row, "market_url") ??
-        row.decision?.market_url ??
-        null,
-      outcomeLabels: row.outcomes === "Yes / No" ? ["Yes", "No"] : [],
-      outcomeCount: row.outcomes === "Yes / No" ? 2 : null,
-      isBinaryYesNo: row.outcomes === "Yes / No",
-      daysUntilClose: row.daysLeft,
-      rules: readLlmContextString(row.row, "rules"),
-      marketContext: readLlmContextString(row.row, "market_context"),
-      resolutionSource: readLlmContextString(row.row, "resolution_source"),
-      llmYesOdds: row.yesOdds,
-      llmNoOdds: row.noOdds,
-      llmAverageYesOdds: null,
-      llmMedianYesOdds: null,
-      llmTrimmedMeanYesOdds: null,
-      llmIqrYesOdds: null,
-      llmTrimmedRangeYesOdds: null,
-      llmMinYesOdds: null,
-      llmMaxYesOdds: null,
-      llmSpreadYesOdds: null,
-      llmDisagreementLevel: null,
-      llmDisagreementCategory: null,
-      llmRationaleMismatchCount: 0,
-      adjudicationRequired: false,
-      evidenceStatus: null,
-      eventState: null,
-      currentVsLlmOddsDifference:
-        row.currentYesOdds !== null && row.yesOdds !== null
-          ? Number((row.yesOdds - row.currentYesOdds).toFixed(4))
-          : null,
-      returnsPerDay: row.returnsPerDay,
-      amountToBeInvested: null,
-      isAmountToBeInvestedHighlighted: false,
-      llmNotes: row.summary,
-      llmProvider: row.provider === "—" ? null : row.provider,
-      llmModel: row.model === "—" ? null : row.model,
-      llmRunId: runId,
-      llmCompletedAt: row.sourceTimestamp,
-      preflightEvidenceBlock: null,
-      llmBreakdown: [],
-    });
+  return buildHistoricalStageTwoEventsSummaryRows({
+    reviewedRows,
+    decisions,
+    runId,
   });
-
-  return [...eventRowsByKey.values()];
 }
 
 function groupStageTwoLlmRowsByModel(
@@ -4713,9 +4391,17 @@ function StageTwoLlmRunDetailsDialog({
     0,
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
+  const scanCandidates =
+    state.run
+      ? (buildBullpenAutoRunWorkflowView(state.run).stages.find(
+          (workflowStage) => workflowStage.key === "scan",
+        )?.scanCandidates ?? [])
+      : [];
+  const reviewedRows = getStageTwoLlmReviewedRows(state.stage, scanCandidates);
   const llmTableRows = getStageTwoLlmTableRows(state);
   const eventsSummaryRows = buildStageTwoEventsSummaryRows(
-    llmTableRows,
+    reviewedRows,
+    state.decisions,
     state.run?.id ?? null,
   );
   const availableLlmDecisionRows = llmTableRows.filter(
