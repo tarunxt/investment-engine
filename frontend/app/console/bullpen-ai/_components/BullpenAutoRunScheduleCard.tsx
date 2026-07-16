@@ -79,6 +79,11 @@ import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDi
 import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
+  BullpenQuestionsTable,
+  type BullpenTableSortKey,
+  type BullpenTableSortState,
+} from "./BullpenQuestionsTable";
+import {
   formatElapsedRunTime,
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
@@ -4124,6 +4129,88 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
   });
 }
 
+function buildStageTwoEventsSummaryRows(
+  rows: ReturnType<typeof getStageTwoLlmTableRows>,
+  runId: string | number | null,
+): BullpenQuestionRow[] {
+  const eventRowsByKey = new Map<string, BullpenQuestionRow>();
+
+  rows.forEach((row) => {
+    const sourceUrl =
+      readLlmContextString(row.row, "source_url") ??
+      readLlmContextString(row.row, "url") ??
+      readLlmContextString(row.row, "market_url") ??
+      row.decision?.market_url ??
+      "";
+    const id =
+      readLlmContextString(row.row, "id") ??
+      readLlmContextString(row.row, "question_id") ??
+      readLlmContextString(row.row, "market_id") ??
+      row.decision?.market_id ??
+      row.id;
+
+    if (eventRowsByKey.has(id)) return;
+
+    eventRowsByKey.set(id, {
+      id,
+      question: row.question,
+      closeTime: row.closeTime,
+      category: row.category,
+      yesOdds: row.currentYesOdds,
+      noOdds: row.currentNoOdds,
+      currentOddsUpdatedAt: null,
+      investmentTableAddedAt: null,
+      volume: readLlmContextString(row.row, "volume"),
+      liquidity: readLlmContextString(row.row, "liquidity"),
+      sourceUrl,
+      slug: readLlmContextString(row.row, "slug") ?? row.decision?.slug ?? null,
+      marketUrl:
+        readLlmContextString(row.row, "market_url") ??
+        row.decision?.market_url ??
+        null,
+      outcomeLabels: row.outcomes === "Yes / No" ? ["Yes", "No"] : [],
+      outcomeCount: row.outcomes === "Yes / No" ? 2 : null,
+      isBinaryYesNo: row.outcomes === "Yes / No",
+      daysUntilClose: row.daysLeft,
+      rules: readLlmContextString(row.row, "rules"),
+      marketContext: readLlmContextString(row.row, "market_context"),
+      resolutionSource: readLlmContextString(row.row, "resolution_source"),
+      llmYesOdds: row.yesOdds,
+      llmNoOdds: row.noOdds,
+      llmAverageYesOdds: null,
+      llmMedianYesOdds: null,
+      llmTrimmedMeanYesOdds: null,
+      llmIqrYesOdds: null,
+      llmTrimmedRangeYesOdds: null,
+      llmMinYesOdds: null,
+      llmMaxYesOdds: null,
+      llmSpreadYesOdds: null,
+      llmDisagreementLevel: null,
+      llmDisagreementCategory: null,
+      llmRationaleMismatchCount: 0,
+      adjudicationRequired: false,
+      evidenceStatus: null,
+      eventState: null,
+      currentVsLlmOddsDifference:
+        row.currentYesOdds !== null && row.yesOdds !== null
+          ? Number((row.yesOdds - row.currentYesOdds).toFixed(4))
+          : null,
+      returnsPerDay: row.returnsPerDay,
+      amountToBeInvested: null,
+      isAmountToBeInvestedHighlighted: false,
+      llmNotes: row.summary,
+      llmProvider: row.provider === "—" ? null : row.provider,
+      llmModel: row.model === "—" ? null : row.model,
+      llmRunId: runId,
+      llmCompletedAt: row.sourceTimestamp,
+      preflightEvidenceBlock: null,
+      llmBreakdown: [],
+    });
+  });
+
+  return [...eventRowsByKey.values()];
+}
+
 function groupStageTwoLlmRowsByModel(
   rows: ReturnType<typeof getStageTwoLlmTableRows>,
 ) {
@@ -4603,6 +4690,11 @@ function StageTwoLlmRunDetailsDialog({
     useState(false);
   const [selectedFailureRow, setSelectedFailureRow] =
     useState<StageTwoLlmFailureDialogRow | null>(null);
+  const [eventsSummarySortState, setEventsSummarySortState] =
+    useState<BullpenTableSortState>({
+      key: "returnsPerDay",
+      direction: "desc",
+    });
   const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
@@ -4610,6 +4702,10 @@ function StageTwoLlmRunDetailsDialog({
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
   const llmTableRows = getStageTwoLlmTableRows(state);
+  const eventsSummaryRows = buildStageTwoEventsSummaryRows(
+    llmTableRows,
+    state.run?.id ?? null,
+  );
   const availableLlmDecisionRows = llmTableRows.filter(
     (row) => row.output && !readLlmContextString(row.output, "error"),
   );
@@ -4670,6 +4766,14 @@ function StageTwoLlmRunDetailsDialog({
     );
     return () => window.clearInterval(intervalId);
   }, [shouldTickDialogTimers]);
+
+  const handleEventsSummarySortChange = (key: BullpenTableSortKey) => {
+    setEventsSummarySortState((current) => ({
+      key,
+      direction:
+        current.key === key && current.direction === "desc" ? "asc" : "desc",
+    }));
+  };
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -4821,6 +4925,21 @@ function StageTwoLlmRunDetailsDialog({
               then fall back to stored LLM-reviewed candidate outputs when
               legacy runs do not include target-run metadata.
             </p>
+            <div className="mt-5">
+              <BullpenQuestionsTable
+                snapshot={null}
+                rowsOverride={eventsSummaryRows}
+                emptyMessage="No Events Summary rows were returned for this Stage 2 run."
+                headerContent={null}
+                isLoading={false}
+                onSortChange={handleEventsSummarySortChange}
+                selectedQuestionIds={new Set<string>()}
+                selectionEnabled={false}
+                sortState={eventsSummarySortState}
+                onToggleQuestion={() => undefined}
+                onToggleSelectAll={() => undefined}
+              />
+            </div>
           </section>
 
           {selectedFailureRow ? (
