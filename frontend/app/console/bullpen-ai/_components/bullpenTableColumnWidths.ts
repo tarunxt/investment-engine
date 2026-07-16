@@ -82,17 +82,62 @@ export function clampBullpenTableColumnWidth(
   columnId: BullpenTableColumnId,
   width: number,
 ) {
-  return Math.max(
-    MIN_BULLPEN_TABLE_COLUMN_WIDTHS[columnId],
-    Math.round(width),
-  );
+  return Math.max(MIN_BULLPEN_TABLE_COLUMN_WIDTHS[columnId], Math.round(width));
 }
 
-export function getBullpenTableWidth(widths: BullpenTableColumnWidths) {
-  return BULLPEN_TABLE_COLUMN_IDS.reduce(
-    (total, columnId) => total + widths[columnId],
-    0,
-  );
+export function getBullpenTableWidth(
+  widths: BullpenTableColumnWidths,
+  columnIds: BullpenTableColumnId[] = BULLPEN_TABLE_COLUMN_IDS,
+) {
+  return columnIds.reduce((total, columnId) => total + widths[columnId], 0);
+}
+
+const BULLPEN_TABLE_COLUMN_ORDER_STORAGE_KEY =
+  "investment-engine:bullpen-ai:question-table-column-order:v1";
+
+export function readBullpenTableColumnOrderFromStorage(
+  visibleColumnIds: BullpenTableColumnId[],
+) {
+  if (typeof window === "undefined") return [...visibleColumnIds];
+
+  try {
+    const raw = window.localStorage.getItem(
+      BULLPEN_TABLE_COLUMN_ORDER_STORAGE_KEY,
+    );
+    if (!raw) return [...visibleColumnIds];
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [...visibleColumnIds];
+
+    const visibleColumnIdSet = new Set(visibleColumnIds);
+    const storedColumnIds = parsed.filter(
+      (columnId): columnId is BullpenTableColumnId =>
+        typeof columnId === "string" &&
+        visibleColumnIdSet.has(columnId as BullpenTableColumnId),
+    );
+    const missingColumnIds = visibleColumnIds.filter(
+      (columnId) => !storedColumnIds.includes(columnId),
+    );
+
+    return [...storedColumnIds, ...missingColumnIds];
+  } catch {
+    return [...visibleColumnIds];
+  }
+}
+
+export function writeBullpenTableColumnOrderToStorage(
+  columnIds: BullpenTableColumnId[],
+) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      BULLPEN_TABLE_COLUMN_ORDER_STORAGE_KEY,
+      JSON.stringify(columnIds),
+    );
+  } catch {
+    // Keep the table usable even when storage is unavailable.
+  }
 }
 
 export function readBullpenTableColumnWidthsFromStorage() {
