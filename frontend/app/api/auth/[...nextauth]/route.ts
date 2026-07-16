@@ -89,7 +89,12 @@ export const authConfig: NextAuthConfig = {
   ],
 
   callbacks: {
-    async jwt({ token, user }: { token: JWT; user?: unknown }) {
+    async jwt({ token, user, trigger, session }: {
+      token: JWT;
+      user?: unknown;
+      trigger?: "signIn" | "signUp" | "update";
+      session?: unknown;
+    }) {
       const userObj = user as Record<string, unknown> | undefined;
       if (userObj) {
         token.id = userObj.id as string;
@@ -98,6 +103,28 @@ export const authConfig: NextAuthConfig = {
         token.userData = userObj.userData as User;
         token.username = userObj.username as string;
         token.role = userObj.role as string;
+        token.expiresIn = userObj.expiresIn as number;
+      }
+
+      // Access-token refreshes occur in the browser API client. Persist the
+      // rotated pair in the Auth.js JWT too, so hard navigation cannot restore
+      // the token that just produced a 401.
+      if (trigger === "update") {
+        const update = session as Record<string, unknown> | undefined;
+        const accessToken = update?.accessToken;
+        const refreshToken = update?.refreshToken;
+        const expiresIn = update?.expiresIn;
+
+        if (
+          typeof accessToken === "string" && accessToken &&
+          typeof refreshToken === "string" && refreshToken
+        ) {
+          token.accessToken = accessToken;
+          token.refreshToken = refreshToken;
+          if (typeof expiresIn === "number" && Number.isFinite(expiresIn) && expiresIn > 0) {
+            token.expiresIn = expiresIn;
+          }
+        }
       }
 
       return token;
@@ -113,7 +140,10 @@ export const authConfig: NextAuthConfig = {
       const sessionObj = session as unknown as Record<string, unknown>;
       sessionObj.accessToken = token.accessToken;
       sessionObj.refreshToken = token.refreshToken;
-      sessionObj.userData = token.userData;
+      sessionObj.expiresIn = token.expiresIn;
+      sessionObj.userData = token.userData
+        ? { ...token.userData, expiresIn: token.expiresIn }
+        : token.userData;
 
       return session;
     },
