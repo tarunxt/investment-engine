@@ -404,6 +404,15 @@ function getRestorableRunningPortfolio(persisted: PersistedWorkflow | null) {
     : null;
 }
 
+function hasActiveWorkflowStage(
+  portfolio: WorkflowPortfolio,
+  states: Record<WorkflowPortfolio, WorkflowState>,
+) {
+  return STAGE_ORDER.some((stage) =>
+    ["queued", "running"].includes(states[portfolio][stage].state),
+  );
+}
+
 function getQueuedStages(
   portfolio: WorkflowPortfolio,
   states: Record<WorkflowPortfolio, WorkflowState>,
@@ -7922,6 +7931,8 @@ ${zerodhaExecutionMode === "direct_market"
 
   const renderSectionCard = (section: (typeof sections)[number]) => {
     const isSectionRunning = runningPortfolio === section.portfolio;
+    const hasActiveStage = hasActiveWorkflowStage(section.portfolio, states);
+    const showPauseKillControls = isSectionRunning || hasActiveStage;
     const queuedStages = getQueuedStages(
       section.portfolio,
       states,
@@ -7951,12 +7962,12 @@ ${zerodhaExecutionMode === "direct_market"
           <div className="flex w-full min-w-0 flex-col items-start gap-3 xl:w-auto xl:max-w-full xl:items-end">
             <div
               className={
-                isSectionRunning
+                showPauseKillControls
                   ? "grid w-full min-w-0 grid-cols-2 gap-2 xl:w-60"
                   : "flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end xl:w-auto"
               }
             >
-              {isSectionRunning ? (
+              {showPauseKillControls ? (
                 <>
                   <Button
                     type="button"
@@ -7981,9 +7992,31 @@ ${zerodhaExecutionMode === "direct_market"
                   <Button
                     type="button"
                     onClick={() => {
+                      const portfolio = section.portfolio;
+                      const timestamp = new Date().toISOString();
+
                       cancelRequestedRef.current = true;
                       pauseRequestedRef.current = false;
                       setWorkflowPaused(false);
+                      if (runningPortfolio === portfolio) {
+                        setRunningPortfolio(null);
+                      }
+                      setStates((current) => ({
+                        ...current,
+                        [portfolio]: STAGE_ORDER.reduce((acc, stage) => {
+                          const info = current[portfolio][stage];
+                          acc[stage] = ["running", "queued"].includes(info.state)
+                            ? {
+                                ...info,
+                                state: "failed",
+                                endedAt: timestamp,
+                                runStatus: "killed",
+                                error: "Auto-rebalance flow was killed by user.",
+                              }
+                            : info;
+                          return acc;
+                        }, {} as WorkflowState),
+                      }));
                       void Promise.allSettled(
                         activeExecutionRefsRef.current.map((execution) =>
                           execution.kind === "job"
