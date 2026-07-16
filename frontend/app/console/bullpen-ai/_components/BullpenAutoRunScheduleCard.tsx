@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useRef,
   useState,
   type ChangeEvent,
   type KeyboardEvent,
@@ -4386,6 +4387,7 @@ function StageTwoLlmRunDetailsDialog({
       direction: "desc",
     });
   const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
+  const llmOutputGroupRefs = useRef(new Map<string, HTMLElement>());
   const stats = getStageTwoStats(state.stage, state.decisions);
   const overlapCount = Math.max(
     0,
@@ -4471,6 +4473,14 @@ function StageTwoLlmRunDetailsDialog({
       direction:
         current.key === key && current.direction === "desc" ? "asc" : "desc",
     }));
+  };
+
+  const scrollToLlmOutputGroup = (row: StageTwoLlmRunSummaryRow) => {
+    const groupKey = `${row.provider}::${row.requestedModel ?? row.model}`;
+    llmOutputGroupRefs.current.get(groupKey)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
   };
 
   return (
@@ -4568,7 +4578,17 @@ function StageTwoLlmRunDetailsDialog({
                       summaryRows.map((row) => (
                         <tr
                           key={`stage-two-summary-${row.key}`}
-                          className="bg-white"
+                          onClick={() => scrollToLlmOutputGroup(row)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              scrollToLlmOutputGroup(row);
+                            }
+                          }}
+                          tabIndex={0}
+                          role="button"
+                          className="cursor-pointer bg-white transition hover:bg-amber-50/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-amber-300"
+                          aria-label={`Show LLM-wise output for ${row.provider} ${row.model}`}
                         >
                           <td className="px-4 py-3 font-bold capitalize text-slate-900">
                             {row.provider}
@@ -4580,7 +4600,10 @@ function StageTwoLlmRunDetailsDialog({
                             {row.status === "failed" ? (
                               <button
                                 type="button"
-                                onClick={() => setSelectedFailureRow(row)}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setSelectedFailureRow(row);
+                                }}
                                 className={`rounded-full border px-2.5 py-1 text-xs font-bold transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-red-300 ${getStageTwoRunSummaryStatusClass(row.status)}`}
                                 aria-label={`Open failure details for ${row.provider} ${row.model}`}
                                 title="Click to see why this LLM failed"
@@ -4700,6 +4723,13 @@ function StageTwoLlmRunDetailsDialog({
                   return (
                     <section
                       key={group.key}
+                      ref={(element) => {
+                        if (element) {
+                          llmOutputGroupRefs.current.set(group.key, element);
+                        } else {
+                          llmOutputGroupRefs.current.delete(group.key);
+                        }
+                      }}
                       className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3">
