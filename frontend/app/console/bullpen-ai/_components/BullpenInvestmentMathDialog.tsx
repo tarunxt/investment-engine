@@ -236,8 +236,8 @@ export function BullpenInvestmentMathDialog({
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            Pink invest rows require either <span className="font-semibold">LLM Yes &gt; 80%</span>{" "}
-            or <span className="font-semibold">LLM No &gt; 80%</span>. Returns/day is used for ranking,
+            Pink invest rows require either <span className="font-semibold">LLM Yes &ge; 80%</span>{" "}
+            or <span className="font-semibold">LLM No &ge; 80%</span>. Returns/day is used for ranking,
             and qualified rows receive a fixed <span className="font-semibold">$5</span> buy amount.
           </p>
         </>

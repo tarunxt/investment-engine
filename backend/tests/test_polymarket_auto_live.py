@@ -4285,6 +4285,203 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
 
 
 @pytest.mark.anyio
+async def test_console_profile_manual_table_rows_treat_80_percent_llm_side_as_qualified(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_row = _manual_console_candidate_row(
+        market_id="candidate-market-80-threshold",
+        question_id="candidate-market-80-threshold",
+        market_title="Candidate market at the 80 threshold",
+        slug="candidate-market-80-threshold",
+        current_yes_odds=20,
+        current_no_odds=80,
+        llm_yes_odds=20,
+        llm_no_odds=80,
+        returns_per_day=8.8,
+        selected=True,
+        close_time=(fixed_now + timedelta(days=7)).isoformat(),
+    )
+    market_lookup = {
+        manual_row.slug: _market(
+            question=manual_row.market_title,
+            slug=manual_row.slug,
+            close_time=manual_row.close_time,
+            current_yes_odds=manual_row.current_yes_odds,
+            current_no_odds=manual_row.current_no_odds,
+        )
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=1,
+                    candidate_rows=[manual_row],
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+
+    assert len(buy_decisions) == 1
+    assert buy_decisions[0].market_id == "candidate-market-80-threshold"
+    assert buy_decisions[0].order_plan is not None
+    assert buy_decisions[0].order_plan.side == "NO"
+    assert buy_decisions[0].stage_results[3].outputs["strongest_llm_odds"] == 80
+    assert result.run.diagnostics.qualified_candidate_rows == 1
+    assert result.run.diagnostics.top_candidate_market_ids == [
+        "candidate-market-80-threshold"
+    ]
+
+
+@pytest.mark.anyio
+async def test_console_profile_manual_selected_rows_only_buy_ranked_top_10_candidates(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        _manual_console_candidate_row(
+            market_id=f"candidate-market-{index}",
+            question_id=f"candidate-market-{index}",
+            market_title=f"Candidate market {index}",
+            slug=f"candidate-market-{index}",
+            current_yes_odds=15,
+            current_no_odds=85,
+            llm_yes_odds=15,
+            llm_no_odds=85,
+            returns_per_day=20 - index,
+            selected=True,
+            close_time=(fixed_now + timedelta(days=7 + index)).isoformat(),
+        )
+        for index in range(1, 12)
+    ]
+    market_lookup = {
+        row.slug: _market(
+            question=row.market_title,
+            slug=row.slug,
+            close_time=row.close_time,
+            current_yes_odds=row.current_yes_odds,
+            current_no_odds=row.current_no_odds,
+        )
+        for row in manual_rows
+        if row.slug
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=len(manual_rows),
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+    skipped_decisions = [decision for decision in result.decisions if decision.decision == "SKIP"]
+
+    assert len(buy_decisions) == 10
+    assert set(result.run.diagnostics.top_candidate_market_ids) == {
+        f"candidate-market-{index}" for index in range(1, 11)
+    }
+    assert all(
+        decision.market_id != "candidate-market-11" for decision in buy_decisions
+    )
+    assert any(
+        decision.market_id == "candidate-market-11"
+        and decision.reason == "Candidate qualified but did not make the top-10 returns/day table."
+        for decision in skipped_decisions
+    )
+
+
+@pytest.mark.anyio
 async def test_console_profile_manual_table_rows_skip_candidates_already_in_active_positions(
     monkeypatch,
 ):

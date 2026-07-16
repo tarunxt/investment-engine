@@ -1060,7 +1060,7 @@ export function getBullpenAmountToBeInvestedBreakdown({
   const qualifies =
     returnsPerDay !== null &&
     normalizedStrongestLlmOdds !== null &&
-    normalizedStrongestLlmOdds > minStrongestLlmOdds;
+    normalizedStrongestLlmOdds >= minStrongestLlmOdds;
 
   return {
     llmYesOdds,
@@ -1101,10 +1101,10 @@ export function hasBullpenStrongLlmOdds(
   return Boolean(
     (question?.llmYesOdds !== null &&
       question?.llmYesOdds !== undefined &&
-      question.llmYesOdds > 80) ||
+      question.llmYesOdds >= 80) ||
       (question?.llmNoOdds !== null &&
         question?.llmNoOdds !== undefined &&
-        question.llmNoOdds > 80),
+        question.llmNoOdds >= 80),
   );
 }
 

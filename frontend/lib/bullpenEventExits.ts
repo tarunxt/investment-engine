@@ -149,7 +149,7 @@ function strongerLlmSide(question: BullpenQuestionRow | null | undefined) {
   const yes = question?.llmYesOdds ?? null;
   const no = question?.llmNoOdds ?? null;
   if (yes === null && no === null) return null;
-  if ((yes ?? -Infinity) <= 80 && (no ?? -Infinity) <= 80) return null;
+  if ((yes ?? -Infinity) < 80 && (no ?? -Infinity) < 80) return null;
   return (yes ?? -Infinity) >= (no ?? -Infinity) ? "YES" : "NO";
 }
 

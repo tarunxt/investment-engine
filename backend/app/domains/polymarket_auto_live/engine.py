@@ -982,7 +982,7 @@ def _stronger_probability_side(
     strongest_probability = max(normalized_yes, normalized_no)
     if strongest_probability == float("-inf"):
         return None, None
-    if strongest_probability <= minimum_probability:
+    if strongest_probability < minimum_probability:
         return None, strongest_probability
     if normalized_yes >= normalized_no:
         return "YES", strongest_probability
@@ -5426,12 +5426,9 @@ class BullpenAutoLiveEngine:
             for row in ranking_top_rows
             if row["kind"] == "candidate"
         }
-        actionable_top_candidate_market_ids = (
-            ranking_top_candidate_market_ids | selected_qualified_candidate_market_ids
-        )
         top_rows = ranking_top_rows
         top_active_keys = ranking_top_active_keys
-        top_candidate_market_ids = actionable_top_candidate_market_ids
+        top_candidate_market_ids = ranking_top_candidate_market_ids
 
         run.stage_results.append(
             build_stage_result(
@@ -5442,7 +5439,7 @@ class BullpenAutoLiveEngine:
                     "top_table_size": len(ranking_top_rows),
                     "active_rows_ranked": len(active_rank_rows),
                     "qualified_candidate_rows": len(candidate_rank_rows),
-                    "top_candidate_market_ids": sorted(actionable_top_candidate_market_ids),
+                    "top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
                     "ranked_top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
                     "selected_qualified_candidate_market_ids": sorted(selected_qualified_candidate_market_ids),
                     "top_active_keys": sorted(ranking_top_active_keys),
@@ -5459,7 +5456,7 @@ class BullpenAutoLiveEngine:
         run.diagnostics.candidate_rows_before_llm = candidate_rows_before_llm
         run.diagnostics.llm_candidate_count = llm_candidate_count
         run.diagnostics.qualified_candidate_rows = len(candidate_rank_rows)
-        run.diagnostics.top_candidate_market_ids = sorted(actionable_top_candidate_market_ids)
+        run.diagnostics.top_candidate_market_ids = sorted(ranking_top_candidate_market_ids)
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.diagnostics.scan_source_label = scan_source_label
         run.diagnostics.scan_source_url = scan_source_url
@@ -6242,14 +6239,7 @@ class BullpenAutoLiveEngine:
             for row in top_rows
             if row["kind"] == "candidate"
         }
-        # Preserve manually selected, Stage 2-qualified opportunities even when the
-        # post-Event-Exit rerank has enough higher-return rows to push them out of
-        # the visible top table.  Stage 2 already marked these rows as explicit
-        # auto-invest selections, so Stage 3 Step 2 must keep them actionable
-        # instead of silently dropping them during the exit-aware rerank.
-        top_candidate_market_ids = (
-            ranked_post_exit_candidate_market_ids | selected_qualified_candidate_market_ids
-        )
+        top_candidate_market_ids = ranked_post_exit_candidate_market_ids
         run.diagnostics.top_candidate_market_ids = sorted(top_candidate_market_ids)
 
         report_invest_stage_progress(

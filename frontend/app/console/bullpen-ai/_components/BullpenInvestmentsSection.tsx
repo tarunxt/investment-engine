@@ -434,7 +434,8 @@ function getStage3PlannedOrderReason(
     question.llmYesOdds ?? -Infinity,
     question.llmNoOdds ?? -Infinity,
   );
-  const hasStrongLlmOdds = Number.isFinite(strongestLlmOdds) && strongestLlmOdds > 80;
+  const hasStrongLlmOdds =
+    Number.isFinite(strongestLlmOdds) && strongestLlmOdds >= 80;
 
   if (!isSelectedForInvest) {
     return "Not included in Stage 3 planned orders because this opportunity is not selected in the Events to invest in table. Select its checkbox before running Stage 2/Invest so it can be reviewed and carried into the Stage 3 buy plan.";
@@ -443,7 +444,7 @@ function getStage3PlannedOrderReason(
     return "Not included in Stage 3 planned orders because Returns/day is unavailable. Stage 3 only creates buy plans for rows with usable current odds, LLM odds, and time-to-close data.";
   }
   if (!hasStrongLlmOdds) {
-    return "Not included in Stage 3 planned orders because neither LLM side is above the strict 80% confidence threshold required for a buy plan.";
+    return "Not included in Stage 3 planned orders because neither LLM side meets the strict 80% confidence threshold required for a buy plan.";
   }
   if (question.llmDisagreementLevel === "High") {
     return "Not included in Stage 3 planned orders because the LLM review has High disagreement, which blocks automatic investment.";
@@ -864,7 +865,7 @@ export function BullpenInvestmentsSection({
                     const checkboxId = `bullpen-investment-${question.id}`;
                     const investOutcome =
                       question.llmYesOdds !== null &&
-                      question.llmYesOdds > 80 &&
+                      question.llmYesOdds >= 80 &&
                       (question.llmNoOdds === null || question.llmYesOdds >= question.llmNoOdds)
                         ? "Yes"
                         : "No";

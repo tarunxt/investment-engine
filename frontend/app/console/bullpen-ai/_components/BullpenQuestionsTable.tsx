@@ -447,7 +447,7 @@ function AmountHighlightConditionsDialog({ onClose }: { onClose: () => void }) {
               Highlight rule
             </div>
             <ul className="mt-3 list-disc space-y-2 pl-5 font-medium text-slate-800">
-              <li>LLM Yes or No Odds is greater than 80%.</li>
+              <li>LLM Yes or No Odds is 80% or higher.</li>
             </ul>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -467,7 +467,7 @@ function AmountHighlightConditionsDialog({ onClose }: { onClose: () => void }) {
 function getLlmOddsCellClass(value: number | null) {
   if (value === null) return "";
   if (value > 90) return "bg-lime-400 text-slate-950";
-  if (value > 80) return "bg-green-500/75 text-slate-950";
+  if (value >= 80) return "bg-green-500/75 text-slate-950";
   return "";
 }
 
@@ -716,7 +716,10 @@ export function BullpenQuestionsTable({
   rowHighlightById,
   emptyMessage,
   headerContent,
+  updatedAt,
+  updateStatusMessage,
   updateUnavailableReason,
+  scrollResetKey,
   isLoading,
   historicalRuns,
   historicalDecisions,
@@ -735,7 +738,10 @@ export function BullpenQuestionsTable({
   >;
   emptyMessage: string;
   headerContent?: ReactNode;
+  updatedAt?: string | null;
+  updateStatusMessage?: string;
   updateUnavailableReason?: string;
+  scrollResetKey?: string | number | null;
   isLoading: boolean;
   historicalRuns?: BullpenAutoLiveRun[];
   historicalDecisions?: BullpenAutoLiveDecision[];
@@ -763,6 +769,7 @@ export function BullpenQuestionsTable({
   const [draggedColumnId, setDraggedColumnId] =
     useState<DraggableBullpenTableColumnId | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
+  const horizontalScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const rows = sortQuestions(
     rowsOverride ?? (snapshot ? snapshot.questions : []),
     sortState,
@@ -777,7 +784,7 @@ export function BullpenQuestionsTable({
     DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS.includes(columnId),
   );
   const tableWidth = getBullpenTableWidth(columnWidths, visibleColumnIds);
-  const updatedAtLabel = formatUpdatedAt(snapshot?.scannedAt);
+  const updatedAtLabel = formatUpdatedAt(updatedAt ?? snapshot?.scannedAt ?? null);
   const showUpdateUnavailableReason =
     updatedAtLabel === "—" && Boolean(updateUnavailableReason);
 
@@ -912,6 +919,15 @@ export function BullpenQuestionsTable({
     };
   }, [resizingColumnId]);
 
+  useEffect(() => {
+    if (scrollResetKey === undefined) return;
+    horizontalScrollContainerRef.current?.scrollTo({
+      left: 0,
+      top: 0,
+      behavior: "auto",
+    });
+  }, [scrollResetKey]);
+
   const amountHighlightInfo = (
     <span
       role="button"
@@ -995,6 +1011,11 @@ export function BullpenQuestionsTable({
           <span className="text-xs font-medium text-slate-500">
             Updated {updatedAtLabel}
           </span>
+          {updateStatusMessage ? (
+            <span className="text-xs font-medium text-amber-700">
+              {updateStatusMessage}
+            </span>
+          ) : null}
           {showUpdateUnavailableReason ? (
             <span className="text-xs font-medium text-amber-700">
               {updateUnavailableReason}
@@ -1003,7 +1024,7 @@ export function BullpenQuestionsTable({
         </div>
         {headerContent ? <div className="mt-3">{headerContent}</div> : null}
       </div>
-      <div className="overflow-x-auto">
+      <div ref={horizontalScrollContainerRef} className="overflow-x-auto">
         <table
           className="min-w-full table-fixed divide-y divide-slate-200 text-sm"
           suppressHydrationWarning

@@ -368,6 +368,99 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
   });
 });
 
+test("Stage 3 invest plan only reuses ranked top-table candidate rows when saved ranking exists", async () => {
+  const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    stageResults: [
+      createStage(1, "scan", {
+        snapshot_id: "snapshot-top-10",
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+          {
+            question_id: "question-2",
+            market_id: "market-2",
+            question: "Will event two happen?",
+            market_title: "Will event two happen?",
+            market_url: "https://example.com/market-2",
+            slug: "event-two",
+            close_time: "2026-07-08T12:00:00Z",
+            theme: "Sports",
+            current_yes_odds: 21,
+            current_no_odds: 79,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            selected_side: "NO",
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+          {
+            market_id: "market-2",
+            question: "Will event two happen?",
+            market_url: "https://example.com/market-2",
+            slug: "event-two",
+            close_time: "2026-07-08T12:00:00Z",
+            returns_per_day: 2.4,
+            qualified: true,
+            selected_side: "NO",
+            fair_yes_probability_pct: 12,
+            fair_no_probability_pct: 88,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+      createStage(6, "ranking", {
+        top_candidate_market_ids: ["market-2"],
+        ranked_top_candidate_market_ids: ["market-2"],
+      }),
+      createStage(3, "invest", {}, "queued"),
+    ],
+  });
+
+  const plan = buildBullpenStage3OnlyInvestPlan(run);
+
+  assert.equal(plan.blockedReason, null);
+  assert.equal(plan.qualifiedCandidateCount, 1);
+  assert.equal(plan.request?.console_profile?.candidate_rows.length, 1);
+  assert.equal(
+    plan.request?.console_profile?.candidate_rows[0]?.market_id,
+    "market-2",
+  );
+});
+
 test("Stage 3 invest plan stays blocked until Stage 2 completes", async () => {
   const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
 

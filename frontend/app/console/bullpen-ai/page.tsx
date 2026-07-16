@@ -752,7 +752,7 @@ function buildBullpenManualInvestOrder(
 ): PolymarketManualInvestOrderRequest | null {
   const outcome =
     question.llmYesOdds !== null &&
-    question.llmYesOdds > 80 &&
+    question.llmYesOdds >= 80 &&
     (question.llmNoOdds === null || question.llmYesOdds >= question.llmNoOdds)
       ? "Yes"
       : "No";
@@ -1794,11 +1794,20 @@ function BullpenAiPageContent() {
               question,
               activePositionQuestionByTargetId,
             ),
-          )
-          .filter((question) => {
-            return isBullpenQuestionInvestmentCandidate(question);
-          })
-      : [];
+        )
+        .filter((question) => {
+          return isBullpenQuestionInvestmentCandidate(question);
+        })
+    : [];
+  const activeInvestmentDisplay =
+    selectionEnabled && activeCurrentSnapshot
+      ? buildBullpenInvestmentDisplay({
+          activePositions: openActivePositions,
+          activePositionQuestions: activePositionQuestionsForLlm,
+          candidates: activeInvestmentCandidates,
+          recentDecisions: recentAutoRunDecisions,
+        })
+      : null;
   const visibleInvestmentCandidates = activeVisibleSnapshot
     ? activeVisibleSnapshot.questions
         .map((question) =>
@@ -1811,8 +1820,37 @@ function BullpenAiPageContent() {
           return isBullpenQuestionInvestmentCandidate(question);
         })
     : [];
+  const currentShortlistedInvestmentCandidates = activeInvestmentDisplay
+    ? activeInvestmentDisplay.topInvestmentRows
+        .filter(
+          (
+            row,
+          ): row is Extract<
+            (typeof activeInvestmentDisplay.topInvestmentRows)[number],
+            { kind: "candidate" }
+          > => row.kind === "candidate",
+        )
+        .map((row) => row.question)
+    : [];
+  const visibleInvestmentDisplay = buildBullpenInvestmentDisplay({
+    activePositions: openActivePositions,
+    activePositionQuestions: activePositionQuestionsForLlm,
+    candidates: visibleInvestmentCandidates,
+    recentDecisions: recentAutoRunDecisions,
+  });
+  const visibleShortlistedInvestmentCandidates =
+    visibleInvestmentDisplay.topInvestmentRows
+      .filter(
+        (
+          row,
+        ): row is Extract<
+          (typeof visibleInvestmentDisplay.topInvestmentRows)[number],
+          { kind: "candidate" }
+        > => row.kind === "candidate",
+      )
+      .map((row) => row.question);
   const activeInvestmentCandidateIds = new Set(
-    activeInvestmentCandidates.map((question) => question.id),
+    currentShortlistedInvestmentCandidates.map((question) => question.id),
   );
   const selectedInvestmentQuestionIds = selectionEnabled
     ? selectedInvestmentQuestionIdsByMode[activeMode].filter((questionId) =>
@@ -1820,21 +1858,15 @@ function BullpenAiPageContent() {
       )
     : [];
   const selectedInvestmentQuestionIdSet = new Set(selectedInvestmentQuestionIds);
-  const investmentDisplay = buildBullpenInvestmentDisplay({
-    activePositions: openActivePositions,
-    activePositionQuestions: activePositionQuestionsForLlm,
-    candidates: visibleInvestmentCandidates,
-    recentDecisions: recentAutoRunDecisions,
-  });
   const eventExitPositionKeys = new Set(
-    investmentDisplay.activePositionsNeedingAttention.map(
+    visibleInvestmentDisplay.activePositionsNeedingAttention.map(
       (entry) => entry.position.key,
     ),
   );
   const activeRetainedRows = activePositionQuestionsForLlm.filter(
     (question) => !eventExitPositionKeys.has(question.id),
   );
-  const eventExitRows = investmentDisplay.activePositionsNeedingAttention
+  const eventExitRows = visibleInvestmentDisplay.activePositionsNeedingAttention
     .map(
       (entry) =>
         entry.question ??
@@ -1927,10 +1959,8 @@ function BullpenAiPageContent() {
   useEffect(() => {
     if (!selectionEnabled || !activeCurrentSnapshot) return;
 
-    const eligibleIds = activeCurrentSnapshot.questions
-      .filter((question) => {
-        return isBullpenQuestionInvestmentCandidate(question);
-      })
+    const eligibleIds = currentShortlistedInvestmentCandidates
+      .filter((question) => buildBullpenManualInvestOrder(question) !== null)
       .map((question) => question.id);
     setSelectedInvestmentQuestionIdsByMode((current) => {
       const previous = current[activeMode];
@@ -1957,7 +1987,12 @@ function BullpenAiPageContent() {
         [activeMode]: eligibleIds,
       };
     });
-  }, [activeCurrentSnapshot, activeMode, selectionEnabled]);
+  }, [
+    activeCurrentSnapshot,
+    activeMode,
+    currentShortlistedInvestmentCandidates,
+    selectionEnabled,
+  ]);
 
   useEffect(() => {
     if (!hasLoadedStorage || !activeVisibleSnapshot) return;
@@ -2197,7 +2232,9 @@ function BullpenAiPageContent() {
     if (!selectionEnabled) return;
     setSelectedInvestmentQuestionIdsByMode((current) => ({
       ...current,
-      [activeMode]: activeInvestmentCandidates.map((question) => question.id),
+      [activeMode]: currentShortlistedInvestmentCandidates.map(
+        (question) => question.id,
+      ),
     }));
   }
 
@@ -3376,9 +3413,9 @@ function BullpenAiPageContent() {
       : "Run Scans and Invest Now above to generate Auto Scan results."
     : !visibleHasAnyLlmOdds
       ? isManualScanView
-        ? "Run LLM analysis first. Pink invest rows appear after LLM Yes or No Odds qualify."
+        ? "Run LLM analysis first. Pink invest rows appear after LLM Yes or No Odds reaches 80% or higher."
         : "This Auto Scan snapshot does not have qualifying LLM odds yet."
-      : "No rows are currently pink. Rows appear here when LLM Yes or No Odds is above 80%.";
+      : "No rows are currently pink. Rows appear here when LLM Yes or No Odds is 80% or higher.";
 
   async function handlePromptTemplateSave(template: string) {
     try {
@@ -4183,7 +4220,9 @@ function BullpenAiPageContent() {
               activePositionQuestions={activePositionQuestionsForLlm}
               activePositionsCount={hasLoadedPositions ? activePositions.length : null}
               candidates={
-                selectionEnabled ? activeInvestmentCandidates : visibleInvestmentCandidates
+                selectionEnabled
+                  ? currentShortlistedInvestmentCandidates
+                  : visibleShortlistedInvestmentCandidates
               }
               claimError={claimPositionsError}
               claimStatusMessage={claimPositionsStatus}

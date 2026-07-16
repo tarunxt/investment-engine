@@ -132,6 +132,18 @@ function workflowStageOutputs(
   return null;
 }
 
+function stageNumberOutputs(
+  run: BullpenAutoLiveRun,
+  stageNumber: number,
+): Record<string, unknown> | null {
+  for (const stage of run.stage_results) {
+    if (stage.stage_number === stageNumber) {
+      return asRecord(stage.outputs);
+    }
+  }
+  return null;
+}
+
 function cloneCandidateRow(
   row: BullpenAutoLiveConsoleCandidateInput,
 ): BullpenAutoLiveConsoleCandidateInput {
@@ -278,7 +290,14 @@ export function buildBullpenStage3OnlyInvestPlan(
   }
 
   const scanOutputs = workflowStageOutputs(run, "scan");
+  const topTableOutputs = stageNumberOutputs(run, 6);
   const acceptedCandidateByMarketId = buildAcceptedCandidateLookup(scanOutputs);
+  const topCandidateMarketIds = new Set(
+    readStringArray(
+      topTableOutputs?.top_candidate_market_ids ??
+        topTableOutputs?.ranked_top_candidate_market_ids,
+    ),
+  );
 
   const candidateRows = asArray(llmOutputs.llm_reviewed_candidates)
     .map((item) => asRecord(item))
@@ -286,9 +305,13 @@ export function buildBullpenStage3OnlyInvestPlan(
       if (!record) {
         return false;
       }
+      const marketId = readString(record.market_id);
       return (
         readString(record.source_kind) !== "active_position" &&
-        readBoolean(record.qualified)
+        readBoolean(record.qualified) &&
+        (!marketId ||
+          topCandidateMarketIds.size === 0 ||
+          topCandidateMarketIds.has(marketId))
       );
     })
     .map((record) => buildCandidateRow(record, acceptedCandidateByMarketId))
