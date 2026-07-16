@@ -15,7 +15,12 @@ import {
   type BullpenSnapshotHistory,
   type ScanMode,
 } from "@/lib/bullpen-ai";
-import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
+import {
+  buildBullpenLlmTargetId,
+  buildBullpenQuestionRowFromActivePosition,
+  type BullpenActivePositionLlmAnalysis,
+} from "@/lib/bullpenActivePositions";
+import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveLlmOutput,
@@ -675,12 +680,50 @@ function applyStage2OutputsToSnapshot({
   };
 }
 
+function buildReviewedCandidateActivePositionKeys({
+  reviewedCandidate,
+  activePositions,
+}: {
+  reviewedCandidate: Record<string, unknown>;
+  activePositions: BullpenActivePositionView[];
+}) {
+  const keys = new Set<string>();
+  const explicitPositionKey = readString(reviewedCandidate.position_key);
+  if (explicitPositionKey) keys.add(explicitPositionKey);
+
+  const marketId = readString(reviewedCandidate.market_id);
+  const slug = readString(reviewedCandidate.slug);
+  const marketUrl = readString(reviewedCandidate.market_url);
+  const question = readString(reviewedCandidate.question);
+  const candidateTargetId = question
+    ? buildBullpenLlmTargetId({ question, slug, marketUrl })
+    : null;
+
+  for (const position of activePositions) {
+    if (marketId && position.marketId === marketId) {
+      keys.add(position.key);
+      continue;
+    }
+
+    const positionTargetId = buildBullpenLlmTargetId(
+      buildBullpenQuestionRowFromActivePosition(position),
+    );
+    if (candidateTargetId && positionTargetId === candidateTargetId) {
+      keys.add(position.key);
+    }
+  }
+
+  return [...keys];
+}
+
 export function syncBullpenAutoRunActivePositionAnalyses({
   currentAnalyses,
   run,
+  activePositions = [],
 }: {
   currentAnalyses: Record<string, BullpenActivePositionLlmAnalysis>;
   run: BullpenAutoLiveRun | null;
+  activePositions?: BullpenActivePositionView[];
 }) {
   if (!run) return currentAnalyses;
 
@@ -693,20 +736,24 @@ export function syncBullpenAutoRunActivePositionAnalyses({
 
   for (const reviewedCandidate of reviewedCandidates) {
     if (!isRecord(reviewedCandidate)) continue;
-    if (readString(reviewedCandidate.source_kind) !== "active_position") continue;
-
-    const positionKey = readString(reviewedCandidate.position_key);
-    if (!positionKey) continue;
+    const positionKeys = buildReviewedCandidateActivePositionKeys({
+      reviewedCandidate,
+      activePositions,
+    });
+    const sourceKind = readString(reviewedCandidate.source_kind);
+    if (sourceKind !== "active_position" && positionKeys.length === 0) continue;
 
     const analysis = buildActivePositionAnalysisFromReviewedCandidate(reviewedCandidate);
     if (!analysis) continue;
 
-    if (JSON.stringify(nextAnalyses[positionKey]) === JSON.stringify(analysis)) {
-      continue;
-    }
+    for (const positionKey of positionKeys) {
+      if (JSON.stringify(nextAnalyses[positionKey]) === JSON.stringify(analysis)) {
+        continue;
+      }
 
-    nextAnalyses[positionKey] = analysis;
-    changed = true;
+      nextAnalyses[positionKey] = analysis;
+      changed = true;
+    }
   }
 
   return changed ? nextAnalyses : currentAnalyses;

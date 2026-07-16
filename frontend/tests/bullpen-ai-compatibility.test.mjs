@@ -816,3 +816,23 @@ test("Bullpen x AI stale fact validation excludes contradictory public-listing c
   assert.equal(validation.invalidStaleFact, true);
   assert.match(validation.staleFactReason, /already confirmed the company is public/i);
 });
+
+
+test("auto-run active position sync matches latest candidate rows by active market id", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenAutoRunSync.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const pageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /activePositions\?: BullpenActivePositionView\[\]/);
+  assert.match(source, /position\.marketId === marketId/);
+  assert.match(source, /buildBullpenLlmTargetId\(\{ question, slug, marketUrl \}\)/);
+  assert.match(pageSource, /activePositions: openActivePositions/);
+});
