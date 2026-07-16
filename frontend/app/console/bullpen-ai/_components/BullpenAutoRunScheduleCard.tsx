@@ -9275,9 +9275,7 @@ export function BullpenAutoRunScheduleCard({
                     submission.
                   </li>
                   <li>
-                    In invest-only reuse mode, Stage 3 uses the latest Stage
-                    2-qualified rows and skips the Bullpen rescan plus LLM
-                    rerun; markets that are already in the Bullpen wallet or
+                    In invest-only reuse mode, Stage 3 uses the {"latest Stage 2-qualified rows and skips the Bullpen rescan plus LLM rerun"}; markets that are already in the Bullpen wallet or
                     were already submitted from the saved run are skipped
                     instead of being re-planned.
                   </li>
