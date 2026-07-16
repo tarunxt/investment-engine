@@ -305,6 +305,10 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
   assert.match(autoRunCardSource, /Events\/prompt/);
   assert.match(autoRunCardSource, /llm_execution_mode/);
   assert.match(autoRunCardSource, /llm_events_per_prompt/);
+  assert.match(
+    autoRunCardSource,
+    /Changes are saved for the next run\. The running Stage 2 job uses the frozen target list/,
+  );
 });
 
 test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt template", () => {
