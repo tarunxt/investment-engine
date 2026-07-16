@@ -4500,6 +4500,14 @@ function StageTwoLlmRunDetailsDialog({
     explicitPendingSummaryCount,
     stats.llmsSelected - returnedSummaryCount,
   );
+  const eventsSummaryUpdateUnavailableReason =
+    runningSummaryCount > 0 || pendingSummaryCount > 0
+      ? "Timestamp unavailable while Stage 2 results are still being fetched."
+      : failedSummaryCount > 0 && completedSummaryCount === 0
+        ? "Timestamp unavailable because Stage 2 did not return any completed model results."
+        : failedSummaryCount > 0 || partialSummaryCount > 0
+          ? "Timestamp unavailable because Stage 2 completed with partial results."
+          : "Timestamp was not included in this Stage 2 result.";
   const cumulativeCost = summaryRows.reduce(
     (total, row) => total + (row.cost ?? 0),
     0,
@@ -4705,17 +4713,13 @@ function StageTwoLlmRunDetailsDialog({
                 </table>
               </div>
             </div>
-            <p className="mt-4 text-xs text-slate-500">
-              Stage 2 model rows come from backend target-run progress first,
-              then fall back to stored LLM-reviewed candidate outputs when
-              legacy runs do not include target-run metadata.
-            </p>
             <div className="mt-5">
               <BullpenQuestionsTable
                 snapshot={null}
                 rowsOverride={eventsSummaryRows}
                 emptyMessage="No Events Summary rows were returned for this Stage 2 run."
                 headerContent={null}
+                updateUnavailableReason={eventsSummaryUpdateUnavailableReason}
                 isLoading={false}
                 onSortChange={handleEventsSummarySortChange}
                 selectedQuestionIds={new Set<string>()}
