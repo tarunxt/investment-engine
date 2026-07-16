@@ -32,7 +32,9 @@ import {
   DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS,
   clampBullpenTableColumnWidth,
   getBullpenTableWidth,
+  readBullpenTableColumnOrderFromStorage,
   readBullpenTableColumnWidthsFromStorage,
+  writeBullpenTableColumnOrderToStorage,
   writeBullpenTableColumnWidthsToStorage,
   type BullpenTableColumnId,
   type BullpenTableColumnWidths,
@@ -72,6 +74,21 @@ type ResizeState = {
   startX: number;
   startWidth: number;
 };
+
+type DraggableBullpenTableColumnId = Exclude<BullpenTableColumnId, "select">;
+
+type BullpenTableColumnDefinition = {
+  columnId: BullpenTableColumnId;
+  label: string;
+  sortKey?: BullpenTableSortKey;
+  align?: "left" | "center" | "right";
+  afterLabel?: ReactNode;
+};
+
+const DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS: BullpenTableColumnId[] =
+  BULLPEN_TABLE_COLUMN_IDS.filter(
+    (columnId) => columnId !== "noOdds" && columnId !== "llmNoOdds",
+  );
 
 function formatDate(value: string | null) {
   return formatApiTimestamp(value, {
@@ -329,6 +346,12 @@ function ResizableColumnHeader({
   onResizeStep,
   onReset,
   afterLabel,
+  draggable,
+  isDragging,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: {
   columnId: ResizableBullpenTableColumnId;
   label: string;
@@ -343,9 +366,33 @@ function ResizableColumnHeader({
   ) => void;
   onResizeStep: (columnId: ResizableBullpenTableColumnId, step: number) => void;
   onReset: (columnId: ResizableBullpenTableColumnId) => void;
+  draggable: boolean;
+  isDragging: boolean;
+  onDragStart: (columnId: DraggableBullpenTableColumnId) => void;
+  onDragOver: (columnId: DraggableBullpenTableColumnId) => void;
+  onDrop: (columnId: DraggableBullpenTableColumnId) => void;
+  onDragEnd: () => void;
 }) {
   return (
-    <th className="group relative px-4 py-3">
+    <th
+      className={cn(
+        "group relative px-4 py-3",
+        draggable && "cursor-grab",
+        isDragging && "bg-blue-50 opacity-60",
+      )}
+      draggable={draggable}
+      onDragStart={() => onDragStart(columnId)}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver(columnId);
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop(columnId);
+      }}
+      onDragEnd={onDragEnd}
+      title="Drag column header to reorder. Drag right edge to resize."
+    >
       <div className="inline-flex items-center gap-1">
         <SortButton
           label={label}
@@ -461,6 +508,207 @@ function LlmOddsDisplay({
   );
 }
 
+function renderBullpenTableCell({
+  columnId,
+  question,
+  rowIndex,
+  hasLlmAnalysis,
+  selectedQuestionIds,
+  selectionEnabled,
+  onToggleQuestion,
+  setBreakdownQuestion,
+}: {
+  columnId: BullpenTableColumnId;
+  question: BullpenQuestionRow;
+  rowIndex: number;
+  hasLlmAnalysis: boolean;
+  selectedQuestionIds: Set<string>;
+  selectionEnabled: boolean;
+  onToggleQuestion: (questionId: string) => void;
+  setBreakdownQuestion: (question: BullpenQuestionRow) => void;
+}) {
+  switch (columnId) {
+    case "select":
+      return (
+        <td key={columnId} className="px-4 py-3">
+          <input
+            type="checkbox"
+            checked={selectedQuestionIds.has(question.id)}
+            disabled={!selectionEnabled}
+            onChange={() => onToggleQuestion(question.id)}
+            className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </td>
+      );
+    case "serialNumber":
+      return (
+        <td
+          key={columnId}
+          className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-600"
+        >
+          {rowIndex + 1}
+        </td>
+      );
+    case "question":
+      return (
+        <td key={columnId} className="px-4 py-3 font-medium text-slate-900">
+          <div className="break-words leading-5">{question.question}</div>
+          {question.marketUrl ? (
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
+              <a
+                href={question.marketUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
+              >
+                Open market
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+            </div>
+          ) : null}
+        </td>
+      );
+    case "closeTime":
+      return (
+        <td
+          key={columnId}
+          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          title={formatDate(question.closeTime) || undefined}
+        >
+          {formatDate(question.closeTime)}
+        </td>
+      );
+    case "daysUntilClose":
+      return (
+        <td
+          key={columnId}
+          className="whitespace-nowrap px-4 py-3 text-slate-600"
+        >
+          {formatDays(question.daysUntilClose)}
+        </td>
+      );
+    case "category":
+      return (
+        <td
+          key={columnId}
+          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          title={question.category || undefined}
+        >
+          {question.category}
+        </td>
+      );
+    case "outcomes":
+      return (
+        <td
+          key={columnId}
+          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          title={formatOutcomeSummary(question)}
+        >
+          {formatOutcomeSummary(question)}
+        </td>
+      );
+    case "yesOdds":
+      return (
+        <td
+          key={columnId}
+          className="whitespace-nowrap px-4 py-3 text-xs font-semibold"
+        >
+          <div className="text-emerald-700">
+            Yes: {formatOdds(question.yesOdds)}
+          </div>
+          <div className="mt-1 text-rose-700">
+            No: {formatOdds(question.noOdds)}
+          </div>
+        </td>
+      );
+    case "llmYesOdds": {
+      const content = (
+        <>
+          <span
+            className={cn("block", getLlmOddsCellClass(question.llmYesOdds))}
+          >
+            Yes:{" "}
+            <LlmOddsDisplay question={question} value={question.llmYesOdds} />
+          </span>
+          <span
+            className={cn(
+              "mt-1 block",
+              getLlmOddsCellClass(question.llmNoOdds),
+            )}
+          >
+            No:{" "}
+            <LlmOddsDisplay question={question} value={question.llmNoOdds} />
+          </span>
+        </>
+      );
+      return (
+        <td
+          key={columnId}
+          className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-violet-700"
+        >
+          {hasLlmAnalysis ? (
+            <button
+              type="button"
+              onClick={() => setBreakdownQuestion(question)}
+              aria-label={`Open LLM odds breakdown for ${question.question}`}
+              className="rounded-md px-2 py-1 text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
+            >
+              {content}
+            </button>
+          ) : (
+            <span className="rounded-md px-2 py-1">{content}</span>
+          )}
+        </td>
+      );
+    }
+    case "returnsPerDay":
+      return (
+        <td
+          key={columnId}
+          className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700"
+        >
+          {formatReturnsPerDay(question.returnsPerDay)}
+        </td>
+      );
+    case "amountToBeInvested":
+      return (
+        <td
+          key={columnId}
+          className={cn(
+            "whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700",
+            question.isAmountToBeInvestedHighlighted
+              ? "bg-fuchsia-500 text-slate-950"
+              : "",
+          )}
+        >
+          {formatMoney(question.amountToBeInvested)}
+        </td>
+      );
+    case "volume":
+      return (
+        <td
+          key={columnId}
+          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          title={question.volume || "—"}
+        >
+          {question.volume || "—"}
+        </td>
+      );
+    case "liquidity":
+      return (
+        <td
+          key={columnId}
+          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          title={question.liquidity || "—"}
+        >
+          {question.liquidity || "—"}
+        </td>
+      );
+    default:
+      return null;
+  }
+}
+
 export function BullpenQuestionsTable({
   snapshot,
   rowsOverride,
@@ -498,8 +746,15 @@ export function BullpenQuestionsTable({
   const [columnWidths, setColumnWidths] = useState<BullpenTableColumnWidths>(
     readBullpenTableColumnWidthsFromStorage,
   );
+  const [columnOrder, setColumnOrder] = useState<BullpenTableColumnId[]>(() =>
+    readBullpenTableColumnOrderFromStorage(
+      DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS,
+    ),
+  );
   const [resizingColumnId, setResizingColumnId] =
     useState<ResizableBullpenTableColumnId | null>(null);
+  const [draggedColumnId, setDraggedColumnId] =
+    useState<DraggableBullpenTableColumnId | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const rows =
     rowsOverride ??
@@ -510,13 +765,10 @@ export function BullpenQuestionsTable({
   ).length;
   const allVisibleSelected =
     selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
-  const visibleColumnIds = BULLPEN_TABLE_COLUMN_IDS.filter(
-    (columnId) => columnId !== "noOdds" && columnId !== "llmNoOdds",
+  const visibleColumnIds = columnOrder.filter((columnId) =>
+    DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS.includes(columnId),
   );
-  const tableWidth =
-    getBullpenTableWidth(columnWidths) -
-    columnWidths.noOdds -
-    columnWidths.llmNoOdds;
+  const tableWidth = getBullpenTableWidth(columnWidths, visibleColumnIds);
   const updatedAtLabel = formatUpdatedAt(snapshot?.scannedAt);
 
   const setColumnWidth = (
@@ -566,6 +818,42 @@ export function BullpenQuestionsTable({
     writeBullpenTableColumnWidthsToStorage(columnWidths);
   }, [columnWidths, resizingColumnId]);
 
+  useEffect(() => {
+    writeBullpenTableColumnOrderToStorage(visibleColumnIds);
+  }, [visibleColumnIds]);
+
+  const moveColumn = (
+    sourceColumnId: DraggableBullpenTableColumnId,
+    targetColumnId: DraggableBullpenTableColumnId,
+  ) => {
+    if (sourceColumnId === targetColumnId) return;
+
+    setColumnOrder((current) => {
+      const sourceIndex = current.indexOf(sourceColumnId);
+      const targetIndex = current.indexOf(targetColumnId);
+      if (sourceIndex === -1 || targetIndex === -1) return current;
+
+      const next = [...current];
+      const [sourceColumn] = next.splice(sourceIndex, 1);
+      next.splice(targetIndex, 0, sourceColumn);
+      return next;
+    });
+  };
+
+  const handleColumnDragStart = (columnId: DraggableBullpenTableColumnId) => {
+    setDraggedColumnId(columnId);
+  };
+
+  const handleColumnDragOver = (columnId: DraggableBullpenTableColumnId) => {
+    if (!draggedColumnId) return;
+    moveColumn(draggedColumnId, columnId);
+  };
+
+  const handleColumnDrop = (columnId: DraggableBullpenTableColumnId) => {
+    if (draggedColumnId) moveColumn(draggedColumnId, columnId);
+    setDraggedColumnId(null);
+  };
+
   const syncDraggedColumnWidth = useEffectEvent(
     (columnId: ResizableBullpenTableColumnId, width: number) => {
       const nextWidth = clampBullpenTableColumnWidth(columnId, width);
@@ -614,6 +902,79 @@ export function BullpenQuestionsTable({
     };
   }, [resizingColumnId]);
 
+  const amountHighlightInfo = (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-label="Show amount highlight conditions"
+      title="Show pink cell highlight conditions"
+      onClick={(event) => {
+        event.stopPropagation();
+        setIsAmountHighlightDialogOpen(true);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsAmountHighlightDialogOpen(true);
+        }
+      }}
+      className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400 text-slate-500 transition hover:border-fuchsia-500 hover:bg-fuchsia-50 hover:text-fuchsia-700 focus:outline-none focus:ring-2 focus:ring-fuchsia-300"
+    >
+      <Info className="h-3 w-3" />
+    </span>
+  );
+
+  const columnDefinitions: Record<
+    BullpenTableColumnId,
+    BullpenTableColumnDefinition
+  > = {
+    select: { columnId: "select", label: "Select" },
+    serialNumber: { columnId: "serialNumber", label: "S. No", align: "center" },
+    question: { columnId: "question", label: "Question", sortKey: "question" },
+    closeTime: {
+      columnId: "closeTime",
+      label: "Closing time",
+      sortKey: "closeTime",
+    },
+    daysUntilClose: {
+      columnId: "daysUntilClose",
+      label: "Days left",
+      sortKey: "daysUntilClose",
+    },
+    category: { columnId: "category", label: "Category", sortKey: "category" },
+    outcomes: { columnId: "outcomes", label: "Outcomes", sortKey: "outcomes" },
+    yesOdds: { columnId: "yesOdds", label: "Current Odds", sortKey: "yesOdds" },
+    noOdds: { columnId: "noOdds", label: "Current No Odds", sortKey: "noOdds" },
+    llmYesOdds: {
+      columnId: "llmYesOdds",
+      label: "LLM Odds",
+      sortKey: "llmYesOdds",
+    },
+    llmNoOdds: {
+      columnId: "llmNoOdds",
+      label: "LLM No Odds",
+      sortKey: "llmNoOdds",
+    },
+    returnsPerDay: {
+      columnId: "returnsPerDay",
+      label: "Returns/day",
+      sortKey: "returnsPerDay",
+    },
+    amountToBeInvested: {
+      columnId: "amountToBeInvested",
+      label: "Amount to be invested",
+      sortKey: "amountToBeInvested",
+      afterLabel: amountHighlightInfo,
+    },
+    volume: { columnId: "volume", label: "Volume", sortKey: "volume" },
+    liquidity: {
+      columnId: "liquidity",
+      label: "Liquidity",
+      sortKey: "liquidity",
+    },
+  };
+
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200">
       <div className="border-b border-slate-200 bg-white px-4 py-3 text-left">
@@ -640,159 +1001,69 @@ export function BullpenQuestionsTable({
           </colgroup>
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
-              <th className="px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={allVisibleSelected}
-                  disabled={!selectionEnabled || rows.length === 0}
-                  onChange={() => onToggleSelectAll()}
-                  className="h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                />
-              </th>
-              <th className="whitespace-nowrap px-4 py-3 text-center">S. No</th>
-              <ResizableColumnHeader
-                columnId="question"
-                label="Question"
-                sortKey="question"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "question"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="closeTime"
-                label="Closing time"
-                sortKey="closeTime"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "closeTime"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="daysUntilClose"
-                label="Days left"
-                sortKey="daysUntilClose"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "daysUntilClose"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="category"
-                label="Category"
-                sortKey="category"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "category"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="outcomes"
-                label="Outcomes"
-                sortKey="outcomes"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "outcomes"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="yesOdds"
-                label="Current Odds"
-                sortKey="yesOdds"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "yesOdds"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="llmYesOdds"
-                label="LLM Odds"
-                sortKey="llmYesOdds"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "llmYesOdds"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="returnsPerDay"
-                label="Returns/day"
-                sortKey="returnsPerDay"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "returnsPerDay"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="amountToBeInvested"
-                label="Amount to be invested"
-                sortKey="amountToBeInvested"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "amountToBeInvested"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-                afterLabel={
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Show amount highlight conditions"
-                    title="Show pink cell highlight conditions"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setIsAmountHighlightDialogOpen(true);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setIsAmountHighlightDialogOpen(true);
-                      }
-                    }}
-                    className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-400 text-slate-500 transition hover:border-fuchsia-500 hover:bg-fuchsia-50 hover:text-fuchsia-700 focus:outline-none focus:ring-2 focus:ring-fuchsia-300"
-                  >
-                    <Info className="h-3 w-3" />
-                  </span>
+              {visibleColumnIds.map((columnId) => {
+                const definition = columnDefinitions[columnId];
+                if (columnId === "select") {
+                  return (
+                    <th key={columnId} className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleSelected}
+                        disabled={!selectionEnabled || rows.length === 0}
+                        onChange={() => onToggleSelectAll()}
+                        className="h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                    </th>
+                  );
                 }
-              />
-              <ResizableColumnHeader
-                columnId="volume"
-                label="Volume"
-                sortKey="volume"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "volume"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
-              <ResizableColumnHeader
-                columnId="liquidity"
-                label="Liquidity"
-                sortKey="liquidity"
-                sortState={sortState}
-                onSortChange={onSortChange}
-                isResizing={resizingColumnId === "liquidity"}
-                onResizeStart={handleResizeStart}
-                onResizeStep={handleResizeStep}
-                onReset={resetColumnWidth}
-              />
+
+                if (columnId === "serialNumber") {
+                  return (
+                    <th
+                      key={columnId}
+                      className="cursor-grab whitespace-nowrap px-4 py-3 text-center"
+                      draggable
+                      onDragStart={() => handleColumnDragStart(columnId)}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        handleColumnDragOver(columnId);
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        handleColumnDrop(columnId);
+                      }}
+                      onDragEnd={() => setDraggedColumnId(null)}
+                      title="Drag column header to reorder."
+                    >
+                      {definition.label}
+                    </th>
+                  );
+                }
+
+                if (!definition.sortKey) return null;
+
+                return (
+                  <ResizableColumnHeader
+                    key={columnId}
+                    columnId={columnId as ResizableBullpenTableColumnId}
+                    label={definition.label}
+                    sortKey={definition.sortKey}
+                    sortState={sortState}
+                    onSortChange={onSortChange}
+                    isResizing={resizingColumnId === columnId}
+                    onResizeStart={handleResizeStart}
+                    onResizeStep={handleResizeStep}
+                    onReset={resetColumnWidth}
+                    afterLabel={definition.afterLabel}
+                    draggable
+                    isDragging={draggedColumnId === columnId}
+                    onDragStart={handleColumnDragStart}
+                    onDragOver={handleColumnDragOver}
+                    onDrop={handleColumnDrop}
+                    onDragEnd={() => setDraggedColumnId(null)}
+                  />
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
@@ -814,152 +1085,18 @@ export function BullpenQuestionsTable({
                         "bg-fuchsia-50 hover:bg-fuchsia-100/70",
                     )}
                   >
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedQuestionIds.has(question.id)}
-                        disabled={!selectionEnabled}
-                        onChange={() => onToggleQuestion(question.id)}
-                        className="mt-1 h-4 w-4 rounded border-slate-300 text-slate-950 focus:ring-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-600">
-                      {rowIndex + 1}
-                    </td>
-                    <td className="px-4 py-3 font-medium text-slate-900">
-                      <div className="break-words leading-5">
-                        {question.question}
-                      </div>
-                      {question.marketUrl ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
-                          <a
-                            href={question.marketUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 text-purple-700 hover:text-purple-900"
-                          >
-                            Open market
-                            <ExternalLink className="h-3.5 w-3.5" />
-                          </a>
-                        </div>
-                      ) : null}
-                    </td>
-                    <td
-                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
-                      title={formatDate(question.closeTime) || undefined}
-                    >
-                      {formatDate(question.closeTime)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-600">
-                      {formatDays(question.daysUntilClose)}
-                    </td>
-                    <td
-                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
-                      title={question.category || undefined}
-                    >
-                      {question.category}
-                    </td>
-                    <td
-                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
-                      title={formatOutcomeSummary(question)}
-                    >
-                      {formatOutcomeSummary(question)}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold">
-                      <div className="text-emerald-700">
-                        Yes: {formatOdds(question.yesOdds)}
-                      </div>
-                      <div className="mt-1 text-rose-700">
-                        No: {formatOdds(question.noOdds)}
-                      </div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-violet-700">
-                      {hasLlmAnalysis ? (
-                        <button
-                          type="button"
-                          onClick={() => setBreakdownQuestion(question)}
-                          aria-label={`Open LLM odds breakdown for ${question.question}`}
-                          className="rounded-md px-2 py-1 text-left underline decoration-violet-300 underline-offset-4 transition hover:text-violet-900"
-                        >
-                          <span
-                            className={cn(
-                              "block",
-                              getLlmOddsCellClass(question.llmYesOdds),
-                            )}
-                          >
-                            Yes:{" "}
-                            <LlmOddsDisplay
-                              question={question}
-                              value={question.llmYesOdds}
-                            />
-                          </span>
-                          <span
-                            className={cn(
-                              "mt-1 block",
-                              getLlmOddsCellClass(question.llmNoOdds),
-                            )}
-                          >
-                            No:{" "}
-                            <LlmOddsDisplay
-                              question={question}
-                              value={question.llmNoOdds}
-                            />
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="rounded-md px-2 py-1">
-                          <span
-                            className={cn(
-                              "block",
-                              getLlmOddsCellClass(question.llmYesOdds),
-                            )}
-                          >
-                            Yes:{" "}
-                            <LlmOddsDisplay
-                              question={question}
-                              value={question.llmYesOdds}
-                            />
-                          </span>
-                          <span
-                            className={cn(
-                              "mt-1 block",
-                              getLlmOddsCellClass(question.llmNoOdds),
-                            )}
-                          >
-                            No:{" "}
-                            <LlmOddsDisplay
-                              question={question}
-                              value={question.llmNoOdds}
-                            />
-                          </span>
-                        </span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700">
-                      {formatReturnsPerDay(question.returnsPerDay)}
-                    </td>
-                    <td
-                      className={cn(
-                        "whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700",
-                        question.isAmountToBeInvestedHighlighted
-                          ? "bg-fuchsia-500 text-slate-950"
-                          : "",
-                      )}
-                    >
-                      {formatMoney(question.amountToBeInvested)}
-                    </td>
-                    <td
-                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
-                      title={question.volume || "—"}
-                    >
-                      {question.volume || "—"}
-                    </td>
-                    <td
-                      className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
-                      title={question.liquidity || "—"}
-                    >
-                      {question.liquidity || "—"}
-                    </td>
+                    {visibleColumnIds.map((columnId) =>
+                      renderBullpenTableCell({
+                        columnId,
+                        question,
+                        rowIndex,
+                        hasLlmAnalysis,
+                        selectedQuestionIds,
+                        selectionEnabled,
+                        onToggleQuestion,
+                        setBreakdownQuestion,
+                      }),
+                    )}
                   </tr>
                 );
               })
