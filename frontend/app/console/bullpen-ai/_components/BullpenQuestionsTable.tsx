@@ -716,6 +716,7 @@ export function BullpenQuestionsTable({
   rowHighlightById,
   emptyMessage,
   headerContent,
+  updateUnavailableReason,
   isLoading,
   historicalRuns,
   historicalDecisions,
@@ -734,6 +735,7 @@ export function BullpenQuestionsTable({
   >;
   emptyMessage: string;
   headerContent?: ReactNode;
+  updateUnavailableReason?: string;
   isLoading: boolean;
   historicalRuns?: BullpenAutoLiveRun[];
   historicalDecisions?: BullpenAutoLiveDecision[];
@@ -776,6 +778,8 @@ export function BullpenQuestionsTable({
   );
   const tableWidth = getBullpenTableWidth(columnWidths, visibleColumnIds);
   const updatedAtLabel = formatUpdatedAt(snapshot?.scannedAt);
+  const showUpdateUnavailableReason =
+    updatedAtLabel === "—" && Boolean(updateUnavailableReason);
 
   const setColumnWidth = (
     columnId: ResizableBullpenTableColumnId,
@@ -991,6 +995,11 @@ export function BullpenQuestionsTable({
           <span className="text-xs font-medium text-slate-500">
             Updated {updatedAtLabel}
           </span>
+          {showUpdateUnavailableReason ? (
+            <span className="text-xs font-medium text-amber-700">
+              {updateUnavailableReason}
+            </span>
+          ) : null}
         </div>
         {headerContent ? <div className="mt-3">{headerContent}</div> : null}
       </div>
