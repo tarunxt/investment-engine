@@ -756,9 +756,10 @@ export function BullpenQuestionsTable({
   const [draggedColumnId, setDraggedColumnId] =
     useState<DraggableBullpenTableColumnId | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
-  const rows =
-    rowsOverride ??
-    (snapshot ? sortQuestions(snapshot.questions, sortState) : []);
+  const rows = sortQuestions(
+    rowsOverride ?? (snapshot ? snapshot.questions : []),
+    sortState,
+  );
   const selectableRowCount = selectionEnabled ? rows.length : 0;
   const selectedVisibleCount = rows.filter((question) =>
     selectedQuestionIds.has(question.id),
