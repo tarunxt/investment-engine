@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
-    DEFAULT_CONSOLE_ORDER_USD,
     next_console_schedule_time,
     next_custom_console_schedule_time,
 )
@@ -55,9 +54,9 @@ AUTO_LIVE_RISK_SUMMARY = (
 )
 CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY = (
     "Runs the Bullpen console top-10 profile on a fixed IST schedule. Each cycle "
-    "scans upcoming markets, runs LLM consensus on every Stage 1 event, buys the "
-    "saved per-trade amount of each new opportunity that reaches the ranked "
-    "top-10 returns/day table on its stronger LLM side, and exits active "
+    "scans upcoming markets, runs LLM consensus on every Stage 1 event, sizes each "
+    "new opportunity as cash in hand divided by remaining open top-10 slots, buys "
+    "qualified ranked opportunities on their stronger LLM side, and exits active "
     "positions that fall outside that top 10."
 )
 CONSOLE_AUTO_LIVE_RISK_SUMMARY = (
@@ -93,19 +92,9 @@ def effective_dry_run(settings: BullpenAutoLiveSettings) -> bool:
     return not live_execution_armed(settings)
 
 
-def format_usd_amount(value: float) -> str:
-    rounded = round(value, 2)
-    if rounded.is_integer():
-        return f"${int(rounded)}"
-    return f"${rounded:,.2f}".rstrip("0").rstrip(".")
-
-
 def strategy_summary_for(settings: BullpenAutoLiveSettings) -> str:
     if settings.strategy_profile == CONSOLE_PROFILE_ID:
-        return CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY.replace(
-            "the saved per-trade amount",
-            format_usd_amount(settings.console_order_usd or DEFAULT_CONSOLE_ORDER_USD),
-        )
+        return CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY
     return AUTO_LIVE_STRATEGY_SUMMARY
 
 

@@ -2094,6 +2094,11 @@ export interface BullpenAutoLiveState {
   current_value_usd: number;
   pnl_usd: number;
   active_positions: number;
+  last_console_trade_amount_usd?: number | null;
+  last_console_trade_cash_in_hand_usd?: number | null;
+  last_console_trade_active_positions?: number | null;
+  last_console_trade_available_slots?: number | null;
+  last_console_trade_max_positions?: number | null;
   trades_today: number;
   consecutive_failed_orders: number;
   today_executed_orders: number;

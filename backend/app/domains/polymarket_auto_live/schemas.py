@@ -571,6 +571,11 @@ class BullpenAutoLiveState(BaseModel):
     current_value_usd: float = Field(default=0, ge=0)
     pnl_usd: float = 0
     active_positions: int = Field(default=0, ge=0)
+    last_console_trade_amount_usd: float | None = Field(default=None, ge=0)
+    last_console_trade_cash_in_hand_usd: float | None = Field(default=None, ge=0)
+    last_console_trade_active_positions: int | None = Field(default=None, ge=0)
+    last_console_trade_available_slots: int | None = Field(default=None, ge=0)
+    last_console_trade_max_positions: int | None = Field(default=None, ge=1)
     trades_today: int = Field(default=0, ge=0)
     consecutive_failed_orders: int = Field(default=0, ge=0)
     today_executed_orders: int = Field(default=0, ge=0)

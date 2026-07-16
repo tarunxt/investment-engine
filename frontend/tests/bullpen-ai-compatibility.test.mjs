@@ -228,7 +228,7 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunProgressSource, /outputs: Record<string, unknown>/);
 });
 
-test("Bullpen x AI auto-run card exposes a saved per-trade amount input", () => {
+test("Bullpen x AI auto-run card exposes the dynamic trade amount formula", () => {
   const autoRunCardSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -238,9 +238,27 @@ test("Bullpen x AI auto-run card exposes a saved per-trade amount input", () => 
   );
 
   assert.match(autoRunCardSource, /Trade amount per new opportunity/);
-  assert.match(autoRunCardSource, /console_order_usd/);
-  assert.match(autoRunCardSource, /Future Bullpen x AI trades and automations will use/);
-  assert.match(autoRunCardSource, /DEFAULT_CONSOLE_ORDER_USD = 5/);
+  assert.match(autoRunCardSource, /Cash in Hand \/ \(10 - Active positions\)/);
+  assert.match(autoRunCardSource, /last_console_trade_amount_usd/);
+  assert.match(autoRunCardSource, /Show trade amount formula/);
+  assert.doesNotMatch(
+    autoRunCardSource,
+    /Future Bullpen x AI trades and automations will use/,
+  );
+});
+
+test("Bullpen x AI auto-run card applies summary data before slower run detail hydration", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /const baseSummary = await summaryPromise;/);
+  assert.match(autoRunCardSource, /setSummary\(baseSummary\);/);
+  assert.match(autoRunCardSource, /const \[runsResult, decisionsResult\] = await Promise\.allSettled/);
 });
 
 test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without persisting a timestamp", () => {

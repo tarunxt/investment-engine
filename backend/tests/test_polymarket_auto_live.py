@@ -1249,19 +1249,33 @@ async def test_console_profile_reports_incremental_stage_3_counters_and_mode_rea
 
 
 @pytest.mark.anyio
-async def test_console_profile_uses_saved_console_order_amount_for_new_buys(
+async def test_console_profile_sizes_new_buys_from_cash_and_active_positions(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
     candidate_market = _market(
-        question="Will the saved console order amount be used?",
-        slug="saved-console-order-amount",
+        question="Will the dynamic console trade amount be used?",
+        slug="dynamic-console-order-amount",
         current_yes_odds=12,
         current_no_odds=88,
     )
 
     async def fake_read_console_wallet_positions():
-        return []
+        return [
+            _console_wallet_position(
+                slug="existing-active-position",
+                market_title="Existing active position",
+                current_price_cents=61,
+                exposure_usd=5.0,
+            )
+        ]
+
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            message="Balance ready",
+            available_balance_usd=14.77,
+        )
 
     async def fake_scan_console_profile_markets(**_kwargs):
         return SimpleNamespace(
@@ -1317,6 +1331,10 @@ async def test_console_profile_uses_saved_console_order_amount_for_new_buys(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
+    )
 
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
@@ -1339,11 +1357,15 @@ async def test_console_profile_uses_saved_console_order_amount_for_new_buys(
         stage for stage in buy_decision.stage_results if stage.stage_number == 5
     )
 
-    assert stage5.outputs["order_usd"] == 12.75
-    assert stage5.reason == "New opportunity receives the saved $12.75 order size."
-    assert buy_decision.target_exposure_usd == 12.75
+    assert stage5.outputs["order_usd"] == 1.64
+    assert stage5.outputs["cash_in_hand_usd"] == 14.77
+    assert stage5.outputs["active_positions"] == 1
+    assert stage5.outputs["available_slots"] == 9
+    assert stage5.reason == "New opportunity receives the formula-based $1.64 order size."
+    assert buy_decision.target_exposure_usd == 1.64
     assert buy_decision.order_plan is not None
-    assert buy_decision.order_plan.order_size_usd == 12.75
+    assert buy_decision.order_plan.order_size_usd == 1.64
+    assert result.state.last_console_trade_amount_usd == 1.64
 
 
 @pytest.mark.anyio

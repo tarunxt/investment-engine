@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type KeyboardEvent,
   type ReactNode,
 } from "react";
 import {
@@ -237,6 +236,7 @@ type ScanCandidateDialogCandidate = ReturnType<
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const DEFAULT_CONSOLE_ORDER_USD = 5;
+const CONSOLE_MAX_ACTIVE_POSITIONS = 10;
 const DEFAULT_LLM_EXECUTION_MODE: BullpenLlmExecutionMode = "chunked_parallel";
 const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
 const POLL_INTERVAL_MS = 4_000;
@@ -403,16 +403,80 @@ function formatInvestAmount(value: number | null) {
   });
 }
 
-function formatEditableAmount(value: number) {
-  return value.toFixed(2).replace(/\.?0+$/, "");
+type ConsoleTradeAmountView = {
+  tradeAmountUsd: number | null;
+  cashInHandUsd: number | null;
+  activePositions: number | null;
+  availableSlots: number | null;
+  maxPositions: number;
+  source: "live" | "last-calculated" | "unavailable";
+};
+
+function calculateConsoleTradeAmountUsd(
+  cashInHandUsd: number,
+  availableSlots: number,
+) {
+  if (cashInHandUsd <= 0 || availableSlots <= 0) return 0;
+  return Number((cashInHandUsd / availableSlots).toFixed(2));
 }
 
-function parseConsoleOrderAmount(value: string) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  const rounded = Number(parsed.toFixed(2));
-  if (rounded <= 0) return null;
-  return rounded;
+function buildConsoleTradeAmountView({
+  cashInHandUsd,
+  activePositions,
+  lastCalculatedTradeAmountUsd,
+  lastCalculatedCashInHandUsd,
+  lastCalculatedActivePositions,
+  lastCalculatedAvailableSlots,
+  lastCalculatedMaxPositions,
+}: {
+  cashInHandUsd: number | null;
+  activePositions: number | null;
+  lastCalculatedTradeAmountUsd: number | null;
+  lastCalculatedCashInHandUsd: number | null;
+  lastCalculatedActivePositions: number | null;
+  lastCalculatedAvailableSlots: number | null;
+  lastCalculatedMaxPositions: number | null;
+}): ConsoleTradeAmountView {
+  if (cashInHandUsd !== null && activePositions !== null) {
+    const availableSlots = Math.max(
+      0,
+      CONSOLE_MAX_ACTIVE_POSITIONS - activePositions,
+    );
+    return {
+      tradeAmountUsd: calculateConsoleTradeAmountUsd(
+        cashInHandUsd,
+        availableSlots,
+      ),
+      cashInHandUsd,
+      activePositions,
+      availableSlots,
+      maxPositions: CONSOLE_MAX_ACTIVE_POSITIONS,
+      source: "live",
+    };
+  }
+
+  if (lastCalculatedTradeAmountUsd !== null) {
+    return {
+      tradeAmountUsd: lastCalculatedTradeAmountUsd,
+      cashInHandUsd: lastCalculatedCashInHandUsd,
+      activePositions: lastCalculatedActivePositions,
+      availableSlots: lastCalculatedAvailableSlots,
+      maxPositions: lastCalculatedMaxPositions ?? CONSOLE_MAX_ACTIVE_POSITIONS,
+      source: "last-calculated",
+    };
+  }
+
+  return {
+    tradeAmountUsd: null,
+    cashInHandUsd: null,
+    activePositions: activePositions,
+    availableSlots:
+      activePositions === null
+        ? null
+        : Math.max(0, CONSOLE_MAX_ACTIVE_POSITIONS - activePositions),
+    maxPositions: CONSOLE_MAX_ACTIVE_POSITIONS,
+    source: "unavailable",
+  };
 }
 
 function parseLlmEventsPerPrompt(value: string) {
@@ -7038,14 +7102,8 @@ export function BullpenAutoRunScheduleCard({
     isInvestEligibilityInfoDialogOpen,
     setIsInvestEligibilityInfoDialogOpen,
   ] = useState(false);
-  const [consoleOrderInput, setConsoleOrderInput] = useState(() =>
-    formatEditableAmount(DEFAULT_CONSOLE_ORDER_USD),
-  );
-  const [consoleOrderDirty, setConsoleOrderDirty] = useState(false);
-  const [consoleOrderSaveBusy, setConsoleOrderSaveBusy] = useState(false);
-  const [consoleOrderFieldError, setConsoleOrderFieldError] = useState<
-    string | null
-  >(null);
+  const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
+    useState(false);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
   const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
   const [scheduleSettingsDirty, setScheduleSettingsDirty] = useState(false);
@@ -7079,8 +7137,10 @@ export function BullpenAutoRunScheduleCard({
   >(null);
   const [, setPortfolioLoading] = useState(true);
 
-  const savedConsoleOrderUsd =
-    summary?.settings.console_order_usd ?? DEFAULT_CONSOLE_ORDER_USD;
+  const persistedConsoleOrderUsd =
+    summary?.state.last_console_trade_amount_usd ??
+    summary?.settings.console_order_usd ??
+    DEFAULT_CONSOLE_ORDER_USD;
 
   useEffect(() => {
     if (scheduleSettingsDirty) return;
@@ -7098,14 +7158,6 @@ export function BullpenAutoRunScheduleCard({
     summary?.settings.console_auto_start_at,
     summary?.settings.console_auto_refresh_minutes,
   ]);
-
-  useEffect(() => {
-    if (consoleOrderDirty) return;
-    window.queueMicrotask(() => {
-      setConsoleOrderInput(formatEditableAmount(savedConsoleOrderUsd));
-      setConsoleOrderFieldError(null);
-    });
-  }, [consoleOrderDirty, savedConsoleOrderUsd]);
 
   useEffect(() => {
     const nextTargets = summary?.settings.console_llm_targets ?? [];
@@ -7135,15 +7187,6 @@ export function BullpenAutoRunScheduleCard({
     summary?.settings.llm_events_per_prompt,
   ]);
 
-  function resolveConsoleOrderAmount() {
-    const parsedAmount = parseConsoleOrderAmount(consoleOrderInput);
-    if (parsedAmount === null) {
-      setConsoleOrderFieldError("Enter an amount greater than $0.");
-      return null;
-    }
-    return parsedAmount;
-  }
-
   function resolveLlmEventsPerPromptValue() {
     const parsedValue = parseLlmEventsPerPrompt(llmEventsPerPromptInput);
     if (parsedValue === null) {
@@ -7151,39 +7194,6 @@ export function BullpenAutoRunScheduleCard({
       return null;
     }
     return parsedValue;
-  }
-
-  async function saveConsoleOrderAmount(options?: { silentSuccess?: boolean }) {
-    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
-    if (nextConsoleOrderUsd === null) {
-      return null;
-    }
-    if (!consoleOrderDirty && nextConsoleOrderUsd === savedConsoleOrderUsd) {
-      return nextConsoleOrderUsd;
-    }
-
-    setConsoleOrderSaveBusy(true);
-    setError(null);
-    try {
-      await apiService.updateBullpenAutoLiveSettings({
-        console_order_usd: nextConsoleOrderUsd,
-      });
-      setConsoleOrderDirty(false);
-      setConsoleOrderFieldError(null);
-      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
-      await loadSummary({ preserveLoading: true });
-      if (!options?.silentSuccess) {
-        setNotice(
-          `Future Bullpen x AI trades and automations will use ${formatMoney(nextConsoleOrderUsd)} per trade.`,
-        );
-      }
-      return nextConsoleOrderUsd;
-    } catch (nextError) {
-      setError(normalizeError(nextError));
-      return null;
-    } finally {
-      setConsoleOrderSaveBusy(false);
-    }
   }
 
   async function handleSelectedLlmTargetsChange(
@@ -7233,12 +7243,6 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
-  function handleConsoleOrderInputChange(event: ChangeEvent<HTMLInputElement>) {
-    setConsoleOrderInput(event.target.value);
-    setConsoleOrderDirty(true);
-    setConsoleOrderFieldError(null);
-  }
-
   function handleLlmEventsPerPromptInputChange(
     event: ChangeEvent<HTMLInputElement>,
   ) {
@@ -7253,66 +7257,64 @@ export function BullpenAutoRunScheduleCard({
     setLlmExecutionFieldError(null);
   }
 
-  function handleConsoleOrderInputBlur() {
-    if (!consoleOrderDirty || consoleOrderSaveBusy || action !== null) return;
-    void saveConsoleOrderAmount({ silentSuccess: true });
-  }
-
-  function handleConsoleOrderInputKeyDown(
-    event: KeyboardEvent<HTMLInputElement>,
-  ) {
-    if (event.key !== "Enter") return;
-    event.preventDefault();
-    void saveConsoleOrderAmount();
-  }
-
   async function loadSummary(options?: {
     preserveLoading?: boolean;
     nextPendingRunId?: string | null;
   }) {
+    let loadingCleared = Boolean(options?.preserveLoading);
+    const resolvedPendingRunId = options?.nextPendingRunId ?? pendingRunId;
     if (!options?.preserveLoading) {
       setLoading(true);
     }
     try {
-      const [summaryResult, runsResult, decisionsResult] = await Promise.allSettled([
-        apiService.getBullpenAutoLiveSummary(),
-        apiService.getBullpenAutoLiveRuns(),
-        apiService.getBullpenAutoLiveDecisions(),
-      ]);
-      if (summaryResult.status !== "fulfilled") {
-        throw summaryResult.reason;
+      const summaryPromise = apiService.getBullpenAutoLiveSummary();
+      const runsPromise = apiService.getBullpenAutoLiveRuns();
+      const decisionsPromise = apiService.getBullpenAutoLiveDecisions();
+      const baseSummary = await summaryPromise;
+      setSummary(baseSummary);
+      setError(null);
+      const baseTrackedRun = getVisibleRun(baseSummary, resolvedPendingRunId);
+      onSummaryUpdated?.({
+        summary: baseSummary,
+        run: baseTrackedRun,
+        pendingRunId: resolvedPendingRunId,
+      });
+      if (!loadingCleared) {
+        setLoading(false);
+        loadingCleared = true;
       }
+
+      const [runsResult, decisionsResult] = await Promise.allSettled([
+        runsPromise,
+        decisionsPromise,
+      ]);
       const nextSummary = {
-        ...summaryResult.value,
+        ...baseSummary,
         latest_run:
-          summaryResult.value.latest_run ??
+          baseSummary.latest_run ??
           (runsResult.status === "fulfilled" ? runsResult.value[0] ?? null : null),
         recent_runs:
           runsResult.status === "fulfilled"
             ? runsResult.value
-            : summaryResult.value.recent_runs,
+            : baseSummary.recent_runs,
         recent_decisions:
           decisionsResult.status === "fulfilled"
             ? decisionsResult.value
-            : summaryResult.value.recent_decisions,
+            : baseSummary.recent_decisions,
       };
       setSummary(nextSummary);
-      setError(null);
-      const nextTrackedRun = getVisibleRun(
-        nextSummary,
-        options?.nextPendingRunId ?? pendingRunId,
-      );
+      const nextTrackedRun = getVisibleRun(nextSummary, resolvedPendingRunId);
       onSummaryUpdated?.({
         summary: nextSummary,
         run: nextTrackedRun,
-        pendingRunId: options?.nextPendingRunId ?? pendingRunId,
+        pendingRunId: resolvedPendingRunId,
       });
       return nextSummary;
     } catch (nextError) {
       setError(normalizeError(nextError));
       return null;
     } finally {
-      if (!options?.preserveLoading) {
+      if (!loadingCleared) {
         setLoading(false);
       }
     }
@@ -7472,7 +7474,7 @@ export function BullpenAutoRunScheduleCard({
     try {
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
-          savedConsoleOrderUsd,
+          persistedConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
           selectedLlmTargets,
@@ -7499,11 +7501,6 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handleEnableAutoRuns() {
-    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
-    if (nextConsoleOrderUsd === null) {
-      return;
-    }
-
     setAction("enable");
     setNotice(null);
     setError(null);
@@ -7521,15 +7518,12 @@ export function BullpenAutoRunScheduleCard({
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
-          nextConsoleOrderUsd,
+          persistedConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
           selectedLlmTargets,
         ),
       );
-      setConsoleOrderDirty(false);
-      setConsoleOrderFieldError(null);
-      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
       setScheduleSavedSummary(
         buildScheduleSummary(
@@ -7550,7 +7544,7 @@ export function BullpenAutoRunScheduleCard({
                 allow_live_execution: true,
                 require_manual_confirmation: false,
                 strategy_profile: CONSOLE_PROFILE_ID,
-                console_order_usd: nextConsoleOrderUsd,
+                console_order_usd: persistedConsoleOrderUsd,
                 console_auto_start_at: startWasNow
                   ? null
                   : normalizedStart || null,
@@ -7597,11 +7591,6 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handleInvestOnly(request: BullpenAutoLiveRunOnceRequest) {
-    const nextConsoleOrderUsd = resolveConsoleOrderAmount();
-    if (nextConsoleOrderUsd === null) {
-      return;
-    }
-
     const startedAt = new Date().toISOString();
     setAction("invest-now");
     setRunNowStartedAt(startedAt);
@@ -7620,15 +7609,12 @@ export function BullpenAutoRunScheduleCard({
       }
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
-          nextConsoleOrderUsd,
+          persistedConsoleOrderUsd,
           scheduleStartInput.trim() || null,
           refreshMinutes,
           selectedLlmTargets,
         ),
       );
-      setConsoleOrderDirty(false);
-      setConsoleOrderFieldError(null);
-      setConsoleOrderInput(formatEditableAmount(nextConsoleOrderUsd));
       const run = await apiService.runBullpenAutoLiveOnce(request);
       const qualifiedCandidateCount =
         request.console_profile?.candidate_rows.length ?? 0;
@@ -7908,18 +7894,43 @@ export function BullpenAutoRunScheduleCard({
   const investOnlyDisabledReason = runIsActive
     ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
     : investOnlyPlan.blockedReason;
-  const consoleOrderSaveDisabled =
-    action !== null ||
-    consoleOrderSaveBusy ||
-    !consoleOrderDirty ||
-    parseConsoleOrderAmount(consoleOrderInput) === null;
-  const consoleOrderHelperMessage = consoleOrderFieldError
-    ? consoleOrderFieldError
-    : consoleOrderSaveBusy
-      ? "Saving trade amount..."
-      : consoleOrderDirty
-        ? "Press Enter, click Save, or start a run to apply this amount to future trades."
-        : "";
+  const liveTradeAmountSource = portfolioState?.live.balance ?? null;
+  const liveTradeAmountBalance = isUsableBullpenBalance(liveTradeAmountSource)
+    ? liveTradeAmountSource
+    : lastUsablePortfolioBalance;
+  const liveTradeAmountActivePositions = hasActivePositionsSnapshot
+    ? activePositions.length
+    : portfolioState
+      ? portfolioState.open_positions.filter((position) => position.shares > 0)
+          .length
+      : (summary?.state.active_positions ?? null);
+  const tradeAmountView = buildConsoleTradeAmountView({
+    cashInHandUsd: liveTradeAmountBalance?.available_balance_usd ?? null,
+    activePositions: liveTradeAmountActivePositions,
+    lastCalculatedTradeAmountUsd:
+      summary?.state.last_console_trade_amount_usd ?? null,
+    lastCalculatedCashInHandUsd:
+      summary?.state.last_console_trade_cash_in_hand_usd ?? null,
+    lastCalculatedActivePositions:
+      summary?.state.last_console_trade_active_positions ?? null,
+    lastCalculatedAvailableSlots:
+      summary?.state.last_console_trade_available_slots ?? null,
+    lastCalculatedMaxPositions:
+      summary?.state.last_console_trade_max_positions ?? null,
+  });
+  const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
+  const tradeAmountHelperMessage =
+    tradeAmountView.source === "live"
+      ? "Uses current cash in hand divided by the remaining open top-10 slots."
+      : tradeAmountView.source === "last-calculated"
+        ? "Showing the last calculated amount until the next fresh balance sync finishes."
+        : "Waiting for Bullpen cash in hand and active positions to calculate this amount.";
+  const tradeAmountSummaryLabel =
+    tradeAmountView.source === "live"
+      ? "Auto-calculated from current portfolio"
+      : tradeAmountView.source === "last-calculated"
+        ? "Showing last calculated amount"
+        : "Waiting for live portfolio data";
 
   useEffect(() => {
     if (!shouldTickTimers) return;
@@ -8051,59 +8062,30 @@ export function BullpenAutoRunScheduleCard({
         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="min-w-0">
-              <label
-                htmlFor="bullpen-auto-run-trade-amount"
-                className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500"
-              >
-                Trade amount per new opportunity
-              </label>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                <div className="flex h-11 min-w-[13rem] flex-1 items-center rounded-xl border border-slate-200 bg-white shadow-sm">
-                  <span className="ml-3 mr-2 text-sm font-semibold text-slate-500">
-                    $
-                  </span>
-                  <input
-                    id="bullpen-auto-run-trade-amount"
-                    type="number"
-                    inputMode="decimal"
-                    min="0.01"
-                    step="0.01"
-                    value={consoleOrderInput}
-                    onChange={handleConsoleOrderInputChange}
-                    onBlur={handleConsoleOrderInputBlur}
-                    onKeyDown={handleConsoleOrderInputKeyDown}
-                    disabled={action !== null || consoleOrderSaveBusy}
-                    className="h-full w-full border-0 bg-transparent p-0 text-sm font-semibold text-slate-950 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
-                    placeholder={String(DEFAULT_CONSOLE_ORDER_USD)}
-                    aria-describedby="bullpen-auto-run-trade-amount-help"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      void saveConsoleOrderAmount();
-                    }}
-                    disabled={consoleOrderSaveDisabled}
-                    className="h-full min-w-[5.5rem] rounded-l-none rounded-r-xl border-y-0 border-r-0 shadow-none"
-                  >
-                    {consoleOrderSaveBusy ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      "Save"
-                    )}
-                  </Button>
-                </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <span>Trade amount per new opportunity</span>
+                <span className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] tracking-[0.12em] text-white">
+                  {tradeAmountDisplay}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setIsTradeAmountInfoDialogOpen(true)}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-fuchsia-200 text-fuchsia-700 transition hover:bg-fuchsia-50 focus:outline-none focus:ring-2 focus:ring-fuchsia-300"
+                  aria-label="Show trade amount formula"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
               </div>
-              <p
-                id="bullpen-auto-run-trade-amount-help"
-                className={`mt-2 text-xs leading-5 ${
-                  consoleOrderFieldError ? "text-rose-700" : "text-slate-600"
-                }`}
-              >
-                {consoleOrderHelperMessage}
+              <div className="mt-2 flex h-11 items-center justify-between rounded-xl border border-slate-200 bg-white px-4 shadow-sm">
+                <span className="text-sm text-slate-500">
+                  {tradeAmountSummaryLabel}
+                </span>
+                <span className="text-base font-semibold tabular-nums text-slate-950">
+                  {tradeAmountDisplay}
+                </span>
+              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-600">
+                {tradeAmountHelperMessage}
               </p>
             </div>
             <div className="min-w-0">
@@ -9205,6 +9187,106 @@ export function BullpenAutoRunScheduleCard({
             state={stageTwoInvestEventsDialog}
             onClose={() => setStageTwoInvestEventsDialog(null)}
           />
+        ) : null}
+
+        {isTradeAmountInfoDialogOpen ? (
+          <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+            <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">
+                    Trade amount formula
+                  </p>
+                  <h3 className="mt-1 text-xl font-semibold">
+                    Cash in Hand / (10 - Active positions)
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsTradeAmountInfoDialogOpen(false)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                  aria-label="Close trade amount formula"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="space-y-4 overflow-y-auto px-6 py-5">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Current amount
+                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950">
+                    {tradeAmountDisplay}
+                  </p>
+                  <p className="mt-2 text-sm text-slate-600">
+                    {tradeAmountView.source === "live"
+                      ? "Calculated from the latest Bullpen portfolio snapshot."
+                      : tradeAmountView.source === "last-calculated"
+                        ? "Showing the last successful calculation until a fresh balance sync completes."
+                        : "Waiting for Bullpen cash in hand and active position data."}
+                  </p>
+                </div>
+
+                {tradeAmountView.cashInHandUsd !== null &&
+                tradeAmountView.activePositions !== null &&
+                tradeAmountView.availableSlots !== null ? (
+                  <>
+                    {tradeAmountView.availableSlots > 0 ? (
+                      <div className="rounded-2xl border border-fuchsia-200 bg-fuchsia-50/60 p-4 text-sm font-medium text-slate-700">
+                        {`${formatMoney(tradeAmountView.cashInHandUsd)} / ${tradeAmountView.availableSlots} = ${tradeAmountDisplay}`}
+                      </div>
+                    ) : (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        All {tradeAmountView.maxPositions} slots are already in
+                        use, so new opportunities size to $0.00 until a
+                        position resolves.
+                      </div>
+                    )}
+
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {[
+                        ["Cash in hand", formatMoney(tradeAmountView.cashInHandUsd)],
+                        [
+                          "Active positions",
+                          tradeAmountView.activePositions.toLocaleString("en-IN"),
+                        ],
+                        [
+                          "Available new slots",
+                          tradeAmountView.availableSlots.toLocaleString("en-IN"),
+                        ],
+                        [
+                          "Target slots",
+                          tradeAmountView.maxPositions.toLocaleString("en-IN"),
+                        ],
+                      ].map(([label, value]) => (
+                        <div
+                          key={label}
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                        >
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            {label}
+                          </p>
+                          <p className="mt-2 text-sm font-semibold text-slate-950">
+                            {value}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    The trade amount will appear here after Bullpen cash in hand
+                    and active positions finish refreshing.
+                  </div>
+                )}
+
+                <p className="text-sm leading-6 text-slate-600">
+                  When an active position resolves, cash is added back and this
+                  amount recalculates on the next fresh balance sync.
+                </p>
+              </div>
+            </div>
+          </div>
         ) : null}
 
         {investMetricDialog ? (

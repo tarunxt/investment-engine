@@ -195,6 +195,34 @@ def console_order_usd(settings: BullpenAutoLiveSettings) -> float:
     return round(settings.console_order_usd or DEFAULT_CONSOLE_ORDER_USD, 2)
 
 
+def build_console_trade_amount_breakdown(
+    *,
+    available_balance_usd: float | None,
+    active_position_count: int,
+    max_positions: int = CONSOLE_RANKED_EVENT_LIMIT,
+) -> dict[str, float | int | None]:
+    normalized_active_positions = max(0, active_position_count)
+    available_slots = max(0, max_positions - normalized_active_positions)
+    cash_in_hand_usd = round_money(available_balance_usd)
+
+    if cash_in_hand_usd is None or cash_in_hand_usd <= 0 or available_slots <= 0:
+        return {
+            "cash_in_hand_usd": cash_in_hand_usd,
+            "active_positions": normalized_active_positions,
+            "available_slots": available_slots,
+            "max_positions": max_positions,
+            "order_usd": 0.0,
+        }
+
+    return {
+        "cash_in_hand_usd": cash_in_hand_usd,
+        "active_positions": normalized_active_positions,
+        "available_slots": available_slots,
+        "max_positions": max_positions,
+        "order_usd": round(cash_in_hand_usd / available_slots, 2),
+    }
+
+
 def score_rank(value: str | None, mapping: dict[str, int]) -> int:
     if not value:
         return -1
@@ -3749,7 +3777,7 @@ class BullpenAutoLiveEngine:
         now: datetime,
         progress_callback: ProgressCallback | None = None,
     ) -> EngineResult:
-        saved_console_order_usd = console_order_usd(settings)
+        persisted_console_order_usd = console_order_usd(settings)
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         manual_console_context = (
             run.request_context.console_profile
@@ -4038,6 +4066,7 @@ class BullpenAutoLiveEngine:
                         reason=reason,
                     )
 
+        console_balance_task = asyncio.create_task(refresh_balance())
         live_wallet_positions = await live_wallet_positions_task
         unsupported_live_wallet_positions = [
             position
@@ -4203,9 +4232,69 @@ class BullpenAutoLiveEngine:
             historical_decisions,
             bullpen_wallet_positions,
         )
+        active_position_market_count = _active_market_count(position_snapshots)
         active_position_rows_before_llm = len(position_snapshots) + len(
             claimable_wallet_positions
         )
+        console_balance_state = None
+        try:
+            console_balance_state = await console_balance_task
+        except Exception as exc:
+            logger.warning(
+                "Could not refresh Bullpen cash in hand for console sizing: %s",
+                exc,
+            )
+
+        console_trade_amount_breakdown = build_console_trade_amount_breakdown(
+            available_balance_usd=(
+                console_balance_state.available_balance_usd
+                if console_balance_state is not None
+                and console_balance_state.status == "ready"
+                else None
+            ),
+            active_position_count=active_position_market_count,
+        )
+        last_calculated_console_order_usd = round_money(
+            state.last_console_trade_amount_usd
+        )
+        fallback_console_order_usd = (
+            last_calculated_console_order_usd
+            if last_calculated_console_order_usd is not None
+            else (
+                persisted_console_order_usd
+                if abs(persisted_console_order_usd - DEFAULT_CONSOLE_ORDER_USD) > 0.009
+                else 0.0
+            )
+        )
+        dynamic_console_order_available = (
+            console_trade_amount_breakdown["cash_in_hand_usd"] is not None
+        )
+        console_order_source = (
+            "dynamic_formula"
+            if dynamic_console_order_available
+            else "last_calculated_fallback"
+            if fallback_console_order_usd > 0
+            else "unavailable"
+        )
+        resolved_console_order_usd = (
+            float(console_trade_amount_breakdown["order_usd"] or 0.0)
+            if dynamic_console_order_available
+            else fallback_console_order_usd
+        )
+        if dynamic_console_order_available:
+            state.last_console_trade_amount_usd = resolved_console_order_usd
+            state.last_console_trade_cash_in_hand_usd = console_trade_amount_breakdown[
+                "cash_in_hand_usd"
+            ]
+            state.last_console_trade_active_positions = int(
+                console_trade_amount_breakdown["active_positions"] or 0
+            )
+            state.last_console_trade_available_slots = int(
+                console_trade_amount_breakdown["available_slots"] or 0
+            )
+            state.last_console_trade_max_positions = int(
+                console_trade_amount_breakdown["max_positions"] or 0
+            )
 
         set_run_stage_result(
             run,
@@ -4230,6 +4319,20 @@ class BullpenAutoLiveEngine:
                     "pending_historical_redeem_conditions": len(
                         pending_historical_redeem_condition_ids
                     ),
+                    "console_trade_amount_usd": resolved_console_order_usd,
+                    "console_trade_amount_source": console_order_source,
+                    "console_trade_cash_in_hand_usd": console_trade_amount_breakdown[
+                        "cash_in_hand_usd"
+                    ],
+                    "console_trade_active_positions": console_trade_amount_breakdown[
+                        "active_positions"
+                    ],
+                    "console_trade_available_slots": console_trade_amount_breakdown[
+                        "available_slots"
+                    ],
+                    "console_trade_max_positions": console_trade_amount_breakdown[
+                        "max_positions"
+                    ],
                     "excluded_wallet_positions": [
                         _serialize_active_wallet_position(position)
                         for position in excluded_wallet_positions
@@ -6654,12 +6757,32 @@ class BullpenAutoLiveEngine:
             stage_results.append(
                 build_stage_result(
                     stage_number=5,
-                    status="pass",
+                    status="pass" if resolved_console_order_usd > 0 else "fail",
                     reason=(
-                        "New opportunity receives the saved "
-                        f"${saved_console_order_usd:g} order size."
+                        "New opportunity receives the formula-based "
+                        f"${resolved_console_order_usd:g} order size."
+                        if console_order_source == "dynamic_formula"
+                        else "New opportunity reuses the last calculated "
+                        f"${resolved_console_order_usd:g} order size because cash in hand is unavailable."
+                        if console_order_source == "last_calculated_fallback"
+                        else "Trade amount could not be calculated because Bullpen cash in hand is unavailable."
                     ),
-                    outputs={"order_usd": saved_console_order_usd},
+                    outputs={
+                        "order_usd": resolved_console_order_usd,
+                        "order_usd_source": console_order_source,
+                        "cash_in_hand_usd": console_trade_amount_breakdown[
+                            "cash_in_hand_usd"
+                        ],
+                        "active_positions": console_trade_amount_breakdown[
+                            "active_positions"
+                        ],
+                        "available_slots": console_trade_amount_breakdown[
+                            "available_slots"
+                        ],
+                        "max_positions": console_trade_amount_breakdown[
+                            "max_positions"
+                        ],
+                    },
                 )
             )
             stage_results.append(
@@ -6678,8 +6801,8 @@ class BullpenAutoLiveEngine:
                     stage_results=stage_results,
                     side_to_trade=context.get("selected_side"),
                     current_exposure_usd=0,
-                    target_exposure_usd=saved_console_order_usd,
-                    order_usd=saved_console_order_usd,
+                    target_exposure_usd=resolved_console_order_usd,
+                    order_usd=resolved_console_order_usd,
                     llm_outputs=llm_outputs,
                     llm_consensus=llm_consensus,
                 ),
