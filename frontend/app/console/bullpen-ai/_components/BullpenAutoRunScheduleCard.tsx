@@ -951,7 +951,7 @@ function StageTwoRunStats({
             className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
             aria-label={`Open details for ${displayStat(stats.llmsCompleted)} completed LLM runs`}
           >
-            LLMs completed:{" "}
+            Current run LLMs completed:{" "}
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmsCompleted)}
             </span>
@@ -971,7 +971,7 @@ function StageTwoRunStats({
           </button>
         ) : (
           <>
-            LLMs completed:{" "}
+            Current run LLMs completed:{" "}
             <span className="font-semibold tabular-nums">
               {displayStat(stats.llmsCompleted)}
             </span>
