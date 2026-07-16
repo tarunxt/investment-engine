@@ -2512,210 +2512,7 @@ function getDecisionExitTypeDetails(decision: BullpenAutoLiveDecision) {
     .filter(Boolean)
     .join(" ");
 
-  return {
-    label,
-    details,
-  };
-}
-
-function StageTwoExecutionShortlist({
-  steps,
-  decisions,
-  onOpenEventExitInfo,
-  onOpenInvestEligibilityInfo,
-  onOpenInvestMetricDialog,
-}: {
-  steps: InvestExecutionStepView[];
-  decisions: BullpenAutoLiveDecision[];
-  onOpenEventExitInfo: () => void;
-  onOpenInvestEligibilityInfo: () => void;
-  onOpenInvestMetricDialog?: (kind: InvestMetricDialogKind) => void;
-}) {
-  if (steps.length === 0) return null;
-
-  const sellDecisions = decisions.filter(
-    (decision) =>
-      decision.order_plan?.action === "sell" ||
-      decision.order_plan?.action === "redeem",
-  );
-  const buyDecisions = decisions.filter(
-    (decision) => decision.order_plan?.action === "buy",
-  );
-
-  const renderPlannedExitMetricCard = ({
-    label,
-    value,
-    kind,
-  }: {
-    label: string;
-    value: number;
-    kind: InvestMetricDialogKind;
-  }) => {
-    const body = (
-      <>
-        <p className="flex items-center gap-1 text-[10px] uppercase tracking-[0.1em]">
-          <span>{label}</span>
-          <span
-            role="button"
-            tabIndex={0}
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenEventExitInfo();
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                onOpenEventExitInfo();
-              }
-            }}
-            className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-current/30 bg-white/70"
-            aria-label={`Explain ${label}`}
-            title={`Explain ${label}`}
-          >
-            <Info className="h-2.5 w-2.5" />
-          </span>
-        </p>
-        <p className="mt-1 text-sm font-semibold text-emerald-950 dark:text-emerald-50">
-          {value}
-        </p>
-      </>
-    );
-    const className =
-      "min-w-[5.25rem] flex-1 rounded-lg border border-white/70 bg-white/60 px-2.5 py-2 text-left";
-
-    if (!onOpenInvestMetricDialog) {
-      return <div className={className}>{body}</div>;
-    }
-
-    return (
-      <button
-        type="button"
-        onClick={() => onOpenInvestMetricDialog(kind)}
-        className={`${className} transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300`}
-      >
-        {body}
-      </button>
-    );
-  };
-
-  return (
-    <div className="mt-3 grid gap-2 text-xs">
-      {steps.map((step) => {
-        const stepDecisions =
-          step.key === "sell" ? sellDecisions : buyDecisions;
-        const infoHandler =
-          step.key === "sell"
-            ? onOpenEventExitInfo
-            : onOpenInvestEligibilityInfo;
-        return (
-          <div
-            key={`stage-2-shortlist-${step.key}`}
-            className="rounded-xl border border-white/70 bg-white/60 px-3 py-3 text-emerald-950 dark:border-slate-700/80 dark:bg-slate-950/70 dark:text-emerald-50"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/80 dark:text-emerald-100/75">
-                  Step {step.stepNumber} of {step.stepTotal}
-                </p>
-                <div className="mt-1 flex items-center gap-2">
-                  <p className="font-semibold">{step.label}</p>
-                  <button
-                    type="button"
-                    onClick={infoHandler}
-                    className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-emerald-200 bg-white/70 text-emerald-900"
-                    aria-label={`Explain ${step.label}`}
-                    title={`Explain ${step.label}`}
-                  >
-                    <Info className="h-3 w-3" />
-                  </button>
-                </div>
-              </div>
-              {onOpenInvestMetricDialog ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    onOpenInvestMetricDialog(
-                      getInvestStepMetricDialogKind(step.key, "planned"),
-                    )
-                  }
-                  className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900 transition hover:border-emerald-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
-                  aria-label={`Open ${step.label} planned orders`}
-                >
-                  {step.plannedOrders ?? 0} planned
-                </button>
-              ) : (
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-900">
-                  {step.plannedOrders ?? 0} planned
-                </span>
-              )}
-            </div>
-            <p className="mt-2 text-[11px] leading-4 text-emerald-900/80 dark:text-emerald-100/75">
-              {step.detail ??
-                (step.key === "sell"
-                  ? "Stage 3 Step 1 will process shortlisted Event Exits first."
-                  : "Stage 3 Step 2 will process shortlisted buy orders after exits.")}
-            </p>
-            {step.key === "sell" ? (
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-emerald-900/80 dark:text-emerald-100/75">
-                {renderPlannedExitMetricCard({
-                  label: "Redeem",
-                  value: getInvestMetricRows(
-                    getSellInvestMetricDialogKind("redeem"),
-                    decisions,
-                  ).length,
-                  kind: getSellInvestMetricDialogKind("redeem"),
-                })}
-                {renderPlannedExitMetricCard({
-                  label: "Event out of Top 10",
-                  value: getInvestMetricRows(
-                    getSellInvestMetricDialogKind("ranking-llm"),
-                    decisions,
-                  ).length,
-                  kind: getSellInvestMetricDialogKind("ranking-llm"),
-                })}
-                {renderPlannedExitMetricCard({
-                  label: "Forced Exit",
-                  value: getInvestMetricRows(
-                    getSellInvestMetricDialogKind("forced-exit"),
-                    decisions,
-                  ).length,
-                  kind: getSellInvestMetricDialogKind("forced-exit"),
-                })}
-              </div>
-            ) : null}
-            {stepDecisions.length > 0 ? (
-              <div className="mt-2 space-y-1.5">
-                {stepDecisions.slice(0, 3).map((decision) => {
-                  const exitType = getDecisionExitTypeDetails(decision);
-                  return (
-                    <div
-                      key={`stage-2-shortlist-${step.key}-${decision.id}`}
-                      className="rounded-lg border border-emerald-100 bg-white/70 px-2.5 py-2"
-                    >
-                      <p className="font-semibold text-slate-950">
-                        {decision.market_title}
-                      </p>
-                      <p className="mt-0.5 text-[11px] leading-4 text-slate-600">
-                        <span className="whitespace-pre-line">
-                          {exitType ? exitType.details : decision.reason}
-                        </span>
-                      </p>
-                    </div>
-                  );
-                })}
-                {stepDecisions.length > 3 ? (
-                  <p className="text-[11px] text-emerald-900/80">
-                    +{stepDecisions.length - 3} more shortlisted events
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
-  );
+  return { label, details };
 }
 
 function formatInvestMetricOrderStatus(decision: BullpenAutoLiveDecision) {
@@ -2773,8 +2570,6 @@ function RunDetailWorkerStages({
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
-  const investStage =
-    workflowView.stages.find((stage) => stage.key === "invest") ?? null;
   const timerNowMs = Date.parse(run.completed_at ?? run.started_at ?? "");
   const stableTimerNowMs = Number.isFinite(timerNowMs) ? timerNowMs : 0;
 
@@ -2817,10 +2612,6 @@ function RunDetailWorkerStages({
         {workflowView.stages.map((stage) => {
           const immediateSuccess = getInvestStageImmediateSuccess(stage);
           const investStageCounters = getInvestStageCounters(stage);
-          const stageTwoExecutionSteps =
-            stage.key === "llm" && investStage
-              ? getInvestStageExecutionSteps(investStage)
-              : [];
           const investExecutionSteps = getInvestStageExecutionSteps(stage);
           const toneClasses = getWorkflowToneClasses(
             immediateSuccess ? "green" : stage.tone,
@@ -2908,15 +2699,6 @@ function RunDetailWorkerStages({
                   />
                 ) : null}
               </div>
-
-              {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
-                <StageTwoExecutionShortlist
-                  steps={stageTwoExecutionSteps}
-                  decisions={decisions}
-                  onOpenEventExitInfo={() => undefined}
-                  onOpenInvestEligibilityInfo={() => undefined}
-                />
-              ) : null}
 
               {investStageCounters.length > 0 ? (
                 <div className="mt-3 grid grid-cols-2 gap-2">
@@ -8481,13 +8263,6 @@ export function BullpenAutoRunScheduleCard({
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
               const investStageCounters = getInvestStageCounters(stage);
-              const investStageForShortlist = workflowView.stages.find(
-                (item) => item.key === "invest",
-              );
-              const stageTwoExecutionSteps =
-                stage.key === "llm" && investStageForShortlist
-                  ? getInvestStageExecutionSteps(investStageForShortlist)
-                  : [];
               const investExecutionSteps = getInvestStageExecutionSteps(stage);
               const investPreviewSteps =
                 stage.key === "invest" &&
@@ -8656,20 +8431,6 @@ export function BullpenAutoRunScheduleCard({
                         />
                       ) : null}
                     </div>
-                  ) : null}
-
-                  {stage.key === "llm" && stageTwoExecutionSteps.length > 0 ? (
-                    <StageTwoExecutionShortlist
-                      steps={stageTwoExecutionSteps}
-                      decisions={summary?.recent_decisions ?? []}
-                      onOpenEventExitInfo={() =>
-                        setIsEventExitStrategiesDialogOpen(true)
-                      }
-                      onOpenInvestEligibilityInfo={() =>
-                        setIsInvestEligibilityInfoDialogOpen(true)
-                      }
-                      onOpenInvestMetricDialog={openInvestMetricDialog}
-                    />
                   ) : null}
 
                   {investStageCounters.length > 0 ? (
