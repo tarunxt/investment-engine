@@ -20,6 +20,29 @@ const STORAGE_KEYS = {
   SESSION_EXPIRES: "app_session_expires",
 } as const;
 
+/**
+ * Emitted after the API client rotates credentials. Auth.js persists its own
+ * JWT in a cookie, so it must be updated too; otherwise the next full page
+ * load restores the expired access token and protected requests begin with 401s.
+ */
+export const AUTH_TOKENS_REFRESHED_EVENT = "investment-engine:auth-tokens-refreshed";
+
+export type RefreshedAuthTokens = {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn?: number;
+};
+
+export function notifyAuthTokensRefreshed(tokens: RefreshedAuthTokens): void {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(
+    new CustomEvent<RefreshedAuthTokens>(AUTH_TOKENS_REFRESHED_EVENT, {
+      detail: tokens,
+    }),
+  );
+}
+
 class SessionStorageService {
   /**
    * Check if we're in browser environment

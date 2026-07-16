@@ -3,7 +3,11 @@
 import { AuthContextType, AuthContext, type User } from "@/hooks/useAuth";
 import { syncTokenToCookie, clearAuthCookies } from "@/services/cookies";
 import { useState, useEffect, useCallback } from "react";
-import { sessionStorage as customSessionStorage } from "@/services/session";
+import {
+  AUTH_TOKENS_REFRESHED_EVENT,
+  type RefreshedAuthTokens,
+  sessionStorage as customSessionStorage,
+} from "@/services/session";
 import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
@@ -136,8 +140,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = await apiService.refreshToken();
 
       if (data.access_token && data.refresh_token) {
-        // Update NextAuth session
-        await update();
+        // refreshToken emits an event that persists this rotated pair in the
+        // Auth.js JWT as well as local storage.
         console.log("Token refreshed successfully");
       }
     } catch (err) {
@@ -178,9 +182,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           );
           customSessionStorage.setUserData(userData as UserResponse);
 
-          // Store expiry time: now + expiresIn seconds
-          const expiryTime = Date.now() + (session.userData?.expiresIn || 900) * 1000;
-          customSessionStorage.setSessionExpiry(expiryTime);
+          // setSessionExpiry accepts a duration in seconds, not an absolute
+          // timestamp. Passing a timestamp kept expired tokens looking valid
+          // for decades and deferred refresh until requests were already 401.
+          customSessionStorage.setSessionExpiry(session.expiresIn ?? 900);
 
           syncTokenToCookie(session.accessToken as string);
         }
@@ -196,6 +201,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Always ensure loading is false when status is not "loading"
     setLoading(false);
   }, [session, status]);
+
+  // Keep Auth.js's cookie-backed JWT aligned with credentials refreshed by
+  // apiService. This prevents a hard navigation from restoring a stale token
+  // and firing a burst of unauthorized page-load requests.
+  useEffect(() => {
+    if (devAuthDisabled) return;
+
+    const handleTokensRefreshed = (event: Event) => {
+      const { accessToken, refreshToken, expiresIn } = (
+        event as CustomEvent<RefreshedAuthTokens>
+      ).detail;
+      void update({ accessToken, refreshToken, expiresIn });
+    };
+
+    window.addEventListener(AUTH_TOKENS_REFRESHED_EVENT, handleTokensRefreshed);
+    return () => {
+      window.removeEventListener(AUTH_TOKENS_REFRESHED_EVENT, handleTokensRefreshed);
+    };
+  }, [update]);
 
   // Check token expiry on mount and when user changes
   useEffect(() => {

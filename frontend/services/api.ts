@@ -1,6 +1,9 @@
 import { URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
-import { sessionStorage } from "@/services/session";
+import {
+  notifyAuthTokensRefreshed,
+  sessionStorage,
+} from "@/services/session";
 import { syncTokenToCookie } from "@/services/cookies";
 import { signOut } from "next-auth/react";
 import {
@@ -414,6 +417,11 @@ class apiServiceClass implements IApiService {
     if (data.access_token && data.refresh_token) {
       sessionStorage.setTokens(data.access_token, data.refresh_token);
       syncTokenToCookie(data.access_token);
+      notifyAuthTokensRefreshed({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresIn: data.expires_in,
+      });
     }
 
     return data;
