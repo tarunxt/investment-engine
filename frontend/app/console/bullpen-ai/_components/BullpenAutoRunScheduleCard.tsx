@@ -3875,7 +3875,10 @@ function readLlmContextArray(
   return Array.isArray(value) ? value : [];
 }
 
-function getStageTwoLlmReviewedRows(stage: WorkflowStageView) {
+function getStageTwoLlmReviewedRows(
+  stage: WorkflowStageView,
+  scanCandidates: WorkflowStageView["scanCandidates"] = [],
+) {
   const persistedRows = Array.isArray(stage.outputs.llm_reviewed_candidates)
     ? stage.outputs.llm_reviewed_candidates.filter(
         (row): row is Record<string, unknown> =>
@@ -3905,7 +3908,7 @@ function getStageTwoLlmReviewedRows(stage: WorkflowStageView) {
 
   persistedRows.forEach(addRow);
 
-  const candidateRows = stage.scanCandidates.map((candidate) => ({
+  const candidateRows = scanCandidates.map((candidate) => ({
     market_id: candidate.marketId,
     question_id: candidate.questionId,
     question: candidate.question,
@@ -3995,7 +3998,13 @@ function getStageTwoLlmOutputs(row: Record<string, unknown>) {
 }
 
 function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
-  const rows = getStageTwoLlmReviewedRows(state.stage);
+  const scanCandidates =
+    state.run
+      ? (buildBullpenAutoRunWorkflowView(state.run).stages.find(
+          (workflowStage) => workflowStage.key === "scan",
+        )?.scanCandidates ?? [])
+      : [];
+  const rows = getStageTwoLlmReviewedRows(state.stage, scanCandidates);
   const decisionByKey = new Map<string, BullpenAutoLiveDecision>();
   state.decisions.forEach((decision) => {
     [
@@ -4038,10 +4047,12 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
       readLlmContextNumber(row, "current_yes_odds") ??
       readLlmContextNumber(row, "current_yes_odds_pct") ??
       readLlmContextNumber(row, "yes_price_pct") ??
+      decision?.current_yes_odds ??
       null;
     const currentNoOdds =
       readLlmContextNumber(row, "current_no_odds") ??
       readLlmContextNumber(row, "current_no_odds_pct") ??
+      decision?.current_no_odds ??
       (currentYesOdds === null
         ? null
         : Number((100 - currentYesOdds).toFixed(4)));
