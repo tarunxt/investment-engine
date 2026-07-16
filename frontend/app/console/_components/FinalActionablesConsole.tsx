@@ -3351,14 +3351,11 @@ function getStockMatchAliases(stock: StockConsensus) {
   [
     stock.key,
     stock.symbol,
-    stock.exchange,
-    stock.representative["Exchange Symbol"],
     stock.representative["Stock Symbol"],
     stock.representative["Stock Name"],
   ].forEach((value) => addNormalizedStockAlias(aliases, value));
 
   stock.rows.forEach((row) => {
-    addNormalizedStockAlias(aliases, row.cells["Exchange Symbol"]);
     addNormalizedStockAlias(aliases, row.cells["Stock Symbol"]);
     addNormalizedStockAlias(aliases, row.cells["Stock Name"]);
   });
