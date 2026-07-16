@@ -3641,6 +3641,7 @@ function BullpenAiPageContent() {
             syncBullpenAutoRunActivePositionAnalyses({
               currentAnalyses: current,
               run,
+              activePositions: openActivePositions,
             }),
           );
         }}
