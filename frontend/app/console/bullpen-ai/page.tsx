@@ -663,6 +663,12 @@ function pickLatestTimestamp(
   }, null);
 }
 
+function getCompletedBullpenLlmRunTimestamp(
+  run: Pick<RunResponse, "updated_at" | "created_at">,
+) {
+  return run.updated_at || run.created_at || new Date().toISOString();
+}
+
 function getBullpenAutoRunCompletedAt(run: BullpenAutoLiveRun | null | undefined) {
   if (!run || run.status !== "completed") return null;
   return run.completed_at || run.started_at || null;
@@ -2851,12 +2857,7 @@ function BullpenAiPageContent() {
           if (!llmBreakdown || llmBreakdown.length === 0) return question;
 
           const consensus = computeBullpenLlmConsensus(llmBreakdown);
-          const completedAt =
-            [...llmBreakdown]
-              .map((entry) => entry.timestamp)
-              .filter((timestamp): timestamp is string => Boolean(timestamp))
-              .sort()
-              .at(-1) || new Date().toISOString();
+          const completedAt = getCompletedBullpenLlmRunTimestamp(completedRun);
 
           return createBullpenQuestionRow({
             ...question,
@@ -2894,12 +2895,7 @@ function BullpenAiPageContent() {
           if (!llmBreakdown || llmBreakdown.length === 0) return question;
 
           const consensus = computeBullpenLlmConsensus(llmBreakdown);
-          const completedAt =
-            [...llmBreakdown]
-              .map((entry) => entry.timestamp)
-              .filter((timestamp): timestamp is string => Boolean(timestamp))
-              .sort()
-              .at(-1) || new Date().toISOString();
+          const completedAt = getCompletedBullpenLlmRunTimestamp(completedRun);
 
           return createBullpenQuestionRow({
             ...question,
@@ -2944,12 +2940,7 @@ function BullpenAiPageContent() {
           if (!position || llmBreakdown.length === 0) continue;
 
           const consensus = computeBullpenLlmConsensus(llmBreakdown);
-          const completedAt =
-            [...llmBreakdown]
-              .map((entry) => entry.timestamp)
-              .filter((timestamp): timestamp is string => Boolean(timestamp))
-              .sort()
-              .at(-1) || new Date().toISOString();
+          const completedAt = getCompletedBullpenLlmRunTimestamp(completedRun);
           const analyzedPosition = buildBullpenQuestionRowFromActivePosition(
             position,
             {
