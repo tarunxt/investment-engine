@@ -4057,6 +4057,7 @@ async def test_console_profile_manual_row_with_conflicting_evidence_normalizes_a
         llm_no_odds=92,
         returns_per_day=9.5,
         selected=True,
+        close_time=(fixed_now + timedelta(days=7)).isoformat(),
         confidence="very_high",
         evidence_status="conflicting_evidence",
     )
@@ -4152,7 +4153,8 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
             llm_yes_odds=8,
             llm_no_odds=92,
             returns_per_day=9.5,
-            selected=True,
+            selected=False,
+            close_time=(fixed_now + timedelta(days=7)).isoformat(),
         ),
         _manual_console_candidate_row(
             market_id="candidate-market-2",
@@ -4165,6 +4167,7 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
             llm_no_odds=9,
             returns_per_day=7.2,
             selected=True,
+            close_time=(fixed_now + timedelta(days=8)).isoformat(),
             evidence_status="conflicting_evidence",
         ),
     ]
@@ -4236,6 +4239,11 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
     buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
 
     assert len(buy_decisions) == 2
+    first_stage3_rows = {
+        decision.market_id: decision.stage_results[3].outputs["selected"]
+        for decision in buy_decisions
+    }
+    assert first_stage3_rows["candidate-market-1"] is False
     assert all(decision.order_plan is not None for decision in buy_decisions)
     assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
     assert sorted(decision.order_plan.side for decision in buy_decisions) == [

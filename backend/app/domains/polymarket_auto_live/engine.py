@@ -3988,7 +3988,7 @@ class BullpenAutoLiveEngine:
                             "llm_outputs": llm_outputs,
                             "llm_consensus": llm_consensus,
                             "stage_results": stage_results,
-                            "qualified": qualified_by_table and row.selected,
+                            "qualified": qualified_by_table,
                             "selected_for_auto_invest": row.selected,
                             "selected_side": selected_side,
                             "reason": qualification_reason,
