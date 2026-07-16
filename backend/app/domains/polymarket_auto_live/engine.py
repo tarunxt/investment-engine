@@ -6134,11 +6134,19 @@ class BullpenAutoLiveEngine:
             for row in top_rows
             if row["kind"] == "active"
         }
-        top_candidate_market_ids = {
+        ranked_post_exit_candidate_market_ids = {
             str(row["market_id"])
             for row in top_rows
             if row["kind"] == "candidate"
         }
+        # Preserve manually selected, Stage 2-qualified opportunities even when the
+        # post-Event-Exit rerank has enough higher-return rows to push them out of
+        # the visible top table.  Stage 2 already marked these rows as explicit
+        # auto-invest selections, so Stage 3 Step 2 must keep them actionable
+        # instead of silently dropping them during the exit-aware rerank.
+        top_candidate_market_ids = (
+            ranked_post_exit_candidate_market_ids | selected_qualified_candidate_market_ids
+        )
         run.diagnostics.top_candidate_market_ids = sorted(top_candidate_market_ids)
 
         report_invest_stage_progress(
@@ -6271,6 +6279,80 @@ class BullpenAutoLiveEngine:
                 continue
             if not isinstance(stage_results, list):
                 stage_results = []
+
+            if (
+                isinstance(current_position, PositionSnapshot)
+                and current_position.exit_state == "EVENT_EXIT_PLANNED"
+                and returns_per_day is None
+            ):
+                exit_signals = current_position.exit_signals
+                exit_labels = [signal.label for signal in exit_signals]
+                exit_reason_codes = [signal.reasonCode for signal in exit_signals]
+                estimated_freeable_value_usd = current_position.estimated_freeable_value_usd
+                if estimated_freeable_value_usd is None:
+                    held_probability = _held_probability_for_side(
+                        held_side=current_position.side,
+                        yes_probability=_probability_from_percent(current_position.current_yes_odds),
+                        no_probability=_probability_from_percent(current_position.current_no_odds),
+                    )
+                    held_best_bid = _held_best_bid_for_side(
+                        held_side=current_position.side,
+                        best_bid_cents=current_position.best_bid_cents,
+                        best_ask_cents=current_position.best_ask_cents,
+                        fallback_probability=held_probability,
+                    )
+                    estimated_freeable_value_usd = _estimated_freeable_value(
+                        shares=current_position.shares,
+                        held_best_bid=held_best_bid,
+                    )
+                actionable_exit = (
+                    estimated_freeable_value_usd is not None
+                    and estimated_freeable_value_usd >= DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+                )
+                reason = (
+                    "Position was already in Event Exits and will be processed before new investments."
+                )
+                if exit_signals:
+                    reason = f"{_event_exit_reason(exit_signals, reason)}. {reason}"
+                if not actionable_exit:
+                    reason = (
+                        f"{reason.rstrip('.')} It has no meaningful executable bid right now, so it "
+                        "is tracked for exit without submitting a sell order yet."
+                    )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=reason,
+                        outputs={
+                            "returns_per_day": returns_per_day,
+                            "exit_state": current_position.exit_state,
+                            "estimated_freeable_value_usd": estimated_freeable_value_usd,
+                            "exit_labels": exit_labels,
+                            "exit_reason_codes": exit_reason_codes,
+                        },
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="EXIT",
+                        reason=reason,
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=0,
+                        order_usd=estimated_freeable_value_usd or 0,
+                        order_shares=position.shares,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                        exit_signals=exit_signals,
+                        exit_state=current_position.exit_state,
+                        include_order_plan=actionable_exit,
+                    ),
+                    market=market,
+                )
+                continue
 
             if returns_per_day is None or not isinstance(current_position, PositionSnapshot):
                 stage_results.append(
