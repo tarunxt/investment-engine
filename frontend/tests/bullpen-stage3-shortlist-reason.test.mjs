@@ -27,6 +27,13 @@ test("each Bullpen event has an accessible Stage 3 shortlist explanation control
 });
 
 test("the Stage 3 shortlist explanation shows each eligibility check and distinguishes saved decisions from local eligibility", () => {
+  const tableSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
   const dialogSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenStage3ShortlistReasonDialog.tsx",
@@ -40,6 +47,9 @@ test("the Stage 3 shortlist explanation shows each eligibility check and disting
   assert.match(dialogSource, /cannot rank it in the combined top-10 table/);
   assert.match(dialogSource, /Eligible for Stage 3/);
   assert.match(dialogSource, /Ranking pending\/failed/);
+  assert.match(dialogSource, /Current Event Summary ranking places this event inside the top-10 shortlist/);
+  assert.match(dialogSource, /currentTopTenQuestionIds\?\.has\(question\.id\)/);
+  assert.match(tableSource, /currentTopTenQuestionIds=\{topTenStrongestLlmOddsIds\}/);
   assert.match(dialogSource, /stage3_final_rank/);
   assert.match(dialogSource, /i\) Strongest LLM odds ≥ 80%/);
   assert.match(dialogSource, /ii\) Inside Top 10/);
