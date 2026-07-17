@@ -1028,7 +1028,13 @@ class RedeemTrackingExecutor:
 
         return PolymarketDoctorStatus(ok=True, message="ok")
 
-    async def redeem(self, *, dry_run: bool, condition_ids: list[str] | None = None):
+    async def redeem(
+        self,
+        *,
+        dry_run: bool,
+        condition_ids: list[str] | None = None,
+        on_chain_fallback: bool = False,
+    ):
         self.redeem_calls += 1
         self.redeem_condition_ids = condition_ids
         if self.redeem_error:

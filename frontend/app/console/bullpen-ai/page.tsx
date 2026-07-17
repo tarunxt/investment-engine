@@ -2355,8 +2355,8 @@ function BullpenAiPageContent() {
         setClaimPositionsStatus(
           remainingClaimablePositions.length > 0
             ? automatic
-              ? `Bullpen auto-claim submitted, but ${formatCountLabel(remainingClaimablePositions.length, "resolved position")} still ${remainingClaimablePositions.length === 1 ? "shows" : "show"} as claimable. Cred-X will retry automatically on the next refresh.`
-              : `Bullpen submitted the claim, but ${formatCountLabel(remainingClaimablePositions.length, "resolved position")} still ${remainingClaimablePositions.length === 1 ? "shows" : "show"} as claimable in the latest wallet refresh.`
+              ? `Bullpen auto-claim submitted, but ${formatCountLabel(remainingClaimablePositions.length, "resolved position")} still ${remainingClaimablePositions.length === 1 ? "shows" : "show"} as claimable. Cred-X will retry automatically after the redeem cooldown and escalate to Bullpen's on-chain fallback if the payout stays stuck.`
+              : `Bullpen submitted the claim, but ${formatCountLabel(remainingClaimablePositions.length, "resolved position")} still ${remainingClaimablePositions.length === 1 ? "shows" : "show"} as claimable in the latest wallet refresh. Cred-X will keep retrying after the redeem cooldown and can escalate to Bullpen's on-chain fallback if needed.`
             : automatic
               ? "Bullpen automatically submitted the resolved positions for claim."
               : "Bullpen submitted the resolved positions for claim.",

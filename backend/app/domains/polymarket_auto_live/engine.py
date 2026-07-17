@@ -27,7 +27,9 @@ from app.domains.polymarket.redeem_coordinator import (
     REDEEM_ATTEMPT_CONFIRMED,
     REDEEM_ATTEMPT_PENDING,
     REDEEM_ATTEMPT_RESOLVED_ZERO_PAYOUT,
+    build_redeem_pending_detail,
     normalize_redeem_condition_ids,
+    redeem_retry_cooldown_seconds,
     submit_scoped_redeem,
 )
 from app.domains.polymarket.bullpen_llm_execution import (
@@ -1443,6 +1445,11 @@ def _reconcile_historical_pending_exit_keys(
         ):
             continue
         if order_plan.action == "redeem":
+            executed_at = _parse_iso_datetime(order_plan.executed_at)
+            if executed_at is not None and (
+                utc_now() - executed_at
+            ) >= timedelta(seconds=redeem_retry_cooldown_seconds()):
+                continue
             condition_ids = set(_redeem_condition_ids_for_decision(decision))
             if any(
                 _wallet_position_matches_redeem_condition(position, condition_ids)
@@ -1525,10 +1532,17 @@ async def _poll_exit_settlement(
                         "Bullpen collateral increased after the redeem submission."
                     )
                     continue
-                order_plan.status = "settlement_pending"
-                order_plan.detail = (
-                    "Redeem submitted, but Bullpen still shows the position while settlement finishes."
+                pending_detail = build_redeem_pending_detail(
+                    list(condition_ids),
+                    attempt_count=1,
+                    retry_after_seconds=redeem_retry_cooldown_seconds(),
+                    on_chain_fallback_next=(
+                        "on-chain fallback"
+                        not in (order_plan.execution_response or "").lower()
+                    ),
                 )
+                order_plan.status = "settlement_pending"
+                order_plan.detail = pending_detail
                 unsettled += 1
                 continue
 

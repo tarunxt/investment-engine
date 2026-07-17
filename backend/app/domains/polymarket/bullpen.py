@@ -578,10 +578,13 @@ class BullpenLiveExecutor:
         *,
         dry_run: bool,
         condition_ids: list[str] | None = None,
+        on_chain_fallback: bool = False,
     ) -> str:
         args = ["polymarket", "redeem"]
         if condition_ids:
             args.extend(["--condition-ids", ",".join(condition_ids)])
+        if on_chain_fallback:
+            args.append("--on-chain-fallback")
         if dry_run:
             args.extend(["--dry-run", "--output", "json"])
         else:

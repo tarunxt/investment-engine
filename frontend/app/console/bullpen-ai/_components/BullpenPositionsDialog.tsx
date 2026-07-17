@@ -300,13 +300,13 @@ export function BullpenPositionsDialog({
 
         <div className="flex-1 overflow-auto px-6 py-5">
           {positionsError ? (
-            <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+            <div className="mb-4 whitespace-pre-wrap break-words rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
               {positionsError}
             </div>
           ) : null}
 
           {claimError ? (
-            <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+            <div className="mb-4 whitespace-pre-wrap break-words rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
               {claimError}
             </div>
           ) : null}

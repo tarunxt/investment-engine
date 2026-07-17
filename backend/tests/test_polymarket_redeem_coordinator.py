@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 import os
 from types import SimpleNamespace
 
@@ -58,9 +59,17 @@ class _RecordingExecutor:
     def __init__(self, *, error: Exception | None = None) -> None:
         self.error = error
         self.redeem_calls: list[list[str]] = []
+        self.redeem_fallback_calls: list[bool] = []
 
-    async def redeem(self, *, dry_run: bool, condition_ids: list[str] | None = None):
+    async def redeem(
+        self,
+        *,
+        dry_run: bool,
+        condition_ids: list[str] | None = None,
+        on_chain_fallback: bool = False,
+    ):
         self.redeem_calls.append(list(condition_ids or []))
+        self.redeem_fallback_calls.append(on_chain_fallback)
         if self.error is not None:
             raise self.error
         return "redeem submitted"
@@ -195,6 +204,85 @@ async def test_scoped_redeem_reconciles_ambiguous_submission_before_retry(tmp_pa
 
 
 @pytest.mark.anyio
+async def test_scoped_redeem_retries_pending_claim_after_cooldown(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("POLYMARKET_REDEEM_RETRY_COOLDOWN_SECONDS", "60")
+    session_factory = _session_factory(tmp_path)
+    executor = _RecordingExecutor()
+
+    async def fake_read_wallet_positions():
+        return [_wallet_position(condition_id="condition-1")]
+
+    with session_factory() as session:
+        coordinator = redeem_coordinator.SyncPolymarketRedeemCoordinator(
+            session=session,
+            user_id=7,
+            executor=executor,
+            read_wallet_positions=fake_read_wallet_positions,
+        )
+        first_result = await coordinator.submit(
+            condition_ids=["condition-1"],
+            source="test",
+        )
+        session.commit()
+
+    with session_factory() as session:
+        record = session.query(PolymarketRedeemAttemptRecord).one()
+        record.last_submitted_at = datetime.now(UTC) - timedelta(minutes=10)
+        session.commit()
+
+    with session_factory() as session:
+        coordinator = redeem_coordinator.SyncPolymarketRedeemCoordinator(
+            session=session,
+            user_id=7,
+            executor=executor,
+            read_wallet_positions=fake_read_wallet_positions,
+        )
+        second_result = await coordinator.submit(
+            condition_ids=["condition-1"],
+            source="test",
+        )
+        session.commit()
+
+    assert first_result.submitted_condition_ids == ["condition-1"]
+    assert second_result.submitted_condition_ids == ["condition-1"]
+    assert executor.redeem_calls == [["condition-1"], ["condition-1"]]
+    assert executor.redeem_fallback_calls == [False, True]
+    assert second_result.outcomes[0].status == redeem_coordinator.REDEEM_ATTEMPT_PENDING
+    assert "error_code=REDEEM_STILL_CLAIMABLE" in second_result.outcomes[0].detail
+
+
+@pytest.mark.anyio
+async def test_scoped_redeem_surfaces_resolution_steps_on_failure(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    executor = _RecordingExecutor(
+        error=BullpenCommandError("Bullpen relayer reports degraded service.")
+    )
+
+    async def fake_read_wallet_positions():
+        return [_wallet_position(condition_id="condition-1")]
+
+    with session_factory() as session:
+        coordinator = redeem_coordinator.SyncPolymarketRedeemCoordinator(
+            session=session,
+            user_id=7,
+            executor=executor,
+            read_wallet_positions=fake_read_wallet_positions,
+        )
+        with pytest.raises(BullpenCommandError) as exc_info:
+            await coordinator.submit(
+                condition_ids=["condition-1"],
+                source="test",
+            )
+
+    assert "error_code=REDEEM_CLAIM_FAILED" in str(exc_info.value)
+    assert "Resolution steps:" in str(exc_info.value)
+    assert "--on-chain-fallback" in str(exc_info.value)
+
+
+@pytest.mark.anyio
 async def test_concurrent_scoped_redeem_submits_only_once(tmp_path, monkeypatch):
     session_factory = _session_factory(tmp_path)
     monkeypatch.setattr(redeem_coordinator, "SyncSessionLocal", session_factory)
@@ -206,7 +294,11 @@ async def test_concurrent_scoped_redeem_submits_only_once(tmp_path, monkeypatch)
             self.release = asyncio.Event()
 
         async def redeem(
-            self, *, dry_run: bool, condition_ids: list[str] | None = None
+            self,
+            *,
+            dry_run: bool,
+            condition_ids: list[str] | None = None,
+            on_chain_fallback: bool = False,
         ):
             self.redeem_calls.append(list(condition_ids or []))
             self.entered.set()

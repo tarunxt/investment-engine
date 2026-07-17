@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+import os
 from typing import Awaitable, Callable, Iterable, Sequence
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.domains.polymarket.bullpen import BullpenCommandError
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.models import PolymarketRedeemAttemptRecord
 from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -40,6 +42,20 @@ _NO_REDEEMABLE_BALANCE_MARKERS = (
     "nothing redeemable",
     "no claimable balance",
 )
+_RETRYABLE_REDEEM_ERROR_MARKERS = (
+    "relayer",
+    "state_failed",
+    "degraded service",
+    "service unavailable",
+    "gateway timeout",
+    "timeout",
+    "market not found in gamma",
+    "payoutdenominator preflight rpc failed",
+    "rate limit",
+    "429",
+)
+_DEFAULT_REDEEM_RETRY_COOLDOWN_SECONDS = 180
+_DEFAULT_REDEEM_ON_CHAIN_FALLBACK_ATTEMPT = 2
 
 
 @dataclass(frozen=True)
@@ -74,6 +90,26 @@ class RedeemSubmissionResult:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def redeem_retry_cooldown_seconds() -> int:
+    value = os.getenv("POLYMARKET_REDEEM_RETRY_COOLDOWN_SECONDS")
+    if value is None:
+        return _DEFAULT_REDEEM_RETRY_COOLDOWN_SECONDS
+    try:
+        return max(0, int(float(value)))
+    except ValueError:
+        return _DEFAULT_REDEEM_RETRY_COOLDOWN_SECONDS
+
+
+def redeem_on_chain_fallback_attempt() -> int:
+    value = os.getenv("POLYMARKET_REDEEM_ON_CHAIN_FALLBACK_ATTEMPT")
+    if value is None:
+        return _DEFAULT_REDEEM_ON_CHAIN_FALLBACK_ATTEMPT
+    try:
+        return max(1, int(float(value)))
+    except ValueError:
+        return _DEFAULT_REDEEM_ON_CHAIN_FALLBACK_ATTEMPT
 
 
 def normalize_redeem_condition_ids(condition_ids: Iterable[str] | None) -> list[str]:
@@ -140,6 +176,143 @@ def _index_wallet_positions(positions: Sequence[object]) -> dict[str, RedeemCond
 def _submission_balance_missing(message: str) -> bool:
     normalized = message.lower()
     return any(marker in normalized for marker in _NO_REDEEMABLE_BALANCE_MARKERS)
+
+
+def _message_suggests_retryable_relayer_issue(message: str | None) -> bool:
+    if not message:
+        return False
+    normalized = message.lower()
+    return any(marker in normalized for marker in _RETRYABLE_REDEEM_ERROR_MARKERS)
+
+
+def _attempt_count(record: PolymarketRedeemAttemptRecord) -> int:
+    value = getattr(record, "attempt_count", 0) or 0
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _seconds_until_retry(
+    record: PolymarketRedeemAttemptRecord,
+    *,
+    now: datetime | None = None,
+) -> int:
+    if record.last_submitted_at is None:
+        return 0
+    last_submitted_at = record.last_submitted_at
+    if last_submitted_at.tzinfo is None:
+        last_submitted_at = last_submitted_at.replace(tzinfo=UTC)
+    else:
+        last_submitted_at = last_submitted_at.astimezone(UTC)
+    next_retry_at = last_submitted_at + timedelta(
+        seconds=redeem_retry_cooldown_seconds()
+    )
+    seconds = int((next_retry_at - (now or _utc_now())).total_seconds())
+    return max(0, seconds)
+
+
+def redeem_attempt_uses_on_chain_fallback(
+    *,
+    attempt_count: int,
+    last_error: str | None = None,
+) -> bool:
+    next_attempt = max(1, attempt_count + 1)
+    return next_attempt >= redeem_on_chain_fallback_attempt() or (
+        _message_suggests_retryable_relayer_issue(last_error)
+    )
+
+
+def _format_retry_window(seconds: int) -> str:
+    if seconds <= 0:
+        return "now"
+    if seconds < 60:
+        return f"in about {seconds} seconds"
+    minutes = seconds // 60
+    if seconds % 60:
+        minutes += 1
+    return f"in about {minutes} minute{'s' if minutes != 1 else ''}"
+
+
+def _format_resolution_steps(
+    condition_ids: Sequence[str],
+    *,
+    on_chain_fallback_used: bool,
+) -> list[str]:
+    normalized_ids = normalize_redeem_condition_ids(condition_ids)
+    condition_label = ",".join(normalized_ids)
+    retry_command = (
+        "bullpen polymarket redeem"
+        f" --condition-ids {condition_label}"
+        " --on-chain-fallback --yes --non-interactive --output json"
+        if condition_label
+        else "bullpen polymarket redeem --on-chain-fallback --yes --non-interactive --output json"
+    )
+    steps = [
+        "Resolution steps:",
+        "1. Run `bullpen status` and `bullpen polymarket positions --output json` in the same Bullpen HOME used by Cred-X.",
+        f"2. Retry `{retry_command}`.",
+        "3. If the payout is stranded on a non-selected wallet, run `bullpen polymarket wallet-audit` and then `bullpen polymarket consolidate --yes` before retrying.",
+        "4. If Bullpen reports auth, approval, or first-trade setup errors, run `bullpen login` or `bullpen polymarket activate` in that same HOME and retry.",
+    ]
+    if on_chain_fallback_used:
+        steps.insert(
+            1,
+            "Cred-X already escalated this redeem to Bullpen's on-chain fallback, so the remaining problem is outside the normal relayer path.",
+        )
+    return steps
+
+
+def build_redeem_pending_detail(
+    condition_ids: Sequence[str],
+    *,
+    attempt_count: int,
+    retry_after_seconds: int,
+    on_chain_fallback_next: bool,
+    last_error: str | None = None,
+) -> str:
+    lines = [
+        "error_code=REDEEM_STILL_CLAIMABLE",
+        "Bullpen still shows a positive redeemable payout after the earlier submit.",
+        (
+            f"Cred-X will retry {_format_retry_window(retry_after_seconds)}."
+            if retry_after_seconds > 0
+            else "Cred-X can retry this redeem now."
+        ),
+        (
+            "The next automatic retry will use Bullpen's on-chain fallback."
+            if on_chain_fallback_next
+            else "If the payout still stays claimable after the next retry, Cred-X will escalate to Bullpen's on-chain fallback."
+        ),
+        f"Previous submitted attempts: {max(1, attempt_count)}.",
+    ]
+    if condition_ids:
+        lines.append(f"Condition IDs: {', '.join(condition_ids)}.")
+    if last_error:
+        lines.append(f"Last Bullpen error: {last_error}")
+    return "\n".join(lines)
+
+
+def build_redeem_failure_detail(
+    condition_ids: Sequence[str],
+    *,
+    message: str,
+    on_chain_fallback_used: bool,
+) -> str:
+    lines = [
+        (
+            "error_code=REDEEM_ON_CHAIN_FALLBACK_FAILED"
+            if on_chain_fallback_used
+            else "error_code=REDEEM_CLAIM_FAILED"
+        ),
+        "Bullpen redeem/claim did not clear the claimable payout.",
+        f"Last Bullpen error: {message}",
+        *_format_resolution_steps(
+            condition_ids,
+            on_chain_fallback_used=on_chain_fallback_used,
+        ),
+    ]
+    return "\n".join(lines)
 
 
 def _attempt_query(
@@ -250,16 +423,43 @@ class SyncPolymarketRedeemCoordinator:
             )
 
         if snapshot.is_claimable:
-            if record.status in REDEEM_PENDING_STATUSES or record.last_submitted_at is not None:
+            retry_after_seconds = _seconds_until_retry(record)
+            if record.last_submitted_at is not None:
+                if retry_after_seconds == 0:
+                    record.status = REDEEM_ATTEMPT_VERIFIED
+                    detail = (
+                        "Bullpen still shows a positive redeemable payout after the earlier submit, "
+                        "so Cred-X is retrying it now."
+                    )
+                else:
+                    record.status = REDEEM_ATTEMPT_PENDING
+                    detail = build_redeem_pending_detail(
+                        [record.condition_id],
+                        attempt_count=_attempt_count(record),
+                        retry_after_seconds=retry_after_seconds,
+                        on_chain_fallback_next=redeem_attempt_uses_on_chain_fallback(
+                            attempt_count=_attempt_count(record),
+                            last_error=record.last_error,
+                        ),
+                        last_error=record.last_error,
+                    )
+            elif record.status in REDEEM_PENDING_STATUSES:
                 record.status = REDEEM_ATTEMPT_PENDING
+                detail = build_redeem_pending_detail(
+                    [record.condition_id],
+                    attempt_count=_attempt_count(record),
+                    retry_after_seconds=retry_after_seconds,
+                    on_chain_fallback_next=redeem_attempt_uses_on_chain_fallback(
+                        attempt_count=_attempt_count(record),
+                        last_error=record.last_error,
+                    ),
+                    last_error=record.last_error,
+                )
             else:
                 record.status = REDEEM_ATTEMPT_VERIFIED
-            record.last_error = None
-            detail = (
-                "Bullpen still shows a positive redeemable payout after an earlier submit."
-                if record.status == REDEEM_ATTEMPT_PENDING
-                else "Bullpen confirmed a positive redeemable payout for this condition."
-            )
+                detail = "Bullpen confirmed a positive redeemable payout for this condition."
+            if record.status == REDEEM_ATTEMPT_VERIFIED:
+                record.last_error = None
             return RedeemAttemptOutcome(
                 condition_id=record.condition_id,
                 status=record.status,
@@ -372,11 +572,24 @@ class SyncPolymarketRedeemCoordinator:
         claim_response: str | None = None
         submission_response: str | None = None
         claim_attempted = False
+        use_on_chain_fallback = any(
+            redeem_attempt_uses_on_chain_fallback(
+                attempt_count=_attempt_count(record),
+                last_error=record.last_error,
+            )
+            for record in pending_records
+        )
         try:
             submission_response = await self.executor.redeem(
                 dry_run=False,
                 condition_ids=verified_ids,
+                on_chain_fallback=use_on_chain_fallback,
             )
+            if use_on_chain_fallback:
+                submission_response = (
+                    "Cred-X used Bullpen's on-chain fallback for this redeem retry.\n"
+                    f"{submission_response}"
+                )
             submitted_at = _utc_now()
             for record in pending_records:
                 record.status = REDEEM_ATTEMPT_SUBMITTED
@@ -415,9 +628,18 @@ class SyncPolymarketRedeemCoordinator:
                 for record in pending_records:
                     if record.status not in REDEEM_TERMINAL_STATUSES:
                         record.status = REDEEM_ATTEMPT_STALE
-                        record.last_error = (
-                            "Bullpen reported no redeemable balance, but the fresh wallet state "
-                            "still needs another reconciliation pass before any retry."
+                        record.last_error = build_redeem_pending_detail(
+                            [record.condition_id],
+                            attempt_count=_attempt_count(record),
+                            retry_after_seconds=redeem_retry_cooldown_seconds(),
+                            on_chain_fallback_next=redeem_attempt_uses_on_chain_fallback(
+                                attempt_count=_attempt_count(record),
+                                last_error=message,
+                            ),
+                            last_error=(
+                                "Bullpen reported no redeemable balance, but the fresh wallet "
+                                "state still needs another reconciliation pass before any retry."
+                            ),
                         )
                 self.session.commit()
                 return RedeemSubmissionResult(
@@ -430,7 +652,11 @@ class SyncPolymarketRedeemCoordinator:
 
             for record in pending_records:
                 record.status = REDEEM_ATTEMPT_STALE
-                record.last_error = message
+                record.last_error = build_redeem_failure_detail(
+                    [record.condition_id],
+                    message=message,
+                    on_chain_fallback_used=use_on_chain_fallback,
+                )
             self.session.commit()
             logger.warning(
                 "Scoped redeem submission failed user=%s conditions=%s error=%s",
@@ -438,7 +664,13 @@ class SyncPolymarketRedeemCoordinator:
                 verified_ids,
                 message,
             )
-            raise
+            raise BullpenCommandError(
+                build_redeem_failure_detail(
+                    verified_ids,
+                    message=message,
+                    on_chain_fallback_used=use_on_chain_fallback,
+                )
+            ) from exc
 
 
 async def reconcile_redeem_attempts(

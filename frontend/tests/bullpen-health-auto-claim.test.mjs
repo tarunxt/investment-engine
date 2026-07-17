@@ -56,10 +56,13 @@ test("Bullpen auto-claim retries unchanged claimable positions after cooldown an
   const previousStateDir = process.env.BULLPEN_HEALTH_STATE_DIR;
   const previousAutoClaim = process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
   const previousCooldown = process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS;
+  const previousFallbackAttempt =
+    process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT;
 
   process.env.BULLPEN_HEALTH_STATE_DIR = tempDir;
   process.env.BULLPEN_AUTO_CLAIM_RESOLVED = "true";
   process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS = "60000";
+  process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT = "2";
 
   t.after(async () => {
     if (previousStateDir === undefined) {
@@ -76,6 +79,12 @@ test("Bullpen auto-claim retries unchanged claimable positions after cooldown an
       delete process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS;
     } else {
       process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS = previousCooldown;
+    }
+    if (previousFallbackAttempt === undefined) {
+      delete process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT;
+    } else {
+      process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT =
+        previousFallbackAttempt;
     }
     await rm(tempDir, { recursive: true, force: true });
   });
@@ -135,6 +144,17 @@ test("Bullpen auto-claim retries unchanged claimable positions after cooldown an
   assert.equal(third.attempted, true);
   assert.equal(third.submitted, true);
   assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1].args, [
+    "polymarket",
+    "redeem",
+    "--condition-ids",
+    "0x1111111111111111111111111111111111111111111111111111111111111111",
+    "--on-chain-fallback",
+    "--yes",
+    "--non-interactive",
+    "--output",
+    "json",
+  ]);
 
   const clearedSnapshot = {
     ...snapshot,
@@ -163,6 +183,7 @@ test("Bullpen auto-claim retries unchanged claimable positions after cooldown an
   assert.equal(fourth.attempted, true);
   assert.equal(fourth.submitted, true);
   assert.equal(calls.length, 3);
+  assert.equal(calls[2].args.includes("--on-chain-fallback"), false);
 });
 
 test("Bullpen auto-claim skips claimable rows that do not have verified condition ids", async (t) => {

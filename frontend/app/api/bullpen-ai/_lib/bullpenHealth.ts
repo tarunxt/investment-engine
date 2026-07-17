@@ -36,6 +36,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 const DEFAULT_REDEEM_TIMEOUT_MS = 180_000;
 const DEFAULT_AUTO_CLAIM_RETRY_COOLDOWN_MS = 60_000;
+const DEFAULT_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT = 2;
 const SNAPSHOT_FILE_NAME = "last-successful-live-snapshot.json";
 const HEALTH_FILE_NAME = "bullpen-health.json";
 const AUTO_CLAIM_STATE_FILE_NAME = "bullpen-auto-claim.json";
@@ -73,6 +74,7 @@ export type BullpenAutoClaimResult = {
 };
 
 type BullpenAutoClaimState = {
+  attemptCount: number;
   lastClaimableSignature: string | null;
   lastAttemptedAt: string | null;
   lastSubmittedAt: string | null;
@@ -80,6 +82,7 @@ type BullpenAutoClaimState = {
 };
 
 const EMPTY_AUTO_CLAIM_STATE: BullpenAutoClaimState = {
+  attemptCount: 0,
   lastClaimableSignature: null,
   lastAttemptedAt: null,
   lastSubmittedAt: null,
@@ -211,10 +214,28 @@ function isBullpenAutoClaimState(value: unknown): value is BullpenAutoClaimState
     "lastError",
   ] as const;
 
-  return fields.every((field) => {
+  const hasStringFields = fields.every((field) => {
     const current = record[field];
     return current === null || typeof current === "string";
   });
+  return (
+    hasStringFields &&
+    (record.attemptCount === undefined ||
+      (typeof record.attemptCount === "number" &&
+        Number.isFinite(record.attemptCount)))
+  );
+}
+
+function getAutoClaimOnChainFallbackAttempt() {
+  const raw = process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT?.trim();
+  if (!raw) {
+    return DEFAULT_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return DEFAULT_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT;
+  }
+  return Math.max(1, Math.trunc(parsed));
 }
 
 async function readBullpenAutoClaimState() {
@@ -222,7 +243,17 @@ async function readBullpenAutoClaimState() {
     const { autoClaimStateFilePath } = getBullpenStatePaths();
     const raw = await readFile(autoClaimStateFilePath, "utf8");
     const parsed = JSON.parse(raw);
-    return isBullpenAutoClaimState(parsed) ? parsed : EMPTY_AUTO_CLAIM_STATE;
+    return isBullpenAutoClaimState(parsed)
+      ? {
+          ...EMPTY_AUTO_CLAIM_STATE,
+          ...parsed,
+          attemptCount:
+            typeof parsed.attemptCount === "number" &&
+            Number.isFinite(parsed.attemptCount)
+              ? parsed.attemptCount
+              : 0,
+        }
+      : EMPTY_AUTO_CLAIM_STATE;
   } catch {
     return EMPTY_AUTO_CLAIM_STATE;
   }
@@ -271,12 +302,14 @@ async function runBullpenRedeemCommand({
   timeoutMs = DEFAULT_REDEEM_TIMEOUT_MS,
   maxBuffer = DEFAULT_MAX_BUFFER,
   conditionIds,
+  onChainFallback = false,
 }: {
   commandCandidates?: string[];
   execFileImpl?: BullpenCliExecImplementation;
   timeoutMs?: number;
   maxBuffer?: number;
   conditionIds: string[];
+  onChainFallback?: boolean;
 }) {
   if (conditionIds.length === 0) {
     throw new Error(
@@ -295,6 +328,7 @@ async function runBullpenRedeemCommand({
           "redeem",
           "--condition-ids",
           conditionIds.join(","),
+          ...(onChainFallback ? ["--on-chain-fallback"] : []),
           "--yes",
           "--non-interactive",
           "--output",
@@ -418,6 +452,7 @@ export async function autoClaimBullpenResolvedPositions(
   if (!claimableSignature || claimableCount === 0) {
     const existingState = await readBullpenAutoClaimState();
     if (
+      existingState.attemptCount ||
       existingState.lastClaimableSignature ||
       existingState.lastAttemptedAt ||
       existingState.lastSubmittedAt ||
@@ -445,6 +480,9 @@ export async function autoClaimBullpenResolvedPositions(
     : Number.NaN;
   const attemptedAtMs = Date.parse(attemptedAt);
   const sameSignature = currentState.lastClaimableSignature === claimableSignature;
+  const nextAttemptCount = sameSignature ? currentState.attemptCount + 1 : 1;
+  const useOnChainFallback =
+    nextAttemptCount >= getAutoClaimOnChainFallbackAttempt();
 
   if (
     sameSignature &&
@@ -470,8 +508,10 @@ export async function autoClaimBullpenResolvedPositions(
       execFileImpl,
       maxBuffer,
       conditionIds: claimableConditionIds,
+      onChainFallback: useOnChainFallback,
     });
     await writeBullpenAutoClaimState({
+      attemptCount: nextAttemptCount,
       lastClaimableSignature: claimableSignature,
       lastAttemptedAt: attemptedAt,
       lastSubmittedAt: attemptedAt,
@@ -490,6 +530,7 @@ export async function autoClaimBullpenResolvedPositions(
   } catch (error) {
     const message = buildBullpenRedeemErrorMessage(error);
     await writeBullpenAutoClaimState({
+      attemptCount: nextAttemptCount,
       lastClaimableSignature: claimableSignature,
       lastAttemptedAt: attemptedAt,
       lastSubmittedAt: currentState.lastSubmittedAt,

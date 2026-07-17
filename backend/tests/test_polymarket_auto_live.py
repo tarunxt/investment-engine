@@ -37,6 +37,7 @@ from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
     ConsoleStageTwoSharedReview,
     PositionSnapshot,
+    _reconcile_historical_pending_exit_keys,
     _auto_live_record_id,
 )
 from app.domains.polymarket_auto_live.llm import run_llm_consensus
@@ -96,6 +97,59 @@ def test_auto_live_record_id_caps_long_action_labels_for_database_columns():
     assert len(record_id) <= 64
     assert record_id.startswith("decision-")
     assert record_id.rsplit("-", 1)[-1]
+
+
+def test_historical_pending_redeem_stops_blocking_after_retry_cooldown(monkeypatch):
+    fixed_now = datetime(2026, 7, 17, 10, 0, tzinfo=UTC)
+    monkeypatch.setenv("POLYMARKET_REDEEM_RETRY_COOLDOWN_SECONDS", "60")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+
+    recent_pending_decision = SimpleNamespace(
+        market_id="market-1",
+        order_plan=SimpleNamespace(
+            dry_run=False,
+            status="settlement_pending",
+            action="redeem",
+            executed_at="2026-07-17T09:59:30+00:00",
+            side="NO",
+            shares=2,
+        ),
+        stage_results=[SimpleNamespace(outputs={"condition_id": "condition-1"})],
+    )
+    cooled_down_decision = SimpleNamespace(
+        market_id="market-1",
+        order_plan=SimpleNamespace(
+            dry_run=False,
+            status="settlement_pending",
+            action="redeem",
+            executed_at="2026-07-17T09:58:00+00:00",
+            side="NO",
+            shares=2,
+        ),
+        stage_results=[SimpleNamespace(outputs={"condition_id": "condition-1"})],
+    )
+    live_position = SimpleNamespace(
+        condition_id="condition-1",
+        is_claimable=True,
+        market_id="market-1",
+        side="NO",
+        shares=2,
+    )
+
+    _, pending_recent = _reconcile_historical_pending_exit_keys(
+        [recent_pending_decision],
+        [live_position],
+    )
+    _, pending_after_cooldown = _reconcile_historical_pending_exit_keys(
+        [cooled_down_decision],
+        [live_position],
+    )
+
+    assert pending_recent == {"condition-1"}
+    assert pending_after_cooldown == set()
 
 
 @pytest.mark.anyio
