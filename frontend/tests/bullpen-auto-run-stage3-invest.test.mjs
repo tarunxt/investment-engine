@@ -1035,6 +1035,22 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /formatReturnsPerDay\(getDecisionReturnsPerDay\(decision\)\)/);
 });
 
+test("Stage 3 schedule card exposes a planned preview queue for current buys and sells", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /Stage 3 Planned Preview/);
+  assert.match(source, /Current Stage 3 buy and sell queue/);
+  assert.match(source, /current Event Exits list with the saved\s+Stage 2 top-10 buy rows/);
+  assert.match(source, /Submit Planned Buys and Sells/);
+  assert.match(source, /NO_STAGE2_QUALIFIED_EVENTS_REASON/);
+});
+
 test("Stage 3 preview steps summarize the sell-first then invest flow before execution starts", async () => {
   const {
     buildBullpenStage3InvestPreviewSteps,

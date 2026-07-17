@@ -68,6 +68,7 @@ import { BullpenStage2To3StrategyDialog } from "./BullpenStage2To3StrategyDialog
 import {
   buildBullpenStage3InvestPreviewSteps,
   buildBullpenStage3OnlyInvestExecutionPlan,
+  NO_STAGE2_QUALIFIED_EVENTS_REASON,
   type BullpenStage3AlreadyInvestedRecord,
   selectBullpenStage3OnlyInvestSource,
 } from "./bullpenAutoRunStage3Invest";
@@ -161,6 +162,23 @@ type InvestMetricDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type PreviewCandidateRow =
+  NonNullable<
+    NonNullable<BullpenAutoLiveRunOnceRequest["console_profile"]>["candidate_rows"]
+  >[number];
+
+type PreviewExitEntry =
+  ReturnType<typeof buildBullpenInvestmentDisplay>["activePositionsNeedingAttention"][number];
+
+type Stage3PreviewDialogState = {
+  sourceRun: BullpenAutoLiveRun | null;
+  request: BullpenAutoLiveRunOnceRequest | null;
+  decisions: BullpenAutoLiveDecision[];
+  plannedOrders: number;
+  sellPlannedOrders: number;
+  buyPlannedOrders: number;
+};
+
 type ScanCandidateDialogMode = "fresh-opportunities" | "active-positions";
 
 type RunDetailDialogState = {
@@ -177,6 +195,326 @@ type StageTwoLlmRunDialogState = {
   stage: WorkflowStageView;
   decisions: BullpenAutoLiveDecision[];
 };
+
+function normalizePreviewConfidence(
+  value: string | null | undefined,
+): BullpenAutoLiveDecision["confidence"] {
+  if (value === "Low" || value === "Medium" || value === "High") {
+    return value;
+  }
+  return "High";
+}
+
+function normalizePreviewEvidenceStatus(
+  value: string | null | undefined,
+): BullpenAutoLiveDecision["evidence_status"] {
+  if (value === "Low" || value === "Moderate" || value === "Strong") {
+    return value;
+  }
+  return "Strong";
+}
+
+function computePreviewHoursRemaining(closeTime: string | null | undefined) {
+  if (!closeTime) return null;
+  const closeMs = Date.parse(closeTime);
+  if (!Number.isFinite(closeMs)) return null;
+  return Math.max(0, Number(((closeMs - Date.now()) / (60 * 60 * 1000)).toFixed(2)));
+}
+
+function resolvePreviewBuySide(
+  candidate: Pick<PreviewCandidateRow, "llm_yes_odds" | "llm_no_odds">,
+): BullpenAutoLiveDecision["side"] {
+  const yesOdds = candidate.llm_yes_odds ?? Number.NEGATIVE_INFINITY;
+  const noOdds = candidate.llm_no_odds ?? Number.NEGATIVE_INFINITY;
+  return yesOdds > noOdds ? "YES" : "NO";
+}
+
+function buildStage3PreviewBuyDecision({
+  sourceRun,
+  candidate,
+  index,
+}: {
+  sourceRun: BullpenAutoLiveRun | null;
+  candidate: PreviewCandidateRow;
+  index: number;
+}): BullpenAutoLiveDecision {
+  const side = resolvePreviewBuySide(candidate);
+  const currentSideOdds =
+    side === "YES" ? candidate.current_yes_odds : candidate.current_no_odds;
+  const fairYesOdds = candidate.llm_yes_odds ?? null;
+  const fairNoOdds = candidate.llm_no_odds ?? null;
+  const fairSideOdds = side === "YES" ? fairYesOdds : fairNoOdds;
+  const limitPriceCents = Math.max(
+    0.01,
+    Number((currentSideOdds ?? fairSideOdds ?? 1).toFixed(2)),
+  );
+  const orderSizeUsd =
+    typeof candidate.amount_to_be_invested === "number" &&
+    Number.isFinite(candidate.amount_to_be_invested)
+      ? Math.max(0, Number(candidate.amount_to_be_invested.toFixed(2)))
+      : 0;
+  const hoursRemaining = computePreviewHoursRemaining(candidate.close_time);
+  const fairProbability = fairSideOdds ?? 0;
+  const currentProbability = currentSideOdds ?? fairProbability;
+  const createdAt =
+    sourceRun?.completed_at ?? sourceRun?.started_at ?? new Date().toISOString();
+
+  return {
+    id: `preview-buy-${candidate.market_id}-${side.toLowerCase()}`,
+    run_id: sourceRun?.id ?? "stage3-preview",
+    created_at: createdAt,
+    updated_at: createdAt,
+    market_id: candidate.market_id,
+    market_title: candidate.market_title,
+    market_url: candidate.market_url,
+    slug: candidate.slug,
+    close_time: candidate.close_time,
+    theme: candidate.theme || "Uncategorized",
+    side,
+    decision: "BUY_NEW",
+    risk_status: "Ready",
+    price_cents: limitPriceCents,
+    current_yes_odds: candidate.current_yes_odds ?? null,
+    current_no_odds: candidate.current_no_odds ?? null,
+    fair_probability_pct: fairProbability,
+    fair_yes_probability_pct: fairYesOdds,
+    fair_no_probability_pct: fairNoOdds,
+    edge_pp: Number((fairProbability - currentProbability).toFixed(2)),
+    score: orderSizeUsd,
+    confidence: normalizePreviewConfidence(candidate.confidence),
+    evidence_status: normalizePreviewEvidenceStatus(candidate.evidence_status),
+    event_state: candidate.event_state ?? "Watching",
+    adjudication_required: Boolean(candidate.adjudication_required),
+    disagreement_level: candidate.llm_disagreement_level ?? null,
+    current_exposure_usd: 0,
+    target_exposure_usd: orderSizeUsd,
+    realized_pnl_usd: null,
+    hours_remaining: hoursRemaining,
+    key_evidence: [],
+    red_flags: [],
+    rationale: candidate.rules ?? candidate.market_context ?? null,
+    reason:
+      "Queued from the saved Stage 2 top-10 list. Stage 3 refreshes live cash plus occupied slots and can resize this buy before submission.",
+    summary:
+      "Queued from the saved Stage 2 top-10 list for Stage 3 Step 2.",
+    stage3_result: "SELECTED",
+    stage3_result_reason:
+      "Saved Stage 2 top-10 candidate is queued for Stage 3 Step 2.",
+    stage3_final_rank: index + 1,
+    stage3_max_positions: DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+    order_plan: {
+      id: `preview-order-buy-${candidate.market_id}-${side.toLowerCase()}`,
+      action: "buy",
+      side,
+      order_type: "limit",
+      status: "planned",
+      market_id: candidate.market_id,
+      market_title: candidate.market_title,
+      order_size_usd: orderSizeUsd,
+      shares:
+        orderSizeUsd > 0
+          ? Number(
+              (orderSizeUsd / Math.max(limitPriceCents / 100, 0.01)).toFixed(6),
+            )
+          : 0,
+      limit_price_cents: limitPriceCents,
+      refreshed_market_price_cents: currentSideOdds ?? null,
+      max_slippage_cents: 0,
+      dry_run: false,
+      detail:
+        "Saved Stage 2 top-10 row is queued for Stage 3 Step 2. Live sizing is refreshed from post-exit cash plus open slots before submission.",
+      execution_response: null,
+      created_at: createdAt,
+      executed_at: null,
+    },
+    exit_signals: [],
+    exit_state: "ACTIVE",
+    llm_outputs: candidate.llm_outputs ?? [],
+    stage_results: [],
+    guardrail_checks: [],
+  };
+}
+
+function buildStage3PreviewSellDecision({
+  sourceRun,
+  entry,
+  question,
+}: {
+  sourceRun: BullpenAutoLiveRun | null;
+  entry: PreviewExitEntry;
+  question: BullpenQuestionRow | null;
+}): BullpenAutoLiveDecision {
+  const position = entry.position;
+  const side = position.heldSide ?? position.outcome?.trim().toUpperCase() ?? "NO";
+  const currentSideOdds = side === "YES" ? position.yesOdds : position.noOdds;
+  const fairYesOdds = question?.llmYesOdds ?? null;
+  const fairNoOdds = question?.llmNoOdds ?? null;
+  const fairSideOdds = side === "YES" ? fairYesOdds : fairNoOdds;
+  const limitPriceCents = Math.max(
+    0.01,
+    Number(
+      (
+        (typeof position.currentPrice === "number"
+          ? position.currentPrice * 100
+          : currentSideOdds ?? fairSideOdds ?? 1)
+      ).toFixed(2),
+    ),
+  );
+  const orderSizeUsd = Math.max(
+    0,
+    Number(
+      (
+        entry.estimatedFreeableValue ??
+        position.currentValue ??
+        position.costBasis ??
+        0
+      ).toFixed(2),
+    ),
+  );
+  const createdAt =
+    sourceRun?.completed_at ?? sourceRun?.started_at ?? new Date().toISOString();
+  const reasonSummary =
+    entry.reasonBadges.length > 0
+      ? entry.reasonBadges.join(" + ")
+      : "Event Exit";
+
+  return {
+    id: `preview-sell-${position.marketId}-${side.toLowerCase()}`,
+    run_id: sourceRun?.id ?? "stage3-preview",
+    created_at: createdAt,
+    updated_at: createdAt,
+    market_id: position.marketId,
+    market_title: position.marketTitle,
+    market_url: position.marketUrl,
+    slug: position.slug,
+    close_time: position.closeTime,
+    theme: question?.category || "Uncategorized",
+    side,
+    decision: "EXIT",
+    risk_status: "Ready",
+    price_cents: limitPriceCents,
+    current_yes_odds: position.yesOdds ?? null,
+    current_no_odds: position.noOdds ?? null,
+    fair_probability_pct: fairSideOdds ?? currentSideOdds ?? 0,
+    fair_yes_probability_pct: fairYesOdds,
+    fair_no_probability_pct: fairNoOdds,
+    edge_pp: 0,
+    score: orderSizeUsd,
+    confidence: normalizePreviewConfidence(
+      question?.llmBreakdown.find((item) => item.confidence)?.confidence ?? null,
+    ),
+    evidence_status: normalizePreviewEvidenceStatus(question?.evidenceStatus),
+    event_state: question?.eventState ?? "Watching",
+    adjudication_required: Boolean(question?.adjudicationRequired),
+    disagreement_level: question?.llmDisagreementLevel ?? null,
+    current_exposure_usd: position.currentValue ?? position.costBasis ?? 0,
+    target_exposure_usd: 0,
+    realized_pnl_usd: position.unrealizedPnl ?? null,
+    hours_remaining: computePreviewHoursRemaining(position.closeTime),
+    key_evidence: [],
+    red_flags: [],
+    rationale: question?.rules ?? position.rules ?? position.marketContext ?? null,
+    reason: `Queued from the current Event Exits list (${reasonSummary}). Stage 3 submits this sell before any new buys.`,
+    summary: `Queued Event Exit (${reasonSummary}) for Stage 3 Step 1.`,
+    stage3_result: null,
+    stage3_result_reason: null,
+    stage3_final_rank: null,
+    stage3_max_positions: DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+    order_plan: {
+      id: `preview-order-sell-${position.marketId}-${side.toLowerCase()}`,
+      action: "sell",
+      side,
+      order_type: "limit",
+      status: "planned",
+      market_id: position.marketId,
+      market_title: position.marketTitle,
+      order_size_usd: orderSizeUsd,
+      shares: position.shares,
+      limit_price_cents: limitPriceCents,
+      refreshed_market_price_cents: currentSideOdds ?? null,
+      max_slippage_cents: 0,
+      dry_run: false,
+      detail:
+        "Current Event Exit row is queued for Stage 3 Step 1 and will be submitted before any Stage 3 buy.",
+      execution_response: null,
+      created_at: createdAt,
+      executed_at: null,
+    },
+    exit_signals: entry.exitSignals,
+    exit_state: entry.exitState,
+    llm_outputs: [],
+    stage_results: [],
+    guardrail_checks: [],
+  };
+}
+
+function buildStage3PreviewDialogState({
+  sourceRun,
+  plan,
+  attentionEntries,
+  activePositionQuestionByKey,
+  allowExitOnlyFallback,
+}: {
+  sourceRun: BullpenAutoLiveRun | null;
+  plan: ReturnType<typeof buildBullpenStage3OnlyInvestExecutionPlan>;
+  attentionEntries: PreviewExitEntry[];
+  activePositionQuestionByKey: ReturnType<
+    typeof buildBullpenInvestmentDisplay
+  >["activePositionQuestionByKey"];
+  allowExitOnlyFallback: boolean;
+}): Stage3PreviewDialogState | null {
+  const previewSellEntries = attentionEntries.filter(
+    (entry) => entry.exitState === "EVENT_EXIT_PLANNED",
+  );
+  const previewSellDecisions = previewSellEntries.map((entry) =>
+    buildStage3PreviewSellDecision({
+      sourceRun,
+      entry,
+      question: activePositionQuestionByKey.get(entry.position.key) ?? null,
+    }),
+  );
+  const previewBuyRows = plan.request?.console_profile?.candidate_rows ?? [];
+  const previewBuyDecisions = previewBuyRows.map((candidate, index) =>
+    buildStage3PreviewBuyDecision({
+      sourceRun,
+      candidate,
+      index,
+    }),
+  );
+  const decisions = [...previewSellDecisions, ...previewBuyDecisions];
+
+  if (decisions.length === 0) {
+    return null;
+  }
+
+  const request =
+    plan.request ??
+    (allowExitOnlyFallback
+      ? {
+          console_profile: {
+            source_label: "Saved Stage 2 output",
+            source_url: null,
+            scanned_at:
+              sourceRun?.completed_at ?? sourceRun?.started_at ?? new Date().toISOString(),
+            snapshot_id: sourceRun?.id ?? "stage3-preview",
+            mode: "stage-3-invest-only",
+            total_candidates: 0,
+            candidate_rows_prefiltered: true,
+            reuse_saved_llm_outputs: true,
+            candidate_rows: [],
+          },
+        }
+      : null);
+
+  return {
+    sourceRun,
+    request,
+    decisions,
+    plannedOrders: decisions.length,
+    sellPlannedOrders: previewSellDecisions.length,
+    buyPlannedOrders: previewBuyDecisions.length,
+  };
+}
 
 function resolveStageTwoLlmRunDialogState({
   currentState,
@@ -6251,6 +6589,135 @@ function InvestMetricDetailsDialog({
   );
 }
 
+function Stage3PreviewDialog({
+  state,
+  submitting = false,
+  submitDisabled = false,
+  onClose,
+  onSubmit,
+}: {
+  state: Stage3PreviewDialogState;
+  submitting?: boolean;
+  submitDisabled?: boolean;
+  onClose: () => void;
+  onSubmit?: () => void;
+}) {
+  const sellDecisions = state.decisions.filter(
+    (decision) => decision.order_plan?.action === "sell",
+  );
+  const buyDecisions = state.decisions.filter(
+    (decision) => decision.order_plan?.action === "buy",
+  );
+
+  return (
+    <div className="fixed inset-0 z-[155] flex items-center justify-center bg-slate-950/60 p-4">
+      <div className="flex max-h-[88vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Stage 3 Planned Preview
+            </p>
+            <h2 className="text-xl font-semibold text-slate-950">
+              Current Stage 3 buy and sell queue
+            </h2>
+            <p className="max-w-4xl text-sm leading-6 text-slate-600">
+              This preview combines the current Event Exits list with the saved
+              Stage 2 top-10 buy rows. Stage 3 submits the exits first, waits
+              for settlement, refreshes live cash plus occupied slots, and only
+              then sizes and submits the buys.
+            </p>
+            <p className="text-xs text-slate-500">
+              Source run{" "}
+              <span className="font-semibold text-slate-700">
+                {state.sourceRun?.id ?? "stage3-preview"}
+              </span>
+              {" · "}snapshot time{" "}
+              <span className="font-semibold text-slate-700">
+                {formatIstDateTime(
+                  state.sourceRun?.completed_at ?? state.sourceRun?.started_at ?? null,
+                )}
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close Stage 3 planned preview"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="grid gap-3 md:grid-cols-3">
+            <InvestMetricSummaryCard label="Planned" value={state.plannedOrders} />
+            <InvestMetricSummaryCard
+              label="Step 1 Exits"
+              value={state.sellPlannedOrders}
+            />
+            <InvestMetricSummaryCard
+              label="Step 2 Buys"
+              value={state.buyPlannedOrders}
+            />
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-950">
+            Stage 3 will use these rows as the planned queue. Sell orders go
+            first, and buy sizes can still change at submission time because
+            Step 2 rechecks fresh wallet cash and open slots.
+          </div>
+
+          <div className="mt-5 space-y-4">
+            <Stage3DecisionTable
+              title="Step 1 Event Exits"
+              rows={sellDecisions}
+              emptyMessage="No executable Event Exit sell rows are waiting right now."
+            />
+            <Stage3DecisionTable
+              title="Step 2 Planned Buys"
+              rows={buyDecisions}
+              emptyMessage="No saved Stage 2 top-10 buy rows are waiting right now."
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
+          <p className="text-xs leading-5 text-slate-500">
+            Preview only until the run is queued. Once submitted, the worker
+            persists the live planned and submitted results in the Stage 3
+            history.
+          </p>
+          {onSubmit ? (
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={submitDisabled || submitting}
+              className={`inline-flex items-center justify-center rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                submitDisabled || submitting
+                  ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                  : "border-blue-950 bg-blue-950 text-white hover:bg-blue-900"
+              }`}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Submitting...
+                </>
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Submit Planned Buys and Sells
+                </>
+              )}
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildConsoleSettingsUpdate(
   consoleOrderUsd: number,
   startAt?: string | null,
@@ -7022,6 +7489,8 @@ export function BullpenAutoRunScheduleCard({
   >(null);
   const [investMetricDialog, setInvestMetricDialog] =
     useState<InvestMetricDialogState | null>(null);
+  const [stage3PreviewDialog, setStage3PreviewDialog] =
+    useState<Stage3PreviewDialogState | null>(null);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
@@ -7666,6 +8135,19 @@ export function BullpenAutoRunScheduleCard({
       hasActivePositionsSnapshot,
     },
   );
+  const stage3PreviewDialogState = buildStage3PreviewDialogState({
+    sourceRun: investOnlySourceRun,
+    plan: investOnlyPlan,
+    attentionEntries: activePositionsNeedingAttention,
+    activePositionQuestionByKey,
+    allowExitOnlyFallback:
+      investOnlyPlan.blockedReason === NO_STAGE2_QUALIFIED_EVENTS_REASON &&
+      activePositionsNeedingAttention.some(
+        (entry) => entry.exitState === "EVENT_EXIT_PLANNED",
+      ),
+  });
+  const effectiveInvestOnlyRequest =
+    stage3PreviewDialogState?.request ?? investOnlyPlan.request;
   const liveAlreadyInvestedRecords =
     summary && hasActivePositionsSnapshot
       ? buildLiveAlreadyInvestedRecords({
@@ -7813,6 +8295,10 @@ export function BullpenAutoRunScheduleCard({
       decisions: investRunDecisions,
     });
   };
+  const openStage3PreviewDialog = () => {
+    if (!stage3PreviewDialogState) return;
+    setStage3PreviewDialog(stage3PreviewDialogState);
+  };
   const openRunInvestMetricDialog = (
     run: BullpenAutoLiveRun,
     kind: InvestMetricDialogKind = "planned",
@@ -7872,7 +8358,9 @@ export function BullpenAutoRunScheduleCard({
     null;
   const investOnlyDisabledReason = runIsActive
     ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
-    : investOnlyPlan.blockedReason;
+    : effectiveInvestOnlyRequest
+      ? null
+      : investOnlyPlan.blockedReason;
   const liveTradeAmountSource = portfolioState?.live.balance ?? null;
   const liveTradeAmountBalance = isUsableBullpenBalance(liveTradeAmountSource)
     ? liveTradeAmountSource
@@ -8443,19 +8931,61 @@ export function BullpenAutoRunScheduleCard({
               const canOpenInputs =
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
-              const investStageCounters = getInvestStageCounters(stage);
               const investExecutionSteps = getInvestStageExecutionSteps(stage);
-              const investPreviewSteps =
+              const showQueuedInvestPreview =
                 stage.key === "invest" &&
                 investExecutionSteps.length === 0 &&
                 stage.state === "queued" &&
                 workflowView.runStatus !== "running" &&
-                Array.isArray(stage.inputs.llm_review_rows)
-                  ? buildQueuedInvestPreviewSteps(
-                      investOnlyPlan,
-                      investOnlySourceRun,
-                    )
-                  : [];
+                Array.isArray(stage.inputs.llm_review_rows);
+              const investStageCounters =
+                stage.key === "invest" &&
+                showQueuedInvestPreview &&
+                stage3PreviewDialogState
+                  ? [
+                      {
+                        label: "Planned",
+                        value: stage3PreviewDialogState.plannedOrders,
+                      },
+                      { label: "Submitted", value: 0 },
+                    ]
+                  : getInvestStageCounters(stage);
+              const investPreviewSteps = showQueuedInvestPreview
+                ? buildQueuedInvestPreviewSteps(
+                    investOnlyPlan,
+                    investOnlySourceRun,
+                  ).map((step) =>
+                    step.key === "sell"
+                      ? {
+                          ...step,
+                          plannedOrders:
+                            stage3PreviewDialogState?.sellPlannedOrders ?? 0,
+                          processedOrders: 0,
+                          submittedOrders: 0,
+                          detail:
+                            stage3PreviewDialogState?.sellPlannedOrders &&
+                            stage3PreviewDialogState.sellPlannedOrders > 0
+                              ? `${stage3PreviewDialogState.sellPlannedOrders} current Event Exit ${
+                                  stage3PreviewDialogState.sellPlannedOrders === 1
+                                    ? "row is"
+                                    : "rows are"
+                                } queued to sell before any new buys.`
+                              : "No executable Step 1 Event Exits are waiting right now.",
+                        }
+                      : step.key === "buy"
+                        ? {
+                            ...step,
+                            plannedOrders:
+                              stage3PreviewDialogState?.buyPlannedOrders ??
+                              step.plannedOrders,
+                          }
+                        : step,
+                  )
+                : [];
+              const useStage3PreviewDialog =
+                stage.key === "invest" &&
+                showQueuedInvestPreview &&
+                stage3PreviewDialogState !== null;
               const displayedInvestSteps =
                 investExecutionSteps.length > 0
                   ? investExecutionSteps
@@ -8653,7 +9183,11 @@ export function BullpenAutoRunScheduleCard({
                           >
                             <button
                               type="button"
-                              onClick={() => openInvestMetricDialog(counterKind)}
+                              onClick={() =>
+                                useStage3PreviewDialog
+                                  ? openStage3PreviewDialog()
+                                  : openInvestMetricDialog(counterKind)
+                              }
                               className="absolute inset-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-300"
                               aria-label="Open Stage 3 planned details"
                             />
@@ -8735,8 +9269,8 @@ export function BullpenAutoRunScheduleCard({
                       <button
                         type="button"
                         onClick={() => {
-                          if (investOnlyPlan.request) {
-                            void handleInvestOnly(investOnlyPlan.request);
+                          if (effectiveInvestOnlyRequest) {
+                            void handleInvestOnly(effectiveInvestOnlyRequest);
                           }
                         }}
                         disabled={
@@ -8768,15 +9302,26 @@ export function BullpenAutoRunScheduleCard({
                         )}
                       </button>
                       {!investOnlyDisabledReason &&
-                      investOnlyPlan.readyCandidateCount > 0 ? (
+                      stage3PreviewDialogState &&
+                      stage3PreviewDialogState.plannedOrders > 0 ? (
                         <p
                           className={`text-[11px] leading-5 ${toneClasses.muted}`}
                         >
-                          {investOnlyPlan.readyCandidateCount} qualified{" "}
-                          {investOnlyPlan.readyCandidateCount === 1
-                            ? "event is"
-                            : "events are"}{" "}
+                          {stage3PreviewDialogState.plannedOrders} planned{" "}
+                          {stage3PreviewDialogState.plannedOrders === 1
+                            ? "row is"
+                            : "rows are"}{" "}
                           ready for this invest-only pass.
+                          {" "}
+                          {stage3PreviewDialogState.sellPlannedOrders > 0
+                            ? `${stage3PreviewDialogState.sellPlannedOrders} sell${stage3PreviewDialogState.sellPlannedOrders === 1 ? "" : "s"} first`
+                            : "No sell rows are queued"}
+                          {" · "}
+                          {stage3PreviewDialogState.buyPlannedOrders} buy
+                          {stage3PreviewDialogState.buyPlannedOrders === 1
+                            ? ""
+                            : "s"}{" "}
+                          after the post-exit refresh.
                         </p>
                       ) : null}
                     </div>
@@ -9274,6 +9819,23 @@ export function BullpenAutoRunScheduleCard({
                     : null,
                 ),
               })
+            }
+          />
+        ) : null}
+
+        {stage3PreviewDialog ? (
+          <Stage3PreviewDialog
+            state={stage3PreviewDialog}
+            submitting={action === "invest-now"}
+            submitDisabled={Boolean(investOnlyDisabledReason) || action !== null}
+            onClose={() => setStage3PreviewDialog(null)}
+            onSubmit={
+              stage3PreviewDialog.request
+                ? () => {
+                    setStage3PreviewDialog(null);
+                    void handleInvestOnly(stage3PreviewDialog.request!);
+                  }
+                : undefined
             }
           />
         ) : null}
