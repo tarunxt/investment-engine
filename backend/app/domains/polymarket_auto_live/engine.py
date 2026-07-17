@@ -6579,7 +6579,12 @@ class BullpenAutoLiveEngine:
                     else current_position.best_ask_cents
                 )
 
-            if returns_per_day is not None and current_position is not None:
+            # A missing returns/day value means the position cannot retain a
+            # place in the ranked Top 10.  It must still go through Event Exit
+            # evaluation rather than falling through to the conservative HOLD
+            # path below; otherwise stale/unrankable wallet positions can keep
+            # consuming a Bullpen slot indefinitely.
+            if current_position is not None:
                 selected_side = (
                     review_context.get("selected_side")
                     if review_context and isinstance(review_context.get("selected_side"), str)
