@@ -4760,6 +4760,10 @@ async def test_console_profile_nonqualifying_active_positions_do_not_displace_to
         fake_run_llm_consensus,
     )
     monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.position_returns_per_day",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
@@ -4792,6 +4796,13 @@ async def test_console_profile_nonqualifying_active_positions_do_not_displace_to
     assert len(buy_decisions) == 10
     assert all(decision.order_plan is not None for decision in buy_decisions)
     assert exit_decisions[0].market_id == active_market.market_id
+    assert exit_decisions[0].exit_state == "EVENT_EXIT_PLANNED"
+    assert exit_decisions[0].order_plan is not None
+    assert exit_decisions[0].order_plan.action == "sell"
+    assert any(
+        signal.reasonCode == "OUTSIDE_TOP_10_BY_RETURNS_DAY"
+        for signal in exit_decisions[0].exit_signals
+    )
     assert stage6.outputs["active_rows_ranked"] == 0
     assert stage6.outputs["top_active_keys"] == []
     assert set(stage6.outputs["top_candidate_market_ids"]) == {
