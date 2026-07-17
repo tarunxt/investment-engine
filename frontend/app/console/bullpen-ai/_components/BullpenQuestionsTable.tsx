@@ -247,6 +247,27 @@ function sortQuestions(
   });
 }
 
+const STRONGEST_LLM_ODDS_THRESHOLD = 80;
+const TOP_LLM_OPPORTUNITIES_LIMIT = 10;
+
+function hasStrongestLlmOdds(
+  question: Pick<BullpenQuestionRow, "llmYesOdds" | "llmNoOdds">,
+) {
+  return (
+    Math.max(question.llmYesOdds ?? -Infinity, question.llmNoOdds ?? -Infinity) >=
+    STRONGEST_LLM_ODDS_THRESHOLD
+  );
+}
+
+function sortByReturnsPerDayDescending(questions: BullpenQuestionRow[]) {
+  return [...questions].sort((left, right) => {
+    const returnsDifference =
+      (right.returnsPerDay ?? -Infinity) - (left.returnsPerDay ?? -Infinity);
+    if (returnsDifference !== 0) return returnsDifference;
+    return left.question.localeCompare(right.question);
+  });
+}
+
 function SortButton({
   label,
   sortKey,
@@ -785,11 +806,61 @@ export function BullpenQuestionsTable({
     useState<ResizableBullpenTableColumnId | null>(null);
   const [draggedColumnId, setDraggedColumnId] =
     useState<DraggableBullpenTableColumnId | null>(null);
+  const [isStrongestLlmOddsFilterActive, setIsStrongestLlmOddsFilterActive] =
+    useState(false);
+  const [isTopTenFilterActive, setIsTopTenFilterActive] = useState(false);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const horizontalScrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const rows = sortQuestions(
-    rowsOverride ?? (snapshot ? snapshot.questions : []),
-    sortState,
+  const allRows = rowsOverride ?? (snapshot ? snapshot.questions : []);
+  const strongestLlmOddsRows = allRows.filter(hasStrongestLlmOdds);
+  const topTenStrongestLlmOddsRows = sortByReturnsPerDayDescending(
+    strongestLlmOddsRows,
+  ).slice(0, TOP_LLM_OPPORTUNITIES_LIMIT);
+  const topTenStrongestLlmOddsIds = new Set(
+    topTenStrongestLlmOddsRows.map((question) => question.id),
+  );
+  const rowsToDisplay = isTopTenFilterActive
+    ? topTenStrongestLlmOddsRows
+    : isStrongestLlmOddsFilterActive
+      ? strongestLlmOddsRows
+      : allRows;
+  const rows = isTopTenFilterActive
+    ? rowsToDisplay
+    : sortQuestions(rowsToDisplay, sortState);
+  const effectiveRowHighlightById = Object.fromEntries(
+    allRows.map((question) => {
+      const configuredHighlight = rowHighlightById?.[question.id];
+      const isActivePosition =
+        configuredHighlight === "active-retained" ||
+        configuredHighlight === "event-exit";
+      const isSelectedFreshOpportunity =
+        configuredHighlight === "new-opportunity";
+
+      if (isActivePosition) {
+        return [
+          question.id,
+          topTenStrongestLlmOddsIds.has(question.id)
+            ? "active-retained"
+            : "event-exit",
+        ];
+      }
+
+      if (
+        isSelectedFreshOpportunity &&
+        topTenStrongestLlmOddsIds.has(question.id)
+      ) {
+        return [question.id, "new-opportunity"];
+      }
+
+      return [question.id, configuredHighlight];
+    }).filter(
+      (
+        entry,
+      ): entry is [
+        string,
+        "active-retained" | "event-exit" | "new-opportunity",
+      ] => Boolean(entry[1]),
+    ),
   );
   const selectableRowCount = selectionEnabled ? rows.length : 0;
   const selectedVisibleCount = rows.filter((question) =>
@@ -1028,6 +1099,38 @@ export function BullpenQuestionsTable({
           <span className="text-xs font-medium text-slate-500">
             Updated {updatedAtLabel}
           </span>
+          <button
+            type="button"
+            onClick={() => {
+              setIsStrongestLlmOddsFilterActive((current) => !current);
+              setIsTopTenFilterActive(false);
+            }}
+            aria-pressed={isStrongestLlmOddsFilterActive}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-300",
+              isStrongestLlmOddsFilterActive
+                ? "border-emerald-600 bg-emerald-600 text-white"
+                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+            )}
+          >
+            Strongest LLM odds ≥ 80%
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIsTopTenFilterActive((current) => !current);
+              setIsStrongestLlmOddsFilterActive(false);
+            }}
+            aria-pressed={isTopTenFilterActive}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-violet-300",
+              isTopTenFilterActive
+                ? "border-violet-600 bg-violet-600 text-white"
+                : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
+            )}
+          >
+            Top 10
+          </button>
           {updateStatusMessage ? (
             <span className="text-xs font-medium text-amber-700">
               {updateStatusMessage}
@@ -1124,7 +1227,7 @@ export function BullpenQuestionsTable({
               rows.map((question, rowIndex) => {
                 const hasLlmAnalysis = hasBullpenLlmAnalysis(question);
 
-                const rowHighlight = rowHighlightById?.[question.id] ?? null;
+                const rowHighlight = effectiveRowHighlightById[question.id] ?? null;
                 return (
                   <tr
                     key={question.id}
