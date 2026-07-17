@@ -282,9 +282,13 @@ test("Bullpen x AI auto-run card applies summary data before slower run detail h
     "utf8",
   );
 
-  assert.match(autoRunCardSource, /const baseSummary = await summaryPromise;/);
-  assert.match(autoRunCardSource, /setSummary\(baseSummary\);/);
-  assert.match(autoRunCardSource, /const \[runsResult, decisionsResult\] = await Promise\.allSettled/);
+  assert.match(autoRunCardSource, /summaryLoadInFlightRef/);
+  assert.match(
+    autoRunCardSource,
+    /const nextSummary = await apiService\.getBullpenAutoLiveSummary\(\);/,
+  );
+  assert.match(autoRunCardSource, /setSummary\(nextSummary\);/);
+  assert.doesNotMatch(autoRunCardSource, /summaryPromise/);
 });
 
 test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without persisting a timestamp", () => {
