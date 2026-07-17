@@ -41,6 +41,7 @@ import {
   type BullpenTableColumnWidths,
 } from "./bullpenTableColumnWidths";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
+import { BullpenStage3ShortlistReasonDialog } from "./BullpenStage3ShortlistReasonDialog";
 
 export type BullpenTableSortKey =
   | "question"
@@ -518,6 +519,7 @@ function renderBullpenTableCell({
   selectionEnabled,
   onToggleQuestion,
   setBreakdownQuestion,
+  setShortlistReasonQuestion,
 }: {
   columnId: BullpenTableColumnId;
   question: BullpenQuestionRow;
@@ -527,6 +529,7 @@ function renderBullpenTableCell({
   selectionEnabled: boolean;
   onToggleQuestion: (questionId: string) => void;
   setBreakdownQuestion: (question: BullpenQuestionRow) => void;
+  setShortlistReasonQuestion: (question: BullpenQuestionRow) => void;
 }) {
   switch (columnId) {
     case "select":
@@ -553,7 +556,19 @@ function renderBullpenTableCell({
     case "question":
       return (
         <td key={columnId} className="px-4 py-3 font-medium text-slate-900">
-          <div className="break-words leading-5">{question.question}</div>
+          <div className="flex items-start gap-2">
+            <button
+              type="button"
+              onClick={() => setShortlistReasonQuestion(question)}
+              className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-slate-400 text-slate-500 transition hover:border-indigo-500 hover:bg-indigo-50 hover:text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              aria-label={`Explain Stage 3 shortlist status for ${question.question}`}
+              aria-haspopup="dialog"
+              title="Explain Stage 3 shortlist status"
+            >
+              <Info className="h-3 w-3" />
+            </button>
+            <div className="break-words leading-5">{question.question}</div>
+          </div>
           {question.marketUrl ? (
             <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
               <a
@@ -753,6 +768,8 @@ export function BullpenQuestionsTable({
   onToggleSelectAll: () => void;
 }) {
   const [breakdownQuestion, setBreakdownQuestion] =
+    useState<BullpenQuestionRow | null>(null);
+  const [shortlistReasonQuestion, setShortlistReasonQuestion] =
     useState<BullpenQuestionRow | null>(null);
   const [isAmountHighlightDialogOpen, setIsAmountHighlightDialogOpen] =
     useState(false);
@@ -1131,6 +1148,7 @@ export function BullpenQuestionsTable({
                         selectionEnabled,
                         onToggleQuestion,
                         setBreakdownQuestion,
+                        setShortlistReasonQuestion,
                       }),
                     )}
                   </tr>
@@ -1155,6 +1173,13 @@ export function BullpenQuestionsTable({
           historicalRuns={historicalRuns}
           historicalDecisions={historicalDecisions}
           onClose={() => setBreakdownQuestion(null)}
+        />
+      ) : null}
+      {shortlistReasonQuestion ? (
+        <BullpenStage3ShortlistReasonDialog
+          question={shortlistReasonQuestion}
+          historicalDecisions={historicalDecisions}
+          onClose={() => setShortlistReasonQuestion(null)}
         />
       ) : null}
       {isAmountHighlightDialogOpen ? (
