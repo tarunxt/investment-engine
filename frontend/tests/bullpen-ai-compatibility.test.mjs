@@ -929,6 +929,25 @@ test("Bullpen x AI keeps BullpenQuestionsTable as the single canonical Events Su
   assert.doesNotMatch(bullpenAiPageSource, /const columnDefinitions:/);
 });
 
+test("Events Summary can filter strongest LLM odds and rank its top 10 by returns per day", () => {
+  const questionsTableSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(questionsTableSource, /Strongest LLM odds ≥ 80%/);
+  assert.match(questionsTableSource, />\s*Top 10\s*</);
+  assert.match(questionsTableSource, /const STRONGEST_LLM_ODDS_THRESHOLD = 80/);
+  assert.match(questionsTableSource, /sortByReturnsPerDayDescending/);
+  assert.match(questionsTableSource, /TOP_LLM_OPPORTUNITIES_LIMIT/);
+  assert.match(questionsTableSource, /"active-retained"/);
+  assert.match(questionsTableSource, /"event-exit"/);
+  assert.match(questionsTableSource, /"new-opportunity"/);
+});
+
 test("Bullpen x AI Stage 2 popup keeps responsive dialog sizing and left-edge table scroll reset", () => {
   const scheduleCardSource = readFileSync(
     new URL(
