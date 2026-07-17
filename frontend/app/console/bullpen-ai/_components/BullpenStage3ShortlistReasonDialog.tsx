@@ -197,7 +197,7 @@ function getStage3Outcome(
       completed: false,
       label: "Not moved to Stage 3 yet",
       detail:
-        "This event only meets the entry checks. Stage 3 has not recorded a final ranking or order outcome for it yet.",
+        "This is a pending workflow status, not a market-data or LLM error. This event passes the local entry checks, but no Stage 3 worker run has yet saved its combined final rank or an order result.",
     };
   }
 
@@ -230,6 +230,48 @@ function getStage3Outcome(
       ? `Stage 3 shortlisted this event, but its ${orderStatus.replaceAll("_", " ")} order did not complete. ${getDecisionReason(latestDecision)}`
       : `Stage 3 shortlisted this event, but no order outcome was recorded. ${getDecisionReason(latestDecision)}`,
   };
+}
+
+function Stage3PendingNextSteps() {
+  return (
+    <section
+      className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4"
+      aria-label="What Stage 3 still needs to do"
+    >
+      <p className="text-sm font-semibold text-amber-950">
+        What still needs to happen before this can be invested
+      </p>
+      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-amber-950/85">
+        <li>
+          Start the <span className="font-semibold">Stage 3 · Exit and Invest</span>{" "}
+          pass from the Auto-Live card (or wait for its enabled schedule). A
+          Stage 2 LLM run only supplies candidate inputs; it does not place an
+          order by itself.
+        </li>
+        <li>
+          Stage 3 must receive a complete Stage 2 review, then rank every
+          qualifying new event together with active positions. Only rows that
+          remain in the final top 10 can receive a new-buy plan.
+        </li>
+        <li>
+          If an exit is needed, Stage 3 processes it first and refreshes live
+          wallet cash, occupied slots, and pending positions. This prevents a
+          new buy from relying on stale capital or a duplicate position.
+        </li>
+        <li>
+          For a live purchase, the execution guardrails must pass: Auto-Live
+          is armed for live trading, the emergency stop is off, the Bullpen
+          doctor and balance checks are healthy, and the calculated order size
+          meets the minimum order amount.
+        </li>
+      </ol>
+      <p className="mt-3 text-xs leading-5 text-amber-900">
+        After the pass finishes, reopen this explanation. It will show the
+        persisted final rank and whether the order was planned, submitted,
+        skipped, or failed with the recorded reason.
+      </p>
+    </section>
+  );
 }
 
 function getShortlistChecks(
@@ -389,6 +431,8 @@ export function BullpenStage3ShortlistReasonDialog({
             </p>
           </div>
         </div>
+
+        {!explanation.latestDecision ? <Stage3PendingNextSteps /> : null}
 
         <ol className="mt-5 space-y-3" aria-label="Stage 3 shortlist checks">
           {checks.map((check) => {
