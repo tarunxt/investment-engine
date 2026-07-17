@@ -52,6 +52,7 @@ import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
+  BullpenAutoLiveOutcomeSide,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveSummaryResponse,
@@ -214,6 +215,12 @@ function normalizePreviewEvidenceStatus(
   return "Strong";
 }
 
+function normalizePreviewOutcomeSide(
+  value: string | null | undefined,
+): BullpenAutoLiveOutcomeSide {
+  return value?.trim().toUpperCase() === "YES" ? "YES" : "NO";
+}
+
 function computePreviewHoursRemaining(closeTime: string | null | undefined) {
   if (!closeTime) return null;
   const closeMs = Date.parse(closeTime);
@@ -345,7 +352,9 @@ function buildStage3PreviewSellDecision({
   question: BullpenQuestionRow | null;
 }): BullpenAutoLiveDecision {
   const position = entry.position;
-  const side = position.heldSide ?? position.outcome?.trim().toUpperCase() ?? "NO";
+  const side = normalizePreviewOutcomeSide(
+    position.heldSide ?? position.outcome,
+  );
   const currentSideOdds = side === "YES" ? position.yesOdds : position.noOdds;
   const fairYesOdds = question?.llmYesOdds ?? null;
   const fairNoOdds = question?.llmNoOdds ?? null;
@@ -8119,6 +8128,15 @@ export function BullpenAutoRunScheduleCard({
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
   const workflowRunNeedsLogin = runNeedsBullpenLogin(workflowRun);
+  const {
+    activePositionQuestionByKey: stage3PreviewQuestionByKey,
+    activePositionsNeedingAttention: stage3PreviewAttentionEntries,
+  } = buildBullpenInvestmentDisplay({
+    activePositions,
+    activePositionQuestions,
+    candidates: [],
+    recentDecisions,
+  });
   const investOnlySource = selectBullpenStage3OnlyInvestSource(
     summary
       ? [summary.latest_run, ...summary.recent_runs]
@@ -8138,11 +8156,11 @@ export function BullpenAutoRunScheduleCard({
   const stage3PreviewDialogState = buildStage3PreviewDialogState({
     sourceRun: investOnlySourceRun,
     plan: investOnlyPlan,
-    attentionEntries: activePositionsNeedingAttention,
-    activePositionQuestionByKey,
+    attentionEntries: stage3PreviewAttentionEntries,
+    activePositionQuestionByKey: stage3PreviewQuestionByKey,
     allowExitOnlyFallback:
       investOnlyPlan.blockedReason === NO_STAGE2_QUALIFIED_EVENTS_REASON &&
-      activePositionsNeedingAttention.some(
+      stage3PreviewAttentionEntries.some(
         (entry) => entry.exitState === "EVENT_EXIT_PLANNED",
       ),
   });
