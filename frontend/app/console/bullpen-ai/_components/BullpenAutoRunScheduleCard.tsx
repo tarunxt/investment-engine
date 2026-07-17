@@ -537,6 +537,15 @@ function areProviderTargetsEqual(
   });
 }
 
+function serializeProviderTargets(targets: ProviderModelTarget[]) {
+  return JSON.stringify(
+    targets.map((target) => ({
+      provider: target.provider,
+      model: target.model,
+    })),
+  );
+}
+
 function formatPriceCents(value: number | null) {
   if (value === null) return "—";
   return `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
@@ -7033,6 +7042,13 @@ export function BullpenAutoRunScheduleCard({
   const [selectedLlmTargets, setSelectedLlmTargets] = useState<
     ProviderModelTarget[]
   >([]);
+  const [llmTargetSelectionSaveBusy, setLlmTargetSelectionSaveBusy] =
+    useState(false);
+  const pendingSelectedLlmTargetsSaveRef = useRef<ProviderModelTarget[] | null>(
+    null,
+  );
+  const selectedLlmTargetsSaveInFlightRef = useRef(false);
+  const savedSelectedLlmTargetsRef = useRef("[]");
   const [llmExecutionMode, setLlmExecutionMode] =
     useState<BullpenLlmExecutionMode>(DEFAULT_LLM_EXECUTION_MODE);
   const [llmEventsPerPromptInput, setLlmEventsPerPromptInput] = useState(
@@ -7079,6 +7095,13 @@ export function BullpenAutoRunScheduleCard({
 
   useEffect(() => {
     const nextTargets = summary?.settings.console_llm_targets ?? [];
+    savedSelectedLlmTargetsRef.current = serializeProviderTargets(nextTargets);
+    if (
+      llmTargetSelectionSaveBusy ||
+      pendingSelectedLlmTargetsSaveRef.current !== null
+    ) {
+      return;
+    }
     window.queueMicrotask(() => {
       setSelectedLlmTargets((currentTargets) =>
         areProviderTargetsEqual(currentTargets, nextTargets)
@@ -7086,7 +7109,7 @@ export function BullpenAutoRunScheduleCard({
           : nextTargets,
       );
     });
-  }, [summary?.settings.console_llm_targets]);
+  }, [llmTargetSelectionSaveBusy, summary?.settings.console_llm_targets]);
 
   useEffect(() => {
     if (llmExecutionSettingsDirty) return;
@@ -7114,18 +7137,54 @@ export function BullpenAutoRunScheduleCard({
     return parsedValue;
   }
 
+  async function flushSelectedLlmTargetSaves() {
+    if (selectedLlmTargetsSaveInFlightRef.current) return;
+    if (pendingSelectedLlmTargetsSaveRef.current === null) return;
+
+    selectedLlmTargetsSaveInFlightRef.current = true;
+    setLlmTargetSelectionSaveBusy(true);
+    setError(null);
+
+    try {
+      while (pendingSelectedLlmTargetsSaveRef.current !== null) {
+        const nextTargets = pendingSelectedLlmTargetsSaveRef.current;
+        pendingSelectedLlmTargetsSaveRef.current = null;
+        const nextSerialized = serializeProviderTargets(nextTargets);
+
+        if (nextSerialized === savedSelectedLlmTargetsRef.current) {
+          continue;
+        }
+
+        const updatedSettings = await apiService.updateBullpenAutoLiveSettings({
+          console_llm_targets: nextTargets,
+        });
+        savedSelectedLlmTargetsRef.current = serializeProviderTargets(
+          updatedSettings.console_llm_targets ?? [],
+        );
+      }
+      await loadSummary({ preserveLoading: true });
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      const reloadedSummary = await loadSummary({ preserveLoading: true });
+      const reloadedTargets = reloadedSummary?.settings.console_llm_targets ?? [];
+      savedSelectedLlmTargetsRef.current =
+        serializeProviderTargets(reloadedTargets);
+      setSelectedLlmTargets(reloadedTargets);
+    } finally {
+      selectedLlmTargetsSaveInFlightRef.current = false;
+      setLlmTargetSelectionSaveBusy(false);
+      if (pendingSelectedLlmTargetsSaveRef.current !== null) {
+        void flushSelectedLlmTargetSaves();
+      }
+    }
+  }
+
   async function handleSelectedLlmTargetsChange(
     nextTargets: ProviderModelTarget[],
   ) {
     setSelectedLlmTargets(nextTargets);
-    try {
-      await apiService.updateBullpenAutoLiveSettings({
-        console_llm_targets: nextTargets,
-      });
-      await loadSummary({ preserveLoading: true });
-    } catch (nextError) {
-      setError(normalizeError(nextError));
-    }
+    pendingSelectedLlmTargetsSaveRef.current = nextTargets;
+    void flushSelectedLlmTargetSaves();
   }
 
   async function handleSaveLlmExecutionSettings(options?: {
@@ -7830,12 +7889,6 @@ export function BullpenAutoRunScheduleCard({
       summary?.state.last_console_trade_max_positions ?? null,
   });
   const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
-  const tradeAmountHelperMessage =
-    tradeAmountView.source === "live"
-      ? "Uses the latest visible cash in hand and open slots for a preview; the worker revalidates occupied slots, pending buys, and fresh balance again before every live submission."
-      : tradeAmountView.source === "last-calculated"
-        ? "Showing the last calculated diagnostic amount until the next fresh balance sync finishes. That cached value never authorizes a live buy."
-        : "Waiting for Bullpen cash in hand and occupied-slot data to calculate this amount.";
   const tradeAmountSummaryLabel =
     tradeAmountView.source === "live"
       ? "Preview from current portfolio"
@@ -8769,9 +8822,7 @@ export function BullpenAutoRunScheduleCard({
                           buttonLabel="Run LLM"
                           containerClassName="gap-0"
                           selectionMode="multiple"
-                          defaultTargets={
-                            summary?.settings.console_llm_targets ?? null
-                          }
+                          defaultTargets={selectedLlmTargets}
                           onRunMultiple={() => undefined}
                           onSelectionChange={handleSelectedLlmTargetsChange}
                           pickerDialogLabel="Select LLMs"

@@ -360,6 +360,40 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
   );
 });
 
+test("Bullpen auto-run only persists LLM target changes after explicit user interaction", () => {
+  const runControlsSource = readFileSync(
+    new URL("../components/shared/EventScanRunControls.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(runControlsSource, /selectionChangeVersionRef/);
+  assert.match(runControlsSource, /emittedSelectionChangeVersionRef/);
+  assert.match(runControlsSource, /markSelectionChangedByUser/);
+  assert.match(
+    runControlsSource,
+    /emittedSelectionChangeVersionRef\.current ===\s*\n\s*selectionChangeVersionRef\.current/,
+  );
+});
+
+test("Bullpen auto-run serializes LLM target saves so rapid multi-select changes do not overwrite newer selections", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /pendingSelectedLlmTargetsSaveRef/);
+  assert.match(autoRunCardSource, /selectedLlmTargetsSaveInFlightRef/);
+  assert.match(autoRunCardSource, /flushSelectedLlmTargetSaves/);
+  assert.match(
+    autoRunCardSource,
+    /pendingSelectedLlmTargetsSaveRef\.current = nextTargets/,
+  );
+  assert.match(autoRunCardSource, /defaultTargets=\{selectedLlmTargets\}/);
+});
+
 test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt template", () => {
   const autoRunCardSource = readFileSync(
     new URL(

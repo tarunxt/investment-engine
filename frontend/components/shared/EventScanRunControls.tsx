@@ -402,6 +402,12 @@ export function EventScanRunControls({
     () => readLastModelSelection()?.selectedMixId ?? "",
   );
   const lastSelectionChangeRef = useRef("");
+  const selectionChangeVersionRef = useRef(0);
+  const emittedSelectionChangeVersionRef = useRef(0);
+
+  const markSelectionChangedByUser = useCallback(() => {
+    selectionChangeVersionRef.current += 1;
+  }, []);
 
   const persistSavedMixes = useCallback((mixes: SavedModelMix[]) => {
     setSavedMixes(mixes);
@@ -576,7 +582,15 @@ export function EventScanRunControls({
 
   useEffect(() => {
     if (!onSelectionChange) return;
+    if (
+      emittedSelectionChangeVersionRef.current ===
+      selectionChangeVersionRef.current
+    ) {
+      return;
+    }
     const serialized = JSON.stringify(activeTargets);
+    emittedSelectionChangeVersionRef.current =
+      selectionChangeVersionRef.current;
     if (serialized === lastSelectionChangeRef.current) return;
     lastSelectionChangeRef.current = serialized;
     onSelectionChange(activeTargets);
@@ -627,6 +641,7 @@ export function EventScanRunControls({
             "This chooser runs one LLM at a time, so the first compatible model in the mix was selected.",
           );
         }
+        markSelectionChangedByUser();
         setHasTouchedSelection(true);
         const nextTargets =
           selectionMode === "multiple"
@@ -827,6 +842,7 @@ export function EventScanRunControls({
                     modelMixControls={modelMixControls}
                     getSelectionConstraint={getSelectionConstraint}
                     onToggle={(key) => {
+                      markSelectionChangedByUser();
                       setHasTouchedSelection(true);
                       if (selectionMode === "multiple") {
                         setSelectedKeys((current) => {
@@ -850,6 +866,7 @@ export function EventScanRunControls({
                     onSelectAll={
                       selectionMode === "multiple"
                         ? () => {
+                            markSelectionChangedByUser();
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set(compatibleTargets));
                             setSelectedMixId("");
@@ -860,6 +877,7 @@ export function EventScanRunControls({
                     onClear={
                       selectionMode === "multiple"
                         ? () => {
+                            markSelectionChangedByUser();
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set());
                             setSelectedMixId("");
@@ -870,6 +888,7 @@ export function EventScanRunControls({
                     onSelectWebCapable={
                       selectionMode === "multiple"
                         ? () => {
+                            markSelectionChangedByUser();
                             setHasTouchedSelection(true);
                             setSelectedKeys(
                               new Set(webCapableCompatibleTargets),
@@ -885,6 +904,7 @@ export function EventScanRunControls({
                     onToggleProvider={
                       selectionMode === "multiple"
                         ? (providerName, models) => {
+                            markSelectionChangedByUser();
                             setHasTouchedSelection(true);
                             setSelectedKeys((current) => {
                               const next = new Set(current);
