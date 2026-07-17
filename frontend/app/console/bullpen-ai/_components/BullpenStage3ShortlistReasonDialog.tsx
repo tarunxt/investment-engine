@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
-import { X } from "lucide-react";
+import { CheckCircle2, X, XCircle } from "lucide-react";
 
 import {
   getBullpenAmountToBeInvestedBreakdown,
@@ -98,10 +98,60 @@ function getShortlistExplanation(
   }
 
   return {
-    status: "Eligible — no recorded Stage 3 result",
-    reason: `This event clears the ${formatOdds(DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS)} LLM threshold. Stage 3 selects at most ${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS} eligible events by returns/day after it finishes reviewing the full eligible universe. No saved Stage 3 decision was found for this event, so this table alone cannot confirm whether it ranked outside the top 10 or was not included in that run.`,
+    status: "Eligible for Stage 3",
+    reason: `This event clears the ${formatOdds(DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS)} LLM threshold and has a returns/day ranking value. It is eligible to move to Stage 3, where the combined top-${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS} ranking determines the final order plan.`,
     source: "Current table values",
   };
+}
+
+type ShortlistCheck = {
+  label: string;
+  detail: string;
+  satisfied: boolean;
+};
+
+function getShortlistChecks(
+  question: BullpenQuestionRow,
+  historicalDecisions?: BullpenAutoLiveDecision[] | null,
+): ShortlistCheck[] {
+  const amount = getBullpenAmountToBeInvestedBreakdown(question);
+  const latestDecision = findLatestDecision(question, historicalDecisions);
+  const hasStrongestLlmOdds =
+    amount.strongestLlmOdds !== null &&
+    amount.strongestLlmOdds >= amount.minStrongestLlmOdds;
+  const hasRankingValue = question.returnsPerDay !== null;
+  const isShortlisted = latestDecision
+    ? ["BUY_NEW", "ADD_MORE"].includes(latestDecision.decision)
+    : hasStrongestLlmOdds && hasRankingValue;
+
+  return [
+    {
+      label: "i) Strongest LLM odds ≥ 80%",
+      detail:
+        amount.strongestLlmOdds === null
+          ? "No usable consensus LLM odds are available."
+          : `${formatOdds(amount.strongestLlmOdds)} strongest side (minimum ${formatOdds(amount.minStrongestLlmOdds)}).`,
+      satisfied: hasStrongestLlmOdds,
+    },
+    {
+      label: "ii) Inside Top 10",
+      detail: latestDecision
+        ? isShortlisted
+          ? "Recorded Stage 3 decision kept this event in the top-10 shortlist."
+          : "Recorded Stage 3 decision did not keep this event in the top-10 shortlist."
+        : hasStrongestLlmOdds && hasRankingValue
+          ? `Eligible for the Stage 3 combined top-${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS} ranking.`
+          : "This event cannot enter the top-10 ranking until its LLM and returns/day checks pass.",
+      satisfied: isShortlisted,
+    },
+    {
+      label: "iii) No other Stage 3 errors",
+      detail: hasRankingValue
+        ? "Returns/day is available and no additional local blocker was found."
+        : "Returns/day is unavailable, so Stage 3 cannot rank this event.",
+      satisfied: hasRankingValue,
+    },
+  ];
 }
 
 export function BullpenStage3ShortlistReasonDialog({
@@ -113,6 +163,7 @@ export function BullpenStage3ShortlistReasonDialog({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const explanation = getShortlistExplanation(question, historicalDecisions);
   const amount = getBullpenAmountToBeInvestedBreakdown(question);
+  const checks = getShortlistChecks(question, historicalDecisions);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -165,6 +216,29 @@ export function BullpenStage3ShortlistReasonDialog({
             Source: {explanation.source}
           </p>
         </div>
+
+        <ol className="mt-5 space-y-3" aria-label="Stage 3 shortlist checks">
+          {checks.map((check) => {
+            const StatusIcon = check.satisfied ? CheckCircle2 : XCircle;
+            return (
+              <li
+                key={check.label}
+                className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3"
+              >
+                <StatusIcon
+                  aria-hidden="true"
+                  className={`mt-0.5 h-5 w-5 shrink-0 ${
+                    check.satisfied ? "text-emerald-600" : "text-rose-600"
+                  }`}
+                />
+                <div>
+                  <p className="text-sm font-semibold text-slate-950">{check.label}</p>
+                  <p className="mt-1 text-sm text-slate-600">{check.detail}</p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
 
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
