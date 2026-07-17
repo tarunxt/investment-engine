@@ -52,10 +52,17 @@ function findLatestDecision(
     )[0];
 }
 
+type Stage3ShortlistExplanation = {
+  status: string;
+  reason: string;
+  source: string;
+  latestDecision?: BullpenAutoLiveDecision;
+};
+
 function getShortlistExplanation(
   question: BullpenQuestionRow,
   historicalDecisions?: BullpenAutoLiveDecision[] | null,
-) {
+): Stage3ShortlistExplanation {
   const amount = getBullpenAmountToBeInvestedBreakdown(question);
   const latestDecision = findLatestDecision(question, historicalDecisions);
 
@@ -109,6 +116,78 @@ type ShortlistCheck = {
   detail: string;
   satisfied: boolean;
 };
+
+type Stage3Outcome = {
+  completed: boolean;
+  label: string;
+  detail: string;
+};
+
+function getDecisionReason(decision: BullpenAutoLiveDecision) {
+  return (
+    decision.order_plan?.detail?.trim() ||
+    decision.reason?.trim() ||
+    decision.summary?.trim() ||
+    "Stage 3 did not record a more specific reason."
+  );
+}
+
+function isSuccessfulStage3Order(decision: BullpenAutoLiveDecision) {
+  const orderPlan = decision.order_plan;
+  if (!orderPlan) return false;
+  if (["submitted", "confirmed"].includes(orderPlan.status)) return true;
+
+  const executionText = `${orderPlan.detail ?? ""}\n${orderPlan.execution_response ?? ""}`;
+  return (
+    /successfully|submitted|filled|executed/i.test(executionText) &&
+    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(
+      executionText,
+    )
+  );
+}
+
+function getStage3Outcome(
+  latestDecision: BullpenAutoLiveDecision | undefined,
+): Stage3Outcome {
+  if (!latestDecision) {
+    return {
+      completed: false,
+      label: "Not moved to Stage 3 yet",
+      detail:
+        "This event only meets the entry checks. Stage 3 has not recorded a final ranking or order outcome for it yet.",
+    };
+  }
+
+  const wasShortlisted = ["BUY_NEW", "ADD_MORE"].includes(
+    latestDecision.decision,
+  );
+  if (!wasShortlisted) {
+    return {
+      completed: false,
+      label: "Not moved to Stage 3",
+      detail: getDecisionReason(latestDecision),
+    };
+  }
+
+  if (isSuccessfulStage3Order(latestDecision)) {
+    return {
+      completed: true,
+      label: "Moved to Stage 3",
+      detail:
+        latestDecision.order_plan?.detail?.trim() ||
+        "Stage 3 shortlisted this event and submitted its order.",
+    };
+  }
+
+  const orderStatus = latestDecision.order_plan?.status;
+  return {
+    completed: false,
+    label: "Not finally moved to Stage 3",
+    detail: orderStatus
+      ? `Stage 3 shortlisted this event, but its ${orderStatus.replaceAll("_", " ")} order did not complete. ${getDecisionReason(latestDecision)}`
+      : `Stage 3 shortlisted this event, but no order outcome was recorded. ${getDecisionReason(latestDecision)}`,
+  };
+}
 
 function getShortlistChecks(
   question: BullpenQuestionRow,
@@ -164,6 +243,7 @@ export function BullpenStage3ShortlistReasonDialog({
   const explanation = getShortlistExplanation(question, historicalDecisions);
   const amount = getBullpenAmountToBeInvestedBreakdown(question);
   const checks = getShortlistChecks(question, historicalDecisions);
+  const outcome = getStage3Outcome(explanation.latestDecision);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
@@ -215,6 +295,35 @@ export function BullpenStage3ShortlistReasonDialog({
           <p className="mt-3 text-xs font-medium text-slate-500">
             Source: {explanation.source}
           </p>
+        </div>
+
+        <div
+          className={`mt-4 flex items-start gap-3 rounded-2xl border p-4 ${
+            outcome.completed
+              ? "border-emerald-200 bg-emerald-50"
+              : "border-rose-200 bg-rose-50"
+          }`}
+          aria-live="polite"
+        >
+          {outcome.completed ? (
+            <CheckCircle2
+              aria-hidden="true"
+              className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600"
+            />
+          ) : (
+            <XCircle
+              aria-hidden="true"
+              className="mt-0.5 h-5 w-5 shrink-0 text-rose-600"
+            />
+          )}
+          <div>
+            <p className="text-sm font-semibold text-slate-950">
+              Final Stage 3 outcome: {outcome.label}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-slate-700">
+              {outcome.detail}
+            </p>
+          </div>
         </div>
 
         <ol className="mt-5 space-y-3" aria-label="Stage 3 shortlist checks">
