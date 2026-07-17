@@ -39,8 +39,14 @@ import {
   getBullpenAmountToBeInvestedBreakdown,
   getBullpenReturnsPerDayBreakdown,
 } from "@/lib/bullpen-ai";
+import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
 import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
 import { formatApiTimestamp } from "@/lib/datetime";
+import {
+  BullpenEventIdentityResolver,
+  buildBullpenEventIdentityFromDecision,
+  buildBullpenEventIdentityFromPosition,
+} from "@/lib/bullpenEventIdentityResolver";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, apiService } from "@/services/api";
@@ -6515,61 +6521,53 @@ function BullpenPortfolioSnapshot({
     })),
   ];
 
-  const latestDecisionByPositionLookup = new Map<
-    string,
-    BullpenAutoLiveDecision
-  >();
-  function rememberDecision(key: string | null, decision: BullpenAutoLiveDecision) {
-    if (!key) return;
-    const existing = latestDecisionByPositionLookup.get(key);
-    if (
-      !existing ||
-      Date.parse(decision.updated_at) >= Date.parse(existing.updated_at)
-    ) {
-      latestDecisionByPositionLookup.set(key, decision);
-    }
-  }
-  for (const decision of recentDecisions) {
-    const side = decision.side?.trim().toUpperCase();
-    const orderSide = decision.order_plan?.side?.trim().toUpperCase();
-    const normalizedTitle = decision.market_title.trim().toLowerCase();
-    [side, orderSide].filter(Boolean).forEach((decisionSide) => {
-      rememberDecision(decision.market_id ? `${decision.market_id}::${decisionSide}` : null, decision);
-      rememberDecision(decision.slug ? `${decision.slug}::${decisionSide}` : null, decision);
-      rememberDecision(normalizedTitle ? `${normalizedTitle}::${decisionSide}` : null, decision);
-    });
-    rememberDecision(decision.market_id, decision);
-    rememberDecision(decision.slug ?? null, decision);
-    rememberDecision(normalizedTitle || null, decision);
-  }
-
   function getPositionDecision(position: BullpenActivePositionView) {
     const heldSide =
       position.heldSide ?? position.outcome?.trim().toUpperCase() ?? null;
-    const normalizedTitle = position.marketTitle.trim().toLowerCase();
-    const lookupKeys = [
-      position.key,
-      position.marketId && heldSide ? `${position.marketId}::${heldSide}` : null,
-      position.marketId,
-      position.conditionId && heldSide ? `${position.conditionId}::${heldSide}` : null,
-      position.conditionId,
-      normalizedTitle && heldSide ? `${normalizedTitle}::${heldSide}` : null,
-      normalizedTitle || null,
-    ].filter((key): key is string => Boolean(key));
-    return lookupKeys.map((key) => latestDecisionByPositionLookup.get(key)).find(Boolean) ?? null;
+    const sameSideDecisions = recentDecisions.filter((decision) => {
+      const decisionSide =
+        decision.side?.trim().toUpperCase() ??
+        decision.order_plan?.side?.trim().toUpperCase() ??
+        null;
+      return heldSide ? decisionSide === heldSide : true;
+    });
+
+    const resolveDecision = (decisions: BullpenAutoLiveDecision[]) => {
+      const match = BullpenEventIdentityResolver.resolveMatch({
+        target: buildBullpenEventIdentityFromPosition(position),
+        candidates: decisions,
+        getIdentity: (decision) => buildBullpenEventIdentityFromDecision(decision),
+        getSortTimestamp: (decision) => decision.updated_at,
+      });
+      return match.status === "matched" ? match.match?.item ?? null : null;
+    };
+
+    return resolveDecision(sameSideDecisions) ?? resolveDecision(recentDecisions);
   }
 
   function getPositionLlmOdds(
     position: BullpenActivePositionView,
     question?: BullpenQuestionRow,
   ) {
+    const analysis = question as
+      | (BullpenQuestionRow & Partial<BullpenActivePositionLlmAnalysis>)
+      | undefined;
     const fromActivePositionAnalysis =
       question && (question.llmYesOdds !== null || question.llmNoOdds !== null)
         ? {
             yes: question.llmYesOdds,
             no: question.llmNoOdds,
             completedAt: question.llmCompletedAt,
-            source: "active-position LLM snapshot",
+            source:
+              analysis?.llmRecoverySource === "current-run"
+                ? "latest Stage 2 consensus"
+                : analysis?.llmRecoverySource === "latest-snapshot"
+                  ? "latest saved snapshot"
+                  : analysis?.llmRecoverySource === "last-known-good"
+                    ? "last known good active-position analysis"
+                    : "active-position LLM snapshot",
+            status: analysis?.llmRecoveryStatus ?? null,
+            diagnostic: analysis?.llmRecoveryReason ?? null,
             error: null,
           }
         : null;
@@ -6584,21 +6582,28 @@ function BullpenPortfolioSnapshot({
         no,
         completedAt: decision?.updated_at ?? null,
         source: "last completed auto-run decision",
+        status: "last-known-good/stale",
+        diagnostic: "Recovered from the latest matching Stage 3 decision.",
         error: null,
       };
     }
 
     const attempted = [
-      question ? "active-position LLM snapshot had no odds" : "no active-position LLM snapshot matched this position",
+      analysis?.llmRecoveryReason ??
+        (question
+          ? "active-position LLM snapshot had no odds"
+          : "no active-position LLM snapshot matched this position"),
       decision
         ? "last completed auto-run decision matched but did not include fair Yes/No odds"
-        : "no last completed auto-run decision matched by position key, market id, slug, or title",
+        : "no last completed auto-run decision matched by shared event identity",
     ];
     return {
       yes: null,
       no: null,
       completedAt: null,
       source: "unavailable",
+      status: analysis?.llmRecoveryStatus ?? "unrecoverable",
+      diagnostic: analysis?.llmRecoveryReason ?? null,
       error: attempted.join("; "),
     };
   }
@@ -6853,8 +6858,11 @@ function BullpenPortfolioSnapshot({
                             {formatOddsPair(llmOdds.yes, llmOdds.no)}
                             <div className="mt-1 max-w-56 text-[11px] leading-4 text-slate-500">
                               {llmOdds.completedAt
-                                ? `${llmOdds.source} · ${formatIstDateTime(llmOdds.completedAt)}`
+                                ? `${llmOdds.source}${llmOdds.status ? ` · ${llmOdds.status}` : ""} · ${formatIstDateTime(llmOdds.completedAt)}`
                                 : (llmOdds.error ?? "LLM odds are unavailable.")}
+                              {!llmOdds.completedAt && llmOdds.diagnostic
+                                ? ` ${llmOdds.diagnostic}`
+                                : null}
                             </div>
                           </td>
                           <td className="px-4 py-3 tabular-nums">
@@ -6928,8 +6936,8 @@ function BullpenPortfolioSnapshot({
                         activePositionQuestionByKey.get(activePositionDetail.key),
                       );
                       return odds.completedAt
-                        ? `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.source} at ${formatIstDateTime(odds.completedAt)}`
-                        : `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.error ?? "LLM odds are unavailable."}`;
+                        ? `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.source}${odds.status ? ` · ${odds.status}` : ""} at ${formatIstDateTime(odds.completedAt)}${odds.diagnostic ? ` · ${odds.diagnostic}` : ""}`
+                        : `Yes: ${formatOddsPercent(odds.yes)} · No: ${formatOddsPercent(odds.no)} · ${odds.error ?? "LLM odds are unavailable."}${odds.diagnostic ? ` · ${odds.diagnostic}` : ""}`;
                     })(),
                   ],
                   [

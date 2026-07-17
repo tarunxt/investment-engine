@@ -13,6 +13,10 @@ export type ScanMode = "30-days" | "end-of-month";
 export type BullpenQuestion = {
   id: string;
   question: string;
+  positionKey?: string | null;
+  conditionId?: string | null;
+  marketId?: string | null;
+  questionId?: string | null;
   closeTime: string | null;
   category: string;
   yesOdds: number | null;
@@ -608,6 +612,13 @@ function normalizeOddsPair(
   }
 
   return { yes, no };
+}
+
+export function normalizeBullpenOddsPair(
+  yesValue: number | null,
+  noValue: number | null,
+) {
+  return normalizeOddsPair(yesValue, noValue);
 }
 
 function averageBullpenValues(values: number[]) {

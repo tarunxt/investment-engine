@@ -94,7 +94,7 @@ async function loadTrackedPositionsFallback(request: NextRequest) {
     marketUpdates = await resolvePolymarketMarketsWithQuestionFallback(
       openPositions.map((position) => ({
         id: position.key,
-        slug: position.market_id,
+        slug: null,
         marketUrl: null,
         question: position.market_title,
       })),
@@ -138,7 +138,7 @@ async function enrichPositionsWithPolymarketData(
     const marketUpdates = await resolvePolymarketMarketsWithQuestionFallback(
       normalizedPositions.map((position) => ({
         id: position.key,
-        slug: position.marketId,
+        slug: position.slug,
         marketUrl: position.marketUrl,
         question: position.marketTitle,
       })),

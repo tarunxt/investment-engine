@@ -719,7 +719,7 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
   );
   assert.match(
     bullpenAiPageSource,
-    /activePositionQuestionByTargetId/,
+    /BullpenEventIdentityResolver\.resolveMatch/,
   );
   assert.match(investmentsSectionSource, /activePositionQuestions:/);
   assert.match(investmentsSectionSource, /Current Yes \/ No/);
@@ -791,7 +791,7 @@ test("Bullpen x AI keeps retrying auto-claim while the same resolved positions r
   assert.match(bullpenAiPageSource, /lastAutoClaimAttemptRef/);
   assert.match(
     bullpenAiPageSource,
-    /Cred-X will retry automatically on the next refresh\./,
+    /Cred-X will retry automatically after the redeem cooldown/,
   );
 });
 
@@ -958,7 +958,7 @@ test("Bullpen x AI stale fact validation excludes contradictory public-listing c
 });
 
 
-test("auto-run active position sync matches latest candidate rows by active market id", () => {
+test("auto-run active position sync uses the shared event identity resolver", () => {
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/bullpenAutoRunSync.ts",
@@ -972,7 +972,7 @@ test("auto-run active position sync matches latest candidate rows by active mark
   );
 
   assert.match(source, /activePositions\?: BullpenActivePositionView\[\]/);
-  assert.match(source, /position\.marketId === marketId/);
-  assert.match(source, /buildBullpenLlmTargetId\(\{ question, slug, marketUrl \}\)/);
+  assert.match(source, /BullpenEventIdentityResolver\.resolveMatch/);
+  assert.match(source, /snapshotAnalysesByKey\?: Record<string, BullpenActivePositionLlmAnalysis>/);
   assert.match(pageSource, /activePositions: openActivePositions/);
 });

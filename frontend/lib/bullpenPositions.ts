@@ -1,6 +1,7 @@
 export type BullpenActivePositionView = {
   key: string;
   marketId: string;
+  slug: string | null;
   conditionId: string | null;
   marketTitle: string;
   outcome: string;
@@ -41,6 +42,7 @@ export type BullpenPositionEconomicClassification =
 export type BullpenExcludedPositionDiagnostic = {
   key: string;
   marketId: string;
+  slug: string | null;
   conditionId: string | null;
   marketTitle: string;
   outcome: string;
@@ -182,6 +184,7 @@ export type BullpenTrackedPositionInput = {
 };
 
 export type BullpenTrackedMarketRefresh = {
+  slug?: string | null;
   yesOdds?: number | null;
   noOdds?: number | null;
   bestBidPrice?: number | null;
@@ -888,6 +891,7 @@ export function normalizeBullpenPosition(
   return applyBullpenPositionClassification({
     key: `${marketId}::${outcome}`,
     marketId,
+    slug: eventSlug,
     conditionId,
     marketTitle,
     outcome,
@@ -918,9 +922,12 @@ export function normalizeBullpenPosition(
 }
 
 function buildBullpenPositionAliases(position: BullpenActivePositionView) {
-  const aliases = [position.marketId, position.conditionId, position.marketTitle].filter(
-    (value): value is string => Boolean(value),
-  );
+  const aliases = [
+    position.marketId,
+    position.slug,
+    position.conditionId,
+    position.marketTitle,
+  ].filter((value): value is string => Boolean(value));
   return [...new Set(aliases)];
 }
 
@@ -966,6 +973,7 @@ function mergeBullpenPositionViews(
   return applyBullpenPositionClassification({
     ...existing,
     key: existing.key,
+    slug: existing.slug ?? incoming.slug,
     conditionId: existing.conditionId ?? incoming.conditionId,
     marketTitle:
       existing.marketTitle && existing.marketTitle !== existing.marketId
@@ -1030,16 +1038,7 @@ export function aggregateBullpenPositionViews(
 
 export function applyBullpenPositionMarketData(
   position: BullpenActivePositionView,
-  marketData: {
-    yesOdds?: number | null;
-    noOdds?: number | null;
-    bestBidPrice?: number | null;
-    bestAskPrice?: number | null;
-    marketUrl?: string | null;
-    rules?: string | null;
-    marketContext?: string | null;
-    resolutionSource?: string | null;
-  },
+  marketData: BullpenTrackedMarketRefresh,
 ) {
   const currentPrice = toBullpenPositionCurrentPrice({
     currentPrice: position.currentPrice,
@@ -1064,6 +1063,7 @@ export function applyBullpenPositionMarketData(
 
   return applyBullpenPositionClassification({
     ...position,
+    slug: marketData.slug ?? position.slug,
     yesOdds,
     noOdds,
     bestBidPrice: marketData.bestBidPrice ?? position.bestBidPrice,
@@ -1098,6 +1098,7 @@ export function buildTrackedBullpenPositionViews(
       const basePosition = {
         key: position.key,
         marketId: position.market_id,
+        slug: marketUpdate?.slug ?? null,
         conditionId: null,
         marketTitle: position.market_title,
         outcome: position.outcome,
@@ -1163,6 +1164,7 @@ export function buildBullpenPositionsDiagnostics(
     .map((position) => ({
       key: position.key,
       marketId: position.marketId,
+      slug: position.slug,
       conditionId: position.conditionId,
       marketTitle: position.marketTitle,
       outcome: position.outcome,

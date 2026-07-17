@@ -4,9 +4,33 @@ import {
   type BullpenQuestionRow,
 } from "./bullpen-ai";
 import {
+  canonicalizeBullpenMarketUrl,
+  type BullpenEventMatchMethod,
+} from "./bullpenEventIdentityResolver";
+import {
   getBullpenPositionDaysUntilClose,
   type BullpenActivePositionView,
 } from "./bullpenPositions";
+
+export type BullpenActivePositionLlmRecoveryStatus =
+  | "recovered"
+  | "last-known-good/stale"
+  | "ambiguous"
+  | "unrecoverable";
+
+export type BullpenActivePositionLlmRecoverySource =
+  | "current-run"
+  | "latest-snapshot"
+  | "last-known-good"
+  | "decision-fallback";
+
+export type BullpenActivePositionLlmTelemetry = {
+  llmRecoveryStatus: BullpenActivePositionLlmRecoveryStatus | null;
+  llmRecoverySource: BullpenActivePositionLlmRecoverySource | null;
+  llmRecoveryMatchMethod: BullpenEventMatchMethod | null;
+  llmRecoveryRunId: string | number | null;
+  llmRecoveryReason: string | null;
+};
 
 export type BullpenActivePositionLlmAnalysis = Pick<
   BullpenQuestionAnalysis,
@@ -33,7 +57,8 @@ export type BullpenActivePositionLlmAnalysis = Pick<
   | "llmCompletedAt"
   | "preflightEvidenceBlock"
   | "llmBreakdown"
->;
+> &
+  BullpenActivePositionLlmTelemetry;
 
 export type BullpenLlmRunTargetLink =
   | {
@@ -69,8 +94,9 @@ function scoreBullpenLlmTargetQuestion(question: BullpenQuestionRow) {
 export function buildBullpenLlmTargetId(
   question: Pick<BullpenQuestionRow, "question" | "slug" | "marketUrl">,
 ) {
-  if (question.marketUrl?.trim()) {
-    return `market-url:${question.marketUrl.trim().toLowerCase()}`;
+  const canonicalMarketUrl = canonicalizeBullpenMarketUrl(question.marketUrl);
+  if (canonicalMarketUrl) {
+    return `market-url:${canonicalMarketUrl}`;
   }
 
   if (question.slug?.trim()) {
@@ -80,7 +106,7 @@ export function buildBullpenLlmTargetId(
   return `question:${normalizeQuestionTitle(question.question)}`;
 }
 
-function createEmptyBullpenActivePositionLlmAnalysis(): BullpenActivePositionLlmAnalysis {
+export function createEmptyBullpenActivePositionLlmAnalysis(): BullpenActivePositionLlmAnalysis {
   return {
     llmYesOdds: null,
     llmNoOdds: null,
@@ -105,6 +131,11 @@ function createEmptyBullpenActivePositionLlmAnalysis(): BullpenActivePositionLlm
     llmCompletedAt: null,
     preflightEvidenceBlock: null,
     llmBreakdown: [],
+    llmRecoveryStatus: null,
+    llmRecoverySource: null,
+    llmRecoveryMatchMethod: null,
+    llmRecoveryRunId: null,
+    llmRecoveryReason: null,
   };
 }
 
@@ -115,6 +146,10 @@ export function buildBullpenQuestionRowFromActivePosition(
   return createBullpenQuestionRow({
     id: position.key,
     question: position.marketTitle,
+    positionKey: position.key,
+    conditionId: position.conditionId,
+    marketId: position.marketId,
+    questionId: null,
     closeTime: position.closeTime,
     category: "Active Position",
     yesOdds: position.yesOdds,
@@ -122,7 +157,7 @@ export function buildBullpenQuestionRowFromActivePosition(
     volume: null,
     liquidity: null,
     sourceUrl: position.marketUrl || "",
-    slug: position.marketId || null,
+    slug: position.slug,
     marketUrl: position.marketUrl,
     outcomeLabels: ["Yes", "No"],
     outcomeCount: 2,
@@ -163,7 +198,99 @@ export function extractBullpenActivePositionLlmAnalysis(
     llmCompletedAt: question.llmCompletedAt,
     preflightEvidenceBlock: question.preflightEvidenceBlock ?? null,
     llmBreakdown: question.llmBreakdown,
+    llmRecoveryStatus:
+      (question as Partial<BullpenActivePositionLlmAnalysis>).llmRecoveryStatus ??
+      null,
+    llmRecoverySource:
+      (question as Partial<BullpenActivePositionLlmAnalysis>).llmRecoverySource ??
+      null,
+    llmRecoveryMatchMethod:
+      (question as Partial<BullpenActivePositionLlmAnalysis>).llmRecoveryMatchMethod ??
+      null,
+    llmRecoveryRunId:
+      (question as Partial<BullpenActivePositionLlmAnalysis>).llmRecoveryRunId ??
+      null,
+    llmRecoveryReason:
+      (question as Partial<BullpenActivePositionLlmAnalysis>).llmRecoveryReason ??
+      null,
   };
+}
+
+export function hasBullpenValidActivePositionOdds(
+  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  return Boolean(
+    analysis &&
+      analysis.llmYesOdds !== null &&
+      analysis.llmNoOdds !== null &&
+      Number.isFinite(analysis.llmYesOdds) &&
+      Number.isFinite(analysis.llmNoOdds),
+  );
+}
+
+export function hasSavedBullpenActivePositionAnalysis(
+  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  return Boolean(
+    analysis &&
+      (hasBullpenValidActivePositionOdds(analysis) ||
+        analysis.llmCompletedAt ||
+        analysis.llmBreakdown.length > 0 ||
+        analysis.llmRecoveryStatus ||
+        analysis.llmRecoveryReason),
+  );
+}
+
+export function getBullpenActivePositionAnalysisCapturedAt(
+  analysis: Pick<
+    BullpenActivePositionLlmAnalysis,
+    "llmCompletedAt" | "llmBreakdown"
+  >,
+) {
+  if (analysis.llmCompletedAt) return analysis.llmCompletedAt;
+
+  return (
+    [...analysis.llmBreakdown]
+      .map((entry) => entry.timestamp)
+      .filter((timestamp): timestamp is string => Boolean(timestamp))
+      .sort()
+      .at(-1) || null
+  );
+}
+
+export function getBullpenActivePositionAnalysisTimestampMs(
+  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  if (!analysis) return 0;
+  const capturedAt = getBullpenActivePositionAnalysisCapturedAt(analysis);
+  if (!capturedAt) return 0;
+
+  const timestampMs = Date.parse(capturedAt);
+  return Number.isFinite(timestampMs) ? timestampMs : 0;
+}
+
+export function pickPreferredBullpenActivePositionAnalysis(
+  left: BullpenActivePositionLlmAnalysis | null | undefined,
+  right: BullpenActivePositionLlmAnalysis | null | undefined,
+) {
+  const normalizedLeft = hasSavedBullpenActivePositionAnalysis(left) ? left : null;
+  const normalizedRight = hasSavedBullpenActivePositionAnalysis(right)
+    ? right
+    : null;
+
+  if (!normalizedLeft) return normalizedRight;
+  if (!normalizedRight) return normalizedLeft;
+
+  const leftValid = hasBullpenValidActivePositionOdds(normalizedLeft);
+  const rightValid = hasBullpenValidActivePositionOdds(normalizedRight);
+  if (leftValid !== rightValid) {
+    return rightValid ? normalizedRight : normalizedLeft;
+  }
+
+  return getBullpenActivePositionAnalysisTimestampMs(normalizedRight) >
+    getBullpenActivePositionAnalysisTimestampMs(normalizedLeft)
+    ? normalizedRight
+    : normalizedLeft;
 }
 
 export function buildBullpenLlmRunTargetSet({

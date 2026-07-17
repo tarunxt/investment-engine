@@ -4,6 +4,14 @@ import type {
   BullpenQuestionRow,
 } from "./bullpen-ai";
 import { classifyBullpenLlmDirection } from "./bullpen-ai";
+import {
+  BullpenEventIdentityResolver,
+  buildBullpenEventIdentity,
+  buildBullpenEventIdentityFromDecision,
+  buildBullpenEventIdentityFromPosition,
+  buildBullpenEventIdentityFromQuestion,
+  buildBullpenEventIdentityFromRecord,
+} from "./bullpenEventIdentityResolver";
 import type { BullpenActivePositionView } from "./bullpenPositions";
 import type {
   BullpenAutoLiveDecision,
@@ -60,12 +68,6 @@ type BuildBullpenHistoricalAssessmentRowsArgs = {
   decisions?: BullpenAutoLiveDecision[] | null;
 };
 
-function normalizeMatchKey(value: string | null | undefined) {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
-  return normalized.length > 0 ? normalized : null;
-}
-
 function compareIsoTimestampsDesc(
   left: string | null | undefined,
   right: string | null | undefined,
@@ -105,70 +107,6 @@ function readStringArray(value: unknown) {
   return value
     .map((item) => (typeof item === "string" ? item.trim() : null))
     .filter((item): item is string => Boolean(item));
-}
-
-function buildTargetMatchKeys({
-  question,
-  position,
-}: {
-  question?: BullpenQuestionRow | null;
-  position?: BullpenActivePositionView | null;
-}) {
-  const keys = new Set<string>();
-  [
-    question?.id,
-    question?.slug,
-    question?.marketUrl,
-    question?.sourceUrl,
-    question?.question,
-    position?.key,
-    position?.marketId,
-    position?.conditionId,
-    position?.marketUrl,
-    position?.marketTitle,
-  ]
-    .map(normalizeMatchKey)
-    .filter((key): key is string => Boolean(key))
-    .forEach((key) => keys.add(key));
-  return keys;
-}
-
-function buildRowMatchKeys(row: Record<string, unknown>) {
-  return [
-    row.position_key,
-    row.market_id,
-    row.marketId,
-    row.question_id,
-    row.questionId,
-    row.slug,
-    row.market_url,
-    row.marketUrl,
-    row.canonical_market_url,
-    row.question,
-    row.market_title,
-    row.marketTitle,
-  ]
-    .map((value) => normalizeMatchKey(typeof value === "string" ? value : null))
-    .filter((key): key is string => Boolean(key));
-}
-
-function decisionMatchesTarget(
-  decision: BullpenAutoLiveDecision,
-  targetKeys: Set<string>,
-) {
-  return [
-    decision.market_id,
-    decision.slug ?? null,
-    decision.market_url ?? null,
-    decision.market_title,
-  ]
-    .map(normalizeMatchKey)
-    .filter((key): key is string => Boolean(key))
-    .some((key) => targetKeys.has(key));
-}
-
-function rowMatchesTarget(row: Record<string, unknown>, targetKeys: Set<string>) {
-  return buildRowMatchKeys(row).some((key) => targetKeys.has(key));
 }
 
 function findStageTwo(run: BullpenAutoLiveRun) {
@@ -396,7 +334,10 @@ function buildDedupeKey(row: BullpenHistoricalAssessmentRow) {
     row.timestamp ?? row.runTimestamp ?? "no-time",
     row.llmYesOdds ?? "no-yes",
     row.llmNoOdds ?? "no-no",
-    normalizeMatchKey(row.rationale ?? row.invalidReason ?? "empty") ?? "empty",
+    (row.rationale ?? row.invalidReason ?? "empty")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ") || "empty",
   ].join("::");
 }
 
@@ -424,7 +365,11 @@ export function buildBullpenHistoricalAssessmentRows({
   decisions,
 }: BuildBullpenHistoricalAssessmentRowsArgs) {
   const rows: BullpenHistoricalAssessmentRow[] = [];
-  const targetKeys = buildTargetMatchKeys({ question, position });
+  const targetIdentity = question
+    ? buildBullpenEventIdentityFromQuestion(question)
+    : position
+      ? buildBullpenEventIdentityFromPosition(position)
+      : buildBullpenEventIdentity({});
   const allRuns = runs ?? [];
   const allDecisions = decisions ?? [];
 
@@ -437,23 +382,27 @@ export function buildBullpenHistoricalAssessmentRows({
   allRuns.forEach((run) => {
     const reviewedRows = getReviewedRows(findStageTwo(run));
     if (reviewedRows.length === 0) return;
-    const matchingDecision = allDecisions
-      .filter((decision) => decision.run_id === run.id)
-      .filter((decision) => decisionMatchesTarget(decision, targetKeys))
-      .sort((left, right) => compareIsoTimestampsDesc(left.updated_at, right.updated_at))
-      .at(0) ?? null;
+    const decisionMatch = BullpenEventIdentityResolver.resolveMatch({
+      target: targetIdentity,
+      candidates: allDecisions.filter((decision) => decision.run_id === run.id),
+      getIdentity: (decision) => buildBullpenEventIdentityFromDecision(decision),
+      getSortTimestamp: (decision) => decision.updated_at,
+    });
+    const reviewedRowMatch = BullpenEventIdentityResolver.resolveMatch({
+      target: targetIdentity,
+      candidates: reviewedRows,
+      getIdentity: (reviewedRow) => buildBullpenEventIdentityFromRecord(reviewedRow),
+    });
+    if (reviewedRowMatch.status !== "matched" || !reviewedRowMatch.match) return;
 
-    reviewedRows
-      .filter((reviewedRow) => rowMatchesTarget(reviewedRow, targetKeys))
-      .forEach((reviewedRow) => {
-        rows.push(
-          ...buildRunBreakdownRows({
-            run,
-            reviewedRow,
-            decision: matchingDecision,
-          }),
-        );
-      });
+    rows.push(
+      ...buildRunBreakdownRows({
+        run,
+        reviewedRow: reviewedRowMatch.match.item,
+        decision:
+          decisionMatch.status === "matched" ? decisionMatch.match?.item ?? null : null,
+      }),
+    );
   });
 
   const deduped = new Map<string, BullpenHistoricalAssessmentRow>();

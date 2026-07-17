@@ -59,10 +59,11 @@ import {
   type BullpenScanFilterDetailId,
 } from "@/lib/bullpenScanExclusions";
 import {
-  buildBullpenLlmTargetId,
   buildBullpenLlmRunTargetSet,
   buildBullpenQuestionRowFromActivePosition,
   extractBullpenActivePositionLlmAnalysis,
+  hasSavedBullpenActivePositionAnalysis,
+  pickPreferredBullpenActivePositionAnalysis,
   type BullpenActivePositionLlmAnalysis,
 } from "@/lib/bullpenActivePositions";
 import { formatApiErrorSummary, formatUnknownError } from "@/lib/apiErrors";
@@ -70,6 +71,11 @@ import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { getResolvedProviderInternetAccess } from "@/lib/llmInternetAccess";
 import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
+import {
+  BullpenEventIdentityResolver,
+  buildBullpenEventIdentityFromPosition,
+  buildBullpenEventIdentityFromQuestion,
+} from "@/lib/bullpenEventIdentityResolver";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
 import { APIError, apiService } from "@/services/api";
@@ -310,68 +316,20 @@ function createEmptySnapshotSourceMap(): Record<ScanMode, BullpenSnapshotSource>
   };
 }
 
-function hasSavedBullpenActivePositionAnalysis(
-  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
-) {
-  return Boolean(
-    analysis &&
-      (analysis.llmYesOdds !== null ||
-        analysis.llmNoOdds !== null ||
-        analysis.llmCompletedAt ||
-        analysis.llmBreakdown.length > 0),
-  );
-}
-
-function getBullpenActivePositionAnalysisCapturedAt(
-  analysis: Pick<
-    BullpenActivePositionLlmAnalysis,
-    "llmCompletedAt" | "llmBreakdown"
-  >,
-) {
-  if (analysis.llmCompletedAt) return analysis.llmCompletedAt;
-
-  return (
-    [...analysis.llmBreakdown]
-      .map((entry) => entry.timestamp)
-      .filter((timestamp): timestamp is string => Boolean(timestamp))
-      .sort()
-      .at(-1) || null
-  );
-}
-
-function getBullpenActivePositionAnalysisTimestampMs(
-  analysis: BullpenActivePositionLlmAnalysis | null | undefined,
-) {
-  if (!analysis) return 0;
-  const capturedAt = getBullpenActivePositionAnalysisCapturedAt(analysis);
-  if (!capturedAt) return 0;
-
-  const timestampMs = Date.parse(capturedAt);
-  return Number.isFinite(timestampMs) ? timestampMs : 0;
-}
-
-function pickNewerBullpenActivePositionAnalysis(
-  left: BullpenActivePositionLlmAnalysis | null | undefined,
-  right: BullpenActivePositionLlmAnalysis | null | undefined,
-) {
-  const normalizedLeft = hasSavedBullpenActivePositionAnalysis(left) ? left : null;
-  const normalizedRight = hasSavedBullpenActivePositionAnalysis(right)
-    ? right
-    : null;
-
-  if (!normalizedLeft) return normalizedRight;
-  if (!normalizedRight) return normalizedLeft;
-
-  return getBullpenActivePositionAnalysisTimestampMs(normalizedRight) >
-    getBullpenActivePositionAnalysisTimestampMs(normalizedLeft)
-    ? normalizedRight
-    : normalizedLeft;
-}
-
 function buildSnapshotBackfilledActivePositionAnalyses(
-  snapshotCollections: Record<ScanMode, BullpenSnapshotHistory>[],
+  {
+    activePositions,
+    snapshotCollections,
+  }: {
+    activePositions: BullpenActivePositionView[];
+    snapshotCollections: Record<ScanMode, BullpenSnapshotHistory>[];
+  },
 ) {
-  const analysesByTargetId = new Map<string, BullpenActivePositionLlmAnalysis>();
+  const snapshotCandidates: {
+    analysis: BullpenActivePositionLlmAnalysis;
+    question: BullpenQuestionRow;
+    snapshotScannedAt: string | null;
+  }[] = [];
 
   for (const snapshotsByMode of snapshotCollections) {
     for (const mode of ["30-days", "end-of-month"] as const) {
@@ -384,19 +342,45 @@ function buildSnapshotBackfilledActivePositionAnalyses(
         for (const question of snapshot.questions) {
           const analysis = extractBullpenActivePositionLlmAnalysis(question);
           if (!hasSavedBullpenActivePositionAnalysis(analysis)) continue;
-
-          const targetId = buildBullpenLlmTargetId(question);
-          const current = analysesByTargetId.get(targetId);
-          const newer = pickNewerBullpenActivePositionAnalysis(current, analysis);
-          if (newer) {
-            analysesByTargetId.set(targetId, newer);
-          }
+          snapshotCandidates.push({
+            analysis,
+            question,
+            snapshotScannedAt: snapshot.scannedAt,
+          });
         }
       }
     }
   }
 
-  return analysesByTargetId;
+  const analysesByPositionKey: Record<string, BullpenActivePositionLlmAnalysis> = {};
+  for (const position of activePositions.filter((item) => !item.isClaimable)) {
+    const questionMatch = BullpenEventIdentityResolver.resolveMatch({
+      target: buildBullpenEventIdentityFromPosition(position),
+      candidates: snapshotCandidates,
+      getIdentity: (candidate) => buildBullpenEventIdentityFromQuestion(candidate.question),
+      getSortTimestamp: (candidate) =>
+        candidate.analysis.llmCompletedAt ?? candidate.snapshotScannedAt,
+    });
+    if (questionMatch.status !== "matched" || !questionMatch.match) continue;
+
+    const analysis = {
+      ...questionMatch.match.item.analysis,
+      llmRecoveryStatus: "last-known-good/stale",
+      llmRecoverySource: "latest-snapshot",
+      llmRecoveryMatchMethod: questionMatch.match.primaryMethod,
+      llmRecoveryRunId: questionMatch.match.item.analysis.llmRunId,
+      llmRecoveryReason: `Recovered from the latest saved snapshot matched by ${BullpenEventIdentityResolver.describeMatchMethod(questionMatch.match.primaryMethod)}.`,
+    } satisfies BullpenActivePositionLlmAnalysis;
+    const preferred = pickPreferredBullpenActivePositionAnalysis(
+      analysesByPositionKey[position.key],
+      analysis,
+    );
+    if (preferred) {
+      analysesByPositionKey[position.key] = preferred;
+    }
+  }
+
+  return analysesByPositionKey;
 }
 
 function buildMergedActivePositionAnalyses({
@@ -411,19 +395,15 @@ function buildMergedActivePositionAnalyses({
   autoSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
 }) {
   const next: Record<string, BullpenActivePositionLlmAnalysis> = {};
-  const snapshotAnalysesByTargetId =
-    buildSnapshotBackfilledActivePositionAnalyses([
-      manualSnapshotsByMode,
-      autoSnapshotsByMode,
-    ]);
+  const snapshotAnalysesByPositionKey = buildSnapshotBackfilledActivePositionAnalyses({
+    activePositions,
+    snapshotCollections: [manualSnapshotsByMode, autoSnapshotsByMode],
+  });
 
   for (const position of activePositions.filter((item) => !item.isClaimable)) {
-    const targetId = buildBullpenLlmTargetId(
-      buildBullpenQuestionRowFromActivePosition(position),
-    );
-    const merged = pickNewerBullpenActivePositionAnalysis(
+    const merged = pickPreferredBullpenActivePositionAnalysis(
       currentAnalyses[position.key],
-      snapshotAnalysesByTargetId.get(targetId),
+      snapshotAnalysesByPositionKey[position.key],
     );
     if (merged) {
       next[position.key] = merged;
@@ -450,16 +430,20 @@ function activePositionAnalysesEqual(
 
 function mergeQuestionWithLatestActivePositionAnalysis(
   question: BullpenQuestionRow,
-  activePositionQuestionByTargetId: Map<string, BullpenQuestionRow>,
+  activePositions: BullpenActivePositionView[],
+  analysesByPositionKey: Record<string, BullpenActivePositionLlmAnalysis>,
 ) {
-  const matchingActivePositionQuestion = activePositionQuestionByTargetId.get(
-    buildBullpenLlmTargetId(question),
-  );
-  if (!matchingActivePositionQuestion) return question;
+  const positionMatch = BullpenEventIdentityResolver.resolveMatch({
+    target: buildBullpenEventIdentityFromQuestion(question),
+    candidates: activePositions,
+    getIdentity: (position) => buildBullpenEventIdentityFromPosition(position),
+    getSortTimestamp: (position) => position.closeTime,
+  });
+  if (positionMatch.status !== "matched" || !positionMatch.match) return question;
 
-  const latestAnalysis = pickNewerBullpenActivePositionAnalysis(
+  const latestAnalysis = pickPreferredBullpenActivePositionAnalysis(
     extractBullpenActivePositionLlmAnalysis(question),
-    extractBullpenActivePositionLlmAnalysis(matchingActivePositionQuestion),
+    analysesByPositionKey[positionMatch.match.item.key],
   );
   if (!latestAnalysis) return question;
 
@@ -1781,18 +1765,14 @@ function BullpenAiPageContent() {
       activePositionAnalysesByKey[position.key],
     ),
   );
-  const activePositionQuestionByTargetId = new Map(
-    activePositionQuestionsForLlm.map(
-      (question) => [buildBullpenLlmTargetId(question), question] as const,
-    ),
-  );
   const activeInvestmentCandidates =
     selectionEnabled && activeCurrentSnapshot
       ? activeCurrentSnapshot.questions
           .map((question) =>
             mergeQuestionWithLatestActivePositionAnalysis(
               question,
-              activePositionQuestionByTargetId,
+              openActivePositions,
+              activePositionAnalysesByKey,
             ),
         )
         .filter((question) => {
@@ -1813,7 +1793,8 @@ function BullpenAiPageContent() {
         .map((question) =>
           mergeQuestionWithLatestActivePositionAnalysis(
             question,
-            activePositionQuestionByTargetId,
+            openActivePositions,
+            activePositionAnalysesByKey,
           ),
         )
         .filter((question) => {
@@ -2996,11 +2977,19 @@ function BullpenAiPageContent() {
               preflightEvidenceBlock:
                 preflightByPositionKey.get(positionKey) ?? null,
               llmBreakdown,
+              llmRecoveryStatus: "recovered",
+              llmRecoverySource: "current-run",
+              llmRecoveryMatchMethod: "position_key",
+              llmRecoveryRunId: completedRun.id,
+              llmRecoveryReason:
+                "Recovered from the latest manual Bullpen LLM run matched by position key.",
             },
           );
-          next[positionKey] = extractBullpenActivePositionLlmAnalysis(
-            analyzedPosition,
-          );
+          next[positionKey] =
+            pickPreferredBullpenActivePositionAnalysis(
+              next[positionKey],
+              extractBullpenActivePositionLlmAnalysis(analyzedPosition),
+            ) ?? extractBullpenActivePositionLlmAnalysis(analyzedPosition);
         }
 
         return next;
@@ -3683,6 +3672,10 @@ function BullpenAiPageContent() {
               currentAnalyses: current,
               run,
               activePositions: openActivePositions,
+              snapshotAnalysesByKey: buildSnapshotBackfilledActivePositionAnalyses({
+                activePositions: openActivePositions,
+                snapshotCollections: [snapshotsByMode, autoSnapshotsByMode],
+              }),
             }),
           );
         }}

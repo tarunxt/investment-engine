@@ -6,6 +6,7 @@ import {
   computeBullpenLlmConsensus,
   createBullpenScanFilters,
   createBullpenQuestionRow,
+  normalizeBullpenOddsPair,
   summarizeBullpenLlmNotes,
   type BullpenLlmDisagreementCategory,
   type BullpenLlmDisagreementLevel,
@@ -16,10 +17,19 @@ import {
   type ScanMode,
 } from "@/lib/bullpen-ai";
 import {
-  buildBullpenLlmTargetId,
-  buildBullpenQuestionRowFromActivePosition,
+  createEmptyBullpenActivePositionLlmAnalysis,
+  hasBullpenValidActivePositionOdds,
+  pickPreferredBullpenActivePositionAnalysis,
   type BullpenActivePositionLlmAnalysis,
 } from "@/lib/bullpenActivePositions";
+import {
+  BullpenEventIdentityResolver,
+  buildBullpenEventIdentityFromDecision,
+  buildBullpenEventIdentityFromPosition,
+  buildBullpenEventIdentityFromQuestion,
+  buildBullpenEventIdentityFromRecord,
+  describeBullpenEventMatchMethod,
+} from "@/lib/bullpenEventIdentityResolver";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 import type {
   BullpenAutoLiveDecision,
@@ -149,6 +159,8 @@ function calculateDaysUntilClose(closeTime: string | null) {
 }
 
 function createBaseQuestionRow({
+  marketId,
+  questionKey,
   questionId,
   question,
   closeTime,
@@ -162,6 +174,8 @@ function createBaseQuestionRow({
   marketUrl,
   rules,
 }: {
+  marketId: string | null;
+  questionKey: string | null;
   questionId: string;
   question: string;
   closeTime: string | null;
@@ -178,6 +192,10 @@ function createBaseQuestionRow({
   return createBullpenQuestionRow({
     id: questionId,
     question,
+    positionKey: null,
+    conditionId: null,
+    marketId,
+    questionId: questionKey ?? questionId,
     closeTime,
     category,
     yesOdds,
@@ -209,13 +227,15 @@ function buildQuestionFromAcceptedCandidate({
   preserveExistingLlm?: boolean;
 }) {
   const record = isRecord(candidate) ? candidate : {};
-  const questionId =
+  const marketId = readString(record.market_id);
+  const questionKey =
     readString(record.question_id) ??
-    readString(record.market_id) ??
+    marketId ??
     readString(record.slug) ??
     readString(record.question) ??
     readString(record.market_title) ??
     `bullpen-auto-run-${Math.random().toString(36).slice(2, 10)}`;
+  const questionId = questionKey;
   const questionLabel =
     readString(record.question) ??
     readString(record.market_title) ??
@@ -224,6 +244,8 @@ function buildQuestionFromAcceptedCandidate({
   const baseQuestion =
     existingQuestion ??
     createBaseQuestionRow({
+      marketId,
+      questionKey,
       questionId,
       question: questionLabel,
       closeTime: readString(record.close_time),
@@ -242,6 +264,8 @@ function buildQuestionFromAcceptedCandidate({
     ...baseQuestion,
     id: questionId,
     question: questionLabel,
+    marketId: marketId ?? baseQuestion.marketId ?? null,
+    questionId: questionKey ?? baseQuestion.questionId ?? questionId,
     closeTime: readString(record.close_time) ?? baseQuestion.closeTime,
     category: readCandidateCategory(record, baseQuestion.category),
     yesOdds: readNumber(record.current_yes_odds) ?? baseQuestion.yesOdds,
@@ -427,22 +451,64 @@ function latestBreakdownTimestamp(
   );
 }
 
+function hasCompleteOddsPair(odds: { yes: number | null; no: number | null }) {
+  return odds.yes !== null && odds.no !== null;
+}
+
+function buildReviewedCandidateConsensusOdds(
+  reviewedCandidate: Record<string, unknown>,
+  llmBreakdown: BullpenQuestionLlmBreakdownItem[],
+) {
+  const consensus = computeBullpenLlmConsensus(llmBreakdown);
+  const normalizedConsensus = normalizeBullpenOddsPair(
+    consensus.consensusYesOdds,
+    consensus.consensusNoOdds,
+  );
+  const normalizedTopLevelOdds = normalizeBullpenOddsPair(
+    readNumber(reviewedCandidate.fair_yes_probability_pct),
+    readNumber(reviewedCandidate.fair_no_probability_pct),
+  );
+
+  return {
+    consensus,
+    normalizedOdds: hasCompleteOddsPair(normalizedConsensus)
+      ? normalizedConsensus
+      : normalizedTopLevelOdds,
+    recoveredFromValidOutputs: hasCompleteOddsPair(normalizedConsensus),
+  };
+}
+
 function buildActivePositionAnalysisFromReviewedCandidate(
   reviewedCandidate: Record<string, unknown>,
+  {
+    runId,
+    recoveryStatus,
+    recoverySource,
+    recoveryMatchMethod,
+    recoveryReason,
+    completedAtFallback,
+  }: {
+    runId: string | number | null;
+    recoveryStatus: BullpenActivePositionLlmAnalysis["llmRecoveryStatus"];
+    recoverySource: BullpenActivePositionLlmAnalysis["llmRecoverySource"];
+    recoveryMatchMethod: BullpenActivePositionLlmAnalysis["llmRecoveryMatchMethod"];
+    recoveryReason: string | null;
+    completedAtFallback: string | null;
+  },
 ): BullpenActivePositionLlmAnalysis | null {
   const llmBreakdown = buildReviewedCandidateBreakdown(reviewedCandidate);
-  const consensus = computeBullpenLlmConsensus(llmBreakdown);
-  const llmCompletedAt = latestBreakdownTimestamp(llmBreakdown);
+  const { consensus, normalizedOdds } = buildReviewedCandidateConsensusOdds(
+    reviewedCandidate,
+    llmBreakdown,
+  );
+  const llmCompletedAt =
+    latestBreakdownTimestamp(llmBreakdown) ?? completedAtFallback ?? null;
   const llmProvider =
     llmBreakdown.length === 1 ? llmBreakdown[0]?.provider ?? null : null;
   const llmModel =
     llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : null;
-  const llmYesOdds =
-    readNumber(reviewedCandidate.fair_yes_probability_pct) ??
-    consensus.consensusYesOdds;
-  const llmNoOdds =
-    readNumber(reviewedCandidate.fair_no_probability_pct) ??
-    consensus.consensusNoOdds;
+  const llmYesOdds = normalizedOdds.yes;
+  const llmNoOdds = normalizedOdds.no;
 
   if (
     llmYesOdds === null &&
@@ -480,31 +546,98 @@ function buildActivePositionAnalysisFromReviewedCandidate(
       llmBreakdown.length > 0 ? summarizeBullpenLlmNotes(llmBreakdown) : null,
     llmProvider,
     llmModel,
-    llmRunId: null,
+    llmRunId: runId,
     llmCompletedAt,
     preflightEvidenceBlock: null,
     llmBreakdown,
+    llmRecoveryStatus: recoveryStatus,
+    llmRecoverySource: recoverySource,
+    llmRecoveryMatchMethod: recoveryMatchMethod,
+    llmRecoveryRunId: runId,
+    llmRecoveryReason: recoveryReason,
   };
 }
 
-function buildQuestionIdMaps(stage: BullpenAutoLiveStageResult | null) {
-  const marketIdToQuestionId = new Map<string, string>();
-  const slugToQuestionId = new Map<string, string>();
+function findSnapshotQuestionMatch({
+  targetIdentity,
+  questions,
+}: {
+  targetIdentity: ReturnType<typeof buildBullpenEventIdentityFromQuestion>;
+  questions: BullpenQuestionRow[];
+}) {
+  return BullpenEventIdentityResolver.resolveMatch({
+    target: targetIdentity,
+    candidates: questions,
+    getIdentity: (question) => buildBullpenEventIdentityFromQuestion(question),
+    getSortTimestamp: (question) => question.llmCompletedAt ?? question.closeTime,
+  });
+}
 
-  for (const candidate of readAcceptedCandidates(stage)) {
-    if (!isRecord(candidate)) continue;
-    const questionId = readString(candidate.question_id) ?? readString(candidate.market_id);
-    const marketId = readString(candidate.market_id);
-    const slug = readString(candidate.slug);
-    if (questionId && marketId) {
-      marketIdToQuestionId.set(marketId, questionId);
-    }
-    if (questionId && slug) {
-      slugToQuestionId.set(slug, questionId);
-    }
-  }
+function mergeStage2QuestionAnalysis({
+  question,
+  reviewedCandidate,
+  llmBreakdown,
+  llmCompletedAt,
+  runId,
+}: {
+  question: BullpenQuestionRow;
+  reviewedCandidate: Record<string, unknown>;
+  llmBreakdown: BullpenQuestionLlmBreakdownItem[];
+  llmCompletedAt: string | null;
+  runId: string | number | null;
+}) {
+  const { consensus, normalizedOdds } = buildReviewedCandidateConsensusOdds(
+    reviewedCandidate,
+    llmBreakdown,
+  );
+  const hasLatestLlmOdds = hasCompleteOddsPair(normalizedOdds);
+  const latestLlmFetchError = getLatestLlmFetchError(reviewedCandidate);
 
-  return { marketIdToQuestionId, slugToQuestionId };
+  return createBullpenQuestionRow({
+    ...question,
+    marketId: readString(reviewedCandidate.market_id) ?? question.marketId ?? null,
+    questionId:
+      readString(reviewedCandidate.question_id) ?? question.questionId ?? question.id,
+    marketUrl: readString(reviewedCandidate.market_url) ?? question.marketUrl,
+    slug: readString(reviewedCandidate.slug) ?? question.slug,
+    category: readCandidateCategory(reviewedCandidate, question.category),
+    closeTime: readString(reviewedCandidate.close_time) ?? question.closeTime,
+    llmYesOdds: hasLatestLlmOdds ? normalizedOdds.yes : question.llmYesOdds,
+    llmNoOdds: hasLatestLlmOdds ? normalizedOdds.no : question.llmNoOdds,
+    llmDisagreementLevel:
+      readDisagreementLevel(reviewedCandidate.disagreement_level) ??
+      consensus.llmDisagreementLevel ??
+      question.llmDisagreementLevel,
+    llmDisagreementCategory:
+      readDisagreementCategory(reviewedCandidate.disagreement_category) ??
+      consensus.llmDisagreementCategory ??
+      question.llmDisagreementCategory,
+    adjudicationRequired:
+      readBoolean(reviewedCandidate.adjudication_required) ??
+      question.adjudicationRequired,
+    evidenceStatus:
+      readString(reviewedCandidate.evidence_status) ?? question.evidenceStatus,
+    eventState: readString(reviewedCandidate.event_state) ?? question.eventState,
+    llmNotes:
+      llmBreakdown.length > 0
+        ? summarizeBullpenLlmNotes(llmBreakdown)
+        : hasLatestLlmOdds
+          ? question.llmNotes
+          : latestLlmFetchError,
+    llmProvider:
+      llmBreakdown.length === 1
+        ? llmBreakdown[0]?.provider ?? null
+        : question.llmProvider,
+    llmModel:
+      llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : question.llmModel,
+    llmCompletedAt: hasLatestLlmOdds ? llmCompletedAt : question.llmCompletedAt,
+    llmRunId: hasLatestLlmOdds ? runId : question.llmRunId,
+    llmBreakdown: llmBreakdown.length > 0 ? llmBreakdown : question.llmBreakdown,
+    daysUntilClose:
+      calculateDaysUntilClose(
+        readString(reviewedCandidate.close_time) ?? question.closeTime,
+      ) ?? question.daysUntilClose,
+  });
 }
 
 function applyDecisionOutputsToSnapshot({
@@ -518,8 +651,6 @@ function applyDecisionOutputsToSnapshot({
 }) {
   if (decisions.length === 0) return snapshot;
 
-  const stage1 = findWorkflowStage(run, "scan", 1);
-  const { marketIdToQuestionId, slugToQuestionId } = buildQuestionIdMaps(stage1);
   const questionById = new Map(snapshot.questions.map((question) => [question.id, question] as const));
   let changed = false;
 
@@ -527,12 +658,12 @@ function applyDecisionOutputsToSnapshot({
     if (!Array.isArray(decision.llm_outputs) || decision.llm_outputs.length === 0) {
       continue;
     }
-    const targetQuestionId =
-      marketIdToQuestionId.get(decision.market_id) ??
-      (decision.slug ? slugToQuestionId.get(decision.slug) : null) ??
-      decision.market_id;
-    const question = questionById.get(targetQuestionId);
-    if (!question) continue;
+    const questionMatch = findSnapshotQuestionMatch({
+      targetIdentity: buildBullpenEventIdentityFromDecision(decision),
+      questions: snapshot.questions,
+    });
+    if (questionMatch.status !== "matched" || !questionMatch.match) continue;
+    const question = questionMatch.match.item;
 
     const stage2 = decision.stage_results.find((stage) => stage.stage_number === 2) ?? null;
     const llmBreakdown = decision.llm_outputs.map((llmOutput) =>
@@ -542,8 +673,15 @@ function applyDecisionOutputsToSnapshot({
       }),
     );
     const nextCloseTime = decision.close_time ?? question.closeTime;
+    const normalizedOdds = normalizeBullpenOddsPair(
+      decision.fair_yes_probability_pct ?? null,
+      decision.fair_no_probability_pct ?? null,
+    );
+    const hasLatestOdds = hasCompleteOddsPair(normalizedOdds);
     const nextQuestion = createBullpenQuestionRow({
       ...question,
+      marketId: decision.market_id ?? question.marketId ?? null,
+      questionId: question.questionId ?? question.id,
       marketUrl: decision.market_url ?? question.marketUrl,
       slug: decision.slug ?? question.slug,
       closeTime: nextCloseTime,
@@ -551,8 +689,8 @@ function applyDecisionOutputsToSnapshot({
         decision as unknown as Record<string, unknown>,
         question.category,
       ),
-      llmYesOdds: decision.fair_yes_probability_pct ?? question.llmYesOdds,
-      llmNoOdds: decision.fair_no_probability_pct ?? question.llmNoOdds,
+      llmYesOdds: hasLatestOdds ? normalizedOdds.yes : question.llmYesOdds,
+      llmNoOdds: hasLatestOdds ? normalizedOdds.no : question.llmNoOdds,
       evidenceStatus: decision.evidence_status ?? question.evidenceStatus,
       eventState: decision.event_state ?? question.eventState,
       adjudicationRequired: decision.adjudication_required,
@@ -562,17 +700,19 @@ function applyDecisionOutputsToSnapshot({
       daysUntilClose:
         calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
       llmCompletedAt:
-        llmBreakdown
-          .map((entry) => entry.timestamp)
-          .filter((timestamp): timestamp is string => Boolean(timestamp))
-          .sort()
-          .at(-1) ?? run.completed_at ?? question.llmCompletedAt,
-      llmRunId: run.id,
-      llmBreakdown,
+        hasLatestOdds
+          ? llmBreakdown
+              .map((entry) => entry.timestamp)
+              .filter((timestamp): timestamp is string => Boolean(timestamp))
+              .sort()
+              .at(-1) ?? run.completed_at ?? question.llmCompletedAt
+          : question.llmCompletedAt,
+      llmRunId: hasLatestOdds ? run.id : question.llmRunId,
+      llmBreakdown: llmBreakdown.length > 0 ? llmBreakdown : question.llmBreakdown,
     });
 
     if (JSON.stringify(nextQuestion) !== JSON.stringify(question)) {
-      questionById.set(targetQuestionId, nextQuestion);
+      questionById.set(question.id, nextQuestion);
       changed = true;
     }
   }
@@ -592,82 +732,33 @@ function applyStage2OutputsToSnapshot({
   snapshot: BullpenScanSnapshot;
   run: BullpenAutoLiveRun;
 }) {
-  const stage1 = findWorkflowStage(run, "scan", 1);
   const stage2 = findWorkflowStage(run, "llm", 2);
   const reviewedCandidates = readReviewedCandidates(stage2);
   if (reviewedCandidates.length === 0) return snapshot;
 
-  const { marketIdToQuestionId, slugToQuestionId } = buildQuestionIdMaps(stage1);
   const questionById = new Map(snapshot.questions.map((question) => [question.id, question] as const));
   let changed = false;
 
   for (const reviewedCandidate of reviewedCandidates) {
     if (!isRecord(reviewedCandidate)) continue;
-
-    const marketId = readString(reviewedCandidate.market_id);
-    const slug = readString(reviewedCandidate.slug);
-    const targetQuestionId =
-      (marketId ? marketIdToQuestionId.get(marketId) : null) ??
-      (slug ? slugToQuestionId.get(slug) : null) ??
-      marketId ??
-      slug;
-    if (!targetQuestionId) continue;
-
-    const question = questionById.get(targetQuestionId);
-    if (!question) continue;
-
-    const nextCloseTime = readString(reviewedCandidate.close_time) ?? question.closeTime;
+    const questionMatch = findSnapshotQuestionMatch({
+      targetIdentity: buildBullpenEventIdentityFromRecord(reviewedCandidate),
+      questions: snapshot.questions,
+    });
+    if (questionMatch.status !== "matched" || !questionMatch.match) continue;
+    const question = questionMatch.match.item;
     const llmBreakdown = buildReviewedCandidateBreakdown(reviewedCandidate);
-    const consensus = computeBullpenLlmConsensus(llmBreakdown);
     const llmCompletedAt = latestBreakdownTimestamp(llmBreakdown) ?? stage2?.completed_at ?? null;
-    const latestLlmFetchError = getLatestLlmFetchError(reviewedCandidate);
-    const latestLlmYesOdds =
-      readNumber(reviewedCandidate.fair_yes_probability_pct) ??
-      consensus.consensusYesOdds;
-    const latestLlmNoOdds =
-      readNumber(reviewedCandidate.fair_no_probability_pct) ??
-      consensus.consensusNoOdds;
-    const hasLatestLlmOdds = latestLlmYesOdds !== null || latestLlmNoOdds !== null;
-    const nextQuestion = createBullpenQuestionRow({
-      ...question,
-      marketUrl: readString(reviewedCandidate.market_url) ?? question.marketUrl,
-      category: readCandidateCategory(reviewedCandidate, question.category),
-      closeTime: nextCloseTime,
-      llmYesOdds: latestLlmYesOdds,
-      llmNoOdds: latestLlmNoOdds,
-      llmDisagreementLevel:
-        readDisagreementLevel(reviewedCandidate.disagreement_level) ??
-        consensus.llmDisagreementLevel ??
-        null,
-      llmDisagreementCategory:
-        readDisagreementCategory(reviewedCandidate.disagreement_category) ??
-        consensus.llmDisagreementCategory ??
-        null,
-      adjudicationRequired:
-        readBoolean(reviewedCandidate.adjudication_required) ??
-        false,
-      evidenceStatus:
-        readString(reviewedCandidate.evidence_status) ?? null,
-      eventState: readString(reviewedCandidate.event_state) ?? null,
-      llmNotes:
-        llmBreakdown.length > 0
-          ? summarizeBullpenLlmNotes(llmBreakdown)
-          : hasLatestLlmOdds
-            ? null
-            : latestLlmFetchError,
-      llmProvider:
-        llmBreakdown.length === 1 ? llmBreakdown[0]?.provider ?? null : null,
-      llmModel:
-        llmBreakdown.length === 1 ? llmBreakdown[0]?.model ?? null : null,
-      llmCompletedAt,
-      llmRunId: run.id,
+    const nextQuestion = mergeStage2QuestionAnalysis({
+      question,
+      reviewedCandidate,
       llmBreakdown,
-      daysUntilClose:
-        calculateDaysUntilClose(nextCloseTime) ?? question.daysUntilClose,
+      llmCompletedAt,
+      runId: run.id,
     });
 
     if (JSON.stringify(nextQuestion) !== JSON.stringify(question)) {
-      questionById.set(targetQuestionId, nextQuestion);
+      questionById.set(question.id, nextQuestion);
       changed = true;
     }
   }
@@ -680,50 +771,16 @@ function applyStage2OutputsToSnapshot({
   };
 }
 
-function buildReviewedCandidateActivePositionKeys({
-  reviewedCandidate,
-  activePositions,
-}: {
-  reviewedCandidate: Record<string, unknown>;
-  activePositions: BullpenActivePositionView[];
-}) {
-  const keys = new Set<string>();
-  const explicitPositionKey = readString(reviewedCandidate.position_key);
-  if (explicitPositionKey) keys.add(explicitPositionKey);
-
-  const marketId = readString(reviewedCandidate.market_id);
-  const slug = readString(reviewedCandidate.slug);
-  const marketUrl = readString(reviewedCandidate.market_url);
-  const question = readString(reviewedCandidate.question);
-  const candidateTargetId = question
-    ? buildBullpenLlmTargetId({ question, slug, marketUrl })
-    : null;
-
-  for (const position of activePositions) {
-    if (marketId && position.marketId === marketId) {
-      keys.add(position.key);
-      continue;
-    }
-
-    const positionTargetId = buildBullpenLlmTargetId(
-      buildBullpenQuestionRowFromActivePosition(position),
-    );
-    if (candidateTargetId && positionTargetId === candidateTargetId) {
-      keys.add(position.key);
-    }
-  }
-
-  return [...keys];
-}
-
 export function syncBullpenAutoRunActivePositionAnalyses({
   currentAnalyses,
   run,
   activePositions = [],
+  snapshotAnalysesByKey = {},
 }: {
   currentAnalyses: Record<string, BullpenActivePositionLlmAnalysis>;
   run: BullpenAutoLiveRun | null;
   activePositions?: BullpenActivePositionView[];
+  snapshotAnalysesByKey?: Record<string, BullpenActivePositionLlmAnalysis>;
 }) {
   if (!run) return currentAnalyses;
 
@@ -731,29 +788,250 @@ export function syncBullpenAutoRunActivePositionAnalyses({
   const reviewedCandidates = readReviewedCandidates(stage2);
   if (reviewedCandidates.length === 0) return currentAnalyses;
 
-  let changed = false;
-  const nextAnalyses = { ...currentAnalyses };
+  type MatchedCandidateResolution = {
+    analysis: BullpenActivePositionLlmAnalysis | null;
+    matchMethod: BullpenActivePositionLlmAnalysis["llmRecoveryMatchMethod"];
+    reason: string;
+    score: number;
+    completedAt: string | null;
+  };
+
+  type AmbiguousCandidateResolution = {
+    matchMethod: BullpenActivePositionLlmAnalysis["llmRecoveryMatchMethod"];
+    reason: string;
+  };
+
+  const matchedCandidatesByPositionKey = new Map<
+    string,
+    MatchedCandidateResolution[]
+  >();
+  const ambiguousCandidatesByPositionKey = new Map<
+    string,
+    AmbiguousCandidateResolution[]
+  >();
+
+  const completedAtFallback = stage2?.completed_at ?? run.completed_at ?? run.started_at;
 
   for (const reviewedCandidate of reviewedCandidates) {
     if (!isRecord(reviewedCandidate)) continue;
-    const positionKeys = buildReviewedCandidateActivePositionKeys({
-      reviewedCandidate,
-      activePositions,
-    });
-    const sourceKind = readString(reviewedCandidate.source_kind);
-    if (sourceKind !== "active_position" && positionKeys.length === 0) continue;
-
-    const analysis = buildActivePositionAnalysisFromReviewedCandidate(reviewedCandidate);
-    if (!analysis) continue;
-
-    for (const positionKey of positionKeys) {
-      if (JSON.stringify(nextAnalyses[positionKey]) === JSON.stringify(analysis)) {
-        continue;
-      }
-
-      nextAnalyses[positionKey] = analysis;
-      changed = true;
+    const explicitPositionKey = readString(reviewedCandidate.position_key);
+    if (explicitPositionKey) {
+      const analysis = buildActivePositionAnalysisFromReviewedCandidate(
+        reviewedCandidate,
+        {
+          runId: run.id,
+          recoveryStatus: "recovered",
+          recoverySource: "current-run",
+          recoveryMatchMethod: "position_key",
+          recoveryReason:
+            "Recovered from the latest Stage 2 reviewed candidate matched by position key.",
+          completedAtFallback,
+        },
+      );
+      const current = matchedCandidatesByPositionKey.get(explicitPositionKey) ?? [];
+      current.push({
+        analysis,
+        matchMethod: "position_key",
+        reason:
+          "Recovered from the latest Stage 2 reviewed candidate matched by position key.",
+        score: 100,
+        completedAt:
+          analysis?.llmCompletedAt ?? latestBreakdownTimestamp(analysis?.llmBreakdown ?? []),
+      });
+      matchedCandidatesByPositionKey.set(explicitPositionKey, current);
+      continue;
     }
+
+    const positionMatch = BullpenEventIdentityResolver.resolveMatch({
+      target: buildBullpenEventIdentityFromRecord(reviewedCandidate),
+      candidates: activePositions,
+      getIdentity: (position) => buildBullpenEventIdentityFromPosition(position),
+      getSortTimestamp: (position) => position.closeTime,
+    });
+    const primaryMethod =
+      positionMatch.match?.primaryMethod ?? positionMatch.matches[0]?.primaryMethod ?? null;
+    const matchLabel = describeBullpenEventMatchMethod(primaryMethod);
+
+    if (positionMatch.status === "matched" && positionMatch.match) {
+      const analysis = buildActivePositionAnalysisFromReviewedCandidate(
+        reviewedCandidate,
+        {
+          runId: run.id,
+          recoveryStatus: "recovered",
+          recoverySource: "current-run",
+          recoveryMatchMethod: primaryMethod,
+          recoveryReason: `Recovered from the latest Stage 2 reviewed candidate matched by ${matchLabel}.`,
+          completedAtFallback,
+        },
+      );
+      const positionKey = positionMatch.match.item.key;
+      const current = matchedCandidatesByPositionKey.get(positionKey) ?? [];
+      current.push({
+        analysis,
+        matchMethod: primaryMethod,
+        reason: `Recovered from the latest Stage 2 reviewed candidate matched by ${matchLabel}.`,
+        score: positionMatch.match.score,
+        completedAt:
+          analysis?.llmCompletedAt ?? latestBreakdownTimestamp(analysis?.llmBreakdown ?? []),
+      });
+      matchedCandidatesByPositionKey.set(positionKey, current);
+      continue;
+    }
+
+    if (positionMatch.status === "ambiguous" && positionMatch.matches.length > 0) {
+      for (const candidate of positionMatch.matches) {
+        const current = ambiguousCandidatesByPositionKey.get(candidate.item.key) ?? [];
+        current.push({
+          matchMethod: primaryMethod,
+          reason: positionMatch.reason,
+        });
+        ambiguousCandidatesByPositionKey.set(candidate.item.key, current);
+      }
+    }
+  }
+
+  const selectBestMatchedCandidate = (
+    candidates: MatchedCandidateResolution[],
+  ) =>
+    [...candidates].sort((left, right) => {
+      const leftValid = hasBullpenValidActivePositionOdds(left.analysis);
+      const rightValid = hasBullpenValidActivePositionOdds(right.analysis);
+      if (leftValid !== rightValid) return rightValid ? 1 : -1;
+      if (right.score !== left.score) return right.score - left.score;
+      const rightTime = right.completedAt ? Date.parse(right.completedAt) : 0;
+      const leftTime = left.completedAt ? Date.parse(left.completedAt) : 0;
+      return rightTime - leftTime;
+    })[0] ?? null;
+
+  const buildFallbackAnalysis = ({
+    currentAnalysis,
+    snapshotAnalysis,
+    unresolvedStatus,
+    unresolvedReason,
+    matchMethod,
+  }: {
+    currentAnalysis: BullpenActivePositionLlmAnalysis | null | undefined;
+    snapshotAnalysis: BullpenActivePositionLlmAnalysis | null | undefined;
+    unresolvedStatus:
+      | "last-known-good/stale"
+      | "ambiguous"
+      | "unrecoverable";
+    unresolvedReason: string;
+    matchMethod: BullpenActivePositionLlmAnalysis["llmRecoveryMatchMethod"];
+  }) => {
+    const preferredFallback = pickPreferredBullpenActivePositionAnalysis(
+      snapshotAnalysis,
+      currentAnalysis,
+    );
+    const fallbackSource =
+      preferredFallback === snapshotAnalysis
+        ? "latest-snapshot"
+        : preferredFallback
+          ? "last-known-good"
+          : null;
+
+    if (preferredFallback && hasBullpenValidActivePositionOdds(preferredFallback)) {
+      return {
+        ...preferredFallback,
+        llmRecoveryStatus: "last-known-good/stale",
+        llmRecoverySource: fallbackSource,
+        llmRecoveryMatchMethod: matchMethod,
+        llmRecoveryRunId: run.id,
+        llmRecoveryReason: unresolvedReason,
+      } satisfies BullpenActivePositionLlmAnalysis;
+    }
+
+    return {
+      ...createEmptyBullpenActivePositionLlmAnalysis(),
+      llmRecoveryStatus: unresolvedStatus,
+      llmRecoverySource: fallbackSource,
+      llmRecoveryMatchMethod: matchMethod,
+      llmRecoveryRunId: run.id,
+      llmRecoveryReason: unresolvedReason,
+    } satisfies BullpenActivePositionLlmAnalysis;
+  };
+
+  let changed = false;
+  const nextAnalyses = { ...currentAnalyses };
+
+  for (const position of activePositions) {
+    const matchedCandidates = matchedCandidatesByPositionKey.get(position.key) ?? [];
+    const ambiguousCandidates =
+      ambiguousCandidatesByPositionKey.get(position.key) ?? [];
+    if (matchedCandidates.length === 0 && ambiguousCandidates.length === 0) {
+      continue;
+    }
+
+    const currentAnalysis = currentAnalyses[position.key];
+    const snapshotAnalysis = snapshotAnalysesByKey[position.key];
+    const bestMatchedCandidate = selectBestMatchedCandidate(matchedCandidates);
+    let nextAnalysis: BullpenActivePositionLlmAnalysis | null = null;
+
+    if (bestMatchedCandidate?.analysis) {
+      if (hasBullpenValidActivePositionOdds(bestMatchedCandidate.analysis)) {
+        nextAnalysis =
+          pickPreferredBullpenActivePositionAnalysis(
+          currentAnalysis,
+          bestMatchedCandidate.analysis,
+          ) ?? bestMatchedCandidate.analysis;
+      } else {
+        nextAnalysis = buildFallbackAnalysis({
+          currentAnalysis,
+          snapshotAnalysis,
+          unresolvedStatus: "unrecoverable",
+          unresolvedReason:
+            bestMatchedCandidate.reason +
+            " The latest run did not yield a valid normalized Yes/No consensus pair.",
+          matchMethod: bestMatchedCandidate.matchMethod,
+        });
+      }
+    } else if (ambiguousCandidates.length > 0) {
+      nextAnalysis = buildFallbackAnalysis({
+        currentAnalysis,
+        snapshotAnalysis,
+        unresolvedStatus: "ambiguous",
+        unresolvedReason: ambiguousCandidates[0]?.reason ?? "The latest run matched multiple active positions ambiguously.",
+        matchMethod: ambiguousCandidates[0]?.matchMethod ?? "title",
+      });
+    }
+
+    if (!nextAnalysis) continue;
+    if (JSON.stringify(nextAnalyses[position.key]) === JSON.stringify(nextAnalysis)) {
+      continue;
+    }
+
+    nextAnalyses[position.key] = nextAnalysis;
+    changed = true;
+  }
+
+  const knownPositionKeys = new Set(activePositions.map((position) => position.key));
+  for (const [positionKey, matchedCandidates] of matchedCandidatesByPositionKey.entries()) {
+    if (knownPositionKeys.has(positionKey)) continue;
+    const bestMatchedCandidate = selectBestMatchedCandidate(matchedCandidates);
+    if (!bestMatchedCandidate?.analysis) continue;
+
+    const nextAnalysis =
+      hasBullpenValidActivePositionOdds(bestMatchedCandidate.analysis)
+        ? pickPreferredBullpenActivePositionAnalysis(
+            currentAnalyses[positionKey],
+            bestMatchedCandidate.analysis,
+          ) ?? bestMatchedCandidate.analysis
+        : buildFallbackAnalysis({
+            currentAnalysis: currentAnalyses[positionKey],
+            snapshotAnalysis: snapshotAnalysesByKey[positionKey],
+            unresolvedStatus: "unrecoverable",
+            unresolvedReason:
+              bestMatchedCandidate.reason +
+              " The latest run did not yield a valid normalized Yes/No consensus pair.",
+            matchMethod: bestMatchedCandidate.matchMethod,
+          });
+
+    if (JSON.stringify(nextAnalyses[positionKey]) === JSON.stringify(nextAnalysis)) {
+      continue;
+    }
+
+    nextAnalyses[positionKey] = nextAnalysis;
+    changed = true;
   }
 
   return changed ? nextAnalyses : currentAnalyses;
