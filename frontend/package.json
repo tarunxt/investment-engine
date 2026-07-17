@@ -42,6 +42,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "playwright": "^1.51.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
