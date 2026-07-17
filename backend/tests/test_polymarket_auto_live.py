@@ -3331,6 +3331,29 @@ def test_market_rules_extract_resolution_criteria_and_deadline():
     assert result.hours_remaining > 0
 
 
+def test_market_rules_prioritize_selected_question_deadline_over_background_rule_dates():
+    market = _market(
+        question="Will Iran announce withdrawal from MOU negotiations by July 24?",
+        description=(
+            "On June 14, 2026, the United States and Iran announced a memorandum "
+            "of understanding. This market resolves to Yes if Iran announces its "
+            "termination of participation by the specified date, 11:59 PM ET."
+        ),
+        # This reproduces a stale event-level endDate returned for a different
+        # market in the same Polymarket event.
+        close_time="2026-06-15T03:59:00+00:00",
+    )
+
+    result = evaluate_market_rules(
+        market,
+        now=datetime(2026, 7, 17, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.deadline_et == "2026-07-24 11:59:00 PM ET"
+    assert result.deadline_source == "question_title_by_date"
+    assert result.expired is False
+
+
 def test_market_rules_fail_without_resolution_criteria():
     result = evaluate_market_rules(
         _market(description=None),
