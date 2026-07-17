@@ -89,3 +89,21 @@ test("the Stage 3 shortlist explanation distinguishes eligibility from the final
   assert.match(dialogSource, /Moved to Stage 3/);
   assert.match(dialogSource, /submitted.*confirmed/);
 });
+
+test("the pending Stage 3 outcome explains why a Stage 2 result cannot invest by itself", () => {
+  const dialogSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenStage3ShortlistReasonDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(dialogSource, /This is a pending workflow status, not a market-data or LLM error/);
+  assert.match(dialogSource, /What still needs to happen before this can be invested/);
+  assert.match(dialogSource, /Stage 3 · Exit and Invest/);
+  assert.match(dialogSource, /Stage 2 LLM run only supplies candidate inputs; it does not place an\s+order by itself/);
+  assert.match(dialogSource, /Only rows that\s+remain in the final top 10 can receive a new-buy plan/);
+  assert.match(dialogSource, /emergency stop is off/);
+  assert.match(dialogSource, /planned, submitted,\s+skipped, or failed/);
+});
