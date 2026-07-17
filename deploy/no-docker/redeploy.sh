@@ -18,6 +18,7 @@ BULLPEN_VERSION="${BULLPEN_VERSION:-0.1.101}"
 BACKEND_LIVE_URL="${BACKEND_LIVE_URL:-http://127.0.0.1:8000/health/live}"
 BACKEND_READY_URL="${BACKEND_READY_URL:-http://127.0.0.1:8000/health/ready}"
 FRONTEND_SMOKE_URL="${FRONTEND_SMOKE_URL:-http://127.0.0.1:3000/login}"
+FRONTEND_CONSOLE_SMOKE_URL="${FRONTEND_CONSOLE_SMOKE_URL:-http://127.0.0.1:3000/console/dashboard}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-30}"
 SMOKE_RETRY_SLEEP_SECONDS="${SMOKE_RETRY_SLEEP_SECONDS:-2}"
@@ -850,6 +851,10 @@ smoke_check "backend live" "$BACKEND_LIVE_URL"
 smoke_check "backend ready" "$BACKEND_READY_URL"
 if [[ "$SCOPE" == "full" ]]; then
   smoke_check "frontend login" "$FRONTEND_SMOKE_URL"
+  # The login route alone does not load the protected console route. Verify the
+  # dashboard too so a broken App Router/proxy artifact fails the release
+  # instead of surfacing as a production 500 after deployment.
+  smoke_check "frontend console dashboard" "$FRONTEND_CONSOLE_SMOKE_URL"
 fi
 
 CONFIG_ROLLBACK_ENABLED=false
