@@ -46,3 +46,19 @@ test("the Stage 3 shortlist explanation shows each eligibility check and disting
   assert.match(dialogSource, /XCircle/);
   assert.match(dialogSource, /DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS/);
 });
+
+test("the Stage 3 shortlist explanation distinguishes eligibility from the final order outcome", () => {
+  const dialogSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenStage3ShortlistReasonDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(dialogSource, /Final Stage 3 outcome/);
+  assert.match(dialogSource, /Not moved to Stage 3 yet/);
+  assert.match(dialogSource, /Not finally moved to Stage 3/);
+  assert.match(dialogSource, /Moved to Stage 3/);
+  assert.match(dialogSource, /submitted.*confirmed/);
+});
