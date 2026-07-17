@@ -1282,6 +1282,7 @@ export function BullpenQuestionsTable({
         <BullpenStage3ShortlistReasonDialog
           question={shortlistReasonQuestion}
           historicalDecisions={historicalDecisions}
+          currentTopTenQuestionIds={topTenStrongestLlmOddsIds}
           onClose={() => setShortlistReasonQuestion(null)}
         />
       ) : null}

@@ -16,6 +16,7 @@ import type { BullpenAutoLiveDecision } from "@/types/api";
 type BullpenStage3ShortlistReasonDialogProps = {
   question: BullpenQuestionRow;
   historicalDecisions?: BullpenAutoLiveDecision[] | null;
+  currentTopTenQuestionIds?: ReadonlySet<string>;
   onClose: () => void;
 };
 
@@ -234,6 +235,7 @@ function getStage3Outcome(
 function getShortlistChecks(
   question: BullpenQuestionRow,
   historicalDecisions?: BullpenAutoLiveDecision[] | null,
+  currentTopTenQuestionIds?: ReadonlySet<string>,
 ): ShortlistCheck[] {
   const amount = getBullpenAmountToBeInvestedBreakdown(question);
   const latestDecision = findLatestDecision(question, historicalDecisions);
@@ -243,8 +245,13 @@ function getShortlistChecks(
   const hasRankingValue = question.returnsPerDay !== null;
   const finalRank = getDecisionFinalRank(latestDecision);
   const maxPositions = getDecisionMaxPositions(latestDecision);
-  const rankingConfirmed = finalRank !== null;
-  const isShortlisted = rankingConfirmed && finalRank <= maxPositions;
+  // The Event Summary Top 10 filter is calculated from the current table data.
+  // Prefer it over a saved decision, which may be from an earlier Stage 3 run and
+  // therefore not contain a final rank for the currently displayed event.
+  const isInCurrentTopTen = currentTopTenQuestionIds?.has(question.id) ?? false;
+  const rankingConfirmed = isInCurrentTopTen || finalRank !== null;
+  const isShortlisted =
+    isInCurrentTopTen || (finalRank !== null && finalRank <= maxPositions);
   const stage3Blocked = latestDecision?.stage3_result === "BLOCKED";
 
   return [
@@ -258,7 +265,9 @@ function getShortlistChecks(
     },
     {
       label: "ii) Inside Top 10",
-      detail: latestDecision
+      detail: isInCurrentTopTen
+        ? "Current Event Summary ranking places this event inside the top-10 shortlist."
+        : latestDecision
         ? rankingConfirmed
           ? isShortlisted
             ? `Recorded Stage 3 decision confirmed final rank #${finalRank} inside the top-${maxPositions} shortlist.`
@@ -286,13 +295,18 @@ function getShortlistChecks(
 export function BullpenStage3ShortlistReasonDialog({
   question,
   historicalDecisions,
+  currentTopTenQuestionIds,
   onClose,
 }: BullpenStage3ShortlistReasonDialogProps) {
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const explanation = getShortlistExplanation(question, historicalDecisions);
   const amount = getBullpenAmountToBeInvestedBreakdown(question);
-  const checks = getShortlistChecks(question, historicalDecisions);
+  const checks = getShortlistChecks(
+    question,
+    historicalDecisions,
+    currentTopTenQuestionIds,
+  );
   const outcome = getStage3Outcome(explanation.latestDecision);
 
   useEffect(() => {
