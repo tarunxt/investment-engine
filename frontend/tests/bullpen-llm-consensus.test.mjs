@@ -4,6 +4,20 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 async function loadBullpenAiModule() {
+  const strategySource = readFileSync(
+    new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
+    "utf8",
+  );
+  const { outputText: strategyOutputText } = ts.transpileModule(strategySource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: "bullpenStage2To3Strategy.ts",
+  });
+  const strategyModuleUrl = `data:text/javascript;base64,${Buffer.from(
+    strategyOutputText,
+  ).toString("base64")}`;
   const source = readFileSync(
     new URL("../lib/bullpen-ai.ts", import.meta.url),
     "utf8",
@@ -15,9 +29,13 @@ async function loadBullpenAiModule() {
     },
     fileName: "bullpen-ai.ts",
   });
+  const rewrittenOutputText = outputText.replace(
+    'from "@/lib/bullpenStage2To3Strategy";',
+    `from ${JSON.stringify(strategyModuleUrl)};`,
+  );
 
   return import(
-    `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
+    `data:text/javascript;base64,${Buffer.from(rewrittenOutputText).toString("base64")}`
   );
 }
 
@@ -214,4 +232,61 @@ test("getBullpenReturnsPerDayBreakdown matches spreadsheet column O", async () =
       result: 13.24,
     },
   );
+});
+
+test("normalizeBullpenLlmBreakdownEntries accepts historical odds aliases while excluding errored rows from consensus", async () => {
+  const {
+    computeBullpenLlmConsensus,
+    normalizeBullpenLlmBreakdownEntries,
+  } = await loadBullpenAiModule();
+
+  const breakdown = normalizeBullpenLlmBreakdownEntries([
+    {
+      provider: "openai",
+      model: "gpt-4o-mini",
+      yes_odds: 88,
+      no_odds: 12,
+      completed_at: "2026-07-16T18:45:07Z",
+    },
+    {
+      provider: "anthropic",
+      model: "claude-3.5-sonnet",
+      yesOdds: 84,
+      noOdds: 16,
+      completed_at: "2026-07-16T18:45:07Z",
+    },
+    {
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      probabilityYes: 82,
+      probabilityNo: 18,
+      completed_at: "2026-07-16T18:45:07Z",
+    },
+    {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      yes_probability: 80,
+      no_probability: 20,
+      completed_at: "2026-07-16T18:45:07Z",
+    },
+    {
+      provider: "failed-provider",
+      model: "model-error",
+      error: "Provider returned no usable probability.",
+      completed_at: "2026-07-16T18:45:07Z",
+    },
+  ]);
+
+  assert.equal(breakdown.length, 5);
+  assert.equal(breakdown[0].llmYesOdds, 88);
+  assert.equal(breakdown[1].llmNoOdds, 16);
+  assert.equal(breakdown[2].llmYesOdds, 82);
+  assert.equal(
+    breakdown[4].invalidReason,
+    "Provider returned no usable probability.",
+  );
+
+  const consensus = computeBullpenLlmConsensus(breakdown);
+  assert.equal(consensus.consensusYesOdds, 83);
+  assert.equal(consensus.consensusNoOdds, 17);
 });

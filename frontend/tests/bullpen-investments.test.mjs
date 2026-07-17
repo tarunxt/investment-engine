@@ -19,6 +19,17 @@ function transpileModuleSource(source, fileName) {
 async function loadBullpenInvestmentsModule() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "bullpen-investments-"));
 
+  const strategySource = readFileSync(
+    new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
+    "utf8",
+  );
+  const strategyPath = path.join(tempDir, "bullpenStage2To3Strategy.mjs");
+  writeFileSync(
+    strategyPath,
+    transpileModuleSource(strategySource, "bullpenStage2To3Strategy.ts"),
+    "utf8",
+  );
+
   const bullpenAiSource = readFileSync(
     new URL("../lib/bullpen-ai.ts", import.meta.url),
     "utf8",
@@ -26,7 +37,10 @@ async function loadBullpenInvestmentsModule() {
   const bullpenAiPath = path.join(tempDir, "bullpen-ai.mjs");
   writeFileSync(
     bullpenAiPath,
-    transpileModuleSource(bullpenAiSource, "bullpen-ai.ts"),
+    transpileModuleSource(bullpenAiSource, "bullpen-ai.ts").replace(
+      'from "@/lib/bullpenStage2To3Strategy";',
+      `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
+    ),
     "utf8",
   );
 
@@ -79,6 +93,10 @@ async function loadBullpenInvestmentsModule() {
     .replace(
       'from "@/lib/bullpenEventExits";',
       `from ${JSON.stringify(pathToFileURL(bullpenEventExitsPath).href)};`,
+    )
+    .replace(
+      'from "@/lib/bullpenStage2To3Strategy";',
+      `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
     );
   const investmentsModulePath = path.join(tempDir, "bullpenInvestments.mjs");
   writeFileSync(investmentsModulePath, rewrittenInvestmentsSource, "utf8");

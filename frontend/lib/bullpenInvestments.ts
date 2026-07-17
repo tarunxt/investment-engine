@@ -2,6 +2,7 @@ import {
   hasBullpenStrongLlmOdds,
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
+import { DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS } from "@/lib/bullpenStage2To3Strategy";
 import {
   evaluateBullpenEventExits,
   getBullpenEventExitBadgeLabel,
@@ -35,7 +36,8 @@ export type BullpenActivePositionAttentionEntry = {
   successfulExitAt: string | null;
 };
 
-const BULLPEN_INVESTMENT_ROW_LIMIT = 10;
+const BULLPEN_INVESTMENT_ROW_LIMIT =
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS;
 
 function readLatestSuccessfulExitTimestampByPositionKey(
   recentDecisions: BullpenAutoLiveDecision[],

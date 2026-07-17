@@ -269,8 +269,9 @@ test("Bullpen LLM breakdown dialog layers above the stage output dialog", () => 
     "utf8",
   );
 
-  assert.match(source, /z-\[140\]/);
-  assert.match(source, /z-\[150\]/);
+  assert.match(source, /z-\[210\]/);
+  assert.match(source, /z-\[215\]/);
+  assert.match(source, /z-\[220\]/);
 });
 
 test("Bullpen auto-run Stage 2 LLM details keep the selected history run instead of switching to the live run", () => {

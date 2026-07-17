@@ -6,6 +6,11 @@ import type {
   BullpenAutoLiveRunOnceRequest,
 } from "@/types/api";
 import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import {
+  mergeBullpenStage2To3StrategyOutputs,
+  readBullpenStage2To3StrategyMetadata,
+  readBullpenStage2UniverseStatus,
+} from "@/lib/bullpenStage2To3Strategy";
 
 export type BullpenStage3OnlyInvestPlan = {
   request: BullpenAutoLiveRunOnceRequest | null;
@@ -142,6 +147,16 @@ function stageNumberOutputs(
     }
   }
   return null;
+}
+
+function resolveStage2To3StrategyOutputs(
+  run: BullpenAutoLiveRun,
+): Record<string, unknown> | null {
+  return mergeBullpenStage2To3StrategyOutputs(
+    workflowStageOutputs(run, "llm"),
+    workflowStageOutputs(run, "invest"),
+    stageNumberOutputs(run, 6),
+  );
 }
 
 function cloneCandidateRow(
@@ -291,37 +306,78 @@ export function buildBullpenStage3OnlyInvestPlan(
 
   const scanOutputs = workflowStageOutputs(run, "scan");
   const topTableOutputs = stageNumberOutputs(run, 6);
+  const strategyOutputs = resolveStage2To3StrategyOutputs(run);
+  const strategyMetadata = readBullpenStage2To3StrategyMetadata(strategyOutputs);
+  const universeStatus = readBullpenStage2UniverseStatus(strategyOutputs);
   const acceptedCandidateByMarketId = buildAcceptedCandidateLookup(scanOutputs);
-  const topCandidateMarketIds = new Set(
-    readStringArray(
+  const topCandidateMarketIdOrder = readStringArray(
+    topTableOutputs?.ranking_top_candidate_market_id_order ??
       topTableOutputs?.top_candidate_market_ids ??
-        topTableOutputs?.ranked_top_candidate_market_ids,
-    ),
+      topTableOutputs?.ranked_top_candidate_market_ids,
   );
+  const topCandidateMarketIds = new Set(topCandidateMarketIdOrder);
+  const candidateRowsByMarketId = new Map<
+    string,
+    BullpenAutoLiveConsoleCandidateInput
+  >();
 
-  const candidateRows = asArray(llmOutputs.llm_reviewed_candidates)
-    .map((item) => asRecord(item))
-    .filter((record): record is Record<string, unknown> => {
-      if (!record) {
-        return false;
-      }
-      const marketId = readString(record.market_id);
-      return (
-        readString(record.source_kind) !== "active_position" &&
-        readBoolean(record.qualified) &&
-        (!marketId ||
-          topCandidateMarketIds.size === 0 ||
-          topCandidateMarketIds.has(marketId))
-      );
-    })
-    .map((record) => buildCandidateRow(record, acceptedCandidateByMarketId))
-    .filter((row): row is BullpenAutoLiveConsoleCandidateInput => Boolean(row));
+  for (const item of asArray(llmOutputs.llm_reviewed_candidates)) {
+    const record = asRecord(item);
+    if (!record) {
+      continue;
+    }
+    const marketId = readString(record.market_id);
+    if (
+      readString(record.source_kind) === "active_position" ||
+      !readBoolean(record.qualified) ||
+      (marketId && topCandidateMarketIds.size > 0 && !topCandidateMarketIds.has(marketId))
+    ) {
+      continue;
+    }
+
+    const row = buildCandidateRow(record, acceptedCandidateByMarketId);
+    if (!row || candidateRowsByMarketId.has(row.market_id)) {
+      continue;
+    }
+    candidateRowsByMarketId.set(row.market_id, row);
+  }
+
+  const topCandidateOrderIndex = new Map(
+    topCandidateMarketIdOrder.map((marketId, index) => [marketId, index] as const),
+  );
+  const candidateRows = [...candidateRowsByMarketId.values()].sort((left, right) => {
+    const leftIndex = topCandidateOrderIndex.get(left.market_id);
+    const rightIndex = topCandidateOrderIndex.get(right.market_id);
+    if (leftIndex !== undefined || rightIndex !== undefined) {
+      if (leftIndex === undefined) return 1;
+      if (rightIndex === undefined) return -1;
+      return leftIndex - rightIndex;
+    }
+    return left.market_id.localeCompare(right.market_id);
+  });
 
   if (candidateRows.length === 0) {
     return {
       request: null,
       qualifiedCandidateCount: 0,
       blockedReason: NO_STAGE2_QUALIFIED_EVENTS_REASON,
+    };
+  }
+
+  if (!universeStatus.isComplete) {
+    const reviewedRowsText =
+      universeStatus.reviewedRows !== null
+        ? universeStatus.reviewedRows.toLocaleString("en-IN")
+        : "the reviewed rows";
+    const totalEligibleRowsText =
+      universeStatus.totalEligibleRows !== null
+        ? universeStatus.totalEligibleRows.toLocaleString("en-IN")
+        : "the full eligible universe";
+
+    return {
+      request: null,
+      qualifiedCandidateCount: candidateRows.length,
+      blockedReason: `Stage 3 reuse is blocked because the saved run reviewed only ${reviewedRowsText} of ${totalEligibleRowsText}, so the combined top-${strategyMetadata.maxPositions} ranking is incomplete.`,
     };
   }
 
@@ -644,7 +700,7 @@ export function buildBullpenStage3InvestPreviewSteps(
   const sellDetail =
     noQualifiedCandidates || onlyAlreadyInvestedCandidates
       ? "No executable Step 1 Event Exits were needed."
-      : "Stage 3 first evaluates Event Exits, combining the existing ranking / LLM exit logic with the new capital-aware forced-exit safety checks.";
+      : "Stage 3 first processes Event Exits, waits for settlement, refreshes live cash plus occupied slots, and only then sizes any new buys.";
   const sellStatus: BullpenStage3InvestPreviewStepStatus =
     noQualifiedCandidates || onlyAlreadyInvestedCandidates ? "completed" : "pending";
   const buyStatus: BullpenStage3InvestPreviewStepStatus =
@@ -659,8 +715,8 @@ export function buildBullpenStage3InvestPreviewSteps(
       ? "All Stage 2-qualified events were already invested, so no new planned orders were needed."
       : plan.blockedReason ??
         (plan.readyCandidateCount > 0
-          ? `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} ready for the invest-only pass after Step 1 clears.`
-          : "Stage 3 will invest the planned orders after Step 1 clears.");
+          ? `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} ready for post-exit sizing once Step 1 settles and the worker refreshes live cash plus occupied slots.`
+          : "Stage 3 will invest the planned orders after Step 1 settles and live state refreshes.");
 
   return [
     {

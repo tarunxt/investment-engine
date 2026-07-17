@@ -34,6 +34,11 @@ import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
 import { BullpenPositionsDialog } from "./BullpenPositionsDialog";
+import {
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
+  hasBullpenQualifiedLlmSide,
+} from "./bullpenStage2To3Strategy";
 
 type BullpenInvestmentsSectionProps = {
   activePositionsCount: number | null;
@@ -430,33 +435,22 @@ function getStage3PlannedOrderReason(
   question: BullpenQuestionRow,
   isSelectedForInvest: boolean,
 ) {
-  const strongestLlmOdds = Math.max(
-    question.llmYesOdds ?? -Infinity,
-    question.llmNoOdds ?? -Infinity,
-  );
-  const hasStrongLlmOdds =
-    Number.isFinite(strongestLlmOdds) && strongestLlmOdds >= 80;
-
   if (!isSelectedForInvest) {
-    return "Not included in Stage 3 planned orders because this opportunity is not selected in the Events to invest in table. Select its checkbox before running Stage 2/Invest so it can be reviewed and carried into the Stage 3 buy plan.";
+    return "This row is not selected in the manual Events to invest in table, so it would be skipped by a manual Invest action. The automatic Stage 3 strategy does not rely on this checkbox: it reviews every active position plus every Stage 1-passed new event before building the combined top-10 ranking.";
   }
   if (question.returnsPerDay === null) {
-    return "Not included in Stage 3 planned orders because Returns/day is unavailable. Stage 3 only creates buy plans for rows with usable current odds, LLM odds, and time-to-close data.";
+    return "Stage 3 cannot safely rank this row yet because Returns/day is unavailable. The automatic strategy needs usable market odds, LLM odds, and time-to-close data before the combined top-10 ranking can include it.";
   }
-  if (!hasStrongLlmOdds) {
-    return "Not included in Stage 3 planned orders because neither LLM side meets the strict 80% confidence threshold required for a buy plan.";
-  }
-  if (question.llmDisagreementLevel === "High") {
-    return "Not included in Stage 3 planned orders because the LLM review has High disagreement, which blocks automatic investment.";
-  }
-  if (question.adjudicationRequired) {
-    return "Not included in Stage 3 planned orders because the LLM review says adjudication is required before automatic investment.";
-  }
-  if (question.amountToBeInvested === null) {
-    return "Not included in Stage 3 planned orders because the fixed investment amount was not assigned for this row.";
+  if (
+    !hasBullpenQualifiedLlmSide(
+      question,
+      DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
+    )
+  ) {
+    return `Stage 3 will not plan a buy unless the stronger LLM side reaches at least ${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS}, including exactly ${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS}. A row below that threshold stays out of the combined ranking.`;
   }
 
-  return "Eligible for Stage 3 planned orders once this selected row is included in a completed Stage 2 run and has not already been invested.";
+  return `This row still needs the full automatic Stage 3 flow to keep it: Stage 2 must finish a complete universe review, the combined top-${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS} ranking must keep it, the market cannot already be active or pending, and fresh post-exit cash plus open slots must be available for dynamic sizing.`;
 }
 
 function QuestionDetailsDialog({
@@ -477,7 +471,7 @@ function QuestionDetailsDialog({
     ["LLM No odds", question.llmNoOdds === null ? "—" : `${question.llmNoOdds.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`],
     ["Returns/day", formatReturnsPerDay(question.returnsPerDay)],
     ["Added", formatIstTimestamp(question.investmentTableAddedAt ?? null)],
-    ["Stage 3 planned order", isSelectedForInvest ? "Selected for review" : "Not selected"],
+    ["Manual table selection", isSelectedForInvest ? "Selected" : "Not selected"],
   ];
   const stage3PlannedOrderReason = getStage3PlannedOrderReason(
     question,
@@ -504,7 +498,7 @@ function QuestionDetailsDialog({
             ))}
           </div>
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">Why this may not be in Stage 3</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">How Stage 3 evaluates this row</p>
             <p className="mt-2 text-sm leading-6 text-amber-950">{stage3PlannedOrderReason}</p>
           </div>
           {question.rules || question.marketContext || question.resolutionSource ? (
@@ -1072,7 +1066,18 @@ export function BullpenInvestmentsSection({
               <button type="button" onClick={() => setIsGroupingInfoOpen(false)} className="text-sm font-semibold text-slate-500 hover:text-slate-900">Close</button>
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-600">
-              Green rows show active Bullpen positions, pink rows show new scanned opportunities, and red rows show active positions that are now in the Event Exits pipeline. The green and pink sections reflect the current top 10 rows ranked by <span className="font-semibold">returns/day</span> after Event Exit evaluation. The Invest action buys the stronger LLM side in Bullpen with a fixed <span className="font-semibold">$5</span> order per new opportunity.
+              Green rows show active Bullpen positions, pink rows show new
+              scanned opportunities, and red rows show active positions that
+              are now in the Event Exits pipeline. The green and pink sections
+              reflect the current top{" "}
+              <span className="font-semibold">
+                {DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS}
+              </span>{" "}
+              rows ranked by <span className="font-semibold">returns/day</span>{" "}
+              after Event Exit evaluation. Automatic Stage 3 buys the stronger
+              qualifying LLM side only after Event Exits settle, live wallet
+              state refreshes, and fresh cash is divided across the remaining
+              open slots.
             </p>
           </div>
         </div>

@@ -1,6 +1,9 @@
 import {
   createBullpenQuestionRow,
   getBullpenAmountToBeInvestedBreakdown,
+  getBullpenReturnsPerDayBreakdown,
+  isBullpenQuestionInvestmentCandidate,
+  normalizeBullpenLlmBreakdownEntries,
   type BullpenLlmDisagreementCategory,
   type BullpenLlmDisagreementLevel,
   type BullpenQuestionLlmBreakdownItem,
@@ -87,16 +90,19 @@ function readRecord(record: Record<string, unknown> | null, key: string) {
 
 function normalizeMatchKey(value: string | null | undefined) {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim().toLowerCase();
+  const trimmed = value.trim().replace(/\/+$/, "").toLowerCase();
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function calculateDaysUntilClose(closeTime: string | null) {
+function calculateDaysUntilClose(
+  closeTime: string | null,
+  referenceTimeMs = Date.now(),
+) {
   if (!closeTime) return null;
   const closeDate = new Date(closeTime);
   if (Number.isNaN(closeDate.getTime())) return null;
   return Number(
-    ((closeDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000)).toFixed(1),
+    ((closeDate.getTime() - referenceTimeMs) / (24 * 60 * 60 * 1000)).toFixed(1),
   );
 }
 
@@ -182,12 +188,15 @@ function formatOutcomes(row: StageTwoReviewedRow) {
 
 function getRowMatchKeys(row: StageTwoReviewedRow) {
   const preparedQuestionPayload = readPreparedQuestionPayload(row);
+  const promptInputMarket = readPromptInputMarket(row);
+  const stageTwoContext = readStageTwoContext(row);
   return [
     row.market_id,
     row.marketId,
     row.question_id,
     row.questionId,
     row.slug,
+    row.canonical_market_url,
     row.market_url,
     row.marketUrl,
     row.question,
@@ -195,11 +204,87 @@ function getRowMatchKeys(row: StageTwoReviewedRow) {
     readRecordValue(preparedQuestionPayload, "market_id"),
     readRecordValue(preparedQuestionPayload, "question_id"),
     readRecordValue(preparedQuestionPayload, "slug"),
+    readRecordValue(promptInputMarket, "slug"),
+    readRecordValue(promptInputMarket, "market_url"),
+    readRecordValue(stageTwoContext, "canonical_market_url"),
     readRecordValue(preparedQuestionPayload, "market_url"),
     readRecordValue(preparedQuestionPayload, "question"),
   ]
     .map((value) => normalizeMatchKey(readString(value)))
     .filter((key): key is string => Boolean(key));
+}
+
+function normalizeTimestampToMs(
+  value: string | number | Date | null | undefined,
+) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.getTime();
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeTimestampToIso(
+  value: string | number | Date | null | undefined,
+) {
+  const timestampMs = normalizeTimestampToMs(value);
+  return timestampMs === null ? null : new Date(timestampMs).toISOString();
+}
+
+function pickLatestTimestamp(
+  values: Array<string | number | Date | null | undefined>,
+) {
+  let bestTimestampMs: number | null = null;
+  values.forEach((value) => {
+    const candidateMs = normalizeTimestampToMs(value);
+    if (candidateMs === null) return;
+    if (bestTimestampMs === null || candidateMs > bestTimestampMs) {
+      bestTimestampMs = candidateMs;
+    }
+  });
+  return bestTimestampMs === null ? null : new Date(bestTimestampMs).toISOString();
+}
+
+function hasUsableNormalizedBreakdownEntry(
+  entry: BullpenQuestionLlmBreakdownItem,
+) {
+  return (
+    !entry.invalidReason &&
+    !entry.invalidStaleFact &&
+    (entry.llmYesOdds !== null || entry.llmNoOdds !== null)
+  );
+}
+
+function readStageTwoRowCalculationTimestamp(row: StageTwoReviewedRow) {
+  return (
+    readFirstString(
+      row.events_summary_snapshot_timestamp,
+      row.events_summary_updated_at,
+      row.events_summary_calculated_at,
+      row.calculation_timestamp,
+      row.calculated_at,
+      row.calculatedAt,
+      row.current_odds_updated_at,
+      row.currentOddsUpdatedAt,
+    ) ?? null
+  );
+}
+
+function readStageTwoRowAnyTimestamp(row: StageTwoReviewedRow) {
+  return (
+    readStageTwoRowCalculationTimestamp(row) ??
+    readFirstString(
+      row.llm_completed_at,
+      row.completed_at,
+      row.llm_run_at,
+      row.scanned_at,
+    ) ??
+    null
+  );
 }
 
 function getDecisionMatchKeys(decision: BullpenAutoLiveDecision) {
@@ -330,6 +415,7 @@ function buildDecisionLookup(decisions: BullpenAutoLiveDecision[]) {
 function buildRowContext(
   row: StageTwoReviewedRow,
   decision: BullpenAutoLiveDecision | null,
+  referenceTimeMs = Date.now(),
 ) {
   const promptInputMarket = readPromptInputMarket(row);
   const preparedQuestionPayload = readPreparedQuestionPayload(row);
@@ -394,7 +480,7 @@ function buildRowContext(
       readRecordValue(preparedQuestionPayload, "slug"),
       decision?.slug,
     ) ?? null;
-  const daysLeft = calculateDaysUntilClose(closeTime);
+  const daysLeft = calculateDaysUntilClose(closeTime, referenceTimeMs);
 
   return {
     title,
@@ -412,6 +498,10 @@ function buildRowContext(
 
 function getRowOutputs(row: StageTwoReviewedRow) {
   return dedupeLlmOutputs(readArray(row.llm_outputs).filter(isRecord));
+}
+
+function getNormalizedRowLlmBreakdown(row: StageTwoReviewedRow) {
+  return normalizeBullpenLlmBreakdownEntries(getRowOutputs(row));
 }
 
 function getDecisionFairYes(decision: BullpenAutoLiveDecision | null) {
@@ -476,6 +566,62 @@ export function readStageTwoLlmOutputCost(
   output: Record<string, unknown> | null,
 ) {
   return readFirstNumber(output?.estimated_cost, output?.cost, output?.cost_usd);
+}
+
+export function resolveStageTwoHistoricalAsOfTimestamp({
+  reviewedRows,
+  scanCompletedAt,
+  stageCompletedAt,
+  runStartedAt,
+  runCompletedAt,
+  nowMs,
+}: {
+  reviewedRows: StageTwoReviewedRow[];
+  scanCompletedAt?: string | null;
+  stageCompletedAt?: string | null;
+  runStartedAt?: string | null;
+  runCompletedAt?: string | null;
+  nowMs?: number | null;
+}) {
+  const persistedCalculationTimestamp = pickLatestTimestamp(
+    reviewedRows.map((row) => readStageTwoRowCalculationTimestamp(row)),
+  );
+  return (
+    persistedCalculationTimestamp ||
+    normalizeTimestampToIso(scanCompletedAt) ||
+    normalizeTimestampToIso(stageCompletedAt) ||
+    normalizeTimestampToIso(runStartedAt) ||
+    normalizeTimestampToIso(runCompletedAt) ||
+    normalizeTimestampToIso(nowMs ?? null)
+  );
+}
+
+export function resolveStageTwoEventsSummaryUpdatedAt({
+  reviewedRows,
+  stageCompletedAt,
+  scanCompletedAt,
+}: {
+  reviewedRows: StageTwoReviewedRow[];
+  stageCompletedAt?: string | null;
+  scanCompletedAt?: string | null;
+}) {
+  const persistedSnapshotTimestamp = pickLatestTimestamp(
+    reviewedRows.map((row) => readStageTwoRowCalculationTimestamp(row)),
+  );
+  const latestValidOutputTimestamp = pickLatestTimestamp(
+    reviewedRows.flatMap((row) =>
+      getNormalizedRowLlmBreakdown(row)
+        .filter(hasUsableNormalizedBreakdownEntry)
+        .map((entry) => entry.timestamp),
+    ),
+  );
+
+  return (
+    persistedSnapshotTimestamp ||
+    latestValidOutputTimestamp ||
+    normalizeTimestampToIso(stageCompletedAt) ||
+    normalizeTimestampToIso(scanCompletedAt)
+  );
 }
 
 export function getStageTwoLlmTargetRuns(stage: Pick<BullpenAutoRunWorkflowStageView, "outputs">) {
@@ -543,12 +689,17 @@ export function getStageTwoLlmReviewedRows(
         ...output,
         provider: readFirstString(output.provider, run.provider) ?? undefined,
         model: readFirstString(output.model, run.model) ?? undefined,
+        requested_model:
+          readFirstString(output.requested_model, output.requestedModel, run.model) ??
+          undefined,
         estimated_cost:
           readStageTwoLlmOutputCost(output) ?? perEventCost ?? undefined,
       };
       upsertRow({
         market_id: readFirstString(item.market_id),
         question_id: readFirstString(item.question_id),
+        slug: readFirstString(item.slug, output.slug),
+        market_url: readFirstString(item.market_url, output.market_url),
         llm_outputs: [mergedOutput],
       });
     });
@@ -560,22 +711,28 @@ export function getStageTwoLlmReviewedRows(
 export function getStageTwoLlmTableRows({
   reviewedRows,
   decisions,
+  asOfTimestamp,
 }: {
   reviewedRows: StageTwoReviewedRow[];
   decisions: BullpenAutoLiveDecision[];
+  asOfTimestamp?: string | number | Date | null;
 }) {
   const decisionByKey = buildDecisionLookup(decisions);
+  const referenceTimeMs = normalizeTimestampToMs(asOfTimestamp) ?? Date.now();
 
   return reviewedRows.flatMap((row, rowIndex) => {
     const decision =
       getRowMatchKeys(row).map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
-    const context = buildRowContext(row, decision);
+    const context = buildRowContext(row, decision, referenceTimeMs);
     const outputs = getRowOutputs(row);
     const baseOutputs = outputs.length ? outputs : [null];
 
     return baseOutputs.map((output, outputIndex) => {
-      const outputYesOdds = readFirstNumber(output?.yes_odds, output?.llm_yes_odds);
-      const outputNoOdds = readFirstNumber(output?.no_odds, output?.llm_no_odds);
+      const normalizedOutput = output
+        ? normalizeBullpenLlmBreakdownEntries([output])[0] ?? null
+        : null;
+      const outputYesOdds = normalizedOutput?.llmYesOdds ?? null;
+      const outputNoOdds = normalizedOutput?.llmNoOdds ?? null;
       const hasProviderOutput = Boolean(output);
       return {
         id: `${rowIndex}-${outputIndex}-${context.title}`,
@@ -583,8 +740,8 @@ export function getStageTwoLlmTableRows({
         row,
         output,
         decision,
-        provider: readFirstString(output?.provider) ?? "—",
-        model: readFirstString(output?.model) ?? "—",
+        provider: normalizedOutput?.provider ?? readFirstString(output?.provider) ?? "—",
+        model: normalizedOutput?.model ?? readFirstString(output?.model) ?? "—",
         sourceTimestamp: readStageTwoLlmTimestamp(output, row),
         serialNumber: rowIndex + 1,
         question: context.title,
@@ -610,21 +767,14 @@ export function getStageTwoLlmTableRows({
             ),
         returnsPerDay:
           readFirstNumber(row.returns_per_day) ??
-          (hasProviderOutput &&
-          context.daysLeft !== null &&
-          context.daysLeft > 0 &&
-          context.currentYesOdds !== null &&
-          context.currentNoOdds !== null &&
-          outputYesOdds !== null &&
-          outputNoOdds !== null
-            ? Number(
-                (
-                  Math.max(
-                    outputYesOdds - context.currentYesOdds,
-                    outputNoOdds - context.currentNoOdds,
-                  ) / context.daysLeft
-                ).toFixed(2),
-              )
+          (hasProviderOutput
+            ? getBullpenReturnsPerDayBreakdown({
+                yesOdds: context.currentYesOdds,
+                noOdds: context.currentNoOdds,
+                llmYesOdds: outputYesOdds,
+                llmNoOdds: outputNoOdds,
+                daysUntilClose: context.daysLeft,
+              }).result
             : getDecisionReturnsPerDay(decision)),
         action:
           readFirstString(output?.decision, output?.action, decision?.decision) ?? "—",
@@ -651,26 +801,80 @@ export function getStageTwoLlmTableRows({
   });
 }
 
+function buildDeterministicHistoricalFallbackId(
+  row: StageTwoReviewedRow,
+  rowIndex: number,
+  context: ReturnType<typeof buildRowContext>,
+) {
+  const slugBase =
+    readFirstString(
+      row.question,
+      row.market_title,
+      context.slug,
+      context.marketUrl,
+      `row-${rowIndex + 1}`,
+    ) ?? `row-${rowIndex + 1}`;
+  const normalized = slugBase
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `stage-two-event-${normalized || rowIndex + 1}`;
+}
+
+function buildStableStageTwoRowId(
+  row: StageTwoReviewedRow,
+  rowIndex: number,
+  context: ReturnType<typeof buildRowContext>,
+  preparedQuestionPayload: Record<string, unknown> | null,
+  stageTwoContext: Record<string, unknown> | null,
+) {
+  return (
+    readFirstString(
+      row.question_id,
+      readRecordValue(preparedQuestionPayload, "question_id"),
+      row.market_id,
+      readRecordValue(preparedQuestionPayload, "market_id"),
+      row.slug,
+      readRecordValue(preparedQuestionPayload, "slug"),
+      context.slug,
+      row.canonical_market_url,
+      readRecordValue(stageTwoContext, "canonical_market_url"),
+      row.market_url,
+      readRecordValue(preparedQuestionPayload, "market_url"),
+      context.marketUrl,
+    ) ?? buildDeterministicHistoricalFallbackId(row, rowIndex, context)
+  );
+}
+
 export function buildStageTwoEventsSummaryRows({
   reviewedRows,
   decisions,
   runId,
+  asOfTimestamp,
 }: {
   reviewedRows: StageTwoReviewedRow[];
   decisions: BullpenAutoLiveDecision[];
   runId: string | number | null;
+  asOfTimestamp?: string | number | Date | null;
 }): BullpenQuestionRow[] {
   const decisionByKey = buildDecisionLookup(decisions);
+  const referenceTimeMs = normalizeTimestampToMs(asOfTimestamp) ?? Date.now();
+  const normalizedAsOfTimestamp = normalizeTimestampToIso(asOfTimestamp);
 
   return reviewedRows.map((row, rowIndex) => {
     const decision =
       getRowMatchKeys(row).map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
-    const context = buildRowContext(row, decision);
+    const context = buildRowContext(row, decision, referenceTimeMs);
     const promptInputMarket = readPromptInputMarket(row);
     const preparedQuestionPayload = readPreparedQuestionPayload(row);
     const stageTwoContext = readStageTwoContext(row);
     const questionRuntime = readQuestionRuntime(row);
     const llmOutputs = getRowOutputs(row);
+    const normalizedBreakdown = normalizeBullpenLlmBreakdownEntries(llmOutputs);
+    const hasUsableBreakdown = normalizedBreakdown.some(
+      hasUsableNormalizedBreakdownEntry,
+    );
     const outcomeLabels = readOutcomeLabels(row);
     const volume = formatMetricString(
       readFirstNumber(
@@ -686,36 +890,23 @@ export function buildStageTwoEventsSummaryRows({
         readRecordValue(promptInputMarket, "liquidity_usd"),
       ),
     );
-    const fallbackId =
-      readFirstString(
-        row.question_id,
-        row.market_id,
-        readRecordValue(preparedQuestionPayload, "question_id"),
-        readRecordValue(preparedQuestionPayload, "market_id"),
-      ) ?? `stage-two-event-${rowIndex + 1}`;
+    const fallbackId = buildStableStageTwoRowId(
+      row,
+      rowIndex,
+      context,
+      preparedQuestionPayload,
+      stageTwoContext,
+    );
     const llmCompletedAt =
-      llmOutputs
-        .map((output) => readStageTwoLlmTimestamp(output, row))
-        .filter((value): value is string => Boolean(value))
-        .sort()
-        .at(-1) ?? null;
+      pickLatestTimestamp(
+        normalizedBreakdown
+          .filter(hasUsableNormalizedBreakdownEntry)
+          .map((entry) => entry.timestamp),
+      ) ??
+      pickLatestTimestamp(llmOutputs.map((output) => readStageTwoLlmTimestamp(output, row))) ??
+      readStageTwoRowAnyTimestamp(row);
     const persistedReturnsPerDay =
       readFirstNumber(row.returns_per_day, getDecisionReturnsPerDay(decision)) ?? null;
-    const persistedAmountToBeInvested =
-      readFirstNumber(row.amount_to_be_invested) ??
-      getBullpenAmountToBeInvestedBreakdown({
-        llmYesOdds: readFirstNumber(
-          row.fair_yes_probability_pct,
-          row.llm_yes_odds,
-          getDecisionFairYes(decision),
-        ),
-        llmNoOdds: readFirstNumber(
-          row.fair_no_probability_pct,
-          row.llm_no_odds,
-          getDecisionFairNo(decision),
-        ),
-        returnsPerDay: persistedReturnsPerDay,
-      }).result;
 
     const summaryRow = createBullpenQuestionRow({
       id: fallbackId,
@@ -724,7 +915,13 @@ export function buildStageTwoEventsSummaryRows({
       category: context.category,
       yesOdds: context.currentYesOdds,
       noOdds: context.currentNoOdds,
-      currentOddsUpdatedAt: null,
+      currentOddsUpdatedAt:
+        readFirstString(
+          row.current_odds_updated_at,
+          row.currentOddsUpdatedAt,
+          row.scanned_at,
+          normalizedAsOfTimestamp,
+        ) ?? null,
       investmentTableAddedAt: null,
       volume,
       liquidity,
@@ -738,7 +935,7 @@ export function buildStageTwoEventsSummaryRows({
         outcomeLabels.every(
           (label) => label.toLowerCase() === "yes" || label.toLowerCase() === "no",
         ),
-      daysUntilClose: calculateDaysUntilClose(context.closeTime),
+      daysUntilClose: calculateDaysUntilClose(context.closeTime, referenceTimeMs),
       rules:
         readFirstString(
           row.rules,
@@ -779,16 +976,19 @@ export function buildStageTwoEventsSummaryRows({
           row.llm_disagreement_category,
         ) as BullpenLlmDisagreementCategory | null,
       adjudicationRequired:
-        readFirstBoolean(row.adjudication_required, decision?.adjudication_required) ??
-        false,
-      evidenceStatus:
-        readFirstString(row.evidence_status, decision?.evidence_status) ?? null,
-      eventState:
-        readFirstString(row.event_state, decision?.event_state) ?? null,
+        !hasUsableBreakdown &&
+        (readFirstBoolean(row.adjudication_required, decision?.adjudication_required) ??
+          false),
+      evidenceStatus: hasUsableBreakdown
+        ? null
+        : readFirstString(row.evidence_status, decision?.evidence_status) ?? null,
+      eventState: hasUsableBreakdown
+        ? null
+        : readFirstString(row.event_state, decision?.event_state) ?? null,
       returnsPerDay: persistedReturnsPerDay,
-      amountToBeInvested: persistedAmountToBeInvested,
+      amountToBeInvested: readFirstNumber(row.amount_to_be_invested),
       llmNotes:
-        llmOutputs.length > 0
+        normalizedBreakdown.length > 0
           ? null
           : readFirstString(row.summary, row.reason, decision?.summary, decision?.reason),
       llmRunId: runId,
@@ -799,14 +999,27 @@ export function buildStageTwoEventsSummaryRows({
           readRecordValue(questionRuntime, "preflight_evidence_block"),
           readRecordValue(preparedQuestionPayload, "preflight_evidence_block"),
         ) ?? null,
-      llmBreakdown: llmOutputs as BullpenQuestionLlmBreakdownItem[],
+      llmBreakdown: normalizedBreakdown,
     });
 
-    return {
+    const finalReturnsPerDay = persistedReturnsPerDay ?? summaryRow.returnsPerDay;
+    const finalAmountToBeInvested =
+      readFirstNumber(row.amount_to_be_invested) ??
+      getBullpenAmountToBeInvestedBreakdown({
+        llmYesOdds: summaryRow.llmYesOdds,
+        llmNoOdds: summaryRow.llmNoOdds,
+        returnsPerDay: finalReturnsPerDay,
+      }).result;
+    const finalRow = {
       ...summaryRow,
-      returnsPerDay: persistedReturnsPerDay ?? summaryRow.returnsPerDay,
-      amountToBeInvested:
-        persistedAmountToBeInvested ?? summaryRow.amountToBeInvested,
+      returnsPerDay: finalReturnsPerDay,
+      amountToBeInvested: finalAmountToBeInvested,
+    };
+
+    return {
+      ...finalRow,
+      isAmountToBeInvestedHighlighted:
+        isBullpenQuestionInvestmentCandidate(finalRow),
     };
   });
 }

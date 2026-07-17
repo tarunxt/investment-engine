@@ -18,6 +18,16 @@ function transpileModuleSource(source, fileName) {
 
 async function loadStage3InvestModule() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "bullpen-auto-run-stage3-invest-"));
+  const strategySource = readFileSync(
+    new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
+    "utf8",
+  );
+  const strategyPath = path.join(tempDir, "bullpenStage2To3Strategy.mjs");
+  writeFileSync(
+    strategyPath,
+    transpileModuleSource(strategySource, "bullpenStage2To3Strategy.ts"),
+    "utf8",
+  );
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/bullpenAutoRunStage3Invest.ts",
@@ -28,7 +38,10 @@ async function loadStage3InvestModule() {
   const modulePath = path.join(tempDir, "bullpenAutoRunStage3Invest.mjs");
   writeFileSync(
     modulePath,
-    transpileModuleSource(source, "bullpenAutoRunStage3Invest.ts"),
+    transpileModuleSource(source, "bullpenAutoRunStage3Invest.ts").replace(
+      'from "@/lib/bullpenStage2To3Strategy";',
+      `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
+    ),
     "utf8",
   );
 
@@ -461,6 +474,66 @@ test("Stage 3 invest plan only reuses ranked top-table candidate rows when saved
   );
 });
 
+test("Stage 3 invest plan blocks reuse when historical Stage 2 metadata says the eligible universe was incomplete", async () => {
+  const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    stageResults: [
+      createStage(1, "scan", {
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        stage2_eligible_rows_total: 26,
+        stage2_reviewed_rows: 20,
+        stage2_universe_complete: false,
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            selected_side: "NO",
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+      createStage(3, "invest", {}, "queued"),
+    ],
+  });
+
+  const plan = buildBullpenStage3OnlyInvestPlan(run);
+
+  assert.equal(plan.request, null);
+  assert.equal(plan.qualifiedCandidateCount, 1);
+  assert.equal(
+    plan.blockedReason,
+    "Stage 3 reuse is blocked because the saved run reviewed only 20 of 26, so the combined top-10 ranking is incomplete.",
+  );
+});
+
 test("Stage 3 invest plan stays blocked until Stage 2 completes", async () => {
   const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
 
@@ -887,13 +960,12 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, />\s*Invested\s*</);
   assert.match(source, /border-blue-950 bg-blue-950 text-white hover:bg-blue-900/);
   assert.match(statusSource, /Rebalance and investment complete\./);
-  assert.match(source, /latest Stage 2-qualified rows/);
-  assert.match(source, /skips the Bullpen rescan plus LLM rerun/);
+  assert.match(source, /ready for this invest-only pass\./);
   assert.doesNotMatch(source, /stage\.key === "llm" && investOnlyPlan\.alreadyInvestedCandidateCount > 0/);
   assert.doesNotMatch(source, /already invested and will be skipped/);
   assert.match(source, /CheckCircle2/);
-  assert.match(source, /How Stage 2 events become eligible to invest/);
-  assert.match(source, /Stage 3 only plans buy orders/);
+  assert.match(source, /Open Stage 3 planned details/);
+  assert.match(source, /Explain Stage 2 to Stage 3 planned strategy/);
   assert.match(source, /formatOddsPercent\(candidate\.llmYesOdds\)/);
   assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
   assert.match(source, /formatReturnsPerDay\(candidate\.returnsPerDay\)/);
@@ -948,8 +1020,10 @@ test("Stage 3 preview steps summarize the sell-first then invest flow before exe
   );
   assert.equal(previewSteps[0].plannedOrders, null);
   assert.equal(previewSteps[1].plannedOrders, 2);
-  assert.match(previewSteps[0].detail, /capital-aware forced-exit/i);
+  assert.match(previewSteps[0].detail, /Event Exits, waits for settlement/i);
+  assert.match(previewSteps[0].detail, /refreshes live cash plus occupied slots/i);
   assert.match(previewSteps[1].detail, /Stage 2-qualified/);
+  assert.match(previewSteps[1].detail, /post-exit sizing/i);
 });
 
 test("Stage 3 preview steps mark the no-work case as finished instead of pending", async () => {

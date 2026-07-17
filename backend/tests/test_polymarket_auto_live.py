@@ -35,7 +35,6 @@ from app.domains.polymarket_auto_live.config import (
 )
 from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
-    CONSOLE_FRESH_LLM_CANDIDATE_CAP,
     ConsoleStageTwoSharedReview,
     PositionSnapshot,
     _auto_live_record_id,
@@ -98,9 +97,6 @@ def test_auto_live_record_id_caps_long_action_labels_for_database_columns():
     assert record_id.startswith("decision-")
     assert record_id.rsplit("-", 1)[-1]
 
-
-def test_console_fresh_llm_candidate_cap_is_50():
-    assert CONSOLE_FRESH_LLM_CANDIDATE_CAP == 50
 
 @pytest.mark.anyio
 async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_paper(monkeypatch):
@@ -702,6 +698,10 @@ async def test_console_profile_advances_to_stage_2_with_naive_candidate_close_ti
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
         settings=BullpenAutoLiveSettings(
@@ -800,6 +800,10 @@ async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch)
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -923,6 +927,10 @@ async def test_console_profile_caps_stage_2_llm_reviews_to_keep_runs_bounded(mon
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
 
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
@@ -982,6 +990,14 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
             market=candidate_market,
             current_price_cents=candidate_market.current_no_odds,
             spread_cents=2,
+        )
+
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=50.0,
+            account_value_usd=50.0,
+            message="Balance ready",
         )
 
     async def fake_execute_console_stage_two_shared_llm(
@@ -1091,6 +1107,10 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.resolve_auto_live_llm_targets",
@@ -1204,6 +1224,10 @@ async def test_console_profile_reports_incremental_stage_3_counters_and_mode_rea
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -1361,7 +1385,9 @@ async def test_console_profile_sizes_new_buys_from_cash_and_active_positions(
     assert stage5.outputs["cash_in_hand_usd"] == 14.77
     assert stage5.outputs["active_positions"] == 1
     assert stage5.outputs["available_slots"] == 9
-    assert stage5.reason == "New opportunity receives the formula-based $1.64 order size."
+    assert stage5.reason == (
+        "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
+    )
     assert buy_decision.target_exposure_usd == 1.64
     assert buy_decision.order_plan is not None
     assert buy_decision.order_plan.order_size_usd == 1.64
@@ -1405,6 +1431,14 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_w
     async def fake_refresh_live_controls(*, user_id: int):
         assert user_id == 7
         return _fake_live_controls()
+
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            message="Balance ready",
+            available_balance_usd=50.0,
+            account_value_usd=50.0,
+        )
 
     async def fake_refresh_execution_quote(*, slug: str | None, side: str):
         assert slug == candidate_market.slug
@@ -1455,6 +1489,10 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_w
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
@@ -1845,7 +1883,7 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
 
     assert executor_calls == ["sell_limit"]
     assert result.run.status == "failed"
-    assert result.run.orders_planned == 2
+    assert result.run.orders_planned == 1
     assert result.run.orders_submitted == 0
     assert "Will the active position fail to exit first?" in result.run.summary
     assert "was not submitted" in result.run.summary
@@ -1858,11 +1896,19 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
     )
     assert invest_stage.status == "fail"
     assert invest_stage.reason == result.run.summary
-    assert invest_stage.outputs["orders_unsubmitted"] == 2
+    assert invest_stage.outputs["orders_unsubmitted"] == 1
     assert invest_stage.outputs["sell_orders_unsubmitted"] == 1
-    assert invest_stage.outputs["buy_orders_unsubmitted"] == 1
+    assert invest_stage.outputs["buy_orders_unsubmitted"] == 0
     assert (
         invest_stage.outputs["execution_failure_message"] == result.run.summary
+    )
+    buy_decision = next(
+        decision for decision in result.decisions if decision.decision == "BUY_NEW"
+    )
+    assert buy_decision.order_plan is None
+    assert buy_decision.reason == (
+        "An earlier sell/redeem did not settle cleanly, so dependent buys stayed "
+        "waiting for collateral instead of submitting a new write."
     )
 
 
@@ -1943,6 +1989,10 @@ async def test_console_profile_reviews_all_stage1_events_before_building_ranked_
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -2343,16 +2393,19 @@ async def test_console_profile_defers_buys_until_exit_settlement_confirms(monkey
         historical_decisions=[],
     )
 
-    buy_statuses = [
-        decision.order_plan.status
-        for decision in result.decisions
-        if decision.order_plan is not None and decision.order_plan.action == "buy"
+    buy_decisions = [
+        decision for decision in result.decisions if decision.decision == "BUY_NEW"
     ]
 
     assert executor_calls[0][0] == "sell"
     assert "buy" not in [name for name, _kwargs in executor_calls]
-    assert buy_statuses
-    assert all(status == "waiting_for_collateral" for status in buy_statuses)
+    assert buy_decisions
+    assert all(decision.order_plan is None for decision in buy_decisions)
+    assert all(
+        decision.reason
+        == "Waiting for earlier sell/redeem settlement confirmation before submitting dependent buys."
+        for decision in buy_decisions
+    )
 
 
 @pytest.mark.anyio
@@ -2627,6 +2680,10 @@ async def test_console_profile_defers_rate_limited_buy_without_fallback_write(
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
@@ -3649,7 +3706,7 @@ def _manual_console_candidate_row(
     close_time: str | None = None,
 ) -> BullpenAutoLiveConsoleCandidateInput:
     if close_time is None:
-        close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+        close_time = datetime(2026, 6, 28, 0, 0, tzinfo=UTC).isoformat()
     return BullpenAutoLiveConsoleCandidateInput(
         question_id=question_id,
         market_id=market_id,
@@ -3856,6 +3913,15 @@ def _fake_live_controls(
     )
 
 
+async def _fake_ready_balance(amount: float = 50.0):
+    return SimpleNamespace(
+        status="ready",
+        available_balance_usd=amount,
+        account_value_usd=amount,
+        message="Balance ready",
+    )
+
+
 def _historical_decision(
     *,
     decision_id: str,
@@ -3926,7 +3992,7 @@ def _historical_decision(
 
 
 @pytest.mark.anyio
-async def test_console_profile_buys_fixed_five_dollar_top10_and_exits_lower_ranked_positions(
+async def test_console_profile_plans_formula_sized_top10_buys_and_exits_lower_ranked_positions(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
@@ -3996,6 +4062,14 @@ async def test_console_profile_buys_fixed_five_dollar_top10_and_exits_lower_rank
             spread_cents=2,
         )
 
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=45.0,
+            account_value_usd=45.0,
+            message="Balance ready",
+        )
+
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.utc_now",
         lambda: fixed_now,
@@ -4027,6 +4101,10 @@ async def test_console_profile_buys_fixed_five_dollar_top10_and_exits_lower_rank
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -4106,6 +4184,14 @@ async def test_console_profile_manual_row_with_conflicting_evidence_normalizes_a
             spread_cents=2,
         )
 
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=50.0,
+            account_value_usd=50.0,
+            message="Balance ready",
+        )
+
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.utc_now",
         lambda: fixed_now,
@@ -4121,6 +4207,10 @@ async def test_console_profile_manual_row_with_conflicting_evidence_normalizes_a
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -4218,6 +4308,14 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
             spread_cents=2,
         )
 
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=50.0,
+            account_value_usd=50.0,
+            message="Balance ready",
+        )
+
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.utc_now",
         lambda: fixed_now,
@@ -4233,6 +4331,10 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -4325,6 +4427,14 @@ async def test_console_profile_manual_table_rows_treat_80_percent_llm_side_as_qu
             spread_cents=2,
         )
 
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=50.0,
+            account_value_usd=50.0,
+            message="Balance ready",
+        )
+
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.utc_now",
         lambda: fixed_now,
@@ -4340,6 +4450,10 @@ async def test_console_profile_manual_table_rows_treat_80_percent_llm_side_as_qu
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(
@@ -4375,6 +4489,239 @@ async def test_console_profile_manual_table_rows_treat_80_percent_llm_side_as_qu
     assert result.run.diagnostics.qualified_candidate_rows == 1
     assert result.run.diagnostics.top_candidate_market_ids == [
         "candidate-market-80-threshold"
+    ]
+
+
+@pytest.mark.anyio
+async def test_console_profile_manual_table_rows_reject_79_99_percent_llm_side(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_row = _manual_console_candidate_row(
+        market_id="candidate-market-79-99-threshold",
+        question_id="candidate-market-79-99-threshold",
+        market_title="Candidate market below the 80 threshold",
+        slug="candidate-market-79-99-threshold",
+        current_yes_odds=20.01,
+        current_no_odds=79.99,
+        llm_yes_odds=20.01,
+        llm_no_odds=79.99,
+        returns_per_day=8.8,
+        selected=True,
+        close_time=(fixed_now + timedelta(days=7)).isoformat(),
+    )
+    market_lookup = {
+        manual_row.slug: _market(
+            question=manual_row.market_title,
+            slug=manual_row.slug,
+            close_time=manual_row.close_time,
+            current_yes_odds=manual_row.current_yes_odds,
+            current_no_odds=manual_row.current_no_odds,
+        )
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=1,
+                    candidate_rows=[manual_row],
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+    skip_decisions = [decision for decision in result.decisions if decision.decision == "SKIP"]
+
+    assert buy_decisions == []
+    assert len(skip_decisions) == 1
+    assert skip_decisions[0].market_id == "candidate-market-79-99-threshold"
+    assert skip_decisions[0].reason == (
+        "Candidate did not pass the Events to invest in table thresholds."
+    )
+    assert skip_decisions[0].stage_results[3].outputs["strongest_llm_odds"] == 79.99
+    assert result.run.diagnostics.qualified_candidate_rows == 0
+    assert result.run.diagnostics.top_candidate_market_ids == []
+
+
+@pytest.mark.anyio
+async def test_console_profile_nonqualifying_active_positions_do_not_displace_top10_candidate_metadata(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will the non-qualifying active position resolve?",
+        slug="active-low-llm",
+        close_time="2026-06-25T00:00:00+00:00",
+        current_yes_odds=90,
+        current_no_odds=10,
+    )
+    live_positions = [
+        _console_wallet_position(
+            slug=active_market.slug,
+            market_title=active_market.question,
+            current_price_cents=10,
+            side="NO",
+        ),
+    ]
+    candidate_markets = [
+        _market(
+            question=f"Candidate market {index + 1}",
+            slug=f"candidate-market-{index + 1}",
+            close_time="2026-06-25T00:00:00+00:00",
+            current_yes_odds=60 - (index * 3),
+            current_no_odds=40 + (index * 3),
+        )
+        for index in range(10)
+    ]
+    market_lookup = {
+        market.slug: market
+        for market in [active_market, *candidate_markets]
+        if market.slug
+    }
+
+    async def fake_read_console_wallet_positions():
+        return live_positions
+
+    async def fake_scan_console_profile_markets(**kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[active_market, *candidate_markets],
+            rejected=[],
+            total_candidates=11,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    def fake_run_llm_consensus(market, *_args, **_kwargs):
+        if market.market_id == active_market.market_id:
+            return _fake_llm_consensus(fair_yes=79.99, fair_no=20.01)
+        return _fake_llm_consensus(fair_yes=10, fair_no=90)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        fake_run_llm_consensus,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    stage6 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.stage_number == 6
+    )
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+    exit_decisions = [decision for decision in result.decisions if decision.decision == "EXIT"]
+
+    assert len(buy_decisions) == 10
+    assert all(decision.order_plan is not None for decision in buy_decisions)
+    assert exit_decisions[0].market_id == active_market.market_id
+    assert stage6.outputs["active_rows_ranked"] == 0
+    assert stage6.outputs["top_active_keys"] == []
+    assert set(stage6.outputs["top_candidate_market_ids"]) == {
+        market.market_id for market in candidate_markets
+    }
+    assert result.run.diagnostics.top_candidate_market_ids == [
+        market.market_id for market in candidate_markets
     ]
 
 
@@ -4424,6 +4771,14 @@ async def test_console_profile_manual_selected_rows_only_buy_ranked_top_10_candi
             spread_cents=2,
         )
 
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=50.0,
+            account_value_usd=50.0,
+            message="Balance ready",
+        )
+
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.utc_now",
         lambda: fixed_now,
@@ -4439,6 +4794,10 @@ async def test_console_profile_manual_selected_rows_only_buy_ranked_top_10_candi
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
     )
 
     result = await BullpenAutoLiveEngine().execute(

@@ -139,7 +139,6 @@ CONFIDENCE_WEIGHT = {"Low": 0.55, "Medium": 0.8, "High": 1.0}
 EVIDENCE_WEIGHT = {"Low": 0.55, "Moderate": 0.8, "Strong": 1.0}
 HIGH_LLM_PROVIDER_ERROR_RATE = 0.5
 SUPPORTED_OUTCOME_SIDES = {"YES", "NO"}
-CONSOLE_FRESH_LLM_CANDIDATE_CAP = 50
 AUTO_LIVE_SHARED_EVIDENCE_OPTIONS = {
     "require_fresh_internet_evidence": True,
     "allow_evidence_grounded_non_web_models": False,
@@ -153,6 +152,9 @@ EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS = 3
 EXIT_SETTLEMENT_TIMEOUT_SECONDS = 18
 _SETTLED_ORDER_STATUSES = {"submitted", "confirmed"}
 _UNSETTLED_EXIT_ORDER_STATUSES = {"submitted", "settlement_pending"}
+CONSOLE_RANKING_FIELD = "returns_per_day"
+CONSOLE_RANKING_TIE_BREAK = "market_id"
+CONSOLE_SIZING_FORMULA = "cash_in_hand / (max_positions - occupied_positions)"
 
 ProgressCallback = Callable[[BullpenAutoLiveRun, BullpenAutoLiveState], None]
 
@@ -198,17 +200,26 @@ def console_order_usd(settings: BullpenAutoLiveSettings) -> float:
 def build_console_trade_amount_breakdown(
     *,
     available_balance_usd: float | None,
-    active_position_count: int,
+    occupied_position_count: int | None = None,
+    active_position_count: int | None = None,
     max_positions: int = CONSOLE_RANKED_EVENT_LIMIT,
 ) -> dict[str, float | int | None]:
-    normalized_active_positions = max(0, active_position_count)
-    available_slots = max(0, max_positions - normalized_active_positions)
+    resolved_occupied_positions = (
+        occupied_position_count
+        if occupied_position_count is not None
+        else active_position_count
+        if active_position_count is not None
+        else 0
+    )
+    normalized_occupied_positions = max(0, resolved_occupied_positions)
+    available_slots = max(0, max_positions - normalized_occupied_positions)
     cash_in_hand_usd = round_money(available_balance_usd)
 
     if cash_in_hand_usd is None or cash_in_hand_usd <= 0 or available_slots <= 0:
         return {
             "cash_in_hand_usd": cash_in_hand_usd,
-            "active_positions": normalized_active_positions,
+            "occupied_positions": normalized_occupied_positions,
+            "active_positions": normalized_occupied_positions,
             "available_slots": available_slots,
             "max_positions": max_positions,
             "order_usd": 0.0,
@@ -216,11 +227,71 @@ def build_console_trade_amount_breakdown(
 
     return {
         "cash_in_hand_usd": cash_in_hand_usd,
-        "active_positions": normalized_active_positions,
+        "occupied_positions": normalized_occupied_positions,
+        "active_positions": normalized_occupied_positions,
         "available_slots": available_slots,
         "max_positions": max_positions,
         "order_usd": round(cash_in_hand_usd / available_slots, 2),
     }
+
+
+def build_console_stage2_universe_status(
+    *,
+    eligible_rows_total: int,
+    reviewed_rows: int,
+    max_llm_candidates_per_run: int,
+    active_rows_reviewed: int,
+    fresh_candidate_rows_total: int,
+    reviewed_fresh_candidate_rows: int,
+) -> dict[str, object]:
+    skipped_rows = max(0, eligible_rows_total - reviewed_rows)
+    skipped_fresh_candidate_rows = max(
+        0,
+        fresh_candidate_rows_total - reviewed_fresh_candidate_rows,
+    )
+    return {
+        "stage2_eligible_rows_total": eligible_rows_total,
+        "stage2_reviewed_rows": reviewed_rows,
+        "stage2_skipped_rows": skipped_rows,
+        "stage2_universe_complete": skipped_rows == 0,
+        "max_llm_candidates_per_run": max_llm_candidates_per_run,
+        "active_position_rows_reviewed": active_rows_reviewed,
+        "fresh_candidate_rows_total": fresh_candidate_rows_total,
+        "reviewed_fresh_candidate_rows": reviewed_fresh_candidate_rows,
+        "skipped_fresh_candidate_rows": skipped_fresh_candidate_rows,
+        "llm_candidates_skipped_by_cap": skipped_rows,
+        "fresh_llm_candidate_cap": reviewed_fresh_candidate_rows,
+        "fresh_llm_candidate_count_before_cap": fresh_candidate_rows_total,
+        "fresh_llm_candidates_skipped_by_cap": skipped_fresh_candidate_rows,
+    }
+
+
+def build_console_strategy_metadata(
+    *,
+    stage2_universe_complete: bool,
+    eligible_rows_total: int | None = None,
+    reviewed_rows: int | None = None,
+    skipped_rows: int | None = None,
+    max_llm_candidates_per_run: int | None = None,
+) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        "strategy_profile": CONSOLE_PROFILE_ID,
+        "min_llm_side_odds": CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+        "max_positions": CONSOLE_RANKED_EVENT_LIMIT,
+        "ranking_field": CONSOLE_RANKING_FIELD,
+        "ranking_tie_break": CONSOLE_RANKING_TIE_BREAK,
+        "sizing_formula": CONSOLE_SIZING_FORMULA,
+        "stage2_universe_complete": stage2_universe_complete,
+    }
+    if eligible_rows_total is not None:
+        metadata["stage2_eligible_rows_total"] = eligible_rows_total
+    if reviewed_rows is not None:
+        metadata["stage2_reviewed_rows"] = reviewed_rows
+    if skipped_rows is not None:
+        metadata["stage2_skipped_rows"] = skipped_rows
+    if max_llm_candidates_per_run is not None:
+        metadata["max_llm_candidates_per_run"] = max_llm_candidates_per_run
+    return metadata
 
 
 def score_rank(value: str | None, mapping: dict[str, int]) -> int:
@@ -1092,6 +1163,60 @@ def _latest_execution_at(decisions: list[BullpenAutoLiveDecision]) -> str | None
     return latest_raw
 
 
+def _decision_execution_timestamp(decision: BullpenAutoLiveDecision) -> datetime | None:
+    return _parse_iso_datetime(
+        decision.order_plan.executed_at if decision.order_plan else None
+    ) or _parse_iso_datetime(decision.updated_at) or _parse_iso_datetime(decision.created_at)
+
+
+def _latest_settled_market_timestamps(
+    decisions: list[BullpenAutoLiveDecision],
+    *,
+    actions: set[str],
+) -> dict[str, datetime]:
+    latest_by_market_id: dict[str, datetime] = {}
+    for decision in decisions:
+        order_plan = decision.order_plan
+        if (
+            order_plan is None
+            or order_plan.dry_run
+            or order_plan.status not in _SETTLED_ORDER_STATUSES
+            or order_plan.action not in actions
+        ):
+            continue
+        executed_at = _decision_execution_timestamp(decision)
+        if executed_at is None:
+            continue
+        current = latest_by_market_id.get(decision.market_id)
+        if current is None or executed_at >= current:
+            latest_by_market_id[decision.market_id] = executed_at
+    return latest_by_market_id
+
+
+def _pending_submitted_buy_market_ids(
+    decisions: list[BullpenAutoLiveDecision],
+    *,
+    visible_active_market_ids: set[str],
+) -> set[str]:
+    latest_buy_by_market_id = _latest_settled_market_timestamps(
+        decisions,
+        actions={"buy"},
+    )
+    latest_exit_by_market_id = _latest_settled_market_timestamps(
+        decisions,
+        actions={"sell", "redeem"},
+    )
+    pending_market_ids: set[str] = set()
+    for market_id, buy_timestamp in latest_buy_by_market_id.items():
+        if market_id in visible_active_market_ids:
+            continue
+        latest_exit_timestamp = latest_exit_by_market_id.get(market_id)
+        if latest_exit_timestamp is not None and latest_exit_timestamp >= buy_timestamp:
+            continue
+        pending_market_ids.add(market_id)
+    return pending_market_ids
+
+
 def _today_order_counts(
     decisions: list[BullpenAutoLiveDecision],
     *,
@@ -1627,6 +1752,105 @@ def _manual_console_consensus(
     )
 
 
+def _active_position_qualifies_for_stage3_ranking(
+    *,
+    held_side: str | None,
+    selected_side: str | None,
+    returns_per_day: float | None,
+    rules_fail_reason: str | None = None,
+    has_usable_llm_output: bool = True,
+) -> bool:
+    normalized_held_side = (
+        held_side.strip().upper() if isinstance(held_side, str) and held_side.strip() else None
+    )
+    return bool(
+        has_usable_llm_output
+        and not rules_fail_reason
+        and returns_per_day is not None
+        and normalized_held_side in SUPPORTED_OUTCOME_SIDES
+        and selected_side is not None
+        and selected_side == normalized_held_side
+    )
+
+
+def _reused_manual_active_position_context(
+    *,
+    position: ConsoleWalletPosition,
+    row: BullpenAutoLiveConsoleCandidateInput,
+    market: ScannedMarket,
+    returns_per_day: float | None,
+) -> dict[str, object]:
+    llm_consensus = _manual_console_consensus(row)
+    selected_side, strongest_llm_odds = _stronger_probability_side(
+        yes_probability=llm_consensus.fair_yes_probability_pct,
+        no_probability=llm_consensus.fair_no_probability_pct,
+        minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+    )
+    qualified = _active_position_qualifies_for_stage3_ranking(
+        held_side=position.side,
+        selected_side=selected_side,
+        returns_per_day=returns_per_day,
+    )
+    review_reason = "Using the current Bullpen x AI LLM output for this active position."
+    return {
+        "source_kind": "active_position",
+        "position_key": f"{position.market_id}::{position.side}",
+        "position_side": position.side,
+        "market": market,
+        "returns_per_day": returns_per_day,
+        "rules": None,
+        "llm_outputs": row.llm_outputs,
+        "llm_consensus": llm_consensus,
+        "stage_results": [
+            build_stage_result(
+                stage_number=1,
+                status="pass",
+                reason="Live wallet position was included for LLM review.",
+                outputs={
+                    "source_kind": "active_position",
+                    "position_key": f"{position.market_id}::{position.side}",
+                    "position_side": position.side,
+                    "shares": position.shares,
+                    "close_time": position.close_time,
+                    "current_yes_odds": position.current_yes_odds,
+                    "current_no_odds": position.current_no_odds,
+                    "returns_per_day": returns_per_day,
+                },
+            ),
+            build_stage_result(
+                stage_number=2,
+                status="pass",
+                reason="Using the current Bullpen x AI table row instead of rerunning a separate scan.",
+                outputs={
+                    "rules_available": bool(row.rules),
+                    "market_url": row.market_url,
+                },
+            ),
+            build_stage_result(
+                stage_number=3,
+                status="warning"
+                if row.llm_disagreement_level in {"Medium", "High"}
+                else "pass",
+                reason=review_reason,
+                outputs={
+                    "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
+                    "fair_no_probability_pct": llm_consensus.fair_no_probability_pct,
+                    "disagreement_level": llm_consensus.disagreement_level,
+                    "disagreement_category": llm_consensus.disagreement_category,
+                    "adjudication_required": llm_consensus.adjudication_required,
+                    "confidence": llm_consensus.confidence,
+                    "evidence_status": llm_consensus.evidence_status,
+                    "event_state": llm_consensus.event_state,
+                },
+            ),
+        ],
+        "qualified": qualified,
+        "strongest_llm_odds": strongest_llm_odds,
+        "selected_side": selected_side,
+        "reason": review_reason,
+    }
+
+
 def _serialize_scan_candidate(
     market: ScannedMarket,
 ) -> dict[str, object]:
@@ -1752,14 +1976,16 @@ async def _hydrate_missing_active_position_markets(
     market_by_id: dict[str, ScannedMarket],
 ) -> tuple[dict[str, ScannedMarket], dict[str, ScannedMarket]]:
     missing_positions_by_slug: dict[str, ConsoleWalletPosition] = {}
+    missing_positions_without_slug: list[ConsoleWalletPosition] = []
     for position in positions:
-        if not position.slug:
-            continue
         if position.slug in market_by_slug or position.market_id in market_by_id:
             continue
-        missing_positions_by_slug.setdefault(position.slug, position)
+        if position.slug:
+            missing_positions_by_slug.setdefault(position.slug, position)
+            continue
+        missing_positions_without_slug.append(position)
 
-    if not missing_positions_by_slug:
+    if not missing_positions_by_slug and not missing_positions_without_slug:
         return market_by_slug, market_by_id
 
     async def fetch_position_market(
@@ -1784,15 +2010,31 @@ async def _hydrate_missing_active_position_markets(
     next_market_by_slug = dict(market_by_slug)
     next_market_by_id = dict(market_by_id)
 
+    positions_needing_fallback = list(missing_positions_without_slug)
     for slug, market in fetched_markets:
         position = missing_positions_by_slug[slug]
-        if market is None:
+        resolved_market = market
+        if resolved_market is None:
+            positions_needing_fallback.append(position)
             continue
-        next_market_by_slug.setdefault(slug, market)
-        if market.slug:
-            next_market_by_slug.setdefault(market.slug, market)
-        next_market_by_id.setdefault(position.market_id, market)
-        next_market_by_id.setdefault(market.market_id, market)
+        next_market_by_slug.setdefault(slug, resolved_market)
+        if resolved_market.slug:
+            next_market_by_slug.setdefault(resolved_market.slug, resolved_market)
+        next_market_by_id.setdefault(position.market_id, resolved_market)
+        next_market_by_id.setdefault(resolved_market.market_id, resolved_market)
+
+    for position in positions_needing_fallback:
+        fallback_market = _active_position_market(
+            position,
+            market_by_slug=next_market_by_slug,
+            market_by_id=next_market_by_id,
+        )
+        if position.slug:
+            next_market_by_slug.setdefault(position.slug, fallback_market)
+        if fallback_market.slug:
+            next_market_by_slug.setdefault(fallback_market.slug, fallback_market)
+        next_market_by_id.setdefault(position.market_id, fallback_market)
+        next_market_by_id.setdefault(fallback_market.market_id, fallback_market)
 
     return next_market_by_slug, next_market_by_id
 
@@ -3777,7 +4019,6 @@ class BullpenAutoLiveEngine:
         now: datetime,
         progress_callback: ProgressCallback | None = None,
     ) -> EngineResult:
-        persisted_console_order_usd = console_order_usd(settings)
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         manual_console_context = (
             run.request_context.console_profile
@@ -3816,6 +4057,7 @@ class BullpenAutoLiveEngine:
         )
         stage1_accepted_candidates: list[dict[str, object]] = []
         stage1_rejected_candidates: list[dict[str, object]] = []
+        accepted_manual_rows: list[BullpenAutoLiveConsoleCandidateInput] = []
         candidate_rows_before_llm = 0
         active_position_rows_before_llm = 0
         llm_candidate_count = 0
@@ -3825,6 +4067,21 @@ class BullpenAutoLiveEngine:
         scan_seed_markets: list[ScannedMarket] | None = None
         market_by_slug: dict[str, ScannedMarket] = {}
         market_by_id: dict[str, ScannedMarket] = {}
+        stage2_universe_status = build_console_stage2_universe_status(
+            eligible_rows_total=0,
+            reviewed_rows=0,
+            max_llm_candidates_per_run=max(1, settings.max_llm_candidates_per_run),
+            active_rows_reviewed=0,
+            fresh_candidate_rows_total=0,
+            reviewed_fresh_candidate_rows=0,
+        )
+        stage2_strategy_metadata = build_console_strategy_metadata(
+            stage2_universe_complete=True,
+            eligible_rows_total=0,
+            reviewed_rows=0,
+            skipped_rows=0,
+            max_llm_candidates_per_run=max(1, settings.max_llm_candidates_per_run),
+        )
 
         if manual_console_rows_used:
             scan_source_label = scan_source_label or "Bullpen x AI manual table"
@@ -3887,6 +4144,24 @@ class BullpenAutoLiveEngine:
                     1
                     for row in accepted_manual_rows
                     if row.llm_yes_odds is not None or row.llm_no_odds is not None
+                )
+                stage2_universe_status = build_console_stage2_universe_status(
+                    eligible_rows_total=llm_candidate_count,
+                    reviewed_rows=llm_candidate_count,
+                    max_llm_candidates_per_run=max(1, settings.max_llm_candidates_per_run),
+                    active_rows_reviewed=0,
+                    fresh_candidate_rows_total=llm_candidate_count,
+                    reviewed_fresh_candidate_rows=llm_candidate_count,
+                )
+                stage2_strategy_metadata = build_console_strategy_metadata(
+                    stage2_universe_complete=True,
+                    eligible_rows_total=llm_candidate_count,
+                    reviewed_rows=llm_candidate_count,
+                    skipped_rows=0,
+                    max_llm_candidates_per_run=max(
+                        1,
+                        settings.max_llm_candidates_per_run,
+                    ),
                 )
                 for row, market in accepted_manual_pairs:
                     returns_per_day = row.returns_per_day
@@ -4236,6 +4511,67 @@ class BullpenAutoLiveEngine:
         active_position_rows_before_llm = len(position_snapshots) + len(
             claimable_wallet_positions
         )
+        reusable_manual_active_position_keys: set[str] = set()
+        manual_active_positions_without_reusable_llm: list[ConsoleWalletPosition] = []
+        if manual_console_rows_have_reusable_llm:
+            manual_rows_by_market_id = {
+                row.market_id: row for row in accepted_manual_rows
+            }
+            manual_rows_by_slug = {
+                row.slug: row for row in accepted_manual_rows if row.slug
+            }
+            for position in bullpen_wallet_positions:
+                if position.is_claimable:
+                    continue
+                position_key = f"{position.market_id}::{position.side}"
+                matched_row = manual_rows_by_market_id.get(position.market_id)
+                if matched_row is None and position.slug:
+                    matched_row = manual_rows_by_slug.get(position.slug)
+                if matched_row is None:
+                    manual_active_positions_without_reusable_llm.append(position)
+                    continue
+                matched_market = (
+                    market_by_slug.get(position.slug)
+                    or market_by_id.get(position.market_id)
+                    or _manual_console_market(matched_row)
+                )
+                active_position_contexts.append(
+                    _reused_manual_active_position_context(
+                        position=position,
+                        row=matched_row,
+                        market=matched_market,
+                        returns_per_day=position_returns_per_day(position, now=now),
+                    )
+                )
+                reusable_manual_active_position_keys.add(position_key)
+
+            reviewable_active_position_count = len(position_snapshots)
+            reviewed_active_position_count = len(reusable_manual_active_position_keys)
+            reviewed_row_total = reviewed_active_position_count + candidate_rows_before_llm
+            eligible_row_total = reviewable_active_position_count + candidate_rows_before_llm
+            manual_reusable_llm_limit = max(
+                max(1, settings.max_llm_candidates_per_run),
+                eligible_row_total,
+            )
+            stage2_universe_status = build_console_stage2_universe_status(
+                eligible_rows_total=eligible_row_total,
+                reviewed_rows=reviewed_row_total,
+                max_llm_candidates_per_run=manual_reusable_llm_limit,
+                active_rows_reviewed=reviewed_active_position_count,
+                fresh_candidate_rows_total=candidate_rows_before_llm,
+                reviewed_fresh_candidate_rows=candidate_rows_before_llm,
+            )
+            stage2_strategy_metadata = build_console_strategy_metadata(
+                stage2_universe_complete=not manual_active_positions_without_reusable_llm,
+                eligible_rows_total=eligible_row_total,
+                reviewed_rows=reviewed_row_total,
+                skipped_rows=eligible_row_total - reviewed_row_total,
+                max_llm_candidates_per_run=manual_reusable_llm_limit,
+            )
+            llm_candidate_count = reviewed_row_total
+        last_calculated_console_order_usd = round_money(
+            state.last_console_trade_amount_usd
+        )
         console_balance_state = None
         try:
             console_balance_state = await console_balance_task
@@ -4252,34 +4588,16 @@ class BullpenAutoLiveEngine:
                 and console_balance_state.status == "ready"
                 else None
             ),
-            active_position_count=active_position_market_count,
-        )
-        last_calculated_console_order_usd = round_money(
-            state.last_console_trade_amount_usd
-        )
-        fallback_console_order_usd = (
-            last_calculated_console_order_usd
-            if last_calculated_console_order_usd is not None
-            else (
-                persisted_console_order_usd
-                if abs(persisted_console_order_usd - DEFAULT_CONSOLE_ORDER_USD) > 0.009
-                else 0.0
-            )
+            occupied_position_count=active_position_market_count,
         )
         dynamic_console_order_available = (
             console_trade_amount_breakdown["cash_in_hand_usd"] is not None
         )
-        console_order_source = (
-            "dynamic_formula"
-            if dynamic_console_order_available
-            else "last_calculated_fallback"
-            if fallback_console_order_usd > 0
-            else "unavailable"
-        )
+        console_order_source = "dynamic_formula" if dynamic_console_order_available else "unavailable"
         resolved_console_order_usd = (
             float(console_trade_amount_breakdown["order_usd"] or 0.0)
             if dynamic_console_order_available
-            else fallback_console_order_usd
+            else 0.0
         )
         if dynamic_console_order_available:
             state.last_console_trade_amount_usd = resolved_console_order_usd
@@ -4321,8 +4639,12 @@ class BullpenAutoLiveEngine:
                     ),
                     "console_trade_amount_usd": resolved_console_order_usd,
                     "console_trade_amount_source": console_order_source,
+                    "console_trade_last_calculated_usd": last_calculated_console_order_usd,
                     "console_trade_cash_in_hand_usd": console_trade_amount_breakdown[
                         "cash_in_hand_usd"
+                    ],
+                    "console_trade_occupied_positions": console_trade_amount_breakdown[
+                        "occupied_positions"
                     ],
                     "console_trade_active_positions": console_trade_amount_breakdown[
                         "active_positions"
@@ -4363,6 +4685,8 @@ class BullpenAutoLiveEngine:
                     "rejected_candidates_count": len(stage1_rejected_candidates),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
                     "used_manual_console_rows": manual_console_rows_used,
                     "selected_manual_candidate_ids": selected_manual_candidate_ids,
                     "selected_manual_candidate_count": len(selected_manual_candidate_ids),
@@ -4427,6 +4751,8 @@ class BullpenAutoLiveEngine:
                 "candidate_rows_before_llm": candidate_rows_before_llm,
                 "llm_candidate_count": llm_candidate_count,
                 "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
+                **stage2_universe_status,
+                **stage2_strategy_metadata,
             }
             if "llm_candidate_count_before_cap" in locals():
                 stage_outputs["llm_candidate_count_before_cap"] = llm_candidate_count_before_cap
@@ -4509,7 +4835,23 @@ class BullpenAutoLiveEngine:
             report_llm_stage_progress(
                 phase_status="running",
                 reason=(
-                    f"Stage 2 started. Reusing existing LLM outputs for {llm_candidate_count} Stage 1 events."
+                    (
+                        "Stage 2 started. Reusing existing LLM outputs for "
+                        f"{candidate_rows_before_llm} Stage 1 events and "
+                        f"{len(active_position_contexts)} active positions."
+                    )
+                    if len(active_position_contexts) > 0
+                    and not manual_active_positions_without_reusable_llm
+                    else (
+                        "Stage 2 started. Reusing existing LLM outputs for "
+                        f"{candidate_rows_before_llm} Stage 1 events and "
+                        f"{len(active_position_contexts)} active positions, but "
+                        f"{len(manual_active_positions_without_reusable_llm)} active positions "
+                        "still need review so Stage 3 will treat the ranking as incomplete."
+                    )
+                    if len(active_position_contexts) > 0
+                    and manual_active_positions_without_reusable_llm
+                    else f"Stage 2 started. Reusing existing LLM outputs for {llm_candidate_count} Stage 1 events."
                     if llm_candidate_count > 0
                     else "No candidate events qualified for Stage 2 LLM review."
                 ),
@@ -4542,10 +4884,8 @@ class BullpenAutoLiveEngine:
             ]
             candidate_rows.sort(
                 key=lambda item: (
-                    0 if item[0].market_id in selected_manual_candidate_id_set else 1,
                     -(item[1] if item[1] is not None else float("-inf")),
-                    item[0].close_time or "",
-                    item[0].question,
+                    item[0].market_id,
                 )
             )
             candidate_rows_before_llm = len(candidate_rows)
@@ -4558,10 +4898,13 @@ class BullpenAutoLiveEngine:
                 for market, returns_per_day in candidate_rows
             ]
             fresh_llm_candidate_count_before_cap = len(fresh_llm_rows)
-            configured_max_llm_candidates = max(1, settings.max_llm_candidates_per_run)
-            fresh_llm_candidate_cap = min(
-                configured_max_llm_candidates,
-                CONSOLE_FRESH_LLM_CANDIDATE_CAP,
+            configured_max_llm_candidates = max(
+                1,
+                settings.max_llm_candidates_per_run,
+            )
+            fresh_llm_candidate_cap = max(
+                0,
+                configured_max_llm_candidates - len(active_llm_rows),
             )
             skipped_fresh_llm_markets = fresh_llm_rows[fresh_llm_candidate_cap:]
             fresh_llm_rows = fresh_llm_rows[:fresh_llm_candidate_cap]
@@ -4570,11 +4913,30 @@ class BullpenAutoLiveEngine:
             )
             llm_markets = [*active_llm_rows, *fresh_llm_rows]
             max_llm_candidates = max(
-                len(active_llm_rows) + fresh_llm_candidate_cap,
+                len(active_llm_rows),
                 configured_max_llm_candidates,
             )
             skipped_llm_markets = skipped_fresh_llm_markets
             llm_candidate_count = len(llm_markets)
+            stage2_universe_status = build_console_stage2_universe_status(
+                eligible_rows_total=llm_candidate_count_before_cap,
+                reviewed_rows=llm_candidate_count,
+                max_llm_candidates_per_run=max_llm_candidates,
+                active_rows_reviewed=len(active_llm_rows),
+                fresh_candidate_rows_total=fresh_llm_candidate_count_before_cap,
+                reviewed_fresh_candidate_rows=len(fresh_llm_rows),
+            )
+            stage2_strategy_metadata = build_console_strategy_metadata(
+                stage2_universe_complete=bool(
+                    stage2_universe_status["stage2_universe_complete"]
+                ),
+                eligible_rows_total=int(
+                    stage2_universe_status["stage2_eligible_rows_total"]
+                ),
+                reviewed_rows=int(stage2_universe_status["stage2_reviewed_rows"]),
+                skipped_rows=int(stage2_universe_status["stage2_skipped_rows"]),
+                max_llm_candidates_per_run=max_llm_candidates,
+            )
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
@@ -4615,6 +4977,8 @@ class BullpenAutoLiveEngine:
                         "fresh_llm_candidate_cap": fresh_llm_candidate_cap,
                         "fresh_llm_candidate_count_before_cap": fresh_llm_candidate_count_before_cap,
                         "fresh_llm_candidates_skipped_by_cap": len(skipped_fresh_llm_markets),
+                        **stage2_universe_status,
+                        **stage2_strategy_metadata,
                         "unsupported_wallet_positions_skipped": len(unsupported_live_wallet_positions),
                         "unsupported_wallet_positions": [
                             {
@@ -4737,10 +5101,17 @@ class BullpenAutoLiveEngine:
                         position = llm_row["position"]
                         if not isinstance(position, ConsoleWalletPosition):
                             continue
-                        selected_side, _ = _stronger_probability_side(
+                        selected_side, strongest_llm_odds = _stronger_probability_side(
                             yes_probability=llm_consensus.fair_yes_probability_pct,
                             no_probability=llm_consensus.fair_no_probability_pct,
                             minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                        )
+                        qualified = _active_position_qualifies_for_stage3_ranking(
+                            held_side=position.side,
+                            selected_side=selected_side,
+                            returns_per_day=returns_per_day,
+                            rules_fail_reason=rules_fail_reason,
+                            has_usable_llm_output=has_usable_llm_output,
                         )
                         review_reason = (
                             "LLM consensus completed for the active position."
@@ -4826,7 +5197,8 @@ class BullpenAutoLiveEngine:
                                         },
                                     ),
                                 ],
-                                "qualified": False,
+                                "qualified": qualified,
+                                "strongest_llm_odds": strongest_llm_odds,
                                 "selected_side": selected_side,
                                 "reason": review_reason,
                             }
@@ -5061,10 +5433,16 @@ class BullpenAutoLiveEngine:
                         evidence_packet,
                         settings,
                     )
-                    selected_side, _ = _stronger_probability_side(
+                    selected_side, strongest_llm_odds = _stronger_probability_side(
                         yes_probability=llm_consensus.fair_yes_probability_pct,
                         no_probability=llm_consensus.fair_no_probability_pct,
                         minimum_probability=CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
+                    )
+                    qualified = _active_position_qualifies_for_stage3_ranking(
+                        held_side=position.side,
+                        selected_side=selected_side,
+                        returns_per_day=returns_per_day,
+                        rules_fail_reason=rules_fail_reason,
                     )
                     review_reason = (
                         "LLM consensus completed for the active position."
@@ -5107,7 +5485,8 @@ class BullpenAutoLiveEngine:
                             "llm_outputs": llm_outputs,
                             "llm_consensus": llm_consensus,
                             "stage_results": stage_results,
-                            "qualified": False,
+                            "qualified": qualified,
+                            "strongest_llm_odds": strongest_llm_odds,
                             "selected_side": selected_side,
                             "reason": review_reason,
                         }
@@ -5304,6 +5683,11 @@ class BullpenAutoLiveEngine:
             if total_reviewed_contexts > 0
             else "warning"
         )
+        if (
+            not bool(stage2_universe_status["stage2_universe_complete"])
+            and llm_stage_status == "pass"
+        ):
+            llm_stage_status = "warning"
         llm_phase_status = (
             "failed"
             if total_reviewed_contexts > 0 and usable_llm_review_count == 0
@@ -5326,6 +5710,10 @@ class BullpenAutoLiveEngine:
                     )
                     if 0 < usable_llm_review_count < total_reviewed_contexts
                     else (
+                        "Stage 2 did not review the full eligible universe, so Stage 3 kept the combined ranking incomplete."
+                    )
+                    if not bool(stage2_universe_status["stage2_universe_complete"])
+                    else (
                         "LLM review completed for "
                         f"{llm_candidate_count} events from {stage1_accepted_candidate_count} "
                         f"Stage 1 candidates and {len(active_position_contexts)} active positions."
@@ -5347,12 +5735,13 @@ class BullpenAutoLiveEngine:
                     "active_position_rows_reviewed": len(active_position_contexts),
                     "candidate_rows_before_llm": candidate_rows_before_llm,
                     "llm_candidate_count": llm_candidate_count,
-                    "llm_candidate_count_before_cap": llm_candidate_count_before_cap if "llm_candidate_count_before_cap" in locals() else llm_candidate_count,
-                    "max_llm_candidates_per_run": max_llm_candidates if "max_llm_candidates" in locals() else settings.max_llm_candidates_per_run,
-                    "llm_candidates_skipped_by_cap": len(skipped_llm_markets) if "skipped_llm_markets" in locals() else 0,
-                    "fresh_llm_candidate_cap": fresh_llm_candidate_cap if "fresh_llm_candidate_cap" in locals() else CONSOLE_FRESH_LLM_CANDIDATE_CAP,
-                    "fresh_llm_candidate_count_before_cap": fresh_llm_candidate_count_before_cap if "fresh_llm_candidate_count_before_cap" in locals() else candidate_rows_before_llm,
-                    "fresh_llm_candidates_skipped_by_cap": len(skipped_fresh_llm_markets) if "skipped_fresh_llm_markets" in locals() else 0,
+                    "llm_candidate_count_before_cap": (
+                        llm_candidate_count_before_cap
+                        if "llm_candidate_count_before_cap" in locals()
+                        else llm_candidate_count
+                    ),
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
                     "usable_llm_review_count": usable_llm_review_count,
                     "qualified_candidate_count": len(qualifying_candidates),
                     "qualified_candidate_market_ids": [
@@ -5368,26 +5757,26 @@ class BullpenAutoLiveEngine:
             ),
         )
         self._report_progress(progress_callback, run, state)
+        active_review_context_by_key = {
+            str(context["position_key"]): context
+            for context in active_position_contexts
+            if context.get("position_key") is not None
+        }
         active_rank_rows = []
         for position in bullpen_wallet_positions:
             if position.is_claimable:
-                active_rank_rows.append(
-                    {
-                        "kind": "redeem",
-                        "key": f"{position.market_id}::{position.side}",
-                        "market_id": position.market_id,
-                        "returns_per_day": float("inf"),
-                        "position": position,
-                    }
-                )
                 continue
-            returns_per_day = position_returns_per_day(position, now=now)
-            if returns_per_day is None:
+            position_key = f"{position.market_id}::{position.side}"
+            review_context = active_review_context_by_key.get(position_key)
+            if not review_context or not bool(review_context.get("qualified")):
+                continue
+            returns_per_day = review_context.get("returns_per_day")
+            if not isinstance(returns_per_day, (int, float)):
                 continue
             active_rank_rows.append(
                 {
                     "kind": "active",
-                    "key": f"{position.market_id}::{position.side}",
+                    "key": position_key,
                     "market_id": position.market_id,
                     "returns_per_day": returns_per_day,
                     "position": position,
@@ -5410,6 +5799,7 @@ class BullpenAutoLiveEngine:
                 row["market_id"],
             ),
         )
+        stage2_universe_complete = bool(stage2_universe_status["stage2_universe_complete"])
         ranking_top_rows = combined_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
         selected_qualified_candidate_market_ids = {
             str(context["market"].market_id)
@@ -5426,23 +5816,50 @@ class BullpenAutoLiveEngine:
             for row in ranking_top_rows
             if row["kind"] == "candidate"
         }
+        ranking_top_candidate_market_id_order = [
+            str(row["market_id"])
+            for row in ranking_top_rows
+            if row["kind"] == "candidate"
+        ]
         top_rows = ranking_top_rows
         top_active_keys = ranking_top_active_keys
         top_candidate_market_ids = ranking_top_candidate_market_ids
+        ranking_exit_active_keys = (
+            ranking_top_active_keys
+            if stage2_universe_complete
+            else {
+                str(row["key"])
+                for row in active_rank_rows
+                if row["kind"] == "active"
+            }
+        )
 
         run.stage_results.append(
             build_stage_result(
                 stage_number=6,
-                status="pass",
-                reason="Ranked active positions and new qualified candidates into the fixed top-10 table.",
+                status="pass" if stage2_universe_complete else "warning",
+                reason=(
+                    "Ranked active positions and new qualified candidates into the fixed top-10 table."
+                    if stage2_universe_complete
+                    else "Stage 2 reviewed only part of the eligible universe, so the combined top-10 ranking is incomplete and Stage 3 will not use it for new buys or top-10 displacement exits."
+                ),
                 outputs={
                     "top_table_size": len(ranking_top_rows),
                     "active_rows_ranked": len(active_rank_rows),
                     "qualified_candidate_rows": len(candidate_rank_rows),
-                    "top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
-                    "ranked_top_candidate_market_ids": sorted(ranking_top_candidate_market_ids),
+                    "top_candidate_market_ids": list(
+                        ranking_top_candidate_market_id_order
+                    ),
+                    "ranked_top_candidate_market_ids": list(
+                        ranking_top_candidate_market_id_order
+                    ),
+                    "ranking_top_candidate_market_id_order": list(
+                        ranking_top_candidate_market_id_order
+                    ),
                     "selected_qualified_candidate_market_ids": sorted(selected_qualified_candidate_market_ids),
                     "top_active_keys": sorted(ranking_top_active_keys),
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
                     "rejected_candidates": [
                         diagnostic.model_dump(mode="json")
                         for diagnostic in rejected_candidate_map.values()
@@ -5456,7 +5873,9 @@ class BullpenAutoLiveEngine:
         run.diagnostics.candidate_rows_before_llm = candidate_rows_before_llm
         run.diagnostics.llm_candidate_count = llm_candidate_count
         run.diagnostics.qualified_candidate_rows = len(candidate_rank_rows)
-        run.diagnostics.top_candidate_market_ids = sorted(ranking_top_candidate_market_ids)
+        run.diagnostics.top_candidate_market_ids = list(
+            ranking_top_candidate_market_id_order
+        )
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.diagnostics.scan_source_label = scan_source_label
         run.diagnostics.scan_source_url = scan_source_url
@@ -5473,6 +5892,7 @@ class BullpenAutoLiveEngine:
         processed_decision_rows = 0
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
+        stage3_buy_refresh_snapshot: dict[str, object] = {}
 
         def _current_stage3_order_counts() -> dict[str, int]:
             sell_planned = 0
@@ -5734,8 +6154,18 @@ class BullpenAutoLiveEngine:
                 "top_table_size": len(top_rows),
                 "active_rows_ranked": len(active_rank_rows),
                 "qualified_candidate_rows": len(candidate_rank_rows),
-                "top_candidate_market_ids": sorted(top_candidate_market_ids),
+                "top_candidate_market_ids": list(
+                    ranked_post_exit_candidate_market_id_order
+                ),
+                "ranked_top_candidate_market_ids": list(
+                    ranked_post_exit_candidate_market_id_order
+                ),
+                "ranking_top_candidate_market_id_order": list(
+                    ranked_post_exit_candidate_market_id_order
+                ),
                 "top_active_keys": sorted(top_active_keys),
+                **stage2_universe_status,
+                **stage2_strategy_metadata,
                 "active_position_rows": len(position_snapshots),
                 "candidate_decision_rows": len(candidate_contexts),
                 "decisions_count": len(decisions),
@@ -5780,6 +6210,8 @@ class BullpenAutoLiveEngine:
                 stage_outputs["execution_gate_reason"] = execution_gate_reason
             if execution_mode_reason:
                 stage_outputs["execution_mode_reason"] = execution_mode_reason
+            if stage3_buy_refresh_snapshot:
+                stage_outputs["post_exit_buy_refresh"] = stage3_buy_refresh_snapshot
             if last_completed_market is not None:
                 stage_outputs["last_completed_market_id"] = last_completed_market.market_id
                 stage_outputs["last_completed_question"] = last_completed_market.question
@@ -5976,11 +6408,6 @@ class BullpenAutoLiveEngine:
                 guardrail_checks=global_guardrails,
             )
 
-        active_review_context_by_key = {
-            str(context["position_key"]): context
-            for context in active_position_contexts
-            if context.get("position_key") is not None
-        }
         active_position_market_ids = {
             snapshot.market_id for snapshot in position_snapshots if snapshot.market_id
         }
@@ -6174,7 +6601,7 @@ class BullpenAutoLiveEngine:
                 exit_evaluation = evaluate_event_exits(
                     EventExitContext(
                         ranking=RankingAndLlmExitContext(
-                            top_active_position_keys=ranking_top_active_keys,
+                            top_active_position_keys=ranking_exit_active_keys,
                             current_position_key=key,
                             current_yes_probability=current_yes_probability,
                             current_no_probability=current_no_probability,
@@ -6202,6 +6629,9 @@ class BullpenAutoLiveEngine:
                     "position_key": key,
                     "market": market,
                     "returns_per_day": returns_per_day,
+                    "qualified_for_ranking": bool(
+                        review_context and review_context.get("qualified")
+                    ),
                     "stage_results": stage_results,
                     "llm_outputs": llm_outputs,
                     "llm_consensus": llm_consensus,
@@ -6218,7 +6648,8 @@ class BullpenAutoLiveEngine:
                 "position": entry["position"],
             }
             for entry in evaluated_active_positions
-            if isinstance(entry.get("returns_per_day"), (int, float))
+            if bool(entry.get("qualified_for_ranking"))
+            and isinstance(entry.get("returns_per_day"), (int, float))
             and isinstance(entry.get("current_position"), PositionSnapshot)
             and entry["current_position"].exit_state not in {"EVENT_EXIT_PLANNED", "DUST_LOST"}
         ]
@@ -6239,8 +6670,15 @@ class BullpenAutoLiveEngine:
             for row in top_rows
             if row["kind"] == "candidate"
         }
+        ranked_post_exit_candidate_market_id_order = [
+            str(row["market_id"])
+            for row in top_rows
+            if row["kind"] == "candidate"
+        ]
         top_candidate_market_ids = ranked_post_exit_candidate_market_ids
-        run.diagnostics.top_candidate_market_ids = sorted(top_candidate_market_ids)
+        run.diagnostics.top_candidate_market_ids = list(
+            ranked_post_exit_candidate_market_id_order
+        )
 
         report_invest_stage_progress(
             phase_status="running",
@@ -6603,6 +7041,39 @@ class BullpenAutoLiveEngine:
                 )
                 continue
 
+            if not stage2_universe_complete:
+                reason = (
+                    "Stage 2 did not review the full eligible universe, so this active position remains held unless a separate safety exit already triggered."
+                )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=reason,
+                        outputs={
+                            "returns_per_day": returns_per_day,
+                            **stage2_universe_status,
+                        },
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="HOLD",
+                        reason=reason,
+                        stage_results=stage_results,
+                        current_position=current_position,
+                        current_exposure_usd=position.exposure_usd,
+                        target_exposure_usd=position.exposure_usd,
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                        exit_signals=exit_signals,
+                        exit_state=current_position.exit_state,
+                    ),
+                    market=market,
+                )
+                continue
+
             if entry["position_key"] in top_active_keys:
                 stage_results.append(
                     build_stage_result(
@@ -6652,6 +7123,8 @@ class BullpenAutoLiveEngine:
                 ),
                 market=market,
             )
+
+        ranked_buy_candidate_market_ids_seen: set[str] = set()
 
         for context in candidate_contexts:
             market = context["market"]
@@ -6716,6 +7189,40 @@ class BullpenAutoLiveEngine:
                     market=market,
                 )
                 continue
+            if not stage2_universe_complete:
+                skip_reason = (
+                    "Candidate qualified, but Stage 2 did not review the full eligible universe, so Stage 3 blocked top-10 buy planning."
+                )
+                _record_rejected_candidate(
+                    rejected_candidate_map,
+                    market=market,
+                    reason=skip_reason,
+                )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=skip_reason,
+                        outputs={
+                            "returns_per_day": returns_per_day,
+                            **stage2_universe_status,
+                        },
+                        hard_block=True,
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="SKIP",
+                        reason=skip_reason,
+                        stage_results=stage_results,
+                        side_to_trade=context.get("selected_side"),
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                    ),
+                    market=market,
+                )
+                continue
             if market.market_id not in top_candidate_market_ids:
                 _record_rejected_candidate(
                     rejected_candidate_map,
@@ -6744,61 +7251,92 @@ class BullpenAutoLiveEngine:
                     market=market,
                 )
                 continue
-            stage_results.append(
-                build_stage_result(
-                    stage_number=5,
-                    status="pass" if resolved_console_order_usd > 0 else "fail",
-                    reason=(
-                        "New opportunity receives the formula-based "
-                        f"${resolved_console_order_usd:g} order size."
-                        if console_order_source == "dynamic_formula"
-                        else "New opportunity reuses the last calculated "
-                        f"${resolved_console_order_usd:g} order size because cash in hand is unavailable."
-                        if console_order_source == "last_calculated_fallback"
-                        else "Trade amount could not be calculated because Bullpen cash in hand is unavailable."
-                    ),
-                    outputs={
-                        "order_usd": resolved_console_order_usd,
-                        "order_usd_source": console_order_source,
-                        "cash_in_hand_usd": console_trade_amount_breakdown[
-                            "cash_in_hand_usd"
-                        ],
-                        "active_positions": console_trade_amount_breakdown[
-                            "active_positions"
-                        ],
-                        "available_slots": console_trade_amount_breakdown[
-                            "available_slots"
-                        ],
-                        "max_positions": console_trade_amount_breakdown[
-                            "max_positions"
-                        ],
-                    },
+            if market.market_id in ranked_buy_candidate_market_ids_seen:
+                skip_reason = (
+                    "Candidate was not planned because another ranked row for the same market already exists in this run."
                 )
-            )
+                _record_rejected_candidate(
+                    rejected_candidate_map,
+                    market=market,
+                    reason=skip_reason,
+                )
+                stage_results.append(
+                    build_stage_result(
+                        stage_number=6,
+                        status="warning",
+                        reason=skip_reason,
+                        outputs={"returns_per_day": returns_per_day},
+                        hard_block=True,
+                    )
+                )
+                record_invest_decision(
+                    _build_decision(
+                        market=market,
+                        decision_action="SKIP",
+                        reason=skip_reason,
+                        stage_results=stage_results,
+                        side_to_trade=context.get("selected_side"),
+                        llm_outputs=llm_outputs,
+                        llm_consensus=llm_consensus,
+                    ),
+                    market=market,
+                )
+                continue
+            ranked_buy_candidate_market_ids_seen.add(market.market_id)
             stage_results.append(
                 build_stage_result(
                     stage_number=6,
                     status="pass",
-                    reason="Qualified candidate ranked inside the top-10 returns/day table.",
-                    outputs={"returns_per_day": returns_per_day},
+                    reason="Qualified candidate ranked inside the top-10 returns/day table and is waiting for post-exit sizing plus live slot validation.",
+                    outputs={
+                        "returns_per_day": returns_per_day,
+                        "pre_refresh_cash_in_hand_usd": console_trade_amount_breakdown[
+                            "cash_in_hand_usd"
+                        ],
+                        "pre_refresh_occupied_positions": console_trade_amount_breakdown[
+                            "occupied_positions"
+                        ],
+                        "pre_refresh_available_slots": console_trade_amount_breakdown[
+                            "available_slots"
+                        ],
+                    },
                 )
             )
             record_invest_decision(
                 _build_decision(
                     market=market,
                     decision_action="BUY_NEW",
-                    reason="Qualified candidate ranked inside the top-10 returns/day table.",
+                    reason="Qualified candidate ranked inside the top-10 returns/day table and is waiting for post-exit sizing plus live slot validation.",
                     stage_results=stage_results,
                     side_to_trade=context.get("selected_side"),
                     current_exposure_usd=0,
-                    target_exposure_usd=resolved_console_order_usd,
-                    order_usd=resolved_console_order_usd,
+                    target_exposure_usd=0,
+                    order_usd=0,
                     llm_outputs=llm_outputs,
                     llm_consensus=llm_consensus,
+                    include_order_plan=False,
                 ),
                 market=market,
             )
 
+        ranked_buy_candidate_order_index = {
+            market_id: index
+            for index, market_id in enumerate(ranking_top_candidate_market_id_order)
+        }
+        ranked_buy_candidate_decisions = sorted(
+            [
+                decision
+                for decision in decisions
+                if decision.decision == "BUY_NEW" and decision.order_plan is None
+            ],
+            key=lambda decision: (
+                ranked_buy_candidate_order_index.get(
+                    decision.market_id,
+                    len(ranking_top_candidate_market_id_order),
+                ),
+                decision.market_id,
+            ),
+        )
         sell_execution_decisions = [
             decision
             for decision in decisions
@@ -6808,20 +7346,12 @@ class BullpenAutoLiveEngine:
                 and decision.order_plan.action in {"sell", "redeem"}
             )
         ]
-        buy_execution_decisions = [
-            decision
-            for decision in decisions
-            if (
-                decision.order_plan is not None
-                and decision.order_plan.status == "planned"
-                and decision.order_plan.action == "buy"
-            )
-        ]
-        actionable_decisions = [*sell_execution_decisions, *buy_execution_decisions]
+        buy_execution_decisions: list[BullpenAutoLiveDecision] = []
+        actionable_decisions = [*sell_execution_decisions, *ranked_buy_candidate_decisions]
         planned_order_counts = _current_stage3_order_counts()
         planned_orders = planned_order_counts["planned"]
         sell_planned_orders = planned_order_counts["sell_planned"]
-        buy_planned_orders = planned_order_counts["buy_planned"]
+        buy_planned_orders = len(ranked_buy_candidate_decisions)
         execution_block_reasons: list[str] = []
         available_balance_before_step1: float | None = None
         if actionable_decisions and not state.dry_run:
@@ -6854,7 +7384,7 @@ class BullpenAutoLiveEngine:
             if state.dry_run:
                 preparation_reason = (
                     f"Stage 3 reviewed all {total_decision_rows} rows and is staying in "
-                    "simulation mode while it walks Step 1 Event Exits and Step 2 planned buys."
+                    "simulation mode while it walks Step 1 Event Exits and then refreshes Step 2 buy sizing."
                 )
             elif execution_pause_reason:
                 preparation_reason = (
@@ -6865,20 +7395,26 @@ class BullpenAutoLiveEngine:
                 preparation_reason = (
                     f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will process "
                     f"{sell_planned_orders} Event Exit order{'s' if sell_planned_orders != 1 else ''} "
-                    f"so capital becomes free, then Step 2 will buy {buy_planned_orders} Stage 3 planned "
-                    f"order{'s' if buy_planned_orders != 1 else ''}."
+                    "so capital becomes free, then Step 2 will refresh live slots plus cash before "
+                    f"deciding how many of the {buy_planned_orders} ranked buy candidate"
+                    f"{'s' if buy_planned_orders != 1 else ''} can be submitted."
                 )
             elif sell_planned_orders > 0:
                 preparation_reason = (
                     f"Stage 3 reviewed all {total_decision_rows} rows. Step 1 will process "
-                    f"{sell_planned_orders} Event Exit order{'s' if sell_planned_orders != 1 else ''}. No Step 2 buys are "
-                    "planned."
+                    f"{sell_planned_orders} Event Exit order{'s' if sell_planned_orders != 1 else ''}. "
+                    + (
+                        "No ranked Stage 3 buy candidates are waiting for Step 2."
+                        if buy_planned_orders == 0
+                        else f"Step 2 will then refresh live slots plus cash for {buy_planned_orders} ranked buy candidate{'s' if buy_planned_orders != 1 else ''}."
+                    )
                 )
             else:
                 preparation_reason = (
                     f"Stage 3 reviewed all {total_decision_rows} rows. No Step 1 Event Exits are "
-                    f"needed, so Step 2 will buy {buy_planned_orders} Stage 3 planned "
-                    f"order{'s' if buy_planned_orders != 1 else ''}."
+                    "needed, so Step 2 will refresh live slots plus cash before "
+                    f"planning up to {buy_planned_orders} ranked buy candidate"
+                    f"{'s' if buy_planned_orders != 1 else ''}."
                 )
             report_invest_stage_progress(
                 phase_status="running",
@@ -6893,16 +7429,369 @@ class BullpenAutoLiveEngine:
         new_positions = position_snapshots[:]
         running_failed_orders = state.consecutive_failed_orders
 
-        for decision in decisions:
-            order_plan = decision.order_plan
-            if order_plan is None:
-                decision.stage_results.append(
-                    build_stage_result(
-                        stage_number=7,
-                        status="skipped",
-                        reason="No execution was needed for this row.",
-                    )
+        def _append_decision_stage_result(
+            decision: BullpenAutoLiveDecision,
+            *,
+            stage_number: int,
+            status: str,
+            reason: str,
+            outputs: dict[str, object] | None = None,
+            hard_block: bool = False,
+        ) -> None:
+            decision.stage_results.append(
+                build_stage_result(
+                    stage_number=stage_number,
+                    status=status,
+                    reason=reason,
+                    outputs=outputs,
+                    hard_block=hard_block,
                 )
+            )
+
+        def _mark_ranked_buy_candidate_unplanned(
+            decision: BullpenAutoLiveDecision,
+            *,
+            reason: str,
+            outputs: dict[str, object] | None = None,
+        ) -> None:
+            decision.reason = reason
+            decision.summary = reason
+            decision.target_exposure_usd = 0
+            decision.score = 0
+            decision.order_plan = None
+            _append_decision_stage_result(
+                decision,
+                stage_number=5,
+                status="warning",
+                reason=reason,
+                outputs=outputs,
+            )
+            _append_decision_stage_result(
+                decision,
+                stage_number=7,
+                status="warning",
+                reason=reason,
+                outputs=outputs,
+            )
+
+        def _plan_ranked_buy_candidate(
+            decision: BullpenAutoLiveDecision,
+            *,
+            order_usd: float,
+            cash_in_hand_usd: float,
+            occupied_positions: int,
+            available_slots: int,
+            order_usd_source: str,
+        ) -> None:
+            planned_reason = (
+                "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
+            )
+            plan_outputs = {
+                "order_usd": round(order_usd, 2),
+                "order_usd_source": order_usd_source,
+                "cash_in_hand_usd": round_money(cash_in_hand_usd),
+                "occupied_positions": occupied_positions,
+                "active_positions": occupied_positions,
+                "available_slots": available_slots,
+                "max_positions": CONSOLE_RANKED_EVENT_LIMIT,
+                "console_trade_last_calculated_usd": last_calculated_console_order_usd,
+                **stage2_universe_status,
+                **stage2_strategy_metadata,
+            }
+            decision.reason = planned_reason
+            decision.summary = planned_reason
+            decision.target_exposure_usd = round(order_usd, 2)
+            decision.score = round(order_usd, 2)
+            _append_decision_stage_result(
+                decision,
+                stage_number=5,
+                status="pass",
+                reason=planned_reason,
+                outputs=plan_outputs,
+            )
+            decision.order_plan = BullpenAutoLiveOrderPlan(
+                id=_auto_live_record_id(
+                    "order",
+                    run_id=run.id,
+                    market_id=decision.market_id,
+                    action=decision.decision,
+                ),
+                action="buy",
+                side=decision.side,
+                market_id=decision.market_id,
+                market_title=decision.market_title,
+                order_size_usd=round(order_usd, 2),
+                shares=0,
+                limit_price_cents=max(0.01, round(decision.price_cents, 2)),
+                max_slippage_cents=settings.max_slippage_cents,
+                dry_run=state.dry_run,
+                detail="Order planned after the post-exit wallet refresh.",
+                created_at=utc_now_iso(),
+            )
+
+        async def _refresh_stage3_buy_state() -> dict[str, object]:
+            if state.dry_run:
+                simulated_exit_market_ids = {
+                    decision.market_id
+                    for decision in sell_execution_decisions
+                    if decision.order_plan is not None
+                    and decision.order_plan.status in {"planned", "skipped"}
+                }
+                visible_active_market_ids = {
+                    position.market_id
+                    for position in position_snapshots
+                    if position.exposure_usd > 0
+                    and position.market_id not in simulated_exit_market_ids
+                }
+                pending_submitted_buy_market_ids = _pending_submitted_buy_market_ids(
+                    historical_decisions,
+                    visible_active_market_ids=visible_active_market_ids,
+                )
+                occupied_market_ids = (
+                    visible_active_market_ids | pending_submitted_buy_market_ids
+                )
+                cash_in_hand_usd = console_trade_amount_breakdown["cash_in_hand_usd"]
+                breakdown = build_console_trade_amount_breakdown(
+                    available_balance_usd=(
+                        float(cash_in_hand_usd)
+                        if isinstance(cash_in_hand_usd, (int, float))
+                        else None
+                    ),
+                    occupied_position_count=len(occupied_market_ids),
+                )
+                return {
+                    "source": "post_exit_simulation",
+                    "visible_active_market_ids": visible_active_market_ids,
+                    "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
+                    "occupied_market_ids": occupied_market_ids,
+                    "cash_in_hand_usd": breakdown["cash_in_hand_usd"],
+                    "occupied_positions": int(breakdown["occupied_positions"] or 0),
+                    "available_slots": int(breakdown["available_slots"] or 0),
+                    "max_positions": int(breakdown["max_positions"] or 0),
+                    "balance_status": "ready"
+                    if breakdown["cash_in_hand_usd"] is not None
+                    else "unavailable",
+                }
+
+            refreshed_wallet_positions = await read_console_wallet_positions()
+            visible_active_market_ids = {
+                position.market_id
+                for position in refreshed_wallet_positions
+                if not position.is_claimable
+                and is_displayable_bullpen_position(position.classification)
+            }
+            pending_submitted_buy_market_ids = _pending_submitted_buy_market_ids(
+                [*historical_decisions, *decisions],
+                visible_active_market_ids=visible_active_market_ids,
+            )
+            occupied_market_ids = visible_active_market_ids | pending_submitted_buy_market_ids
+            balance_state = await refresh_balance()
+            available_balance_usd = (
+                balance_state.available_balance_usd
+                if balance_state.status == "ready"
+                else None
+            )
+            breakdown = build_console_trade_amount_breakdown(
+                available_balance_usd=available_balance_usd,
+                occupied_position_count=len(occupied_market_ids),
+            )
+            return {
+                "source": "post_exit_live_refresh",
+                "visible_active_market_ids": visible_active_market_ids,
+                "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
+                "occupied_market_ids": occupied_market_ids,
+                "cash_in_hand_usd": breakdown["cash_in_hand_usd"],
+                "occupied_positions": int(breakdown["occupied_positions"] or 0),
+                "available_slots": int(breakdown["available_slots"] or 0),
+                "max_positions": int(breakdown["max_positions"] or 0),
+                "balance_status": balance_state.status,
+                "balance_message": balance_state.message,
+            }
+
+        async def _plan_stage3_buy_orders(
+            *,
+            step2_block_reason: str | None = None,
+        ) -> None:
+            nonlocal buy_execution_decisions, stage3_buy_refresh_snapshot
+
+            if not ranked_buy_candidate_decisions:
+                buy_execution_decisions = []
+                return
+
+            if step2_block_reason:
+                block_outputs = {
+                    "order_usd_source": "post_exit_blocked",
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
+                }
+                for decision in ranked_buy_candidate_decisions:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason=step2_block_reason,
+                        outputs=block_outputs,
+                    )
+                buy_execution_decisions = []
+                return
+
+            try:
+                refreshed_state = await _refresh_stage3_buy_state()
+            except Exception as exc:
+                refresh_reason = (
+                    "Stage 3 could not refresh Bullpen wallet state after Event Exits, so the ranked buys stayed deferred: "
+                    f"{exc}"
+                )
+                for decision in ranked_buy_candidate_decisions:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason=refresh_reason,
+                        outputs={
+                            "order_usd_source": "post_exit_refresh_failed",
+                            **stage2_universe_status,
+                            **stage2_strategy_metadata,
+                        },
+                    )
+                buy_execution_decisions = []
+                return
+
+            stage3_buy_refresh_snapshot = dict(refreshed_state)
+            occupied_market_ids = set(
+                refreshed_state["occupied_market_ids"]  # type: ignore[arg-type]
+            )
+            planned_buy_market_ids: set[str] = set()
+            remaining_cash = (
+                float(refreshed_state["cash_in_hand_usd"])
+                if isinstance(refreshed_state["cash_in_hand_usd"], (int, float))
+                else None
+            )
+
+            for decision in ranked_buy_candidate_decisions:
+                current_breakdown = build_console_trade_amount_breakdown(
+                    available_balance_usd=remaining_cash,
+                    occupied_position_count=len(occupied_market_ids),
+                )
+                current_occupied_positions = int(
+                    current_breakdown["occupied_positions"] or 0
+                )
+                current_available_slots = int(current_breakdown["available_slots"] or 0)
+                current_outputs = {
+                    "cash_in_hand_usd": current_breakdown["cash_in_hand_usd"],
+                    "occupied_positions": current_occupied_positions,
+                    "active_positions": current_occupied_positions,
+                    "available_slots": current_available_slots,
+                    "max_positions": int(current_breakdown["max_positions"] or 0),
+                    "order_usd_source": refreshed_state["source"],
+                    "console_trade_last_calculated_usd": last_calculated_console_order_usd,
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
+                }
+
+                if decision.market_id in occupied_market_ids:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason="Market already has an active or submitted Bullpen position after the post-exit refresh, so Stage 3 did not plan another buy.",
+                        outputs=current_outputs,
+                    )
+                    continue
+
+                if decision.market_id in planned_buy_market_ids:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason="Another ranked buy for this market was already planned earlier in the same run.",
+                        outputs=current_outputs,
+                    )
+                    continue
+
+                if remaining_cash is None:
+                    balance_reason = (
+                        "Fresh Bullpen cash in hand was unavailable after the post-exit refresh, so Stage 3 deferred new buys."
+                    )
+                    balance_message = refreshed_state.get("balance_message")
+                    if isinstance(balance_message, str) and balance_message.strip():
+                        balance_reason = f"{balance_reason.rstrip('.')} ({balance_message.strip()})"
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason=balance_reason,
+                        outputs=current_outputs,
+                    )
+                    continue
+
+                if current_available_slots <= 0:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason="All Bullpen slots were still occupied after the post-exit refresh, so no new buy was planned.",
+                        outputs=current_outputs,
+                    )
+                    continue
+
+                order_usd = float(current_breakdown["order_usd"] or 0.0)
+                if order_usd <= 0:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason="The refreshed post-exit cash balance did not leave a positive order size for this ranked candidate.",
+                        outputs=current_outputs,
+                    )
+                    continue
+
+                if order_usd < settings.min_order_usd:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason="The refreshed post-exit order size is below the minimum order amount, so Stage 3 deferred this buy.",
+                        outputs={
+                            **current_outputs,
+                            "order_usd": round(order_usd, 2),
+                        },
+                    )
+                    continue
+
+                if len(occupied_market_ids) + 1 > CONSOLE_RANKED_EVENT_LIMIT:
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason="Planning this buy would exceed the 10-position Bullpen limit, so the guardrail blocked it.",
+                        outputs=current_outputs,
+                    )
+                    continue
+
+                _plan_ranked_buy_candidate(
+                    decision,
+                    order_usd=order_usd,
+                    cash_in_hand_usd=remaining_cash,
+                    occupied_positions=current_occupied_positions,
+                    available_slots=current_available_slots,
+                    order_usd_source=str(refreshed_state["source"]),
+                )
+                occupied_market_ids.add(decision.market_id)
+                planned_buy_market_ids.add(decision.market_id)
+                remaining_cash = round(max(0.0, remaining_cash - order_usd), 2)
+
+            buy_execution_decisions = [
+                decision
+                for decision in ranked_buy_candidate_decisions
+                if decision.order_plan is not None
+                and decision.order_plan.status == "planned"
+                and decision.order_plan.action == "buy"
+            ]
+            report_invest_stage_progress(
+                phase_status="running",
+                reason=(
+                    "Stage 3 Step 2 refreshed wallet positions plus cash and planned "
+                    f"{len(buy_execution_decisions)} buy order"
+                    f"{'s' if len(buy_execution_decisions) != 1 else ''}."
+                ),
+                completed_items=processed_decision_rows,
+                execution_gate_reason=execution_pause_reason,
+                execution_mode_reason=simulation_reason if state.dry_run else None,
+                current_step_key="buy",
+                current_step_detail=(
+                    f"Cash in hand ${float(refreshed_state['cash_in_hand_usd']):.2f}"
+                    if isinstance(refreshed_state["cash_in_hand_usd"], (int, float))
+                    else "Cash in hand unavailable;"
+                )
+                + (
+                    f"occupied positions {refreshed_state['occupied_positions']}; "
+                    f"available slots {refreshed_state['available_slots']}."
+                ),
+                completed_at=None,
+            )
 
         def _stage3_step_number(step_key: str) -> int:
             return 1 if step_key == "sell" else 2
@@ -6947,7 +7836,7 @@ class BullpenAutoLiveEngine:
                 phase_status="running",
                 reason=(
                     f"Stage 3 Step {step_number} of 2 is submitting planned order "
-                    f"{pending_order_number} of {planned_orders}. Latest: {decision.market_title}"
+                    f"{pending_order_number} of {global_counts['planned']}. Latest: {decision.market_title}"
                 ),
                 completed_items=processed_decision_rows,
                 execution_gate_reason=execution_pause_reason,
@@ -7134,7 +8023,116 @@ class BullpenAutoLiveEngine:
                 )
                 return
 
+            async def _revalidate_buy_order_for_submission() -> bool:
+                nonlocal stage3_buy_refresh_snapshot
+                if order_plan.action != "buy":
+                    return True
+
+                refreshed_buy_state = await _refresh_stage3_buy_state()
+                stage3_buy_refresh_snapshot = dict(refreshed_buy_state)
+                current_breakdown = build_console_trade_amount_breakdown(
+                    available_balance_usd=(
+                        float(refreshed_buy_state["cash_in_hand_usd"])
+                        if isinstance(
+                            refreshed_buy_state["cash_in_hand_usd"],
+                            (int, float),
+                        )
+                        else None
+                    ),
+                    occupied_position_count=int(
+                        refreshed_buy_state["occupied_positions"] or 0
+                    ),
+                )
+                current_outputs = {
+                    "order_usd_source": refreshed_buy_state["source"],
+                    "cash_in_hand_usd": current_breakdown["cash_in_hand_usd"],
+                    "occupied_positions": int(
+                        current_breakdown["occupied_positions"] or 0
+                    ),
+                    "active_positions": int(
+                        current_breakdown["occupied_positions"] or 0
+                    ),
+                    "available_slots": int(current_breakdown["available_slots"] or 0),
+                    "max_positions": int(current_breakdown["max_positions"] or 0),
+                    "console_trade_last_calculated_usd": last_calculated_console_order_usd,
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
+                }
+
+                visible_active_market_ids = set(
+                    refreshed_buy_state["visible_active_market_ids"]  # type: ignore[arg-type]
+                )
+                pending_submitted_buy_market_ids = set(
+                    refreshed_buy_state["pending_submitted_buy_market_ids"]  # type: ignore[arg-type]
+                )
+                if (
+                    decision.market_id in visible_active_market_ids
+                    or decision.market_id in pending_submitted_buy_market_ids
+                ):
+                    order_plan.status = "deferred"
+                    order_plan.detail = (
+                        "This market already has an active or submitted Bullpen position after the latest refresh, so Stage 3 did not submit another buy."
+                    )
+                elif current_breakdown["cash_in_hand_usd"] is None:
+                    order_plan.status = "deferred"
+                    order_plan.detail = (
+                        "Fresh Bullpen cash in hand is unavailable, so Stage 3 deferred this buy instead of reusing a cached amount."
+                    )
+                elif int(current_breakdown["available_slots"] or 0) <= 0:
+                    order_plan.status = "deferred"
+                    order_plan.detail = (
+                        "All Bullpen slots are occupied after the latest refresh, so Stage 3 deferred this buy."
+                    )
+                elif int(current_breakdown["occupied_positions"] or 0) + 1 > CONSOLE_RANKED_EVENT_LIMIT:
+                    order_plan.status = "deferred"
+                    order_plan.detail = (
+                        "Submitting this order would exceed the 10-position Bullpen limit, so the guardrail deferred it."
+                    )
+                else:
+                    refreshed_order_usd = float(current_breakdown["order_usd"] or 0.0)
+                    if refreshed_order_usd < settings.min_order_usd:
+                        order_plan.status = "deferred"
+                        order_plan.detail = (
+                            "The refreshed post-exit order size is below the minimum order amount, so Stage 3 deferred this buy."
+                        )
+                    elif refreshed_order_usd <= 0:
+                        order_plan.status = "deferred"
+                        order_plan.detail = (
+                            "The refreshed post-exit cash balance did not leave a positive order size for this buy."
+                        )
+                    else:
+                        order_plan.order_size_usd = round(refreshed_order_usd, 2)
+                        decision.target_exposure_usd = round(refreshed_order_usd, 2)
+                        decision.score = round(refreshed_order_usd, 2)
+                        return True
+
+                _append_decision_stage_result(
+                    decision,
+                    stage_number=7,
+                    status="warning",
+                    reason=order_plan.detail,
+                    outputs={**current_outputs, **order_plan.model_dump(mode="json")},
+                )
+                _, step_processed, _ = _stage3_step_counts(step_key)
+                report_invest_stage_progress(
+                    phase_status="running",
+                    reason=(
+                        f"Stage 3 Step {step_number} of 2 processed {step_processed} of "
+                        f"{step_total_orders} buy orders. Latest: {decision.market_title}"
+                    ),
+                    completed_items=processed_decision_rows,
+                    execution_gate_reason=execution_pause_reason,
+                    execution_mode_reason=simulation_reason if state.dry_run else None,
+                    current_step_key=step_key,
+                    current_step_detail=order_plan.detail,
+                    completed_at=None,
+                )
+                return False
+
             quote_price_cents = order_plan.limit_price_cents
+            if order_plan.action == "buy" and not state.dry_run:
+                if not await _revalidate_buy_order_for_submission():
+                    return
             if not state.dry_run:
                 quote = await refresh_execution_quote(slug=decision.slug, side=order_plan.side)
                 quote_price_cents = quote.current_price_cents or order_plan.limit_price_cents
@@ -7466,6 +8464,8 @@ class BullpenAutoLiveEngine:
                         )
                         if collateral_confirmed:
                             try:
+                                if not await _revalidate_buy_order_for_submission():
+                                    return
                                 order_plan.execution_response = await _submit_buy_order()
                                 _record_submitted_buy_position()
                                 order_plan.status = "submitted"
@@ -7619,6 +8619,7 @@ class BullpenAutoLiveEngine:
 
         for decision in sell_execution_decisions:
             await _execute_actionable_decision(decision, step_key="sell")
+        step2_block_reason: str | None = None
         if sell_execution_decisions and not state.dry_run:
             _, available_balance_after_step1 = await _poll_exit_settlement(
                 decisions=sell_execution_decisions,
@@ -7644,19 +8645,7 @@ class BullpenAutoLiveEngine:
                     else "An earlier sell/redeem did not settle cleanly, so dependent buys "
                     "stayed waiting for collateral instead of submitting a new write."
                 )
-                for decision in buy_execution_decisions:
-                    if decision.order_plan is None or decision.order_plan.status != "planned":
-                        continue
-                    decision.order_plan.status = "waiting_for_collateral"
-                    decision.order_plan.detail = waiting_reason
-                    decision.stage_results.append(
-                        build_stage_result(
-                            stage_number=7,
-                            status="warning",
-                            reason=waiting_reason,
-                            outputs=decision.order_plan.model_dump(mode="json"),
-                        )
-                    )
+                step2_block_reason = waiting_reason
                 report_invest_stage_progress(
                     phase_status="running",
                     reason=(
@@ -7678,8 +8667,18 @@ class BullpenAutoLiveEngine:
                 and available_balance_after_step1 > available_balance_before_step1
             ):
                 available_balance_before_step1 = available_balance_after_step1
+        await _plan_stage3_buy_orders(step2_block_reason=step2_block_reason)
         for decision in buy_execution_decisions:
             await _execute_actionable_decision(decision, step_key="buy")
+
+        for decision in decisions:
+            if decision.order_plan is None and _decision_stage_result(decision, 7) is None:
+                _append_decision_stage_result(
+                    decision,
+                    stage_number=7,
+                    status="skipped",
+                    reason="No execution was needed for this row.",
+                )
 
         state.consecutive_failed_orders = running_failed_orders
         for decision in decisions:
@@ -7796,8 +8795,18 @@ class BullpenAutoLiveEngine:
                     "top_table_size": len(top_rows),
                     "active_rows_ranked": len(active_rank_rows),
                     "qualified_candidate_rows": len(candidate_rank_rows),
-                    "top_candidate_market_ids": sorted(top_candidate_market_ids),
+                    "top_candidate_market_ids": list(
+                        ranked_post_exit_candidate_market_id_order
+                    ),
+                    "ranked_top_candidate_market_ids": list(
+                        ranked_post_exit_candidate_market_id_order
+                    ),
+                    "ranking_top_candidate_market_id_order": list(
+                        ranked_post_exit_candidate_market_id_order
+                    ),
                     "top_active_keys": sorted(top_active_keys),
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
                     "active_position_rows": active_position_rows_before_llm,
                     "claimable_position_rows": len(claimable_wallet_positions),
                     "candidate_decision_rows": len(candidate_contexts),
@@ -7857,6 +8866,7 @@ class BullpenAutoLiveEngine:
                     "execution_gate_reason": execution_pause_reason,
                     "execution_failure_message": execution_issue_summary,
                     "execution_mode_reason": simulation_reason if state.dry_run else None,
+                    "post_exit_buy_refresh": stage3_buy_refresh_snapshot,
                     "order_issues": live_order_issues,
                     "decision_summaries": [
                         {

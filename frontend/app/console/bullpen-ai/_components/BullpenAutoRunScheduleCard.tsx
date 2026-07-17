@@ -58,6 +58,7 @@ import {
   buildBullpenAutoRunWorkflowView,
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
+import { BullpenStage2To3StrategyDialog } from "./BullpenStage2To3StrategyDialog";
 import {
   buildBullpenStage3InvestPreviewSteps,
   buildBullpenStage3OnlyInvestExecutionPlan,
@@ -88,11 +89,27 @@ import {
   buildStageTwoEventsSummaryRows as buildHistoricalStageTwoEventsSummaryRows,
   getStageTwoLlmReviewedRows as getHistoricalStageTwoLlmReviewedRows,
   getStageTwoLlmTableRows as getHistoricalStageTwoLlmTableRows,
+  resolveStageTwoEventsSummaryUpdatedAt,
+  resolveStageTwoHistoricalAsOfTimestamp,
 } from "./bullpenAutoRunStageTwoHistory";
 import {
   formatElapsedRunTime,
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
+import {
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_FIELD,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_TIE_BREAK,
+  formatBullpenStage2To3RankingFieldLabel,
+  formatBullpenStage2To3RankingTieBreakLabel,
+  formatBullpenStage2To3SizingFormulaLabel,
+  mergeBullpenStage2To3StrategyOutputs,
+  readBullpenStage2To3StrategyMetadata,
+  readBullpenStage2UniverseStatus,
+  type BullpenStage2To3StrategyMetadata,
+  type BullpenStage2UniverseStatus,
+} from "./bullpenStage2To3Strategy";
 
 const BULLPEN_LOGIN_COMMAND =
   "sudo -u investor env HOME=/home/investor BULLPEN_BIN=/usr/local/bin/bullpen /usr/local/bin/bullpen login --no-browser";
@@ -208,6 +225,12 @@ type StageTwoLlmEventInputDialogState = {
   llmContext: Record<string, unknown> | null;
 };
 
+type Stage2To3StrategyDialogState = {
+  sourceKey: string;
+  strategyMetadata: BullpenStage2To3StrategyMetadata;
+  universeStatus: BullpenStage2UniverseStatus;
+};
+
 type StageTwoLlmRunBreakupKind =
   | "active-positions"
   | "new-opportunities"
@@ -236,7 +259,8 @@ type ScanCandidateDialogCandidate = ReturnType<
 
 const CONSOLE_PROFILE_ID = "bullpen_console_top10";
 const DEFAULT_CONSOLE_ORDER_USD = 5;
-const CONSOLE_MAX_ACTIVE_POSITIONS = 10;
+const CONSOLE_MAX_ACTIVE_POSITIONS =
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS;
 const DEFAULT_LLM_EXECUTION_MODE: BullpenLlmExecutionMode = "chunked_parallel";
 const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
 // The summary already includes the recent runs and decisions. Refreshing it at
@@ -1052,6 +1076,23 @@ function findRunStage(
       (stage) => stage.stage_number === fallbackStageNumber,
     ) ??
     null
+  );
+}
+
+function resolveStage2To3StrategyDialogOutputs(
+  run: BullpenAutoLiveRun | null,
+  primaryOutputs: Record<string, unknown> | null,
+) {
+  const llmStage = findRunStage(run, "llm", 2);
+  const investStage = findRunStage(run, "invest", 3);
+  const rankingStage =
+    run?.stage_results.find((stage) => stage.stage_number === 6) ?? null;
+
+  return mergeBullpenStage2To3StrategyOutputs(
+    isRecord(llmStage?.outputs) ? llmStage.outputs : null,
+    isRecord(investStage?.outputs) ? investStage.outputs : null,
+    isRecord(rankingStage?.outputs) ? rankingStage.outputs : null,
+    primaryOutputs,
   );
 }
 
@@ -1934,7 +1975,7 @@ function InvestExecutionStepsSummary({
   compact?: boolean;
   onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
   onOpenEventExitInfo?: () => void;
-  onOpenInvestEligibilityInfo?: () => void;
+  onOpenInvestEligibilityInfo?: (trigger: HTMLButtonElement | null) => void;
 }) {
   if (steps.length === 0) return null;
 
@@ -2040,10 +2081,14 @@ function InvestExecutionStepsSummary({
                   {step.key === "buy" && onOpenInvestEligibilityInfo ? (
                     <button
                       type="button"
-                      onClick={onOpenInvestEligibilityInfo}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenInvestEligibilityInfo(event.currentTarget);
+                      }}
                       className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-white/80 bg-white/70 ${toneClasses.text}`}
-                      aria-label="Explain Stage 2 planned-order eligibility"
-                      title="Explain Stage 2 planned-order eligibility"
+                      aria-label="Explain Stage 2 to Stage 3 planned strategy"
+                      title="Explain Stage 2 to Stage 3 planned strategy"
+                      aria-haspopup="dialog"
                     >
                       <Info className="h-3.5 w-3.5" />
                     </button>
@@ -3722,7 +3767,10 @@ function getStageTwoLlmReviewedRows(
   return getHistoricalStageTwoLlmReviewedRows(stage, scanCandidates);
 }
 
-function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
+function getStageTwoLlmTableRows(
+  state: StageTwoLlmRunDialogState,
+  asOfTimestamp?: string | number | Date | null,
+) {
   const scanCandidates =
     state.run
       ? (buildBullpenAutoRunWorkflowView(state.run).stages.find(
@@ -3736,6 +3784,7 @@ function getStageTwoLlmTableRows(state: StageTwoLlmRunDialogState) {
   return getHistoricalStageTwoLlmTableRows({
     reviewedRows,
     decisions: state.decisions,
+    asOfTimestamp,
   });
 }
 
@@ -3743,12 +3792,58 @@ function buildStageTwoEventsSummaryRows(
   reviewedRows: ReturnType<typeof getStageTwoLlmReviewedRows>,
   decisions: BullpenAutoLiveDecision[],
   runId: string | number | null,
+  asOfTimestamp?: string | number | Date | null,
 ): BullpenQuestionRow[] {
   return buildHistoricalStageTwoEventsSummaryRows({
     reviewedRows,
     decisions,
     runId,
+    asOfTimestamp,
   });
+}
+
+function getRunWorkflowStageResult(
+  run: BullpenAutoLiveRun | null | undefined,
+  workflowStageKey: "scan" | "llm" | "invest",
+  stageNumber: number,
+) {
+  if (!run) return null;
+  return (
+    run.stage_results.find(
+      (stage) =>
+        readLlmContextString(
+          (stage.outputs as Record<string, unknown> | null) ?? null,
+          "workflow_stage_key",
+        ) === workflowStageKey,
+    ) ??
+    run.stage_results.find((stage) => stage.stage_number === stageNumber) ??
+    null
+  );
+}
+
+function formatStageTwoSummaryMessage({
+  completed,
+  partial,
+  failed,
+}: {
+  completed: number;
+  partial: number;
+  failed: number;
+}) {
+  if (partial <= 0 && failed <= 0) return null;
+
+  const fragments = [
+    `${completed} completed`,
+    `${partial} partial`,
+    `${failed} failed`,
+  ].filter((fragment) => !fragment.startsWith("0 "));
+
+  if (fragments.length === 0) return null;
+  if (fragments.length === 1) return `Partial results: ${fragments[0]}.`;
+  if (fragments.length === 2) {
+    return `Partial results: ${fragments[0]} and ${fragments[1]}.`;
+  }
+  return `Partial results: ${fragments[0]}, ${fragments[1]} and ${fragments[2]}.`;
 }
 
 function groupStageTwoLlmRowsByModel(
@@ -4211,7 +4306,7 @@ function getStageTwoRunSummaryStatusLabel(status: StageTwoRunSummaryStatus) {
   return "Failed";
 }
 
-function StageTwoLlmRunDetailsDialog({
+export function StageTwoLlmRunDetailsDialog({
   state,
   onClose,
 }: {
@@ -4242,18 +4337,31 @@ function StageTwoLlmRunDetailsDialog({
     0,
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
-  const scanCandidates =
-    state.run
-      ? (buildBullpenAutoRunWorkflowView(state.run).stages.find(
-          (workflowStage) => workflowStage.key === "scan",
-        )?.scanCandidates ?? [])
-      : [];
+  const workflowView = state.run ? buildBullpenAutoRunWorkflowView(state.run) : null;
+  const scanWorkflowStage =
+    workflowView?.stages.find((workflowStage) => workflowStage.key === "scan") ?? null;
+  const scanCandidates = scanWorkflowStage?.scanCandidates ?? [];
+  const scanStageResult = getRunWorkflowStageResult(state.run, "scan", 1);
+  const llmStageResult = getRunWorkflowStageResult(state.run, "llm", 2);
   const reviewedRows = getStageTwoLlmReviewedRows(state.stage, scanCandidates);
-  const llmTableRows = getStageTwoLlmTableRows(state);
+  const eventsSummaryAsOfTimestamp = resolveStageTwoHistoricalAsOfTimestamp({
+    reviewedRows,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+    stageCompletedAt: llmStageResult?.completed_at ?? state.stage.timerCompletedAt,
+    runStartedAt: state.run?.started_at ?? state.stage.timerStartedAt,
+    runCompletedAt: state.run?.completed_at ?? null,
+    nowMs: dialogNowMs,
+  });
+  const llmTableRows = getStageTwoLlmTableRows(
+    state,
+    eventsSummaryAsOfTimestamp,
+  );
   const eventsSummaryRows = buildStageTwoEventsSummaryRows(
     reviewedRows,
     state.decisions,
     state.run?.id ?? null,
+    eventsSummaryAsOfTimestamp,
   );
   const availableLlmDecisionRows = llmTableRows.filter(
     (row) => row.output && !readLlmContextString(row.output, "error"),
@@ -4285,14 +4393,25 @@ function StageTwoLlmRunDetailsDialog({
     explicitPendingSummaryCount,
     stats.llmsSelected - returnedSummaryCount,
   );
+  const eventsSummaryUpdatedAt = resolveStageTwoEventsSummaryUpdatedAt({
+    reviewedRows,
+    stageCompletedAt: llmStageResult?.completed_at ?? state.stage.timerCompletedAt,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+  });
+  const eventsSummaryStatusMessage = formatStageTwoSummaryMessage({
+    completed: completedSummaryCount,
+    partial: partialSummaryCount,
+    failed: failedSummaryCount,
+  });
   const eventsSummaryUpdateUnavailableReason =
-    runningSummaryCount > 0 || pendingSummaryCount > 0
+    eventsSummaryUpdatedAt
+      ? undefined
+      : runningSummaryCount > 0 || pendingSummaryCount > 0
       ? "Timestamp unavailable while Stage 2 results are still being fetched."
       : failedSummaryCount > 0 && completedSummaryCount === 0
         ? "Timestamp unavailable because Stage 2 did not return any completed model results."
-        : failedSummaryCount > 0 || partialSummaryCount > 0
-          ? "Timestamp unavailable because Stage 2 completed with partial results."
-          : "Timestamp was not included in this Stage 2 result.";
+        : "Timestamp was not included in this Stage 2 result.";
   const cumulativeCost = summaryRows.reduce(
     (total, row) => total + (row.cost ?? 0),
     0,
@@ -4341,8 +4460,11 @@ function StageTwoLlmRunDetailsDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+    <div
+      data-testid="stage-two-llm-run-dialog"
+      className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4"
+    >
+      <div className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1500px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
@@ -4372,7 +4494,10 @@ function StageTwoLlmRunDetailsDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-auto px-6 py-5">
+        <div
+          data-testid="stage-two-llm-run-dialog-body"
+          className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-5"
+        >
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -4498,13 +4623,16 @@ function StageTwoLlmRunDetailsDialog({
                 </table>
               </div>
             </div>
-            <div className="mt-5">
+            <div data-testid="stage-two-events-summary" className="mt-5">
               <BullpenQuestionsTable
                 snapshot={null}
                 rowsOverride={eventsSummaryRows}
                 emptyMessage="No Events Summary rows were returned for this Stage 2 run."
                 headerContent={null}
+                updatedAt={eventsSummaryUpdatedAt}
+                updateStatusMessage={eventsSummaryStatusMessage ?? undefined}
                 updateUnavailableReason={eventsSummaryUpdateUnavailableReason}
+                scrollResetKey={state.run?.id ?? "stage-two-llm-run"}
                 isLoading={false}
                 onSortChange={handleEventsSummarySortChange}
                 selectedQuestionIds={new Set<string>()}
@@ -5711,7 +5839,7 @@ function InvestMetricDetailsDialog({
   onClose: () => void;
   onSelectKind: (kind: InvestMetricDialogKind) => void;
   onOpenEventExitInfo?: () => void;
-  onOpenInvestEligibilityInfo?: () => void;
+  onOpenInvestEligibilityInfo?: (trigger: HTMLButtonElement | null) => void;
 }) {
   const metricDefinition = getInvestMetricDialogDefinition(state.kind);
   const rows = getInvestMetricRows(state.kind, state.decisions);
@@ -6888,10 +7016,10 @@ export function BullpenAutoRunScheduleCard({
     useState(false);
   const [isLlmExecutionModePickerOpen, setIsLlmExecutionModePickerOpen] =
     useState(false);
-  const [
-    isInvestEligibilityInfoDialogOpen,
-    setIsInvestEligibilityInfoDialogOpen,
-  ] = useState(false);
+  const stage2To3StrategyDialogTriggerRef =
+    useRef<HTMLButtonElement | null>(null);
+  const [stage2To3StrategyDialog, setStage2To3StrategyDialog] =
+    useState<Stage2To3StrategyDialogState | null>(null);
   const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
     useState(false);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
@@ -7638,6 +7766,22 @@ export function BullpenAutoRunScheduleCard({
       }),
     });
   };
+  const openStage2To3StrategyDialog = ({
+    trigger,
+    sourceKey,
+    outputs,
+  }: {
+    trigger: HTMLButtonElement | null;
+    sourceKey: string;
+    outputs: Record<string, unknown> | null;
+  }) => {
+    stage2To3StrategyDialogTriggerRef.current = trigger;
+    setStage2To3StrategyDialog({
+      sourceKey,
+      strategyMetadata: readBullpenStage2To3StrategyMetadata(outputs),
+      universeStatus: readBullpenStage2UniverseStatus(outputs),
+    });
+  };
   const openRunDetailDialog = (run: BullpenAutoLiveRun) => {
     const stage =
       buildBullpenAutoRunWorkflowView(run).stages.find(
@@ -7686,11 +7830,17 @@ export function BullpenAutoRunScheduleCard({
       summary?.state.last_console_trade_max_positions ?? null,
   });
   const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
+  const tradeAmountHelperMessage =
+    tradeAmountView.source === "live"
+      ? "Uses the latest visible cash in hand and open slots for a preview; the worker revalidates occupied slots, pending buys, and fresh balance again before every live submission."
+      : tradeAmountView.source === "last-calculated"
+        ? "Showing the last calculated diagnostic amount until the next fresh balance sync finishes. That cached value never authorizes a live buy."
+        : "Waiting for Bullpen cash in hand and occupied-slot data to calculate this amount.";
   const tradeAmountSummaryLabel =
     tradeAmountView.source === "live"
-      ? "Auto-calculated from current portfolio"
+      ? "Preview from current portfolio"
       : tradeAmountView.source === "last-calculated"
-        ? "Showing last calculated amount"
+        ? "Showing last diagnostic amount"
         : "Waiting for live portfolio data";
 
   useEffect(() => {
@@ -8404,30 +8554,92 @@ export function BullpenAutoRunScheduleCard({
 
                   {investStageCounters.length > 0 ? (
                     <div className="mt-3 grid grid-cols-2 gap-2">
-                      {investStageCounters.map((counter) => (
-                        <button
-                          key={counter.label}
-                          type="button"
-                          onClick={() =>
-                            openInvestMetricDialog(
-                              counter.label.toLowerCase() as InvestMetricDialogKind,
-                            )
-                          }
-                          className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 dark:border-slate-700/80 dark:bg-slate-950/70 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300"
-                          aria-label={`Open Stage 3 ${counter.label.toLowerCase()} details`}
-                        >
-                          <p
-                            className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                      {investStageCounters.map((counter) => {
+                        const counterKind =
+                          counter.label.toLowerCase() as InvestMetricDialogKind;
+                        const plannedStrategySourceKey = `workflow-stage-${stage.key}-planned`;
+                        const isPlannedCounter =
+                          stage.key === "invest" && counter.label === "Planned";
+
+                        if (!isPlannedCounter) {
+                          return (
+                            <button
+                              key={counter.label}
+                              type="button"
+                              onClick={() => openInvestMetricDialog(counterKind)}
+                              className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 dark:border-slate-700/80 dark:bg-slate-950/70"
+                              aria-label={`Open Stage 3 ${counter.label.toLowerCase()} details`}
+                            >
+                              <p
+                                className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                              >
+                                {counter.label}
+                              </p>
+                              <p
+                                className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}
+                              >
+                                {counter.value}
+                              </p>
+                            </button>
+                          );
+                        }
+
+                        return (
+                          <div
+                            key={counter.label}
+                            className="relative rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left transition hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white dark:border-slate-700/80 dark:bg-slate-950/70"
                           >
-                            {counter.label}
-                          </p>
-                          <p
-                            className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}
-                          >
-                            {counter.value}
-                          </p>
-                        </button>
-                      ))}
+                            <button
+                              type="button"
+                              onClick={() => openInvestMetricDialog(counterKind)}
+                              className="absolute inset-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-300"
+                              aria-label="Open Stage 3 planned details"
+                            />
+                            <div className="pointer-events-none relative z-10">
+                              <div className="flex items-center gap-1.5">
+                                <p
+                                  className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
+                                >
+                                  Planned
+                                </p>
+                                <button
+                                  type="button"
+                                  data-testid="stage3-planned-strategy-button"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    openStage2To3StrategyDialog({
+                                      trigger: event.currentTarget,
+                                      sourceKey: plannedStrategySourceKey,
+                                      outputs: resolveStage2To3StrategyDialogOutputs(
+                                        workflowRun,
+                                        isRecord(stage.outputs)
+                                          ? stage.outputs
+                                          : null,
+                                      ),
+                                    });
+                                  }}
+                                  className={`pointer-events-auto inline-flex h-5 w-5 items-center justify-center rounded-full border border-current/30 bg-white/85 ${toneClasses.text} transition hover:bg-white`}
+                                  aria-label="Explain Stage 2 to Stage 3 planned strategy"
+                                  title="Explain Stage 2 to Stage 3 planned strategy"
+                                  aria-haspopup="dialog"
+                                  aria-expanded={
+                                    stage2To3StrategyDialog?.sourceKey ===
+                                    plannedStrategySourceKey
+                                  }
+                                >
+                                  <Info className="h-3 w-3" />
+                                </button>
+                              </div>
+                              <p
+                                className={`mt-1 text-sm font-semibold tabular-nums ${toneClasses.text}`}
+                              >
+                                {counter.value}
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : null}
 
@@ -8442,8 +8654,15 @@ export function BullpenAutoRunScheduleCard({
                         onOpenEventExitInfo={() =>
                           setIsEventExitStrategiesDialogOpen(true)
                         }
-                        onOpenInvestEligibilityInfo={() =>
-                          setIsInvestEligibilityInfoDialogOpen(true)
+                        onOpenInvestEligibilityInfo={(trigger) =>
+                          openStage2To3StrategyDialog({
+                            trigger,
+                            sourceKey: `workflow-stage-${stage.key}-buy-step`,
+                            outputs: resolveStage2To3StrategyDialogOutputs(
+                              workflowRun,
+                              isRecord(stage.outputs) ? stage.outputs : null,
+                            ),
+                          })
                         }
                       />
                     </div>
@@ -8812,82 +9031,32 @@ export function BullpenAutoRunScheduleCard({
           />
         ) : null}
 
-        {isInvestEligibilityInfoDialogOpen ? (
-          <div
-            className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget) {
-                setIsInvestEligibilityInfoDialogOpen(false);
-              }
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="bullpen-stage3-eligibility-title"
-              className="w-full max-w-2xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
-            >
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-600">
-                    Stage 3 Planned Queue
-                  </p>
-                  <h2
-                    id="bullpen-stage3-eligibility-title"
-                    className="mt-2 text-xl font-semibold text-slate-950"
-                  >
-                    How Stage 2 events become eligible to invest
-                  </h2>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsInvestEligibilityInfoDialogOpen(false)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                  aria-label="Close planned queue eligibility details"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-700">
-                <p>
-                  Stage 3 only plans buy orders for Stage 2 candidate events
-                  that have already passed the qualification and ranking checks.
-                </p>
-                <ul className="list-disc space-y-2 pl-5">
-                  <li>
-                    Stage 2 must first keep the event{" "}
-                    <span className="font-semibold">qualified</span>: rules
-                    parsing, disagreement, adjudication, and manual selection
-                    are shown for review, but only a strong LLM side and
-                    computable returns/day are required before Stage 3 ranking.
-                  </li>
-                  <li>
-                    Those qualified candidates are then ranked together with
-                    active Bullpen positions by{" "}
-                    <span className="font-semibold">returns/day</span>.
-                  </li>
-                  <li>
-                    Only candidates that land inside the fixed{" "}
-                    <span className="font-semibold">
-                      top-10 investable table
-                    </span>{" "}
-                    are added to Stage 3&apos;s planned buy queue.
-                  </li>
-                  <li>
-                    Step 1 Event Exits run first to free capital, and any buy
-                    still depends on live execution guardrails before
-                    submission.
-                  </li>
-                  <li>
-                    In invest-only reuse mode, Stage 3 uses the {"latest Stage 2-qualified rows and skips the Bullpen rescan plus LLM rerun"}; markets that are already in the Bullpen wallet or
-                    were already submitted from the saved run are skipped
-                    instead of being re-planned.
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        ) : null}
+        <BullpenStage2To3StrategyDialog
+          open={Boolean(stage2To3StrategyDialog)}
+          onClose={() => setStage2To3StrategyDialog(null)}
+          triggerRef={stage2To3StrategyDialogTriggerRef}
+          minLlmSideOdds={
+            stage2To3StrategyDialog?.strategyMetadata.minLlmSideOdds ??
+            DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS
+          }
+          maxPositions={
+            stage2To3StrategyDialog?.strategyMetadata.maxPositions ??
+            DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS
+          }
+          rankingFieldLabel={formatBullpenStage2To3RankingFieldLabel(
+            stage2To3StrategyDialog?.strategyMetadata.rankingField ??
+              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_FIELD,
+          )}
+          rankingTieBreakLabel={formatBullpenStage2To3RankingTieBreakLabel(
+            stage2To3StrategyDialog?.strategyMetadata.rankingTieBreak ??
+              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_TIE_BREAK,
+          )}
+          sizingFormulaLabel={formatBullpenStage2To3SizingFormulaLabel(
+            stage2To3StrategyDialog?.strategyMetadata.maxPositions ??
+              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+          )}
+          universeStatus={stage2To3StrategyDialog?.universeStatus ?? null}
+        />
 
         {scanCandidateDialog ? (
           <StageOneOutputDialog
@@ -8932,7 +9101,9 @@ export function BullpenAutoRunScheduleCard({
                     Trade amount formula
                   </p>
                   <h3 className="mt-1 text-xl font-semibold">
-                    Cash in Hand / (10 - Active positions)
+                    {formatBullpenStage2To3SizingFormulaLabel(
+                      CONSOLE_MAX_ACTIVE_POSITIONS,
+                    )}
                   </h3>
                 </div>
                 <button
@@ -8954,10 +9125,10 @@ export function BullpenAutoRunScheduleCard({
                   </p>
                   <p className="mt-2 text-sm text-slate-600">
                     {tradeAmountView.source === "live"
-                      ? "Calculated from the latest Bullpen portfolio snapshot."
+                      ? "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
                       : tradeAmountView.source === "last-calculated"
-                        ? "Showing the last successful calculation until a fresh balance sync completes."
-                        : "Waiting for Bullpen cash in hand and active position data."}
+                        ? "Showing the last successful diagnostic calculation until a fresh balance sync completes. That cached amount is never used as a live-buy fallback."
+                        : "Waiting for Bullpen cash in hand and occupied-slot data."}
                   </p>
                 </div>
 
@@ -8981,7 +9152,7 @@ export function BullpenAutoRunScheduleCard({
                       {[
                         ["Cash in hand", formatMoney(tradeAmountView.cashInHandUsd)],
                         [
-                          "Active positions",
+                          "Occupied positions",
                           tradeAmountView.activePositions.toLocaleString("en-IN"),
                         ],
                         [
@@ -9031,8 +9202,18 @@ export function BullpenAutoRunScheduleCard({
               openRunInvestMetricDialog(investMetricDialog.run, kind)
             }
             onOpenEventExitInfo={() => setIsEventExitStrategiesDialogOpen(true)}
-            onOpenInvestEligibilityInfo={() =>
-              setIsInvestEligibilityInfoDialogOpen(true)
+            onOpenInvestEligibilityInfo={(trigger) =>
+              openStage2To3StrategyDialog({
+                trigger,
+                sourceKey: `invest-metric-${investMetricDialog.run.id}-${investMetricDialog.kind}`,
+                outputs: resolveStage2To3StrategyDialogOutputs(
+                  investMetricDialog.run,
+                  investMetricDialog.stage &&
+                    isRecord(investMetricDialog.stage.outputs)
+                    ? investMetricDialog.stage.outputs
+                    : null,
+                ),
+              })
             }
           />
         ) : null}

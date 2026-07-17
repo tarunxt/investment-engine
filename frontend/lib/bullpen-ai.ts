@@ -3,6 +3,10 @@ import type {
   PolymarketEventQuestionRuntimeMetadata,
   PolymarketEventRuntimeMetadata,
 } from "@/types/api";
+import {
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
+  hasBullpenQualifiedLlmSide,
+} from "@/lib/bullpenStage2To3Strategy";
 
 export type ScanMode = "30-days" | "end-of-month";
 
@@ -161,6 +165,10 @@ export type BullpenLlmAnalysisPayload = {
 export type BullpenQuestionLlmBreakdownItem = {
   provider: string;
   model: string;
+  requestedModel?: string | null;
+  actualModel?: string | null;
+  status?: string | null;
+  providerError?: string | null;
   jobId: number | null;
   runId: number | null;
   timestamp: string | null;
@@ -1052,7 +1060,8 @@ export function getBullpenAmountToBeInvestedBreakdown({
   BullpenQuestionRow,
   "llmYesOdds" | "llmNoOdds" | "returnsPerDay"
 >): BullpenAmountToBeInvestedBreakdown {
-  const minStrongestLlmOdds = 80;
+  const minStrongestLlmOdds =
+    DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS;
   const strongestLlmOdds = Math.max(llmYesOdds ?? -Infinity, llmNoOdds ?? -Infinity);
   const normalizedStrongestLlmOdds = Number.isFinite(strongestLlmOdds)
     ? strongestLlmOdds
@@ -1078,16 +1087,10 @@ export function isBullpenQuestionInvestmentCandidate(
   question: Pick<
     BullpenQuestionRow,
     "llmYesOdds" | "llmNoOdds" | "returnsPerDay" | "amountToBeInvested"
-  > &
-    Partial<
-      Pick<BullpenQuestionRow, "llmDisagreementLevel" | "adjudicationRequired">
-    >,
+  >,
 ) {
   return (
     question.returnsPerDay !== null &&
-    question.amountToBeInvested !== null &&
-    question.llmDisagreementLevel !== "High" &&
-    !question.adjudicationRequired &&
     hasBullpenStrongLlmOdds(question)
   );
 }
@@ -1098,14 +1101,7 @@ export function hasBullpenStrongLlmOdds(
     | null
     | undefined,
 ) {
-  return Boolean(
-    (question?.llmYesOdds !== null &&
-      question?.llmYesOdds !== undefined &&
-      question.llmYesOdds >= 80) ||
-      (question?.llmNoOdds !== null &&
-        question?.llmNoOdds !== undefined &&
-        question.llmNoOdds >= 80),
-  );
+  return hasBullpenQualifiedLlmSide(question);
 }
 
 function pickBullpenConsensusLabel(
@@ -1200,8 +1196,6 @@ export function createBullpenQuestionRow(
     llmNoOdds,
     returnsPerDay,
     amountToBeInvested,
-    llmDisagreementLevel: llmConsensus.llmDisagreementLevel,
-    adjudicationRequired: llmConsensus.adjudicationRequired,
   });
 
   return {
@@ -1567,135 +1561,222 @@ function normalizeBullpenLlmBreakdown(
   if (!Array.isArray(value)) return [];
 
   return value
-    .map((entry): BullpenQuestionLlmBreakdownItem | null => {
-      if (!entry || typeof entry !== "object") return null;
-      const record = entry as Record<string, unknown>;
-      const provider = readStringValue(record.provider);
-      const model = readStringValue(record.model);
-      if (!provider || !model) return null;
-      const normalizedOdds = normalizeOddsPair(
-        extractNumber(record.llmYesOdds ?? record.llm_yes_odds),
-        extractNumber(record.llmNoOdds ?? record.llm_no_odds),
-      );
-      const rationaleText =
-        readStringValue(record.rationale) ||
-        readStringValue(record.reasoning) ||
-        readStringValue(record.notes) ||
-        readStringValue(record.note) ||
-        readStringValue(record.explanation) ||
-        readStringValue(record.summary) ||
-        null;
-      const rationaleMismatch = detectBullpenRationaleOddsMismatch(
-        rationaleText,
-        normalizedOdds.yes,
-      );
-
-      return {
-        provider,
-        model,
-        jobId:
-          typeof record.jobId === "number" && Number.isFinite(record.jobId)
-            ? record.jobId
-            : typeof record.job_id === "number" && Number.isFinite(record.job_id)
-              ? record.job_id
-              : null,
-        runId:
-          typeof record.runId === "number" && Number.isFinite(record.runId)
-            ? record.runId
-            : typeof record.run_id === "number" && Number.isFinite(record.run_id)
-              ? record.run_id
-              : null,
-        timestamp:
-          readStringValue(record.timestamp) ||
-          readStringValue(record.completedAt) ||
-          readStringValue(record.completed_at) ||
-          null,
-        llmYesOdds: normalizedOdds.yes,
-        llmNoOdds: normalizedOdds.no,
-        yesDefinition:
-          readStringValue(record.yesDefinition) ||
-          readStringValue(record.yes_definition) ||
-          null,
-        deadlineEt:
-          readStringValue(record.deadlineEt) ||
-          readStringValue(record.deadline_et) ||
-          null,
-        hoursRemaining: roundBullpenValue(
-          extractNumber(record.hoursRemaining ?? record.hours_remaining),
-        ),
-        evidenceStatus:
-          readStringValue(record.evidenceStatus) ||
-          readStringValue(record.evidence_status) ||
-          null,
-        eventState:
-          readStringValue(record.eventState) ||
-          readStringValue(record.event_state) ||
-          null,
-        confidence: readStringValue(record.confidence) || null,
-        keyEvidence: readStringArrayValue(
-          record.keyEvidence ?? record.key_evidence,
-        ),
-        redFlags: readStringArrayValue(record.redFlags ?? record.red_flags),
-        rationale: rationaleText,
-        direction:
-          (readStringValue(record.direction) as BullpenLlmDirection | null) ??
-          classifyBullpenLlmDirection(normalizedOdds.yes),
-        rationaleOddsMismatch:
-          readBooleanValue(
-            record.rationaleOddsMismatch ?? record.rationale_odds_mismatch,
-          ) ?? rationaleMismatch.rationaleOddsMismatch,
-        rationaleOddsMismatchReason:
-          readStringValue(
-            record.rationaleOddsMismatchReason ??
-              record.rationale_odds_mismatch_reason,
-          ) ?? rationaleMismatch.rationaleOddsMismatchReason,
-        effectiveWeight: roundBullpenValue(
-          extractNumber(record.effectiveWeight ?? record.effective_weight) ??
-            rationaleMismatch.effectiveWeight,
-        ),
-        webSearchUsed: readBooleanValue(
-          record.webSearchUsed ?? record.web_search_used,
-        ),
-        webSearchQueries: readStringArrayValue(
-          record.webSearchQueries ?? record.web_search_queries,
-        ),
-        webSources: readStringArrayValue(
-          record.webSources ?? record.web_sources,
-        ),
-        internetVerified: readBooleanValue(
-          record.internetVerified ?? record.internet_verified,
-        ),
-        evidenceBlockUsed:
-          readBooleanValue(
-            record.evidenceBlockUsed ?? record.evidence_block_used,
-          ) ?? false,
-        staleFactDetected:
-          readBooleanValue(
-            record.staleFactDetected ?? record.stale_fact_detected,
-          ) ??
-          readBooleanValue(
-            record.invalidStaleFact ?? record.invalid_stale_fact,
-          ) ??
-          false,
-        invalidReason:
-          readStringValue(record.invalidReason) ||
-          readStringValue(record.invalid_reason) ||
-          readStringValue(record.staleFactReason) ||
-          readStringValue(record.stale_fact_reason) ||
-          null,
-        invalidStaleFact:
-          readBooleanValue(
-            record.invalidStaleFact ?? record.invalid_stale_fact,
-          ) ?? false,
-        staleFactReason:
-          readStringValue(record.staleFactReason) ||
-          readStringValue(record.stale_fact_reason) ||
-          null,
-      } satisfies BullpenQuestionLlmBreakdownItem;
-    })
+    .map((entry) => normalizeBullpenLlmBreakdownEntry(entry))
     .filter(
       (entry): entry is BullpenQuestionLlmBreakdownItem => entry !== null,
     );
+}
+
+function readBullpenLlmOddsAlias(
+  record: Record<string, unknown>,
+  aliases: string[],
+) {
+  for (const alias of aliases) {
+    const value = extractNumber(record[alias]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+export function normalizeBullpenLlmBreakdownEntry(
+  entry: unknown,
+): BullpenQuestionLlmBreakdownItem | null {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+
+  const record = entry as Record<string, unknown>;
+  const requestedModel =
+    readStringValue(record.requestedModel) ||
+    readStringValue(record.requested_model) ||
+    readStringValue(record.targetModel) ||
+    readStringValue(record.target_model) ||
+    readStringValue(record.modelName) ||
+    readStringValue(record.model_name) ||
+    readStringValue(record.llm_model) ||
+    readStringValue(record.model) ||
+    null;
+  const actualModel =
+    readStringValue(record.actualModel) ||
+    readStringValue(record.actual_model) ||
+    readStringValue(record.resolvedModel) ||
+    readStringValue(record.resolved_model) ||
+    readStringValue(record.model) ||
+    null;
+  const provider =
+    readStringValue(record.provider) ||
+    readStringValue(record.llm_provider) ||
+    readStringValue(record.provider_name) ||
+    "unknown-provider";
+  const model = actualModel || requestedModel || "unknown-model";
+  const normalizedOdds = normalizeOddsPair(
+    readBullpenLlmOddsAlias(record, [
+      "llmYesOdds",
+      "llm_yes_odds",
+      "yesOdds",
+      "yes_odds",
+      "yesProbability",
+      "yes_probability",
+      "probYes",
+      "prob_yes",
+      "probabilityYes",
+      "probability_yes",
+      "fair_yes_probability_pct",
+    ]),
+    readBullpenLlmOddsAlias(record, [
+      "llmNoOdds",
+      "llm_no_odds",
+      "noOdds",
+      "no_odds",
+      "noProbability",
+      "no_probability",
+      "probNo",
+      "prob_no",
+      "probabilityNo",
+      "probability_no",
+      "fair_no_probability_pct",
+    ]),
+  );
+  const rationaleText =
+    readStringValue(record.rationale) ||
+    readStringValue(record.reasoning) ||
+    readStringValue(record.notes) ||
+    readStringValue(record.note) ||
+    readStringValue(record.explanation) ||
+    readStringValue(record.summary) ||
+    null;
+  const rationaleMismatch = detectBullpenRationaleOddsMismatch(
+    rationaleText,
+    normalizedOdds.yes,
+  );
+  const providerError =
+    readStringValue(record.providerError) ||
+    readStringValue(record.provider_error) ||
+    readStringValue(record.error) ||
+    null;
+  const status =
+    readStringValue(record.status) ||
+    readStringValue(record.execution_status) ||
+    null;
+  const invalidReason =
+    readStringValue(record.invalidReason) ||
+    readStringValue(record.invalid_reason) ||
+    readStringValue(record.staleFactReason) ||
+    readStringValue(record.stale_fact_reason) ||
+    providerError ||
+    (normalizedOdds.yes === null && normalizedOdds.no === null
+      ? "Provider returned no usable YES/NO odds."
+      : null);
+
+  return {
+    provider,
+    model,
+    requestedModel,
+    actualModel,
+    status,
+    providerError,
+    jobId:
+      typeof record.jobId === "number" && Number.isFinite(record.jobId)
+        ? record.jobId
+        : typeof record.job_id === "number" && Number.isFinite(record.job_id)
+          ? record.job_id
+          : null,
+    runId:
+      typeof record.runId === "number" && Number.isFinite(record.runId)
+        ? record.runId
+        : typeof record.run_id === "number" && Number.isFinite(record.run_id)
+          ? record.run_id
+          : null,
+    timestamp:
+      readStringValue(record.timestamp) ||
+      readStringValue(record.completedAt) ||
+      readStringValue(record.completed_at) ||
+      readStringValue(record.createdAt) ||
+      readStringValue(record.created_at) ||
+      readStringValue(record.updatedAt) ||
+      readStringValue(record.updated_at) ||
+      null,
+    llmYesOdds: normalizedOdds.yes,
+    llmNoOdds: normalizedOdds.no,
+    yesDefinition:
+      readStringValue(record.yesDefinition) ||
+      readStringValue(record.yes_definition) ||
+      null,
+    deadlineEt:
+      readStringValue(record.deadlineEt) ||
+      readStringValue(record.deadline_et) ||
+      null,
+    hoursRemaining: roundBullpenValue(
+      extractNumber(record.hoursRemaining ?? record.hours_remaining),
+    ),
+    evidenceStatus:
+      readStringValue(record.evidenceStatus) ||
+      readStringValue(record.evidence_status) ||
+      null,
+    eventState:
+      readStringValue(record.eventState) ||
+      readStringValue(record.event_state) ||
+      null,
+    confidence: readStringValue(record.confidence) || null,
+    keyEvidence: readStringArrayValue(
+      record.keyEvidence ??
+        record.key_evidence ??
+        record.keyEvidenceSourceIds ??
+        record.key_evidence_source_ids,
+    ),
+    redFlags: readStringArrayValue(record.redFlags ?? record.red_flags),
+    rationale: rationaleText,
+    direction:
+      (readStringValue(record.direction) as BullpenLlmDirection | null) ??
+      classifyBullpenLlmDirection(normalizedOdds.yes),
+    rationaleOddsMismatch:
+      readBooleanValue(
+        record.rationaleOddsMismatch ?? record.rationale_odds_mismatch,
+      ) ?? rationaleMismatch.rationaleOddsMismatch,
+    rationaleOddsMismatchReason:
+      readStringValue(
+        record.rationaleOddsMismatchReason ??
+          record.rationale_odds_mismatch_reason,
+      ) ?? rationaleMismatch.rationaleOddsMismatchReason,
+    effectiveWeight: roundBullpenValue(
+      extractNumber(record.effectiveWeight ?? record.effective_weight) ??
+        rationaleMismatch.effectiveWeight,
+    ),
+    webSearchUsed: readBooleanValue(
+      record.webSearchUsed ?? record.web_search_used,
+    ),
+    webSearchQueries: readStringArrayValue(
+      record.webSearchQueries ?? record.web_search_queries,
+    ),
+    webSources: readStringArrayValue(
+      record.webSources ?? record.web_sources,
+    ),
+    internetVerified: readBooleanValue(
+      record.internetVerified ?? record.internet_verified,
+    ),
+    evidenceBlockUsed:
+      readBooleanValue(
+        record.evidenceBlockUsed ?? record.evidence_block_used,
+      ) ?? false,
+    staleFactDetected:
+      readBooleanValue(
+        record.staleFactDetected ?? record.stale_fact_detected,
+      ) ??
+      readBooleanValue(record.invalidStaleFact ?? record.invalid_stale_fact) ??
+      false,
+    invalidReason,
+    invalidStaleFact:
+      readBooleanValue(record.invalidStaleFact ?? record.invalid_stale_fact) ??
+      false,
+    staleFactReason:
+      readStringValue(record.staleFactReason) ||
+      readStringValue(record.stale_fact_reason) ||
+      null,
+  } satisfies BullpenQuestionLlmBreakdownItem;
+}
+
+export function normalizeBullpenLlmBreakdownEntries(
+  value: unknown,
+): BullpenQuestionLlmBreakdownItem[] {
+  return normalizeBullpenLlmBreakdown(value);
 }
 
 function buildBullpenQuestionLookupMap(questions: BullpenQuestionRow[]) {

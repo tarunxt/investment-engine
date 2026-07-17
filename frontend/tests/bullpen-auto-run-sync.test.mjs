@@ -25,6 +25,17 @@ function transpileModuleSource(source, fileName) {
 async function loadBullpenAutoRunSyncModule() {
   const tempDir = mkdtempSync(path.join(tmpdir(), "bullpen-auto-run-sync-"));
 
+  const strategySource = readFileSync(
+    new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
+    "utf8",
+  );
+  const strategyPath = path.join(tempDir, "bullpenStage2To3Strategy.mjs");
+  writeFileSync(
+    strategyPath,
+    transpileModuleSource(strategySource, "bullpenStage2To3Strategy.ts"),
+    "utf8",
+  );
+
   const bullpenAiSource = readFileSync(
     new URL("../lib/bullpen-ai.ts", import.meta.url),
     "utf8",
@@ -32,7 +43,47 @@ async function loadBullpenAutoRunSyncModule() {
   const bullpenAiPath = path.join(tempDir, "bullpen-ai.mjs");
   writeFileSync(
     bullpenAiPath,
-    transpileModuleSource(bullpenAiSource, "bullpen-ai.ts"),
+    transpileModuleSource(bullpenAiSource, "bullpen-ai.ts").replace(
+      'from "@/lib/bullpenStage2To3Strategy";',
+      `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
+    ),
+    "utf8",
+  );
+
+  const bullpenPositionsSource = readFileSync(
+    new URL("../lib/bullpenPositions.ts", import.meta.url),
+    "utf8",
+  );
+  const bullpenPositionsPath = path.join(tempDir, "bullpenPositions.mjs");
+  writeFileSync(
+    bullpenPositionsPath,
+    transpileModuleSource(bullpenPositionsSource, "bullpenPositions.ts"),
+    "utf8",
+  );
+
+  const bullpenActivePositionsSource = readFileSync(
+    new URL("../lib/bullpenActivePositions.ts", import.meta.url),
+    "utf8",
+  );
+  const bullpenActivePositionsPath = path.join(
+    tempDir,
+    "bullpenActivePositions.mjs",
+  );
+  const rewrittenBullpenActivePositionsSource = transpileModuleSource(
+    bullpenActivePositionsSource,
+    "bullpenActivePositions.ts",
+  )
+    .replace(
+      'from "./bullpen-ai";',
+      `from ${JSON.stringify(pathToFileURL(bullpenAiPath).href)};`,
+    )
+    .replace(
+      'from "./bullpenPositions";',
+      `from ${JSON.stringify(pathToFileURL(bullpenPositionsPath).href)};`,
+    );
+  writeFileSync(
+    bullpenActivePositionsPath,
+    rewrittenBullpenActivePositionsSource,
     "utf8",
   );
 
@@ -46,10 +97,15 @@ async function loadBullpenAutoRunSyncModule() {
   const rewrittenSyncSource = transpileModuleSource(
     syncSource,
     "bullpenAutoRunSync.ts",
-  ).replace(
-    'from "@/lib/bullpen-ai";',
-    `from ${JSON.stringify(pathToFileURL(bullpenAiPath).href)};`,
-  );
+  )
+    .replace(
+      'from "@/lib/bullpen-ai";',
+      `from ${JSON.stringify(pathToFileURL(bullpenAiPath).href)};`,
+    )
+    .replace(
+      'from "@/lib/bullpenActivePositions";',
+      `from ${JSON.stringify(pathToFileURL(bullpenActivePositionsPath).href)};`,
+    );
   const syncModulePath = path.join(tempDir, "bullpenAutoRunSync.mjs");
   writeFileSync(syncModulePath, rewrittenSyncSource, "utf8");
 

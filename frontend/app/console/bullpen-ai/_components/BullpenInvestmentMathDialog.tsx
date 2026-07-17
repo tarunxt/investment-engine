@@ -13,6 +13,11 @@ import {
   getBullpenReturnsPerDayBreakdown,
   type BullpenQuestionRow,
 } from "@/lib/bullpen-ai";
+import {
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
+  formatBullpenStage2To3SizingFormulaLabel,
+} from "@/lib/bullpenStage2To3Strategy";
 
 type BullpenInvestmentMathDialogProps = {
   focus: "returnsPerDay" | "amountToBeInvested";
@@ -203,19 +208,23 @@ export function BullpenInvestmentMathDialog({
   const amountCard = question ? (
     <CalculationCard
       title="Capital"
-      formula="Fixed $5 once the row qualifies"
+      formula={`Automatic Stage 3 sizing uses ${formatBullpenStage2To3SizingFormulaLabel(
+        DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+      )}`}
       summary={formatMoney(amountBreakdown!.result ?? null)}
       highlighted={focus === "amountToBeInvested"}
     >
       {amountBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
-          This amount is only available after the row has a returns/day value and
-          either LLM Yes or LLM No odds clear the minimum threshold.
+          This table amount only appears after the row has a returns/day value
+          and either LLM Yes or LLM No odds clear the minimum threshold. Live
+          Stage 3 buys are still sized later from fresh cash in hand and
+          remaining occupied slots.
         </p>
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`Qualified rows receive a fixed $${amountBreakdown!.fixedAmountUsd.toFixed(2)} order size.`}
+            {`This table currently shows a $${amountBreakdown!.fixedAmountUsd.toFixed(2)} placeholder, but automatic Stage 3 buys are re-sized after Event Exits using fresh cash and occupied-slot counts.`}
           </div>
           <div className="mt-4">
             <MetricRow
@@ -236,9 +245,23 @@ export function BullpenInvestmentMathDialog({
             />
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">
-            Pink invest rows require either <span className="font-semibold">LLM Yes &ge; 80%</span>{" "}
-            or <span className="font-semibold">LLM No &ge; 80%</span>. Returns/day is used for ranking,
-            and qualified rows receive a fixed <span className="font-semibold">$5</span> buy amount.
+            Stage 2-qualified rows require the stronger LLM side to reach at
+            least{" "}
+            <span className="font-semibold">
+              {DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS}%
+            </span>
+            , including exactly{" "}
+            <span className="font-semibold">
+              {DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS}%
+            </span>
+            . Returns/day helps rank the combined top-10 table, and automatic
+            Stage 3 sizing uses{" "}
+            <span className="font-semibold">
+              {formatBullpenStage2To3SizingFormulaLabel(
+                DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+              )}
+            </span>
+            .
           </p>
         </>
       )}

@@ -4,6 +4,20 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 async function loadBullpenAiModule() {
+  const strategySource = readFileSync(
+    new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
+    "utf8",
+  );
+  const { outputText: strategyOutputText } = ts.transpileModule(strategySource, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2020,
+    },
+    fileName: "bullpenStage2To3Strategy.ts",
+  });
+  const strategyModuleUrl = `data:text/javascript;base64,${Buffer.from(
+    strategyOutputText,
+  ).toString("base64")}`;
   const source = readFileSync(
     new URL("../lib/bullpen-ai.ts", import.meta.url),
     "utf8",
@@ -15,9 +29,13 @@ async function loadBullpenAiModule() {
     },
     fileName: "bullpen-ai.ts",
   });
+  const rewrittenOutputText = outputText.replace(
+    'from "@/lib/bullpenStage2To3Strategy";',
+    `from ${JSON.stringify(strategyModuleUrl)};`,
+  );
 
   return import(
-    `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`
+    `data:text/javascript;base64,${Buffer.from(rewrittenOutputText).toString("base64")}`
   );
 }
 
@@ -236,9 +254,17 @@ test("Bullpen x AI auto-run card exposes the dynamic trade amount formula", () =
     ),
     "utf8",
   );
+  const strategySource = readFileSync(
+    new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.match(autoRunCardSource, /Trade amount per new opportunity/);
-  assert.match(autoRunCardSource, /Cash in Hand \/ \(10 - Active positions\)/);
+  assert.match(autoRunCardSource, /formatBullpenStage2To3SizingFormulaLabel/);
+  assert.match(
+    strategySource,
+    /return `Cash in Hand \/ \(\$\{maxPositions\} - Occupied Positions\)`;/,
+  );
   assert.match(autoRunCardSource, /last_console_trade_amount_usd/);
   assert.match(autoRunCardSource, /Show trade amount formula/);
   assert.doesNotMatch(
@@ -455,7 +481,7 @@ test("Bullpen x AI investment candidates include strong LLM Yes or No odds", asy
       llmYesOdds: 79,
       llmNoOdds: 80,
     }),
-    false,
+    true,
   );
 
   assert.equal(
@@ -463,14 +489,14 @@ test("Bullpen x AI investment candidates include strong LLM Yes or No odds", asy
       ...eligibleQuestion,
       llmDisagreementLevel: "High",
     }),
-    false,
+    true,
   );
   assert.equal(
     isBullpenQuestionInvestmentCandidate({
       ...eligibleQuestion,
       adjudicationRequired: true,
     }),
-    false,
+    true,
   );
 });
 
@@ -742,8 +768,8 @@ test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () 
 
   assert.match(dialogSource, /Preflight Evidence Block:/);
   assert.match(dialogSource, /buildBullpenQuestionPreflightEvidenceBlock/);
-  assert.match(dialogSource, /Web used:/);
-  assert.match(dialogSource, /Sources count:/);
+  assert.match(dialogSource, /Latest LLM update:/);
+  assert.match(dialogSource, /BullpenEventHistoricalAssessmentTable/);
 });
 
 test("Bullpen x AI treats saved odds or timestamps as clickable LLM analysis", async () => {
@@ -818,6 +844,59 @@ test("Bullpen auto-run summary sync keeps completed run visible after refresh", 
     scheduleCardSource,
     /recent_runs\.find\(\(run\) => run\.status === "completed"\)/,
   );
+});
+
+test("Bullpen x AI keeps BullpenQuestionsTable as the single canonical Events Summary table", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    "utf8",
+  );
+  const scheduleCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const questionsTableSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(bullpenAiPageSource, /<BullpenQuestionsTable/);
+  assert.match(scheduleCardSource, /<BullpenQuestionsTable/);
+  assert.match(questionsTableSource, /const columnDefinitions:/);
+  assert.doesNotMatch(scheduleCardSource, /const columnDefinitions:/);
+  assert.doesNotMatch(bullpenAiPageSource, /const columnDefinitions:/);
+});
+
+test("Bullpen x AI Stage 2 popup keeps responsive dialog sizing and left-edge table scroll reset", () => {
+  const scheduleCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const questionsTableSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenQuestionsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(scheduleCardSource, /max-h-\[92vh\]/);
+  assert.match(scheduleCardSource, /w-\[calc\(100vw-2rem\)\]/);
+  assert.match(scheduleCardSource, /max-w-\[1500px\]/);
+  assert.match(scheduleCardSource, /overflow-y-auto overflow-x-hidden/);
+  assert.match(scheduleCardSource, /updatedAt=\{eventsSummaryUpdatedAt\}/);
+  assert.match(scheduleCardSource, /scrollResetKey=\{state\.run\?\.id \?\? "stage-two-llm-run"\}/);
+  assert.match(questionsTableSource, /scrollResetKey\?: string \| number \| null;/);
+  assert.match(questionsTableSource, /scrollTo\(\{\s*left: 0,/);
 });
 
 test("Bullpen x AI stale fact validation excludes contradictory public-listing claims", async () => {
