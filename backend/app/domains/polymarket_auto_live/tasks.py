@@ -127,6 +127,20 @@ def _synchronize_state(
     return settings, normalized
 
 
+def persist_auto_live_progress_sync(
+    *,
+    user_id: int,
+    repo: SyncPolymarketAutoLiveRepository,
+    session,
+    run: BullpenAutoLiveRun,
+    state,
+) -> None:
+    repo.save_run(user_id, run)
+    repo.replace_run_decisions_from_stage3_payload(user_id, run)
+    repo.save_state(user_id, state)
+    session.commit()
+
+
 @celery.task(
     bind=True,
     max_retries=2,
@@ -159,9 +173,13 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
 
         try:
             def persist_progress(current_run: BullpenAutoLiveRun, current_state) -> None:
-                repo.save_run(user_id, current_run)
-                repo.save_state(user_id, current_state)
-                session.commit()
+                persist_auto_live_progress_sync(
+                    user_id=user_id,
+                    repo=repo,
+                    session=session,
+                    run=current_run,
+                    state=current_state,
+                )
 
             engine_result = asyncio.run(
                 BullpenAutoLiveEngine().execute(
@@ -210,9 +228,13 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             state.last_action = run.summary
             state.last_run_id = run.id
             state.last_run_at = completed_at
-            repo.save_run(user_id, run)
-            repo.save_state(user_id, state)
-            session.commit()
+            persist_auto_live_progress_sync(
+                user_id=user_id,
+                repo=repo,
+                session=session,
+                run=run,
+                state=state,
+            )
             logger.exception("Auto-Live run %s exhausted retries", run_id)
             return
 
@@ -288,6 +310,7 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                     state,
                 )
                 repo.save_run(user_id, recovered_run)
+                repo.replace_run_decisions_from_stage3_payload(user_id, recovered_run)
                 repo.save_state(user_id, state)
                 session.commit()
 

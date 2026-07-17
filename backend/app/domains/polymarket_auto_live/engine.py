@@ -2229,6 +2229,10 @@ def _serialize_stage3_decision_row(
         "rationale": decision.rationale,
         "reason": decision.reason,
         "summary": decision.summary,
+        "stage3_result": decision.stage3_result,
+        "stage3_result_reason": decision.stage3_result_reason,
+        "stage3_final_rank": decision.stage3_final_rank,
+        "stage3_max_positions": decision.stage3_max_positions,
         "order_plan": (
             decision.order_plan.model_dump(mode="json") if decision.order_plan else None
         ),
@@ -5835,6 +5839,11 @@ class BullpenAutoLiveEngine:
             for row in ranking_top_rows
             if row["kind"] == "candidate"
         ]
+        candidate_final_rank_by_market_id = {
+            str(row["market_id"]): index
+            for index, row in enumerate(combined_rank_rows, start=1)
+            if row["kind"] == "candidate"
+        }
         top_rows = ranking_top_rows
         top_active_keys = ranking_top_active_keys
         top_candidate_market_ids = ranking_top_candidate_market_ids
@@ -6270,6 +6279,31 @@ class BullpenAutoLiveEngine:
                 last_completed_market=market,
                 execution_mode_reason=simulation_reason if state.dry_run else None,
                 completed_at=None,
+            )
+
+        _UNSET_STAGE3_FINAL_RANK = object()
+
+        def _set_stage3_decision_result(
+            decision: BullpenAutoLiveDecision,
+            *,
+            result: str,
+            reason: str | None = None,
+            final_rank: int | None | object = _UNSET_STAGE3_FINAL_RANK,
+        ) -> None:
+            decision.stage3_result = result  # type: ignore[assignment]
+            decision.stage3_result_reason = (
+                reason
+                or decision.reason
+                or decision.summary
+                or "Stage 3 did not record a more specific reason."
+            )
+            decision.stage3_max_positions = CONSOLE_RANKED_EVENT_LIMIT
+            if final_rank is _UNSET_STAGE3_FINAL_RANK:
+                return
+            decision.stage3_final_rank = (
+                int(final_rank)
+                if isinstance(final_rank, int) and final_rank > 0
+                else None
             )
 
         def _build_decision(
@@ -7146,6 +7180,7 @@ class BullpenAutoLiveEngine:
             stage_results = list(context["stage_results"])
             llm_outputs = context["llm_outputs"]
             llm_consensus = context["llm_consensus"]
+            candidate_final_rank = candidate_final_rank_by_market_id.get(market.market_id)
             if market.market_id in active_position_market_ids:
                 skip_reason = (
                     "Candidate already has an active Bullpen position and will not be bought again."
@@ -7163,18 +7198,22 @@ class BullpenAutoLiveEngine:
                         outputs={"returns_per_day": returns_per_day},
                     )
                 )
-                record_invest_decision(
-                    _build_decision(
-                        market=market,
-                        decision_action="SKIP",
-                        reason=skip_reason,
-                        stage_results=stage_results,
-                        side_to_trade=context.get("selected_side"),
-                        llm_outputs=llm_outputs,
-                        llm_consensus=llm_consensus,
-                    ),
+                decision = _build_decision(
                     market=market,
+                    decision_action="SKIP",
+                    reason=skip_reason,
+                    stage_results=stage_results,
+                    side_to_trade=context.get("selected_side"),
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
                 )
+                _set_stage3_decision_result(
+                    decision,
+                    result="BLOCKED",
+                    reason=skip_reason,
+                    final_rank=candidate_final_rank,
+                )
+                record_invest_decision(decision, market=market)
                 continue
             if not context["qualified"]:
                 _record_rejected_candidate(
@@ -7190,18 +7229,21 @@ class BullpenAutoLiveEngine:
                         hard_block=True,
                     )
                 )
-                record_invest_decision(
-                    _build_decision(
-                        market=market,
-                        decision_action="SKIP",
-                        reason=str(context["reason"]),
-                        stage_results=stage_results,
-                        side_to_trade=context.get("selected_side"),
-                        llm_outputs=llm_outputs,
-                        llm_consensus=llm_consensus,
-                    ),
+                decision = _build_decision(
                     market=market,
+                    decision_action="SKIP",
+                    reason=str(context["reason"]),
+                    stage_results=stage_results,
+                    side_to_trade=context.get("selected_side"),
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
                 )
+                _set_stage3_decision_result(
+                    decision,
+                    result="BLOCKED",
+                    reason=str(context["reason"]),
+                )
+                record_invest_decision(decision, market=market)
                 continue
             if not stage2_universe_complete:
                 skip_reason = (
@@ -7224,46 +7266,56 @@ class BullpenAutoLiveEngine:
                         hard_block=True,
                     )
                 )
-                record_invest_decision(
-                    _build_decision(
-                        market=market,
-                        decision_action="SKIP",
-                        reason=skip_reason,
-                        stage_results=stage_results,
-                        side_to_trade=context.get("selected_side"),
-                        llm_outputs=llm_outputs,
-                        llm_consensus=llm_consensus,
-                    ),
+                decision = _build_decision(
                     market=market,
+                    decision_action="SKIP",
+                    reason=skip_reason,
+                    stage_results=stage_results,
+                    side_to_trade=context.get("selected_side"),
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
                 )
+                _set_stage3_decision_result(
+                    decision,
+                    result="BLOCKED",
+                    reason=skip_reason,
+                )
+                record_invest_decision(decision, market=market)
                 continue
             if market.market_id not in top_candidate_market_ids:
+                outside_top_ten_reason = (
+                    "Candidate qualified but did not make the top-10 returns/day table."
+                )
                 _record_rejected_candidate(
                     rejected_candidate_map,
                     market=market,
-                    reason="Candidate qualified but did not make the top-10 returns/day table.",
+                    reason=outside_top_ten_reason,
                 )
                 stage_results.append(
                     build_stage_result(
                         stage_number=6,
                         status="warning",
-                        reason="Candidate qualified but did not make the top-10 returns/day table.",
+                        reason=outside_top_ten_reason,
                         outputs={"returns_per_day": returns_per_day},
                         hard_block=True,
                     )
                 )
-                record_invest_decision(
-                    _build_decision(
-                        market=market,
-                        decision_action="SKIP",
-                        reason="Candidate qualified but did not make the top-10 returns/day table.",
-                        stage_results=stage_results,
-                        side_to_trade=context.get("selected_side"),
-                        llm_outputs=llm_outputs,
-                        llm_consensus=llm_consensus,
-                    ),
+                decision = _build_decision(
                     market=market,
+                    decision_action="SKIP",
+                    reason=outside_top_ten_reason,
+                    stage_results=stage_results,
+                    side_to_trade=context.get("selected_side"),
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
                 )
+                _set_stage3_decision_result(
+                    decision,
+                    result="OUTSIDE_TOP_10",
+                    reason=outside_top_ten_reason,
+                    final_rank=candidate_final_rank,
+                )
+                record_invest_decision(decision, market=market)
                 continue
             if market.market_id in ranked_buy_candidate_market_ids_seen:
                 skip_reason = (
@@ -7283,25 +7335,32 @@ class BullpenAutoLiveEngine:
                         hard_block=True,
                     )
                 )
-                record_invest_decision(
-                    _build_decision(
-                        market=market,
-                        decision_action="SKIP",
-                        reason=skip_reason,
-                        stage_results=stage_results,
-                        side_to_trade=context.get("selected_side"),
-                        llm_outputs=llm_outputs,
-                        llm_consensus=llm_consensus,
-                    ),
+                decision = _build_decision(
                     market=market,
+                    decision_action="SKIP",
+                    reason=skip_reason,
+                    stage_results=stage_results,
+                    side_to_trade=context.get("selected_side"),
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
                 )
+                _set_stage3_decision_result(
+                    decision,
+                    result="BLOCKED",
+                    reason=skip_reason,
+                    final_rank=candidate_final_rank,
+                )
+                record_invest_decision(decision, market=market)
                 continue
             ranked_buy_candidate_market_ids_seen.add(market.market_id)
+            ranking_selected_reason = (
+                "Qualified candidate ranked inside the top-10 returns/day table and is waiting for post-exit sizing plus live slot validation."
+            )
             stage_results.append(
                 build_stage_result(
                     stage_number=6,
                     status="pass",
-                    reason="Qualified candidate ranked inside the top-10 returns/day table and is waiting for post-exit sizing plus live slot validation.",
+                    reason=ranking_selected_reason,
                     outputs={
                         "returns_per_day": returns_per_day,
                         "pre_refresh_cash_in_hand_usd": console_trade_amount_breakdown[
@@ -7316,22 +7375,26 @@ class BullpenAutoLiveEngine:
                     },
                 )
             )
-            record_invest_decision(
-                _build_decision(
-                    market=market,
-                    decision_action="BUY_NEW",
-                    reason="Qualified candidate ranked inside the top-10 returns/day table and is waiting for post-exit sizing plus live slot validation.",
-                    stage_results=stage_results,
-                    side_to_trade=context.get("selected_side"),
-                    current_exposure_usd=0,
-                    target_exposure_usd=0,
-                    order_usd=0,
-                    llm_outputs=llm_outputs,
-                    llm_consensus=llm_consensus,
-                    include_order_plan=False,
-                ),
+            decision = _build_decision(
                 market=market,
+                decision_action="BUY_NEW",
+                reason=ranking_selected_reason,
+                stage_results=stage_results,
+                side_to_trade=context.get("selected_side"),
+                current_exposure_usd=0,
+                target_exposure_usd=0,
+                order_usd=0,
+                llm_outputs=llm_outputs,
+                llm_consensus=llm_consensus,
+                include_order_plan=False,
             )
+            _set_stage3_decision_result(
+                decision,
+                result="SELECTED",
+                reason=ranking_selected_reason,
+                final_rank=candidate_final_rank,
+            )
+            record_invest_decision(decision, market=market)
 
         ranked_buy_candidate_order_index = {
             market_id: index
@@ -7473,6 +7536,11 @@ class BullpenAutoLiveEngine:
             decision.target_exposure_usd = 0
             decision.score = 0
             decision.order_plan = None
+            _set_stage3_decision_result(
+                decision,
+                result="BLOCKED",
+                reason=reason,
+            )
             _append_decision_stage_result(
                 decision,
                 stage_number=5,
@@ -7516,6 +7584,11 @@ class BullpenAutoLiveEngine:
             decision.summary = planned_reason
             decision.target_exposure_usd = round(order_usd, 2)
             decision.score = round(order_usd, 2)
+            _set_stage3_decision_result(
+                decision,
+                result="SELECTED",
+                reason=planned_reason,
+            )
             _append_decision_stage_result(
                 decision,
                 stage_number=5,

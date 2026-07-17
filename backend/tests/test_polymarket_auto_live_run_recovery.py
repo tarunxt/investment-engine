@@ -17,6 +17,7 @@ from app.domains.polymarket_auto_live.run_recovery import (
     reconcile_running_auto_live_run,
 )
 from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveDecision,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
     BullpenAutoLiveStageResult,
@@ -48,6 +49,68 @@ def _stage_result(
         started_at="2026-07-05T12:00:00+00:00",
         completed_at=completed_at,
     )
+
+
+def _stage3_decision_row() -> dict[str, object]:
+    return {
+        "id": "decision-run-recovery-market-1",
+        "run_id": "run-summary-backfill",
+        "created_at": "2026-07-05T12:09:00+00:00",
+        "updated_at": "2026-07-05T12:10:00+00:00",
+        "market_id": "market-1",
+        "market_title": "Will recovery backfill decisions?",
+        "market_url": "https://example.com/market-1",
+        "slug": "market-1",
+        "close_time": "2026-07-08T12:00:00+00:00",
+        "theme": "Macro",
+        "side": "NO",
+        "decision": "BUY_NEW",
+        "risk_status": "Ready",
+        "price_cents": 82.0,
+        "current_yes_odds": 18.0,
+        "current_no_odds": 82.0,
+        "fair_probability_pct": 82.0,
+        "fair_yes_probability_pct": 18.0,
+        "fair_no_probability_pct": 82.0,
+        "edge_pp": 0.0,
+        "score": 5.0,
+        "confidence": "High",
+        "evidence_status": "Strong",
+        "adjudication_required": False,
+        "current_exposure_usd": 0.0,
+        "target_exposure_usd": 5.0,
+        "key_evidence": [],
+        "red_flags": [],
+        "reason": "Recovered from Stage 3 payload.",
+        "summary": "Recovered from Stage 3 payload.",
+        "stage3_result": "SELECTED",
+        "stage3_result_reason": "Recovered from Stage 3 payload.",
+        "stage3_final_rank": 1,
+        "stage3_max_positions": 10,
+        "order_plan": {
+            "id": "order-run-recovery-market-1",
+            "action": "buy",
+            "side": "NO",
+            "order_type": "limit",
+            "status": "submitted",
+            "market_id": "market-1",
+            "market_title": "Will recovery backfill decisions?",
+            "order_size_usd": 5.0,
+            "shares": 6.097561,
+            "limit_price_cents": 82.0,
+            "max_slippage_cents": 2.0,
+            "dry_run": False,
+            "detail": "Limit order submitted successfully.",
+            "execution_response": None,
+            "created_at": "2026-07-05T12:09:00+00:00",
+            "executed_at": "2026-07-05T12:09:05+00:00",
+        },
+        "exit_signals": [],
+        "exit_state": "ACTIVE",
+        "llm_outputs": [],
+        "stage_results": [],
+        "guardrail_checks": [],
+    }
 
 
 def test_reconcile_running_auto_live_run_completes_when_stage3_is_already_terminal():
@@ -108,6 +171,163 @@ def test_reconcile_running_auto_live_run_completes_when_stage3_is_already_termin
         recovered.summary
         == "Auto-Live completed with 15 decisions, 2 planned orders, and 2 submitted orders."
     )
+
+
+def test_reconcile_running_auto_live_run_does_not_complete_from_completed_at_alone():
+    run = BullpenAutoLiveRun(
+        id="run-missing-stage3",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        completed_at="2026-07-05T12:02:10+00:00",
+        summary="Stage 2 finished.",
+        stage_results=[
+            _stage_result(
+                stage_number=1,
+                workflow_stage_key="scan",
+                phase_status="completed",
+                reason="Stage 1 finished.",
+                completed_at="2026-07-05T12:00:10+00:00",
+            ),
+            _stage_result(
+                stage_number=2,
+                workflow_stage_key="llm",
+                phase_status="completed",
+                reason="Stage 2 finished.",
+                completed_at="2026-07-05T12:02:10+00:00",
+            ),
+        ],
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 2, 10, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 25, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-task-missing-stage3",
+            state="PENDING",
+            inspect_succeeded=True,
+        ),
+    )
+
+    assert recovered is run
+    assert recovered.status == "failed"
+    assert recovered.completed_at == "2026-07-05T12:25:00+00:00"
+    assert recovered.error_message is not None
+    assert "no longer active" in recovered.error_message
+    assert recovered.summary.startswith("Auto-Live run failed:")
+
+
+@pytest.mark.anyio
+async def test_get_summary_backfills_completed_run_decisions_from_stage3_payload(
+    monkeypatch,
+):
+    run = BullpenAutoLiveRun(
+        id="run-summary-backfill",
+        triggered_by="manual",
+        status="completed",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        completed_at="2026-07-05T12:10:00+00:00",
+        summary="Auto-Live completed with 1 decision.",
+        stage_results=[
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="completed",
+                reason="Stage 3 finished.",
+                outputs={
+                    "decision_rows": [_stage3_decision_row()],
+                    "decisions_count": 1,
+                    "orders_planned": 1,
+                    "orders_submitted": 1,
+                },
+                completed_at="2026-07-05T12:10:00+00:00",
+            ),
+        ],
+    )
+    settings = BullpenAutoLiveSettings(auto_live_enabled=True)
+    state = BullpenAutoLiveState(status="stopped", mode="dry-run")
+    stored_decisions: list[BullpenAutoLiveDecision] = []
+    replace_calls: list[str] = []
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.commits = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self) -> None:
+            self.commits += 1
+
+    fake_session = _FakeSession()
+
+    class _FakeRepo:
+        def __init__(self, session) -> None:
+            assert session is fake_session
+
+        async def ensure_settings(self, user_id: int):
+            assert user_id == 7
+            return settings
+
+        async def ensure_state(self, user_id: int):
+            assert user_id == 7
+            return state
+
+        async def get_running_run_record(self, user_id: int):
+            assert user_id == 7
+            return None
+
+        async def list_runs(self, user_id: int, *, limit: int | None = None):
+            assert user_id == 7
+            assert limit in {10, None}
+            return [run]
+
+        async def count_decisions_by_run(self, run_ids):
+            assert run_ids == [run.id]
+            return {run.id: len(stored_decisions)}
+
+        async def replace_run_decisions_from_stage3_payload(self, user_id: int, next_run):
+            assert user_id == 7
+            assert next_run.id == run.id
+            replace_calls.append(next_run.id)
+            stored_decisions[:] = next_run and [
+                BullpenAutoLiveDecision.model_validate(_stage3_decision_row())
+            ]
+            return len(stored_decisions)
+
+        async def list_decisions(self, user_id: int, *, limit: int | None = None):
+            assert user_id == 7
+            assert limit == 25
+            return list(stored_decisions)
+
+        async def save_state(self, user_id: int, next_state: BullpenAutoLiveState):
+            assert user_id == 7
+            assert next_state.last_run_id in {None, run.id}
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        lambda: fake_session,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _FakeRepo,
+    )
+
+    summary = await BullpenAutoLiveBot(user_id=7).get_summary()
+
+    assert replace_calls == [run.id]
+    assert len(summary.recent_decisions) == 1
+    assert summary.recent_decisions[0].run_id == run.id
+    assert summary.recent_decisions[0].stage3_result == "SELECTED"
+    assert summary.recent_decisions[0].stage3_final_rank == 1
+    assert fake_session.commits >= 1
 
 
 def test_task_inspection_reuses_a_recent_snapshot(monkeypatch):
@@ -396,6 +616,15 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
         async def save_run(self, user_id: int, next_run: BullpenAutoLiveRun) -> None:
             assert user_id == 7
             saved_runs.append(next_run.model_copy(deep=True))
+
+        async def replace_run_decisions_from_stage3_payload(
+            self,
+            user_id: int,
+            next_run: BullpenAutoLiveRun,
+        ) -> int:
+            assert user_id == 7
+            assert next_run.id == recovered_run.id
+            return 0
 
         async def save_state(self, user_id: int, next_state: BullpenAutoLiveState) -> None:
             assert user_id == 7

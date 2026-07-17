@@ -19,6 +19,7 @@ from app.domains.polymarket_auto_live.run_recovery import (
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
     apply_run_to_record,
+    extract_stage3_decisions_from_run,
     record_to_run,
     record_to_settings,
     record_to_state,
@@ -171,6 +172,32 @@ class BullpenAutoLiveBot:
     def __init__(self, user_id: int) -> None:
         self.user_id = user_id
 
+    async def _reconcile_terminal_stage3_decisions(
+        self,
+        repo: AsyncPolymarketAutoLiveRepository,
+        runs: list[BullpenAutoLiveRun],
+    ) -> bool:
+        terminal_runs = [run for run in runs if run.status != "running"]
+        if not terminal_runs:
+            return False
+
+        decision_counts = await repo.count_decisions_by_run([run.id for run in terminal_runs])
+        reconciled = False
+        for run in terminal_runs:
+            payload_decisions = extract_stage3_decisions_from_run(run)
+            if payload_decisions is None:
+                continue
+            payload_count = len(payload_decisions)
+            existing_count = decision_counts.get(run.id, 0)
+            if existing_count >= payload_count:
+                continue
+
+            await repo.replace_run_decisions_from_stage3_payload(self.user_id, run)
+            decision_counts[run.id] = payload_count
+            reconciled = True
+
+        return reconciled
+
     async def _get_active_run_or_recover(
         self,
         repo: AsyncPolymarketAutoLiveRepository,
@@ -203,6 +230,7 @@ class BullpenAutoLiveBot:
         )
         recovered_state = self._synchronize_state(settings, recovered_state)
         await repo.save_run(self.user_id, recovered_run)
+        await repo.replace_run_decisions_from_stage3_payload(self.user_id, recovered_run)
         await repo.save_state(self.user_id, recovered_state)
         return None, recovered_state
 
@@ -286,6 +314,9 @@ class BullpenAutoLiveBot:
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             _, state = await self._get_active_run_or_recover(repo, settings, state)
             runs = await repo.list_runs(self.user_id, limit=10)
+            if await self._reconcile_terminal_stage3_decisions(repo, runs):
+                await session.commit()
+                runs = await repo.list_runs(self.user_id, limit=10)
             decisions = await repo.list_decisions(self.user_id, limit=25)
             await repo.save_state(self.user_id, state)
             await session.commit()
@@ -303,11 +334,18 @@ class BullpenAutoLiveBot:
     async def list_runs(self) -> list[BullpenAutoLiveRun]:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
-            return await repo.list_runs(self.user_id)
+            runs = await repo.list_runs(self.user_id)
+            if await self._reconcile_terminal_stage3_decisions(repo, runs):
+                await session.commit()
+                return await repo.list_runs(self.user_id)
+            return runs
 
     async def list_decisions(self) -> list[BullpenAutoLiveDecision]:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
+            runs = await repo.list_runs(self.user_id, limit=25)
+            if await self._reconcile_terminal_stage3_decisions(repo, runs):
+                await session.commit()
             return await repo.list_decisions(self.user_id)
 
     async def run_once(

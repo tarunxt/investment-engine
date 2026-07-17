@@ -3800,6 +3800,7 @@ function getStageTwoLlmTableRows(
     reviewedRows,
     decisions: state.decisions,
     asOfTimestamp,
+    runId: state.run?.id ?? null,
   });
 }
 

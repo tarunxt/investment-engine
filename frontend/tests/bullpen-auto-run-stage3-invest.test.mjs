@@ -534,6 +534,63 @@ test("Stage 3 invest plan blocks reuse when historical Stage 2 metadata says the
   );
 });
 
+test("Stage 3 invest plan trusts the reviewed-row counts when legacy isComplete metadata contradicts a complete universe", async () => {
+  const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    stageResults: [
+      createStage(1, "scan", {
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        stage2_eligible_rows_total: 1,
+        stage2_reviewed_rows: 1,
+        stage2_universe_complete: false,
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            selected_side: "NO",
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+      createStage(3, "invest", {}, "queued"),
+    ],
+  });
+
+  const plan = buildBullpenStage3OnlyInvestPlan(run);
+
+  assert.equal(plan.blockedReason, null);
+  assert.equal(plan.qualifiedCandidateCount, 1);
+  assert.equal(plan.request?.console_profile?.candidate_rows.length, 1);
+});
+
 test("Stage 3 invest plan stays blocked until Stage 2 completes", async () => {
   const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
 

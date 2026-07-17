@@ -29,27 +29,49 @@ function formatReturnsPerDay(value: number | null) {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
 }
 
-function normalizeTitle(value: string | null | undefined) {
-  return (value || "").trim().toLocaleLowerCase().replace(/\s+/g, " ");
+function normalizeMatchKey(value: string | null | undefined) {
+  const normalized = (value || "").trim().toLocaleLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeRunId(value: string | number | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  return null;
 }
 
 function findLatestDecision(
   question: BullpenQuestionRow,
   decisions: BullpenAutoLiveDecision[] | null | undefined,
 ) {
-  const questionTitle = normalizeTitle(question.question);
-  return [...(decisions || [])]
-    .filter(
-      (decision) =>
-        decision.market_id === question.id ||
-        normalizeTitle(decision.market_title) === questionTitle ||
-        (Boolean(question.marketUrl) && decision.market_url === question.marketUrl),
-    )
-    .sort(
-      (left, right) =>
-        new Date(right.updated_at || right.created_at).getTime() -
-        new Date(left.updated_at || left.created_at).getTime(),
-    )[0];
+  const normalizedRunId = normalizeRunId(question.llmRunId);
+  const normalizedMarketId = normalizeMatchKey(question.id);
+  const normalizedSlug = normalizeMatchKey(question.slug);
+  const orderedDecisions = [...(decisions || [])].sort(
+    (left, right) =>
+      new Date(right.updated_at || right.created_at).getTime() -
+      new Date(left.updated_at || left.created_at).getTime(),
+  );
+
+  const exactRunMarketDecision = orderedDecisions.find(
+    (decision) =>
+      normalizeRunId(decision.run_id) === normalizedRunId &&
+      normalizeMatchKey(decision.market_id) === normalizedMarketId,
+  );
+  if (exactRunMarketDecision) {
+    return exactRunMarketDecision;
+  }
+
+  return orderedDecisions.find(
+    (decision) =>
+      normalizeMatchKey(decision.market_id) === normalizedMarketId ||
+      (normalizedSlug !== null &&
+        normalizeMatchKey(decision.slug) === normalizedSlug),
+  );
 }
 
 type Stage3ShortlistExplanation = {
@@ -67,11 +89,16 @@ function getShortlistExplanation(
   const latestDecision = findLatestDecision(question, historicalDecisions);
 
   if (latestDecision) {
-    const wasShortlisted = ["BUY_NEW", "ADD_MORE"].includes(
-      latestDecision.decision,
-    );
+    const finalRank = getDecisionFinalRank(latestDecision);
+    const maxPositions = getDecisionMaxPositions(latestDecision);
+    const wasShortlisted = finalRank !== null && finalRank <= maxPositions;
     return {
-      status: wasShortlisted ? "Shortlisted" : "Not shortlisted",
+      status:
+        latestDecision.stage3_result === "BLOCKED"
+          ? "Blocked"
+          : wasShortlisted
+            ? "Shortlisted"
+            : "Not shortlisted",
       reason: latestDecision.reason || latestDecision.summary,
       source: "Recorded Stage 3 decision",
       latestDecision,
@@ -125,11 +152,26 @@ type Stage3Outcome = {
 
 function getDecisionReason(decision: BullpenAutoLiveDecision) {
   return (
+    decision.stage3_result_reason?.trim() ||
     decision.order_plan?.detail?.trim() ||
     decision.reason?.trim() ||
     decision.summary?.trim() ||
     "Stage 3 did not record a more specific reason."
   );
+}
+
+function getDecisionFinalRank(decision: BullpenAutoLiveDecision | undefined) {
+  if (!decision || typeof decision.stage3_final_rank !== "number") {
+    return null;
+  }
+  return decision.stage3_final_rank;
+}
+
+function getDecisionMaxPositions(decision: BullpenAutoLiveDecision | undefined) {
+  if (!decision || typeof decision.stage3_max_positions !== "number") {
+    return DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS;
+  }
+  return decision.stage3_max_positions;
 }
 
 function isSuccessfulStage3Order(decision: BullpenAutoLiveDecision) {
@@ -199,9 +241,11 @@ function getShortlistChecks(
     amount.strongestLlmOdds !== null &&
     amount.strongestLlmOdds >= amount.minStrongestLlmOdds;
   const hasRankingValue = question.returnsPerDay !== null;
-  const isShortlisted = latestDecision
-    ? ["BUY_NEW", "ADD_MORE"].includes(latestDecision.decision)
-    : hasStrongestLlmOdds && hasRankingValue;
+  const finalRank = getDecisionFinalRank(latestDecision);
+  const maxPositions = getDecisionMaxPositions(latestDecision);
+  const rankingConfirmed = finalRank !== null;
+  const isShortlisted = rankingConfirmed && finalRank <= maxPositions;
+  const stage3Blocked = latestDecision?.stage3_result === "BLOCKED";
 
   return [
     {
@@ -215,20 +259,26 @@ function getShortlistChecks(
     {
       label: "ii) Inside Top 10",
       detail: latestDecision
-        ? isShortlisted
-          ? "Recorded Stage 3 decision kept this event in the top-10 shortlist."
-          : "Recorded Stage 3 decision did not keep this event in the top-10 shortlist."
+        ? rankingConfirmed
+          ? isShortlisted
+            ? `Recorded Stage 3 decision confirmed final rank #${finalRank} inside the top-${maxPositions} shortlist.`
+            : `Recorded Stage 3 decision confirmed final rank #${finalRank}, which stayed outside the top-${maxPositions} shortlist.`
+          : "Ranking pending/failed because no persisted final rank was recorded for this event."
         : hasStrongestLlmOdds && hasRankingValue
-          ? `Eligible for the Stage 3 combined top-${DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS} ranking.`
+          ? "Ranking pending/failed until Stage 3 persists a final rank for this event."
           : "This event cannot enter the top-10 ranking until its LLM and returns/day checks pass.",
       satisfied: isShortlisted,
     },
     {
       label: "iii) No other Stage 3 errors",
-      detail: hasRankingValue
-        ? "Returns/day is available and no additional local blocker was found."
-        : "Returns/day is unavailable, so Stage 3 cannot rank this event.",
-      satisfied: hasRankingValue,
+      detail: latestDecision
+        ? stage3Blocked
+          ? getDecisionReason(latestDecision)
+          : "No persisted Stage 3 blocker was recorded for this event."
+        : hasRankingValue
+          ? "Returns/day is available and no additional local blocker was found yet."
+          : "Returns/day is unavailable, so Stage 3 cannot rank this event.",
+      satisfied: latestDecision ? !stage3Blocked : hasRankingValue,
     },
   ];
 }

@@ -143,13 +143,13 @@ export function readBullpenStage2UniverseStatus(
       ? skippedRows <= 0
       : totalEligibleRows !== null && reviewedRows !== null
         ? reviewedRows >= totalEligibleRows
-        : true;
+        : null;
 
   return {
     totalEligibleRows,
     reviewedRows,
     skippedRows,
-    isComplete: explicitIsComplete ?? inferredIsComplete,
+    isComplete: inferredIsComplete ?? explicitIsComplete ?? true,
   };
 }
 

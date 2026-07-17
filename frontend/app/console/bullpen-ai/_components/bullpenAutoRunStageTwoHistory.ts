@@ -94,6 +94,28 @@ function normalizeMatchKey(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeRunId(value: string | number | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value.trim();
+  }
+  return null;
+}
+
+function buildRunMarketMatchKey(
+  runId: string | number | null | undefined,
+  marketId: string | null | undefined,
+) {
+  const normalizedRunId = normalizeRunId(runId);
+  const normalizedMarketId = normalizeMatchKey(marketId);
+  if (!normalizedRunId || !normalizedMarketId) {
+    return null;
+  }
+  return `run-market:${normalizedRunId}::${normalizedMarketId}`;
+}
+
 function calculateDaysUntilClose(
   closeTime: string | null,
   referenceTimeMs = Date.now(),
@@ -186,32 +208,34 @@ function formatOutcomes(row: StageTwoReviewedRow) {
   return "Yes / No";
 }
 
-function getRowMatchKeys(row: StageTwoReviewedRow) {
+function getRowMatchKeys(
+  row: StageTwoReviewedRow,
+  runId?: string | number | null,
+) {
   const preparedQuestionPayload = readPreparedQuestionPayload(row);
   const promptInputMarket = readPromptInputMarket(row);
-  const stageTwoContext = readStageTwoContext(row);
-  return [
+  const rawKeys = [
     row.market_id,
     row.marketId,
     row.question_id,
     row.questionId,
     row.slug,
-    row.canonical_market_url,
-    row.market_url,
-    row.marketUrl,
-    row.question,
-    row.market_title,
     readRecordValue(preparedQuestionPayload, "market_id"),
     readRecordValue(preparedQuestionPayload, "question_id"),
     readRecordValue(preparedQuestionPayload, "slug"),
     readRecordValue(promptInputMarket, "slug"),
-    readRecordValue(promptInputMarket, "market_url"),
-    readRecordValue(stageTwoContext, "canonical_market_url"),
-    readRecordValue(preparedQuestionPayload, "market_url"),
-    readRecordValue(preparedQuestionPayload, "question"),
   ]
     .map((value) => normalizeMatchKey(readString(value)))
     .filter((key): key is string => Boolean(key));
+  const orderedKeys: string[] = [];
+  rawKeys.forEach((key) => {
+    const runMarketKey = buildRunMarketMatchKey(runId, key);
+    if (runMarketKey) {
+      orderedKeys.push(runMarketKey);
+    }
+    orderedKeys.push(key);
+  });
+  return orderedKeys;
 }
 
 function normalizeTimestampToMs(
@@ -288,14 +312,18 @@ function readStageTwoRowAnyTimestamp(row: StageTwoReviewedRow) {
 }
 
 function getDecisionMatchKeys(decision: BullpenAutoLiveDecision) {
-  return [
-    decision.market_id,
-    decision.slug ?? null,
-    decision.market_url ?? null,
-    decision.market_title,
-  ]
+  const rawKeys = [decision.market_id, decision.slug ?? null]
     .map(normalizeMatchKey)
     .filter((key): key is string => Boolean(key));
+  const orderedKeys: string[] = [];
+  rawKeys.forEach((key) => {
+    const runMarketKey = buildRunMarketMatchKey(decision.run_id, key);
+    if (runMarketKey) {
+      orderedKeys.push(runMarketKey);
+    }
+    orderedKeys.push(key);
+  });
+  return orderedKeys;
 }
 
 function isMissingValue(value: unknown) {
@@ -712,17 +740,19 @@ export function getStageTwoLlmTableRows({
   reviewedRows,
   decisions,
   asOfTimestamp,
+  runId,
 }: {
   reviewedRows: StageTwoReviewedRow[];
   decisions: BullpenAutoLiveDecision[];
   asOfTimestamp?: string | number | Date | null;
+  runId?: string | number | null;
 }) {
   const decisionByKey = buildDecisionLookup(decisions);
   const referenceTimeMs = normalizeTimestampToMs(asOfTimestamp) ?? Date.now();
 
   return reviewedRows.flatMap((row, rowIndex) => {
     const decision =
-      getRowMatchKeys(row).map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
+      getRowMatchKeys(row, runId).map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
     const context = buildRowContext(row, decision, referenceTimeMs);
     const outputs = getRowOutputs(row);
     const baseOutputs = outputs.length ? outputs : [null];
@@ -864,7 +894,7 @@ export function buildStageTwoEventsSummaryRows({
 
   return reviewedRows.map((row, rowIndex) => {
     const decision =
-      getRowMatchKeys(row).map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
+      getRowMatchKeys(row, runId).map((key) => decisionByKey.get(key)).find(Boolean) ?? null;
     const context = buildRowContext(row, decision, referenceTimeMs);
     const promptInputMarket = readPromptInputMarket(row);
     const preparedQuestionPayload = readPreparedQuestionPayload(row);

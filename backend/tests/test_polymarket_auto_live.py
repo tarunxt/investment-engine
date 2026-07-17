@@ -4881,6 +4881,11 @@ async def test_console_profile_manual_selected_rows_only_buy_ranked_top_10_candi
     skipped_decisions = [decision for decision in result.decisions if decision.decision == "SKIP"]
 
     assert len(buy_decisions) == 10
+    assert all(decision.stage3_result == "SELECTED" for decision in buy_decisions)
+    assert all(
+        decision.stage3_final_rank is not None and decision.stage3_final_rank <= 10
+        for decision in buy_decisions
+    )
     assert set(result.run.diagnostics.top_candidate_market_ids) == {
         f"candidate-market-{index}" for index in range(1, 11)
     }
@@ -4890,6 +4895,8 @@ async def test_console_profile_manual_selected_rows_only_buy_ranked_top_10_candi
     assert any(
         decision.market_id == "candidate-market-11"
         and decision.reason == "Candidate qualified but did not make the top-10 returns/day table."
+        and decision.stage3_result == "OUTSIDE_TOP_10"
+        and decision.stage3_final_rank == 11
         for decision in skipped_decisions
     )
 
@@ -5006,11 +5013,121 @@ async def test_console_profile_manual_table_rows_skip_candidates_already_in_acti
     assert any(
         decision.market_id == "candidate-market-1"
         and "active Bullpen position" in decision.reason
+        and decision.stage3_result == "BLOCKED"
         for decision in skipped_decisions
     )
     assert all(
         not (decision.decision == "BUY_NEW" and decision.market_id == "candidate-market-1")
         for decision in result.decisions
+    )
+
+
+@pytest.mark.anyio
+async def test_console_profile_manual_rows_plan_only_one_buy_order_per_duplicate_market(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        _manual_console_candidate_row(
+            market_id="duplicate-market",
+            question_id="duplicate-market-row-1",
+            market_title="Duplicate market row 1",
+            slug="duplicate-market",
+            current_yes_odds=18,
+            current_no_odds=82,
+            llm_yes_odds=10,
+            llm_no_odds=90,
+            returns_per_day=9.5,
+            selected=True,
+        ),
+        _manual_console_candidate_row(
+            market_id="duplicate-market",
+            question_id="duplicate-market-row-2",
+            market_title="Duplicate market row 2",
+            slug="duplicate-market",
+            current_yes_odds=18,
+            current_no_odds=82,
+            llm_yes_odds=10,
+            llm_no_odds=90,
+            returns_per_day=9.4,
+            selected=True,
+        ),
+    ]
+    market_lookup = {
+        "duplicate-market": _market(
+            question="Duplicate market",
+            slug="duplicate-market",
+            close_time=(fixed_now + timedelta(days=7)).isoformat(),
+            current_yes_odds=18,
+            current_no_odds=82,
+        )
+    }
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=len(manual_rows),
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
+    skipped_decisions = [decision for decision in result.decisions if decision.decision == "SKIP"]
+
+    assert len(buy_decisions) == 1
+    assert buy_decisions[0].market_id == "duplicate-market"
+    assert buy_decisions[0].stage3_result == "SELECTED"
+    assert buy_decisions[0].order_plan is not None
+    assert len(skipped_decisions) == 1
+    assert skipped_decisions[0].market_id == "duplicate-market"
+    assert skipped_decisions[0].stage3_result == "BLOCKED"
+    assert skipped_decisions[0].reason == (
+        "Candidate was not planned because another ranked row for the same market already exists in this run."
     )
 
 

@@ -1719,6 +1719,10 @@ export type BullpenAutoLiveDecisionAction =
   | "TRIM"
   | "EXIT"
   | "SKIP";
+export type BullpenAutoLiveStage3Result =
+  | "SELECTED"
+  | "OUTSIDE_TOP_10"
+  | "BLOCKED";
 export type BullpenAutoLiveRiskStatus = "Ready" | "Watch" | "Blocked";
 export type BullpenAutoLiveRunStatus =
   | "running"
@@ -2038,6 +2042,10 @@ export interface BullpenAutoLiveDecision {
   rationale?: string | null;
   reason: string;
   summary: string;
+  stage3_result?: BullpenAutoLiveStage3Result | null;
+  stage3_result_reason?: string | null;
+  stage3_final_rank?: number | null;
+  stage3_max_positions?: number | null;
   order_plan?: BullpenAutoLiveOrderPlan | null;
   exit_signals: BullpenAutoLiveExitSignal[];
   exit_state: BullpenAutoLiveExitState;

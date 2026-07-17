@@ -130,6 +130,20 @@ test("Stage 2 to Stage 3 strategy metadata falls back safely for historical runs
       isComplete: false,
     },
   );
+
+  assert.deepEqual(
+    readBullpenStage2UniverseStatus({
+      stage2_eligible_rows_total: 10,
+      stage2_reviewed_rows: 10,
+      stage2_universe_complete: false,
+    }),
+    {
+      totalEligibleRows: 10,
+      reviewedRows: 10,
+      skippedRows: null,
+      isComplete: true,
+    },
+  );
 });
 
 test("Stage 3 explanation copy no longer claims fixed Stage 3 sizing or extra disagreement blockers", () => {

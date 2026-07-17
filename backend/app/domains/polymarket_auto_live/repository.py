@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from pydantic import ValidationError
-from sqlalchemy import Select, desc, select
+from sqlalchemy import Select, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -179,6 +179,49 @@ def record_to_decision(record: PolymarketAutoLiveDecisionRecord) -> BullpenAutoL
         raise
 
 
+def extract_stage3_decisions_from_run(
+    run: BullpenAutoLiveRun,
+) -> list[BullpenAutoLiveDecision] | None:
+    invest_stages = [
+        stage
+        for stage in run.stage_results
+        if (
+            isinstance(stage.outputs, dict)
+            and stage.outputs.get("workflow_stage_key") == "invest"
+        )
+        or stage.stage_number == 3
+    ]
+    if not invest_stages:
+        return None
+
+    invest_stage = max(invest_stages, key=lambda stage: stage.stage_number)
+    raw_rows = invest_stage.outputs.get("decision_rows")
+    if not isinstance(raw_rows, list):
+        return []
+
+    decisions: list[BullpenAutoLiveDecision] = []
+    fallback_updated_at = invest_stage.completed_at or invest_stage.started_at or run.completed_at
+    fallback_created_at = invest_stage.started_at or run.started_at
+    for index, raw_row in enumerate(raw_rows, start=1):
+        if not isinstance(raw_row, dict):
+            continue
+
+        payload = dict(raw_row)
+        payload.setdefault("run_id", run.id)
+        payload.setdefault("created_at", fallback_created_at)
+        payload.setdefault("updated_at", fallback_updated_at or fallback_created_at)
+        try:
+            decisions.append(BullpenAutoLiveDecision.model_validate(payload))
+        except ValidationError as exc:
+            logger.warning(
+                "Skipping malformed Stage 3 decision row %s for run %s during recovery: %s",
+                index,
+                run.id,
+                exc,
+            )
+    return decisions
+
+
 def apply_settings_to_record(
     record: PolymarketAutoLiveSettingsRecord,
     settings: BullpenAutoLiveSettings,
@@ -347,6 +390,60 @@ class AsyncPolymarketAutoLiveRepository:
         apply_run_to_record(record, run, user_id=user_id)
         await self.session.flush()
 
+    async def count_decisions_by_run(self, run_ids: Sequence[str]) -> dict[str, int]:
+        if not run_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                select(
+                    PolymarketAutoLiveDecisionRecord.run_id,
+                    func.count(PolymarketAutoLiveDecisionRecord.id),
+                )
+                .where(PolymarketAutoLiveDecisionRecord.run_id.in_(tuple(run_ids)))
+                .group_by(PolymarketAutoLiveDecisionRecord.run_id)
+            )
+        ).all()
+        return {str(run_id): int(count) for run_id, count in rows}
+
+    async def replace_run_decisions_from_stage3_payload(
+        self,
+        user_id: int,
+        run: BullpenAutoLiveRun,
+    ) -> int:
+        decisions = extract_stage3_decisions_from_run(run)
+        if decisions is None:
+            return 0
+
+        existing = (
+            await self.session.execute(
+                select(PolymarketAutoLiveDecisionRecord).where(
+                    PolymarketAutoLiveDecisionRecord.run_id == run.id
+                )
+            )
+        ).scalars().all()
+        for row in existing:
+            await self.session.delete(row)
+
+        for decision in decisions:
+            record = PolymarketAutoLiveDecisionRecord(
+                id=decision.id,
+                user_id=user_id,
+                run_id=run.id,
+                market_id=decision.market_id,
+                slug=decision.slug,
+                market_title=decision.market_title,
+                side=decision.side,
+                decision=decision.decision,
+                risk_status=decision.risk_status,
+                edge_pp=decision.edge_pp,
+                score=decision.score,
+                payload={},
+            )
+            apply_decision_to_record(record, decision, user_id=user_id)
+            self.session.add(record)
+        await self.session.flush()
+        return len(decisions)
+
     async def list_runs(self, user_id: int, *, limit: int | None = None) -> list[BullpenAutoLiveRun]:
         query = (
             select(PolymarketAutoLiveRunRecord)
@@ -452,6 +549,19 @@ class SyncPolymarketAutoLiveRepository:
         record = self.session.get(PolymarketAutoLiveRunRecord, run_id)
         return record_to_run(record) if record is not None else None
 
+    def count_decisions_by_run(self, run_ids: Sequence[str]) -> dict[str, int]:
+        if not run_ids:
+            return {}
+        rows = self.session.execute(
+            select(
+                PolymarketAutoLiveDecisionRecord.run_id,
+                func.count(PolymarketAutoLiveDecisionRecord.id),
+            )
+            .where(PolymarketAutoLiveDecisionRecord.run_id.in_(tuple(run_ids)))
+            .group_by(PolymarketAutoLiveDecisionRecord.run_id)
+        ).all()
+        return {str(run_id): int(count) for run_id, count in rows}
+
     def replace_run_decisions(
         self,
         user_id: int,
@@ -483,6 +593,17 @@ class SyncPolymarketAutoLiveRepository:
             )
             apply_decision_to_record(record, decision, user_id=user_id)
             self.session.add(record)
+
+    def replace_run_decisions_from_stage3_payload(
+        self,
+        user_id: int,
+        run: BullpenAutoLiveRun,
+    ) -> int:
+        decisions = extract_stage3_decisions_from_run(run)
+        if decisions is None:
+            return 0
+        self.replace_run_decisions(user_id, run.id, decisions)
+        return len(decisions)
 
     def list_runs(self, user_id: int, *, limit: int | None = None) -> list[BullpenAutoLiveRun]:
         query = (

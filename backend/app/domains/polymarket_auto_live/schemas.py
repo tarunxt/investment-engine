@@ -13,6 +13,7 @@ AutoLiveRunStatus = Literal["running", "completed", "failed", "skipped"]
 AutoLiveStageStatus = Literal["pass", "fail", "warning", "skipped"]
 AutoLiveRuntimeStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 AutoLiveRuntimeMode = Literal["dry-run", "analysis-only", "live-trading"]
+AutoLiveStage3Result = Literal["SELECTED", "OUTSIDE_TOP_10", "BLOCKED"]
 AutoLiveOrderPlanStatus = Literal[
     "planned",
     "submitted",
@@ -511,6 +512,10 @@ class BullpenAutoLiveDecision(BaseModel):
     rationale: str | None = None
     reason: str
     summary: str
+    stage3_result: AutoLiveStage3Result | None = None
+    stage3_result_reason: str | None = None
+    stage3_final_rank: int | None = Field(default=None, ge=1)
+    stage3_max_positions: int | None = Field(default=None, ge=1)
     order_plan: BullpenAutoLiveOrderPlan | None = None
     exit_signals: list[BullpenAutoLiveExitSignal] = Field(default_factory=list)
     exit_state: AutoLiveExitState = "ACTIVE"

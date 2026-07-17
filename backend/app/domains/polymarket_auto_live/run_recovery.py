@@ -443,9 +443,6 @@ def _format_terminal_task_result_detail(task_snapshot: AutoLiveTaskRuntimeSnapsh
 
 
 def _should_finalize_settled_running_run(run: BullpenAutoLiveRun) -> bool:
-    if run.completed_at:
-        return True
-
     if _find_failure_stage(run) is not None:
         unfinished_workflow_stage = next(
             (
@@ -457,6 +454,9 @@ def _should_finalize_settled_running_run(run: BullpenAutoLiveRun) -> bool:
         )
         return unfinished_workflow_stage is None
 
+    # A stale `running` record is only safe to mark completed once the Invest
+    # workflow stage itself reached a terminal state. A stray completed_at
+    # timestamp alone can be persisted before Stage 3 decisions are finalized.
     return _find_terminal_invest_stage(run) is not None
 
 
