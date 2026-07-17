@@ -27,6 +27,10 @@ DATE_WITH_OPTIONAL_TIME_PATTERN = re.compile(
     r"(?:\s*(?P<timezone>ET|EST|EDT|UTC|GMT|AST|Arabia Standard Time|Eastern Time|New York time))?",
     re.IGNORECASE,
 )
+QUESTION_BY_DATE_PATTERN = re.compile(
+    r"\bby\s+(?P<date>(?:[A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?))\b",
+    re.IGNORECASE,
+)
 
 TIMEZONE_NAME_TO_IANA = {
     "et": "America/New_York",
@@ -128,9 +132,38 @@ def _timezone_label(raw_name: str | None, zone_iana: str | None) -> str | None:
 def _parse_deadline_from_rules(
     description: str | None,
     *,
+    question: str,
     market_close_time: str | None,
+    now: datetime,
 ) -> tuple[datetime | None, str | None, str | None, str | None, str, list[str]]:
     warnings: list[str] = []
+    # A Polymarket multi-market event can retain an event-level `endDate` that
+    # belongs to a different outcome.  The date in the selected market's
+    # question (for example, "... by July 24?") is therefore authoritative
+    # over both that stale close time and background dates in the rules.
+    title_match = QUESTION_BY_DATE_PATTERN.search(question)
+    if title_match:
+        title_date = title_match.group("date")
+        try:
+            parsed = date_parser.parse(title_date, default=now.astimezone(ET))
+            if not re.search(r"\b\d{4}\b", title_date):
+                close_time = _parse_iso(market_close_time)
+                if close_time is not None:
+                    parsed = parsed.replace(year=close_time.astimezone(ET).year)
+            parsed = parsed.replace(hour=23, minute=59, second=0, microsecond=0, tzinfo=ET)
+        except (ValueError, OverflowError):
+            warnings.append("Could not parse the deadline date in the market question.")
+        else:
+            return (
+                parsed.astimezone(UTC),
+                "ET",
+                ET.key,
+                f"{title_date} 11:59 PM ET",
+                "question_title_by_date",
+                "high",
+                warnings,
+            )
+
     if not description:
         fallback_deadline = _parse_iso(market_close_time)
         return (
@@ -260,7 +293,9 @@ def evaluate_market_rules(
         warnings,
     ) = _parse_deadline_from_rules(
         resolution_criteria,
+        question=market.question,
         market_close_time=market.close_time,
+        now=now,
     )
     hours_remaining = (
         round((deadline_utc_dt - now).total_seconds() / 3600, 2)

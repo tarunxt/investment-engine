@@ -157,6 +157,24 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
   );
 });
 
+test("Bullpen preflight uses the selected market's by-date instead of a stale event close time", async () => {
+  const { buildBullpenQuestionPreflightEvidenceBlock } = await loadBullpenAiModule();
+  const questionRow = {
+    ...createQuestionRow(),
+    question: "Will Iran announce withdrawal from MOU negotiations by July 24?",
+    // Event-level data can be stale or refer to a resolved sibling market.
+    closeTime: "2026-06-15T03:59:00Z",
+  };
+
+  const preflightEvidenceBlock = buildBullpenQuestionPreflightEvidenceBlock(
+    questionRow,
+    new Date("2026-07-17T12:00:00.000Z"),
+  );
+
+  assert.match(preflightEvidenceBlock, /deadline \(ET\): 2026-07-24 11:59:00 PM ET/);
+  assert.match(preflightEvidenceBlock, /hours remaining: 183\.98/);
+});
+
 test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-invest endpoint", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),

@@ -169,6 +169,18 @@ def _format_text(value: str | None, fallback: str = "Not supplied") -> str:
     return normalized or fallback
 
 
+def _normalize_close_time(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
+
+
 def _canonical_market_slug(record: dict[str, Any], fallback_slug: str | None = None) -> str | None:
     return _read_string(record, ["slug", "marketSlug", "questionSlug"]) or fallback_slug
 
@@ -934,6 +946,7 @@ def prepare_polymarket_event_context(
         refreshed_best_bid = None
         refreshed_best_ask = None
         refreshed_spread = None
+        refreshed_close_time = question.close_time or question.closing_time
         question_warnings: list[str] = []
         field_provenance: dict[str, Stage2FieldProvenance] = {}
 
@@ -963,6 +976,12 @@ def prepare_polymarket_event_context(
                 gamma_record,
                 ["question", "title", "name", "marketQuestion"],
             ) or refreshed_question
+            refreshed_close_time = _normalize_close_time(
+                _read_string(
+                    gamma_record,
+                    ["endDate", "end_date", "closeTime", "close_time", "closingTime"],
+                )
+            ) or refreshed_close_time
             refreshed_market_slug = _canonical_market_slug(
                 gamma_record,
                 refreshed_market_slug,
@@ -1004,6 +1023,7 @@ def prepare_polymarket_event_context(
                 validation_status="matched" if refreshed_market_url else "missing",
             )
             note_provenance("exact_resolution_rules", source="gamma", validation_status="matched")
+            note_provenance("close_time", source="gamma", validation_status="matched")
             if refreshed_market_context:
                 note_provenance(
                     "background_market_context",
@@ -1027,7 +1047,7 @@ def prepare_polymarket_event_context(
             question=refreshed_question,
             market_url=refreshed_market_url,
             slug=refreshed_market_slug or refreshed_slug,
-            close_time=question.close_time or question.closing_time,
+            close_time=refreshed_close_time,
             theme=question.category,
             current_yes_odds=refreshed_yes_odds,
             current_no_odds=refreshed_no_odds,
@@ -1113,7 +1133,7 @@ def prepare_polymarket_event_context(
             slug=refreshed_market_slug or refreshed_slug,
             current_yes_odds=refreshed_yes_odds,
             current_no_odds=refreshed_no_odds,
-            close_time=question.close_time or question.closing_time,
+            close_time=refreshed_close_time,
             close_time_et=refreshed_rule_evaluation.deadline_et,
             deadline_et=refreshed_rule_evaluation.deadline_et,
             hours_remaining=refreshed_rule_evaluation.hours_remaining,
@@ -1188,6 +1208,7 @@ def prepare_polymarket_event_context(
                     "canonical_event_slug",
                     "current_yes_odds",
                     "current_no_odds",
+                    "close_time",
                     "exact_resolution_rules",
                     "resolution_source_description",
                 )
@@ -1216,6 +1237,8 @@ def prepare_polymarket_event_context(
                     "polymarket_rules": refreshed_rules,
                     "polymarket_market_context": refreshed_market_context,
                     "polymarket_resolution_source": refreshed_resolution_source,
+                    "close_time": refreshed_close_time,
+                    "closing_time": refreshed_close_time,
                     "preflight_evidence_block": verified_block,
                     "evidence_packet_v2": evidence_packet,
                     "stage2_context": canonical_context,

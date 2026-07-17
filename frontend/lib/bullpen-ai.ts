@@ -2266,9 +2266,12 @@ function createBullpenEasternDate(
   );
 }
 
-function extractBullpenMentionedDateParts(question: string) {
+function extractBullpenMentionedDateParts(
+  question: string,
+  fallbackYear: number,
+) {
   const match = question.match(
-    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:,\s*(\d{4}))?\b/i,
+    /\bby\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2})(?:,\s*(\d{4}))?\b/i,
   );
   if (!match) return null;
 
@@ -2276,7 +2279,7 @@ function extractBullpenMentionedDateParts(question: string) {
   const day = Number(match[2]);
   const year = match[3]
     ? Number(match[3])
-    : new Date().getUTCFullYear();
+    : fallbackYear;
 
   if (
     monthIndex === undefined ||
@@ -2306,13 +2309,16 @@ function buildBullpenDeadlineInfo(question: BullpenQuestionRow, now: Date) {
   const closeTimeEt = closeDate
     ? formatBullpenDateTimeInTimeZone(closeDate, BULLPEN_ET_TIME_ZONE)
     : null;
-  const titleDateParts = extractBullpenMentionedDateParts(question.question);
-  const isByDateMarket =
-    /\bby\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:,\s*\d{4})?\b/i.test(
-      question.question,
-    );
+  // The market title identifies the selected row in a multi-market event.
+  // Its date must outrank an event-level closeTime, which can belong to an
+  // already-resolved sibling market. Use the close time only to supply a
+  // missing title year, keeping prompt construction deterministic.
+  const titleDateParts = extractBullpenMentionedDateParts(
+    question.question,
+    closeDate?.getUTCFullYear() ?? now.getUTCFullYear(),
+  );
   const titleDeadlineDate =
-    titleDateParts && isByDateMarket
+    titleDateParts
       ? createBullpenEasternDate(
           titleDateParts.year,
           titleDateParts.monthIndex,
