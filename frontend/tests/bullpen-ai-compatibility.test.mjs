@@ -425,6 +425,30 @@ test("Bullpen auto-run serializes LLM target saves so rapid multi-select changes
     /pendingSelectedLlmTargetsSaveRef\.current = nextTargets/,
   );
   assert.match(autoRunCardSource, /defaultTargets=\{selectedLlmTargets\}/);
+  assert.match(autoRunCardSource, /selectedLlmTargetsSavePromiseRef/);
+  assert.match(autoRunCardSource, /await selectedLlmTargetsSavePromiseRef\.current/);
+});
+
+test("Bullpen auto-run bootstraps legacy Stage 2 LLM selections into canonical server settings", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /readLegacyBullpenLlmTargetsFromStorage/);
+  assert.match(autoRunCardSource, /legacyBullpenLlmTargetsBootstrapEligibleRef/);
+  assert.match(
+    autoRunCardSource,
+    /pendingSelectedLlmTargetsSaveRef\.current = legacyTargets/,
+  );
+  assert.match(autoRunCardSource, /ensureCanonicalStage2LlmTargets/);
+  assert.match(
+    autoRunCardSource,
+    /ensureCanonicalStage2LlmTargets\(\{\s*requireNonEmpty:\s*true,\s*\}\)/,
+  );
 });
 
 test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt template", () => {

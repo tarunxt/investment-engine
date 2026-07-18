@@ -121,6 +121,8 @@ import {
 
 const BULLPEN_LOGIN_COMMAND =
   "sudo -u investor env HOME=/home/investor BULLPEN_BIN=/usr/local/bin/bullpen /usr/local/bin/bullpen login --no-browser";
+const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
+  "investment-engine:bullpen-ai:last-llm-target:v1";
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -912,6 +914,81 @@ function serializeProviderTargets(targets: ProviderModelTarget[]) {
       model: target.model,
     })),
   );
+}
+
+function normalizeStoredProviderTarget(
+  value: unknown,
+): ProviderModelTarget | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const provider =
+    typeof (value as { provider?: unknown }).provider === "string"
+      ? (value as { provider: string }).provider.trim()
+      : "";
+  const model =
+    typeof (value as { model?: unknown }).model === "string"
+      ? (value as { model: string }).model.trim()
+      : "";
+  if (!provider || !model) {
+    return null;
+  }
+
+  return { provider, model };
+}
+
+function readLegacyBullpenLlmTargetsFromStorage() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(BULLPEN_LAST_LLM_TARGET_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    const candidateTargets = Array.isArray(parsed)
+      ? parsed
+      : parsed
+        ? [parsed]
+        : [];
+    const normalizedTargets: ProviderModelTarget[] = [];
+    const seenKeys = new Set<string>();
+
+    candidateTargets.forEach((target) => {
+      const normalizedTarget = normalizeStoredProviderTarget(target);
+      if (!normalizedTarget) return;
+
+      const key = `${normalizedTarget.provider.toLowerCase()}::${normalizedTarget.model.toLowerCase()}`;
+      if (seenKeys.has(key)) return;
+
+      seenKeys.add(key);
+      normalizedTargets.push(normalizedTarget);
+    });
+
+    return normalizedTargets;
+  } catch {
+    return [];
+  }
+}
+
+function resolveCanonicalStage2TargetSelection(
+  selectedTargets: ProviderModelTarget[],
+  serverTargets: ProviderModelTarget[],
+  legacyTargets: ProviderModelTarget[] | null,
+) {
+  if (selectedTargets.length > 0) {
+    return selectedTargets;
+  }
+  if (serverTargets.length > 0) {
+    return serverTargets;
+  }
+  return legacyTargets ?? [];
+}
+
+function missingStage2TargetsError(): ErrorState {
+  return {
+    message:
+      "Select at least one LLM before starting Auto-Live Stage 2. The saved target list is empty.",
+    details: null,
+  };
 }
 
 function formatPriceCents(value: number | null) {
@@ -7770,7 +7847,15 @@ export function BullpenAutoRunScheduleCard({
     null,
   );
   const selectedLlmTargetsSaveInFlightRef = useRef(false);
+  const selectedLlmTargetsSavePromiseRef = useRef<Promise<void> | null>(null);
   const savedSelectedLlmTargetsRef = useRef("[]");
+  const legacyBullpenLlmTargetsRef = useRef<ProviderModelTarget[]>(
+    readLegacyBullpenLlmTargetsFromStorage(),
+  );
+  const legacyBullpenLlmTargetsBootstrapStartedRef = useRef(false);
+  const legacyBullpenLlmTargetsBootstrapEligibleRef = useRef(
+    legacyBullpenLlmTargetsRef.current.length > 0,
+  );
   const [llmExecutionMode, setLlmExecutionMode] =
     useState<BullpenLlmExecutionMode>(DEFAULT_LLM_EXECUTION_MODE);
   const [llmEventsPerPromptInput, setLlmEventsPerPromptInput] = useState(
@@ -7818,6 +7903,9 @@ export function BullpenAutoRunScheduleCard({
   useEffect(() => {
     const nextTargets = summary?.settings.console_llm_targets ?? [];
     savedSelectedLlmTargetsRef.current = serializeProviderTargets(nextTargets);
+    if (nextTargets.length > 0) {
+      legacyBullpenLlmTargetsBootstrapEligibleRef.current = false;
+    }
     if (
       llmTargetSelectionSaveBusy ||
       pendingSelectedLlmTargetsSaveRef.current !== null
@@ -7832,6 +7920,25 @@ export function BullpenAutoRunScheduleCard({
       );
     });
   }, [llmTargetSelectionSaveBusy, summary?.settings.console_llm_targets]);
+
+  useEffect(() => {
+    if (!summary) return;
+    if (legacyBullpenLlmTargetsBootstrapStartedRef.current) return;
+    if ((summary.settings.console_llm_targets ?? []).length > 0) return;
+    if (!legacyBullpenLlmTargetsBootstrapEligibleRef.current) return;
+
+    const legacyTargets = legacyBullpenLlmTargetsRef.current;
+    if (legacyTargets.length === 0) return;
+
+    legacyBullpenLlmTargetsBootstrapStartedRef.current = true;
+    setSelectedLlmTargets((currentTargets) =>
+      areProviderTargetsEqual(currentTargets, legacyTargets)
+        ? currentTargets
+        : legacyTargets,
+    );
+    pendingSelectedLlmTargetsSaveRef.current = legacyTargets;
+    void flushSelectedLlmTargetSaves();
+  }, [summary]);
 
   useEffect(() => {
     if (llmExecutionSettingsDirty) return;
@@ -7860,43 +7967,62 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function flushSelectedLlmTargetSaves() {
-    if (selectedLlmTargetsSaveInFlightRef.current) return;
+    if (selectedLlmTargetsSavePromiseRef.current) {
+      await selectedLlmTargetsSavePromiseRef.current;
+      return;
+    }
     if (pendingSelectedLlmTargetsSaveRef.current === null) return;
 
-    selectedLlmTargetsSaveInFlightRef.current = true;
-    setLlmTargetSelectionSaveBusy(true);
-    setError(null);
+    const savePromise = (async () => {
+      selectedLlmTargetsSaveInFlightRef.current = true;
+      setLlmTargetSelectionSaveBusy(true);
+      setError(null);
 
-    try {
-      while (pendingSelectedLlmTargetsSaveRef.current !== null) {
-        const nextTargets = pendingSelectedLlmTargetsSaveRef.current;
-        pendingSelectedLlmTargetsSaveRef.current = null;
-        const nextSerialized = serializeProviderTargets(nextTargets);
+      try {
+        while (pendingSelectedLlmTargetsSaveRef.current !== null) {
+          const nextTargets = pendingSelectedLlmTargetsSaveRef.current;
+          pendingSelectedLlmTargetsSaveRef.current = null;
+          const nextSerialized = serializeProviderTargets(nextTargets);
 
-        if (nextSerialized === savedSelectedLlmTargetsRef.current) {
-          continue;
+          if (nextSerialized === savedSelectedLlmTargetsRef.current) {
+            continue;
+          }
+
+          const updatedSettings = await apiService.updateBullpenAutoLiveSettings({
+            console_llm_targets: nextTargets,
+          });
+          const savedTargets = updatedSettings.console_llm_targets ?? [];
+          savedSelectedLlmTargetsRef.current = serializeProviderTargets(
+            savedTargets,
+          );
+          legacyBullpenLlmTargetsBootstrapEligibleRef.current = false;
+          if (savedTargets.length > 0) {
+            legacyBullpenLlmTargetsRef.current = savedTargets;
+          }
         }
-
-        const updatedSettings = await apiService.updateBullpenAutoLiveSettings({
-          console_llm_targets: nextTargets,
-        });
-        savedSelectedLlmTargetsRef.current = serializeProviderTargets(
-          updatedSettings.console_llm_targets ?? [],
-        );
+        await loadSummary({ preserveLoading: true });
+      } catch (nextError) {
+        setError(normalizeError(nextError));
+        const reloadedSummary = await loadSummary({ preserveLoading: true });
+        const reloadedTargets = reloadedSummary?.settings.console_llm_targets ?? [];
+        savedSelectedLlmTargetsRef.current =
+          serializeProviderTargets(reloadedTargets);
+        setSelectedLlmTargets(reloadedTargets);
+      } finally {
+        selectedLlmTargetsSaveInFlightRef.current = false;
+        setLlmTargetSelectionSaveBusy(false);
       }
-      await loadSummary({ preserveLoading: true });
-    } catch (nextError) {
-      setError(normalizeError(nextError));
-      const reloadedSummary = await loadSummary({ preserveLoading: true });
-      const reloadedTargets = reloadedSummary?.settings.console_llm_targets ?? [];
-      savedSelectedLlmTargetsRef.current =
-        serializeProviderTargets(reloadedTargets);
-      setSelectedLlmTargets(reloadedTargets);
+    })();
+
+    selectedLlmTargetsSavePromiseRef.current = savePromise;
+    try {
+      await savePromise;
     } finally {
-      selectedLlmTargetsSaveInFlightRef.current = false;
-      setLlmTargetSelectionSaveBusy(false);
+      if (selectedLlmTargetsSavePromiseRef.current === savePromise) {
+        selectedLlmTargetsSavePromiseRef.current = null;
+      }
       if (pendingSelectedLlmTargetsSaveRef.current !== null) {
-        void flushSelectedLlmTargetSaves();
+        await flushSelectedLlmTargetSaves();
       }
     }
   }
@@ -7907,6 +8033,65 @@ export function BullpenAutoRunScheduleCard({
     setSelectedLlmTargets(nextTargets);
     pendingSelectedLlmTargetsSaveRef.current = nextTargets;
     void flushSelectedLlmTargetSaves();
+  }
+
+  async function ensureCanonicalStage2LlmTargets(options?: {
+    requireNonEmpty?: boolean;
+  }) {
+    await flushSelectedLlmTargetSaves();
+
+    const currentSummary =
+      summary ?? (await loadSummary({ preserveLoading: true }));
+    const serverTargets = currentSummary?.settings.console_llm_targets ?? [];
+    const nextTargets = resolveCanonicalStage2TargetSelection(
+      selectedLlmTargets,
+      serverTargets,
+      legacyBullpenLlmTargetsBootstrapEligibleRef.current
+        ? legacyBullpenLlmTargetsRef.current
+        : null,
+    );
+
+    if (nextTargets.length === 0) {
+      if (options?.requireNonEmpty) {
+        setError(missingStage2TargetsError());
+        setNotice(null);
+        if (startNowProgressTimeoutRef.current !== null) {
+          window.clearTimeout(startNowProgressTimeoutRef.current);
+          startNowProgressTimeoutRef.current = null;
+        }
+        setStartNowProgress(null);
+      }
+      return options?.requireNonEmpty ? null : undefined;
+    }
+
+    if (areProviderTargetsEqual(serverTargets, nextTargets)) {
+      legacyBullpenLlmTargetsRef.current = nextTargets;
+      return nextTargets;
+    }
+
+    const updatedSettings = await apiService.updateBullpenAutoLiveSettings({
+      console_llm_targets: nextTargets,
+    });
+    const savedTargets = updatedSettings.console_llm_targets ?? [];
+    savedSelectedLlmTargetsRef.current = serializeProviderTargets(savedTargets);
+    legacyBullpenLlmTargetsBootstrapEligibleRef.current = false;
+    if (savedTargets.length > 0) {
+      legacyBullpenLlmTargetsRef.current = savedTargets;
+    }
+    setSelectedLlmTargets((currentTargets) =>
+      areProviderTargetsEqual(currentTargets, savedTargets)
+        ? currentTargets
+        : savedTargets,
+    );
+    await loadSummary({ preserveLoading: true });
+
+    if (savedTargets.length === 0 && options?.requireNonEmpty) {
+      setError(missingStage2TargetsError());
+      setNotice(null);
+      return null;
+    }
+
+    return savedTargets.length > 0 ? savedTargets : undefined;
   }
 
   async function handleSaveLlmExecutionSettings(options?: {
@@ -8156,12 +8341,13 @@ export function BullpenAutoRunScheduleCard({
     const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
     const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
     try {
+      const consoleLlmTargets = await ensureCanonicalStage2LlmTargets();
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           persistedConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
-          selectedLlmTargets,
+          consoleLlmTargets,
         ),
       );
       setScheduleSettingsDirty(false);
@@ -8201,12 +8387,18 @@ export function BullpenAutoRunScheduleCard({
       }
       const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
+      const consoleLlmTargets = await ensureCanonicalStage2LlmTargets({
+        requireNonEmpty: true,
+      });
+      if (!consoleLlmTargets) {
+        return;
+      }
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           persistedConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
-          selectedLlmTargets,
+          consoleLlmTargets,
         ),
       );
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
@@ -8295,6 +8487,12 @@ export function BullpenAutoRunScheduleCard({
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
       const latestConsoleOrderUsd =
         tradeAmountView.tradeAmountUsd ?? persistedConsoleOrderUsd;
+      const consoleLlmTargets = await ensureCanonicalStage2LlmTargets({
+        requireNonEmpty: true,
+      });
+      if (!consoleLlmTargets) {
+        return;
+      }
 
       if (autoRunActive) {
         setStartNowProgress(
@@ -8312,7 +8510,7 @@ export function BullpenAutoRunScheduleCard({
           latestConsoleOrderUsd,
           normalizedStart || null,
           refreshMinutes,
-          selectedLlmTargets,
+          consoleLlmTargets,
         ),
       );
       if (abortIfStartCancelled()) return;
@@ -8402,12 +8600,21 @@ export function BullpenAutoRunScheduleCard({
         });
         return;
       }
+      const consoleLlmTargets = await ensureCanonicalStage2LlmTargets({
+        requireNonEmpty: true,
+      });
+      if (!consoleLlmTargets) {
+        setAction(null);
+        setPendingRunId(null);
+        setRunNowStartedAt(null);
+        return;
+      }
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           persistedConsoleOrderUsd,
           scheduleStartInput.trim() || null,
           refreshMinutes,
-          selectedLlmTargets,
+          consoleLlmTargets,
         ),
       );
       const run = await apiService.runBullpenAutoLiveOnce(request);
