@@ -56,7 +56,22 @@ LEADERBOARD_PERIOD_MAX_AGE = {
     "weekly": timedelta(days=7),
 }
 logger = logging.getLogger(__name__)
-_polygon_rpc_semaphore = asyncio.Semaphore(POLYGON_RPC_CONCURRENCY_LIMIT)
+_polygon_rpc_semaphore: asyncio.Semaphore | None = None
+_polygon_rpc_semaphore_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _polygon_rpc_semaphore_for_current_loop() -> asyncio.Semaphore:
+    global _polygon_rpc_semaphore, _polygon_rpc_semaphore_loop
+
+    loop = asyncio.get_running_loop()
+    # Celery runs Auto-Live jobs with asyncio.run(), which creates a fresh
+    # event loop for each task/retry. asyncio synchronization primitives are
+    # bound to the loop they were first used on, so never reuse the global
+    # Polygon RPC limiter across loops.
+    if _polygon_rpc_semaphore is None or _polygon_rpc_semaphore_loop is not loop:
+        _polygon_rpc_semaphore = asyncio.Semaphore(POLYGON_RPC_CONCURRENCY_LIMIT)
+        _polygon_rpc_semaphore_loop = loop
+    return _polygon_rpc_semaphore
 
 
 @dataclass(frozen=True)
@@ -1121,7 +1136,7 @@ async def _post_polygon_rpc_with_backoff(
 ) -> object:
     last_error: Exception | None = None
     for attempt in range(POLYGON_RPC_MAX_ATTEMPTS):
-        async with _polygon_rpc_semaphore:
+        async with _polygon_rpc_semaphore_for_current_loop():
             response = await client.post(
                 rpc_url,
                 json=body,

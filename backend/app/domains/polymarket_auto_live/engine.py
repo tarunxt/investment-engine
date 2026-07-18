@@ -404,6 +404,26 @@ def set_run_stage_result(
     run.stage_results.append(stage_result)
 
 
+def reset_workflow_stage_results(
+    run: BullpenAutoLiveRun,
+    *,
+    from_stage_number: int,
+) -> None:
+    """Drop stale workflow-stage progress before retrying a run.
+
+    Auto-Live Celery retries reuse the same persisted run record. If the first
+    attempt fails while Stage 3 is running, the retry must not keep showing that
+    old Stage 3 row while Stage 2 is being recomputed. The retry can only publish
+    Stage 3 again after Stage 2 has completed and the Stage 3 input is rebuilt.
+    """
+
+    run.stage_results = [
+        stage_result
+        for stage_result in run.stage_results
+        if stage_result.stage_number < from_stage_number
+    ]
+
+
 @dataclass
 class PositionSnapshot:
     market_id: str
@@ -2767,6 +2787,7 @@ class BullpenAutoLiveEngine:
         state.live_execution_allowed = False
         state.emergency_stopped = settings.emergency_stop
         run.dry_run = state.dry_run
+        reset_workflow_stage_results(run, from_stage_number=2)
         state.last_execution_at = _latest_execution_at(historical_decisions)
         (
             state.today_executed_orders,
