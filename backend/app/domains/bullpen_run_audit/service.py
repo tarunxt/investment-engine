@@ -118,6 +118,40 @@ def _stage_outputs_for_workflow(run_payload: dict[str, Any], workflow_key: str) 
     return {}
 
 
+def _stage_outputs_for_stage_number(run_payload: dict[str, Any], stage_number: int) -> dict[str, Any]:
+    for stage in reversed(run_payload.get("stage_results") or []):
+        if not isinstance(stage, dict):
+            continue
+        if int(stage.get("stage_number") or 0) != stage_number:
+            continue
+        outputs = stage.get("outputs")
+        if isinstance(outputs, dict):
+            return dict(outputs)
+    return {}
+
+
+def _stage2_to_stage3_handoff_market_ids(run_payload: dict[str, Any]) -> list[str]:
+    ranking_outputs = _stage_outputs_for_stage_number(run_payload, 6)
+    stage3_outputs = _stage_outputs_for_workflow(run_payload, "invest")
+    raw_ids = (
+        ranking_outputs.get("ranking_top_candidate_market_id_order")
+        or ranking_outputs.get("top_candidate_market_ids")
+        or ranking_outputs.get("ranked_top_candidate_market_ids")
+        or stage3_outputs.get("ranking_top_candidate_market_id_order")
+        or stage3_outputs.get("top_candidate_market_ids")
+        or stage3_outputs.get("ranked_top_candidate_market_ids")
+        or []
+    )
+    if not isinstance(raw_ids, list):
+        return []
+    market_ids: list[str] = []
+    for item in raw_ids:
+        value = str(item or "").strip()
+        if value:
+            market_ids.append(value)
+    return market_ids
+
+
 def _logical_stage_number_for_result(stage: dict[str, Any]) -> int:
     outputs = stage.get("outputs")
     if isinstance(outputs, dict):
@@ -534,6 +568,7 @@ def _build_bundle(
     order_intents = run_orders_payload.get("orders") if isinstance(run_orders_payload.get("orders"), list) else []
     stage2_outputs = _stage_outputs_for_workflow(run_payload, "llm")
     stage3_outputs = _stage_outputs_for_workflow(run_payload, "invest")
+    stage2_to_stage3_handoff_market_ids = _stage2_to_stage3_handoff_market_ids(run_payload)
     audit_metadata = (
         run_payload.get("audit_metadata")
         if isinstance(run_payload.get("audit_metadata"), dict)
@@ -644,6 +679,7 @@ def _build_bundle(
             ],
             "candidate_reviews": candidate_reviews,
             "qualified_candidate_market_ids": stage2_outputs.get("qualified_candidate_market_ids") or [],
+            "stage3_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
             "llm_invocations": stage2_outputs.get("llm_target_runs") or [],
             "llm_runtime": {
                 key: value
@@ -661,6 +697,7 @@ def _build_bundle(
             "order_metrics": stage3_outputs.get("order_metrics") or {},
             "execution_steps": stage3_outputs.get("execution_steps") or [],
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),
+            "stage2_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
         },
         "guardrails": {
             "run_guardrails": run_payload.get("guardrail_checks") or [],

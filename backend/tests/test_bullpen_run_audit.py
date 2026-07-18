@@ -160,6 +160,72 @@ def test_build_deterministic_findings_flags_missing_stage3_handoff():
     assert "QUALIFIED_STAGE2_CANDIDATE_MISSING_STAGE3_RESULT" in codes
 
 
+def test_build_deterministic_findings_flags_missing_stage2_top10_handoff_decision():
+    bundle = {
+        "metadata": {"run_id": "run-2"},
+        "overview": {
+            "started_at": "2026-07-18T10:00:00+00:00",
+            "completed_at": "2026-07-18T10:05:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {
+            "candidate_reviews": [],
+            "stage3_handoff_candidate_market_ids": ["market-top-1"],
+        },
+        "stage_3": {
+            "decisions": [],
+            "order_intents": [],
+            "max_positions": 10,
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+    codes = {finding["code"] for finding in findings}
+
+    assert "STAGE2_TOP10_HANDOFF_MISSING_STAGE3_DECISION" in codes
+
+
+def test_build_deterministic_findings_flags_missing_stage2_top10_planning_reason():
+    bundle = {
+        "metadata": {"run_id": "run-3"},
+        "overview": {
+            "started_at": "2026-07-18T10:00:00+00:00",
+            "completed_at": "2026-07-18T10:05:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {
+            "candidate_reviews": [],
+            "stage3_handoff_candidate_market_ids": ["market-top-2"],
+        },
+        "stage_3": {
+            "decisions": [
+                {
+                    "id": "decision-1",
+                    "market_id": "market-top-2",
+                    "stage3_result": "SELECTED",
+                    "stage3_result_reason": "",
+                    "summary": "",
+                    "reason": "",
+                    "order_plan": None,
+                }
+            ],
+            "order_intents": [],
+            "max_positions": 10,
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+    codes = {finding["code"] for finding in findings}
+
+    assert "STAGE2_TOP10_HANDOFF_MISSING_PLANNING_REASON" in codes
+
+
 def test_algorithm_registry_contains_required_audit_keys():
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert keys >= {

@@ -12,8 +12,10 @@ test("Stage 2 invest list keeps shortlisted BUY_NEW rows visible until Stage 3 f
   );
 
   assert.match(source, /if \(decision\.decision === "BUY_NEW"\) \{\s*return true;/);
-  assert.match(source, /Stage 2-ranked buy candidates that Stage 3 is trying to execute\./);
-  assert.match(source, /If a top-ranked event was deferred, its latest blocker is shown/);
+  assert.match(source, /buildBullpenStage2TopTenHandoffRows/);
+  assert.match(source, /Persisted Stage 2 Top 10 candidates that Stage 3 is trying to\s+execute\./);
+  assert.match(source, /If a transferred event never became a concrete Step 2\s+buy plan/);
   assert.match(source, /Execution blocker \/ detail:/);
+  assert.match(source, /row\.missingFromStage3/);
   assert.match(source, /decision\.stage3_result\?\.replaceAll\("_", " "\) \?\? "Pending"/);
 });

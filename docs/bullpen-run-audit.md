@@ -136,6 +136,10 @@ pre-LLM review rows.
 Persisted candidate reviews, per-model outputs, Stage 2 LLM runtime payloads, and
 qualified handoff inputs.
 
+The Stage 2 bundle now also captures the persisted `Stage 2 Top 10 -> Stage 3`
+handoff candidate market IDs so audits can verify that every queued Top 10 row
+either appeared in Stage 3 decisions or recorded a concrete blocker.
+
 Stage 2 LLM invocation counts now come only from persisted child provider/model
 executions. Wrapper task completion does not count as an LLM response, blank
 provider/model rows are treated as data-integrity failures, Stage 2 may end in
@@ -144,7 +148,9 @@ provider/model rows are treated as data-integrity failures, Stage 2 may end in
 ### Stage 3
 
 Decision rows, guardrail outcomes, ranking and selection results, order intents,
-execution steps, and order funnel metrics.
+execution steps, order funnel metrics, and the mirrored Stage 2 handoff queue
+used to explain why a Top 10 row did or did not become a concrete Step 2 buy
+plan.
 
 ### Guardrails
 
@@ -188,6 +194,8 @@ Current deterministic checks include:
 * rationale-versus-odds mismatch
 * provider failure markers
 * qualified Stage 2 candidate missing Stage 3 result
+* Stage 2 Top 10 handoff row missing from Stage 3 decisions
+* Stage 2 Top 10 handoff row missing a recorded planning blocker
 * blocked Stage 3 decision without reason
 * rank duplicates or gaps
 * selection count exceeding max positions
@@ -226,6 +234,7 @@ When changing Bullpen logic:
 * update `AUDITED_ALGORITHM_REGISTRY`
 * update validators and finding messages
 * update frontend run audit rendering if labels or sections changed
+* confirm Stage 2 Top 10 handoff rows still persist enough detail to explain why a queued row was planned, deferred, missing, or failed in Stage 3
 * add or update tests
 * review `AGENTS.md` synchronization contract
 

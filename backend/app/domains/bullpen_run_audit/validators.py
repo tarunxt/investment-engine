@@ -204,6 +204,7 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
 
     decisions = stage_3.get("decisions") if isinstance(stage_3.get("decisions"), list) else []
     stage3_market_ids: set[str] = set()
+    decisions_by_market_id: dict[str, dict[str, Any]] = {}
     stage3_ranks: list[int] = []
     selected_count = 0
     blocked_without_reason = 0
@@ -212,6 +213,7 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
             continue
         market_id = str(decision.get("market_id") or f"decision-{index + 1}")
         stage3_market_ids.add(market_id)
+        decisions_by_market_id.setdefault(market_id, decision)
         final_rank = decision.get("stage3_final_rank")
         if isinstance(final_rank, int):
             stage3_ranks.append(final_rank)
@@ -219,6 +221,12 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
             selected_count += 1
         if decision.get("stage3_result") == "BLOCKED" and not decision.get("stage3_result_reason"):
             blocked_without_reason += 1
+
+    handoff_market_ids = {
+        str(market_id)
+        for market_id in (stage_2.get("stage3_handoff_candidate_market_ids") or [])
+        if str(market_id or "").strip()
+    }
 
     for market_id in sorted(qualified_market_ids - stage3_market_ids):
         findings.append(
@@ -230,6 +238,55 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                 title="Qualified Stage 2 candidate never received a Stage 3 result",
                 explanation="A candidate was qualified in Stage 2 but never appeared in Stage 3 decisions.",
                 evidence_pointers=[f"/stage_2/candidate_reviews/market:{market_id}"],
+            )
+        )
+
+    for market_id in sorted(handoff_market_ids - stage3_market_ids):
+        findings.append(
+            _finding(
+                code="STAGE2_TOP10_HANDOFF_MISSING_STAGE3_DECISION",
+                severity="high",
+                stage="stage-3",
+                category="handoff",
+                title="Stage 2 Top 10 handoff row never reached Stage 3",
+                explanation="A persisted Stage 2 Top 10 handoff market never appeared in Stage 3 decisions.",
+                evidence_pointers=[
+                    f"/stage_2/stage3_handoff_candidate_market_ids/market:{market_id}",
+                    "/stage_3/decisions",
+                ],
+            )
+        )
+
+    handoff_missing_reason = 0
+    for market_id in sorted(handoff_market_ids & stage3_market_ids):
+        decision = decisions_by_market_id.get(market_id) or {}
+        order_plan = decision.get("order_plan") if isinstance(decision.get("order_plan"), dict) else {}
+        has_buy_order_plan = str(order_plan.get("action") or "").strip().lower() == "buy"
+        recorded_reason = str(
+            decision.get("stage3_result_reason")
+            or decision.get("summary")
+            or decision.get("reason")
+            or order_plan.get("detail")
+            or ""
+        ).strip()
+        if not has_buy_order_plan and not recorded_reason:
+            handoff_missing_reason += 1
+
+    if handoff_missing_reason > 0:
+        findings.append(
+            _finding(
+                code="STAGE2_TOP10_HANDOFF_MISSING_PLANNING_REASON",
+                severity="medium",
+                stage="stage-3",
+                category="decision-recording",
+                title="Stage 2 Top 10 handoff row is missing a planning blocker",
+                explanation="At least one Stage 2 Top 10 handoff decision never became a buy plan and did not persist a reason.",
+                observed_value=str(handoff_missing_reason),
+                expected_value="0",
+                evidence_pointers=[
+                    "/stage_2/stage3_handoff_candidate_market_ids",
+                    "/stage_3/decisions",
+                ],
             )
         )
 
@@ -396,4 +453,3 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                 )
 
     return findings
-

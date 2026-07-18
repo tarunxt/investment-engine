@@ -101,6 +101,10 @@ import {
   resolveStageTwoHistoricalAsOfTimestamp,
 } from "./bullpenAutoRunStageTwoHistory";
 import {
+  buildBullpenStage2TopTenHandoffRows,
+  type BullpenStage2TopTenHandoffRow,
+} from "./bullpenStage2TopTenHandoff";
+import {
   formatElapsedRunTime,
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
@@ -191,7 +195,7 @@ type RunDetailDialogState = {
 };
 
 type StageTwoInvestEventsDialogState = {
-  decisions: BullpenAutoLiveDecision[];
+  rows: BullpenStage2TopTenHandoffRow[];
 };
 
 type StageTwoLlmRunDialogState = {
@@ -1046,6 +1050,7 @@ function getStageOneStats(stage: WorkflowStageView) {
 function getStageTwoStats(
   stage: WorkflowStageView,
   decisions: BullpenAutoLiveDecision[] = [],
+  run: BullpenAutoLiveRun | null = null,
 ) {
   const { open: activePositions, claimable: claimablePositions } =
     getStageActivePositionCounts(stage);
@@ -1073,7 +1078,13 @@ function getStageTwoStats(
       ? stageTwoTargets.filter((target) => hasStageTwoLlmIdentity(target)).length
       : null) ??
     Math.max(llmsCompleted, 0);
-  const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
+  const stage2TopTenHandoffCount = run
+    ? buildBullpenStage2TopTenHandoffRows({ run, decisions }).length
+    : 0;
+  const newEventsToInvestIn =
+    stage2TopTenHandoffCount > 0
+      ? stage2TopTenHandoffCount
+      : getStageTwoInvestableDecisions(decisions).length;
 
   return {
     activePositions,
@@ -1365,15 +1376,17 @@ function StageTwoRunStats({
   hideNumbers?: boolean;
   decisions?: BullpenAutoLiveDecision[];
   scanStageForPositionSnapshot?: WorkflowStageView;
-  onOpenInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+  onOpenInvestEvents?: (rows: BullpenStage2TopTenHandoffRow[]) => void;
   onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenScanCandidateDialog?: (
     stage: WorkflowStageView,
     mode: ScanCandidateDialogMode,
   ) => void;
 }) {
-  const investableDecisions = getStageTwoInvestableDecisions(decisions);
-  const stats = getStageTwoStats(stage, decisions);
+  const stage2TopTenHandoffRows = run
+    ? buildBullpenStage2TopTenHandoffRows({ run, decisions })
+    : [];
+  const stats = getStageTwoStats(stage, decisions, run);
   const positionDialogStage = scanStageForPositionSnapshot ?? stage;
   const positionStats = scanStageForPositionSnapshot
     ? getStageOneStats(scanStageForPositionSnapshot)
@@ -1555,10 +1568,10 @@ function StageTwoRunStats({
         )}
       </div>
       <div>
-        {onOpenInvestEvents && stats.newEventsToInvestIn > 0 ? (
+        {onOpenInvestEvents && stage2TopTenHandoffRows.length > 0 ? (
           <button
             type="button"
-            onClick={() => onOpenInvestEvents(investableDecisions)}
+            onClick={() => onOpenInvestEvents(stage2TopTenHandoffRows)}
             className="text-left font-medium text-emerald-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
             aria-label={`Open details for ${displayStat(stats.newEventsToInvestIn)} new events to invest in`}
           >
@@ -3212,7 +3225,7 @@ function RunDetailWorkerStages({
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
-  onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+  onOpenStageTwoInvestEvents?: (rows: BullpenStage2TopTenHandoffRow[]) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
@@ -3412,7 +3425,7 @@ function RunDetailDialog({
   state: RunDetailDialogState;
   onClose: () => void;
   onOpenScanFilters?: () => void;
-  onOpenStageTwoInvestEvents?: (decisions: BullpenAutoLiveDecision[]) => void;
+  onOpenStageTwoInvestEvents?: (rows: BullpenStage2TopTenHandoffRow[]) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenMetricDetails?: (
     run: BullpenAutoLiveRun,
@@ -4170,6 +4183,10 @@ function RunHistoryMetricTiles({
   decisions,
   onOpenMetricDetails,
 }: RunHistoryMetricTilesProps) {
+  const stage2TopTenHandoffRows = buildBullpenStage2TopTenHandoffRows({
+    run,
+    decisions,
+  });
   const availableForClaimCount = getInvestMetricRows(
     "sell-redeem",
     decisions,
@@ -4182,10 +4199,10 @@ function RunHistoryMetricTiles({
     "sell-forced-exit",
     decisions,
   ).length;
-  const newEventsToInvestCount = getInvestMetricRows(
-    "buy-planned",
-    decisions,
-  ).length;
+  const newEventsToInvestCount =
+    stage2TopTenHandoffRows.length > 0
+      ? stage2TopTenHandoffRows.length
+      : getInvestMetricRows("buy-planned", decisions).length;
   const newEventsInvestedCount = getInvestMetricRows(
     "buy-submitted",
     decisions,
@@ -5011,7 +5028,7 @@ export function StageTwoLlmRunDetailsDialog({
     });
   const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
   const llmOutputGroupRefs = useRef(new Map<string, HTMLElement>());
-  const stats = getStageTwoStats(state.stage, state.decisions);
+  const stats = getStageTwoStats(state.stage, state.decisions, state.run);
   const overlapCount = Math.max(
     0,
     stats.activePositions + stats.newOpportunities - stats.llmRanOn,
@@ -6446,12 +6463,12 @@ function StageTwoInvestEventsDialog({
               Stage 2 Output
             </p>
             <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              New Events to Invest in: {state.decisions.length}
+              New Events to Invest in: {state.rows.length}
             </h2>
             <p className="mt-2 text-sm text-slate-600">
-              Stage 2-ranked buy candidates that Stage 3 is trying to execute.
-              If a top-ranked event was deferred, its latest blocker is shown
-              here.
+              Persisted Stage 2 Top 10 candidates that Stage 3 is trying to
+              execute. If a transferred event never became a concrete Step 2
+              buy plan, its latest blocker is shown here.
             </p>
           </div>
           <button
@@ -6464,12 +6481,17 @@ function StageTwoInvestEventsDialog({
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
-          {state.decisions.length ? (
+          {state.rows.length ? (
             <div className="space-y-4">
-              {state.decisions.map((decision, index) => {
-                const executionTone = getStageTwoInvestExecutionTone(decision);
-                const executionStatus = formatStageTwoInvestExecutionStatus(decision);
-                const executionReason = getStageTwoInvestExecutionReason(decision);
+              {state.rows.map((row, index) => {
+                const decision = row.displayDecision;
+                const executionTone = row.missingFromStage3
+                  ? "warning"
+                  : getStageTwoInvestExecutionTone(decision);
+                const executionStatus = row.missingFromStage3
+                  ? "missing from Stage 3"
+                  : formatStageTwoInvestExecutionStatus(decision);
+                const executionReason = row.reason;
                 const executionBadgeClassName =
                   executionTone === "success"
                     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
@@ -6486,10 +6508,11 @@ function StageTwoInvestEventsDialog({
                       : executionTone === "info"
                         ? "border-sky-100 bg-sky-50/40"
                         : "border-slate-200 bg-slate-50/40";
-                const stage3Rank =
-                  typeof decision.stage3_final_rank === "number"
-                    ? `#${decision.stage3_final_rank}`
-                    : null;
+                const plannedAmount =
+                  decision.order_plan?.order_size_usd ??
+                  (decision.target_exposure_usd > 0
+                    ? decision.target_exposure_usd
+                    : row.question.amountToBeInvested ?? 0);
 
                 return (
                 <article
@@ -6500,7 +6523,7 @@ function StageTwoInvestEventsDialog({
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
                         Event {index + 1}
-                        {stage3Rank ? ` · Rank ${stage3Rank}` : ""}
+                        {` · Rank #${row.rank}`}
                       </p>
                       <h3 className="mt-1 text-base font-semibold text-slate-950">
                         {decision.market_title}
@@ -6524,7 +6547,9 @@ function StageTwoInvestEventsDialog({
                         Stage 3 outcome
                       </p>
                       <p className="mt-1 font-semibold text-slate-950">
-                        {decision.stage3_result?.replaceAll("_", " ") ?? "Pending"}
+                        {row.missingFromStage3
+                          ? "Missing from Stage 3"
+                          : decision.stage3_result?.replaceAll("_", " ") ?? "Pending"}
                       </p>
                     </div>
                     <div className="rounded-xl bg-white/80 px-3 py-2">
@@ -6541,9 +6566,7 @@ function StageTwoInvestEventsDialog({
                         Planned amount
                       </p>
                       <p className="mt-1 font-semibold text-slate-950">
-                        $
-                        {decision.order_plan?.order_size_usd.toFixed(2) ??
-                          decision.target_exposure_usd.toFixed(2)}
+                        ${plannedAmount.toFixed(2)}
                       </p>
                     </div>
                   </div>
@@ -6552,9 +6575,10 @@ function StageTwoInvestEventsDialog({
                       Indepth details
                     </p>
                     <p className="mt-1 leading-6">
-                      {decision.rationale || decision.reason}
+                      {decision.rationale || decision.reason || row.question.llmNotes}
                     </p>
-                    {executionReason !== (decision.rationale || decision.reason) ? (
+                    {executionReason !==
+                    (decision.rationale || decision.reason || row.question.llmNotes) ? (
                       <p className="mt-2 leading-6 text-slate-600">
                         <span className="font-semibold text-slate-950">
                           Execution blocker / detail:
@@ -6581,8 +6605,7 @@ function StageTwoInvestEventsDialog({
             </div>
           ) : (
             <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              No Stage 2-ranked Stage 3 buy candidates were returned for this
-              run.
+              No persisted Stage 2 Top 10 handoff rows were returned for this run.
             </p>
           )}
         </div>
@@ -6606,6 +6629,27 @@ function InvestMetricDetailsDialog({
 }) {
   const metricDefinition = getInvestMetricDialogDefinition(state.kind);
   const rows = getInvestMetricRows(state.kind, state.decisions);
+  const stage2TopTenHandoffRows = buildBullpenStage2TopTenHandoffRows({
+    run: state.run,
+    decisions: state.decisions,
+  });
+  const showStage2TopTenGapRows =
+    state.kind === "planned" || state.kind === "buy-planned";
+  const stage2TopTenGapRows = showStage2TopTenGapRows
+    ? stage2TopTenHandoffRows.filter((row) => row.missingFromBuyPlan)
+    : [];
+  const tableRows = (
+    showStage2TopTenGapRows
+      ? [...rows, ...stage2TopTenGapRows.map((row) => row.displayDecision)]
+      : rows
+  ).sort((left, right) => {
+    const leftRank = left.stage3_final_rank ?? Number.POSITIVE_INFINITY;
+    const rightRank = right.stage3_final_rank ?? Number.POSITIVE_INFINITY;
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
+    }
+    return left.market_title.localeCompare(right.market_title);
+  });
   const decisionsCount = getInvestStageMetric(
     state.stage,
     "decisions_count",
@@ -6636,16 +6680,16 @@ function InvestMetricDetailsDialog({
     state.run.error_message.trim().length > 0
       ? state.run.error_message.trim()
       : null);
-  const filteredPlannedCount = rows.filter(
+  const filteredPlannedCount = tableRows.filter(
     (decision) => decision.order_plan,
   ).length;
-  const filteredProcessedCount = rows.filter((decision) =>
+  const filteredProcessedCount = tableRows.filter((decision) =>
     isProcessedInvestOrderPlan(decision.order_plan),
   ).length;
-  const filteredSubmittedCount = rows.filter((decision) =>
+  const filteredSubmittedCount = tableRows.filter((decision) =>
     isSubmittedOrSuccessfulDecision(decision),
   ).length;
-  const filteredUnsubmittedRows = rows.filter(
+  const filteredUnsubmittedRows = tableRows.filter(
     (decision) =>
       decision.order_plan && !isSubmittedOrSuccessfulDecision(decision),
   );
@@ -6733,7 +6777,7 @@ function InvestMetricDetailsDialog({
               Selected filter
             </p>
             <p className="mt-2 text-sm font-semibold text-slate-950">
-              {rows.length.toLocaleString("en-IN")} rows ·{" "}
+              {tableRows.length.toLocaleString("en-IN")} rows ·{" "}
               {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
               {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
               {filteredSubmittedCount.toLocaleString("en-IN")} submitted
@@ -6754,6 +6798,19 @@ function InvestMetricDetailsDialog({
             <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:text-sky-50">
               Stage 3 submits Bullpen orders one at a time, so multiple planned
               orders can take a few minutes when Bullpen is slow or retrying.
+            </div>
+          ) : null}
+
+          {stage2TopTenGapRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <span className="font-semibold">
+                Stage 2 Top 10 rows missing from the concrete Step 2 buy-plan count:
+              </span>{" "}
+              {stage2TopTenGapRows.length.toLocaleString("en-IN")} transferred
+              row
+              {stage2TopTenGapRows.length === 1 ? "" : "s"} are still shown
+              below, but Stage 3 never created a buy order plan for them. Each
+              row includes the recorded blocker or a missing-handoff reason.
             </div>
           ) : null}
 
@@ -6851,7 +6908,7 @@ function InvestMetricDetailsDialog({
           ) : null}
 
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-            {rows.length > 0 ? (
+            {tableRows.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="min-w-[78rem] divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
@@ -6868,7 +6925,7 @@ function InvestMetricDetailsDialog({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {rows.map((decision) => (
+                    {tableRows.map((decision) => (
                       <tr key={decision.id}>
                         <td className="px-4 py-3 align-top">
                           <div className="font-semibold text-slate-950">
@@ -9975,9 +10032,9 @@ export function BullpenAutoRunScheduleCard({
                           stage={stage}
                           hideNumbers={!showStageNumbers}
                           decisions={investRunDecisions}
-                          onOpenInvestEvents={(investDecisions) =>
+                          onOpenInvestEvents={(rows) =>
                             setStageTwoInvestEventsDialog({
-                              decisions: investDecisions,
+                              rows,
                             })
                           }
                           onOpenLlmRunDetails={setStageTwoLlmRunDialog}
@@ -10523,8 +10580,8 @@ export function BullpenAutoRunScheduleCard({
             state={runDetailDialog}
             onClose={() => setRunDetailDialog(null)}
             onOpenScanFilters={onOpenScanFilters}
-            onOpenStageTwoInvestEvents={(investDecisions) =>
-              setStageTwoInvestEventsDialog({ decisions: investDecisions })
+            onOpenStageTwoInvestEvents={(rows) =>
+              setStageTwoInvestEventsDialog({ rows })
             }
             onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
             onOpenMetricDetails={openRunInvestMetricDialog}

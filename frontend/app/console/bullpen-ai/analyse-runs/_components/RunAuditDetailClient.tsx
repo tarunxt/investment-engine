@@ -570,6 +570,7 @@ function renderSectionData(section: string, data: unknown) {
     const candidateReviews = asArray(stage.candidate_reviews);
     const llmInvocations = asArray(stage.llm_invocations);
     const qualifiedIds = asArray(stage.qualified_candidate_market_ids);
+    const handoffIds = asArray(stage.stage3_handoff_candidate_market_ids);
     const runStages = asArray(stage.run_stages);
     return (
       <div className="space-y-4">
@@ -580,6 +581,7 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Candidate Reviews", value: String(candidateReviews.length) },
               { label: "LLM Invocations", value: String(llmInvocations.length) },
               { label: "Qualified Candidates", value: String(qualifiedIds.length) },
+              { label: "Stage 3 Handoff Rows", value: String(handoffIds.length) },
               { label: "Configured Targets", value: String(asRecord(stage.llm_runtime)?.llm_target_count ?? "—") },
               { label: "Runtime Coverage", value: String(asRecord(stage.llm_runtime)?.llm_target_count ?? "—") },
               { label: "Selected Model Mix", value: stringValue(asRecord(stage.llm_runtime)?.llm_execution_mode) },
@@ -592,6 +594,7 @@ function renderSectionData(section: string, data: unknown) {
         <JsonPanel title="LLM Invocations" value={llmInvocations} />
         <JsonPanel title="Candidate Reviews" value={candidateReviews} />
         <JsonPanel title="Qualified Candidate IDs" value={qualifiedIds} />
+        <JsonPanel title="Stage 3 Handoff Candidate IDs" value={handoffIds} />
       </div>
     );
   }
@@ -601,6 +604,7 @@ function renderSectionData(section: string, data: unknown) {
     const decisions = asArray(stage.decisions);
     const decisionRows = asArray(stage.decision_rows);
     const orderIntents = asArray(stage.order_intents);
+    const handoffIds = asArray(stage.stage2_handoff_candidate_market_ids);
     const runStages = asArray(stage.run_stages);
     return (
       <div className="space-y-4">
@@ -613,6 +617,7 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Order Intents", value: String(orderIntents.length) },
               { label: "Execution Steps", value: String(asArray(stage.execution_steps).length) },
               { label: "Max Positions", value: String(stage.max_positions ?? "—") },
+              { label: "Stage 2 Handoff Rows", value: String(handoffIds.length) },
               { label: "Order Metrics", value: String(Object.keys(asRecord(stage.order_metrics) ?? {}).length) },
               { label: "Selected Decisions", value: String(decisions.filter((item) => asRecord(item)?.stage3_result === "SELECTED").length) },
             ]}
@@ -620,6 +625,7 @@ function renderSectionData(section: string, data: unknown) {
         </SectionShell>
         <JsonPanel title="Order Metrics" value={stage.order_metrics} defaultOpen />
         <JsonPanel title="Execution Steps" value={stage.execution_steps} />
+        <JsonPanel title="Stage 2 Handoff Candidate IDs" value={handoffIds} />
         <JsonPanel title="Run Stage Records" value={runStages} />
         <JsonPanel title="Decision Rows" value={decisionRows} />
         <JsonPanel title="Decisions" value={decisions} />
