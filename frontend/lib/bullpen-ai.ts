@@ -1048,10 +1048,10 @@ export function getBullpenReturnsPerDayBreakdown({
     };
   }
 
-  // Match spreadsheet column O:
-  // =IF(LLM No Odds > 50%, (100 - Current No Odds) / Days, (100 - Current Yes Odds) / Days)
-  const currentSide = llmNoOdds > 50 ? "No" : "Yes";
-  const currentOdds = currentSide === "No" ? noOdds : yesOdds;
+  // Returns/day ranks the strongest LLM Yes/No side by time remaining:
+  // strongest(LLM Yes odds, LLM No odds) / days left.
+  const currentSide = llmYesOdds >= llmNoOdds ? "Yes" : "No";
+  const currentOdds = currentSide === "Yes" ? llmYesOdds : llmNoOdds;
 
   return {
     currentOdds,
@@ -1059,7 +1059,7 @@ export function getBullpenReturnsPerDayBreakdown({
     daysUntilClose,
     llmYesOdds,
     llmNoOdds,
-    result: Number(((100 - currentOdds) / daysUntilClose).toFixed(2)),
+    result: Number((currentOdds / daysUntilClose).toFixed(2)),
   };
 }
 

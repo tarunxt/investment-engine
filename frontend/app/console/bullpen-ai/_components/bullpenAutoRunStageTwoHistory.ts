@@ -828,17 +828,16 @@ export function getStageTwoLlmTableRows({
               row.fair_no_probability_pct,
               getDecisionFairNo(decision),
             ),
-        returnsPerDay:
-          readFirstNumber(row.returns_per_day) ??
-          (hasProviderOutput
-            ? getBullpenReturnsPerDayBreakdown({
-                yesOdds: context.currentYesOdds,
-                noOdds: context.currentNoOdds,
-                llmYesOdds: outputYesOdds,
-                llmNoOdds: outputNoOdds,
-                daysUntilClose: context.daysLeft,
-              }).result
-            : getDecisionReturnsPerDay(decision)),
+        returnsPerDay: hasProviderOutput
+          ? getBullpenReturnsPerDayBreakdown({
+              yesOdds: context.currentYesOdds,
+              noOdds: context.currentNoOdds,
+              llmYesOdds: outputYesOdds,
+              llmNoOdds: outputNoOdds,
+              daysUntilClose: context.daysLeft,
+            }).result
+          : (readFirstNumber(row.returns_per_day) ??
+              getDecisionReturnsPerDay(decision)),
         action:
           readFirstString(output?.decision, output?.action, decision?.decision) ?? "—",
         risk:
@@ -1065,7 +1064,7 @@ export function buildStageTwoEventsSummaryRows({
       llmBreakdown: normalizedBreakdown,
     });
 
-    const finalReturnsPerDay = persistedReturnsPerDay ?? summaryRow.returnsPerDay;
+    const finalReturnsPerDay = summaryRow.returnsPerDay ?? persistedReturnsPerDay;
     const finalAmountToBeInvested =
       readFirstNumber(row.amount_to_be_invested) ??
       getBullpenAmountToBeInvestedBreakdown({
