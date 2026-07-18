@@ -7620,6 +7620,7 @@ export function BullpenAutoRunScheduleCard({
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
   const [startNowProgress, setStartNowProgress] = useState<string | null>(null);
   const startNowProgressTimeoutRef = useRef<number | null>(null);
+  const startNowCancelledRef = useRef(false);
   const summaryLoadInFlightRef = useRef(false);
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
@@ -8090,6 +8091,7 @@ export function BullpenAutoRunScheduleCard({
     setAction("enable");
     setNotice(null);
     setError(null);
+    startNowCancelledRef.current = false;
 
     try {
       const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
@@ -8165,6 +8167,7 @@ export function BullpenAutoRunScheduleCard({
     setTimerNowMs(Date.parse(startedAt));
     setNotice(null);
     setError(null);
+    startNowCancelledRef.current = false;
     if (startNowProgressTimeoutRef.current !== null) {
       window.clearTimeout(startNowProgressTimeoutRef.current);
       startNowProgressTimeoutRef.current = null;
@@ -8172,6 +8175,14 @@ export function BullpenAutoRunScheduleCard({
     setStartNowProgress(
       "Validating refresh duration and preparing the Auto Run request…",
     );
+    const abortIfStartCancelled = () => {
+      if (!startNowCancelledRef.current) return false;
+      setStartNowProgress(null);
+      setRunNowStartedAt(null);
+      setPendingRunId(null);
+      setNotice("Auto Run start was killed before the worker could continue.");
+      return true;
+    };
 
     try {
       const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
@@ -8193,6 +8204,7 @@ export function BullpenAutoRunScheduleCard({
           "Stopping the existing Auto Run before starting a fresh run…",
         );
         await apiService.stopBullpenAutoLive();
+        if (abortIfStartCancelled()) return;
       }
 
       setStartNowProgress(
@@ -8206,6 +8218,7 @@ export function BullpenAutoRunScheduleCard({
           selectedLlmTargets,
         ),
       );
+      if (abortIfStartCancelled()) return;
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
       setScheduleSavedSummary(
         buildScheduleSummary(
@@ -8216,12 +8229,17 @@ export function BullpenAutoRunScheduleCard({
 
       setStartNowProgress("Starting the Auto-Live scheduler in the backend…");
       await apiService.startBullpenAutoLive();
+      if (abortIfStartCancelled()) return;
       setStartNowProgress(
         "Building the latest Bullpen candidate snapshot for this run…",
       );
       const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
-      setStartNowProgress("Queueing the Auto Run worker now…");
+      if (abortIfStartCancelled()) return;
+      setStartNowProgress(
+        "Stage 1 Bullpen Scan snapshot is ready. Queueing the Auto Run worker now…",
+      );
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+      if (abortIfStartCancelled()) return;
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       setStartNowProgress(
@@ -8341,6 +8359,7 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handleKillRun() {
+    startNowCancelledRef.current = true;
     setAction("kill-run");
     setNotice(null);
     setError(null);
@@ -8419,7 +8438,7 @@ export function BullpenAutoRunScheduleCard({
   const runTimerStartedAt = visibleRun?.started_at ?? runNowStartedAt;
   const liveWorkflowView = buildBullpenAutoRunWorkflowView(
     workflowRun,
-    pendingRunId,
+    pendingRunId ?? (action === "start-now" ? "start-now-pending" : null),
     runTimerStartedAt,
   );
   const openScanCandidateDialog = (
@@ -8445,9 +8464,11 @@ export function BullpenAutoRunScheduleCard({
     (stage) => stage.isCurrent,
   );
   const runActionRequested = action === "invest-now";
+  const startNowActionRequested = action === "start-now";
   const runIsActive =
     !liveWorkflowSettled &&
     (runActionRequested ||
+      startNowActionRequested ||
       pendingRunId !== null ||
       visibleRun?.status === "running" ||
       Boolean(summary?.state.running) ||
