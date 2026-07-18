@@ -13,6 +13,12 @@ from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
 )
+from app.domains.polymarket_auto_live.order_intent_service import (
+    cancel_order_intent_for_user_sync,
+    get_run_orders_for_user_sync,
+    refresh_run_order_state_for_user_sync,
+    retry_order_intent_for_user_sync,
+)
 from app.domains.polymarket_auto_live.run_recovery import (
     reconcile_running_auto_live_run,
 )
@@ -29,6 +35,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveStageResult,
     BullpenAutoLiveSettings,
@@ -347,6 +354,42 @@ class BullpenAutoLiveBot:
             if await self._reconcile_terminal_stage3_decisions(repo, runs):
                 await session.commit()
             return await repo.list_decisions(self.user_id)
+
+    async def get_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
+        return await asyncio.to_thread(
+            get_run_orders_for_user_sync,
+            user_id=self.user_id,
+            run_id=run_id,
+        )
+
+    async def reconcile_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
+        from app.domains.polymarket_auto_live.tasks import reconcile_auto_live_run_orders
+
+        summary = await asyncio.to_thread(
+            refresh_run_order_state_for_user_sync,
+            user_id=self.user_id,
+            run_id=run_id,
+        )
+        reconcile_auto_live_run_orders.delay(run_id)  # type: ignore[attr-defined]
+        return summary
+
+    async def retry_order_intent(self, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
+        from app.domains.polymarket_auto_live.tasks import retry_auto_live_order_intent
+
+        summary = await asyncio.to_thread(
+            retry_order_intent_for_user_sync,
+            user_id=self.user_id,
+            intent_id=intent_id,
+        )
+        retry_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+        return summary
+
+    async def cancel_order_intent(self, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
+        return await asyncio.to_thread(
+            cancel_order_intent_for_user_sync,
+            user_id=self.user_id,
+            intent_id=intent_id,
+        )
 
     async def run_once(
         self,

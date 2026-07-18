@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 
 AUTO_LIVE_EXECUTION_ENV_VAR = "BULLPEN_AUTO_LIVE_ALLOW_EXECUTION"
+AUTO_LIVE_EXECUTION_V2_ENV_VAR = "AUTO_LIVE_EXECUTION_V2_ENABLED"
+AUTO_LIVE_EXECUTION_V2_SHADOW_ENV_VAR = "AUTO_LIVE_EXECUTION_V2_SHADOW_ONLY"
 TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "y", "on"})
 
 
@@ -39,3 +41,11 @@ def auto_live_backend_execution_env_detail() -> str:
         "Set it to true in /etc/investor/backend.env, then restart "
         "investor-backend and investor-celery-worker."
     )
+
+
+def auto_live_execution_v2_enabled() -> bool:
+    return _bool_from_env(AUTO_LIVE_EXECUTION_V2_ENV_VAR, False)
+
+
+def auto_live_execution_v2_shadow_only() -> bool:
+    return _bool_from_env(AUTO_LIVE_EXECUTION_V2_SHADOW_ENV_VAR, False)

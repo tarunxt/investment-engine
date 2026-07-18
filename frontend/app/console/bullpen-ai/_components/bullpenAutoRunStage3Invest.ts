@@ -473,7 +473,13 @@ function shouldPreferTimestamp(next: string, current: string | null | undefined)
 }
 
 function isCompletedInvestOrderStatus(status: string | null | undefined) {
-  return status === "submitted" || status === "confirmed";
+  return (
+    status === "submitted" ||
+    status === "confirming" ||
+    status === "partially_filled" ||
+    status === "confirmed" ||
+    status === "filled"
+  );
 }
 
 function buildLatestSubmittedExitTimestampLookup(

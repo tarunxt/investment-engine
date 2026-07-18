@@ -9,18 +9,32 @@ AutoLiveConfidence = Literal["Low", "Medium", "High"]
 AutoLiveGuardrailStatus = Literal["pass", "watch", "fail"]
 AutoLiveDecisionAction = Literal["BUY_NEW", "ADD_MORE", "HOLD", "TRIM", "EXIT", "SKIP"]
 AutoLiveRiskStatus = Literal["Ready", "Watch", "Blocked"]
-AutoLiveRunStatus = Literal["running", "completed", "failed", "skipped"]
+AutoLiveRunStatus = Literal[
+    "running",
+    "confirming",
+    "completed",
+    "partial_success",
+    "failed",
+    "skipped",
+]
 AutoLiveStageStatus = Literal["pass", "fail", "warning", "skipped"]
 AutoLiveRuntimeStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 AutoLiveRuntimeMode = Literal["dry-run", "analysis-only", "live-trading"]
 AutoLiveStage3Result = Literal["SELECTED", "OUTSIDE_TOP_10", "BLOCKED"]
 AutoLiveOrderPlanStatus = Literal[
     "planned",
+    "ready",
+    "retry_wait",
+    "submitting",
     "submitted",
+    "confirming",
+    "partially_filled",
     "settlement_pending",
-    "confirmed",
     "waiting_for_collateral",
+    "confirmed",
+    "filled",
     "deferred",
+    "failed_permanent",
     "rpc_rate_limited",
     "already_redeemed",
     "resolved_zero_payout",
@@ -75,6 +89,54 @@ TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configu
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
 BullpenLlmExecutionMode = Literal["chunked_parallel", "single_combined"]
+AutoLiveOrderIntentStatus = Literal[
+    "PLANNED",
+    "READY",
+    "RETRY_WAIT",
+    "SUBMITTING",
+    "SUBMITTED",
+    "CONFIRMING",
+    "PARTIALLY_FILLED",
+    "SETTLEMENT_PENDING",
+    "WAITING_FOR_COLLATERAL",
+    "CONFIRMED",
+    "FILLED",
+    "DEFERRED",
+    "CANCELLED",
+    "FAILED_PERMANENT",
+]
+AutoLiveReservationStatus = Literal["active", "consumed", "released"]
+AutoLiveExecutorErrorCode = Literal[
+    "RPC_RATE_LIMITED",
+    "RPC_UNAVAILABLE",
+    "HTTP_502",
+    "HTTP_503",
+    "HTTP_504",
+    "NETWORK_TIMEOUT",
+    "CONNECTION_RESET",
+    "AUTH_EXPIRED",
+    "SESSION_INVALID",
+    "LIVE_LOCKED",
+    "DOCTOR_READ_FAILED",
+    "ORDER_WRITE_UNAVAILABLE",
+    "BALANCE_UNAVAILABLE",
+    "INSUFFICIENT_COLLATERAL",
+    "SETTLEMENT_PENDING",
+    "QUOTE_UNAVAILABLE",
+    "QUOTE_STALE",
+    "MARKET_CLOSED",
+    "MARKET_RESOLVED",
+    "UNSUPPORTED_SIDE",
+    "INVALID_TICK_SIZE",
+    "INVALID_PRICE_PRECISION",
+    "INVALID_SHARE_PRECISION",
+    "BELOW_MINIMUM_ORDER",
+    "NO_SHARES_AVAILABLE",
+    "CONDITION_ID_UNAVAILABLE",
+    "EMERGENCY_STOP",
+    "PERMANENT_REJECTION",
+    "AMBIGUOUS_SUBMISSION",
+]
 
 
 class BullpenAutoLiveLlmTarget(BaseModel):
@@ -401,6 +463,129 @@ class BullpenAutoLiveRunDiagnostics(BaseModel):
     scan_source_url: str | None = None
     used_manual_console_rows: bool = False
     selected_manual_candidate_ids: list[str] = Field(default_factory=list)
+    stage2_has_usable_reviews: bool = True
+    ranking_enabled: bool = True
+    ranking_exit_enabled: bool = True
+    new_buy_enabled: bool = True
+    safety_exit_enabled: bool = True
+
+
+class BullpenAutoLiveOrderFunnel(BaseModel):
+    planned: int = Field(default=0, ge=0)
+    ready: int = Field(default=0, ge=0)
+    attempted: int = Field(default=0, ge=0)
+    remotely_accepted: int = Field(default=0, ge=0)
+    submitted: int = Field(default=0, ge=0)
+    confirming: int = Field(default=0, ge=0)
+    partially_filled: int = Field(default=0, ge=0)
+    confirmed: int = Field(default=0, ge=0)
+    filled: int = Field(default=0, ge=0)
+    retry_wait: int = Field(default=0, ge=0)
+    settlement_pending: int = Field(default=0, ge=0)
+    waiting_for_collateral: int = Field(default=0, ge=0)
+    deferred: int = Field(default=0, ge=0)
+    cancelled: int = Field(default=0, ge=0)
+    permanently_failed: int = Field(default=0, ge=0)
+    attempt_rate: float = Field(default=0, ge=0)
+    acceptance_rate: float = Field(default=0, ge=0)
+    confirmation_rate: float = Field(default=0, ge=0)
+    fill_rate: float = Field(default=0, ge=0)
+    terminal_success_rate: float = Field(default=0, ge=0)
+
+
+class BullpenAutoLiveOrderAttempt(BaseModel):
+    id: int
+    intent_id: str
+    attempt_number: int = Field(ge=1)
+    worker_task_id: str | None = None
+    rpc_provider: str | None = None
+    executor_path: str | None = None
+    started_at: str
+    completed_at: str | None = None
+    result_status: str
+    error_code: AutoLiveExecutorErrorCode | str | None = None
+    error_message: str | None = None
+    retry_after_seconds: int | None = Field(default=None, ge=0)
+    remote_order_id: str | None = None
+    remote_transaction_hash: str | None = None
+    sanitized_request_json: dict[str, object] = Field(default_factory=dict)
+    sanitized_response_json: dict[str, object] = Field(default_factory=dict)
+    reconciliation_json: dict[str, object] = Field(default_factory=dict)
+
+
+class BullpenAutoLiveCapitalReservation(BaseModel):
+    id: int
+    user_id: int
+    order_intent_id: str
+    amount_usd: float = Field(ge=0)
+    status: AutoLiveReservationStatus
+    created_at: str
+    updated_at: str
+    released_at: str | None = None
+
+
+class BullpenAutoLiveOrderIntent(BaseModel):
+    id: str
+    user_id: int
+    run_id: str
+    decision_id: str | None = None
+    dependency_group: str | None = None
+    action: Literal["buy", "sell", "redeem"]
+    market_id: str
+    slug: str | None = None
+    condition_id: str | None = None
+    side: AutoLiveOutcomeSide | None = None
+    requested_order_usd: float | None = Field(default=None, ge=0)
+    requested_shares: float | None = Field(default=None, ge=0)
+    requested_limit_price_cents: float | None = Field(default=None, ge=0, le=100)
+    current_order_usd: float | None = Field(default=None, ge=0)
+    current_shares: float | None = Field(default=None, ge=0)
+    current_limit_price_cents: float | None = Field(default=None, ge=0, le=100)
+    max_slippage_cents: float = Field(default=0, ge=0)
+    status: AutoLiveOrderIntentStatus
+    error_class: str | None = None
+    last_error_code: AutoLiveExecutorErrorCode | str | None = None
+    last_error_message: str | None = None
+    retryable: bool = False
+    attempt_count: int = Field(default=0, ge=0)
+    max_attempts: int = Field(default=0, ge=0)
+    next_attempt_at: str | None = None
+    priority: int = Field(default=100, ge=0)
+    remote_order_id: str | None = None
+    remote_transaction_hash: str | None = None
+    idempotency_key: str
+    reserved_cash_usd: float = Field(default=0, ge=0)
+    expected_release_usd: float = Field(default=0, ge=0)
+    confirmed_release_usd: float = Field(default=0, ge=0)
+    filled_shares: float = Field(default=0, ge=0)
+    remaining_shares: float = Field(default=0, ge=0)
+    average_fill_price_cents: float | None = Field(default=None, ge=0, le=100)
+    dependency_metadata_json: dict[str, object] = Field(default_factory=dict)
+    execution_metadata_json: dict[str, object] = Field(default_factory=dict)
+    version: int = Field(default=1, ge=1)
+    created_at: str
+    updated_at: str
+    first_submitted_at: str | None = None
+    last_submitted_at: str | None = None
+    confirmed_at: str | None = None
+    terminal_at: str | None = None
+    attempts: list[BullpenAutoLiveOrderAttempt] = Field(default_factory=list)
+    reservations: list[BullpenAutoLiveCapitalReservation] = Field(default_factory=list)
+
+
+class BullpenAutoLiveRunOrdersResponse(BaseModel):
+    run: BullpenAutoLiveRun | None = None
+    orders: list[BullpenAutoLiveOrderIntent] = Field(default_factory=list)
+    order_funnel: BullpenAutoLiveOrderFunnel = Field(default_factory=BullpenAutoLiveOrderFunnel)
+    action_funnels: dict[str, BullpenAutoLiveOrderFunnel] = Field(default_factory=dict)
+    retry_counts: dict[str, int] = Field(default_factory=dict)
+    provider_error_counts: dict[str, int] = Field(default_factory=dict)
+    average_confirmation_seconds: float | None = Field(default=None, ge=0)
+    oldest_pending_order_age_seconds: float | None = Field(default=None, ge=0)
+    pending_confirmation_count: int = Field(default=0, ge=0)
+    partial_fill_count: int = Field(default=0, ge=0)
+    permanent_failure_count: int = Field(default=0, ge=0)
+    transient_failure_count: int = Field(default=0, ge=0)
 
 
 class BullpenAutoLiveOrderPlan(BaseModel):
@@ -411,6 +596,7 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     status: AutoLiveOrderPlanStatus = "planned"
     market_id: str
     market_title: str
+    dependency_group: str | None = None
     order_size_usd: float = Field(ge=0)
     shares: float = Field(default=0, ge=0)
     limit_price_cents: float = Field(ge=0, le=100)
@@ -418,9 +604,24 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     max_slippage_cents: float = Field(ge=0)
     dry_run: bool = True
     detail: str
+    retryable: bool = False
+    attempt_count: int = Field(default=0, ge=0)
+    next_retry_at: str | None = None
+    remote_order_id: str | None = None
+    remote_transaction_hash: str | None = None
+    provider_alias: str | None = None
+    latest_error_code: AutoLiveExecutorErrorCode | str | None = None
+    dependency_state: str | None = None
+    reservation_state: AutoLiveReservationStatus | str | None = None
+    reservation_amount_usd: float | None = Field(default=None, ge=0)
+    filled_shares: float = Field(default=0, ge=0)
+    remaining_shares: float = Field(default=0, ge=0)
+    average_fill_price_cents: float | None = Field(default=None, ge=0, le=100)
     execution_response: str | None = None
     created_at: str
     executed_at: str | None = None
+    confirmed_at: str | None = None
+    terminal_at: str | None = None
 
 
 class BullpenAutoLiveExitSignalMetrics(BaseModel):
@@ -516,6 +717,9 @@ class BullpenAutoLiveDecision(BaseModel):
     stage3_result_reason: str | None = None
     stage3_final_rank: int | None = Field(default=None, ge=1)
     stage3_max_positions: int | None = Field(default=None, ge=1)
+    selection_required: bool = False
+    selected_for_auto_invest: bool | None = None
+    selection_block_reason: str | None = None
     order_plan: BullpenAutoLiveOrderPlan | None = None
     exit_signals: list[BullpenAutoLiveExitSignal] = Field(default_factory=list)
     exit_state: AutoLiveExitState = "ACTIVE"
@@ -538,9 +742,21 @@ class BullpenAutoLiveRun(BaseModel):
     orders_planned: int = 0
     orders_submitted: int = 0
     error_message: str | None = None
+    execution_version: str | None = None
+    order_funnel: BullpenAutoLiveOrderFunnel = Field(default_factory=BullpenAutoLiveOrderFunnel)
+    action_funnels: dict[str, BullpenAutoLiveOrderFunnel] = Field(default_factory=dict)
+    retry_counts: dict[str, int] = Field(default_factory=dict)
+    provider_error_counts: dict[str, int] = Field(default_factory=dict)
+    average_confirmation_seconds: float | None = Field(default=None, ge=0)
+    oldest_pending_order_age_seconds: float | None = Field(default=None, ge=0)
+    pending_confirmation_count: int = Field(default=0, ge=0)
+    partial_fill_count: int = Field(default=0, ge=0)
+    permanent_failure_count: int = Field(default=0, ge=0)
+    transient_failure_count: int = Field(default=0, ge=0)
     stage_results: list[BullpenAutoLiveStageResult] = Field(default_factory=list)
     guardrail_checks: list[BullpenAutoLiveGuardrailCheck] = Field(default_factory=list)
     decision_ids: list[str] = Field(default_factory=list)
+    order_intent_ids: list[str] = Field(default_factory=list)
     diagnostics: BullpenAutoLiveRunDiagnostics = Field(default_factory=BullpenAutoLiveRunDiagnostics)
     request_context: BullpenAutoLiveRunOnceRequest | None = None
 

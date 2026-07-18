@@ -1726,7 +1726,9 @@ export type BullpenAutoLiveStage3Result =
 export type BullpenAutoLiveRiskStatus = "Ready" | "Watch" | "Blocked";
 export type BullpenAutoLiveRunStatus =
   | "running"
+  | "confirming"
   | "completed"
+  | "partial_success"
   | "failed"
   | "skipped";
 export type BullpenAutoLiveStageStatus =
@@ -1746,11 +1748,18 @@ export type BullpenAutoLiveRuntimeMode =
   | "live-trading";
 export type BullpenAutoLiveOrderPlanStatus =
   | "planned"
+  | "ready"
+  | "retry_wait"
+  | "submitting"
   | "submitted"
+  | "confirming"
+  | "partially_filled"
   | "settlement_pending"
   | "confirmed"
+  | "filled"
   | "waiting_for_collateral"
   | "deferred"
+  | "failed_permanent"
   | "rpc_rate_limited"
   | "already_redeemed"
   | "resolved_zero_payout"
@@ -1759,6 +1768,55 @@ export type BullpenAutoLiveOrderPlanStatus =
   | "failed";
 export type BullpenAutoLiveOrderAction = "buy" | "sell" | "hold" | "redeem";
 export type BullpenAutoLiveOutcomeSide = "YES" | "NO";
+export type BullpenAutoLiveOrderIntentStatus =
+  | "PLANNED"
+  | "READY"
+  | "RETRY_WAIT"
+  | "SUBMITTING"
+  | "SUBMITTED"
+  | "CONFIRMING"
+  | "PARTIALLY_FILLED"
+  | "SETTLEMENT_PENDING"
+  | "WAITING_FOR_COLLATERAL"
+  | "CONFIRMED"
+  | "FILLED"
+  | "DEFERRED"
+  | "CANCELLED"
+  | "FAILED_PERMANENT";
+export type BullpenAutoLiveReservationStatus =
+  | "active"
+  | "consumed"
+  | "released";
+export type BullpenAutoLiveExecutorErrorCode =
+  | "RPC_RATE_LIMITED"
+  | "RPC_UNAVAILABLE"
+  | "HTTP_502"
+  | "HTTP_503"
+  | "HTTP_504"
+  | "NETWORK_TIMEOUT"
+  | "CONNECTION_RESET"
+  | "AUTH_EXPIRED"
+  | "SESSION_INVALID"
+  | "LIVE_LOCKED"
+  | "DOCTOR_READ_FAILED"
+  | "ORDER_WRITE_UNAVAILABLE"
+  | "BALANCE_UNAVAILABLE"
+  | "INSUFFICIENT_COLLATERAL"
+  | "SETTLEMENT_PENDING"
+  | "QUOTE_UNAVAILABLE"
+  | "QUOTE_STALE"
+  | "MARKET_CLOSED"
+  | "MARKET_RESOLVED"
+  | "UNSUPPORTED_SIDE"
+  | "INVALID_TICK_SIZE"
+  | "INVALID_PRICE_PRECISION"
+  | "INVALID_SHARE_PRECISION"
+  | "BELOW_MINIMUM_ORDER"
+  | "NO_SHARES_AVAILABLE"
+  | "CONDITION_ID_UNAVAILABLE"
+  | "EMERGENCY_STOP"
+  | "PERMANENT_REJECTION"
+  | "AMBIGUOUS_SUBMISSION";
 export type BullpenAutoLiveTriggeredBy =
   | "manual"
   | "scheduler"
@@ -1910,6 +1968,109 @@ export interface BullpenAutoLiveRunOnceRequest {
   console_profile?: BullpenAutoLiveConsoleRunContext | null;
 }
 
+export interface BullpenAutoLiveOrderFunnel {
+  planned: number;
+  ready: number;
+  attempted: number;
+  remotely_accepted: number;
+  submitted: number;
+  confirming: number;
+  partially_filled: number;
+  confirmed: number;
+  filled: number;
+  retry_wait: number;
+  settlement_pending: number;
+  waiting_for_collateral: number;
+  deferred: number;
+  cancelled: number;
+  permanently_failed: number;
+  attempt_rate: number;
+  acceptance_rate: number;
+  confirmation_rate: number;
+  fill_rate: number;
+  terminal_success_rate: number;
+}
+
+export interface BullpenAutoLiveOrderAttempt {
+  id: number;
+  intent_id: string;
+  attempt_number: number;
+  worker_task_id?: string | null;
+  rpc_provider?: string | null;
+  executor_path?: string | null;
+  started_at: string;
+  completed_at?: string | null;
+  result_status: string;
+  error_code?: BullpenAutoLiveExecutorErrorCode | string | null;
+  error_message?: string | null;
+  retry_after_seconds?: number | null;
+  remote_order_id?: string | null;
+  remote_transaction_hash?: string | null;
+  sanitized_request_json: Record<string, unknown>;
+  sanitized_response_json: Record<string, unknown>;
+  reconciliation_json: Record<string, unknown>;
+}
+
+export interface BullpenAutoLiveCapitalReservation {
+  id: number;
+  user_id: number;
+  order_intent_id: string;
+  amount_usd: number;
+  status: BullpenAutoLiveReservationStatus;
+  created_at: string;
+  updated_at: string;
+  released_at?: string | null;
+}
+
+export interface BullpenAutoLiveOrderIntent {
+  id: string;
+  user_id: number;
+  run_id: string;
+  decision_id?: string | null;
+  dependency_group?: string | null;
+  action: "buy" | "sell" | "redeem";
+  market_id: string;
+  slug?: string | null;
+  condition_id?: string | null;
+  side?: BullpenAutoLiveOutcomeSide | null;
+  requested_order_usd?: number | null;
+  requested_shares?: number | null;
+  requested_limit_price_cents?: number | null;
+  current_order_usd?: number | null;
+  current_shares?: number | null;
+  current_limit_price_cents?: number | null;
+  max_slippage_cents: number;
+  status: BullpenAutoLiveOrderIntentStatus;
+  error_class?: string | null;
+  last_error_code?: BullpenAutoLiveExecutorErrorCode | string | null;
+  last_error_message?: string | null;
+  retryable: boolean;
+  attempt_count: number;
+  max_attempts: number;
+  next_attempt_at?: string | null;
+  priority: number;
+  remote_order_id?: string | null;
+  remote_transaction_hash?: string | null;
+  idempotency_key: string;
+  reserved_cash_usd: number;
+  expected_release_usd: number;
+  confirmed_release_usd: number;
+  filled_shares: number;
+  remaining_shares: number;
+  average_fill_price_cents?: number | null;
+  dependency_metadata_json: Record<string, unknown>;
+  execution_metadata_json: Record<string, unknown>;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  first_submitted_at?: string | null;
+  last_submitted_at?: string | null;
+  confirmed_at?: string | null;
+  terminal_at?: string | null;
+  attempts: BullpenAutoLiveOrderAttempt[];
+  reservations: BullpenAutoLiveCapitalReservation[];
+}
+
 export interface BullpenAutoLiveOrderPlan {
   id: string;
   action: BullpenAutoLiveOrderAction;
@@ -1918,6 +2079,7 @@ export interface BullpenAutoLiveOrderPlan {
   status: BullpenAutoLiveOrderPlanStatus;
   market_id: string;
   market_title: string;
+  dependency_group?: string | null;
   order_size_usd: number;
   shares: number;
   limit_price_cents: number;
@@ -1925,9 +2087,24 @@ export interface BullpenAutoLiveOrderPlan {
   max_slippage_cents: number;
   dry_run: boolean;
   detail: string;
+  retryable?: boolean;
+  attempt_count?: number;
+  next_retry_at?: string | null;
+  remote_order_id?: string | null;
+  remote_transaction_hash?: string | null;
+  provider_alias?: string | null;
+  latest_error_code?: BullpenAutoLiveExecutorErrorCode | string | null;
+  dependency_state?: string | null;
+  reservation_state?: BullpenAutoLiveReservationStatus | string | null;
+  reservation_amount_usd?: number | null;
+  filled_shares?: number;
+  remaining_shares?: number;
+  average_fill_price_cents?: number | null;
   execution_response?: string | null;
   created_at: string;
   executed_at?: string | null;
+  confirmed_at?: string | null;
+  terminal_at?: string | null;
 }
 
 export interface BullpenAutoLiveStageResult {
@@ -2046,6 +2223,9 @@ export interface BullpenAutoLiveDecision {
   stage3_result_reason?: string | null;
   stage3_final_rank?: number | null;
   stage3_max_positions?: number | null;
+  selection_required?: boolean;
+  selected_for_auto_invest?: boolean | null;
+  selection_block_reason?: string | null;
   order_plan?: BullpenAutoLiveOrderPlan | null;
   exit_signals: BullpenAutoLiveExitSignal[];
   exit_state: BullpenAutoLiveExitState;
@@ -2068,9 +2248,36 @@ export interface BullpenAutoLiveRun {
   orders_planned: number;
   orders_submitted: number;
   error_message?: string | null;
+  execution_version?: string | null;
+  order_funnel?: BullpenAutoLiveOrderFunnel | null;
+  action_funnels?: Record<string, BullpenAutoLiveOrderFunnel> | null;
+  retry_counts?: Record<string, number> | null;
+  provider_error_counts?: Record<string, number> | null;
+  average_confirmation_seconds?: number | null;
+  oldest_pending_order_age_seconds?: number | null;
+  pending_confirmation_count?: number;
+  partial_fill_count?: number;
+  permanent_failure_count?: number;
+  transient_failure_count?: number;
   stage_results: BullpenAutoLiveStageResult[];
   guardrail_checks: BullpenAutoLiveGuardrailCheck[];
   decision_ids: string[];
+  order_intent_ids?: string[];
+}
+
+export interface BullpenAutoLiveRunOrdersResponse {
+  run?: BullpenAutoLiveRun | null;
+  orders: BullpenAutoLiveOrderIntent[];
+  order_funnel: BullpenAutoLiveOrderFunnel;
+  action_funnels: Record<string, BullpenAutoLiveOrderFunnel>;
+  retry_counts: Record<string, number>;
+  provider_error_counts: Record<string, number>;
+  average_confirmation_seconds?: number | null;
+  oldest_pending_order_age_seconds?: number | null;
+  pending_confirmation_count: number;
+  partial_fill_count: number;
+  permanent_failure_count: number;
+  transient_failure_count: number;
 }
 
 export interface BullpenAutoLiveState {

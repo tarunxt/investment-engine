@@ -6828,8 +6828,15 @@ function getVisibleRun(
       (summary.latest_run?.id === pendingRunId ? summary.latest_run : null)
     );
   }
-  if (summary.latest_run?.status === "running") return summary.latest_run;
-  const runningRun = summary.recent_runs.find((run) => run.status === "running");
+  if (
+    summary.latest_run?.status === "running" ||
+    summary.latest_run?.status === "confirming"
+  ) {
+    return summary.latest_run;
+  }
+  const runningRun = summary.recent_runs.find(
+    (run) => run.status === "running" || run.status === "confirming",
+  );
   if (runningRun) return runningRun;
 
   // On page refresh there is usually no pending/running run to track, but the
@@ -7808,7 +7815,11 @@ export function BullpenAutoRunScheduleCard({
 
   const trackedRunId =
     pendingRunId ??
-    (summary?.latest_run?.status === "running" ? summary.latest_run.id : null);
+    (
+      summary?.latest_run?.status === "running" ||
+      summary?.latest_run?.status === "confirming"
+    ? summary.latest_run.id
+    : null);
 
   const pollTrackedRun = useEffectEvent(async (runId: string) => {
     const nextSummary = await loadSummary({ preserveLoading: true });
@@ -7819,7 +7830,11 @@ export function BullpenAutoRunScheduleCard({
     const matchingRun =
       nextSummary.recent_runs.find((run) => run.id === runId) ??
       (nextSummary.latest_run?.id === runId ? nextSummary.latest_run : null);
-    if (!matchingRun || matchingRun.status === "running") {
+    if (
+      !matchingRun ||
+      matchingRun.status === "running" ||
+      matchingRun.status === "confirming"
+    ) {
       return;
     }
 

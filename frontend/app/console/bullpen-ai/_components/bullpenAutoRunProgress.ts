@@ -503,9 +503,13 @@ export function buildBullpenAutoRunWorkflowView(
   ).length;
   const currentStageIndex = (() => {
     const runningStageIndex = stageResults.findIndex(
-      (stage) => getPhaseStatus(stage) === "running",
+      (stage) => {
+        const phase = getPhaseStatus(stage);
+        return phase === "running" || phase === "confirming";
+      },
     );
     if (runningStageIndex >= 0) return runningStageIndex;
+    if (runStatus === "confirming") return WORKFLOW_DEFINITIONS.length - 1;
     if (runStatus !== "running") return -1;
     return Math.min(completedStageCount, WORKFLOW_DEFINITIONS.length - 1);
   })();
@@ -528,6 +532,7 @@ export function buildBullpenAutoRunWorkflowView(
     } else if (
       index === currentStageIndex &&
       (runStatus === "running" ||
+        runStatus === "confirming" ||
         runStatus === "failed" ||
         runStatus === "skipped")
     ) {
@@ -539,7 +544,13 @@ export function buildBullpenAutoRunWorkflowView(
     }
 
     const tone: WorkflowTone =
-      state === "finished" ? "green" : state === "current" ? "yellow" : "blue";
+      state === "finished" &&
+      stage?.status !== "fail" &&
+      !(runStatus === "partial_success" && definition.key === "invest")
+        ? "green"
+        : state === "current"
+          ? "yellow"
+          : "blue";
     const shouldShowStageData = state !== "queued";
     const stageInputs = readWorkflowInputs(definition, stage, previousStage);
     const completedItems = shouldShowStageData
@@ -589,6 +600,8 @@ export function buildBullpenAutoRunWorkflowView(
       ? null
       : explicitPhase === "running" && runStatus === "running"
         ? null
+        : explicitPhase === "confirming" || runStatus === "confirming"
+          ? null
         : (stage?.completed_at ??
           (state === "finished"
             ? (normalizedRun?.completed_at ?? null)
@@ -642,15 +655,19 @@ export function buildBullpenAutoRunWorkflowView(
   const allStagesFinished = stages.every((stage) => stage.state === "finished");
   const currentStageLabel = currentStage
     ? currentStage.title
-    : allStagesFinished
-      ? "All 3 stages finished"
-      : runStatus === "completed"
+    : runStatus === "partial_success"
+      ? "Stage 3 finished with partial success"
+      : allStagesFinished
         ? "All 3 stages finished"
-        : runStatus === "failed"
-          ? "Last run failed"
-          : runStatus === "skipped"
-            ? "Last run was skipped"
-            : "Queued for the next auto-run";
+        : runStatus === "completed"
+          ? "All 3 stages finished"
+          : runStatus === "confirming"
+            ? "Stage 3 confirming"
+          : runStatus === "failed"
+            ? "Last run failed"
+            : runStatus === "skipped"
+              ? "Last run was skipped"
+              : "Queued for the next auto-run";
   const statusCopy =
     runStatus === "failed"
       ? formatBullpenRunSummaryForMonitor(
@@ -660,6 +677,16 @@ export function buildBullpenAutoRunWorkflowView(
         )
       : currentStage
         ? `Current stage: ${currentStage.title}`
+        : runStatus === "confirming"
+          ? formatBullpenRunSummaryForMonitor(
+              normalizedRun?.summary,
+              "Stage 3 queued durable intents and is still confirming terminal order state.",
+            )
+          : runStatus === "partial_success"
+            ? formatBullpenRunSummaryForMonitor(
+                normalizedRun?.summary,
+                "The latest Bullpen Scan + LLM + Exit and Invest run finished with mixed order outcomes.",
+              )
         : allStagesFinished || runStatus === "completed"
           ? "The latest Bullpen Scan + LLM + Exit and Invest run finished all 3 stages."
           : runStatus === "skipped"

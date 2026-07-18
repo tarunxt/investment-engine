@@ -300,7 +300,11 @@ def _service_user_home() -> str | None:
         return None
 
 
-def bullpen_process_env(*, read_only: bool) -> dict[str, str]:
+def bullpen_process_env(
+    *,
+    read_only: bool,
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, str]:
     env = os.environ.copy()
     configured_home = _configured_bullpen_home()
     service_home = _service_user_home()
@@ -311,6 +315,8 @@ def bullpen_process_env(*, read_only: bool) -> dict[str, str]:
     if read_only:
         env["BULLPEN_READ_ONLY"] = "true"
         env["BULLPEN_NON_INTERACTIVE"] = "true"
+    if extra_env:
+        env.update(extra_env)
     return env
 
 
@@ -357,8 +363,9 @@ async def run_bullpen(
     *,
     timeout_seconds: int,
     read_only: bool,
+    extra_env: dict[str, str] | None = None,
 ) -> str:
-    env = bullpen_process_env(read_only=read_only)
+    env = bullpen_process_env(read_only=read_only, extra_env=extra_env)
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -399,29 +406,50 @@ async def run_bullpen(
     return stdout_text
 
 
-async def run_bullpen_json(args: list[str], *, timeout_seconds: int = 20) -> object:
-    stdout = await run_bullpen(args, timeout_seconds=timeout_seconds, read_only=True)
+async def run_bullpen_json(
+    args: list[str],
+    *,
+    timeout_seconds: int = 20,
+    extra_env: dict[str, str] | None = None,
+) -> object:
+    stdout = await run_bullpen(
+        args,
+        timeout_seconds=timeout_seconds,
+        read_only=True,
+        extra_env=extra_env,
+    )
     return json.loads(stdout)
 
 
 async def run_first_bullpen_json(
-    command_variants: Iterable[list[str]], *, timeout_seconds: int = 20
+    command_variants: Iterable[list[str]],
+    *,
+    timeout_seconds: int = 20,
+    extra_env: dict[str, str] | None = None,
 ) -> object:
     variants = list(command_variants)
     errors: list[str] = []
     runtime_context = bullpen_runtime_context(read_only=True)
     for args in variants:
-        try:
-            return await run_bullpen_json(args, timeout_seconds=timeout_seconds)
-        except Exception as exc:
-            errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
+            try:
+                return await run_bullpen_json(
+                    args,
+                    timeout_seconds=timeout_seconds,
+                    extra_env=extra_env,
+                )
+            except Exception as exc:
+                errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
     if errors and _is_auth_required_error(" | ".join(errors)):
         login_confirmed = await wait_for_bullpen_login()
         if login_confirmed:
             retry_errors: list[str] = []
             for args in variants:
                 try:
-                    return await run_bullpen_json(args, timeout_seconds=timeout_seconds)
+                    return await run_bullpen_json(
+                        args,
+                        timeout_seconds=timeout_seconds,
+                        extra_env=extra_env,
+                    )
                 except Exception as exc:
                     retry_errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
             errors.extend(
@@ -579,6 +607,7 @@ class BullpenLiveExecutor:
         dry_run: bool,
         condition_ids: list[str] | None = None,
         on_chain_fallback: bool = False,
+        extra_env: dict[str, str] | None = None,
     ) -> str:
         args = ["polymarket", "redeem"]
         if condition_ids:
@@ -590,18 +619,24 @@ class BullpenLiveExecutor:
         else:
             args.extend(["--yes", "--non-interactive", "--output", "json"])
         stdout = await run_bullpen(
-            args, timeout_seconds=BULLPEN_REDEEM_TIMEOUT_SECONDS, read_only=dry_run
+            args,
+            timeout_seconds=BULLPEN_REDEEM_TIMEOUT_SECONDS,
+            read_only=dry_run,
+            extra_env=extra_env,
         )
         return redact_secrets(stdout)
 
-    async def claim(self, *, dry_run: bool) -> str:
+    async def claim(self, *, dry_run: bool, extra_env: dict[str, str] | None = None) -> str:
         args = ["polymarket", "claim"]
         if dry_run:
             args.extend(["--dry-run", "--output", "json"])
         else:
             args.extend(["--yes", "--non-interactive", "--output", "json"])
         stdout = await run_bullpen(
-            args, timeout_seconds=BULLPEN_REDEEM_TIMEOUT_SECONDS, read_only=dry_run
+            args,
+            timeout_seconds=BULLPEN_REDEEM_TIMEOUT_SECONDS,
+            read_only=dry_run,
+            extra_env=extra_env,
         )
         return redact_secrets(stdout)
 
@@ -612,12 +647,14 @@ class BullpenLiveExecutor:
         outcome: str,
         amount_usd: float,
         max_price: float,
+        extra_env: dict[str, str] | None = None,
     ) -> str:
         return await self._execute_buy_with_limit(
             market_id=market_id,
             outcome=outcome,
             amount_usd=amount_usd,
             max_price=max_price,
+            extra_env=extra_env,
         )
 
     async def sell_limit(
@@ -628,6 +665,7 @@ class BullpenLiveExecutor:
         shares: float,
         min_price: float,
         max_reprice_attempts: int | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> str:
         args = [
             "polymarket",
@@ -648,7 +686,10 @@ class BullpenLiveExecutor:
         while True:
             try:
                 stdout = await run_bullpen(
-                    current_args, timeout_seconds=45, read_only=False
+                    current_args,
+                    timeout_seconds=45,
+                    read_only=False,
+                    extra_env=extra_env,
                 )
                 return redact_secrets(stdout)
             except BullpenCommandError as exc:
@@ -672,6 +713,7 @@ class BullpenLiveExecutor:
         outcome: str,
         amount_usd: float,
         max_price: float,
+        extra_env: dict[str, str] | None = None,
     ) -> str:
         args = [
             "polymarket",
@@ -693,7 +735,10 @@ class BullpenLiveExecutor:
         while True:
             try:
                 stdout = await run_bullpen(
-                    current_args, timeout_seconds=45, read_only=False
+                    current_args,
+                    timeout_seconds=45,
+                    read_only=False,
+                    extra_env=extra_env,
                 )
                 return redact_secrets(stdout)
             except BullpenCommandError as exc:
@@ -716,6 +761,7 @@ class BullpenLiveExecutor:
                         ],
                         timeout_seconds=45,
                         read_only=False,
+                        extra_env=extra_env,
                     )
                     continue
 

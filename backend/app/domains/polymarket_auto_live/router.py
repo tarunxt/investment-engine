@@ -8,6 +8,7 @@ from app.domains.auth.models import User
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
@@ -92,10 +93,58 @@ async def list_auto_live_runs(current_user: User = Depends(get_current_user)):
     return await bot.list_runs()
 
 
+@router.get("/runs/{run_id}/orders", response_model=BullpenAutoLiveRunOrdersResponse)
+async def get_auto_live_run_orders(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.get_run_orders(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+
+@router.post("/runs/{run_id}/reconcile", response_model=BullpenAutoLiveRunOrdersResponse)
+async def reconcile_auto_live_run_order_states(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.reconcile_run_orders(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+
 @router.get("/decisions", response_model=list[BullpenAutoLiveDecision])
 async def list_auto_live_decisions(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
     return await bot.list_decisions()
+
+
+@router.post("/orders/{intent_id}/retry", response_model=BullpenAutoLiveRunOrdersResponse)
+async def retry_auto_live_order(
+    intent_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.retry_order_intent(intent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
+
+
+@router.post("/orders/{intent_id}/cancel", response_model=BullpenAutoLiveRunOrdersResponse)
+async def cancel_auto_live_order(
+    intent_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.cancel_order_intent(intent_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
 
 
 @router.post("/run-once", response_model=BullpenAutoLiveRun)

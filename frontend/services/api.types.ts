@@ -54,6 +54,7 @@ import {
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveDecision,
     BullpenAutoLiveState,
@@ -198,7 +199,11 @@ export interface IApiService {
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
+    getBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
+    reconcileBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
+    retryBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
+    cancelBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     runBullpenAutoLiveOnce(data?: BullpenAutoLiveRunOnceRequest): Promise<BullpenAutoLiveRun>;
     startBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     stopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
@@ -216,7 +221,11 @@ export interface IApiService {
     bullpenAiAutoLiveUpdateSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     bullpenAiAutoLiveResetSettings(): Promise<BullpenAutoLiveSettings>;
     bullpenAiAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
+    bullpenAiAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
+    bullpenAiAutoLiveReconcileRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
+    bullpenAiAutoLiveRetryOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
+    bullpenAiAutoLiveCancelOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     bullpenAiAutoLiveRunOnce(data?: BullpenAutoLiveRunOnceRequest): Promise<BullpenAutoLiveRun>;
     bullpenAiAutoLiveStart(): Promise<BullpenAutoLiveState>;
     bullpenAiAutoLiveStop(): Promise<BullpenAutoLiveState>;

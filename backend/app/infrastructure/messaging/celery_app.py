@@ -23,7 +23,13 @@ celery.conf.task_routes = {
     "app.domains.auth.tasks.*": {"queue": "email"},
     "app.domains.runs.tasks.*": {"queue": "email"},
     "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run": {"queue": "ai"},
+    "app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent": {"queue": "ai"},
+    "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_order_intent": {"queue": "ai"},
+    "app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent": {"queue": "ai"},
     "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs": {"queue": "beat"},
+    "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents": {"queue": "beat"},
+    "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders": {"queue": "beat"},
+    "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders": {"queue": "beat"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -43,6 +49,14 @@ celery.conf.beat_schedule = {
     },
     "polymarket-auto-live-due-run-scan": {
         "task": "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs",
+        "schedule": crontab(minute="*"),
+    },
+    "polymarket-auto-live-order-intent-dispatch": {
+        "task": "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents",
+        "schedule": crontab(minute="*"),
+    },
+    "polymarket-auto-live-order-intent-reconcile": {
+        "task": "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders",
         "schedule": crontab(minute="*"),
     },
 }

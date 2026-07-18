@@ -13,7 +13,10 @@ from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: 
 from app.domains.jobs.models import Job  # noqa: F401
 from app.domains.polymarket.models import PolymarketRedeemAttemptRecord  # noqa: F401
 from app.domains.polymarket_auto_live.models import (  # noqa: F401
+    PolymarketAutoLiveCapitalReservationRecord,
     PolymarketAutoLiveDecisionRecord,
+    PolymarketAutoLiveOrderAttemptRecord,
+    PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLivePositionRecord,
     PolymarketAutoLiveRunRecord,
     PolymarketAutoLiveSettingsRecord,

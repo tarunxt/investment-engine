@@ -65,6 +65,7 @@ from app.domains.polymarket_auto_live.console_profile import (
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
+    auto_live_execution_v2_enabled,
 )
 from app.domains.polymarket_auto_live.evidence import EvidencePacket, build_evidence_packet
 from app.domains.polymarket_auto_live.event_exit import (
@@ -7455,9 +7456,16 @@ class BullpenAutoLiveEngine:
         planned_orders = planned_order_counts["planned"]
         sell_planned_orders = planned_order_counts["sell_planned"]
         buy_planned_orders = len(ranked_buy_candidate_decisions)
+        execution_v2_handoff = bool(
+            actionable_decisions
+            and not state.dry_run
+            and auto_live_execution_v2_enabled()
+            and settings.auto_live_enabled
+            and settings.allow_live_execution
+        )
         execution_block_reasons: list[str] = []
         available_balance_before_step1: float | None = None
-        if actionable_decisions and not state.dry_run:
+        if actionable_decisions and not state.dry_run and not execution_v2_handoff:
             live_controls = await refresh_live_controls(user_id=user_id)
             state.doctor_status = "pass" if live_controls.doctor.ok else "fail"
             state.balance_status = "pass" if live_controls.balance.status == "ready" else "fail"
@@ -7488,6 +7496,12 @@ class BullpenAutoLiveEngine:
                 preparation_reason = (
                     f"Stage 3 reviewed all {total_decision_rows} rows and is staying in "
                     "simulation mode while it walks Step 1 Event Exits and then refreshes Step 2 buy sizing."
+                )
+            elif execution_v2_handoff:
+                preparation_reason = (
+                    f"Stage 3 reviewed all {total_decision_rows} rows and queued "
+                    f"{planned_orders} durable order intent"
+                    f"{'s' if planned_orders != 1 else ''} for independent execution plus confirmation."
                 )
             elif execution_pause_reason:
                 preparation_reason = (
@@ -8730,10 +8744,25 @@ class BullpenAutoLiveEngine:
                 completed_at=None,
             )
 
-        for decision in sell_execution_decisions:
-            await _execute_actionable_decision(decision, step_key="sell")
+        if execution_v2_handoff:
+            for decision in sell_execution_decisions:
+                if decision.order_plan is None or decision.order_plan.status != "planned":
+                    continue
+                decision.order_plan.detail = (
+                    "Durable Stage 3 execution queued this exit order for asynchronous submission."
+                )
+                _append_decision_stage_result(
+                    decision,
+                    stage_number=7,
+                    status="warning",
+                    reason=decision.order_plan.detail,
+                    outputs=decision.order_plan.model_dump(mode="json"),
+                )
+        else:
+            for decision in sell_execution_decisions:
+                await _execute_actionable_decision(decision, step_key="sell")
         step2_block_reason: str | None = None
-        if sell_execution_decisions and not state.dry_run:
+        if sell_execution_decisions and not state.dry_run and not execution_v2_handoff:
             _, available_balance_after_step1 = await _poll_exit_settlement(
                 decisions=sell_execution_decisions,
                 baseline_balance_usd=available_balance_before_step1,
@@ -8781,8 +8810,23 @@ class BullpenAutoLiveEngine:
             ):
                 available_balance_before_step1 = available_balance_after_step1
         await _plan_stage3_buy_orders(step2_block_reason=step2_block_reason)
-        for decision in buy_execution_decisions:
-            await _execute_actionable_decision(decision, step_key="buy")
+        if execution_v2_handoff:
+            for decision in buy_execution_decisions:
+                if decision.order_plan is None or decision.order_plan.status != "planned":
+                    continue
+                decision.order_plan.detail = (
+                    "Durable Stage 3 execution queued this buy order for asynchronous submission."
+                )
+                _append_decision_stage_result(
+                    decision,
+                    stage_number=7,
+                    status="warning",
+                    reason=decision.order_plan.detail,
+                    outputs=decision.order_plan.model_dump(mode="json"),
+                )
+        else:
+            for decision in buy_execution_decisions:
+                await _execute_actionable_decision(decision, step_key="buy")
 
         for decision in decisions:
             if decision.order_plan is None and _decision_stage_result(decision, 7) is None:
@@ -8820,7 +8864,7 @@ class BullpenAutoLiveEngine:
             execution_mode_reason=simulation_reason if state.dry_run else None,
         )
         final_order_metrics = _current_stage3_order_metrics()
-        live_order_issues = _collect_live_order_issues(decisions)
+        live_order_issues = [] if execution_v2_handoff else _collect_live_order_issues(decisions)
         live_order_issue_count = len(live_order_issues)
         live_order_hard_failure_count = sum(
             1 for issue in live_order_issues if bool(issue.get("hard_failure"))
@@ -8846,7 +8890,7 @@ class BullpenAutoLiveEngine:
             planned_orders=final_order_counts["planned"],
             submitted_orders=final_order_counts["submitted"],
         )
-        degraded_live_run = bool(live_order_issues) and not state.dry_run
+        degraded_live_run = bool(live_order_issues) and not state.dry_run and not execution_v2_handoff
         run.decisions_count = len(decisions)
         run.decision_ids = [decision.id for decision in decisions]
         run.orders_planned = final_order_counts["planned"]
@@ -8854,9 +8898,17 @@ class BullpenAutoLiveEngine:
         run.live_execution_requested = bool(
             actionable_decisions and live_execution_requested(settings)
         )
-        run.live_execution_attempted = bool(actionable_decisions and not state.dry_run)
-        run.completed_at = utc_now_iso()
-        run.status = "failed" if state.paused or degraded_live_run else "completed"
+        run.live_execution_attempted = bool(
+            actionable_decisions and not state.dry_run and not execution_v2_handoff
+        )
+        run.completed_at = None if execution_v2_handoff else utc_now_iso()
+        run.status = (
+            "confirming"
+            if execution_v2_handoff
+            else "failed"
+            if state.paused or degraded_live_run
+            else "completed"
+        )
         run.error_message = None
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.request_context = None
@@ -8864,6 +8916,12 @@ class BullpenAutoLiveEngine:
             run.summary = (
                 f"Console schedule simulated {len(decisions)} decisions with "
                 f"{final_order_counts['planned']} planned orders. {simulation_reason}"
+            )
+        elif execution_v2_handoff:
+            run.summary = (
+                f"Console schedule queued {final_order_counts['planned']} durable "
+                f"Stage 3 order intent{'s' if final_order_counts['planned'] != 1 else ''} "
+                "for asynchronous execution and confirmation."
             )
         elif state.paused:
             run.summary = (
@@ -8886,10 +8944,12 @@ class BullpenAutoLiveEngine:
             build_workflow_stage_result(
                 stage_number=3,
                 workflow_stage_key="invest",
-                phase_status="completed",
+                phase_status="confirming" if execution_v2_handoff else "completed",
                 status=(
                     "fail"
                     if degraded_live_run
+                    else "warning"
+                    if execution_v2_handoff
                     else "pass"
                     if len(decisions) > 0
                     else "warning"
@@ -8897,6 +8957,8 @@ class BullpenAutoLiveEngine:
                 reason=(
                     execution_issue_summary
                     if degraded_live_run
+                    else "Durable Stage 3 order intents were queued for asynchronous execution and confirmation."
+                    if execution_v2_handoff
                     else "Rebalance, Event Exit processing, and investment planning/execution finished for the ranked Bullpen table."
                     if len(decisions) > 0
                     else "Stage 3 finished without any decisions to process."
@@ -8945,6 +9007,9 @@ class BullpenAutoLiveEngine:
                     "execution_steps": final_execution_steps,
                     "order_metrics": final_order_metrics,
                     "execution_step_key": (
+                        "confirming"
+                        if execution_v2_handoff
+                        else
                         "blocked"
                         if actionable_decisions and state.paused
                         else "failed"
@@ -8954,6 +9019,9 @@ class BullpenAutoLiveEngine:
                         else None
                     ),
                     "execution_step_label": (
+                        "Stage 3 confirming"
+                        if execution_v2_handoff
+                        else
                         "Stage 3 blocked"
                         if actionable_decisions and state.paused
                         else "Stage 3 failed"
@@ -8965,6 +9033,9 @@ class BullpenAutoLiveEngine:
                     "execution_step_number": None,
                     "execution_step_total": 2,
                     "execution_step_detail": (
+                        "Durable Stage 3 order intents were queued and will continue confirming asynchronously."
+                        if execution_v2_handoff
+                        else
                         execution_issue_summary
                         if degraded_live_run
                         else execution_pause_reason
@@ -8998,7 +9069,7 @@ class BullpenAutoLiveEngine:
                 },
                 guardrails_checked=global_guardrails,
                 started_at=invest_stage_started_at,
-                completed_at=run.completed_at,
+                completed_at=None if execution_v2_handoff else run.completed_at,
             ),
         )
 
@@ -9007,7 +9078,7 @@ class BullpenAutoLiveEngine:
         state.last_scan_at = run.completed_at
         state.last_llm_run_at = run.completed_at
         state.last_rebalance_at = run.completed_at
-        state.last_error = None if run.status == "completed" else run.summary
+        state.last_error = None if run.status in {"completed", "confirming"} else run.summary
         state.last_action = run.summary
         state.latest_guardrail_checks = global_guardrails
         state.live_execution_allowed = not execution_block_reasons and not state.paused and not state.dry_run

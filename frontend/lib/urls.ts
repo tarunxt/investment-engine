@@ -161,7 +161,14 @@ const bullpenAutoLiveApiUrls = {
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
   runs: () => `${resolveApiBaseUrl()}/polymarket/auto-live/runs`,
+  runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
+  reconcileRunOrders: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/reconcile`,
   decisions: () => `${resolveApiBaseUrl()}/polymarket/auto-live/decisions`,
+  retryOrder: (intentId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/retry`,
+  cancelOrder: (intentId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/cancel`,
   runOnce: () => `${resolveApiBaseUrl()}/polymarket/auto-live/run-once`,
   start: () => `${resolveApiBaseUrl()}/polymarket/auto-live/start`,
   stop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/stop`,

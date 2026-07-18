@@ -35,6 +35,7 @@ import {
   BullpenAutoLiveSettings,
   BullpenAutoLiveSettingsUpdate,
   BullpenAutoLiveRun,
+  BullpenAutoLiveRunOrdersResponse,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveDecision,
   BullpenAutoLiveState,
@@ -999,8 +1000,41 @@ class apiServiceClass implements IApiService {
     return this.get<BullpenAutoLiveRun[]>(URLs.bullpenAutoLive.runs());
   }
 
+  getBullpenAutoLiveRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.get<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.runOrders(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  reconcileBullpenAutoLiveRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.reconcileRunOrders(runId),
+    );
+  }
+
   getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
     return this.get<BullpenAutoLiveDecision[]>(URLs.bullpenAutoLive.decisions());
+  }
+
+  retryBullpenAutoLiveOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.retryOrder(intentId),
+    );
+  }
+
+  cancelBullpenAutoLiveOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.cancelOrder(intentId),
+    );
   }
 
   getBullpenTradeAnalysis(params?: {
@@ -1099,8 +1133,32 @@ class apiServiceClass implements IApiService {
     return this.getBullpenAutoLiveRuns();
   }
 
+  bullpenAiAutoLiveRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.getBullpenAutoLiveRunOrders(runId);
+  }
+
+  bullpenAiAutoLiveReconcileRunOrders(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.reconcileBullpenAutoLiveRunOrders(runId);
+  }
+
   bullpenAiAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
     return this.getBullpenAutoLiveDecisions();
+  }
+
+  bullpenAiAutoLiveRetryOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.retryBullpenAutoLiveOrder(intentId);
+  }
+
+  bullpenAiAutoLiveCancelOrder(
+    intentId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.cancelBullpenAutoLiveOrder(intentId);
   }
 
   bullpenAiTradeAnalysis(params?: {

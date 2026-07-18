@@ -19,12 +19,22 @@ from app.domains.polymarket_auto_live.bot import (
     effective_dry_run,
     live_execution_requested,
 )
+from app.domains.polymarket_auto_live.config import auto_live_execution_v2_enabled
 from app.domains.polymarket_auto_live.event_exit import ExitSignal, PositionPriceSnapshot
 from app.domains.polymarket_auto_live.engine import BullpenAutoLiveEngine, PositionSnapshot
 from app.domains.polymarket_auto_live.models import (
+    PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLiveRunRecord,
     PolymarketAutoLiveSettingsRecord,
     PolymarketAutoLiveStateRecord,
+)
+from app.domains.polymarket_auto_live.order_intent_service import (
+    create_or_refresh_run_order_intents_sync,
+    execute_order_intent_sync,
+    get_intent_user_id_sync,
+    list_due_order_intent_ids_sync,
+    reconcile_order_intent_sync,
+    sync_run_and_decisions_from_intents_sync,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
     finalize_failed_run_progress,
@@ -243,6 +253,32 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
         repo.replace_positions(user_id, engine_result.positions)
         repo.save_state(user_id, engine_result.state)
         session.commit()
+        if (
+            auto_live_execution_v2_enabled()
+            and engine_result.run.live_execution_requested
+            and not engine_result.run.dry_run
+        ):
+            create_or_refresh_run_order_intents_sync(
+                session,
+                user_id=user_id,
+                run=engine_result.run,
+                decisions=engine_result.decisions,
+            )
+            synced_run = sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=user_id,
+                run_id=run_id,
+            )
+            if synced_run is not None:
+                engine_result.state.last_action = synced_run.summary
+                engine_result.state.last_error = (
+                    None if synced_run.status in {"completed", "confirming"} else synced_run.summary
+                )
+                engine_result.state.last_run_id = synced_run.id
+                engine_result.state.last_run_at = synced_run.completed_at or _utc_now().isoformat()
+                repo.save_state(user_id, engine_result.state)
+                session.commit()
+            dispatch_due_auto_live_order_intents.delay()  # type: ignore[attr-defined]
         try:
             sync_auto_live_position_snapshots_sync(
                 user_id=user_id,
@@ -340,3 +376,94 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
             session.commit()
             task = execute_polymarket_auto_live_run.delay(user_id, run.id)  # type: ignore[attr-defined]
             register_auto_live_run_task_sync(run.id, task.id)
+
+
+@celery.task(
+    name="app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents",
+    queue="beat",
+)
+def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
+    with SyncSessionLocal() as session:
+        executable_ids = list_due_order_intent_ids_sync(
+            session,
+            limit=limit,
+            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"),
+        )
+        reconcilable_ids = list_due_order_intent_ids_sync(
+            session,
+            limit=limit,
+            statuses=("SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING"),
+        )
+
+    for intent_id in executable_ids:
+        execute_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+    for intent_id in reconcilable_ids:
+        reconcile_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+
+
+@celery.task(
+    bind=True,
+    max_retries=0,
+    name="app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent",
+    queue="ai",
+)
+def execute_auto_live_order_intent(self, intent_id: str) -> None:
+    execute_order_intent_sync(intent_id, worker_task_id=self.request.id)
+
+
+@celery.task(
+    bind=True,
+    max_retries=0,
+    name="app.domains.polymarket_auto_live.tasks.reconcile_auto_live_order_intent",
+    queue="ai",
+)
+def reconcile_auto_live_order_intent(self, intent_id: str) -> None:
+    reconcile_order_intent_sync(intent_id)
+
+
+@celery.task(
+    name="app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders",
+    queue="beat",
+)
+def reconcile_auto_live_run_orders(run_id: str) -> None:
+    with SyncSessionLocal() as session:
+        intent_ids = (
+            session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord.id)
+                .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+                .where(
+                    PolymarketAutoLiveOrderIntentRecord.status.in_(
+                        ("SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING")
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for intent_id in intent_ids:
+        reconcile_auto_live_order_intent.delay(str(intent_id))  # type: ignore[attr-defined]
+
+
+@celery.task(
+    bind=True,
+    max_retries=0,
+    name="app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent",
+    queue="ai",
+)
+def retry_auto_live_order_intent(self, intent_id: str) -> None:
+    execute_order_intent_sync(intent_id, worker_task_id=self.request.id)
+
+
+@celery.task(
+    name="app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders",
+    queue="beat",
+)
+def reconcile_all_pending_auto_live_orders(limit: int = 100) -> None:
+    with SyncSessionLocal() as session:
+        intent_ids = list_due_order_intent_ids_sync(
+            session,
+            limit=limit,
+            statuses=("SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING"),
+        )
+    for intent_id in intent_ids:
+        reconcile_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
