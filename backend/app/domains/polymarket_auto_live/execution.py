@@ -142,8 +142,8 @@ async def refresh_doctor() -> PolymarketDoctorStatus:
     return await BullpenLiveExecutor().doctor()
 
 
-async def refresh_balance() -> PolymarketBalanceState:
-    return await BullpenBalanceReader().refresh()
+async def refresh_balance(*, wait_for_login: bool = False) -> PolymarketBalanceState:
+    return await BullpenBalanceReader().refresh(wait_for_login=wait_for_login)
 
 
 async def refresh_runtime_execution_settings(*, user_id: int) -> RuntimeExecutionSettings:

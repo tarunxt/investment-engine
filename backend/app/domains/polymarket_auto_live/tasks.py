@@ -64,6 +64,10 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class AutoLiveRunCancelled(RuntimeError):
+    """Raised when a user-cancelled run should stop persisting worker progress."""
+
+
 def _position_snapshot_from_record(record) -> PositionSnapshot:
     payload = record.payload or {}
     return PositionSnapshot(
@@ -126,6 +130,18 @@ def _position_snapshot_from_record(record) -> PositionSnapshot:
 _finalize_failed_run_progress = finalize_failed_run_progress
 
 
+def _run_was_cancelled_by_user(
+    repo: SyncPolymarketAutoLiveRepository,
+    run_id: str,
+) -> bool:
+    current_run = repo.get_run(run_id)
+    return bool(
+        current_run is not None
+        and current_run.status == "failed"
+        and current_run.error_message == "Cancelled by user"
+    )
+
+
 def _synchronize_state(
     user_id: int,
     repo: SyncPolymarketAutoLiveRepository,
@@ -148,6 +164,8 @@ def persist_auto_live_progress_sync(
     run: BullpenAutoLiveRun,
     state,
 ) -> None:
+    if _run_was_cancelled_by_user(repo, run.id):
+        raise AutoLiveRunCancelled(f"Auto-Live run {run.id} was cancelled by user.")
     repo.save_run(user_id, run)
     repo.replace_run_decisions_from_stage3_payload(user_id, run)
     repo.save_state(user_id, state)
@@ -217,6 +235,24 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                     progress_callback=persist_progress,
                 )
             )
+        except AutoLiveRunCancelled:
+            logger.info("Stopping Auto-Live worker for user-cancelled run %s", run_id)
+            try:
+                materialize_run_audit_snapshot_sync(
+                    session,
+                    user_id=user_id,
+                    run_id=run_id,
+                    force=True,
+                    freeze=True,
+                )
+                session.commit()
+            except Exception:
+                logger.exception(
+                    "Bullpen run audit freeze after cancellation failed for run %s",
+                    run_id,
+                )
+                session.rollback()
+            return
         except Exception as exc:
             logger.exception("Auto-Live run %s failed before completion", run_id)
             sanitized_error = redact_secrets(str(exc))
@@ -273,6 +309,25 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                 logger.exception("Final Bullpen run audit freeze failed for run %s", run_id)
                 session.rollback()
             logger.exception("Auto-Live run %s exhausted retries", run_id)
+            return
+
+        if _run_was_cancelled_by_user(repo, run_id):
+            logger.info("Skipping final Auto-Live persistence for cancelled run %s", run_id)
+            try:
+                materialize_run_audit_snapshot_sync(
+                    session,
+                    user_id=user_id,
+                    run_id=run_id,
+                    force=True,
+                    freeze=True,
+                )
+                session.commit()
+            except Exception:
+                logger.exception(
+                    "Bullpen run audit freeze after final cancellation check failed for run %s",
+                    run_id,
+                )
+                session.rollback()
             return
 
         repo.save_run(user_id, engine_result.run)

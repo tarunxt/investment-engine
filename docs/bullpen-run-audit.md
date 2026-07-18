@@ -131,6 +131,13 @@ and timeline summaries.
 Source scan inputs, filter context, candidate inputs, active-position carry-over, and
 pre-LLM review rows.
 
+For auto-live console-profile runs, Stage 1 background Bullpen CLI reads are
+expected to stay non-interactive: discover, positions, and balance refreshes
+must use short worker-safe timeouts and must not block on manual Bullpen login
+polling. If a user cancels the run while those reads are in flight, the audit
+must preserve the cancelled lifecycle instead of letting a late worker progress
+write revert the run back to an in-progress state.
+
 ### Stage 2
 
 Persisted candidate reviews, per-model outputs, Stage 2 LLM runtime payloads, and
@@ -248,6 +255,9 @@ When changing Bullpen logic:
 * update `AUDITED_ALGORITHM_REGISTRY`
 * update validators and finding messages
 * update frontend run audit rendering if labels or sections changed
+* preserve the non-interactive Stage 1 runtime contract for background Bullpen
+  scan, positions, and balance reads unless the audit docs and tests are updated
+  in the same task
 * confirm Stage 2 Top 10 handoff rows still persist enough detail to explain why a queued row was planned, deferred, missing, or failed in Stage 3
 * confirm any saved Stage 2 -> Stage 3 reuse payload still preserves exact resolution rules instead of only derived summaries
 * add or update tests

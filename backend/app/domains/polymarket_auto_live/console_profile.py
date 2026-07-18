@@ -40,6 +40,8 @@ CONSOLE_RANKED_EVENT_LIMIT = 10
 DEFAULT_CONSOLE_ORDER_USD = 5.0
 CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
 CONSOLE_MIN_MARKET_ODDS = 5.0
+CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
+CONSOLE_POSITIONS_TIMEOUT_SECONDS = 8
 
 _POSITIONS_COMMAND_VARIANTS = [
     ["polymarket", "positions", "--output", "json"],
@@ -768,7 +770,8 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
     try:
         parsed = await run_first_bullpen_json(
             _DISCOVER_COMMAND_VARIANTS,
-            timeout_seconds=25,
+            timeout_seconds=CONSOLE_DISCOVER_TIMEOUT_SECONDS,
+            wait_for_login=False,
         )
         return _build_cli_console_scan_result(
             _collect_console_discover_rows(parsed),
@@ -985,7 +988,9 @@ def _aggregate_console_wallet_positions(
 
 async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
     parsed = await run_first_bullpen_json(
-        _POSITIONS_COMMAND_VARIANTS, timeout_seconds=30
+        _POSITIONS_COMMAND_VARIANTS,
+        timeout_seconds=CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+        wait_for_login=False,
     )
     rows = _collect_console_position_rows(parsed)
     positions: list[ConsoleWalletPosition] = []

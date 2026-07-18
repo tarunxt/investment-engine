@@ -426,6 +426,7 @@ async def run_first_bullpen_json(
     *,
     timeout_seconds: int = 20,
     extra_env: dict[str, str] | None = None,
+    wait_for_login: bool = True,
 ) -> object:
     variants = list(command_variants)
     errors: list[str] = []
@@ -439,7 +440,7 @@ async def run_first_bullpen_json(
                 )
             except Exception as exc:
                 errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
-    if errors and _is_auth_required_error(" | ".join(errors)):
+    if wait_for_login and errors and _is_auth_required_error(" | ".join(errors)):
         login_confirmed = await wait_for_bullpen_login()
         if login_confirmed:
             retry_errors: list[str] = []
@@ -1103,7 +1104,11 @@ class BullpenRedeemedTradesReader:
 
 
 class BullpenBalanceReader:
-    async def refresh(self) -> PolymarketBalanceState:
+    async def refresh(
+        self,
+        *,
+        wait_for_login: bool = True,
+    ) -> PolymarketBalanceState:
         checked_at = utc_now()
         try:
             parsed = await run_first_bullpen_json(
@@ -1114,6 +1119,7 @@ class BullpenBalanceReader:
                         BULLPEN_BALANCE_TIMEOUT_SECONDS,
                     )
                 ),
+                wait_for_login=wait_for_login,
             )
             balance_values = _extract_balance_values(parsed)
             return PolymarketBalanceState(
