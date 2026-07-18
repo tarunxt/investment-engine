@@ -499,7 +499,10 @@ export function buildBullpenAutoRunWorkflowView(
     findWorkflowStageResult(normalizedRun, definition, index + 1),
   );
   const completedStageCount = stageResults.filter(
-    (stage) => getPhaseStatus(stage) === "completed",
+    (stage) => {
+      const phase = getPhaseStatus(stage);
+      return phase === "completed" || phase === "partial";
+    },
   ).length;
   const currentStageIndex = (() => {
     const runningStageIndex = stageResults.findIndex(
@@ -525,6 +528,7 @@ export function buildBullpenAutoRunWorkflowView(
     let state: WorkflowState;
     if (
       explicitPhase === "completed" ||
+      explicitPhase === "partial" ||
       explicitPhase === "failed" ||
       runStatus === "completed" ||
       investStageEffectivelyCompleted

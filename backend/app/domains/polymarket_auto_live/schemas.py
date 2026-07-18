@@ -143,6 +143,33 @@ class BullpenAutoLiveLlmTarget(BaseModel):
     provider: str = Field(min_length=1)
     model: str = Field(min_length=1)
 
+    @field_validator("provider", "model")
+    @classmethod
+    def normalize_target_field(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("provider and model are required")
+        return normalized
+
+
+def _normalize_console_llm_targets(
+    targets: list[BullpenAutoLiveLlmTarget],
+) -> list[BullpenAutoLiveLlmTarget]:
+    normalized_targets: list[BullpenAutoLiveLlmTarget] = []
+    seen_targets: set[tuple[str, str]] = set()
+    for target in targets:
+        key = (target.provider.strip().lower(), target.model.strip().lower())
+        if not key[0] or not key[1] or key in seen_targets:
+            continue
+        seen_targets.add(key)
+        normalized_targets.append(
+            BullpenAutoLiveLlmTarget(
+                provider=target.provider.strip(),
+                model=target.model.strip(),
+            )
+        )
+    return normalized_targets
+
 
 class BullpenAutoLiveSettingsBase(BaseModel):
     strategy_profile: AutoLiveStrategyProfile = "guardrail_kelly"
@@ -237,6 +264,14 @@ class BullpenAutoLiveSettingsBase(BaseModel):
         if not isinstance(value, int):
             raise ValueError("llm_events_per_prompt must be an integer from 1 to 100")
         return value
+
+    @field_validator("console_llm_targets")
+    @classmethod
+    def normalize_console_llm_targets(
+        cls,
+        value: list[BullpenAutoLiveLlmTarget],
+    ) -> list[BullpenAutoLiveLlmTarget]:
+        return _normalize_console_llm_targets(value)
 
     @model_validator(mode="after")
     def validate_cross_field_rules(self) -> "BullpenAutoLiveSettingsBase":
@@ -354,6 +389,16 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
         if value is None:
             return None
         return BullpenAutoLiveSettingsBase.validate_llm_events_per_prompt(value)
+
+    @field_validator("console_llm_targets")
+    @classmethod
+    def normalize_optional_console_llm_targets(
+        cls,
+        value: list[BullpenAutoLiveLlmTarget] | None,
+    ) -> list[BullpenAutoLiveLlmTarget] | None:
+        if value is None:
+            return None
+        return _normalize_console_llm_targets(value)
 
 
 class BullpenAutoLiveGuardrailCheck(BaseModel):
@@ -758,8 +803,19 @@ class BullpenAutoLiveRun(BaseModel):
     decision_ids: list[str] = Field(default_factory=list)
     order_intent_ids: list[str] = Field(default_factory=list)
     diagnostics: BullpenAutoLiveRunDiagnostics = Field(default_factory=BullpenAutoLiveRunDiagnostics)
+    stage2_llm_targets_snapshot: list[BullpenAutoLiveLlmTarget] | None = None
     request_context: BullpenAutoLiveRunOnceRequest | None = None
     audit_metadata: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("stage2_llm_targets_snapshot")
+    @classmethod
+    def normalize_stage2_llm_targets_snapshot(
+        cls,
+        value: list[BullpenAutoLiveLlmTarget] | None,
+    ) -> list[BullpenAutoLiveLlmTarget] | None:
+        if value is None:
+            return None
+        return _normalize_console_llm_targets(value)
 
 
 class BullpenAutoLiveState(BaseModel):

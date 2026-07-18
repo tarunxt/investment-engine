@@ -992,7 +992,9 @@ function getStageTwoStats(
     readStageOutputNumber(stage.inputs.llm_provider_target_count) ??
     readStageOutputNumber(stage.inputs.llm_selected_target_count) ??
     readStageOutputNumber(stage.inputs.llm_target_count) ??
-    (stageTwoTargets.length > 0 ? stageTwoTargets.length : null) ??
+    (stageTwoTargets.length > 0
+      ? stageTwoTargets.filter((target) => hasStageTwoLlmIdentity(target)).length
+      : null) ??
     Math.max(llmsCompleted, 0);
   const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
 
@@ -1014,6 +1016,7 @@ function getStageTwoLlmOutcomeCounts(
   completedCount: number,
 ) {
   const explicitPassed =
+    readStageOutputNumber(stage.outputs.llm_usable_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llm_passed_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llm_successful_provider_target_count);
   const explicitFailed =
@@ -1028,12 +1031,12 @@ function getStageTwoLlmOutcomeCounts(
 
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
-    const statuses = targetRuns.map((run) =>
-      normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
-    );
-    const failed = statuses.filter((status) => status === "failed").length;
-    const passed = statuses.filter(
-      (status) => status === "completed" || status === "partial",
+    const validTargetRuns = targetRuns.filter((run) => hasStageTwoLlmIdentity(run));
+    const failed = validTargetRuns.filter((run) =>
+      isFailedStageTwoTargetRun(run),
+    ).length;
+    const passed = validTargetRuns.filter((run) =>
+      isUsableStageTwoTargetRun(run),
     ).length;
     return { passed, failed };
   }
@@ -1045,6 +1048,7 @@ function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
     return targetRuns.filter((run) => {
+      if (!hasStageTwoLlmIdentity(run)) return false;
       const status = normalizeStageTwoRunStatus(
         readLlmContextString(run, "status"),
       );
@@ -4356,6 +4360,11 @@ type StageTwoRunSummaryStatus =
   | "pending"
   | "running";
 
+const STAGE_TWO_LLM_IDENTITY_ERROR =
+  "Data integrity error: Stage 2 recorded an LLM target execution without a provider/model identity.";
+const STAGE_TWO_LLM_MISSING_CHILD_ERROR =
+  "Data integrity error: Stage 2 never recorded a child LLM execution for this selected provider/model target.";
+
 type StageTwoLlmRunSummaryRow = {
   key: string;
   provider: string;
@@ -4399,7 +4408,48 @@ function normalizeStageTwoRunStatus(
     return value;
   if (value === "processing") return "running";
   if (value === "queued") return "pending";
-  return "completed";
+  return "failed";
+}
+
+function readStageTwoLlmIdentity(
+  value: Record<string, unknown> | null,
+) {
+  const provider = readLlmContextString(value, "provider")?.trim() ?? "";
+  const model = readLlmContextString(value, "model")?.trim() ?? "";
+  if (!provider || !model) return null;
+  return { provider, model };
+}
+
+function hasStageTwoLlmIdentity(
+  value: Record<string, unknown> | null,
+) {
+  return readStageTwoLlmIdentity(value) !== null;
+}
+
+function isUsableStageTwoTargetRun(run: Record<string, unknown>) {
+  const usableEventCount = readLlmContextNumber(run, "usable_event_count");
+  if (usableEventCount !== null) return usableEventCount > 0;
+  const status = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+  return status === "completed" || status === "partial";
+}
+
+function isFailedStageTwoTargetRun(run: Record<string, unknown>) {
+  if (!hasStageTwoLlmIdentity(run)) return true;
+  const usableEventCount = readLlmContextNumber(run, "usable_event_count");
+  if (usableEventCount !== null) return usableEventCount <= 0;
+  return normalizeStageTwoRunStatus(readLlmContextString(run, "status")) === "failed";
+}
+
+function isTerminalStageTwoStage(stage: WorkflowStageView) {
+  const phaseStatus =
+    readStageOutputString(stage.outputs.phase_status) ??
+    readStageOutputString(stage.inputs.phase_status);
+  return (
+    Boolean(stage.timerCompletedAt) ||
+    phaseStatus === "completed" ||
+    phaseStatus === "partial" ||
+    phaseStatus === "failed"
+  );
 }
 
 function getStageTwoLlmTargets(stage: WorkflowStageView) {
@@ -4438,20 +4488,22 @@ function getStageTwoLlmRunSummaryRows(
 
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
+    const stageIsTerminal = isTerminalStageTwoStage(stage);
     const runRows = targetRuns.map((run, index) => {
-      const provider = readLlmContextString(run, "provider") ?? "—";
-      const model = readLlmContextString(run, "model") ?? "—";
+      const identity = readStageTwoLlmIdentity(run);
+      const provider = identity?.provider ?? "—";
+      const model = identity?.model ?? "—";
       const key = `${provider}::${model}`;
+      const rawStatus = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
+      const status = identity ? rawStatus : "failed";
       return {
         key: `${key}-${index}`,
         provider,
         model,
-        requestedModel: readLlmContextString(run, "requested_model") ?? model,
-        status: normalizeStageTwoRunStatus(readLlmContextString(run, "status")),
+        requestedModel:
+          readLlmContextString(run, "requested_model") ?? (identity ? model : null),
+        status,
         runtime: (() => {
-          const status = normalizeStageTwoRunStatus(
-            readLlmContextString(run, "status"),
-          );
           const elapsedSeconds = readLlmContextNumber(run, "elapsed_seconds");
           if (status === "running" || status === "pending") {
             const startedAt =
@@ -4468,6 +4520,7 @@ function getStageTwoLlmRunSummaryRows(
           groupCostByKey.get(key) ??
           null,
         error:
+          (!identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null) ??
           readLlmContextString(run, "error") ??
           readLlmContextString(run, "error_summary") ??
           readLlmContextString(
@@ -4477,6 +4530,7 @@ function getStageTwoLlmRunSummaryRows(
           readLlmContextString(run, "message") ??
           null,
         failureCategory:
+          (!identity ? "data_integrity_error" : null) ??
           readLlmContextString(run, "failure_category") ??
           readLlmContextString(
             readLlmContextRecord(run, "first_error"),
@@ -4499,28 +4553,39 @@ function getStageTwoLlmRunSummaryRows(
     });
     const runKeys = new Set(
       runRows.map(
-        (row) => `${row.provider}::${row.requestedModel ?? row.model}`,
+        (row) =>
+          row.provider !== "—" && (row.requestedModel ?? row.model)
+            ? `${row.provider}::${row.requestedModel ?? row.model}`
+            : null,
       ),
     );
     const pendingRunRows = getStageTwoLlmTargets(stage)
       .filter((target) => {
-        const provider = readLlmContextString(target, "provider") ?? "—";
-        const model = readLlmContextString(target, "model") ?? "—";
-        return !runKeys.has(`${provider}::${model}`);
+        const identity = readStageTwoLlmIdentity(target);
+        if (!identity) return true;
+        return !runKeys.has(`${identity.provider}::${identity.model}`);
       })
       .map((target, index) => {
-        const provider = readLlmContextString(target, "provider") ?? "—";
-        const model = readLlmContextString(target, "model") ?? "—";
+        const identity = readStageTwoLlmIdentity(target);
+        const provider = identity?.provider ?? "—";
+        const model = identity?.model ?? "—";
+        const isIntegrityFailure = !identity || stageIsTerminal;
         return {
           key: `${provider}::${model}-pending-${index}`,
           provider,
           model,
-          requestedModel: model,
-          status: "pending" as StageTwoRunSummaryStatus,
+          requestedModel: identity?.model ?? null,
+          status: isIntegrityFailure
+            ? ("failed" as StageTwoRunSummaryStatus)
+            : ("pending" as StageTwoRunSummaryStatus),
           runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
           cost: null,
-          error: null,
-          failureCategory: null,
+          error: !identity
+            ? STAGE_TWO_LLM_IDENTITY_ERROR
+            : stageIsTerminal
+              ? STAGE_TWO_LLM_MISSING_CHILD_ERROR
+              : null,
+          failureCategory: !identity || stageIsTerminal ? "data_integrity_error" : null,
           firstError: null,
           lastError: null,
           batchErrors: [],
@@ -4537,24 +4602,34 @@ function getStageTwoLlmRunSummaryRows(
   }
 
   const knownKeys = new Set(groups.map((group) => group.key));
+  const stageIsTerminal = isTerminalStageTwoStage(stage);
   const pendingTargets = getStageTwoLlmTargets(stage).filter((target) => {
-    const provider = readLlmContextString(target, "provider") ?? "—";
-    const model = readLlmContextString(target, "model") ?? "—";
-    return !knownKeys.has(`${provider}::${model}`);
+    const identity = readStageTwoLlmIdentity(target);
+    if (!identity) return true;
+    return !knownKeys.has(`${identity.provider}::${identity.model}`);
   });
   const pendingRows = pendingTargets.map((target, index) => {
-    const provider = readLlmContextString(target, "provider") ?? "—";
-    const model = readLlmContextString(target, "model") ?? "—";
+    const identity = readStageTwoLlmIdentity(target);
+    const provider = identity?.provider ?? "—";
+    const model = identity?.model ?? "—";
     return {
       key: `${provider}::${model}-pending-${index}`,
       provider,
       model,
-      requestedModel: model,
-      status: "pending" as StageTwoRunSummaryStatus,
+      requestedModel: identity?.model ?? null,
+      status:
+        !identity || stageIsTerminal
+          ? ("failed" as StageTwoRunSummaryStatus)
+          : ("pending" as StageTwoRunSummaryStatus),
       runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
       cost: null,
-      error: null,
-      failureCategory: null,
+      error: !identity
+        ? STAGE_TWO_LLM_IDENTITY_ERROR
+        : stageIsTerminal
+          ? STAGE_TWO_LLM_MISSING_CHILD_ERROR
+          : null,
+      failureCategory:
+        !identity || stageIsTerminal ? "data_integrity_error" : null,
       firstError: null,
       lastError: null,
       batchErrors: [],
@@ -4572,15 +4647,24 @@ function getStageTwoLlmRunSummaryRows(
       provider: group.rows[0]?.provider ?? "—",
       model: group.rows[0]?.model ?? group.label,
       requestedModel: group.rows[0]?.model ?? group.label,
-      status: "completed" as StageTwoRunSummaryStatus,
+      status:
+        group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
+          ? ("failed" as StageTwoRunSummaryStatus)
+          : ("completed" as StageTwoRunSummaryStatus),
       runtime: "—",
       cost: groupCostByKey.get(group.key) ?? null,
-      error: readLlmContextString(
-        group.rows.find((row) => readLlmContextString(row.output, "error"))
-          ?.output ?? null,
-        "error",
-      ),
-      failureCategory: null,
+      error:
+        group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
+          ? STAGE_TWO_LLM_IDENTITY_ERROR
+          : readLlmContextString(
+              group.rows.find((row) => readLlmContextString(row.output, "error"))
+                ?.output ?? null,
+              "error",
+            ),
+      failureCategory:
+        group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
+          ? "data_integrity_error"
+          : null,
       firstError: null,
       lastError: null,
       batchErrors: [],
@@ -9751,6 +9835,8 @@ export function BullpenAutoRunScheduleCard({
                           containerClassName="gap-0"
                           selectionMode="multiple"
                           defaultTargets={selectedLlmTargets}
+                          disableImplicitDefaultTarget
+                          ignoreStoredSelection
                           onRunMultiple={() => undefined}
                           onSelectionChange={handleSelectedLlmTargetsChange}
                           pickerDialogLabel="Select LLMs"

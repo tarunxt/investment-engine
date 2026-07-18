@@ -377,6 +377,55 @@ test("Bullpen auto-run workflow view explains Stage 3 counts as combined review 
   assert.equal(view.stages[2].outputs.candidate_decision_rows, 9);
 });
 
+test("Bullpen auto-run workflow view treats a partial Stage 2 as finished so Stage 3 can proceed", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const partialStageTwo = createStage(2, "Only one of four selected models returned usable odds.", {
+    workflow_stage_key: "llm",
+    phase_status: "partial",
+    completed_items: 4,
+    total_items: 4,
+    item_label: "events",
+  });
+  partialStageTwo.completed_at = "2026-06-25T05:01:00Z";
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage-2-partial",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 3 is evaluating the persisted usable Stage 2 outputs.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      partialStageTwo,
+      createStage(3, "Stage 3 is reviewing the partial Stage 2 handoff.", {
+        workflow_stage_key: "invest",
+        phase_status: "running",
+        completed_items: 1,
+        total_items: 3,
+        item_label: "rows",
+      }),
+    ],
+  });
+
+  assert.equal(view.currentStageLabel, "Stage 3 · Exit and Invest");
+  assert.equal(view.stages[1].state, "finished");
+  assert.equal(view.stages[1].timerCompletedAt, "2026-06-25T05:01:00Z");
+  assert.equal(view.stages[2].state, "current");
+});
+
 test("Bullpen auto-run workflow view appends the exact Stage 3 gate reason to the detail copy", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

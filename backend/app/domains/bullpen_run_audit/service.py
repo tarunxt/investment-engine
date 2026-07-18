@@ -1010,17 +1010,31 @@ def materialize_run_audit_snapshot_sync(
         (bundle["stage_2"]["llm_runtime"] or {}).get("llm_target_count") or 0
     )
     llm_invocations = bundle["stage_2"]["llm_invocations"]
-    current_snapshot.llm_attempted_call_count = len(llm_invocations) if isinstance(llm_invocations, list) else 0
+    valid_llm_invocations = [
+        invocation
+        for invocation in (llm_invocations if isinstance(llm_invocations, list) else [])
+        if isinstance(invocation, dict)
+        and str(invocation.get("provider") or "").strip()
+        and str(invocation.get("model") or "").strip()
+    ]
+
+    def _llm_invocation_succeeded(invocation: dict[str, object]) -> bool:
+        usable_event_count = invocation.get("usable_event_count")
+        if isinstance(usable_event_count, int):
+            return usable_event_count > 0
+        return invocation.get("status") in {"completed", "partial"}
+
+    current_snapshot.llm_attempted_call_count = len(valid_llm_invocations)
     current_snapshot.llm_succeeded_call_count = sum(
         1
-        for invocation in llm_invocations
-        if isinstance(invocation, dict) and invocation.get("status") in {"completed", "partial"}
-    ) if isinstance(llm_invocations, list) else 0
+        for invocation in valid_llm_invocations
+        if _llm_invocation_succeeded(invocation)
+    )
     current_snapshot.llm_failed_call_count = sum(
         1
-        for invocation in llm_invocations
-        if isinstance(invocation, dict) and invocation.get("status") == "failed"
-    ) if isinstance(llm_invocations, list) else 0
+        for invocation in valid_llm_invocations
+        if not _llm_invocation_succeeded(invocation)
+    )
     current_snapshot.qualified_candidate_count = len(
         bundle["stage_2"].get("qualified_candidate_market_ids") or []
     )

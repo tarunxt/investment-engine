@@ -237,6 +237,46 @@ test("Stage 2 historical LLM rows dedupe duplicate target-run outputs and retain
   assert.equal(geminiRow.output.error, "Provider returned no usable probability.");
 });
 
+test("Stage 2 historical rows treat missing provider/model identity as a data-integrity error", async () => {
+  const historyModule = await loadStageTwoHistoryModule();
+  const reviewedRows = historyModule.getStageTwoLlmReviewedRows(
+    createStage({
+      llm_target_runs: [
+        {
+          status: "completed",
+          event_outputs: [
+            {
+              market_id: "market-1",
+              question_id: "question-1",
+              output: {
+                yes_odds: 88,
+                no_odds: 12,
+                completed_at: HISTORICAL_AS_OF,
+              },
+            },
+          ],
+        },
+      ],
+    }),
+    [createScanCandidate()],
+  );
+
+  const rows = historyModule.buildStageTwoEventsSummaryRows({
+    reviewedRows,
+    decisions: [],
+    runId: "run-integrity",
+    asOfTimestamp: HISTORICAL_AS_OF,
+  });
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].llmYesOdds, null);
+  assert.equal(rows[0].llmNoOdds, null);
+  assert.equal(
+    rows[0].llmBreakdown[0].invalidReason,
+    "Data integrity error: Stage 2 recorded an LLM output without a provider/model identity.",
+  );
+});
+
 test("Stage 2 historical summary rows normalize yes_odds/no_odds aliases into canonical odds and money fields", async () => {
   const historyModule = await loadStageTwoHistoryModule();
   const reviewedRows = historyModule.getStageTwoLlmReviewedRows(
@@ -427,6 +467,72 @@ test("Stage 2 historical summary rows build consensus from completed and partial
   assert.equal(rows[0].returnsPerDay, 10);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].isAmountToBeInvestedHighlighted, true);
+});
+
+test("Stage 2 historical target-run rows keep provider errors and invalid JSON attributed to the correct model", async () => {
+  const historyModule = await loadStageTwoHistoryModule();
+  const reviewedRows = historyModule.getStageTwoLlmReviewedRows(
+    createStage({
+      llm_target_runs: [
+        {
+          provider: "deepseek",
+          model: "deepseek-reasoner",
+          status: "failed",
+          event_outputs: [
+            {
+              market_id: "market-1",
+              question_id: "question-1",
+              output: {
+                provider: "deepseek",
+                model: "deepseek-reasoner",
+                error: "Provider timeout",
+                completed_at: HISTORICAL_AS_OF,
+              },
+            },
+          ],
+        },
+        {
+          provider: "deepseek",
+          model: "deepseek-chat",
+          status: "failed",
+          event_outputs: [
+            {
+              market_id: "market-1",
+              question_id: "question-1",
+              output: {
+                provider: "deepseek",
+                model: "deepseek-chat",
+                invalid_reason: "LLM response was not valid JSON.",
+                completed_at: HISTORICAL_AS_OF,
+              },
+            },
+          ],
+        },
+      ],
+    }),
+    [createScanCandidate()],
+  );
+
+  const tableRows = historyModule.getStageTwoLlmTableRows({
+    reviewedRows,
+    decisions: [],
+  });
+
+  const providerFailureRow = tableRows.find(
+    (row) =>
+      row.provider === "deepseek" && row.model === "deepseek-reasoner",
+  );
+  const invalidJsonRow = tableRows.find(
+    (row) => row.provider === "deepseek" && row.model === "deepseek-chat",
+  );
+
+  assert.ok(providerFailureRow);
+  assert.equal(providerFailureRow.output.error, "Provider timeout");
+  assert.ok(invalidJsonRow);
+  assert.equal(
+    invalidJsonRow.output.invalid_reason,
+    "LLM response was not valid JSON.",
+  );
 });
 
 test("Stage 2 historical rows match target outputs by stable IDs instead of array position", async () => {

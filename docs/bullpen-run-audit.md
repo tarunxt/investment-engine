@@ -136,6 +136,11 @@ pre-LLM review rows.
 Persisted candidate reviews, per-model outputs, Stage 2 LLM runtime payloads, and
 qualified handoff inputs.
 
+Stage 2 LLM invocation counts now come only from persisted child provider/model
+executions. Wrapper task completion does not count as an LLM response, blank
+provider/model rows are treated as data-integrity failures, Stage 2 may end in
+`partial`, and Stage 3 may only consume persisted usable Stage 2 outputs.
+
 ### Stage 3
 
 Decision rows, guardrail outcomes, ranking and selection results, order intents,

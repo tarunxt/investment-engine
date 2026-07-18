@@ -38,6 +38,7 @@ interface EventScanRunControlsBaseProps {
   buttonLabel?: string;
   containerClassName?: string;
   defaultTarget?: ProviderModelTarget | null;
+  disableImplicitDefaultTarget?: boolean;
   disabled?: boolean;
   getSelectionConstraint?: (
     provider: ProviderInfo,
@@ -50,6 +51,7 @@ interface EventScanRunControlsBaseProps {
     | null
     | undefined;
   historicalEstimatedCostInrByTarget?: Record<string, number>;
+  ignoreStoredSelection?: boolean;
   pickerHeaderContent?: ReactNode;
   pickerButtonClassName?: string;
   pickerDescription?: string;
@@ -255,6 +257,7 @@ function getFirstCompatibleTarget(
 function getPreferredTarget(
   providers: ProviderInfo[],
   defaultTarget: ProviderModelTarget | null | undefined,
+  disableImplicitDefaultTarget = false,
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
@@ -266,7 +269,9 @@ function getPreferredTarget(
     | null
     | undefined,
 ) {
-  const candidates = [defaultTarget, DEFAULT_EVENT_TARGET];
+  const candidates = disableImplicitDefaultTarget
+    ? [defaultTarget]
+    : [defaultTarget, DEFAULT_EVENT_TARGET];
   for (const candidate of candidates) {
     if (
       candidate &&
@@ -275,6 +280,7 @@ function getPreferredTarget(
       return candidate;
     }
   }
+  if (disableImplicitDefaultTarget) return null;
   return getFirstCompatibleTarget(providers, getSelectionConstraint);
 }
 
@@ -283,9 +289,11 @@ function getPreferredTargets(
   {
     defaultTarget,
     defaultTargets,
+    disableImplicitDefaultTarget = false,
   }: {
     defaultTarget?: ProviderModelTarget | null;
     defaultTargets?: ProviderModelTarget[] | null;
+    disableImplicitDefaultTarget?: boolean;
   },
   getSelectionConstraint?: (
     provider: ProviderInfo,
@@ -321,8 +329,10 @@ function getPreferredTargets(
   const firstCompatibleTarget = getPreferredTarget(
     providers,
     defaultTarget,
+    disableImplicitDefaultTarget,
     getSelectionConstraint,
   );
+  if (disableImplicitDefaultTarget) return [];
   return firstCompatibleTarget ? [firstCompatibleTarget] : [];
 }
 
@@ -365,9 +375,11 @@ export function EventScanRunControls({
   containerClassName,
   defaultTarget,
   defaultTargets,
+  disableImplicitDefaultTarget,
   disabled,
   getSelectionConstraint,
   historicalEstimatedCostInrByTarget,
+  ignoreStoredSelection,
   pickerHeaderContent,
   pickerButtonClassName,
   pickerDescription,
@@ -389,17 +401,18 @@ export function EventScanRunControls({
     null,
   );
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => {
-    const lastSelection = readLastModelSelection();
+    const lastSelection = ignoreStoredSelection ? null : readLastModelSelection();
     return new Set(lastSelection?.targets ?? []);
   });
   const [hasTouchedSelection, setHasTouchedSelection] = useState(() =>
-    Boolean(readLastModelSelection()?.targets.length),
+    Boolean(!ignoreStoredSelection && readLastModelSelection()?.targets.length),
   );
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
   );
   const [selectedMixId, setSelectedMixId] = useState(
-    () => readLastModelSelection()?.selectedMixId ?? "",
+    () =>
+      ignoreStoredSelection ? "" : readLastModelSelection()?.selectedMixId ?? "",
   );
   const lastSelectionChangeRef = useRef("");
   const selectionChangeVersionRef = useRef(0);
@@ -416,12 +429,13 @@ export function EventScanRunControls({
 
   const persistLastSelection = useCallback(
     (targets: Iterable<string>, nextSelectedMixId = selectedMixId) => {
+      if (ignoreStoredSelection) return;
       writeLastModelSelection({
         targets: Array.from(targets),
         selectedMixId: nextSelectedMixId || undefined,
       });
     },
-    [selectedMixId],
+    [ignoreStoredSelection, selectedMixId],
   );
 
   const updatePickerPosition = useCallback(() => {
@@ -535,7 +549,12 @@ export function EventScanRunControls({
 
   const activeTarget =
     providers.length > 0
-      ? getPreferredTarget(providers, defaultTarget, getSelectionConstraint)
+      ? getPreferredTarget(
+          providers,
+          defaultTarget,
+          disableImplicitDefaultTarget,
+          getSelectionConstraint,
+        )
       : null;
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
@@ -559,7 +578,11 @@ export function EventScanRunControls({
   const defaultSelectedKeys = new Set(
     getPreferredTargets(
       providers,
-      { defaultTarget, defaultTargets },
+      {
+        defaultTarget,
+        defaultTargets,
+        disableImplicitDefaultTarget,
+      },
       getSelectionConstraint,
     )
       .map((target) => targetKey(target))

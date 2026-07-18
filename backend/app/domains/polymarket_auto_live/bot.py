@@ -176,6 +176,12 @@ def build_initial_scan_stage_result(
     )
 
 
+def _stage2_llm_targets_snapshot(
+    settings: BullpenAutoLiveSettings,
+):
+    return [target.model_copy(deep=True) for target in settings.console_llm_targets]
+
+
 def _native_audit_metadata(settings: BullpenAutoLiveSettings) -> dict[str, object]:
     return build_native_run_audit_metadata(
         settings_snapshot=settings.model_dump(mode="json"),
@@ -428,6 +434,7 @@ class BullpenAutoLiveBot:
                     completed_at=utc_now(),
                     summary="Emergency stop is active.",
                     guardrail_checks=self._build_guardrail_checks(settings, state),
+                    stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                     audit_metadata=_native_audit_metadata(settings),
                 )
                 run_record = self._new_run_record(run)
@@ -448,6 +455,7 @@ class BullpenAutoLiveBot:
                     completed_at=utc_now(),
                     summary=f"Run {running_run.id} is already in progress.",
                     guardrail_checks=self._build_guardrail_checks(settings, state),
+                    stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                     audit_metadata=_native_audit_metadata(settings),
                 )
                 session.add(self._new_run_record(run))
@@ -473,6 +481,7 @@ class BullpenAutoLiveBot:
                         started_at=started_at,
                     )
                 ],
+                stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                 request_context=request,
                 audit_metadata=_native_audit_metadata(settings),
             )

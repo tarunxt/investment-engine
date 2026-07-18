@@ -380,21 +380,54 @@ function mergeLlmOutputRecords(
   return merged;
 }
 
+const STAGE_TWO_HISTORY_IDENTITY_ERROR =
+  "Data integrity error: Stage 2 recorded an LLM output without a provider/model identity.";
+
+function normalizeStageTwoHistoryOutputIntegrity(
+  output: Record<string, unknown>,
+  index: number,
+) {
+  const provider = readFirstString(output.provider, output.llm_provider)?.trim() ?? "";
+  const model = readFirstString(output.model, output.llm_model)?.trim() ?? "";
+  if (provider && model) return output;
+
+  return {
+    ...output,
+    error:
+      readFirstString(output.error, output.provider_error) ??
+      STAGE_TWO_HISTORY_IDENTITY_ERROR,
+    invalid_reason:
+      readFirstString(output.invalid_reason, output.invalidReason) ??
+      STAGE_TWO_HISTORY_IDENTITY_ERROR,
+    _stage2_integrity_key: `missing-provider-model-${index}`,
+  };
+}
+
 function getLlmOutputMatchKey(output: Record<string, unknown>, index: number) {
-  const provider = readFirstString(output.provider, output.llm_provider) ?? "provider";
-  const model = readFirstString(output.model, output.llm_model) ?? "model";
+  const provider =
+    readFirstString(output.provider, output.llm_provider) ??
+    `missing-provider-${index}`;
+  const model =
+    readFirstString(output.model, output.llm_model) ?? `missing-model-${index}`;
   const timestamp =
     readFirstString(output.completed_at, output.completedAt, output.timestamp) ??
     `output-${index}`;
-  return `${provider.toLowerCase()}::${model.toLowerCase()}::${timestamp.toLowerCase()}`;
+  const integrityKey = readFirstString(output._stage2_integrity_key);
+  return `${provider.toLowerCase()}::${model.toLowerCase()}::${timestamp.toLowerCase()}::${(integrityKey ?? "").toLowerCase()}`;
 }
 
 function dedupeLlmOutputs(outputs: Record<string, unknown>[]) {
   const deduped = new Map<string, Record<string, unknown>>();
   outputs.forEach((output, index) => {
-    const key = getLlmOutputMatchKey(output, index);
+    const normalizedOutput = normalizeStageTwoHistoryOutputIntegrity(output, index);
+    const key = getLlmOutputMatchKey(normalizedOutput, index);
     const existing = deduped.get(key);
-    deduped.set(key, existing ? mergeLlmOutputRecords(existing, output) : output);
+    deduped.set(
+      key,
+      existing
+        ? mergeLlmOutputRecords(existing, normalizedOutput)
+        : normalizedOutput,
+    );
   });
   return [...deduped.values()];
 }

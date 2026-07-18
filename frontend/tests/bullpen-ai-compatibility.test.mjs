@@ -367,19 +367,30 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
     bullpenAiPageSource,
     /summary\.settings\.console_llm_prompt_template/,
   );
+  assert.match(
+    bullpenAiPageSource,
+    /updateBullpenAutoLiveSettings\(\{\s*console_llm_targets:\s*targets,\s*\}\)/,
+  );
+  assert.match(bullpenAiPageSource, /disableImplicitDefaultTarget/);
+  assert.match(bullpenAiPageSource, /ignoreStoredSelection/);
   assert.match(autoRunCardSource, /stage-2-llm-execution-mode/);
   assert.match(autoRunCardSource, /Batched parallel/);
   assert.match(autoRunCardSource, /Single combined/);
   assert.match(autoRunCardSource, /Events\/prompt/);
   assert.match(autoRunCardSource, /Current run LLMs completed/);
   assert.match(autoRunCardSource, /Open LLM completion diagnostics/);
-  assert.match(autoRunCardSource, /stageTwoTargets\.length > 0 \? stageTwoTargets\.length : null/);
+  assert.match(
+    autoRunCardSource,
+    /stageTwoTargets\.length > 0\s*\?\s*stageTwoTargets\.filter\(\(target\) => hasStageTwoLlmIdentity\(target\)\)\.length\s*:\s*null/,
+  );
   assert.match(autoRunCardSource, /llm_execution_mode/);
   assert.match(autoRunCardSource, /llm_events_per_prompt/);
   assert.match(
     autoRunCardSource,
     /Changes are saved for the next run\. The running Stage 2 job uses the frozen target list/,
   );
+  assert.match(autoRunCardSource, /disableImplicitDefaultTarget/);
+  assert.match(autoRunCardSource, /ignoreStoredSelection/);
 });
 
 test("Bullpen auto-run only persists LLM target changes after explicit user interaction", () => {

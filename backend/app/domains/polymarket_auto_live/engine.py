@@ -95,6 +95,7 @@ from app.domains.polymarket_auto_live.llm import (
     CONFIDENCE_RANK,
     build_market_prompt,
     compute_llm_consensus,
+    resolve_auto_live_llm_target_pairs,
     resolve_auto_live_llm_targets,
     run_llm_consensus,
 )
@@ -114,6 +115,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveLlmOutput,
+    BullpenAutoLiveLlmTarget,
     BullpenAutoLiveOrderPlan,
     BullpenAutoLiveRejectedCandidateDiagnostic,
     BullpenAutoLiveRun,
@@ -168,6 +170,15 @@ def utc_now() -> datetime:
 
 def utc_now_iso() -> str:
     return utc_now().isoformat()
+
+
+def _resolve_stage2_llm_target_pairs(
+    run: BullpenAutoLiveRun,
+    settings: BullpenAutoLiveSettings,
+) -> list[tuple[str, str]]:
+    if run.stage2_llm_targets_snapshot is not None:
+        return resolve_auto_live_llm_target_pairs(run.stage2_llm_targets_snapshot)
+    return resolve_auto_live_llm_targets(settings)
 
 
 def _auto_live_record_id(
@@ -722,6 +733,85 @@ async def _execute_console_stage_two_shared_llm(
         for provider_name, model_name in targets
     }
 
+    def _read_target_batch_errors(target_result: object) -> list[dict[str, Any]]:
+        runtime_metadata = getattr(target_result, "runtime_metadata", None)
+        if not isinstance(runtime_metadata, dict):
+            return []
+        llm_batches = runtime_metadata.get("llm_batches")
+        if not isinstance(llm_batches, list):
+            return []
+        return [
+            batch
+            for batch in llm_batches
+            if isinstance(batch, dict) and batch.get("error_details")
+        ]
+
+    def _read_target_first_error(target_result: object) -> dict[str, Any] | None:
+        batch_errors = _read_target_batch_errors(target_result)
+        return (
+            batch_errors[0].get("error_details")
+            if batch_errors
+            and isinstance(batch_errors[0].get("error_details"), dict)
+            else None
+        )
+
+    def _read_target_last_error(target_result: object) -> dict[str, Any] | None:
+        batch_errors = _read_target_batch_errors(target_result)
+        return (
+            batch_errors[-1].get("error_details")
+            if batch_errors
+            and isinstance(batch_errors[-1].get("error_details"), dict)
+            else None
+        )
+
+    def _has_usable_llm_output(output: BullpenAutoLiveLlmOutput) -> bool:
+        return (
+            not output.error
+            and not output.invalid_reason
+            and (
+                output.llm_yes_odds is not None
+                or output.llm_no_odds is not None
+            )
+        )
+
+    def _target_output_payload(
+        *,
+        provider_name: str,
+        model_name: str,
+        target_result: object,
+        completed_at: str,
+    ) -> tuple[list[dict[str, Any]], int]:
+        incremental_event_outputs: list[dict[str, Any]] = []
+        usable_event_count = 0
+        event_results = getattr(target_result, "event_results", {})
+        if not isinstance(event_results, dict):
+            event_results = {}
+        for market_id, event in prepared_event_by_market_id.items():
+            event_result = event_results.get(event.event_id)
+            output = (
+                event_result_to_auto_live_output(
+                    event_result,
+                    completed_at=completed_at,
+                )
+                if event_result is not None
+                else BullpenAutoLiveLlmOutput(
+                    provider=provider_name,
+                    model=model_name,
+                    error="No terminal result was recorded for this event.",
+                    completed_at=completed_at,
+                )
+            )
+            if _has_usable_llm_output(output):
+                usable_event_count += 1
+            incremental_event_outputs.append(
+                {
+                    "market_id": market_id,
+                    "question_id": event.question_payload.question_id,
+                    "output": output.model_dump(),
+                }
+            )
+        return incremental_event_outputs, usable_event_count
+
     def emit_target_progress() -> None:
         if target_progress_callback is not None:
             target_progress_callback(
@@ -754,39 +844,47 @@ async def _execute_console_stage_two_shared_llm(
             elapsed_seconds = round(time.perf_counter() - started_monotonic, 3)
             target_status = getattr(target_result, "status", "completed")
             completed_at = utc_now_iso()
-            incremental_event_outputs: list[dict[str, Any]] = []
-            for market_id, event in prepared_event_by_market_id.items():
-                event_result = target_result.event_results.get(event.event_id)
-                output = (
-                    event_result_to_auto_live_output(
-                        event_result,
-                        completed_at=completed_at,
-                    )
-                    if event_result is not None
-                    else BullpenAutoLiveLlmOutput(
-                        provider=provider_name,
-                        model=model_name,
-                        error="No terminal result was recorded for this event.",
-                        completed_at=completed_at,
-                    )
-                )
-                incremental_event_outputs.append(
-                    {
-                        "market_id": market_id,
-                        "question_id": event.question_payload.question_id,
-                        "output": output.model_dump(),
-                    }
-                )
+            incremental_event_outputs, usable_event_count = _target_output_payload(
+                provider_name=provider_name,
+                model_name=model_name,
+                target_result=target_result,
+                completed_at=completed_at,
+            )
+            first_error = _read_target_first_error(target_result)
+            last_error = _read_target_last_error(target_result)
             target_run_progress[target_key].update({
-                "status": target_status if target_status in {"completed", "partial", "failed"} else "completed",
+                "status": (
+                    target_status
+                    if target_status in {"completed", "partial", "failed"}
+                    else "completed"
+                ),
                 "completed_at": completed_at,
                 "elapsed_seconds": elapsed_seconds,
                 "estimated_cost": getattr(target_result, "estimated_cost", None),
+                "tokens_in": getattr(target_result, "tokens_in", None),
+                "tokens_out": getattr(target_result, "tokens_out", None),
+                "response_text": getattr(target_result, "response_text", None),
+                "usable_event_count": usable_event_count,
                 "failed_event_count": getattr(target_result, "failed_event_count", None),
                 "invalid_event_count": getattr(target_result, "invalid_event_count", None),
                 "blocked_event_count": getattr(target_result, "blocked_event_count", None),
                 "retry_request_count": getattr(target_result, "retry_request_count", None),
                 "recovery_batch_count": getattr(target_result, "recovery_batch_count", None),
+                "first_error": first_error,
+                "last_error": last_error,
+                "error": (
+                    str(first_error.get("safe_message")).strip()
+                    if isinstance(first_error, dict)
+                    and str(first_error.get("safe_message") or "").strip()
+                    else None
+                ),
+                "failure_category": (
+                    str(first_error.get("category")).strip()
+                    if isinstance(first_error, dict)
+                    and str(first_error.get("category") or "").strip()
+                    else None
+                ),
+                "batch_errors": _read_target_batch_errors(target_result),
                 "event_outputs": incremental_event_outputs,
             })
             return provider_name, model_name, target_result
@@ -796,12 +894,16 @@ async def _execute_console_stage_two_shared_llm(
                 "completed_at": utc_now_iso(),
                 "elapsed_seconds": round(time.perf_counter() - started_monotonic, 3),
                 "error": str(exc),
+                "failure_category": "provider_failed",
+                "response_text": None,
+                "usable_event_count": 0,
             })
             return provider_name, model_name, exc
         finally:
             completed_target_count += 1
             emit_target_progress()
 
+    emit_target_progress()
     target_results = await asyncio.gather(
         *[
             run_target(provider_name, model_name)
@@ -867,6 +969,7 @@ async def _execute_console_stage_two_shared_llm(
                 "tokens_in": target_result.tokens_in,
                 "tokens_out": target_result.tokens_out,
                 "estimated_cost": target_result.estimated_cost,
+                "response_text": target_result.response_text,
                 "elapsed_seconds": round(
                     sum(
                         batch.elapsed_seconds
@@ -874,27 +977,21 @@ async def _execute_console_stage_two_shared_llm(
                     ),
                     3,
                 ),
-                "first_error": next(
-                    (
-                        batch.get("error_details")
-                        for batch in target_result.runtime_metadata.get("llm_batches", [])
-                        if isinstance(batch, dict) and batch.get("error_details")
-                    ),
-                    None,
+                "usable_event_count": sum(
+                    1
+                    for event_result in target_result.event_results.values()
+                    if getattr(event_result, "error", None) is None
+                    and getattr(event_result, "invalid_reason", None) is None
+                    and (
+                        getattr(getattr(event_result, "row", None), "llm_yes_odds", None)
+                        is not None
+                        or getattr(getattr(event_result, "row", None), "llm_no_odds", None)
+                        is not None
+                    )
                 ),
-                "last_error": next(
-                    (
-                        batch.get("error_details")
-                        for batch in reversed(target_result.runtime_metadata.get("llm_batches", []))
-                        if isinstance(batch, dict) and batch.get("error_details")
-                    ),
-                    None,
-                ),
-                "batch_errors": [
-                    batch
-                    for batch in target_result.runtime_metadata.get("llm_batches", [])
-                    if isinstance(batch, dict) and batch.get("error_details")
-                ],
+                "first_error": _read_target_first_error(target_result),
+                "last_error": _read_target_last_error(target_result),
+                "batch_errors": _read_target_batch_errors(target_result),
             }
         )
         target_question_runtime = target_result.runtime_metadata.get("question_runtime")
@@ -925,15 +1022,25 @@ async def _execute_console_stage_two_shared_llm(
         market_id: compute_llm_consensus(outputs)
         for market_id, outputs in outputs_by_market_id.items()
     }
-    passed_target_count = sum(
+    started_target_count = sum(
         1
         for target_run in runtime_output_targets
-        if target_run.get("status") in {"completed", "partial"}
+        if str(target_run.get("provider") or "").strip()
+        and str(target_run.get("model") or "").strip()
+    )
+    usable_target_count = sum(
+        1
+        for target_run in runtime_output_targets
+        if isinstance(target_run.get("usable_event_count"), int)
+        and int(target_run.get("usable_event_count") or 0) > 0
     )
     failed_target_count = sum(
         1
         for target_run in runtime_output_targets
-        if target_run.get("status") == "failed"
+        if not (
+            isinstance(target_run.get("usable_event_count"), int)
+            and int(target_run.get("usable_event_count") or 0) > 0
+        )
     )
     runtime_outputs = {
         "llm_execution_mode": execution_options.execution_mode,
@@ -942,8 +1049,10 @@ async def _execute_console_stage_two_shared_llm(
         "llm_target_count": len(targets),
         "llm_provider_target_count": len(targets),
         "llm_selected_target_count": len(targets),
+        "llm_started_provider_target_count": started_target_count,
         "llm_completed_provider_target_count": len(runtime_output_targets),
-        "llm_passed_provider_target_count": passed_target_count,
+        "llm_usable_provider_target_count": usable_target_count,
+        "llm_passed_provider_target_count": usable_target_count,
         "llm_failed_provider_target_count": failed_target_count,
         "llm_targets": [
             {"provider": provider_name, "model": model_name}
@@ -4096,7 +4205,18 @@ class BullpenAutoLiveEngine:
             if manual_console_context is not None
             else True
         )
-        console_llm_targets = resolve_auto_live_llm_targets(settings)
+        console_llm_targets = _resolve_stage2_llm_target_pairs(run, settings)
+        stage2_settings = settings.model_copy(
+            update={
+                "console_llm_targets": [
+                    BullpenAutoLiveLlmTarget(
+                        provider=provider_name,
+                        model=model_name,
+                    )
+                    for provider_name, model_name in console_llm_targets
+                ]
+            }
+        )
         selected_console_llm_target_keys = {
             (provider_name.strip(), model_name.strip())
             for provider_name, model_name in console_llm_targets
@@ -4184,10 +4304,10 @@ class BullpenAutoLiveEngine:
             def _manual_row_has_reusable_llm_outputs(
                 row: BullpenAutoLiveConsoleCandidateInput,
             ) -> bool:
+                if not selected_console_llm_target_keys:
+                    return False
                 if row.llm_yes_odds is None and row.llm_no_odds is None:
                     return False
-                if not selected_console_llm_target_keys:
-                    return True
                 row_output_target_keys = {
                     (output.provider.strip(), output.model.strip())
                     for output in row.llm_outputs
@@ -4790,12 +4910,22 @@ class BullpenAutoLiveEngine:
         self._report_progress(progress_callback, run, state)
         llm_stage_started_at = utc_now_iso()
         stage1_accepted_candidate_count = len(stage1_accepted_candidates)
-        console_prompt_template = _console_stage_two_prompt_template(settings)
-        llm_execution_runtime_outputs: dict[str, object] = {}
+        console_prompt_template = _console_stage_two_prompt_template(stage2_settings)
+        llm_execution_runtime_outputs: dict[str, object] = {
+            "llm_selected_target_count": len(console_llm_targets),
+            "llm_started_provider_target_count": 0,
+            "llm_completed_provider_target_count": 0,
+            "llm_usable_provider_target_count": 0,
+            "llm_passed_provider_target_count": 0,
+            "llm_failed_provider_target_count": 0,
+            "llm_target_runs": [],
+        }
         llm_execution_stage_outputs: dict[str, object] = {
-            "llm_execution_mode": settings.llm_execution_mode,
-            "llm_events_per_prompt": settings.llm_events_per_prompt,
+            "llm_execution_mode": stage2_settings.llm_execution_mode,
+            "llm_events_per_prompt": stage2_settings.llm_events_per_prompt,
             "llm_target_count": len(console_llm_targets),
+            "llm_provider_target_count": len(console_llm_targets),
+            "llm_selected_target_count": len(console_llm_targets),
             "llm_prompt_template": console_prompt_template,
             "llm_targets": [
                 {"provider": provider_name, "model": model_name}
@@ -4806,14 +4936,20 @@ class BullpenAutoLiveEngine:
             ),
             "llm_prompt_template_source": (
                 "server_saved"
-                if (settings.console_llm_prompt_template or "").strip()
+                if (stage2_settings.console_llm_prompt_template or "").strip()
                 else "default"
+            ),
+            "llm_target_snapshot_source": (
+                "run_snapshot"
+                if run.stage2_llm_targets_snapshot is not None
+                else "settings_fallback"
             ),
         }
 
         def report_llm_stage_progress(
             *,
             phase_status: str,
+            stage_status: str | None = None,
             reason: str,
             completed_items: int,
             current_candidate_index: int | None = None,
@@ -4899,7 +5035,7 @@ class BullpenAutoLiveEngine:
                     stage_number=2,
                     workflow_stage_key="llm",
                     phase_status=phase_status,
-                    status="pass" if llm_candidate_count > 0 else "warning",
+                    status=stage_status or ("pass" if llm_candidate_count > 0 else "warning"),
                     reason=reason,
                     completed_items=completed_items,
                     total_items=llm_candidate_count,
@@ -4912,7 +5048,32 @@ class BullpenAutoLiveEngine:
             )
             self._report_progress(progress_callback, run, state)
 
+        def fail_stage_two_for_missing_targets() -> EngineResult:
+            reason = (
+                "Stage 2 failed before execution because no LLM targets were selected for this run snapshot."
+            )
+            report_llm_stage_progress(
+                phase_status="failed",
+                stage_status="fail",
+                reason=reason,
+                completed_items=0,
+                reused_existing_llm_outputs=False,
+                completed_at=utc_now_iso(),
+            )
+            run.completed_at = utc_now_iso()
+            run.status = "failed"
+            run.error_message = reason
+            run.summary = reason
+            run.diagnostics.stage2_has_usable_reviews = False
+            run.diagnostics.ranking_enabled = False
+            run.diagnostics.ranking_exit_enabled = False
+            run.diagnostics.new_buy_enabled = False
+            self._report_progress(progress_callback, run, state)
+            return EngineResult(run=run, decisions=[], state=state, positions=positions)
+
         if manual_console_rows_have_reusable_llm:
+            if llm_candidate_count > 0 and len(console_llm_targets) == 0:
+                return fail_stage_two_for_missing_targets()
             report_llm_stage_progress(
                 phase_status="running",
                 reason=(
@@ -5095,6 +5256,9 @@ class BullpenAutoLiveEngine:
             )
             self._report_progress(progress_callback, run, state)
 
+            if llm_candidate_count > 0 and len(console_llm_targets) == 0:
+                return fail_stage_two_for_missing_targets()
+
             report_llm_stage_progress(
                 phase_status="running",
                 reason=(
@@ -5124,9 +5288,48 @@ class BullpenAutoLiveEngine:
                     completed_target_count: int,
                     target_runs: list[dict[str, Any]],
                 ) -> None:
+                    started_target_count = sum(
+                        1
+                        for target_run in target_runs
+                        if str(target_run.get("provider") or "").strip()
+                        and str(target_run.get("model") or "").strip()
+                        and target_run.get("status") in {"running", "completed", "partial", "failed"}
+                    )
+                    usable_target_count = sum(
+                        1
+                        for target_run in target_runs
+                        if (
+                            isinstance(target_run.get("usable_event_count"), int)
+                            and int(target_run.get("usable_event_count") or 0) > 0
+                        )
+                    )
+                    failed_target_count = sum(
+                        1
+                        for target_run in target_runs
+                        if target_run.get("status") == "failed"
+                        or (
+                            target_run.get("status") in {"completed", "partial"}
+                            and not (
+                                isinstance(target_run.get("usable_event_count"), int)
+                                and int(target_run.get("usable_event_count") or 0) > 0
+                            )
+                        )
+                    )
+                    llm_execution_runtime_outputs[
+                        "llm_started_provider_target_count"
+                    ] = started_target_count
                     llm_execution_runtime_outputs[
                         "llm_completed_provider_target_count"
                     ] = completed_target_count
+                    llm_execution_runtime_outputs[
+                        "llm_usable_provider_target_count"
+                    ] = usable_target_count
+                    llm_execution_runtime_outputs[
+                        "llm_passed_provider_target_count"
+                    ] = usable_target_count
+                    llm_execution_runtime_outputs[
+                        "llm_failed_provider_target_count"
+                    ] = failed_target_count
                     llm_execution_runtime_outputs["llm_target_runs"] = target_runs
                     report_llm_stage_progress(
                         phase_status="running",
@@ -5141,7 +5344,7 @@ class BullpenAutoLiveEngine:
                 shared_review = await _execute_console_stage_two_shared_llm(
                     llm_markets=llm_markets,
                     rules_by_market_id=rules_by_market_id,
-                    settings=settings,
+                    settings=stage2_settings,
                     now=now,
                     target_progress_callback=report_llm_target_progress,
                 )
@@ -5512,7 +5715,7 @@ class BullpenAutoLiveEngine:
                         market,
                         rules,
                         evidence_packet,
-                        settings,
+                        stage2_settings,
                     )
                     selected_side, strongest_llm_odds = _stronger_probability_side(
                         yes_probability=llm_consensus.fair_yes_probability_pct,
@@ -5632,7 +5835,7 @@ class BullpenAutoLiveEngine:
                     market,
                     rules,
                     evidence_packet,
-                    settings,
+                    stage2_settings,
                 )
                 fair_no = llm_consensus.fair_no_probability_pct
                 selected_side, strongest_llm_odds = _stronger_probability_side(
@@ -5734,14 +5937,14 @@ class BullpenAutoLiveEngine:
                     completed_at=None,
                 )
 
+        llm_stage_candidates = [
+            _serialize_llm_review_context(context)
+            for context in [*active_position_contexts, *candidate_contexts]
+        ]
         qualifying_candidates = [
             context
             for context in candidate_contexts
             if bool(context["qualified"])
-        ]
-        llm_stage_candidates = [
-            _serialize_llm_review_context(context)
-            for context in [*active_position_contexts, *candidate_contexts]
         ]
         usable_llm_review_count = sum(
             1
@@ -5755,25 +5958,65 @@ class BullpenAutoLiveEngine:
             )
         )
         total_reviewed_contexts = len(active_position_contexts) + len(candidate_contexts)
-        llm_stage_status = (
-            "warning"
-            if 0 < usable_llm_review_count < total_reviewed_contexts
-            else "fail"
-            if total_reviewed_contexts > 0 and usable_llm_review_count == 0
-            else "pass"
-            if total_reviewed_contexts > 0
-            else "warning"
+        actual_target_runs = [
+            target_run
+            for target_run in (
+                llm_execution_runtime_outputs.get("llm_target_runs")
+                if isinstance(
+                    llm_execution_runtime_outputs.get("llm_target_runs"),
+                    list,
+                )
+                else []
+            )
+            if isinstance(target_run, dict)
+            and str(target_run.get("provider") or "").strip()
+            and str(target_run.get("model") or "").strip()
+        ]
+        selected_llm_target_count = int(
+            llm_execution_runtime_outputs.get("llm_selected_target_count")
+            or llm_execution_stage_outputs.get("llm_selected_target_count")
+            or len(console_llm_targets)
         )
+        usable_llm_target_count = int(
+            llm_execution_runtime_outputs.get("llm_usable_provider_target_count")
+            or 0
+        )
+        reused_stage2_outputs = manual_console_rows_have_reusable_llm and not actual_target_runs
+        if llm_candidate_count > 0 and not reused_stage2_outputs:
+            llm_phase_status = (
+                "failed"
+                if usable_llm_target_count == 0
+                else "partial"
+                if 0 < usable_llm_target_count < max(1, selected_llm_target_count)
+                else "completed"
+            )
+            llm_stage_status = (
+                "fail"
+                if usable_llm_target_count == 0
+                else "warning"
+                if usable_llm_target_count < max(1, selected_llm_target_count)
+                else "pass"
+            )
+        else:
+            llm_stage_status = (
+                "warning"
+                if 0 < usable_llm_review_count < total_reviewed_contexts
+                else "fail"
+                if total_reviewed_contexts > 0 and usable_llm_review_count == 0
+                else "pass"
+                if total_reviewed_contexts > 0
+                else "warning"
+            )
+            llm_phase_status = (
+                "failed"
+                if total_reviewed_contexts > 0 and usable_llm_review_count == 0
+                else "completed"
+            )
         if (
             not bool(stage2_universe_status["stage2_universe_complete"])
             and llm_stage_status == "pass"
         ):
             llm_stage_status = "warning"
-        llm_phase_status = (
-            "failed"
-            if total_reviewed_contexts > 0 and usable_llm_review_count == 0
-            else "completed"
-        )
         set_run_stage_result(
             run,
             build_workflow_stage_result(
@@ -5785,11 +6028,20 @@ class BullpenAutoLiveEngine:
                     (
                         "No selected LLM target produced a usable probability estimate, so Stage 2 failed and Stage 3 remained blocked."
                     )
-                    if total_reviewed_contexts > 0 and usable_llm_review_count == 0
+                    if llm_candidate_count > 0
+                    and not reused_stage2_outputs
+                    and usable_llm_target_count == 0
                     else (
-                        "At least one LLM target produced usable estimates, but some targets or rows still failed."
+                        f"{usable_llm_target_count} of {selected_llm_target_count} selected LLM targets produced usable probabilities."
+                        " Stage 3 proceeded only from those persisted usable outputs."
                     )
-                    if 0 < usable_llm_review_count < total_reviewed_contexts
+                    if llm_candidate_count > 0
+                    and not reused_stage2_outputs
+                    and 0 < usable_llm_target_count < max(1, selected_llm_target_count)
+                    else (
+                        "Stage 2 reused persisted usable LLM outputs from the current Bullpen x AI table."
+                    )
+                    if reused_stage2_outputs
                     else (
                         "Stage 2 did not review the full eligible universe, so Stage 3 kept the combined ranking incomplete."
                     )
@@ -5852,10 +6104,55 @@ class BullpenAutoLiveEngine:
             self._report_progress(progress_callback, run, state)
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
 
+        persisted_stage3_candidate_market_ids = {
+            str(candidate.get("market_id"))
+            for candidate in llm_stage_candidates
+            if candidate.get("source_kind") == "candidate"
+            and any(
+                isinstance(output, dict)
+                and str(output.get("provider") or "").strip()
+                and str(output.get("model") or "").strip()
+                and output.get("error") is None
+                and output.get("invalid_reason") is None
+                and (
+                    output.get("llm_yes_odds") is not None
+                    or output.get("llm_no_odds") is not None
+                )
+                for output in (
+                    candidate.get("llm_outputs")
+                    if isinstance(candidate.get("llm_outputs"), list)
+                    else []
+                )
+            )
+        }
+        persisted_stage3_active_position_keys = {
+            str(candidate.get("position_key"))
+            for candidate in llm_stage_candidates
+            if candidate.get("source_kind") == "active_position"
+            and candidate.get("position_key") is not None
+            and any(
+                isinstance(output, dict)
+                and str(output.get("provider") or "").strip()
+                and str(output.get("model") or "").strip()
+                and output.get("error") is None
+                and output.get("invalid_reason") is None
+                and (
+                    output.get("llm_yes_odds") is not None
+                    or output.get("llm_no_odds") is not None
+                )
+                for output in (
+                    candidate.get("llm_outputs")
+                    if isinstance(candidate.get("llm_outputs"), list)
+                    else []
+                )
+            )
+        }
+
         active_review_context_by_key = {
             str(context["position_key"]): context
             for context in active_position_contexts
             if context.get("position_key") is not None
+            and str(context["position_key"]) in persisted_stage3_active_position_keys
         }
         active_rank_rows = []
         for position in bullpen_wallet_positions:
@@ -5886,6 +6183,7 @@ class BullpenAutoLiveEngine:
                 "context": context,
             }
             for context in qualifying_candidates
+            if str(context["market"].market_id) in persisted_stage3_candidate_market_ids
         ]
         combined_rank_rows = sorted(
             [*active_rank_rows, *candidate_rank_rows],

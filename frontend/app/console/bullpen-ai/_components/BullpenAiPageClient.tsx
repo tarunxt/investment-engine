@@ -1120,6 +1120,27 @@ function normalizeStoredTarget(
   return null;
 }
 
+function normalizeServerBullpenLlmTargets(
+  value: unknown,
+): ProviderModelTarget[] {
+  if (!Array.isArray(value)) return [];
+
+  const normalizedTargets: ProviderModelTarget[] = [];
+  const seenTargets = new Set<string>();
+  value.forEach((item) => {
+    const normalized = normalizeStoredTarget(item);
+    if (!normalized) return;
+    const provider = normalized.provider.trim();
+    const model = normalized.model.trim();
+    if (!provider || !model) return;
+    const key = `${provider.toLowerCase()}::${model.toLowerCase()}`;
+    if (seenTargets.has(key)) return;
+    seenTargets.add(key);
+    normalizedTargets.push({ provider, model });
+  });
+  return normalizedTargets;
+}
+
 function isStoredActivePositionLlmAnalysis(
   value: unknown,
 ): value is BullpenActivePositionLlmAnalysis {
@@ -1257,8 +1278,7 @@ function writeStoredBoolean(key: string, value: boolean) {
 }
 
 function getDefaultBullpenLlmTargets(lastTargets: ProviderModelTarget[]) {
-  if (lastTargets.length > 0) return lastTargets;
-  return [{ provider: "deepseek", model: "deepseek-v4-flash" }];
+  return lastTargets;
 }
 
 function formatTargetSummary(
@@ -2648,17 +2668,33 @@ function BullpenAiPageContent() {
       return;
     }
 
-    setLlmRunningMode(activeMode);
-    setLlmRunStartedAtByMode((current) => ({
-      ...current,
-      [activeMode]: Date.now(),
-    }));
     setLlmMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
-    setLastLlmTargets(targets);
-    writeLastLlmTargetsToStorage(targets);
 
     try {
+      const savedSettings = await apiService.updateBullpenAutoLiveSettings({
+        console_llm_targets: targets,
+      });
+      const savedTargets = normalizeServerBullpenLlmTargets(
+        savedSettings.console_llm_targets,
+      );
+      if (savedTargets.length === 0) {
+        setLlmMessagesByMode((current) => ({
+          ...current,
+          [activeMode]:
+            "Stage 2 could not start because the saved LLM target list is empty.",
+        }));
+        return;
+      }
+
+      setLlmRunningMode(activeMode);
+      setLlmRunStartedAtByMode((current) => ({
+        ...current,
+        [activeMode]: Date.now(),
+      }));
+      setLastLlmTargets(savedTargets);
+      writeLastLlmTargetsToStorage(savedTargets);
+
       const promptInputs = buildBullpenLlmPromptInputs(questionsToAnalyze);
       const polymarketEventContext: PolymarketEventRunContext = {
         kind: "polymarket_bullpen_event",
@@ -2673,7 +2709,7 @@ function BullpenAiPageContent() {
           execution_mode: bullpenLlmExecutionMode,
           events_per_prompt: bullpenLlmEventsPerPrompt,
           max_concurrent_requests: DEFAULT_BULLPEN_LLM_MAX_CONCURRENT_REQUESTS,
-          target_count: targets.length,
+          target_count: savedTargets.length,
         },
       };
       const run = await apiService.createRun({
@@ -2682,7 +2718,7 @@ function BullpenAiPageContent() {
           bullpenLlmPromptTemplate,
           promptInputs,
         ),
-        targets,
+        targets: savedTargets,
         allow_parallel: true,
         polymarket_event_context: polymarketEventContext,
       });
@@ -2690,7 +2726,7 @@ function BullpenAiPageContent() {
       const completedRun = await waitForBullpenRunCompletion(run.id);
       setLatestCompletedLlmRunId(completedRun.id);
       const targetOrder = new Map(
-        targets.map((target, index) => [
+        savedTargets.map((target, index) => [
           `${target.provider}::${target.model}`,
           index,
         ]),
@@ -3668,6 +3704,11 @@ function BullpenAiPageContent() {
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         recentDecisions={recentAutoRunDecisions}
         onSummaryUpdated={({ summary, run }) => {
+          const serverTargets = normalizeServerBullpenLlmTargets(
+            summary.settings.console_llm_targets,
+          );
+          setLastLlmTargets(serverTargets);
+          writeLastLlmTargetsToStorage(serverTargets);
           const serverPromptTemplate = normalizeServerBullpenLlmPromptTemplate(
             summary.settings.console_llm_prompt_template,
           );
@@ -4019,12 +4060,14 @@ function BullpenAiPageContent() {
                     buttonLabel="Run LLM"
                     containerClassName="gap-0"
                     defaultTargets={getDefaultBullpenLlmTargets(lastLlmTargets)}
+                    disableImplicitDefaultTarget
                     disabled={
                       !isManualScanView ||
                       !activeCurrentSnapshot ||
                       isViewingHistory ||
                       (selectedQuestionCount === 0 && openActivePositions.length === 0)
                     }
+                    ignoreStoredSelection
                     selectionMode="multiple"
                     onRunMultiple={runLlm}
                     getSelectionConstraint={getBullpenSelectionConstraint}

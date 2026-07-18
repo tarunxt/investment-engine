@@ -15,6 +15,7 @@ from app.domains.polymarket_auto_live.rules import RuleEvaluation
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveLlmOutput,
+    BullpenAutoLiveLlmTarget,
     BullpenAutoLiveSettings,
 )
 
@@ -553,21 +554,34 @@ def _count_outlier_models(
     )
 
 
-def resolve_auto_live_llm_targets(
-    settings: BullpenAutoLiveSettings | None = None,
+def resolve_auto_live_llm_target_pairs(
+    targets: list[BullpenAutoLiveLlmTarget] | list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, str]]:
-    if settings is None:
+    if not targets:
         return []
 
     deduped_targets: list[tuple[str, str]] = []
     seen_targets: set[tuple[str, str]] = set()
-    for target in settings.console_llm_targets:
-        key = (target.provider.strip(), target.model.strip())
+    for target in targets:
+        if isinstance(target, tuple):
+            provider_name, model_name = target
+        else:
+            provider_name = target.provider
+            model_name = target.model
+        key = (provider_name.strip(), model_name.strip())
         if not key[0] or not key[1] or key in seen_targets:
             continue
         seen_targets.add(key)
         deduped_targets.append(key)
     return deduped_targets
+
+
+def resolve_auto_live_llm_targets(
+    settings: BullpenAutoLiveSettings | None = None,
+) -> list[tuple[str, str]]:
+    if settings is None:
+        return []
+    return resolve_auto_live_llm_target_pairs(settings.console_llm_targets)
 
 
 def build_market_prompt(

@@ -15,6 +15,11 @@ import pytest
 from pydantic import ValidationError
 
 import app.infrastructure.database.all_models  # noqa: F401
+from app.domains.polymarket.bullpen_llm_execution import (
+    BullpenLlmEventProviderResult,
+    BullpenLlmTargetExecutionResult,
+    ParsedBullpenMarketRow,
+)
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
     build_initial_run_summary,
@@ -37,6 +42,7 @@ from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
     ConsoleStageTwoSharedReview,
     PositionSnapshot,
+    _execute_console_stage_two_shared_llm,
     build_workflow_stage_result,
     reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
@@ -83,6 +89,7 @@ from app.domains.polymarket_auto_live.schemas import (
 )
 from app.domains.runs.schemas import (
     BullpenLlmExecutionOptions,
+    PreparedPolymarketEventContext,
     PolymarketEventQuestionPayload,
 )
 from app.domains.trading_bots.service import (
@@ -1109,7 +1116,17 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
         target_progress_callback=None,
     ):
         if target_progress_callback is not None:
-            target_progress_callback(1, [{"provider": "openai", "model": "gpt-test", "status": "completed"}])
+            target_progress_callback(
+                1,
+                [
+                    {
+                        "provider": "openai",
+                        "model": "gpt-test",
+                        "status": "completed",
+                        "usable_event_count": 1,
+                    }
+                ],
+            )
         assert now == fixed_now
         assert len(llm_markets) == 1
         assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96
@@ -1158,27 +1175,36 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
                 target_count=1,
                 prompt_template_hash="shared-stage-2-hash",
             ),
-            runtime_outputs={
-                "llm_execution_mode": "single_combined",
-                "llm_events_per_prompt": 7,
-                "llm_prompt_template_hash": "shared-stage-2-hash",
-                "llm_primary_request_count": 1,
-                "llm_retry_request_count": 0,
+                runtime_outputs={
+                    "llm_execution_mode": "single_combined",
+                    "llm_events_per_prompt": 7,
+                    "llm_target_count": 1,
+                    "llm_provider_target_count": 1,
+                    "llm_selected_target_count": 1,
+                    "llm_started_provider_target_count": 1,
+                    "llm_completed_provider_target_count": 1,
+                    "llm_usable_provider_target_count": 1,
+                    "llm_passed_provider_target_count": 1,
+                    "llm_failed_provider_target_count": 0,
+                    "llm_prompt_template_hash": "shared-stage-2-hash",
+                    "llm_primary_request_count": 1,
+                    "llm_retry_request_count": 0,
                 "llm_recovery_batch_count": 0,
                 "llm_failed_event_count": 0,
                 "llm_invalid_event_count": 0,
                 "llm_blocked_event_count": 0,
                 "llm_max_observed_concurrency": 1,
                 "llm_target_runs": [
-                    {
-                        "provider": "openai",
-                        "model": "gpt-4o-mini",
-                        "status": "completed",
-                        "primary_request_count": 1,
-                    }
-                ],
-            },
-        )
+                        {
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "status": "completed",
+                            "usable_event_count": 1,
+                            "primary_request_count": 1,
+                        }
+                    ],
+                },
+            )
 
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.utc_now",
@@ -1256,6 +1282,983 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
         "market_id"
     ] == candidate_market.market_id
     assert result.run.orders_planned == 1
+
+
+@pytest.mark.anyio
+async def test_shared_stage_2_creates_one_child_execution_per_selected_target(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will four selected models create four Stage 2 executions?",
+        slug="four-stage-2-targets",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    settings = BullpenAutoLiveSettings(
+        strategy_profile=CONSOLE_PROFILE_ID,
+        console_llm_targets=[
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-reasoner"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-chat"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-coder"),
+        ],
+        llm_execution_mode="single_combined",
+    )
+    llm_markets = [
+        {
+            "kind": "candidate",
+            "market": candidate_market,
+            "returns_per_day": 9.0,
+        }
+    ]
+    rules_by_market_id = {
+        candidate_market.market_id: _fake_rules(hours_remaining=96)
+    }
+    target_calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.prepare_polymarket_event_context",
+        lambda context: PreparedPolymarketEventContext(
+            question_payload=context.question_payload,
+            runtime_metadata={
+                "question_runtime": {
+                    candidate_market.market_id: {
+                        "question_id": candidate_market.market_id,
+                        "question": candidate_market.question,
+                    }
+                }
+            },
+        ),
+    )
+
+    def fake_execute_bullpen_llm_target(
+        _context,
+        *,
+        provider_name: str,
+        model_name: str,
+        prepared_context,
+    ):
+        target_calls.append((provider_name, model_name))
+        event_id = str(
+            prepared_context.question_payload[0].market_id
+            or prepared_context.question_payload[0].question_id
+        )
+        row = ParsedBullpenMarketRow(
+            event_id=event_id,
+            record={"event_id": event_id},
+            question_ref=prepared_context.question_payload[0].question_ref,
+            question_id=prepared_context.question_payload[0].question_id,
+            market_id=prepared_context.question_payload[0].market_id,
+            question=prepared_context.question_payload[0].question,
+            llm_yes_odds=91.0,
+            llm_no_odds=9.0,
+            yes_definition="candidate X wins by the deadline",
+            deadline_et="2026-06-24 08:00:00 PM ET",
+            deadline_utc="2026-06-24T20:00:00+00:00",
+            resolution_timezone="America/New_York",
+            hours_remaining=96.0,
+            evidence_status="Strong",
+            event_state="scheduled_not_occurred",
+            confidence="High",
+            key_evidence=[],
+            key_evidence_source_ids=[],
+            red_flags=[],
+            rationale="Usable odds returned for Stage 2.",
+        )
+        event_result = BullpenLlmEventProviderResult(
+            event_id=event_id,
+            provider=provider_name,
+            model=model_name,
+            status="success",
+            row=row,
+        )
+        return BullpenLlmTargetExecutionResult(
+            provider=provider_name,
+            model=model_name,
+            response_text=json.dumps(
+                {
+                    "markets": [
+                        {
+                            "event_id": event_id,
+                            "llm_yes_odds": 91,
+                            "llm_no_odds": 9,
+                        }
+                    ]
+                }
+            ),
+            runtime_metadata={
+                "llm_model": model_name,
+                "llm_batches": [],
+                "question_runtime": {
+                    candidate_market.market_id: {
+                        "question_id": candidate_market.market_id,
+                        "question": candidate_market.question,
+                    }
+                },
+            },
+            event_results={event_id: event_result},
+            batch_metadata=[],
+            status="completed",
+            tokens_in=100,
+            tokens_out=25,
+            estimated_cost=0.01,
+            web_search_used=False,
+            web_search_queries=[],
+            web_sources=[],
+            primary_request_count=1,
+            retry_request_count=0,
+            recovery_batch_count=0,
+            recovered_event_count=0,
+            failed_event_count=0,
+            blocked_event_count=0,
+            invalid_event_count=0,
+            max_observed_concurrency=1,
+            prompt_size_estimates=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.execute_bullpen_llm_target",
+        fake_execute_bullpen_llm_target,
+    )
+
+    review = await _execute_console_stage_two_shared_llm(
+        llm_markets=llm_markets,
+        rules_by_market_id=rules_by_market_id,
+        settings=settings,
+        now=fixed_now,
+    )
+
+    expected_targets = {
+        ("deepseek", "deepseek-v4-flash"),
+        ("deepseek", "deepseek-reasoner"),
+        ("deepseek", "deepseek-chat"),
+        ("deepseek", "deepseek-coder"),
+    }
+    assert set(target_calls) == expected_targets
+    assert review.runtime_outputs["llm_selected_target_count"] == 4
+    assert review.runtime_outputs["llm_completed_provider_target_count"] == 4
+    assert review.runtime_outputs["llm_usable_provider_target_count"] == 4
+    assert review.runtime_outputs["llm_failed_provider_target_count"] == 0
+    assert {
+        (row["provider"], row["model"])
+        for row in review.runtime_outputs["llm_target_runs"]
+    } == expected_targets
+    assert all(
+        row["response_text"] and row["usable_event_count"] == 1
+        for row in review.runtime_outputs["llm_target_runs"]
+    )
+
+
+@pytest.mark.anyio
+async def test_console_profile_stage_2_uses_frozen_run_target_snapshot_after_restart(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the run keep its frozen Stage 2 targets after settings change?",
+        slug="frozen-stage-2-targets",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    frozen_targets = [
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-reasoner"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-chat"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-coder"),
+    ]
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    async def fake_shared_review(
+        *,
+        llm_markets,
+        rules_by_market_id,
+        settings,
+        now,
+        target_progress_callback=None,
+    ):
+        if target_progress_callback is not None:
+            target_progress_callback(
+                4,
+                [
+                    {
+                        "provider": target.provider,
+                        "model": target.model,
+                        "status": "completed",
+                        "usable_event_count": 1,
+                    }
+                    for target in frozen_targets
+                ],
+            )
+        assert now == fixed_now
+        assert len(llm_markets) == 1
+        assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96
+        assert [
+            (target.provider, target.model)
+            for target in settings.console_llm_targets
+        ] == [
+            (target.provider, target.model) for target in frozen_targets
+        ]
+        outputs = [
+            BullpenAutoLiveLlmOutput(
+                provider=target.provider,
+                model=target.model,
+                llm_yes_odds=90.0,
+                llm_no_odds=10.0,
+                confidence="High",
+                evidence_status="Strong",
+                event_state="scheduled_not_occurred",
+                rationale="Frozen target returned usable odds.",
+                completed_at=fixed_now.isoformat(),
+            )
+            for target in frozen_targets
+        ]
+        _, consensus = _fake_llm_consensus(fair_yes=90, fair_no=10)
+        return ConsoleStageTwoSharedReview(
+            prepared_payload_by_market_id={
+                candidate_market.market_id: PolymarketEventQuestionPayload(
+                    question_ref="Q1",
+                    question_id=candidate_market.market_id,
+                    market_id=candidate_market.market_id,
+                    question=candidate_market.question,
+                    close_time=candidate_market.close_time,
+                    current_time_utc=fixed_now.isoformat(),
+                    current_time_et=fixed_now.isoformat(),
+                    deadline_et="2026-06-24 08:00:00 PM ET",
+                    hours_remaining=96,
+                    category=candidate_market.theme,
+                    outcomes=["Yes", "No"],
+                    current_yes_odds=12,
+                    current_no_odds=88,
+                    market_url=candidate_market.market_url,
+                    slug=candidate_market.slug,
+                    polymarket_rules=(
+                        'This market will resolve to "Yes" if candidate X wins by the deadline.'
+                    ),
+                )
+            },
+            question_runtime_by_market_id={candidate_market.market_id: {}},
+            outputs_by_market_id={candidate_market.market_id: outputs},
+            consensus_by_market_id={candidate_market.market_id: consensus},
+            execution_options=BullpenLlmExecutionOptions(
+                execution_mode="single_combined",
+                events_per_prompt=20,
+                target_count=4,
+                prompt_template_hash="frozen-stage-2-hash",
+            ),
+            runtime_outputs={
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 20,
+                "llm_target_count": 4,
+                "llm_provider_target_count": 4,
+                "llm_selected_target_count": 4,
+                "llm_started_provider_target_count": 4,
+                "llm_completed_provider_target_count": 4,
+                "llm_usable_provider_target_count": 4,
+                "llm_passed_provider_target_count": 4,
+                "llm_failed_provider_target_count": 0,
+                "llm_prompt_template_hash": "frozen-stage-2-hash",
+                "llm_target_runs": [
+                    {
+                        "provider": target.provider,
+                        "model": target.model,
+                        "status": "completed",
+                        "usable_event_count": 1,
+                    }
+                    for target in frozen_targets
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        fake_shared_review,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(stage2_llm_targets_snapshot=frozen_targets),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+
+    assert llm_stage.outputs["llm_target_snapshot_source"] == "run_snapshot"
+    assert llm_stage.outputs["llm_selected_target_count"] == 4
+    assert llm_stage.outputs["llm_usable_provider_target_count"] == 4
+    assert llm_stage.outputs["llm_targets"] == [
+        {"provider": target.provider, "model": target.model}
+        for target in frozen_targets
+    ]
+
+
+@pytest.mark.anyio
+async def test_console_profile_stage_2_fails_clearly_when_frozen_targets_are_empty(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will Stage 2 fail when no targets are frozen?",
+        slug="empty-stage-2-targets",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    async def fail_shared_review(**_kwargs):
+        raise AssertionError("Stage 2 shared execution should not run without targets")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        fail_shared_review,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(stage2_llm_targets_snapshot=[]),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+
+    assert result.run.status == "failed"
+    assert llm_stage.outputs["phase_status"] == "failed"
+    assert llm_stage.status == "fail"
+    assert "no llm targets were selected" in result.run.summary.lower()
+    assert llm_stage.outputs["llm_target_runs"] == []
+    assert not any(
+        stage.outputs.get("workflow_stage_key") == "invest"
+        for stage in result.run.stage_results
+    )
+
+
+@pytest.mark.anyio
+async def test_console_profile_stage_2_keeps_provider_and_parsing_failures_attributed_to_the_correct_model(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will Stage 2 keep provider and parsing failures attributed?",
+        slug="stage-2-error-attribution",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    frozen_targets = [
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-reasoner"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-chat"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-coder"),
+    ]
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    async def fake_shared_review(
+        *,
+        llm_markets,
+        rules_by_market_id,
+        settings,
+        now,
+        target_progress_callback=None,
+    ):
+        assert now == fixed_now
+        assert len(llm_markets) == 1
+        assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96
+        assert [
+            (target.provider, target.model)
+            for target in settings.console_llm_targets
+        ] == [
+            (target.provider, target.model) for target in frozen_targets
+        ]
+        if target_progress_callback is not None:
+            target_progress_callback(
+                4,
+                [
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-v4-flash",
+                        "status": "completed",
+                        "usable_event_count": 1,
+                    },
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-reasoner",
+                        "status": "failed",
+                        "usable_event_count": 0,
+                        "error": "Provider timeout",
+                    },
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "status": "failed",
+                        "usable_event_count": 0,
+                        "error": "LLM response was not valid JSON.",
+                    },
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-coder",
+                        "status": "failed",
+                        "usable_event_count": 0,
+                        "error": "Response schema validation failed.",
+                    },
+                ],
+            )
+        outputs = [
+            BullpenAutoLiveLlmOutput(
+                provider="deepseek",
+                model="deepseek-v4-flash",
+                llm_yes_odds=91.0,
+                llm_no_odds=9.0,
+                confidence="High",
+                evidence_status="Strong",
+                event_state="scheduled_not_occurred",
+                rationale="Usable odds.",
+                completed_at=fixed_now.isoformat(),
+            ),
+            BullpenAutoLiveLlmOutput(
+                provider="deepseek",
+                model="deepseek-reasoner",
+                error="Provider timeout",
+                completed_at=fixed_now.isoformat(),
+            ),
+            BullpenAutoLiveLlmOutput(
+                provider="deepseek",
+                model="deepseek-chat",
+                invalid_reason="LLM response was not valid JSON.",
+                rationale="LLM response was not valid JSON.",
+                completed_at=fixed_now.isoformat(),
+            ),
+            BullpenAutoLiveLlmOutput(
+                provider="deepseek",
+                model="deepseek-coder",
+                invalid_reason="Response schema validation failed.",
+                rationale="Response schema validation failed.",
+                completed_at=fixed_now.isoformat(),
+            ),
+        ]
+        _, consensus = _fake_llm_consensus(fair_yes=91, fair_no=9)
+        return ConsoleStageTwoSharedReview(
+            prepared_payload_by_market_id={
+                candidate_market.market_id: PolymarketEventQuestionPayload(
+                    question_ref="Q1",
+                    question_id=candidate_market.market_id,
+                    market_id=candidate_market.market_id,
+                    question=candidate_market.question,
+                    close_time=candidate_market.close_time,
+                    current_time_utc=fixed_now.isoformat(),
+                    current_time_et=fixed_now.isoformat(),
+                    deadline_et="2026-06-24 08:00:00 PM ET",
+                    hours_remaining=96,
+                    category=candidate_market.theme,
+                    outcomes=["Yes", "No"],
+                    current_yes_odds=12,
+                    current_no_odds=88,
+                    market_url=candidate_market.market_url,
+                    slug=candidate_market.slug,
+                    polymarket_rules=(
+                        'This market will resolve to "Yes" if candidate X wins by the deadline.'
+                    ),
+                )
+            },
+            question_runtime_by_market_id={candidate_market.market_id: {}},
+            outputs_by_market_id={candidate_market.market_id: outputs},
+            consensus_by_market_id={candidate_market.market_id: consensus},
+            execution_options=BullpenLlmExecutionOptions(
+                execution_mode="single_combined",
+                events_per_prompt=20,
+                target_count=4,
+                prompt_template_hash="stage-2-attr-hash",
+            ),
+            runtime_outputs={
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 20,
+                "llm_target_count": 4,
+                "llm_provider_target_count": 4,
+                "llm_selected_target_count": 4,
+                "llm_started_provider_target_count": 4,
+                "llm_completed_provider_target_count": 4,
+                "llm_usable_provider_target_count": 1,
+                "llm_passed_provider_target_count": 1,
+                "llm_failed_provider_target_count": 3,
+                "llm_prompt_template_hash": "stage-2-attr-hash",
+                "llm_target_runs": [
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-v4-flash",
+                        "status": "completed",
+                        "usable_event_count": 1,
+                        "response_text": "{\"markets\":[{\"llm_yes_odds\":91,\"llm_no_odds\":9}]}",
+                        "event_outputs": [
+                            {
+                                "market_id": candidate_market.market_id,
+                                "question_id": candidate_market.market_id,
+                                "output": outputs[0].model_dump(mode="json"),
+                            }
+                        ],
+                    },
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-reasoner",
+                        "status": "failed",
+                        "usable_event_count": 0,
+                        "error": "Provider timeout",
+                        "failure_category": "provider_failed",
+                        "response_text": None,
+                        "event_outputs": [
+                            {
+                                "market_id": candidate_market.market_id,
+                                "question_id": candidate_market.market_id,
+                                "output": outputs[1].model_dump(mode="json"),
+                            }
+                        ],
+                    },
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-chat",
+                        "status": "failed",
+                        "usable_event_count": 0,
+                        "error": "LLM response was not valid JSON.",
+                        "failure_category": "invalid_json",
+                        "response_text": "{not-json",
+                        "event_outputs": [
+                            {
+                                "market_id": candidate_market.market_id,
+                                "question_id": candidate_market.market_id,
+                                "output": outputs[2].model_dump(mode="json"),
+                            }
+                        ],
+                    },
+                    {
+                        "provider": "deepseek",
+                        "model": "deepseek-coder",
+                        "status": "failed",
+                        "usable_event_count": 0,
+                        "error": "Response schema validation failed.",
+                        "failure_category": "invalid_schema",
+                        "response_text": "{\"markets\":[{\"missing\":true}]}",
+                        "event_outputs": [
+                            {
+                                "market_id": candidate_market.market_id,
+                                "question_id": candidate_market.market_id,
+                                "output": outputs[3].model_dump(mode="json"),
+                            }
+                        ],
+                    },
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        fake_shared_review,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(stage2_llm_targets_snapshot=frozen_targets),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    reviewed_row = llm_stage.outputs["llm_reviewed_candidates"][0]
+    outputs_by_model = {
+        output["model"]: output for output in reviewed_row["llm_outputs"]
+    }
+
+    assert llm_stage.outputs["phase_status"] == "partial"
+    assert llm_stage.outputs["llm_selected_target_count"] == 4
+    assert llm_stage.outputs["llm_usable_provider_target_count"] == 1
+    assert llm_stage.outputs["llm_failed_provider_target_count"] == 3
+    assert outputs_by_model["deepseek-reasoner"]["error"] == "Provider timeout"
+    assert (
+        outputs_by_model["deepseek-chat"]["invalid_reason"]
+        == "LLM response was not valid JSON."
+    )
+    assert (
+        outputs_by_model["deepseek-coder"]["invalid_reason"]
+        == "Response schema validation failed."
+    )
+    assert result.run.status == "completed"
+    assert any(
+        stage.outputs.get("workflow_stage_key") == "invest"
+        for stage in result.run.stage_results
+    )
+
+
+@pytest.mark.anyio
+async def test_console_profile_stage_2_wrapper_completion_cannot_fake_success_or_start_stage3(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will wrapper completion stay blocked without usable model outputs?",
+        slug="wrapper-completion-cannot-fake-success",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    frozen_targets = [
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-reasoner"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-chat"),
+        BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-coder"),
+    ]
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        assert side == "NO"
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=candidate_market.current_no_odds,
+            spread_cents=2,
+        )
+
+    async def fake_shared_review(
+        *,
+        llm_markets,
+        rules_by_market_id,
+        settings,
+        now,
+        target_progress_callback=None,
+    ):
+        assert now == fixed_now
+        assert len(llm_markets) == 1
+        assert rules_by_market_id[candidate_market.market_id].hours_remaining == 96
+        assert [
+            (target.provider, target.model)
+            for target in settings.console_llm_targets
+        ] == [
+            (target.provider, target.model) for target in frozen_targets
+        ]
+        if target_progress_callback is not None:
+            target_progress_callback(
+                1,
+                [{"status": "completed"}],
+            )
+        return ConsoleStageTwoSharedReview(
+            prepared_payload_by_market_id={},
+            question_runtime_by_market_id={candidate_market.market_id: {}},
+            outputs_by_market_id={
+                candidate_market.market_id: [
+                    BullpenAutoLiveLlmOutput(
+                        provider="deepseek",
+                        model="deepseek-v4-flash",
+                        error="Provider returned no usable probability.",
+                        completed_at=fixed_now.isoformat(),
+                    )
+                ]
+            },
+            consensus_by_market_id={
+                candidate_market.market_id: SimpleNamespace(
+                    fair_yes_probability_pct=None,
+                    fair_no_probability_pct=None,
+                    disagreement_level=None,
+                    disagreement_category=None,
+                    adjudication_required=True,
+                    confidence=None,
+                    evidence_status=None,
+                    event_state=None,
+                )
+            },
+            execution_options=BullpenLlmExecutionOptions(
+                execution_mode="single_combined",
+                events_per_prompt=20,
+                target_count=4,
+                prompt_template_hash="wrapper-completion-hash",
+            ),
+            runtime_outputs={
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 20,
+                "llm_target_count": 4,
+                "llm_provider_target_count": 4,
+                "llm_selected_target_count": 4,
+                "llm_started_provider_target_count": 1,
+                "llm_completed_provider_target_count": 1,
+                "llm_usable_provider_target_count": 0,
+                "llm_passed_provider_target_count": 0,
+                "llm_failed_provider_target_count": 1,
+                "llm_prompt_template_hash": "wrapper-completion-hash",
+                "llm_target_runs": [{"status": "completed"}],
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda *_args, **_kwargs: 9.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        fake_shared_review,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(stage2_llm_targets_snapshot=frozen_targets),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    llm_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+
+    assert result.run.status == "failed"
+    assert llm_stage.outputs["phase_status"] == "failed"
+    assert llm_stage.outputs["llm_selected_target_count"] == 4
+    assert llm_stage.outputs["llm_completed_provider_target_count"] == 1
+    assert llm_stage.outputs["llm_usable_provider_target_count"] == 0
+    assert llm_stage.outputs["llm_failed_provider_target_count"] == 1
+    assert "no selected llm target produced a usable probability estimate" in result.run.summary.lower()
+    assert not any(
+        stage.outputs.get("workflow_stage_key") == "invest"
+        for stage in result.run.stage_results
+    )
 
 
 @pytest.mark.anyio
@@ -6344,6 +7347,7 @@ def _run_snapshot(
     *,
     dry_run: bool = True,
     request_context: BullpenAutoLiveRunOnceRequest | None = None,
+    stage2_llm_targets_snapshot: list[BullpenAutoLiveLlmTarget] | None = None,
 ) -> BullpenAutoLiveRun:
     return BullpenAutoLiveRun(
         id="run-1",
@@ -6353,6 +7357,7 @@ def _run_snapshot(
         started_at="2026-06-21T10:00:00+00:00",
         summary="Queued",
         request_context=request_context,
+        stage2_llm_targets_snapshot=stage2_llm_targets_snapshot,
     )
 
 

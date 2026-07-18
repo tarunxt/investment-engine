@@ -16,6 +16,7 @@ from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
+    _stage2_llm_targets_snapshot,
     build_initial_run_summary,
     build_initial_scan_stage_result,
     effective_dry_run,
@@ -408,6 +409,7 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                         started_at=now.isoformat(),
                     )
                 ],
+                stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                 audit_metadata=build_native_run_audit_metadata(
                     settings_snapshot=settings.model_dump(mode="json"),
                     prompt_template=settings.console_llm_prompt_template,
