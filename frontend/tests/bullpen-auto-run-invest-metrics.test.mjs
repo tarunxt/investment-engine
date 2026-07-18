@@ -125,11 +125,18 @@ test("Stage 3 metric filters break out sell, processed, and forced-exit rows", a
     ),
     ["buy-submitted"],
   );
+
+  assert.deepEqual(
+    getInvestMetricRows(getSellInvestMetricDialogKind("ranking-llm"), decisions).map(
+      (decision) => decision.id,
+    ),
+    ["sell-submitted"],
+  );
   assert.deepEqual(
     getInvestMetricRows(getSellInvestMetricDialogKind("forced-exit"), decisions).map(
       (decision) => decision.id,
     ),
-    ["sell-failed"],
+    [],
   );
 });
 
@@ -214,6 +221,9 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
   assert.match(source, /persistedDecisions:\s*\n\s*summary\?\.recent_decisions\.filter/);
   assert.match(source, /Selected filter/);
   assert.match(source, /Orders still not submitted/);
+  assert.match(source, /value: step\.rankingLlmSubmittedOrders/);
+  assert.match(source, /value: step\.forcedExitSubmittedOrders/);
+  assert.match(source, /value: step\.redeemSubmittedOrders/);
 });
 
 test("schedule card hides removed Stage 3 Step 1 exit shortlist copy", () => {

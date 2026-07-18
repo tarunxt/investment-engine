@@ -1875,6 +1875,8 @@ type InvestExecutionStepView = {
   redeemPlannedOrders?: number | null;
   redeemProcessedOrders?: number | null;
   redeemSubmittedOrders?: number | null;
+  rankingLlmSubmittedOrders?: number | null;
+  forcedExitSubmittedOrders?: number | null;
 };
 
 function normalizeInvestExecutionStepStatus(
@@ -1893,10 +1895,50 @@ function normalizeInvestExecutionStepStatus(
   return null;
 }
 
+function getSubmittedSellSubpartCounts(decisions: BullpenAutoLiveDecision[]) {
+  const submittedSellDecisions = decisions.filter((decision) => {
+    const action = decision.order_plan?.action;
+    return (
+      (action === "sell" || action === "redeem") &&
+      isSubmittedOrSuccessfulDecision(decision)
+    );
+  });
+
+  const hasStrategy = (
+    decision: BullpenAutoLiveDecision,
+    strategies: Set<string>,
+  ) => decision.exit_signals.some((signal) => strategies.has(signal.strategy));
+
+  const rankingOrLlmStrategies = new Set([
+    "OUTSIDE_TOP_10_RETURNS_DAY",
+    "LLM_OR_ODDS_FILTER_EXIT",
+  ]);
+  const forcedExitStrategies = new Set(["CAPITAL_AWARE_FORCED_EXIT"]);
+  const redeemStrategies = new Set(["REDEEM_CLAIM"]);
+
+  return {
+    redeem: submittedSellDecisions.filter(
+      (decision) =>
+        decision.order_plan?.action === "redeem" ||
+        hasStrategy(decision, redeemStrategies),
+    ).length,
+    rankingOrLlm: submittedSellDecisions.filter((decision) =>
+      hasStrategy(decision, rankingOrLlmStrategies),
+    ).length,
+    forced: submittedSellDecisions.filter((decision) =>
+      hasStrategy(decision, forcedExitStrategies),
+    ).length,
+  };
+}
+
 function getInvestStageExecutionSteps(
   stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+  decisions: BullpenAutoLiveDecision[] = [],
 ) {
   if (stage.key !== "invest") return [];
+
+  const submittedSellSubpartCounts = getSubmittedSellSubpartCounts(decisions);
+  const hasDecisionRows = decisions.length > 0;
 
   const rawSteps = stage.outputs.execution_steps;
   if (!Array.isArray(rawSteps)) return [];
@@ -1948,9 +1990,15 @@ function getInvestStageExecutionSteps(
         redeemProcessedOrders: readStageOutputNumber(
           step.redeem_processed_orders,
         ),
-        redeemSubmittedOrders: readStageOutputNumber(
-          step.redeem_submitted_orders,
-        ),
+        redeemSubmittedOrders: hasDecisionRows
+          ? submittedSellSubpartCounts.redeem
+          : readStageOutputNumber(step.redeem_submitted_orders),
+        rankingLlmSubmittedOrders: hasDecisionRows
+          ? submittedSellSubpartCounts.rankingOrLlm
+          : readStageOutputNumber(step.ranking_llm_submitted_orders),
+        forcedExitSubmittedOrders: hasDecisionRows
+          ? submittedSellSubpartCounts.forced
+          : readStageOutputNumber(step.forced_exit_submitted_orders),
       };
     })
     .filter((step): step is InvestExecutionStepView => step !== null);
@@ -1989,6 +2037,12 @@ function getLastInvestExecutionStep(
       redeemSubmittedOrders: readStageOutputNumber(
         rawStep.redeem_submitted_orders,
       ),
+      rankingLlmSubmittedOrders: readStageOutputNumber(
+        rawStep.ranking_llm_submitted_orders,
+      ),
+      forcedExitSubmittedOrders: readStageOutputNumber(
+        rawStep.forced_exit_submitted_orders,
+      ),
     };
   }
 
@@ -2016,6 +2070,12 @@ function getLastInvestExecutionStep(
     redeemSubmittedOrders: readStageOutputNumber(
       investStage.outputs.redeem_submitted,
     ),
+    rankingLlmSubmittedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_ranking_llm_submitted,
+    ),
+    forcedExitSubmittedOrders: readStageOutputNumber(
+      investStage.outputs.event_exit_forced_submitted,
+    ),
   };
 }
 
@@ -2040,6 +2100,8 @@ function buildQueuedInvestPreviewSteps(
           redeemPlannedOrders: lastSellStep.redeemPlannedOrders,
           redeemProcessedOrders: lastSellStep.redeemProcessedOrders,
           redeemSubmittedOrders: lastSellStep.redeemSubmittedOrders,
+          rankingLlmSubmittedOrders: lastSellStep.rankingLlmSubmittedOrders,
+          forcedExitSubmittedOrders: lastSellStep.forcedExitSubmittedOrders,
         }
       : step,
   );
@@ -2512,21 +2574,21 @@ function InvestExecutionStepsSummary({
                     <div className="mt-2 grid gap-2 sm:grid-cols-3">
                       {renderMetricCard({
                         label: "Redeem",
-                        value: step.redeemPlannedOrders,
+                        value: step.redeemSubmittedOrders,
                         kind: getSellInvestMetricDialogKind("redeem"),
                         toneClasses,
                         onOpenInfo: onOpenEventExitInfo,
                       })}
                       {renderMetricCard({
                         label: "Event out of Top 10",
-                        value: step.rankingLlmPlannedOrders,
+                        value: step.rankingLlmSubmittedOrders,
                         kind: getSellInvestMetricDialogKind("ranking-llm"),
                         toneClasses,
                         onOpenInfo: onOpenEventExitInfo,
                       })}
                       {renderMetricCard({
                         label: "Forced Exit",
-                        value: step.forcedExitPlannedOrders,
+                        value: step.forcedExitSubmittedOrders,
                         kind: getSellInvestMetricDialogKind("forced-exit"),
                         toneClasses,
                         onOpenInfo: onOpenEventExitInfo,
@@ -3036,7 +3098,7 @@ function RunDetailWorkerStages({
         {workflowView.stages.map((stage) => {
           const immediateSuccess = getInvestStageImmediateSuccess(stage);
           const investStageCounters = getInvestStageCounters(stage);
-          const investExecutionSteps = getInvestStageExecutionSteps(stage);
+          const investExecutionSteps = getInvestStageExecutionSteps(stage, decisions);
           const toneClasses = getWorkflowToneClasses(
             immediateSuccess ? "green" : stage.tone,
           );
@@ -6325,7 +6387,7 @@ function InvestMetricDetailsDialog({
   );
   const hasPendingOrders = filteredPlannedCount > filteredSubmittedCount;
   const executionSteps = state.stage
-    ? getInvestStageExecutionSteps(state.stage)
+    ? getInvestStageExecutionSteps(state.stage, state.decisions)
     : [];
   const progressLogEntries = getInvestProgressLogEntries({
     stage: state.stage,
@@ -9029,7 +9091,19 @@ export function BullpenAutoRunScheduleCard({
               const canOpenInputs =
                 (stage.key === "llm" || stage.key === "invest") &&
                 Object.keys(stage.inputs).length > 0;
-              const investExecutionSteps = getInvestStageExecutionSteps(stage);
+              const stageDecisions = workflowRunForMonitor
+                ? mergeInvestStageDecisionRows({
+                    stage,
+                    persistedDecisions:
+                      summary?.recent_decisions.filter(
+                        (decision) => decision.run_id === workflowRunForMonitor.id,
+                      ) ?? [],
+                  })
+                : [];
+              const investExecutionSteps = getInvestStageExecutionSteps(
+                stage,
+                stageDecisions,
+              );
               const showQueuedInvestPreview =
                 stage.key === "invest" &&
                 investExecutionSteps.length === 0 &&
