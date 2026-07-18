@@ -1,0 +1,240 @@
+name: Repair Bullpen Runtime Home
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_repair:
+        description: Type REPAIR_BULLPEN_RUNTIME to confirm the production Bullpen credential home can be updated and services restarted.
+        required: true
+        type: string
+      credential_home:
+        description: Shared Bullpen credential home the backend and frontend should use.
+        required: true
+        default: /var/lib/credx/bullpen
+        type: string
+      source_home:
+        description: Existing Bullpen credential directory to copy from when repairing the shared runtime home.
+        required: true
+        default: /home/ubuntu/.bullpen
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  repair:
+    name: Repair Bullpen runtime env and credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.confirm_repair }}" != "REPAIR_BULLPEN_RUNTIME" ]]; then
+            echo "Confirmation input did not match REPAIR_BULLPEN_RUNTIME." >&2
+            exit 1
+          fi
+
+      - name: Repair Bullpen runtime over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 1200s
+          command_timeout: 1200s
+          script: |
+            set -euo pipefail
+
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP_ROOT="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            LEGACY_APP_USER="investor"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+            FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+            BULLPEN_BIN="/usr/local/bin/bullpen"
+            CREDENTIAL_HOME="${{ inputs.credential_home }}"
+            SOURCE_HOME="${{ inputs.source_home }}"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+            resolve_systemd_service_name() {
+              local primary="$1"
+              local legacy="$2"
+
+              if systemctl is-active --quiet "$primary" >/dev/null 2>&1 || systemctl is-enabled --quiet "$primary" >/dev/null 2>&1; then
+                printf '%s\n' "$primary"
+                return
+              fi
+
+              if systemctl is-active --quiet "$legacy" >/dev/null 2>&1 || systemctl is-enabled --quiet "$legacy" >/dev/null 2>&1; then
+                printf '%s\n' "$legacy"
+                return
+              fi
+
+              if systemctl cat "$primary" >/dev/null 2>&1; then
+                printf '%s\n' "$primary"
+                return
+              fi
+
+              if systemctl cat "$legacy" >/dev/null 2>&1; then
+                printf '%s\n' "$legacy"
+                return
+              fi
+
+              printf '%s\n' "$primary"
+            }
+
+            restart_service_if_present() {
+              local service_name="$1"
+              if systemctl cat "$service_name" >/dev/null 2>&1; then
+                echo "==> Restarting $service_name"
+                sudo systemctl restart "$service_name"
+                sudo systemctl is-active "$service_name"
+              else
+                echo "==> Skipping missing service: $service_name"
+              fi
+            }
+
+            credentials_present() {
+              local home_dir="$1"
+              sudo test -f "$home_dir/credentials.json.enc" || sudo test -f "$home_dir/credentials.json"
+            }
+
+            BACKEND_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-backend" "investment-engine-backend"
+            )"
+            WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-worker" "investment-engine-celery-worker"
+            )"
+            BEAT_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
+            )"
+            FRONTEND_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-frontend" "investment-engine-frontend"
+            )"
+
+            echo "==> App root: $APP_ROOT"
+            echo "==> App user: $APP_USER"
+            echo "==> Backend env: $BACKEND_ENV_FILE"
+            echo "==> Frontend env: $FRONTEND_ENV_FILE"
+            echo "==> Bullpen bin: $BULLPEN_BIN"
+            echo "==> Shared credential home: $CREDENTIAL_HOME"
+            echo "==> Bootstrap source home: $SOURCE_HOME"
+
+            sudo test -x "$BULLPEN_BIN"
+            sudo test -f "$BACKEND_ENV_FILE"
+            sudo test -f "$FRONTEND_ENV_FILE"
+            id "$APP_USER" >/dev/null
+
+            if [[ -d "$SOURCE_HOME" ]]; then
+              if credentials_present "$SOURCE_HOME"; then
+                echo "==> Source credential store detected"
+              else
+                echo "Source credential directory exists but does not contain Bullpen credentials: $SOURCE_HOME" >&2
+                exit 1
+              fi
+            elif ! credentials_present "$CREDENTIAL_HOME"; then
+              echo "Neither the shared Bullpen credential home nor the bootstrap source contains credentials." >&2
+              exit 1
+            fi
+
+            echo "==> Preparing shared Bullpen credential home"
+            sudo mkdir -p "$CREDENTIAL_HOME"
+            if credentials_present "$CREDENTIAL_HOME"; then
+              sudo cp -a "$CREDENTIAL_HOME" "$CREDENTIAL_HOME.bak.$(date +%Y%m%d%H%M%S)"
+            fi
+            if [[ -d "$SOURCE_HOME" && "$SOURCE_HOME" != "$CREDENTIAL_HOME" ]]; then
+              sudo rsync -a --delete "$SOURCE_HOME"/ "$CREDENTIAL_HOME"/
+            fi
+            sudo chown -R "$APP_USER":"$APP_USER" "$CREDENTIAL_HOME"
+            sudo find "$CREDENTIAL_HOME" -type d -exec chmod 700 {} \;
+            sudo find "$CREDENTIAL_HOME" -type f -exec chmod 600 {} \;
+            credentials_present "$CREDENTIAL_HOME"
+
+            echo "==> Updating Bullpen runtime env in backend and frontend env files"
+            sudo env \
+              BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
+              FRONTEND_ENV_FILE="$FRONTEND_ENV_FILE" \
+              BULLPEN_BIN="$BULLPEN_BIN" \
+              CREDENTIAL_HOME="$CREDENTIAL_HOME" \
+              python3 - <<'PY'
+            import os
+            from pathlib import Path
+
+            files = [
+                Path(os.environ["BACKEND_ENV_FILE"]),
+                Path(os.environ["FRONTEND_ENV_FILE"]),
+            ]
+            updates = {
+                "BULLPEN_BIN": os.environ["BULLPEN_BIN"],
+                "BULLPEN_HOME": os.environ["CREDENTIAL_HOME"],
+                "BULLPEN_CREDENTIALS_HOME": os.environ["CREDENTIAL_HOME"],
+            }
+
+            for path in files:
+                lines = path.read_text(encoding="utf-8").splitlines()
+                output: list[str] = []
+                seen: set[str] = set()
+
+                for line in lines:
+                    stripped = line.lstrip()
+                    if not stripped or stripped.startswith("#") or "=" not in line:
+                        output.append(line)
+                        continue
+
+                    key, _ = line.split("=", 1)
+                    if key in updates:
+                        output.append(f"{key}={updates[key]}")
+                        seen.add(key)
+                    else:
+                        output.append(line)
+
+                for key, value in updates.items():
+                    if key not in seen:
+                        output.append(f"{key}={value}")
+
+                path.write_text("\n".join(output) + "\n", encoding="utf-8")
+            PY
+
+            restart_service_if_present "$BACKEND_SERVICE_NAME"
+            restart_service_if_present "$WORKER_SERVICE_NAME"
+            restart_service_if_present "$BEAT_SERVICE_NAME"
+            restart_service_if_present "$FRONTEND_SERVICE_NAME"
+
+            echo "==> Effective Bullpen env entries"
+            sudo bash -lc "
+              grep -E '^(BULLPEN_BIN|BULLPEN_HOME|BULLPEN_CREDENTIALS_HOME)=' '$BACKEND_ENV_FILE'
+              grep -E '^(BULLPEN_BIN|BULLPEN_HOME|BULLPEN_CREDENTIALS_HOME)=' '$FRONTEND_ENV_FILE'
+            "
+
+            echo "==> Verifying Bullpen runtime as the production service user"
+            sudo -u "$APP_USER" -H bash -lc "
+              export HOME='$CREDENTIAL_HOME'
+              export BULLPEN_HOME='$CREDENTIAL_HOME'
+              export BULLPEN_CREDENTIALS_HOME='$CREDENTIAL_HOME'
+              '$BULLPEN_BIN' status
+              '$BULLPEN_BIN' polymarket positions --output json > /tmp/credx-bullpen-positions.json
+              python3 - <<'PY'
+              import json
+              from pathlib import Path
+
+              payload = json.loads(Path('/tmp/credx-bullpen-positions.json').read_text(encoding='utf-8'))
+              if not isinstance(payload, (dict, list)):
+                  raise SystemExit('Bullpen positions output was not JSON object/array')
+              print('Bullpen positions JSON verified')
+              PY
+            "
+
+            echo "==> Backend readiness"
+            curl --fail --silent --show-error --location --max-time 20 http://127.0.0.1:8000/health/ready
+
+            echo "==> Recent backend logs"
+            sudo journalctl -u "$BACKEND_SERVICE_NAME" -n 40 --no-pager
