@@ -91,6 +91,7 @@ import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
   BullpenQuestionsTable,
   type BullpenTableSortKey,
+  type BullpenQuestionsTableExtraColumn,
   type BullpenTableSortState,
 } from "./BullpenQuestionsTable";
 import {
@@ -1242,15 +1243,6 @@ function getStageTwoInvestExecutionTone(
     return "info";
   }
   return "neutral";
-}
-
-function getStageTwoInvestExecutionReason(decision: BullpenAutoLiveDecision) {
-  return (
-    decision.order_plan?.detail ||
-    decision.stage3_result_reason ||
-    decision.summary ||
-    decision.reason
-  );
 }
 
 function StageOneRunStats({
@@ -6454,9 +6446,111 @@ function StageTwoInvestEventsDialog({
   state: StageTwoInvestEventsDialogState;
   onClose: () => void;
 }) {
+  const [sortState, setSortState] = useState<BullpenTableSortState>({
+    key: "returnsPerDay",
+    direction: "desc",
+  });
+  const rowsByQuestionId = new Map(
+    state.rows.map((row) => [row.question.id, row] as const),
+  );
+  const extraColumns: BullpenQuestionsTableExtraColumn[] = [
+    {
+      id: "stage3Status",
+      label: "Latest Stage 3 status",
+      width: 260,
+      render: (question) => {
+        const row = rowsByQuestionId.get(question.id);
+        return <span className="text-xs leading-5">{row?.reason ?? "—"}</span>;
+      },
+    },
+    {
+      id: "stage3Outcome",
+      label: "Stage 3 outcome",
+      width: 150,
+      render: (question) => {
+        const row = rowsByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+        return (
+          <span className="font-semibold text-slate-950">
+            {row.missingFromStage3
+              ? "Missing from Stage 3"
+              : decision.stage3_result?.replaceAll("_", " ") ?? "Pending"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "execution",
+      label: "Execution",
+      width: 170,
+      render: (question) => {
+        const row = rowsByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+        const executionTone = row.missingFromStage3
+          ? "warning"
+          : getStageTwoInvestExecutionTone(decision);
+        const executionStatus = row.missingFromStage3
+          ? "missing from Stage 3"
+          : formatStageTwoInvestExecutionStatus(decision);
+        const className =
+          executionTone === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : executionTone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : executionTone === "info"
+                ? "border-sky-200 bg-sky-50 text-sky-800"
+                : "border-slate-200 bg-white text-slate-700";
+        return (
+          <span
+            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}
+          >
+            {decision.side} · {executionStatus}
+          </span>
+        );
+      },
+    },
+    {
+      id: "indepthDetails",
+      label: "Indepth details",
+      width: 360,
+      render: (question) => {
+        const row = rowsByQuestionId.get(question.id);
+        const decision = row?.displayDecision;
+        if (!row || !decision) return question.llmNotes ?? "—";
+        const detail =
+          decision.rationale || decision.reason || question.llmNotes || "—";
+        return (
+          <div className="space-y-1 text-xs leading-5">
+            <p>{detail}</p>
+            {row.reason !== detail ? (
+              <p className="text-slate-600">
+                <span className="font-semibold text-slate-950">
+                  Execution blocker / detail:
+                </span>{" "}
+                {row.reason}
+              </p>
+            ) : null}
+            {decision.key_evidence.length ? (
+              <p className="text-slate-600">
+                Evidence: {decision.key_evidence.join("; ")}
+              </p>
+            ) : null}
+            {decision.red_flags.length ? (
+              <p className="text-rose-700">
+                Red flags: {decision.red_flags.join("; ")}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
+    },
+  ];
+
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
-      <div className="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+      <div className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1500px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
@@ -6481,133 +6575,30 @@ function StageTwoInvestEventsDialog({
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
-          {state.rows.length ? (
-            <div className="space-y-4">
-              {state.rows.map((row, index) => {
-                const decision = row.displayDecision;
-                const executionTone = row.missingFromStage3
-                  ? "warning"
-                  : getStageTwoInvestExecutionTone(decision);
-                const executionStatus = row.missingFromStage3
-                  ? "missing from Stage 3"
-                  : formatStageTwoInvestExecutionStatus(decision);
-                const executionReason = row.reason;
-                const executionBadgeClassName =
-                  executionTone === "success"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                    : executionTone === "warning"
-                      ? "border-amber-200 bg-amber-50 text-amber-800"
-                      : executionTone === "info"
-                        ? "border-sky-200 bg-sky-50 text-sky-800"
-                        : "border-slate-200 bg-white text-slate-700";
-                const cardClassName =
-                  executionTone === "success"
-                    ? "border-emerald-100 bg-emerald-50/40"
-                    : executionTone === "warning"
-                      ? "border-amber-100 bg-amber-50/40"
-                      : executionTone === "info"
-                        ? "border-sky-100 bg-sky-50/40"
-                        : "border-slate-200 bg-slate-50/40";
-                const plannedAmount =
-                  decision.order_plan?.order_size_usd ??
-                  (decision.target_exposure_usd > 0
-                    ? decision.target_exposure_usd
-                    : row.question.amountToBeInvested ?? 0);
-
-                return (
-                <article
-                  key={decision.id}
-                  className={`rounded-2xl border p-4 text-sm text-slate-700 ${cardClassName}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
-                        Event {index + 1}
-                        {` · Rank #${row.rank}`}
-                      </p>
-                      <h3 className="mt-1 text-base font-semibold text-slate-950">
-                        {decision.market_title}
-                      </h3>
-                    </div>
-                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${executionBadgeClassName}`}>
-                      {decision.side} · {executionStatus}
-                    </span>
-                  </div>
-                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      Latest Stage 3 status
-                    </p>
-                    <p className="mt-1 leading-6">
-                      {executionReason}
-                    </p>
-                  </div>
-                  <div className="mt-3 grid gap-3 md:grid-cols-3">
-                    <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        Stage 3 outcome
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-950">
-                        {row.missingFromStage3
-                          ? "Missing from Stage 3"
-                          : decision.stage3_result?.replaceAll("_", " ") ?? "Pending"}
-                      </p>
-                    </div>
-                    <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        Price / fair
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-950">
-                        {decision.price_cents.toFixed(1)}¢ /{" "}
-                        {decision.fair_probability_pct.toFixed(1)}%
-                      </p>
-                    </div>
-                    <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        Planned amount
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-950">
-                        ${plannedAmount.toFixed(2)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      Indepth details
-                    </p>
-                    <p className="mt-1 leading-6">
-                      {decision.rationale || decision.reason || row.question.llmNotes}
-                    </p>
-                    {executionReason !==
-                    (decision.rationale || decision.reason || row.question.llmNotes) ? (
-                      <p className="mt-2 leading-6 text-slate-600">
-                        <span className="font-semibold text-slate-950">
-                          Execution blocker / detail:
-                        </span>{" "}
-                        {executionReason}
-                      </p>
-                    ) : null}
-                    {decision.key_evidence.length ? (
-                      <ul className="mt-2 list-disc space-y-1 pl-5">
-                        {decision.key_evidence.map((item) => (
-                          <li key={item}>{item}</li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {decision.red_flags.length ? (
-                      <p className="mt-2 text-rose-700">
-                        Red flags: {decision.red_flags.join("; ")}
-                      </p>
-                    ) : null}
-                  </div>
-                </article>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              No persisted Stage 2 Top 10 handoff rows were returned for this run.
-            </p>
-          )}
+          <BullpenQuestionsTable
+            snapshot={null}
+            rowsOverride={state.rows.map((row) => row.question)}
+            emptyMessage="No persisted Stage 2 Top 10 handoff rows were returned for this run."
+            headerContent={null}
+            updatedAt={null}
+            scrollResetKey="stage-two-invest-events"
+            isLoading={false}
+            onSortChange={(key) =>
+              setSortState((current) => ({
+                key,
+                direction:
+                  current.key === key && current.direction === "desc"
+                    ? "asc"
+                    : "desc",
+              }))
+            }
+            selectedQuestionIds={new Set<string>()}
+            selectionEnabled={false}
+            sortState={sortState}
+            onToggleQuestion={() => undefined}
+            onToggleSelectAll={() => undefined}
+            extraColumns={extraColumns}
+          />
         </div>
       </div>
     </div>
