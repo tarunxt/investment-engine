@@ -238,7 +238,24 @@ jobs:
             "
 
             echo "==> Backend readiness"
-            curl --fail --silent --show-error --location --max-time 20 http://127.0.0.1:8000/health/ready
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error --location --max-time 20 http://127.0.0.1:8000/health/ready; then
+                echo
+                echo "Backend ready check passed on attempt $attempt"
+                break
+              fi
+
+              if [[ "$attempt" == "30" ]]; then
+                echo
+                echo "Backend ready check did not pass after 30 attempts." >&2
+                sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager || true
+                exit 1
+              fi
+
+              echo
+              echo "Backend not ready yet (attempt $attempt/30); retrying in 2s"
+              sleep 2
+            done
 
             echo "==> Recent backend logs"
             sudo journalctl -u "$BACKEND_SERVICE_NAME" -n 40 --no-pager
