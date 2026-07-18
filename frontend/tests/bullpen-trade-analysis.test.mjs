@@ -7,7 +7,7 @@ function readSource(relativePath) {
 }
 
 test("Bullpen x AI page exposes the Analyse Events button and route helper", () => {
-  const pageSource = readSource("../app/console/bullpen-ai/page.tsx");
+  const pageSource = readSource("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx");
   const urlsSource = readSource("../lib/urls.ts");
 
   assert.match(pageSource, /Analyse Events/);
@@ -51,7 +51,7 @@ test("Trade analysis list and detail pages stay wired to their client screens", 
 });
 
 test("Bullpen analysis requests carry analysis context from the selected question rows", () => {
-  const pageSource = readSource("../app/console/bullpen-ai/page.tsx");
+  const pageSource = readSource("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx");
 
   assert.match(pageSource, /analysis_context:/);
   assert.match(pageSource, /volume_usd: parseBullpenNumericMetric\(question\.volume\)/);
