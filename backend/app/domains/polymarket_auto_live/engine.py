@@ -257,27 +257,120 @@ def build_console_stage2_universe_status(
     active_rows_reviewed: int,
     fresh_candidate_rows_total: int,
     reviewed_fresh_candidate_rows: int,
+    llm_rows_skipped_by_cap: int | None = None,
+    fresh_llm_candidate_cap: int | None = None,
+    configured_max_llm_candidates_per_run: int | None = None,
+    blocker_code: str | None = None,
+    blocker_summary: str | None = None,
+    blocker_fix: str | None = None,
+    blocker_rows: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     skipped_rows = max(0, eligible_rows_total - reviewed_rows)
     skipped_fresh_candidate_rows = max(
         0,
         fresh_candidate_rows_total - reviewed_fresh_candidate_rows,
     )
-    return {
+    is_complete = skipped_rows == 0
+    effective_llm_rows_skipped_by_cap = (
+        max(0, llm_rows_skipped_by_cap)
+        if llm_rows_skipped_by_cap is not None
+        else skipped_rows
+    )
+    effective_fresh_llm_candidate_cap = (
+        max(0, fresh_llm_candidate_cap)
+        if fresh_llm_candidate_cap is not None
+        else reviewed_fresh_candidate_rows
+    )
+    normalized_blocker_rows = list(blocker_rows or [])
+    if is_complete:
+        blocker_code = None
+        blocker_summary = None
+        blocker_fix = None
+        normalized_blocker_rows = []
+    elif blocker_summary is None:
+        blocker_summary = (
+            f"Stage 2 reviewed {reviewed_rows} of {eligible_rows_total} eligible rows."
+        )
+    if not is_complete and blocker_fix is None:
+        blocker_fix = (
+            "Rerun Stage 2 and inspect the saved universe counts plus skipped rows to find the missing review coverage."
+        )
+    universe_status = {
         "stage2_eligible_rows_total": eligible_rows_total,
         "stage2_reviewed_rows": reviewed_rows,
         "stage2_skipped_rows": skipped_rows,
-        "stage2_universe_complete": skipped_rows == 0,
+        "stage2_universe_complete": is_complete,
         "max_llm_candidates_per_run": max_llm_candidates_per_run,
         "active_position_rows_reviewed": active_rows_reviewed,
         "fresh_candidate_rows_total": fresh_candidate_rows_total,
         "reviewed_fresh_candidate_rows": reviewed_fresh_candidate_rows,
         "skipped_fresh_candidate_rows": skipped_fresh_candidate_rows,
-        "llm_candidates_skipped_by_cap": skipped_rows,
-        "fresh_llm_candidate_cap": reviewed_fresh_candidate_rows,
+        "llm_candidates_skipped_by_cap": effective_llm_rows_skipped_by_cap,
+        "fresh_llm_candidate_cap": effective_fresh_llm_candidate_cap,
         "fresh_llm_candidate_count_before_cap": fresh_candidate_rows_total,
         "fresh_llm_candidates_skipped_by_cap": skipped_fresh_candidate_rows,
+        "configured_max_llm_candidates_per_run": configured_max_llm_candidates_per_run,
+        "stage2_universe_blocker_code": blocker_code,
+        "stage2_universe_blocker_summary": blocker_summary,
+        "stage2_universe_blocker_fix": blocker_fix,
+        "stage2_universe_blocker_rows": normalized_blocker_rows,
+        "stage2_universe_status": {
+            "total_eligible_rows": eligible_rows_total,
+            "reviewed_rows": reviewed_rows,
+            "skipped_rows": skipped_rows,
+            "is_complete": is_complete,
+            "max_llm_candidates_per_run": max_llm_candidates_per_run,
+            "configured_max_llm_candidates_per_run": configured_max_llm_candidates_per_run,
+            "active_rows_reviewed": active_rows_reviewed,
+            "fresh_candidate_rows_total": fresh_candidate_rows_total,
+            "reviewed_fresh_candidate_rows": reviewed_fresh_candidate_rows,
+            "skipped_fresh_candidate_rows": skipped_fresh_candidate_rows,
+            "llm_rows_skipped_by_cap": effective_llm_rows_skipped_by_cap,
+            "fresh_llm_candidate_cap": effective_fresh_llm_candidate_cap,
+            "blocker_code": blocker_code,
+            "blocker_summary": blocker_summary,
+            "blocker_fix": blocker_fix,
+            "blocker_rows": normalized_blocker_rows,
+        },
     }
+    return universe_status
+
+
+def _read_stage2_universe_blocker_detail(
+    stage2_universe_status: dict[str, object],
+    key: str,
+) -> str | None:
+    nested_status = stage2_universe_status.get("stage2_universe_status")
+    if isinstance(nested_status, dict):
+        nested_value = nested_status.get(key)
+        if isinstance(nested_value, str) and nested_value.strip():
+            return nested_value.strip()
+    flat_value = stage2_universe_status.get(f"stage2_universe_{key}")
+    if isinstance(flat_value, str) and flat_value.strip():
+        return flat_value.strip()
+    return None
+
+
+def _stage2_universe_incomplete_reason(
+    *,
+    base_reason: str,
+    stage2_universe_status: dict[str, object],
+) -> str:
+    blocker_summary = _read_stage2_universe_blocker_detail(
+        stage2_universe_status,
+        "blocker_summary",
+    )
+    blocker_fix = _read_stage2_universe_blocker_detail(
+        stage2_universe_status,
+        "blocker_fix",
+    )
+    if blocker_summary and blocker_fix:
+        return f"{base_reason} Why: {blocker_summary} What to do: {blocker_fix}"
+    if blocker_summary:
+        return f"{base_reason} Why: {blocker_summary}"
+    if blocker_fix:
+        return f"{base_reason} What to do: {blocker_fix}"
+    return base_reason
 
 
 def build_console_strategy_metadata(
@@ -4264,6 +4357,7 @@ class BullpenAutoLiveEngine:
         stage1_accepted_candidates: list[dict[str, object]] = []
         stage1_rejected_candidates: list[dict[str, object]] = []
         accepted_manual_rows: list[BullpenAutoLiveConsoleCandidateInput] = []
+        manual_seed_markets: list[ScannedMarket] = []
         candidate_rows_before_llm = 0
         active_position_rows_before_llm = 0
         llm_candidate_count = 0
@@ -4280,6 +4374,11 @@ class BullpenAutoLiveEngine:
             active_rows_reviewed=0,
             fresh_candidate_rows_total=0,
             reviewed_fresh_candidate_rows=0,
+            llm_rows_skipped_by_cap=0,
+            configured_max_llm_candidates_per_run=max(
+                1,
+                settings.max_llm_candidates_per_run,
+            ),
         )
         stage2_strategy_metadata = build_console_strategy_metadata(
             stage2_universe_complete=True,
@@ -4326,6 +4425,7 @@ class BullpenAutoLiveEngine:
                     accepted_manual_pairs.append((row, market))
             accepted_manual_rows = [row for row, _ in accepted_manual_pairs]
             manual_markets = [market for _, market in accepted_manual_pairs]
+            manual_seed_markets = list(manual_markets)
             def _manual_row_has_reusable_llm_outputs(
                 row: BullpenAutoLiveConsoleCandidateInput,
             ) -> bool:
@@ -4379,6 +4479,11 @@ class BullpenAutoLiveEngine:
                     active_rows_reviewed=0,
                     fresh_candidate_rows_total=llm_candidate_count,
                     reviewed_fresh_candidate_rows=llm_candidate_count,
+                    llm_rows_skipped_by_cap=0,
+                    configured_max_llm_candidates_per_run=max(
+                        1,
+                        settings.max_llm_candidates_per_run,
+                    ),
                 )
                 stage2_strategy_metadata = build_console_strategy_metadata(
                     stage2_universe_complete=True,
@@ -4780,22 +4885,55 @@ class BullpenAutoLiveEngine:
                 max(1, settings.max_llm_candidates_per_run),
                 eligible_row_total,
             )
-            stage2_universe_status = build_console_stage2_universe_status(
-                eligible_rows_total=eligible_row_total,
-                reviewed_rows=reviewed_row_total,
-                max_llm_candidates_per_run=manual_reusable_llm_limit,
-                active_rows_reviewed=reviewed_active_position_count,
-                fresh_candidate_rows_total=candidate_rows_before_llm,
-                reviewed_fresh_candidate_rows=candidate_rows_before_llm,
-            )
-            stage2_strategy_metadata = build_console_strategy_metadata(
-                stage2_universe_complete=not manual_active_positions_without_reusable_llm,
-                eligible_rows_total=eligible_row_total,
-                reviewed_rows=reviewed_row_total,
-                skipped_rows=eligible_row_total - reviewed_row_total,
-                max_llm_candidates_per_run=manual_reusable_llm_limit,
-            )
-            llm_candidate_count = reviewed_row_total
+            if manual_active_positions_without_reusable_llm:
+                manual_console_rows_have_reusable_llm = False
+                active_position_contexts = []
+                candidate_contexts = []
+                reusable_manual_active_position_keys.clear()
+                scan_seed_markets = list(manual_seed_markets)
+                stage2_universe_status = build_console_stage2_universe_status(
+                    eligible_rows_total=eligible_row_total,
+                    reviewed_rows=eligible_row_total,
+                    max_llm_candidates_per_run=manual_reusable_llm_limit,
+                    active_rows_reviewed=reviewable_active_position_count,
+                    fresh_candidate_rows_total=candidate_rows_before_llm,
+                    reviewed_fresh_candidate_rows=candidate_rows_before_llm,
+                    llm_rows_skipped_by_cap=0,
+                    configured_max_llm_candidates_per_run=max(
+                        1,
+                        settings.max_llm_candidates_per_run,
+                    ),
+                )
+                stage2_strategy_metadata = build_console_strategy_metadata(
+                    stage2_universe_complete=True,
+                    eligible_rows_total=eligible_row_total,
+                    reviewed_rows=eligible_row_total,
+                    skipped_rows=0,
+                    max_llm_candidates_per_run=manual_reusable_llm_limit,
+                )
+                llm_candidate_count = eligible_row_total
+            else:
+                stage2_universe_status = build_console_stage2_universe_status(
+                    eligible_rows_total=eligible_row_total,
+                    reviewed_rows=reviewed_row_total,
+                    max_llm_candidates_per_run=manual_reusable_llm_limit,
+                    active_rows_reviewed=reviewed_active_position_count,
+                    fresh_candidate_rows_total=candidate_rows_before_llm,
+                    reviewed_fresh_candidate_rows=candidate_rows_before_llm,
+                    llm_rows_skipped_by_cap=0,
+                    configured_max_llm_candidates_per_run=max(
+                        1,
+                        settings.max_llm_candidates_per_run,
+                    ),
+                )
+                stage2_strategy_metadata = build_console_strategy_metadata(
+                    stage2_universe_complete=True,
+                    eligible_rows_total=eligible_row_total,
+                    reviewed_rows=reviewed_row_total,
+                    skipped_rows=0,
+                    max_llm_candidates_per_run=manual_reusable_llm_limit,
+                )
+                llm_candidate_count = reviewed_row_total
         last_calculated_console_order_usd = round_money(
             state.last_console_trade_amount_usd
         )
@@ -5054,6 +5192,10 @@ class BullpenAutoLiveEngine:
                 ]
             elif qualified_candidate_count is not None:
                 stage_outputs["qualified_candidate_count_so_far"] = qualified_candidate_count
+            stage2_total_items = int(
+                stage2_universe_status.get("stage2_eligible_rows_total")
+                or llm_candidate_count
+            )
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
@@ -5063,7 +5205,7 @@ class BullpenAutoLiveEngine:
                     status=stage_status or ("pass" if llm_candidate_count > 0 else "warning"),
                     reason=reason,
                     completed_items=completed_items,
-                    total_items=llm_candidate_count,
+                    total_items=stage2_total_items,
                     item_label="events",
                     outputs=stage_outputs,
                     guardrails_checked=global_guardrails,
@@ -5169,21 +5311,17 @@ class BullpenAutoLiveEngine:
                 1,
                 settings.max_llm_candidates_per_run,
             )
-            fresh_llm_candidate_cap = max(
-                0,
-                configured_max_llm_candidates - len(active_llm_rows),
-            )
-            skipped_fresh_llm_markets = fresh_llm_rows[fresh_llm_candidate_cap:]
-            fresh_llm_rows = fresh_llm_rows[:fresh_llm_candidate_cap]
+            fresh_llm_candidate_cap = fresh_llm_candidate_count_before_cap
+            skipped_fresh_llm_markets: list[dict[str, object]] = []
             llm_candidate_count_before_cap = (
                 len(active_llm_rows) + fresh_llm_candidate_count_before_cap
             )
             llm_markets = [*active_llm_rows, *fresh_llm_rows]
             max_llm_candidates = max(
-                len(active_llm_rows),
+                llm_candidate_count_before_cap,
                 configured_max_llm_candidates,
             )
-            skipped_llm_markets = skipped_fresh_llm_markets
+            skipped_llm_markets: list[dict[str, object]] = []
             llm_candidate_count = len(llm_markets)
             stage2_universe_status = build_console_stage2_universe_status(
                 eligible_rows_total=llm_candidate_count_before_cap,
@@ -5192,6 +5330,9 @@ class BullpenAutoLiveEngine:
                 active_rows_reviewed=len(active_llm_rows),
                 fresh_candidate_rows_total=fresh_llm_candidate_count_before_cap,
                 reviewed_fresh_candidate_rows=len(fresh_llm_rows),
+                llm_rows_skipped_by_cap=0,
+                fresh_llm_candidate_cap=len(fresh_llm_rows),
+                configured_max_llm_candidates_per_run=configured_max_llm_candidates,
             )
             stage2_strategy_metadata = build_console_strategy_metadata(
                 stage2_universe_complete=bool(
@@ -6042,6 +6183,16 @@ class BullpenAutoLiveEngine:
             and llm_stage_status == "pass"
         ):
             llm_stage_status = "warning"
+        incomplete_universe_reason = _stage2_universe_incomplete_reason(
+            base_reason=(
+                "Stage 2 did not review the full eligible universe, so Stage 3 kept the combined ranking incomplete."
+            ),
+            stage2_universe_status=stage2_universe_status,
+        )
+        stage2_total_items = int(
+            stage2_universe_status.get("stage2_eligible_rows_total")
+            or llm_candidate_count
+        )
         set_run_stage_result(
             run,
             build_workflow_stage_result(
@@ -6067,9 +6218,7 @@ class BullpenAutoLiveEngine:
                         "Stage 2 reused persisted usable LLM outputs from the current Bullpen x AI table."
                     )
                     if reused_stage2_outputs
-                    else (
-                        "Stage 2 did not review the full eligible universe, so Stage 3 kept the combined ranking incomplete."
-                    )
+                    else incomplete_universe_reason
                     if not bool(stage2_universe_status["stage2_universe_complete"])
                     else (
                         "LLM review completed for "
@@ -6082,7 +6231,7 @@ class BullpenAutoLiveEngine:
                     else "Stage 2 had no candidate events to review."
                 ),
                 completed_items=llm_candidate_count,
-                total_items=llm_candidate_count,
+                total_items=stage2_total_items,
                 item_label="events",
                 outputs={
                     "scan_source_label": scan_source_label,
@@ -6218,6 +6367,24 @@ class BullpenAutoLiveEngine:
             ),
         )
         stage2_universe_complete = bool(stage2_universe_status["stage2_universe_complete"])
+        incomplete_ranking_reason = _stage2_universe_incomplete_reason(
+            base_reason=(
+                "Stage 2 reviewed only part of the eligible universe, so the combined top-10 ranking is incomplete and Stage 3 will not use it for new buys or top-10 displacement exits."
+            ),
+            stage2_universe_status=stage2_universe_status,
+        )
+        incomplete_active_position_reason = _stage2_universe_incomplete_reason(
+            base_reason=(
+                "Stage 2 did not review the full eligible universe, so this active position remains held unless a separate safety exit already triggered."
+            ),
+            stage2_universe_status=stage2_universe_status,
+        )
+        incomplete_candidate_reason = _stage2_universe_incomplete_reason(
+            base_reason=(
+                "Candidate qualified, but Stage 2 did not review the full eligible universe, so Stage 3 blocked top-10 buy planning."
+            ),
+            stage2_universe_status=stage2_universe_status,
+        )
         ranking_top_rows = combined_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
         selected_qualified_candidate_market_ids = {
             str(context["market"].market_id)
@@ -6264,7 +6431,7 @@ class BullpenAutoLiveEngine:
                 reason=(
                     "Ranked active positions and new qualified candidates into the fixed top-10 table."
                     if stage2_universe_complete
-                    else "Stage 2 reviewed only part of the eligible universe, so the combined top-10 ranking is incomplete and Stage 3 will not use it for new buys or top-10 displacement exits."
+                    else incomplete_ranking_reason
                 ),
                 outputs={
                     "top_table_size": len(ranking_top_rows),
@@ -7495,9 +7662,7 @@ class BullpenAutoLiveEngine:
                 continue
 
             if not stage2_universe_complete:
-                reason = (
-                    "Stage 2 did not review the full eligible universe, so this active position remains held unless a separate safety exit already triggered."
-                )
+                reason = incomplete_active_position_reason
                 stage_results.append(
                     build_stage_result(
                         stage_number=6,
@@ -7651,9 +7816,7 @@ class BullpenAutoLiveEngine:
                 record_invest_decision(decision, market=market)
                 continue
             if not stage2_universe_complete:
-                skip_reason = (
-                    "Candidate qualified, but Stage 2 did not review the full eligible universe, so Stage 3 blocked top-10 buy planning."
-                )
+                skip_reason = incomplete_candidate_reason
                 _record_rejected_candidate(
                     rejected_candidate_map,
                     market=market,

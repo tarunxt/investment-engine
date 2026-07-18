@@ -116,6 +116,9 @@ test("Stage 2 to Stage 3 strategy metadata falls back safely for historical runs
     reviewedRows: null,
     skippedRows: null,
     isComplete: true,
+    blockerCode: null,
+    blockerSummary: null,
+    blockerFix: null,
   });
 
   assert.deepEqual(
@@ -128,6 +131,9 @@ test("Stage 2 to Stage 3 strategy metadata falls back safely for historical runs
       reviewedRows: 8,
       skippedRows: null,
       isComplete: false,
+      blockerCode: null,
+      blockerSummary: null,
+      blockerFix: null,
     },
   );
 
@@ -142,6 +148,36 @@ test("Stage 2 to Stage 3 strategy metadata falls back safely for historical runs
       reviewedRows: 10,
       skippedRows: null,
       isComplete: true,
+      blockerCode: null,
+      blockerSummary: null,
+      blockerFix: null,
+    },
+  );
+
+  assert.deepEqual(
+    readBullpenStage2UniverseStatus({
+      stage2_universe_status: {
+        total_eligible_rows: 26,
+        reviewed_rows: 20,
+        skipped_rows: 6,
+        is_complete: false,
+        blocker_code: "manual_reuse_missing_active_positions",
+        blocker_summary:
+          "Saved LLM reuse missed 6 live active Bullpen rows that were not present in the saved table.",
+        blocker_fix:
+          "Rerun Stage 2 without reuse, or refresh the Bullpen x AI table so every live active position has a saved row.",
+      },
+    }),
+    {
+      totalEligibleRows: 26,
+      reviewedRows: 20,
+      skippedRows: 6,
+      isComplete: false,
+      blockerCode: "manual_reuse_missing_active_positions",
+      blockerSummary:
+        "Saved LLM reuse missed 6 live active Bullpen rows that were not present in the saved table.",
+      blockerFix:
+        "Rerun Stage 2 without reuse, or refresh the Bullpen x AI table so every live active position has a saved row.",
     },
   );
 });

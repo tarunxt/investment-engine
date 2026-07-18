@@ -680,6 +680,20 @@ def _build_bundle(
             "candidate_reviews": candidate_reviews,
             "qualified_candidate_market_ids": stage2_outputs.get("qualified_candidate_market_ids") or [],
             "stage3_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
+            "universe_status": (
+                stage2_outputs.get("stage2_universe_status")
+                if isinstance(stage2_outputs.get("stage2_universe_status"), dict)
+                else {
+                    "total_eligible_rows": stage2_outputs.get("stage2_eligible_rows_total"),
+                    "reviewed_rows": stage2_outputs.get("stage2_reviewed_rows"),
+                    "skipped_rows": stage2_outputs.get("stage2_skipped_rows"),
+                    "is_complete": stage2_outputs.get("stage2_universe_complete"),
+                    "blocker_code": stage2_outputs.get("stage2_universe_blocker_code"),
+                    "blocker_summary": stage2_outputs.get("stage2_universe_blocker_summary"),
+                    "blocker_fix": stage2_outputs.get("stage2_universe_blocker_fix"),
+                    "blocker_rows": stage2_outputs.get("stage2_universe_blocker_rows") or [],
+                }
+            ),
             "llm_invocations": stage2_outputs.get("llm_target_runs") or [],
             "llm_runtime": {
                 key: value

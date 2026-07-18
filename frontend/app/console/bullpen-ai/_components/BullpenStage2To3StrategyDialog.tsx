@@ -17,6 +17,9 @@ type BullpenStage2To3StrategyDialogProps = {
     reviewedRows: number | null;
     skippedRows: number | null;
     isComplete: boolean;
+    blockerCode: string | null;
+    blockerSummary: string | null;
+    blockerFix: string | null;
   } | null;
 };
 
@@ -149,6 +152,23 @@ export function BullpenStage2To3StrategyDialog({
               {reviewedRowsText} · Skipped rows: {skippedRowsText} · Universe{" "}
               {universeStatus?.isComplete === false ? "incomplete" : "complete"}
             </div>
+            {universeStatus?.isComplete === false &&
+            (universeStatus.blockerSummary || universeStatus.blockerFix) ? (
+              <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-950">
+                {universeStatus.blockerSummary ? (
+                  <p>
+                    <span className="font-semibold">Why:</span>{" "}
+                    {universeStatus.blockerSummary}
+                  </p>
+                ) : null}
+                {universeStatus.blockerFix ? (
+                  <p className={universeStatus.blockerSummary ? "mt-1" : undefined}>
+                    <span className="font-semibold">What to do:</span>{" "}
+                    {universeStatus.blockerFix}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </StrategySection>
 
           <StrategySection title="3. Eligibility">

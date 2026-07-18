@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 1
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-18"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-18-stage2-universe"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-18"
 
@@ -160,4 +160,3 @@ BULLPEN_AUDIT_CRITICAL_SOURCE_FILES: Final[tuple[str, ...]] = (
 )
 
 FEEDBACK_PROMPT_FILE: Final[str] = "backend/prompts/bullpen-run-audit-v1.txt"
-

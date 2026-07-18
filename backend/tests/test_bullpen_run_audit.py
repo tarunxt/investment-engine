@@ -16,6 +16,7 @@ from app.domains.bullpen_run_audit.prompt_builder import (
     plan_feedback_chunks,
 )
 from app.domains.bullpen_run_audit.router import router as run_audit_router
+from app.domains.bullpen_run_audit.service import _build_bundle
 from app.domains.bullpen_run_audit.sanitizer import sanitize_secret_value
 from app.domains.bullpen_run_audit.schemas import BullpenRunAuditFeedbackSummary
 from app.domains.bullpen_run_audit.validators import build_deterministic_findings
@@ -224,6 +225,94 @@ def test_build_deterministic_findings_flags_missing_stage2_top10_planning_reason
     codes = {finding["code"] for finding in findings}
 
     assert "STAGE2_TOP10_HANDOFF_MISSING_PLANNING_REASON" in codes
+
+
+def test_build_deterministic_findings_flags_incomplete_stage2_universe_without_remediation():
+    bundle = {
+        "metadata": {"run_id": "run-stage2-universe"},
+        "overview": {
+            "started_at": "2026-07-18T10:00:00+00:00",
+            "completed_at": "2026-07-18T10:05:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {
+            "candidate_reviews": [],
+            "universe_status": {
+                "total_eligible_rows": 26,
+                "reviewed_rows": 20,
+                "skipped_rows": 6,
+                "is_complete": False,
+            },
+        },
+        "stage_3": {
+            "decisions": [],
+            "order_intents": [],
+            "max_positions": 10,
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+    codes = {finding["code"] for finding in findings}
+
+    assert "INCOMPLETE_STAGE2_UNIVERSE_MISSING_REMEDIATION" in codes
+
+
+def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
+    run_payload = {
+        "id": "run-universe-details",
+        "status": "completed",
+        "triggered_by": "manual",
+        "started_at": "2026-07-18T10:00:00+00:00",
+        "completed_at": "2026-07-18T10:05:00+00:00",
+        "summary": "Stage 2 finished.",
+        "stage_results": [
+            {
+                "stage_number": 2,
+                "status": "warning",
+                "reason": "Universe incomplete.",
+                "outputs": {
+                    "workflow_stage_key": "llm",
+                    "stage2_eligible_rows_total": 26,
+                    "stage2_reviewed_rows": 20,
+                    "stage2_skipped_rows": 6,
+                    "stage2_universe_complete": False,
+                    "stage2_universe_blocker_code": "manual_reuse_missing_active_positions",
+                    "stage2_universe_blocker_summary": "Saved LLM reuse missed live active positions.",
+                    "stage2_universe_blocker_fix": "Rerun Stage 2 without reuse.",
+                    "stage2_universe_blocker_rows": [
+                        {"position_key": "market-1::NO", "market_id": "market-1"}
+                    ],
+                },
+            }
+        ],
+        "audit_metadata": {
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "settings_snapshot": {},
+        },
+        "diagnostics": {},
+    }
+
+    bundle = _build_bundle(
+        run_payload=run_payload,
+        decisions=[],
+        run_orders_payload={},
+        source_kind="native",
+        lifecycle_status="working",
+    )
+
+    assert bundle["stage_2"]["universe_status"] == {
+        "total_eligible_rows": 26,
+        "reviewed_rows": 20,
+        "skipped_rows": 6,
+        "is_complete": False,
+        "blocker_code": "manual_reuse_missing_active_positions",
+        "blocker_summary": "Saved LLM reuse missed live active positions.",
+        "blocker_fix": "Rerun Stage 2 without reuse.",
+        "blocker_rows": [{"position_key": "market-1::NO", "market_id": "market-1"}],
+    }
 
 
 def test_algorithm_registry_contains_required_audit_keys():

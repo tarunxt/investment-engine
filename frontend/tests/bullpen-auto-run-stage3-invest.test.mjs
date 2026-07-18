@@ -499,6 +499,10 @@ test("Stage 3 invest plan blocks reuse when historical Stage 2 metadata says the
         stage2_eligible_rows_total: 26,
         stage2_reviewed_rows: 20,
         stage2_universe_complete: false,
+        stage2_universe_blocker_summary:
+          "Saved Stage 2 reuse missed 6 live active Bullpen rows that were not present in the saved table.",
+        stage2_universe_blocker_fix:
+          "Rerun Stage 2 without reuse, or refresh the Bullpen x AI table so every live active position has a saved row.",
         llm_reviewed_candidates: [
           {
             market_id: "market-1",
@@ -530,7 +534,7 @@ test("Stage 3 invest plan blocks reuse when historical Stage 2 metadata says the
   assert.equal(plan.qualifiedCandidateCount, 1);
   assert.equal(
     plan.blockedReason,
-    "Stage 3 reuse is blocked because the saved run reviewed only 20 of 26, so the combined top-10 ranking is incomplete.",
+    "Stage 3 reuse is blocked because Saved Stage 2 reuse missed 6 live active Bullpen rows that were not present in the saved table. The combined top-10 ranking is incomplete. What to do: Rerun Stage 2 without reuse, or refresh the Bullpen x AI table so every live active position has a saved row.",
   );
 });
 

@@ -11,6 +11,9 @@ export type BullpenStage2UniverseStatus = {
   reviewedRows: number | null;
   skippedRows: number | null;
   isComplete: boolean;
+  blockerCode: string | null;
+  blockerSummary: string | null;
+  blockerFix: string | null;
 };
 
 export const DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS = 80;
@@ -137,6 +140,15 @@ export function readBullpenStage2UniverseStatus(
   const explicitIsComplete =
     readBoolean(universeRecord?.is_complete) ??
     readBoolean(outputs?.stage2_universe_complete);
+  const blockerCode =
+    readString(universeRecord?.blocker_code) ??
+    readString(outputs?.stage2_universe_blocker_code);
+  const blockerSummary =
+    readString(universeRecord?.blocker_summary) ??
+    readString(outputs?.stage2_universe_blocker_summary);
+  const blockerFix =
+    readString(universeRecord?.blocker_fix) ??
+    readString(outputs?.stage2_universe_blocker_fix);
 
   const inferredIsComplete =
     skippedRows !== null
@@ -150,6 +162,9 @@ export function readBullpenStage2UniverseStatus(
     reviewedRows,
     skippedRows,
     isComplete: inferredIsComplete ?? explicitIsComplete ?? true,
+    blockerCode,
+    blockerSummary,
+    blockerFix,
   };
 }
 

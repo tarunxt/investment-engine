@@ -373,11 +373,17 @@ export function buildBullpenStage3OnlyInvestPlan(
       universeStatus.totalEligibleRows !== null
         ? universeStatus.totalEligibleRows.toLocaleString("en-IN")
         : "the full eligible universe";
+    const blockerSummary = universeStatus.blockerSummary;
+    const blockerFix = universeStatus.blockerFix;
+    const blockerDetail = blockerSummary
+      ? ` ${blockerSummary}`
+      : ` the saved run reviewed only ${reviewedRowsText} of ${totalEligibleRowsText}.`;
+    const blockerFixDetail = blockerFix ? ` What to do: ${blockerFix}` : "";
 
     return {
       request: null,
       qualifiedCandidateCount: candidateRows.length,
-      blockedReason: `Stage 3 reuse is blocked because the saved run reviewed only ${reviewedRowsText} of ${totalEligibleRowsText}, so the combined top-${strategyMetadata.maxPositions} ranking is incomplete.`,
+      blockedReason: `Stage 3 reuse is blocked because${blockerDetail} The combined top-${strategyMetadata.maxPositions} ranking is incomplete.${blockerFixDetail}`,
     };
   }
 

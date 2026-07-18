@@ -982,7 +982,7 @@ async def test_console_profile_reports_incremental_stage_2_progress(monkeypatch)
 
 
 @pytest.mark.anyio
-async def test_console_profile_caps_stage_2_llm_reviews_to_keep_runs_bounded(monkeypatch):
+async def test_console_profile_stage_2_reviews_the_full_eligible_universe_even_when_the_saved_cap_is_lower(monkeypatch):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
     markets = [
         _market(
@@ -1067,6 +1067,9 @@ async def test_console_profile_caps_stage_2_llm_reviews_to_keep_runs_bounded(mon
             auto_live_enabled=True,
             dry_run=True,
             max_llm_candidates_per_run=2,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(),
@@ -1080,11 +1083,19 @@ async def test_console_profile_caps_stage_2_llm_reviews_to_keep_runs_bounded(mon
         if stage.outputs.get("workflow_stage_key") == "llm"
     )
 
-    assert reviewed_slugs == ["stage-2-cap-0", "stage-2-cap-1"]
-    assert llm_stage.outputs["llm_candidate_count"] == 2
+    assert reviewed_slugs == [
+        "stage-2-cap-0",
+        "stage-2-cap-1",
+        "stage-2-cap-2",
+        "stage-2-cap-3",
+        "stage-2-cap-4",
+    ]
+    assert llm_stage.outputs["llm_candidate_count"] == 5
     assert llm_stage.outputs["llm_candidate_count_before_cap"] == 5
-    assert llm_stage.outputs["max_llm_candidates_per_run"] == 2
-    assert llm_stage.outputs["llm_candidates_skipped_by_cap"] == 3
+    assert llm_stage.outputs["max_llm_candidates_per_run"] == 5
+    assert llm_stage.outputs["configured_max_llm_candidates_per_run"] == 2
+    assert llm_stage.outputs["llm_candidates_skipped_by_cap"] == 0
+    assert llm_stage.outputs["stage2_universe_complete"] is True
 
 
 @pytest.mark.anyio
@@ -6617,6 +6628,142 @@ async def test_console_profile_manual_selected_rows_rerun_llm_when_reuse_is_disa
     assert result.run.stage_results[1].outputs["workflow_stage_key"] == "llm"
     assert result.run.stage_results[1].outputs["phase_status"] == "completed"
     assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
+    assert not result.run.stage_results[1].outputs.get("reused_existing_llm_outputs")
+
+
+@pytest.mark.anyio
+async def test_console_profile_saved_manual_llm_rows_fall_back_to_a_full_review_when_live_active_positions_are_missing(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_row = _manual_console_candidate_row(
+        market_id="candidate-market-1",
+        question_id="candidate-market-1",
+        market_title="Candidate market 1",
+        slug="candidate-market-1",
+        current_yes_odds=8,
+        current_no_odds=92,
+        llm_yes_odds=11,
+        llm_no_odds=89,
+        returns_per_day=6.2,
+        selected=True,
+    )
+    active_position = _console_wallet_position(
+        slug="active-market-1",
+        market_title="Active market 1",
+        current_price_cents=88,
+        side="NO",
+    )
+    market_lookup = {
+        manual_row.slug: _market(
+            question=manual_row.market_title,
+            slug=manual_row.slug,
+            close_time=manual_row.close_time,
+            current_yes_odds=manual_row.current_yes_odds,
+            current_no_odds=manual_row.current_no_odds,
+        ),
+        active_position.slug: _market(
+            question=active_position.market_title,
+            slug=active_position.slug,
+            close_time=active_position.close_time,
+            current_yes_odds=active_position.current_yes_odds,
+            current_no_odds=active_position.current_no_odds,
+        ),
+    }
+    llm_calls: list[str] = []
+
+    async def fake_read_console_wallet_positions():
+        return [active_position]
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        market = market_lookup[slug]
+        return SimpleNamespace(
+            market=market,
+            current_price_cents=(
+                market.current_yes_odds if side == "YES" else market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    async def fail_scan_candidate_markets(**_kwargs):
+        raise AssertionError("Manual Bullpen x AI rows should bypass the backend rescan.")
+
+    async def fail_scan_console_profile_markets(**_kwargs):
+        raise AssertionError("Manual Bullpen x AI rows should bypass the console profile scan.")
+
+    def fake_run_llm_consensus(market, *_args, **_kwargs):
+        llm_calls.append(market.market_id)
+        return _fake_llm_consensus(fair_yes=10, fair_no=90)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_candidate_markets",
+        fail_scan_candidate_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fail_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=60),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        fake_run_llm_consensus,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    source_url="https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=1,
+                    reuse_saved_llm_outputs=True,
+                    candidate_rows=[manual_row],
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert llm_calls == ["active-market-1", "candidate-market-1"]
+    assert result.run.stage_results[1].outputs["workflow_stage_key"] == "llm"
+    assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
+    assert result.run.stage_results[1].outputs["stage2_reviewed_rows"] == 2
+    assert result.run.stage_results[1].outputs["stage2_universe_complete"] is True
     assert not result.run.stage_results[1].outputs.get("reused_existing_llm_outputs")
 
 

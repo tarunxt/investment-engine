@@ -572,6 +572,7 @@ function renderSectionData(section: string, data: unknown) {
     const qualifiedIds = asArray(stage.qualified_candidate_market_ids);
     const handoffIds = asArray(stage.stage3_handoff_candidate_market_ids);
     const runStages = asArray(stage.run_stages);
+    const universeStatus = asRecord(stage.universe_status);
     return (
       <div className="space-y-4">
         <SectionShell title="Stage 2 Summary">
@@ -584,12 +585,48 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Stage 3 Handoff Rows", value: String(handoffIds.length) },
               { label: "Configured Targets", value: String(asRecord(stage.llm_runtime)?.llm_target_count ?? "—") },
               { label: "Runtime Coverage", value: String(asRecord(stage.llm_runtime)?.llm_target_count ?? "—") },
+              { label: "Eligible Rows", value: String(universeStatus?.total_eligible_rows ?? "—") },
+              { label: "Reviewed Rows", value: String(universeStatus?.reviewed_rows ?? "—") },
+              { label: "Skipped Rows", value: String(universeStatus?.skipped_rows ?? "—") },
+              {
+                label: "Universe Complete",
+                value:
+                  universeStatus?.is_complete === false
+                    ? "No"
+                    : universeStatus?.is_complete === true
+                      ? "Yes"
+                      : "—",
+              },
               { label: "Selected Model Mix", value: stringValue(asRecord(stage.llm_runtime)?.llm_execution_mode) },
               { label: "Prompt Version", value: stringValue(asRecord(stage.llm_runtime)?.prompt_version) },
             ]}
           />
         </SectionShell>
+        {universeStatus?.is_complete === false &&
+        (stringValue(universeStatus?.blocker_summary) ||
+          stringValue(universeStatus?.blocker_fix)) ? (
+          <SectionShell
+            title="Universe Blocker"
+            subtitle="Why Stage 2 could not finish the full eligible-universe review and the recommended remediation."
+          >
+            <div className="space-y-2 text-sm text-slate-700">
+              {stringValue(universeStatus?.blocker_summary) ? (
+                <p>
+                  <span className="font-semibold text-slate-950">Why:</span>{" "}
+                  {stringValue(universeStatus?.blocker_summary)}
+                </p>
+              ) : null}
+              {stringValue(universeStatus?.blocker_fix) ? (
+                <p>
+                  <span className="font-semibold text-slate-950">What to do:</span>{" "}
+                  {stringValue(universeStatus?.blocker_fix)}
+                </p>
+              ) : null}
+            </div>
+          </SectionShell>
+        ) : null}
         <JsonPanel title="LLM Runtime" value={stage.llm_runtime} defaultOpen />
+        <JsonPanel title="Universe Status" value={stage.universe_status} />
         <JsonPanel title="Run Stage Records" value={runStages} />
         <JsonPanel title="LLM Invocations" value={llmInvocations} />
         <JsonPanel title="Candidate Reviews" value={candidateReviews} />

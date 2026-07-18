@@ -127,6 +127,11 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         if isinstance(stage_2.get("candidate_reviews"), list)
         else []
     )
+    universe_status = (
+        stage_2.get("universe_status")
+        if isinstance(stage_2.get("universe_status"), dict)
+        else {}
+    )
     qualified_market_ids: set[str] = set()
     for index, review in enumerate(candidate_reviews):
         if not isinstance(review, dict):
@@ -201,6 +206,23 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                         ],
                     )
                 )
+
+    universe_is_complete = universe_status.get("is_complete")
+    blocker_summary = str(universe_status.get("blocker_summary") or "").strip()
+    blocker_fix = str(universe_status.get("blocker_fix") or "").strip()
+    if universe_is_complete is False and (not blocker_summary or not blocker_fix):
+        findings.append(
+            _finding(
+                code="INCOMPLETE_STAGE2_UNIVERSE_MISSING_REMEDIATION",
+                severity="medium",
+                stage="stage-2",
+                category="llm-coverage",
+                title="Incomplete Stage 2 universe is missing a stored cause or fix",
+                explanation="Stage 2 marked the eligible universe incomplete, but the audit snapshot does not contain both a blocker summary and remediation step.",
+                expected_value="blocker_summary and blocker_fix",
+                evidence_pointers=["/stage_2/universe_status"],
+            )
+        )
 
     decisions = stage_3.get("decisions") if isinstance(stage_3.get("decisions"), list) else []
     stage3_market_ids: set[str] = set()
