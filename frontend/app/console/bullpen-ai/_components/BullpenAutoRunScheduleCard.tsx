@@ -7618,6 +7618,8 @@ export function BullpenAutoRunScheduleCard({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
+  const [startNowProgress, setStartNowProgress] = useState<string | null>(null);
+  const startNowProgressTimeoutRef = useRef<number | null>(null);
   const summaryLoadInFlightRef = useRef(false);
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
@@ -8163,6 +8165,13 @@ export function BullpenAutoRunScheduleCard({
     setTimerNowMs(Date.parse(startedAt));
     setNotice(null);
     setError(null);
+    if (startNowProgressTimeoutRef.current !== null) {
+      window.clearTimeout(startNowProgressTimeoutRef.current);
+      startNowProgressTimeoutRef.current = null;
+    }
+    setStartNowProgress(
+      "Validating refresh duration and preparing the Auto Run request…",
+    );
 
     try {
       const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
@@ -8180,9 +8189,15 @@ export function BullpenAutoRunScheduleCard({
         tradeAmountView.tradeAmountUsd ?? persistedConsoleOrderUsd;
 
       if (autoRunActive) {
+        setStartNowProgress(
+          "Stopping the existing Auto Run before starting a fresh run…",
+        );
         await apiService.stopBullpenAutoLive();
       }
 
+      setStartNowProgress(
+        "Saving trade amount, schedule, refresh duration, and LLM settings…",
+      );
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           latestConsoleOrderUsd,
@@ -8199,15 +8214,30 @@ export function BullpenAutoRunScheduleCard({
         ),
       );
 
+      setStartNowProgress("Starting the Auto-Live scheduler in the backend…");
       await apiService.startBullpenAutoLive();
+      setStartNowProgress(
+        "Building the latest Bullpen candidate snapshot for this run…",
+      );
       const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
+      setStartNowProgress("Queueing the Auto Run worker now…");
       const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      setStartNowProgress(
+        "Run queued. Fetching live backend status and worker stage updates…",
+      );
       await loadSummary({
         preserveLoading: true,
         nextPendingRunId: run.id,
       });
+      setStartNowProgress(
+        "Auto Run started. Live worker progress is now shown below.",
+      );
+      startNowProgressTimeoutRef.current = window.setTimeout(() => {
+        setStartNowProgress(null);
+        startNowProgressTimeoutRef.current = null;
+      }, 5_000);
       setNotice(
         `Started a fresh Auto Run now with ${formatMoney(
           latestConsoleOrderUsd,
@@ -8216,6 +8246,7 @@ export function BullpenAutoRunScheduleCard({
     } catch (nextError) {
       setError(normalizeError(nextError));
       setRunNowStartedAt(null);
+      setStartNowProgress(null);
     } finally {
       setAction(null);
     }
@@ -8620,6 +8651,14 @@ export function BullpenAutoRunScheduleCard({
         : "Waiting for live portfolio data";
 
   useEffect(() => {
+    return () => {
+      if (startNowProgressTimeoutRef.current !== null) {
+        window.clearTimeout(startNowProgressTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!shouldTickTimers) return;
 
     const intervalId = window.setInterval(() => {
@@ -8754,6 +8793,20 @@ export function BullpenAutoRunScheduleCard({
                 )}
               </Button>
             )}
+            {startNowProgress ? (
+              <div
+                className="basis-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 shadow-sm"
+                aria-live="polite"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Loader2
+                    className="h-3.5 w-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
+                  {startNowProgress}
+                </span>
+              </div>
+            ) : null}
             {showRunTimer ? (
               <div
                 className="inline-flex items-center justify-center gap-1 text-center text-xs font-semibold tabular-nums text-sky-800"
