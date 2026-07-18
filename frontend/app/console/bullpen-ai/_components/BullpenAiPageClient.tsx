@@ -99,7 +99,7 @@ import type {
   RunResponse,
 } from "@/types/api";
 
-import { shouldReplaceCategory } from "@/app/api/bullpen-ai/_lib/polymarketCategory";
+import { shouldReplaceCategory } from "@/lib/polymarketCategory";
 import {
   BullpenQuestionsTable,
   type BullpenTableSortKey,
