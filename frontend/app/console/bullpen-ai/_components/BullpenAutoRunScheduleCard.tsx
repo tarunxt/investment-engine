@@ -197,6 +197,20 @@ type StageTwoLlmRunDialogState = {
   decisions: BullpenAutoLiveDecision[];
 };
 
+type StageTwoBypassDialogState = {
+  reason: string;
+  steps: string[];
+};
+
+const STAGE_TWO_BYPASS_REASON =
+  "Stage 3 has already started while Stage 2 is still marked In Queue because this run is reusing the latest saved Stage 2-qualified output instead of launching a new LLM review for the current pass.";
+
+const STAGE_TWO_BYPASS_RECTIFICATION_STEPS = [
+  "Open Stage 2 Output or the latest completed run details and confirm the saved Stage 2 top-10 rows are fresh enough for the current investment decision.",
+  "If fresh LLM review is required, stop the active Stage 3 pass, run Stage 2 · Run LLM again, and wait until the Stage 2 container shows Finished.",
+  "After Stage 2 finishes, rerun Stage 3 · Exit and Invest so orders are planned from the newly completed Stage 2 snapshot.",
+];
+
 function normalizePreviewConfidence(
   value: string | null | undefined,
 ): BullpenAutoLiveDecision["confidence"] {
@@ -6065,6 +6079,55 @@ function StageTwoLlmRunBreakupDialog({
   );
 }
 
+function StageTwoBypassDialog({
+  state,
+  onClose,
+}: {
+  state: StageTwoBypassDialogState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[180] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+      <div className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-amber-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+        <div className="flex items-start justify-between gap-4 border-b border-amber-100 bg-amber-50 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+              Stage 2 bypass reason
+            </p>
+            <h3 className="mt-1 text-xl font-semibold text-amber-950">
+              Stage 3 started while Stage 2 is In Queue
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-amber-200 bg-white p-2 text-amber-800 transition hover:bg-amber-50"
+            aria-label="Close Stage 2 bypass reason"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto px-6 py-5">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Detailed reason</p>
+            <p className="mt-2 leading-6">{state.reason}</p>
+          </div>
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Steps to rectify
+            </p>
+            <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+              {state.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StageTwoInvestEventsDialog({
   state,
   onClose,
@@ -7514,6 +7577,8 @@ export function BullpenAutoRunScheduleCard({
     useState<StageTwoInvestEventsDialogState | null>(null);
   const [stageTwoLlmRunDialog, setStageTwoLlmRunDialog] =
     useState<StageTwoLlmRunDialogState | null>(null);
+  const [stageTwoBypassDialog, setStageTwoBypassDialog] =
+    useState<StageTwoBypassDialogState | null>(null);
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
@@ -9058,6 +9123,12 @@ export function BullpenAutoRunScheduleCard({
                   : stage.progressLabel;
               const showStageSpinner =
                 stage.isCurrent && !immediateSuccess && !investPreviewFinished;
+              const stageTwoBypassed =
+                stage.key === "llm" &&
+                stage.state === "queued" &&
+                workflowView.stages.some(
+                  (item) => item.key === "invest" && item.state === "current",
+                );
 
               return (
                 <div
@@ -9105,11 +9176,28 @@ export function BullpenAutoRunScheduleCard({
                       ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      <span
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
-                      >
-                        {stageStatusLabel}
-                      </span>
+                      {stageTwoBypassed ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setStageTwoBypassDialog({
+                              reason: STAGE_TWO_BYPASS_REASON,
+                              steps: STAGE_TWO_BYPASS_RECTIFICATION_STEPS,
+                            })
+                          }
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 ${toneClasses.badge}`}
+                          aria-label="Open Stage 2 bypass reason"
+                          title="Stage 2 was bypassed for this Stage 3 run"
+                        >
+                          {stageStatusLabel}
+                        </button>
+                      ) : (
+                        <span
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+                        >
+                          {stageStatusLabel}
+                        </span>
+                      )}
                       <span
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
                         aria-label={`${stage.title} time taken`}
@@ -9155,6 +9243,12 @@ export function BullpenAutoRunScheduleCard({
                           onOpenScanCandidateDialog={openScanCandidateDialog}
                           onOpenScanFilters={onOpenScanFilters}
                         />
+                      ) : null}
+                      {stageTwoBypassed ? (
+                        <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-amber-900">
+                          <span className="font-semibold">Stage 2 bypassed:</span>{" "}
+                          {STAGE_TWO_BYPASS_REASON}
+                        </div>
                       ) : null}
                       {stage.key === "llm" ? (
                         <StageTwoRunStats
@@ -9720,6 +9814,13 @@ export function BullpenAutoRunScheduleCard({
           <StageTwoLlmRunDetailsDialog
             state={refreshedStageTwoLlmRunDialog}
             onClose={() => setStageTwoLlmRunDialog(null)}
+          />
+        ) : null}
+
+        {stageTwoBypassDialog ? (
+          <StageTwoBypassDialog
+            state={stageTwoBypassDialog}
+            onClose={() => setStageTwoBypassDialog(null)}
           />
         ) : null}
 
