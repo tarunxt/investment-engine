@@ -42,7 +42,10 @@ from app.domains.polymarket_auto_live.engine import (
     _reconcile_historical_pending_exit_keys,
     _auto_live_record_id,
 )
-from app.domains.polymarket_auto_live.llm import run_llm_consensus
+from app.domains.polymarket_auto_live.llm import (
+    resolve_auto_live_llm_targets,
+    run_llm_consensus,
+)
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
     PolymarketAutoLiveStateRecord,
@@ -70,6 +73,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveLlmOutput,
+    BullpenAutoLiveLlmTarget,
     BullpenAutoLiveOrderPlan,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOnceRequest,
@@ -3735,6 +3739,28 @@ async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
     assert len(overview.bots) == 4
     assert overview.bots[0].href == "/console/polymarket-bot"
     assert overview.bots[3].next_scheduled_run == "2026-06-21T10:01:00+00:00"
+
+def test_resolve_auto_live_llm_targets_uses_only_saved_console_selection():
+    settings = BullpenAutoLiveSettings(
+        console_llm_targets=[
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-reasoner"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-chat"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-coder"),
+        ]
+    )
+
+    assert resolve_auto_live_llm_targets(settings) == [
+        ("deepseek", "deepseek-v4-flash"),
+        ("deepseek", "deepseek-reasoner"),
+        ("deepseek", "deepseek-chat"),
+        ("deepseek", "deepseek-coder"),
+    ]
+
+
+def test_resolve_auto_live_llm_targets_does_not_fall_back_to_random_defaults():
+    assert resolve_auto_live_llm_targets(BullpenAutoLiveSettings()) == []
+    assert resolve_auto_live_llm_targets() == []
 
 
 def _market(

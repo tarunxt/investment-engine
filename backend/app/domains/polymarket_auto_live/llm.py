@@ -18,7 +18,6 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSettings,
 )
 
-PREFERRED_PROVIDERS = ("openai", "gemini", "anthropic", "deepseek")
 CONFIDENCE_RANK = {"Low": 0, "Medium": 1, "High": 2}
 EVIDENCE_RANK = {"Low": 0, "Moderate": 1, "Strong": 2}
 BULLPEN_YES_CAMP_THRESHOLD = 60
@@ -557,25 +556,18 @@ def _count_outlier_models(
 def resolve_auto_live_llm_targets(
     settings: BullpenAutoLiveSettings | None = None,
 ) -> list[tuple[str, str]]:
-    if settings and settings.console_llm_targets:
-        deduped_targets: list[tuple[str, str]] = []
-        seen_targets: set[tuple[str, str]] = set()
-        for target in settings.console_llm_targets:
-            key = (target.provider.strip(), target.model.strip())
-            if not key[0] or not key[1] or key in seen_targets:
-                continue
-            seen_targets.add(key)
-            deduped_targets.append(key)
-        if deduped_targets:
-            return deduped_targets
+    if settings is None:
+        return []
 
-    targets: list[tuple[str, str]] = []
-    for provider_name in PREFERRED_PROVIDERS:
-        resolved = ProviderFactory.resolve_default_target(provider_name, "")
-        if resolved is None:
+    deduped_targets: list[tuple[str, str]] = []
+    seen_targets: set[tuple[str, str]] = set()
+    for target in settings.console_llm_targets:
+        key = (target.provider.strip(), target.model.strip())
+        if not key[0] or not key[1] or key in seen_targets:
             continue
-        targets.append(resolved)
-    return targets
+        seen_targets.add(key)
+        deduped_targets.append(key)
+    return deduped_targets
 
 
 def build_market_prompt(
