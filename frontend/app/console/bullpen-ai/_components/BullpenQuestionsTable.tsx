@@ -90,15 +90,18 @@ type BullpenTableColumnDefinition = {
 export type BullpenQuestionsTableExtraColumn = {
   id: string;
   label: string;
-  width: number;
+  width?: number;
   align?: "left" | "center" | "right";
-  render: (question: BullpenQuestionRow, rowIndex: number) => ReactNode;
+  headerClassName?: string;
+  cellClassName?: string;
+  renderCell: (question: BullpenQuestionRow) => ReactNode;
 };
 
 const DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS: BullpenTableColumnId[] =
   BULLPEN_TABLE_COLUMN_IDS.filter(
     (columnId) => columnId !== "noOdds" && columnId !== "llmNoOdds",
   );
+const DEFAULT_EXTRA_COLUMN_WIDTH = 240;
 
 function formatDate(value: string | null) {
   return formatApiTimestamp(value, {
@@ -767,13 +770,16 @@ export function BullpenQuestionsTable({
   isLoading,
   historicalRuns,
   historicalDecisions,
+  visibleColumnIds,
+  persistColumnPreferences = true,
+  showPresetFilters = true,
+  extraColumns = [],
   onSortChange,
   selectedQuestionIds,
   selectionEnabled,
   sortState,
   onToggleQuestion,
   onToggleSelectAll,
-  extraColumns = [],
 }: {
   snapshot: BullpenScanSnapshot | null;
   rowsOverride?: BullpenQuestionRow[];
@@ -790,13 +796,16 @@ export function BullpenQuestionsTable({
   isLoading: boolean;
   historicalRuns?: BullpenAutoLiveRun[];
   historicalDecisions?: BullpenAutoLiveDecision[];
+  visibleColumnIds?: BullpenTableColumnId[];
+  persistColumnPreferences?: boolean;
+  showPresetFilters?: boolean;
+  extraColumns?: BullpenQuestionsTableExtraColumn[];
   onSortChange: (key: BullpenTableSortKey) => void;
   selectedQuestionIds: Set<string>;
   selectionEnabled: boolean;
   sortState: BullpenTableSortState;
   onToggleQuestion: (questionId: string) => void;
   onToggleSelectAll: () => void;
-  extraColumns?: BullpenQuestionsTableExtraColumn[];
 }) {
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<BullpenQuestionRow | null>(null);
@@ -804,13 +813,18 @@ export function BullpenQuestionsTable({
     useState<BullpenQuestionRow | null>(null);
   const [isAmountHighlightDialogOpen, setIsAmountHighlightDialogOpen] =
     useState(false);
+  const requestedVisibleColumnIds =
+    visibleColumnIds ?? DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS;
   const [columnWidths, setColumnWidths] = useState<BullpenTableColumnWidths>(
-    readBullpenTableColumnWidthsFromStorage,
+    () =>
+      persistColumnPreferences
+        ? readBullpenTableColumnWidthsFromStorage()
+        : { ...DEFAULT_BULLPEN_TABLE_COLUMN_WIDTHS },
   );
   const [columnOrder, setColumnOrder] = useState<BullpenTableColumnId[]>(() =>
-    readBullpenTableColumnOrderFromStorage(
-      DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS,
-    ),
+    persistColumnPreferences
+      ? readBullpenTableColumnOrderFromStorage(requestedVisibleColumnIds)
+      : [...requestedVisibleColumnIds],
   );
   const [resizingColumnId, setResizingColumnId] =
     useState<ResizableBullpenTableColumnId | null>(null);
@@ -878,15 +892,34 @@ export function BullpenQuestionsTable({
   ).length;
   const allVisibleSelected =
     selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
-  const visibleColumnIds = columnOrder.filter((columnId) =>
-    DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS.includes(columnId),
+  const visibleBaseColumnIds = columnOrder.filter((columnId) =>
+    requestedVisibleColumnIds.includes(columnId),
   );
   const tableWidth =
-    getBullpenTableWidth(columnWidths, visibleColumnIds) +
-    extraColumns.reduce((total, column) => total + column.width, 0);
+    getBullpenTableWidth(columnWidths, visibleBaseColumnIds) +
+    extraColumns.reduce(
+      (total, column) => total + (column.width ?? DEFAULT_EXTRA_COLUMN_WIDTH),
+      0,
+    );
   const updatedAtLabel = formatUpdatedAt(updatedAt ?? snapshot?.scannedAt ?? null);
   const showUpdateUnavailableReason =
     updatedAtLabel === "—" && Boolean(updateUnavailableReason);
+
+  useEffect(() => {
+    setColumnOrder((current) => {
+      const retained = current.filter((columnId) =>
+        requestedVisibleColumnIds.includes(columnId),
+      );
+      const missing = requestedVisibleColumnIds.filter(
+        (columnId) => !retained.includes(columnId),
+      );
+      const next = [...retained, ...missing];
+      return next.length === current.length &&
+        next.every((columnId, index) => columnId === current[index])
+        ? current
+        : next;
+    });
+  }, [requestedVisibleColumnIds]);
 
   const setColumnWidth = (
     columnId: ResizableBullpenTableColumnId,
@@ -932,12 +965,14 @@ export function BullpenQuestionsTable({
 
   useEffect(() => {
     if (resizingColumnId) return;
+    if (!persistColumnPreferences) return;
     writeBullpenTableColumnWidthsToStorage(columnWidths);
-  }, [columnWidths, resizingColumnId]);
+  }, [columnWidths, persistColumnPreferences, resizingColumnId]);
 
   useEffect(() => {
-    writeBullpenTableColumnOrderToStorage(visibleColumnIds);
-  }, [visibleColumnIds]);
+    if (!persistColumnPreferences) return;
+    writeBullpenTableColumnOrderToStorage(visibleBaseColumnIds);
+  }, [persistColumnPreferences, visibleBaseColumnIds]);
 
   const moveColumn = (
     sourceColumnId: DraggableBullpenTableColumnId,
@@ -1111,38 +1146,42 @@ export function BullpenQuestionsTable({
           <span className="text-xs font-medium text-slate-500">
             Updated {updatedAtLabel}
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              setIsStrongestLlmOddsFilterActive((current) => !current);
-              setIsTopTenFilterActive(false);
-            }}
-            aria-pressed={isStrongestLlmOddsFilterActive}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-300",
-              isStrongestLlmOddsFilterActive
-                ? "border-emerald-600 bg-emerald-600 text-white"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
-            )}
-          >
-            Strongest LLM odds ≥ 80%
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setIsTopTenFilterActive((current) => !current);
-              setIsStrongestLlmOddsFilterActive(false);
-            }}
-            aria-pressed={isTopTenFilterActive}
-            className={cn(
-              "rounded-full border px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-violet-300",
-              isTopTenFilterActive
-                ? "border-violet-600 bg-violet-600 text-white"
-                : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
-            )}
-          >
-            Top 10
-          </button>
+          {showPresetFilters ? (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsStrongestLlmOddsFilterActive((current) => !current);
+                  setIsTopTenFilterActive(false);
+                }}
+                aria-pressed={isStrongestLlmOddsFilterActive}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-300",
+                  isStrongestLlmOddsFilterActive
+                    ? "border-emerald-600 bg-emerald-600 text-white"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+                )}
+              >
+                Strongest LLM odds ≥ 80%
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTopTenFilterActive((current) => !current);
+                  setIsStrongestLlmOddsFilterActive(false);
+                }}
+                aria-pressed={isTopTenFilterActive}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-violet-300",
+                  isTopTenFilterActive
+                    ? "border-violet-600 bg-violet-600 text-white"
+                    : "border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100",
+                )}
+              >
+                Top 10
+              </button>
+            </>
+          ) : null}
           {updateStatusMessage ? (
             <span className="text-xs font-medium text-amber-700">
               {updateStatusMessage}
@@ -1163,16 +1202,19 @@ export function BullpenQuestionsTable({
           style={{ width: tableWidth }}
         >
           <colgroup>
-            {visibleColumnIds.map((columnId) => (
+            {visibleBaseColumnIds.map((columnId) => (
               <col key={columnId} style={{ width: columnWidths[columnId] }} />
             ))}
             {extraColumns.map((column) => (
-              <col key={`extra-${column.id}`} style={{ width: column.width }} />
+              <col
+                key={column.id}
+                style={{ width: column.width ?? DEFAULT_EXTRA_COLUMN_WIDTH }}
+              />
             ))}
           </colgroup>
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
-              {visibleColumnIds.map((columnId) => {
+              {visibleBaseColumnIds.map((columnId) => {
                 const definition = columnDefinitions[columnId];
                 if (columnId === "select") {
                   return (
@@ -1237,11 +1279,15 @@ export function BullpenQuestionsTable({
               })}
               {extraColumns.map((column) => (
                 <th
-                  key={`extra-header-${column.id}`}
+                  key={column.id}
                   className={cn(
-                    "whitespace-nowrap px-4 py-3 font-semibold",
-                    column.align === "center" && "text-center",
-                    column.align === "right" && "text-right",
+                    "whitespace-nowrap px-4 py-3",
+                    column.align === "center"
+                      ? "text-center"
+                      : column.align === "right"
+                        ? "text-right"
+                        : "text-left",
+                    column.headerClassName,
                   )}
                 >
                   {column.label}
@@ -1268,7 +1314,7 @@ export function BullpenQuestionsTable({
                         "bg-fuchsia-50 hover:bg-fuchsia-100/70",
                     )}
                   >
-                    {visibleColumnIds.map((columnId) =>
+                    {visibleBaseColumnIds.map((columnId) =>
                       renderBullpenTableCell({
                         columnId,
                         question,
@@ -1283,14 +1329,18 @@ export function BullpenQuestionsTable({
                     )}
                     {extraColumns.map((column) => (
                       <td
-                        key={`extra-cell-${question.id}-${column.id}`}
+                        key={column.id}
                         className={cn(
-                          "px-4 py-3 text-slate-700",
-                          column.align === "center" && "text-center",
-                          column.align === "right" && "text-right",
+                          "px-4 py-3 align-top text-slate-700",
+                          column.align === "center"
+                            ? "text-center"
+                            : column.align === "right"
+                              ? "text-right"
+                              : "text-left",
+                          column.cellClassName,
                         )}
                       >
-                        {column.render(question, rowIndex)}
+                        {column.renderCell(question)}
                       </td>
                     ))}
                   </tr>
@@ -1299,7 +1349,7 @@ export function BullpenQuestionsTable({
             ) : (
               <tr>
                 <td
-                  colSpan={visibleColumnIds.length + extraColumns.length}
+                  colSpan={visibleBaseColumnIds.length + extraColumns.length}
                   className="px-4 py-12 text-center text-slate-500"
                 >
                   {isLoading ? "Scanning Bullpen..." : emptyMessage}

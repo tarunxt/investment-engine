@@ -90,6 +90,7 @@ import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDial
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
   BullpenQuestionsTable,
+  type BullpenQuestionsTableExtraColumn,
   type BullpenTableSortKey,
   type BullpenQuestionsTableExtraColumn,
   type BullpenTableSortState,
@@ -1245,6 +1246,239 @@ function getStageTwoInvestExecutionTone(
   return "neutral";
 }
 
+function getStageTwoInvestExecutionReason(decision: BullpenAutoLiveDecision) {
+  return (
+    decision.order_plan?.detail ||
+    decision.stage3_result_reason ||
+    decision.summary ||
+    decision.reason
+  );
+}
+
+function formatStage2TopTenHandoffOutcome(row: BullpenStage2TopTenHandoffRow) {
+  if (row.missingFromStage3) return "Missing from Stage 3";
+  return row.displayDecision.stage3_result?.replaceAll("_", " ") ?? "Pending";
+}
+
+function buildStage2TopTenEventsSummaryRows(
+  rows: BullpenStage2TopTenHandoffRow[],
+) {
+  return rows.map((row) => {
+    const plannedAmount =
+      row.displayDecision.order_plan?.order_size_usd ??
+      (row.displayDecision.target_exposure_usd > 0
+        ? row.displayDecision.target_exposure_usd
+        : row.question.amountToBeInvested);
+
+    return {
+      ...row.question,
+      amountToBeInvested:
+        plannedAmount && plannedAmount > 0
+          ? plannedAmount
+          : row.question.amountToBeInvested,
+    };
+  });
+}
+
+function Stage2TopTenEventsSummaryTable({
+  rows,
+  run,
+  emptyMessage,
+  headerContent,
+  testId,
+}: {
+  rows: BullpenStage2TopTenHandoffRow[];
+  run: BullpenAutoLiveRun | null;
+  emptyMessage: string;
+  headerContent?: ReactNode;
+  testId?: string;
+}) {
+  const [sortState, setSortState] = useState<BullpenTableSortState>({
+    key: "returnsPerDay",
+    direction: "desc",
+  });
+  const questionRows = buildStage2TopTenEventsSummaryRows(rows);
+  const rowByQuestionId = new Map(
+    questionRows.map((question, index) => [question.id, rows[index]]),
+  );
+  const extraColumns: BullpenQuestionsTableExtraColumn[] = [
+    {
+      id: "stage3-status",
+      label: "Stage 3 status",
+      width: 190,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const executionTone = row.missingFromStage3
+          ? "warning"
+          : getStageTwoInvestExecutionTone(row.displayDecision);
+        const executionStatus = row.missingFromStage3
+          ? "Missing from Stage 3"
+          : formatStageTwoInvestExecutionStatus(row.displayDecision);
+        const badgeClassName =
+          executionTone === "success"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+            : executionTone === "warning"
+              ? "border-amber-200 bg-amber-50 text-amber-800"
+              : executionTone === "info"
+                ? "border-sky-200 bg-sky-50 text-sky-800"
+                : "border-slate-200 bg-white text-slate-700";
+
+        return (
+          <div className="space-y-1">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Rank #{row.rank}
+            </p>
+            <span
+              className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize ${badgeClassName}`}
+            >
+              {executionStatus}
+            </span>
+            <p className="text-xs text-slate-500">
+              {row.missingFromBuyPlan
+                ? "Still waiting for a concrete Step 2 buy plan."
+                : "Concrete Step 2 buy plan was created."}
+            </p>
+          </div>
+        );
+      },
+    },
+    {
+      id: "stage3-outcome",
+      label: "Stage 3 outcome",
+      width: 200,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+
+        return (
+          <div className="space-y-1">
+            <p className="font-semibold text-slate-950">
+              {formatStage2TopTenHandoffOutcome(row)}
+            </p>
+            <p className="text-xs text-slate-500">
+              {decision.decision.replaceAll("_", " ")} · Side {decision.side}
+            </p>
+            <p className="text-xs text-slate-500">
+              {decision.risk_status.replaceAll("_", " ")}
+            </p>
+          </div>
+        );
+      },
+    },
+    {
+      id: "order-blocker",
+      label: "Order / blocker",
+      width: 300,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+
+        if (!decision.order_plan) {
+          return (
+            <div className="space-y-1">
+              <p className="font-semibold text-slate-950">No order planned</p>
+              <p className="text-xs leading-5 text-slate-600">{row.reason}</p>
+            </div>
+          );
+        }
+
+        return (
+          <div className="space-y-1">
+            <p className="font-semibold capitalize text-slate-950">
+              {decision.order_plan.status.replaceAll("_", " ")}
+            </p>
+            <p className="text-xs text-slate-500">
+              {formatMoney(decision.order_plan.order_size_usd)} at{" "}
+              {formatPriceCents(decision.order_plan.limit_price_cents)}
+            </p>
+            <div className="text-xs leading-5 text-slate-600">
+              <ErrorCodeWithDetails
+                detail={decision.order_plan.detail}
+                detailClassName="text-slate-600"
+              />
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "details",
+      label: "Details",
+      width: 340,
+      renderCell: (question) => {
+        const row = rowByQuestionId.get(question.id);
+        if (!row) return "—";
+        const decision = row.displayDecision;
+        const rationale =
+          decision.rationale || decision.reason || row.question.llmNotes;
+        const executionReason = row.reason;
+
+        return (
+          <div className="space-y-1">
+            <p className="text-sm leading-6 text-slate-700">
+              {rationale || "No in-depth details were captured for this row."}
+            </p>
+            {executionReason !== rationale ? (
+              <p className="text-xs leading-5 text-slate-500">
+                <span className="font-semibold text-slate-700">
+                  Execution blocker / detail:
+                </span>{" "}
+                {executionReason}
+              </p>
+            ) : null}
+          </div>
+        );
+      },
+    },
+  ];
+
+  return (
+    <div data-testid={testId}>
+      <BullpenQuestionsTable
+        snapshot={null}
+        rowsOverride={questionRows}
+        emptyMessage={emptyMessage}
+        headerContent={headerContent}
+        updatedAt={run?.completed_at ?? run?.started_at ?? null}
+        updateUnavailableReason="Timestamp unavailable because this view is reconstructed from the saved Stage 2 Top 10 handoff."
+        scrollResetKey={`${run?.id ?? "stage2-top10"}-${rows.length}`}
+        isLoading={false}
+        historicalRuns={run ? [run] : undefined}
+        historicalDecisions={rows.map((row) => row.decision ?? row.displayDecision)}
+        visibleColumnIds={[
+          "serialNumber",
+          "question",
+          "closeTime",
+          "category",
+          "yesOdds",
+          "llmYesOdds",
+          "returnsPerDay",
+          "amountToBeInvested",
+        ]}
+        persistColumnPreferences={false}
+        showPresetFilters={false}
+        extraColumns={extraColumns}
+        onSortChange={(key) =>
+          setSortState((current) => ({
+            key,
+            direction:
+              current.key === key && current.direction === "desc"
+                ? "asc"
+                : "desc",
+          }))
+        }
+        selectedQuestionIds={new Set<string>()}
+        selectionEnabled={false}
+        sortState={sortState}
+        onToggleQuestion={() => undefined}
+        onToggleSelectAll={() => undefined}
+      />
+    </div>
+  );
+}
 function StageOneRunStats({
   stage,
   hideNumbers = false,
@@ -6446,108 +6680,6 @@ function StageTwoInvestEventsDialog({
   state: StageTwoInvestEventsDialogState;
   onClose: () => void;
 }) {
-  const [sortState, setSortState] = useState<BullpenTableSortState>({
-    key: "returnsPerDay",
-    direction: "desc",
-  });
-  const rowsByQuestionId = new Map(
-    state.rows.map((row) => [row.question.id, row] as const),
-  );
-  const extraColumns: BullpenQuestionsTableExtraColumn[] = [
-    {
-      id: "stage3Status",
-      label: "Latest Stage 3 status",
-      width: 260,
-      render: (question) => {
-        const row = rowsByQuestionId.get(question.id);
-        return <span className="text-xs leading-5">{row?.reason ?? "—"}</span>;
-      },
-    },
-    {
-      id: "stage3Outcome",
-      label: "Stage 3 outcome",
-      width: 150,
-      render: (question) => {
-        const row = rowsByQuestionId.get(question.id);
-        if (!row) return "—";
-        const decision = row.displayDecision;
-        return (
-          <span className="font-semibold text-slate-950">
-            {row.missingFromStage3
-              ? "Missing from Stage 3"
-              : decision.stage3_result?.replaceAll("_", " ") ?? "Pending"}
-          </span>
-        );
-      },
-    },
-    {
-      id: "execution",
-      label: "Execution",
-      width: 170,
-      render: (question) => {
-        const row = rowsByQuestionId.get(question.id);
-        if (!row) return "—";
-        const decision = row.displayDecision;
-        const executionTone = row.missingFromStage3
-          ? "warning"
-          : getStageTwoInvestExecutionTone(decision);
-        const executionStatus = row.missingFromStage3
-          ? "missing from Stage 3"
-          : formatStageTwoInvestExecutionStatus(decision);
-        const className =
-          executionTone === "success"
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-            : executionTone === "warning"
-              ? "border-amber-200 bg-amber-50 text-amber-800"
-              : executionTone === "info"
-                ? "border-sky-200 bg-sky-50 text-sky-800"
-                : "border-slate-200 bg-white text-slate-700";
-        return (
-          <span
-            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}
-          >
-            {decision.side} · {executionStatus}
-          </span>
-        );
-      },
-    },
-    {
-      id: "indepthDetails",
-      label: "Indepth details",
-      width: 360,
-      render: (question) => {
-        const row = rowsByQuestionId.get(question.id);
-        const decision = row?.displayDecision;
-        if (!row || !decision) return question.llmNotes ?? "—";
-        const detail =
-          decision.rationale || decision.reason || question.llmNotes || "—";
-        return (
-          <div className="space-y-1 text-xs leading-5">
-            <p>{detail}</p>
-            {row.reason !== detail ? (
-              <p className="text-slate-600">
-                <span className="font-semibold text-slate-950">
-                  Execution blocker / detail:
-                </span>{" "}
-                {row.reason}
-              </p>
-            ) : null}
-            {decision.key_evidence.length ? (
-              <p className="text-slate-600">
-                Evidence: {decision.key_evidence.join("; ")}
-              </p>
-            ) : null}
-            {decision.red_flags.length ? (
-              <p className="text-rose-700">
-                Red flags: {decision.red_flags.join("; ")}
-              </p>
-            ) : null}
-          </div>
-        );
-      },
-    },
-  ];
-
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
       <div className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1500px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
@@ -6575,29 +6707,18 @@ function StageTwoInvestEventsDialog({
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
-          <BullpenQuestionsTable
-            snapshot={null}
-            rowsOverride={state.rows.map((row) => row.question)}
+          <Stage2TopTenEventsSummaryTable
+            rows={state.rows}
+            run={null}
+            testId="stage-two-invest-events-summary"
             emptyMessage="No persisted Stage 2 Top 10 handoff rows were returned for this run."
-            headerContent={null}
-            updatedAt={null}
-            scrollResetKey="stage-two-invest-events"
-            isLoading={false}
-            onSortChange={(key) =>
-              setSortState((current) => ({
-                key,
-                direction:
-                  current.key === key && current.direction === "desc"
-                    ? "asc"
-                    : "desc",
-              }))
+            headerContent={
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950">
+                This Events Summary view mirrors the Stage 3 Step 2 planned
+                queue layout so every transferred Stage 2 Top 10 row carries
+                the same Stage 3 status, outcome, and blocker columns.
+              </div>
             }
-            selectedQuestionIds={new Set<string>()}
-            selectionEnabled={false}
-            sortState={sortState}
-            onToggleQuestion={() => undefined}
-            onToggleSelectAll={() => undefined}
-            extraColumns={extraColumns}
           />
         </div>
       </div>
@@ -6629,6 +6750,8 @@ function InvestMetricDetailsDialog({
   const stage2TopTenGapRows = showStage2TopTenGapRows
     ? stage2TopTenHandoffRows.filter((row) => row.missingFromBuyPlan)
     : [];
+  const showStage2TopTenEventsSummary =
+    state.kind === "buy-planned" && stage2TopTenHandoffRows.length > 0;
   const tableRows = (
     showStage2TopTenGapRows
       ? [...rows, ...stage2TopTenGapRows.map((row) => row.displayDecision)]
@@ -6696,6 +6819,15 @@ function InvestMetricDetailsDialog({
     (decision) => decision.order_plan?.status === "planned",
   );
   const hasPendingOrders = filteredPlannedCount > filteredSubmittedCount;
+  const concreteBuyPlanCount = stage2TopTenHandoffRows.filter(
+    (row) => !row.missingFromBuyPlan,
+  ).length;
+  const submittedBuyPlanCount = stage2TopTenHandoffRows.filter((row) =>
+    isSubmittedOrSuccessfulDecision(row.displayDecision),
+  ).length;
+  const blockedOrWaitingBuyPlanCount = stage2TopTenHandoffRows.filter(
+    (row) => row.missingFromBuyPlan,
+  ).length;
   const executionSteps = state.stage
     ? getInvestStageExecutionSteps(state.stage, state.decisions)
     : [];
@@ -6763,17 +6895,59 @@ function InvestMetricDetailsDialog({
             </div>
           </div>
 
-          <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Selected filter
-            </p>
-            <p className="mt-2 text-sm font-semibold text-slate-950">
-              {tableRows.length.toLocaleString("en-IN")} rows ·{" "}
-              {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
-              {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
-              {filteredSubmittedCount.toLocaleString("en-IN")} submitted
-            </p>
-          </div>
+          {showStage2TopTenEventsSummary ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Saved Stage 2 transfer queue
+              </p>
+              <div className="mt-3 grid gap-3 md:grid-cols-4">
+                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    Transferred rows
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-slate-950">
+                    {stage2TopTenHandoffRows.length.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
+                    Concrete buy plans
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-blue-950">
+                    {concreteBuyPlanCount.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                    Submitted
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-emerald-950">
+                    {submittedBuyPlanCount.toLocaleString("en-IN")}
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
+                    Still waiting / blocked
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-amber-950">
+                    {blockedOrWaitingBuyPlanCount.toLocaleString("en-IN")}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Selected filter
+              </p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">
+                {tableRows.length.toLocaleString("en-IN")} rows ·{" "}
+                {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
+                {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
+                {filteredSubmittedCount.toLocaleString("en-IN")} submitted
+              </p>
+            </div>
+          )}
 
           {runError ? (
             <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950">
@@ -6898,148 +7072,167 @@ function InvestMetricDetailsDialog({
             </div>
           ) : null}
 
-          <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
-            {tableRows.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-[78rem] divide-y divide-slate-200 text-sm">
-                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    <tr>
-                      <th className="px-4 py-3">Event</th>
-                      <th className="px-4 py-3">Decision</th>
-                      <th className="px-4 py-3">Edge & score</th>
-                      <th className="px-4 py-3">Exposure</th>
-                      <th className="px-4 py-3">LLM Yes Odds</th>
-                      <th className="px-4 py-3">LLM No Odds</th>
-                      <th className="px-4 py-3">Returns/day</th>
-                      <th className="px-4 py-3">Exit Type</th>
-                      <th className="px-4 py-3">Order</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {tableRows.map((decision) => (
-                      <tr key={decision.id}>
-                        <td className="px-4 py-3 align-top">
-                          <div className="font-semibold text-slate-950">
-                            {decision.market_url ? (
-                              <a
-                                className="hover:text-sky-700 hover:underline"
-                                href={decision.market_url}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                {decision.market_title}
-                              </a>
-                            ) : (
-                              decision.market_title
+          {showStage2TopTenEventsSummary ? (
+            <div className="mt-5">
+              <Stage2TopTenEventsSummaryTable
+                rows={stage2TopTenHandoffRows}
+                run={state.run}
+                testId="stage-three-step-two-events-summary"
+                emptyMessage="No saved Stage 2 Top 10 rows were returned for this Stage 3 Step 2 view."
+                headerContent={
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950">
+                    This Events Summary view shows the full saved Stage 2 Top 10
+                    transfer queue. Rows that never became concrete Step 2 buy
+                    plans stay visible here with their latest recorded blocker
+                    or missing-handoff reason.
+                  </div>
+                }
+              />
+            </div>
+          ) : (
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">
+              {tableRows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-[78rem] divide-y divide-slate-200 text-sm">
+                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      <tr>
+                        <th className="px-4 py-3">Event</th>
+                        <th className="px-4 py-3">Decision</th>
+                        <th className="px-4 py-3">Edge & score</th>
+                        <th className="px-4 py-3">Exposure</th>
+                        <th className="px-4 py-3">LLM Yes Odds</th>
+                        <th className="px-4 py-3">LLM No Odds</th>
+                        <th className="px-4 py-3">Returns/day</th>
+                        <th className="px-4 py-3">Exit Type</th>
+                        <th className="px-4 py-3">Order</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {tableRows.map((decision) => (
+                        <tr key={decision.id}>
+                          <td className="px-4 py-3 align-top">
+                            <div className="font-semibold text-slate-950">
+                              {decision.market_url ? (
+                                <a
+                                  className="hover:text-sky-700 hover:underline"
+                                  href={decision.market_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {decision.market_title}
+                                </a>
+                              ) : (
+                                decision.market_title
+                              )}
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              {decision.theme} · closes{" "}
+                              {formatIstDateTime(decision.close_time)}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            <span className="font-semibold capitalize text-slate-950">
+                              {decision.decision.replaceAll("_", " ")}
+                            </span>
+                            <br />
+                            Side {decision.side} · {decision.confidence}
+                            <br />
+                            {decision.risk_status.replaceAll("_", " ")}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            Edge{" "}
+                            {decision.edge_pp.toLocaleString("en-IN", {
+                              maximumFractionDigits: 2,
+                            })}{" "}
+                            pp
+                            <br />
+                            Score{" "}
+                            {decision.score.toLocaleString("en-IN", {
+                              maximumFractionDigits: 2,
+                            })}
+                            <br />
+                            Fair{" "}
+                            {formatOddsPercent(decision.fair_probability_pct)}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            Current {formatMoney(decision.current_exposure_usd)}
+                            <br />
+                            Target {formatMoney(decision.target_exposure_usd)}
+                          </td>
+                          <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                            {formatOddsPercent(
+                              decision.fair_yes_probability_pct ?? null,
                             )}
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {decision.theme} · closes{" "}
-                            {formatIstDateTime(decision.close_time)}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 align-top text-slate-700">
-                          <span className="font-semibold capitalize text-slate-950">
-                            {decision.decision.replaceAll("_", " ")}
-                          </span>
-                          <br />
-                          Side {decision.side} · {decision.confidence}
-                          <br />
-                          {decision.risk_status.replaceAll("_", " ")}
-                        </td>
-                        <td className="px-4 py-3 align-top text-slate-700">
-                          Edge{" "}
-                          {decision.edge_pp.toLocaleString("en-IN", {
-                            maximumFractionDigits: 2,
-                          })}{" "}
-                          pp
-                          <br />
-                          Score{" "}
-                          {decision.score.toLocaleString("en-IN", {
-                            maximumFractionDigits: 2,
-                          })}
-                          <br />
-                          Fair{" "}
-                          {formatOddsPercent(decision.fair_probability_pct)}
-                        </td>
-                        <td className="px-4 py-3 align-top text-slate-700">
-                          Current {formatMoney(decision.current_exposure_usd)}
-                          <br />
-                          Target {formatMoney(decision.target_exposure_usd)}
-                        </td>
-                        <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
-                          {formatOddsPercent(
-                            decision.fair_yes_probability_pct ?? null,
-                          )}
-                        </td>
-                        <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
-                          {formatOddsPercent(
-                            decision.fair_no_probability_pct ?? null,
-                          )}
-                        </td>
-                        <td className="px-4 py-3 align-top tabular-nums text-slate-700">
-                          {formatReturnsPerDay(
-                            getDecisionReturnsPerDay(decision),
-                          )}
-                        </td>
-                        <td className="px-4 py-3 align-top text-slate-700">
-                          {(() => {
-                            const exitType =
-                              getDecisionExitTypeDetails(decision);
-                            return exitType ? (
+                          </td>
+                          <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                            {formatOddsPercent(
+                              decision.fair_no_probability_pct ?? null,
+                            )}
+                          </td>
+                          <td className="px-4 py-3 align-top tabular-nums text-slate-700">
+                            {formatReturnsPerDay(
+                              getDecisionReturnsPerDay(decision),
+                            )}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            {(() => {
+                              const exitType =
+                                getDecisionExitTypeDetails(decision);
+                              return exitType ? (
+                                <>
+                                  <span className="font-semibold text-slate-950">
+                                    {exitType.label}
+                                  </span>
+                                  <br />
+                                  <span className="whitespace-pre-line text-xs leading-5">
+                                    {exitType.details}
+                                  </span>
+                                </>
+                              ) : (
+                                "—"
+                              );
+                            })()}
+                          </td>
+                          <td className="px-4 py-3 align-top text-slate-700">
+                            <span className="font-semibold capitalize">
+                              {formatInvestMetricOrderStatus(decision)}
+                            </span>
+                            {decision.order_plan ? (
                               <>
-                                <span className="font-semibold text-slate-950">
-                                  {exitType.label}
-                                </span>
                                 <br />
-                                <span className="whitespace-pre-line text-xs leading-5">
-                                  {exitType.details}
-                                </span>
+                                {formatMoney(
+                                  decision.order_plan.order_size_usd,
+                                )}{" "}
+                                at{" "}
+                                {formatPriceCents(
+                                  decision.order_plan.limit_price_cents,
+                                )}
+                                <br />
+                                <ErrorCodeWithDetails
+                                  detail={decision.order_plan.detail}
+                                  detailClassName="text-slate-700"
+                                />
                               </>
                             ) : (
-                              "—"
-                            );
-                          })()}
-                        </td>
-                        <td className="px-4 py-3 align-top text-slate-700">
-                          <span className="font-semibold capitalize">
-                            {formatInvestMetricOrderStatus(decision)}
-                          </span>
-                          {decision.order_plan ? (
-                            <>
-                              <br />
-                              {formatMoney(
-                                decision.order_plan.order_size_usd,
-                              )}{" "}
-                              at{" "}
-                              {formatPriceCents(
-                                decision.order_plan.limit_price_cents,
-                              )}
-                              <br />
-                              <ErrorCodeWithDetails
-                                detail={decision.order_plan.detail}
-                                detailClassName="text-slate-700"
-                              />
-                            </>
-                          ) : (
-                            <>
-                              <br />
-                              {decision.reason}
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
-                Stage 3 has not emitted any decision rows for this metric yet.
-                The worker may still be preparing the first review row.
-              </div>
-            )}
-          </div>
+                              <>
+                                <br />
+                                {decision.reason}
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
+                  Stage 3 has not emitted any decision rows for this metric yet.
+                  The worker may still be preparing the first review row.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

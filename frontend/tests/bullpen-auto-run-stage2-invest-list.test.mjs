@@ -18,6 +18,10 @@ test("Stage 2 invest list keeps shortlisted BUY_NEW rows visible until Stage 3 f
   assert.match(source, /Execution blocker \/ detail:/);
   assert.match(source, /row\.missingFromStage3/);
   assert.match(source, /decision\.stage3_result\?\.replaceAll\("_", " "\) \?\? "Pending"/);
+  assert.match(source, /showStage2TopTenEventsSummary/);
+  assert.match(source, /<Stage2TopTenEventsSummaryTable/);
+  assert.match(source, /testId="stage-three-step-two-events-summary"/);
+  assert.match(source, /Saved Stage 2 transfer queue/);
 });
 
 test("Stage 2 handoff falls back to all reviewed Top 10 rows by returns/day", () => {
