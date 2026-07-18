@@ -43,6 +43,7 @@ from app.domains.polymarket_auto_live.engine import (
     ConsoleStageTwoSharedReview,
     PositionSnapshot,
     _execute_console_stage_two_shared_llm,
+    _apply_next_cycle_schedule,
     build_workflow_stage_result,
     reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
@@ -97,6 +98,26 @@ from app.domains.trading_bots.service import (
     build_trading_bots_summary,
 )
 
+
+
+def test_console_profile_next_cycle_uses_custom_auto_run_schedule():
+    settings = BullpenAutoLiveSettings(
+        strategy_profile=CONSOLE_PROFILE_ID,
+        console_auto_start_at="15:50:00 18 July, 2026",
+        console_auto_refresh_minutes=60,
+    )
+    state = BullpenAutoLiveState(running=True)
+
+    _apply_next_cycle_schedule(
+        settings=settings,
+        state=state,
+        reference_time=datetime(2026, 7, 18, 11, 0, tzinfo=UTC),
+    )
+
+    assert state.next_run_at == "2026-07-18T11:20:00+00:00"
+    assert state.next_scan_at == state.next_run_at
+    assert state.next_llm_run_at == state.next_run_at
+    assert state.next_rebalance_at == state.next_run_at
 
 
 def test_auto_live_record_id_caps_long_action_labels_for_database_columns():

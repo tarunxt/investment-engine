@@ -2870,6 +2870,38 @@ def _trade_analysis_exit_context_from_decision(
     }
 
 
+def _apply_next_cycle_schedule(
+    *,
+    settings: BullpenAutoLiveSettings,
+    state: BullpenAutoLiveState,
+    reference_time: datetime,
+) -> None:
+    if state.running and settings.strategy_profile == CONSOLE_PROFILE_ID:
+        next_run_at = next_custom_console_schedule_time(
+            reference_time,
+            start_at=settings.console_auto_start_at,
+            refresh_minutes=settings.console_auto_refresh_minutes,
+        ).isoformat()
+        state.next_run_at = next_run_at
+        state.next_scan_at = next_run_at
+        state.next_llm_run_at = next_run_at
+        state.next_rebalance_at = next_run_at
+        return
+
+    state.next_run_at = (
+        reference_time + timedelta(seconds=settings.active_price_refresh_seconds)
+    ).isoformat() if state.running else None
+    state.next_scan_at = (
+        reference_time + timedelta(minutes=settings.new_scan_interval_minutes)
+    ).isoformat() if state.running else None
+    state.next_llm_run_at = (
+        reference_time + timedelta(minutes=settings.llm_rerun_interval_minutes)
+    ).isoformat() if state.running else None
+    state.next_rebalance_at = (
+        reference_time + timedelta(minutes=settings.rebalance_interval_minutes)
+    ).isoformat() if state.running else None
+
+
 def _safe_trade_analysis_capture(
     action: str,
     capture_fn: Callable[..., None],
@@ -4150,18 +4182,11 @@ class BullpenAutoLiveEngine:
             and not state.paused
             and execution_halted_reason is None
         )
-        state.next_run_at = (
-            now + timedelta(seconds=settings.active_price_refresh_seconds)
-        ).isoformat() if state.running else None
-        state.next_scan_at = (
-            now + timedelta(minutes=settings.new_scan_interval_minutes)
-        ).isoformat() if state.running else None
-        state.next_llm_run_at = (
-            now + timedelta(minutes=settings.llm_rerun_interval_minutes)
-        ).isoformat() if state.running else None
-        state.next_rebalance_at = (
-            now + timedelta(minutes=settings.rebalance_interval_minutes)
-        ).isoformat() if state.running else None
+        _apply_next_cycle_schedule(
+            settings=settings,
+            state=state,
+            reference_time=now,
+        )
         state.invested_usd = round(sum(position.exposure_usd for position in new_positions), 2)
         state.current_value_usd = round(sum(position.exposure_usd for position in new_positions), 2)
         state.pnl_usd = round(state.current_value_usd - state.invested_usd, 2)
