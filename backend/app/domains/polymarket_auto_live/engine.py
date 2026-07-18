@@ -925,11 +925,26 @@ async def _execute_console_stage_two_shared_llm(
         market_id: compute_llm_consensus(outputs)
         for market_id, outputs in outputs_by_market_id.items()
     }
+    passed_target_count = sum(
+        1
+        for target_run in runtime_output_targets
+        if target_run.get("status") in {"completed", "partial"}
+    )
+    failed_target_count = sum(
+        1
+        for target_run in runtime_output_targets
+        if target_run.get("status") == "failed"
+    )
     runtime_outputs = {
         "llm_execution_mode": execution_options.execution_mode,
         "llm_events_per_prompt": execution_options.events_per_prompt,
         "llm_prompt_template_hash": execution_options.prompt_template_hash,
         "llm_target_count": len(targets),
+        "llm_provider_target_count": len(targets),
+        "llm_selected_target_count": len(targets),
+        "llm_completed_provider_target_count": len(runtime_output_targets),
+        "llm_passed_provider_target_count": passed_target_count,
+        "llm_failed_provider_target_count": failed_target_count,
         "llm_targets": [
             {"provider": provider_name, "model": model_name}
             for provider_name, model_name in targets

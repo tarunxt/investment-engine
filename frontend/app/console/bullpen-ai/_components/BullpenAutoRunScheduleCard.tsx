@@ -984,6 +984,7 @@ function getStageTwoStats(
 
   const llmsCompleted = getStageTwoCompletedLlmCount(stage);
   const llmOutcomeCounts = getStageTwoLlmOutcomeCounts(stage, llmsCompleted);
+  const stageTwoTargets = getStageTwoLlmTargets(stage);
   const llmsSelected =
     readStageOutputNumber(stage.outputs.llm_provider_target_count) ??
     readStageOutputNumber(stage.outputs.llm_selected_target_count) ??
@@ -991,6 +992,7 @@ function getStageTwoStats(
     readStageOutputNumber(stage.inputs.llm_provider_target_count) ??
     readStageOutputNumber(stage.inputs.llm_selected_target_count) ??
     readStageOutputNumber(stage.inputs.llm_target_count) ??
+    (stageTwoTargets.length > 0 ? stageTwoTargets.length : null) ??
     Math.max(llmsCompleted, 0);
   const newEventsToInvestIn = getStageTwoInvestableDecisions(decisions).length;
 
@@ -1349,30 +1351,41 @@ function StageTwoRunStats({
       </div>
       <div>
         {onOpenLlmRunDetails ? (
-          <button
-            type="button"
-            onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
-            className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
-            aria-label={`Open details for ${displayStat(stats.llmsCompleted)} completed LLM runs`}
-          >
-            Current run LLMs completed:{" "}
-            <span className="font-semibold tabular-nums">
-              {displayStat(stats.llmsCompleted)}
-            </span>
-            /
-            <span className="font-semibold tabular-nums">
-              {displayStat(stats.llmsSelected)}
-            </span>{" "}
-            (Passed:{" "}
-            <span className="font-semibold tabular-nums">
-              {displayStat(stats.llmsPassed)}
-            </span>{" "}
-            | Failed:{" "}
-            <span className="font-semibold tabular-nums">
-              {displayStat(stats.llmsFailed)}
-            </span>
-            )
-          </button>
+          <div className="flex items-start gap-1.5">
+            <button
+              type="button"
+              onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
+              className="text-left font-medium text-amber-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+              aria-label={`Open details for ${displayStat(stats.llmsCompleted)} completed LLM runs`}
+            >
+              Current run LLMs completed:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsCompleted)}
+              </span>
+              /
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsSelected)}
+              </span>{" "}
+              (Passed:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsPassed)}
+              </span>{" "}
+              | Failed:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.llmsFailed)}
+              </span>
+              )
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenLlmRunDetails({ run, stage, decisions })}
+              className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-amber-300 bg-amber-50 text-amber-700 shadow-sm transition hover:border-amber-400 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-amber-300"
+              aria-label="Open LLM completion diagnostics, including selected targets, failures, and captured errors"
+              title="Why can selected LLMs show as zero? Open diagnostics"
+            >
+              <Info className="h-3 w-3" aria-hidden="true" />
+            </button>
+          </div>
         ) : (
           <>
             Current run LLMs completed:{" "}
