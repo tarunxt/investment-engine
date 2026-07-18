@@ -4081,6 +4081,12 @@ class BullpenAutoLiveEngine:
             if manual_console_context is not None
             else True
         )
+        console_llm_targets = resolve_auto_live_llm_targets(settings)
+        selected_console_llm_target_keys = {
+            (provider_name.strip(), model_name.strip())
+            for provider_name, model_name in console_llm_targets
+            if provider_name.strip() and model_name.strip()
+        }
         manual_console_rows_have_reusable_llm = False
         selected_manual_candidate_ids: list[str] = []
         selected_manual_candidate_id_set: set[str] = set()
@@ -4160,11 +4166,32 @@ class BullpenAutoLiveEngine:
                     accepted_manual_pairs.append((row, market))
             accepted_manual_rows = [row for row, _ in accepted_manual_pairs]
             manual_markets = [market for _, market in accepted_manual_pairs]
+            def _manual_row_has_reusable_llm_outputs(
+                row: BullpenAutoLiveConsoleCandidateInput,
+            ) -> bool:
+                if row.llm_yes_odds is None and row.llm_no_odds is None:
+                    return False
+                if not selected_console_llm_target_keys:
+                    return True
+                row_output_target_keys = {
+                    (output.provider.strip(), output.model.strip())
+                    for output in row.llm_outputs
+                    if output.provider.strip()
+                    and output.model.strip()
+                    and output.error is None
+                    and output.invalid_reason is None
+                    and (
+                        output.llm_yes_odds is not None
+                        or output.llm_no_odds is not None
+                    )
+                }
+                return selected_console_llm_target_keys.issubset(row_output_target_keys)
+
             manual_console_rows_have_reusable_llm = (
                 manual_console_reuse_saved_llm_outputs
                 and bool(accepted_manual_rows)
                 and all(
-                    row.llm_yes_odds is not None or row.llm_no_odds is not None
+                    _manual_row_has_reusable_llm_outputs(row)
                     for row in accepted_manual_rows
                 )
             )
@@ -4748,7 +4775,6 @@ class BullpenAutoLiveEngine:
         self._report_progress(progress_callback, run, state)
         llm_stage_started_at = utc_now_iso()
         stage1_accepted_candidate_count = len(stage1_accepted_candidates)
-        console_llm_targets = resolve_auto_live_llm_targets(settings)
         console_prompt_template = _console_stage_two_prompt_template(settings)
         llm_execution_runtime_outputs: dict[str, object] = {}
         llm_execution_stage_outputs: dict[str, object] = {
@@ -5797,6 +5823,20 @@ class BullpenAutoLiveEngine:
             ),
         )
         self._report_progress(progress_callback, run, state)
+        if llm_phase_status == "failed":
+            run.completed_at = utc_now_iso()
+            run.status = "failed"
+            run.error_message = (
+                "Stage 2 failed because no selected LLM target produced a usable probability estimate; Stage 3 was not started."
+            )
+            run.summary = run.error_message
+            run.diagnostics.stage2_has_usable_reviews = False
+            run.diagnostics.ranking_enabled = False
+            run.diagnostics.ranking_exit_enabled = False
+            run.diagnostics.new_buy_enabled = False
+            self._report_progress(progress_callback, run, state)
+            return EngineResult(run=run, state=state, positions=positions)
+
         active_review_context_by_key = {
             str(context["position_key"]): context
             for context in active_position_contexts
