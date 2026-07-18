@@ -37,6 +37,8 @@ from app.domains.polymarket_auto_live.engine import (
     BullpenAutoLiveEngine,
     ConsoleStageTwoSharedReview,
     PositionSnapshot,
+    build_workflow_stage_result,
+    reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
     _auto_live_record_id,
 )
@@ -97,6 +99,46 @@ def test_auto_live_record_id_caps_long_action_labels_for_database_columns():
     assert len(record_id) <= 64
     assert record_id.startswith("decision-")
     assert record_id.rsplit("-", 1)[-1]
+
+
+def test_auto_live_retry_clears_stale_stage3_until_stage2_rebuilds():
+    run = BullpenAutoLiveRun(
+        id="retry-run",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=True,
+        started_at="2026-07-18T00:00:00+00:00",
+        summary="Retrying Auto-Live run.",
+        stage_results=[
+            build_workflow_stage_result(
+                stage_number=1,
+                workflow_stage_key="scan",
+                phase_status="completed",
+                status="pass",
+                reason="Stage 1 finished.",
+            ),
+            build_workflow_stage_result(
+                stage_number=2,
+                workflow_stage_key="llm",
+                phase_status="completed",
+                status="pass",
+                reason="Old Stage 2 attempt finished.",
+            ),
+            build_workflow_stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                status="pass",
+                reason="Old Stage 3 attempt was running when the worker retried.",
+                completed_at=None,
+            ),
+        ],
+    )
+
+    reset_workflow_stage_results(run, from_stage_number=2)
+
+    assert [stage.stage_number for stage in run.stage_results] == [1]
+    assert run.stage_results[0].outputs["workflow_stage_key"] == "scan"
 
 
 def test_historical_pending_redeem_stops_blocking_after_retry_cooldown(monkeypatch):
