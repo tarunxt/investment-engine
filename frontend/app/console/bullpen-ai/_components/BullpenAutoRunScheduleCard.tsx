@@ -143,6 +143,7 @@ type BullpenAutoRunScheduleCardProps = {
 type ActionState =
   | "enable"
   | "invest-now"
+  | "start-now"
   | "stop"
   | "pause-run"
   | "resume-run"
@@ -8093,6 +8094,70 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
+  async function handleStartAutoRunNow() {
+    setAction("start-now");
+    const startedAt = new Date().toISOString();
+    setRunNowStartedAt(startedAt);
+    setTimerNowMs(Date.parse(startedAt));
+    setNotice(null);
+    setError(null);
+
+    try {
+      const refreshMinutes = Number.parseInt(scheduleRefreshInput, 10);
+      if (!Number.isFinite(refreshMinutes) || refreshMinutes < 1) {
+        setError({
+          message: "Enter a refresh duration of at least 1 minute.",
+          details: null,
+        });
+        return;
+      }
+
+      const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
+      const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
+      const latestConsoleOrderUsd = tradeAmountView.tradeAmountUsd;
+
+      if (autoRunActive) {
+        await apiService.stopBullpenAutoLive();
+      }
+
+      await apiService.updateBullpenAutoLiveSettings(
+        buildConsoleSettingsUpdate(
+          latestConsoleOrderUsd,
+          normalizedStart || null,
+          refreshMinutes,
+          selectedLlmTargets,
+        ),
+      );
+      setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
+      setScheduleSavedSummary(
+        buildScheduleSummary(
+          startWasNow ? "Now" : normalizedStart,
+          String(refreshMinutes),
+        ),
+      );
+
+      await apiService.startBullpenAutoLive();
+      const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
+      const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+      setPendingRunId(run.id);
+      setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      await loadSummary({
+        preserveLoading: true,
+        nextPendingRunId: run.id,
+      });
+      setNotice(
+        `Started a fresh Auto Run now with ${formatMoney(
+          latestConsoleOrderUsd,
+        )} per new opportunity and a ${refreshMinutes}-minute refresh duration.`,
+      );
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      setRunNowStartedAt(null);
+    } finally {
+      setAction(null);
+    }
+  }
+
   async function handleStopAutoRuns() {
     setAction("stop");
     setNotice(null);
@@ -8569,6 +8634,26 @@ export function BullpenAutoRunScheduleCard({
             >
               <History className="mr-2 h-4 w-4" />
               History
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleStartAutoRunNow}
+              disabled={action !== null}
+              className="border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800 disabled:opacity-60"
+            >
+              {action === "start-now" ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Starting...
+                </>
+              ) : (
+                <>
+                  <Zap className="mr-2 h-4 w-4" />
+                  Start Auto Run Now
+                </>
+              )}
             </Button>
             {autoRunActive ? (
               <Button

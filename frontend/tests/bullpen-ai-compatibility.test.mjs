@@ -321,6 +321,8 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   assert.match(autoRunCardSource, /setScheduleStartInput\("Now"\);/);
   assert.match(autoRunCardSource, /setScheduleSettingsDirty\(true\);/);
   assert.match(autoRunCardSource, /Run and Enable Auto Runs/);
+  assert.match(autoRunCardSource, /Start Auto Run Now/);
+  assert.match(autoRunCardSource, /handleStartAutoRunNow/);
   assert.match(autoRunCardSource, /const normalizedStart = startWasNow \? "" : scheduleStartInput\.trim\(\);/);
   assert.match(autoRunCardSource, /runBullpenAutoLiveOnce\(runNowRequest\)/);
 });
