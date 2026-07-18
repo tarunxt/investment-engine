@@ -48,4 +48,6 @@ test("list client loads paginated summaries instead of raw detail bundles", asyn
   assert.match(source, /apiService\.getBullpenRunAudits\(/);
   assert.doesNotMatch(source, /getBullpenRunAuditSection\(/);
   assert.match(source, /Bullpen Runs Audit/);
+  assert.match(source, /Runs Analysis/);
+  assert.match(source, /URLs\.routes\.console\.bullpenAiAnalyseRuns\(\)/);
 });
