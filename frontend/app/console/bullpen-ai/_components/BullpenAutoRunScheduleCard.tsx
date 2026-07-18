@@ -1164,17 +1164,82 @@ function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
 }
 
 function getStageTwoInvestableDecisions(decisions: BullpenAutoLiveDecision[]) {
-  return decisions.filter((decision) => {
-    const orderPlan = decision.order_plan;
-    if (orderPlan) {
-      return orderPlan.action === "buy" && orderPlan.status !== "cancelled";
-    }
-    return (
-      (decision.decision === "BUY_NEW" || decision.decision === "ADD_MORE") &&
-      decision.risk_status !== "Blocked" &&
-      decision.target_exposure_usd > decision.current_exposure_usd
-    );
-  });
+  return [...decisions]
+    .filter((decision) => {
+      const orderPlan = decision.order_plan;
+      if (orderPlan) {
+        return orderPlan.action === "buy" && orderPlan.status !== "cancelled";
+      }
+      if (decision.decision === "BUY_NEW") {
+        return true;
+      }
+      return (
+        decision.decision === "ADD_MORE" &&
+        decision.risk_status !== "Blocked" &&
+        decision.target_exposure_usd > decision.current_exposure_usd
+      );
+    })
+    .sort((left, right) => {
+      const leftRank = left.stage3_final_rank ?? Number.POSITIVE_INFINITY;
+      const rightRank = right.stage3_final_rank ?? Number.POSITIVE_INFINITY;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      return left.market_title.localeCompare(right.market_title);
+    });
+}
+
+function formatStageTwoInvestExecutionStatus(decision: BullpenAutoLiveDecision) {
+  if (decision.order_plan?.action === "buy") {
+    return decision.order_plan.status.replaceAll("_", " ");
+  }
+  if (
+    decision.decision === "BUY_NEW" &&
+    decision.stage3_result === "SELECTED"
+  ) {
+    return "queued for Stage 3";
+  }
+  return decision.decision.replaceAll("_", " ");
+}
+
+function getStageTwoInvestExecutionTone(
+  decision: BullpenAutoLiveDecision,
+) {
+  const status = decision.order_plan?.status ?? null;
+  if (
+    status === "submitted" ||
+    status === "confirming" ||
+    status === "partially_filled" ||
+    status === "settlement_pending" ||
+    status === "confirmed" ||
+    status === "filled"
+  ) {
+    return "success";
+  }
+  if (
+    status === "failed" ||
+    status === "failed_permanent" ||
+    status === "cancelled" ||
+    status === "deferred" ||
+    status === "rpc_rate_limited" ||
+    status === "waiting_for_collateral" ||
+    status === "skipped"
+  ) {
+    return "warning";
+  }
+  if (decision.decision === "BUY_NEW") {
+    return "info";
+  }
+  return "neutral";
+}
+
+function getStageTwoInvestExecutionReason(decision: BullpenAutoLiveDecision) {
+  return (
+    decision.order_plan?.detail ||
+    decision.stage3_result_reason ||
+    decision.summary ||
+    decision.reason
+  );
 }
 
 function StageOneRunStats({
@@ -6384,8 +6449,9 @@ function StageTwoInvestEventsDialog({
               New Events to Invest in: {state.decisions.length}
             </h2>
             <p className="mt-2 text-sm text-slate-600">
-              Stage 2-qualified events that have a buy plan ready for the Stage
-              3 invest pass.
+              Stage 2-ranked buy candidates that Stage 3 is trying to execute.
+              If a top-ranked event was deferred, its latest blocker is shown
+              here.
             </p>
           </div>
           <button
@@ -6400,34 +6466,67 @@ function StageTwoInvestEventsDialog({
         <div className="flex-1 overflow-auto px-6 py-5">
           {state.decisions.length ? (
             <div className="space-y-4">
-              {state.decisions.map((decision, index) => (
+              {state.decisions.map((decision, index) => {
+                const executionTone = getStageTwoInvestExecutionTone(decision);
+                const executionStatus = formatStageTwoInvestExecutionStatus(decision);
+                const executionReason = getStageTwoInvestExecutionReason(decision);
+                const executionBadgeClassName =
+                  executionTone === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : executionTone === "warning"
+                      ? "border-amber-200 bg-amber-50 text-amber-800"
+                      : executionTone === "info"
+                        ? "border-sky-200 bg-sky-50 text-sky-800"
+                        : "border-slate-200 bg-white text-slate-700";
+                const cardClassName =
+                  executionTone === "success"
+                    ? "border-emerald-100 bg-emerald-50/40"
+                    : executionTone === "warning"
+                      ? "border-amber-100 bg-amber-50/40"
+                      : executionTone === "info"
+                        ? "border-sky-100 bg-sky-50/40"
+                        : "border-slate-200 bg-slate-50/40";
+                const stage3Rank =
+                  typeof decision.stage3_final_rank === "number"
+                    ? `#${decision.stage3_final_rank}`
+                    : null;
+
+                return (
                 <article
                   key={decision.id}
-                  className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4 text-sm text-slate-700"
+                  className={`rounded-2xl border p-4 text-sm text-slate-700 ${cardClassName}`}
                 >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">
                         Event {index + 1}
+                        {stage3Rank ? ` · Rank ${stage3Rank}` : ""}
                       </p>
                       <h3 className="mt-1 text-base font-semibold text-slate-950">
                         {decision.market_title}
                       </h3>
                     </div>
-                    <span className="rounded-full border border-emerald-200 bg-white px-3 py-1 text-xs font-semibold text-emerald-800">
-                      {decision.side} ·{" "}
-                      {decision.order_plan?.status ?? decision.decision}
+                    <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${executionBadgeClassName}`}>
+                      {decision.side} · {executionStatus}
                     </span>
                   </div>
                   <div className="mt-3 rounded-xl bg-white/80 px-3 py-2">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      Summary
+                      Latest Stage 3 status
                     </p>
                     <p className="mt-1 leading-6">
-                      {decision.summary || decision.reason}
+                      {executionReason}
                     </p>
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-3">
+                    <div className="rounded-xl bg-white/80 px-3 py-2">
+                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Stage 3 outcome
+                      </p>
+                      <p className="mt-1 font-semibold text-slate-950">
+                        {decision.stage3_result?.replaceAll("_", " ") ?? "Pending"}
+                      </p>
+                    </div>
                     <div className="rounded-xl bg-white/80 px-3 py-2">
                       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
                         Price / fair
@@ -6435,15 +6534,6 @@ function StageTwoInvestEventsDialog({
                       <p className="mt-1 font-semibold text-slate-950">
                         {decision.price_cents.toFixed(1)}¢ /{" "}
                         {decision.fair_probability_pct.toFixed(1)}%
-                      </p>
-                    </div>
-                    <div className="rounded-xl bg-white/80 px-3 py-2">
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                        Edge / score
-                      </p>
-                      <p className="mt-1 font-semibold text-slate-950">
-                        {decision.edge_pp.toFixed(1)} pp /{" "}
-                        {decision.score.toFixed(1)}
                       </p>
                     </div>
                     <div className="rounded-xl bg-white/80 px-3 py-2">
@@ -6464,6 +6554,14 @@ function StageTwoInvestEventsDialog({
                     <p className="mt-1 leading-6">
                       {decision.rationale || decision.reason}
                     </p>
+                    {executionReason !== (decision.rationale || decision.reason) ? (
+                      <p className="mt-2 leading-6 text-slate-600">
+                        <span className="font-semibold text-slate-950">
+                          Execution blocker / detail:
+                        </span>{" "}
+                        {executionReason}
+                      </p>
+                    ) : null}
                     {decision.key_evidence.length ? (
                       <ul className="mt-2 list-disc space-y-1 pl-5">
                         {decision.key_evidence.map((item) => (
@@ -6478,11 +6576,13 @@ function StageTwoInvestEventsDialog({
                     ) : null}
                   </div>
                 </article>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              No Stage 2-qualified invest events were returned for this run.
+              No Stage 2-ranked Stage 3 buy candidates were returned for this
+              run.
             </p>
           )}
         </div>
