@@ -205,10 +205,12 @@ export function getInvestMetricDialogDefinition(
       };
     case "sell-ranking-llm":
       return {
-        title: "Stage 3 Step 1 Event out of Top 10 exits",
+        title: "Stage 3 Step 1 submitted Event out of Top 10 exits",
         description:
-          "Event Exit rows triggered by the Event out of Top 10 exit logic.",
-        includes: (decision) => hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
+          "Event Exit rows triggered by the Event out of Top 10 exit logic whose order was submitted and confirmed by Bullpen.",
+        includes: (decision) =>
+          isSubmittedOrSuccessfulDecision(decision) &&
+          hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
       };
     case "sell-ranking-llm-planned":
       return {
@@ -221,10 +223,12 @@ export function getInvestMetricDialogDefinition(
       };
     case "sell-forced-exit":
       return {
-        title: "Stage 3 Step 1 forced exits",
+        title: "Stage 3 Step 1 submitted forced exits",
         description:
-          "Event Exit rows triggered by the capital-aware forced-exit guardrail.",
-        includes: (decision) => hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
+          "Event Exit rows triggered by the capital-aware forced-exit guardrail whose order was submitted and confirmed by Bullpen.",
+        includes: (decision) =>
+          isSubmittedOrSuccessfulDecision(decision) &&
+          hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
       };
     case "sell-forced-exit-planned":
       return {
@@ -237,12 +241,13 @@ export function getInvestMetricDialogDefinition(
       };
     case "sell-redeem":
       return {
-        title: "Stage 3 Step 1 redeem/claim",
+        title: "Stage 3 Step 1 submitted redeem/claim",
         description:
-          "Resolved winning Bullpen positions that skip Stage 2 LLM review and are redeemed/claimed in Stage 3 Step 1.",
+          "Resolved winning Bullpen positions whose redeem/claim order was submitted and confirmed by Bullpen.",
         includes: (decision) =>
-          decision.order_plan?.action === "redeem" ||
-          hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES),
+          isSubmittedOrSuccessfulDecision(decision) &&
+          (decision.order_plan?.action === "redeem" ||
+            hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES)),
       };
     case "sell-redeem-planned":
       return {
