@@ -170,7 +170,7 @@ export function RunAuditListClient() {
             </Link>
           </Button>
           <Button asChild className="bg-purple-700 text-white hover:bg-purple-800">
-            <Link href={URLs.routes.console.bullpenAi()}>Bullpen x AI</Link>
+            <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>Runs Analysis</Link>
           </Button>
         </div>
       </div>

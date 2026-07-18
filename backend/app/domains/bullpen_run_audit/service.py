@@ -7,8 +7,10 @@ import json
 from math import ceil
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.domains.bullpen_run_audit.constants import (
     AUDIT_SECTION_KEYS,
     AUDITED_ALGORITHM_REGISTRY,
@@ -52,6 +54,8 @@ from app.domains.bullpen_run_audit.schemas import (
 from app.domains.bullpen_run_audit.validators import build_deterministic_findings
 from app.domains.polymarket_auto_live.order_intent_service import summarize_run_orders_sync
 from app.domains.polymarket_auto_live.repository import record_to_decision, record_to_run
+
+logger = get_logger(__name__)
 
 TERMINAL_RUN_STATUSES = {"completed", "partial_success", "failed", "skipped"}
 STATUS_PRIORITY = {"fail": 3, "warning": 2, "pass": 1, "skipped": 0}
@@ -1090,13 +1094,21 @@ def ensure_materialized_snapshots_for_user_sync(
         to_date=to_date,
         run_id_search=run_id_search,
     )
-    for run_record in run_records:
-        materialize_run_audit_snapshot_sync(
-            session,
-            user_id=user_id,
-            run_id=run_record.id,
-            force=False,
-        )
+    for run_record in run_records[:100]:
+        try:
+            with session.begin_nested():
+                materialize_run_audit_snapshot_sync(
+                    session,
+                    user_id=user_id,
+                    run_id=run_record.id,
+                    force=False,
+                )
+        except Exception:
+            logger.exception(
+                "Failed to materialize Bullpen run audit snapshot user_id=%s run_id=%s",
+                user_id,
+                run_record.id,
+            )
 
 
 def _snapshot_to_summary(snapshot: BullpenRunAuditSnapshotRecord) -> BullpenRunAuditSummaryItem:
@@ -1196,23 +1208,8 @@ def list_run_audit_summaries_sync(
         to_date=to_date,
         run_id_search=run_id_search,
     )
-    total_count = len(
-        session.execute(
-            repo.list_snapshots_query(
-                user_id=user_id,
-                stage_failure=stage_failure,
-                audit_status=audit_status,
-                finding_severity=finding_severity,
-                feedback_generated=feedback_generated,
-                run_status=run_status,
-                triggered_by=triggered_by,
-                dry_live_mode=dry_live_mode,
-                from_date=from_date,
-                to_date=to_date,
-                run_id_search=run_id_search,
-            )
-        ).scalars().all()
-    )
+    count_query = select(func.count()).select_from(query.order_by(None).subquery())
+    total_count = int(session.execute(count_query).scalar_one() or 0)
     rows = list(
         session.execute(
             query.limit(limit).offset(max(0, page - 1) * limit)
