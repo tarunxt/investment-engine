@@ -134,7 +134,10 @@ pre-LLM review rows.
 For auto-live console-profile runs, Stage 1 background Bullpen CLI reads are
 expected to stay non-interactive: discover, positions, and balance refreshes
 must use short worker-safe timeouts and must not block on manual Bullpen login
-polling. If a user cancels the run while those reads are in flight, the audit
+polling. The current worker contract is a 5 second discover timeout, a 20 second
+default positions timeout with `BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS`
+available for bounded overrides, and the existing bounded balance timeout path.
+If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
 write revert the run back to an in-progress state.
 

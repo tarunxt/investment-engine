@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
@@ -41,7 +42,8 @@ DEFAULT_CONSOLE_ORDER_USD = 5.0
 CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
 CONSOLE_MIN_MARKET_ODDS = 5.0
 CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
-CONSOLE_POSITIONS_TIMEOUT_SECONDS = 8
+CONSOLE_POSITIONS_TIMEOUT_SECONDS = 20
+CONSOLE_POSITIONS_TIMEOUT_ENV_VAR = "BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS"
 
 _POSITIONS_COMMAND_VARIANTS = [
     ["polymarket", "positions", "--output", "json"],
@@ -174,6 +176,16 @@ class ConsoleDiscoverRow:
     row: dict[str, object]
     context_theme: str | None
     context_close_time: str | None
+
+
+def _console_positions_timeout_seconds() -> int:
+    configured = os.getenv(CONSOLE_POSITIONS_TIMEOUT_ENV_VAR)
+    if configured is None:
+        return CONSOLE_POSITIONS_TIMEOUT_SECONDS
+    try:
+        return max(1, int(configured))
+    except ValueError:
+        return CONSOLE_POSITIONS_TIMEOUT_SECONDS
 
 
 def _parse_console_start_at(value: str | None) -> datetime | None:
@@ -989,7 +1001,7 @@ def _aggregate_console_wallet_positions(
 async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
     parsed = await run_first_bullpen_json(
         _POSITIONS_COMMAND_VARIANTS,
-        timeout_seconds=CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+        timeout_seconds=_console_positions_timeout_seconds(),
         wait_for_login=False,
     )
     rows = _collect_console_position_rows(parsed)
