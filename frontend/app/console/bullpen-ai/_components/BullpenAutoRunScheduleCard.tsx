@@ -8176,7 +8176,8 @@ export function BullpenAutoRunScheduleCard({
 
       const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
-      const latestConsoleOrderUsd = tradeAmountView.tradeAmountUsd;
+      const latestConsoleOrderUsd =
+        tradeAmountView.tradeAmountUsd ?? persistedConsoleOrderUsd;
 
       if (autoRunActive) {
         await apiService.stopBullpenAutoLive();
