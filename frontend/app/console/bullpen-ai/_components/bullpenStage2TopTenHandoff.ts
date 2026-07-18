@@ -319,7 +319,7 @@ function buildTopCandidateMarketIdOrder(
       investOutputs?.ranked_top_candidate_market_ids,
   );
   if (marketIds.length > 0) {
-    return marketIds;
+    return marketIds.slice(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS);
   }
 
   const reviewedTopTenMarketIds = [...questionByMarketId.values()]
@@ -372,7 +372,9 @@ function decisionsFallbackFromRun(run: BullpenAutoLiveRun) {
       return left.marketId.localeCompare(right.marketId);
     });
 
-  return rankedDecisions.map((item) => item.marketId);
+  return rankedDecisions
+    .slice(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS)
+    .map((item) => item.marketId);
 }
 
 function buildReason(decision: BullpenAutoLiveDecision | null) {

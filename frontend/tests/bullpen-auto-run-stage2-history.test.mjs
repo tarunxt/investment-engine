@@ -153,6 +153,8 @@ test("Stage 2 historical summary rows rebuild consensus from persisted event dat
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].question, "Will event one happen?");
+  assert.equal(rows[0].marketId, "market-1");
+  assert.equal(rows[0].questionId, "question-1");
   assert.equal(rows[0].category, "Politics");
   assert.equal(rows[0].yesOdds, 54);
   assert.equal(rows[0].noOdds, 46);

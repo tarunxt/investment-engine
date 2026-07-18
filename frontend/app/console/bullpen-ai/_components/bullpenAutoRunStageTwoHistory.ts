@@ -973,6 +973,17 @@ export function buildStageTwoEventsSummaryRows({
     const summaryRow = createBullpenQuestionRow({
       id: fallbackId,
       question: context.title,
+      marketId:
+        readFirstString(
+          row.market_id,
+          readRecordValue(preparedQuestionPayload, "market_id"),
+          decision?.market_id,
+        ) ?? null,
+      questionId:
+        readFirstString(
+          row.question_id,
+          readRecordValue(preparedQuestionPayload, "question_id"),
+        ) ?? null,
       closeTime: context.closeTime,
       category: context.category,
       yesOdds: context.currentYesOdds,
