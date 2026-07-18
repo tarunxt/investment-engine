@@ -1,6 +1,13 @@
 "use client";
 
-import { Suspense, useEffect, useEffectEvent, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -1759,35 +1766,53 @@ function BullpenAiPageContent() {
       />
     </div>
   );
-  const activePositionQuestionsForLlm = openActivePositions.map((position) =>
-    buildBullpenQuestionRowFromActivePosition(
-      position,
-      activePositionAnalysesByKey[position.key],
-    ),
+  const activePositionQuestionsForLlm = useMemo(
+    () =>
+      openActivePositions.map((position) =>
+        buildBullpenQuestionRowFromActivePosition(
+          position,
+          activePositionAnalysesByKey[position.key],
+        ),
+      ),
+    [activePositionAnalysesByKey, openActivePositions],
   );
-  const activeInvestmentCandidates =
-    selectionEnabled && activeCurrentSnapshot
-      ? activeCurrentSnapshot.questions
-          .map((question) =>
-            mergeQuestionWithLatestActivePositionAnalysis(
-              question,
-              openActivePositions,
-              activePositionAnalysesByKey,
-            ),
-        )
-        .filter((question) => {
-          return isBullpenQuestionInvestmentCandidate(question);
-        })
-    : [];
-  const activeInvestmentDisplay =
-    selectionEnabled && activeCurrentSnapshot
-      ? buildBullpenInvestmentDisplay({
-          activePositions: openActivePositions,
-          activePositionQuestions: activePositionQuestionsForLlm,
-          candidates: activeInvestmentCandidates,
-          recentDecisions: recentAutoRunDecisions,
-        })
-      : null;
+  const activeInvestmentCandidates = useMemo(() => {
+    if (!selectionEnabled || !activeCurrentSnapshot) return [];
+
+    return activeCurrentSnapshot.questions
+      .map((question) =>
+        mergeQuestionWithLatestActivePositionAnalysis(
+          question,
+          openActivePositions,
+          activePositionAnalysesByKey,
+        ),
+      )
+      .filter((question) => {
+        return isBullpenQuestionInvestmentCandidate(question);
+      });
+  }, [
+    activeCurrentSnapshot,
+    activePositionAnalysesByKey,
+    openActivePositions,
+    selectionEnabled,
+  ]);
+  const activeInvestmentDisplay = useMemo(() => {
+    if (!selectionEnabled || !activeCurrentSnapshot) return null;
+
+    return buildBullpenInvestmentDisplay({
+      activePositions: openActivePositions,
+      activePositionQuestions: activePositionQuestionsForLlm,
+      candidates: activeInvestmentCandidates,
+      recentDecisions: recentAutoRunDecisions,
+    });
+  }, [
+    activeCurrentSnapshot,
+    activeInvestmentCandidates,
+    activePositionQuestionsForLlm,
+    openActivePositions,
+    recentAutoRunDecisions,
+    selectionEnabled,
+  ]);
   const visibleInvestmentCandidates = activeVisibleSnapshot
     ? activeVisibleSnapshot.questions
         .map((question) =>
@@ -1801,18 +1826,20 @@ function BullpenAiPageContent() {
           return isBullpenQuestionInvestmentCandidate(question);
         })
     : [];
-  const currentShortlistedInvestmentCandidates = activeInvestmentDisplay
-    ? activeInvestmentDisplay.topInvestmentRows
-        .filter(
-          (
-            row,
-          ): row is Extract<
-            (typeof activeInvestmentDisplay.topInvestmentRows)[number],
-            { kind: "candidate" }
-          > => row.kind === "candidate",
-        )
-        .map((row) => row.question)
-    : [];
+  const currentShortlistedInvestmentCandidates = useMemo(() => {
+    if (!activeInvestmentDisplay) return [];
+
+    return activeInvestmentDisplay.topInvestmentRows
+      .filter(
+        (
+          row,
+        ): row is Extract<
+          (typeof activeInvestmentDisplay.topInvestmentRows)[number],
+          { kind: "candidate" }
+        > => row.kind === "candidate",
+      )
+      .map((row) => row.question);
+  }, [activeInvestmentDisplay]);
   const visibleInvestmentDisplay = buildBullpenInvestmentDisplay({
     activePositions: openActivePositions,
     activePositionQuestions: activePositionQuestionsForLlm,
