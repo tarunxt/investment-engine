@@ -1033,6 +1033,9 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /formatOddsPercent\(decision\.fair_yes_probability_pct \?\? null\)/);
   assert.match(source, /formatOddsPercent\(decision\.fair_no_probability_pct \?\? null\)/);
   assert.match(source, /formatReturnsPerDay\(getDecisionReturnsPerDay\(decision\)\)/);
+  assert.match(source, /STAGE_TWO_BYPASS_REASON/);
+  assert.match(source, /Open Stage 2 bypass reason/);
+  assert.match(source, /Steps to rectify/);
 });
 
 test("Stage 3 schedule card exposes a planned preview queue for current buys and sells", () => {
