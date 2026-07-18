@@ -126,7 +126,7 @@ import {
 } from "./bullpenStage2To3Strategy";
 
 const BULLPEN_LOGIN_COMMAND =
-  "sudo -u investor env HOME=/home/investor BULLPEN_BIN=/usr/local/bin/bullpen /usr/local/bin/bullpen login --no-browser";
+  "sudo -u investor env HOME=/var/lib/credx/bullpen BULLPEN_BIN=/usr/local/bin/bullpen /usr/local/bin/bullpen login --no-browser";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 
