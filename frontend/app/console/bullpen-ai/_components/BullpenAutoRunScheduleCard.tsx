@@ -7849,12 +7849,15 @@ export function BullpenAutoRunScheduleCard({
   const selectedLlmTargetsSaveInFlightRef = useRef(false);
   const selectedLlmTargetsSavePromiseRef = useRef<Promise<void> | null>(null);
   const savedSelectedLlmTargetsRef = useRef("[]");
-  const legacyBullpenLlmTargetsRef = useRef<ProviderModelTarget[]>(
+  const [initialLegacyBullpenLlmTargets] = useState(() =>
     readLegacyBullpenLlmTargetsFromStorage(),
+  );
+  const legacyBullpenLlmTargetsRef = useRef<ProviderModelTarget[]>(
+    initialLegacyBullpenLlmTargets,
   );
   const legacyBullpenLlmTargetsBootstrapStartedRef = useRef(false);
   const legacyBullpenLlmTargetsBootstrapEligibleRef = useRef(
-    legacyBullpenLlmTargetsRef.current.length > 0,
+    initialLegacyBullpenLlmTargets.length > 0,
   );
   const [llmExecutionMode, setLlmExecutionMode] =
     useState<BullpenLlmExecutionMode>(DEFAULT_LLM_EXECUTION_MODE);
@@ -7921,24 +7924,6 @@ export function BullpenAutoRunScheduleCard({
     });
   }, [llmTargetSelectionSaveBusy, summary?.settings.console_llm_targets]);
 
-  useEffect(() => {
-    if (!summary) return;
-    if (legacyBullpenLlmTargetsBootstrapStartedRef.current) return;
-    if ((summary.settings.console_llm_targets ?? []).length > 0) return;
-    if (!legacyBullpenLlmTargetsBootstrapEligibleRef.current) return;
-
-    const legacyTargets = legacyBullpenLlmTargetsRef.current;
-    if (legacyTargets.length === 0) return;
-
-    legacyBullpenLlmTargetsBootstrapStartedRef.current = true;
-    setSelectedLlmTargets((currentTargets) =>
-      areProviderTargetsEqual(currentTargets, legacyTargets)
-        ? currentTargets
-        : legacyTargets,
-    );
-    pendingSelectedLlmTargetsSaveRef.current = legacyTargets;
-    void flushSelectedLlmTargetSaves();
-  }, [summary]);
 
   useEffect(() => {
     if (llmExecutionSettingsDirty) return;
@@ -8026,6 +8011,25 @@ export function BullpenAutoRunScheduleCard({
       }
     }
   }
+
+  useEffect(() => {
+    if (!summary) return;
+    if (legacyBullpenLlmTargetsBootstrapStartedRef.current) return;
+    if ((summary.settings.console_llm_targets ?? []).length > 0) return;
+    if (!legacyBullpenLlmTargetsBootstrapEligibleRef.current) return;
+
+    const legacyTargets = legacyBullpenLlmTargetsRef.current;
+    if (legacyTargets.length === 0) return;
+
+    legacyBullpenLlmTargetsBootstrapStartedRef.current = true;
+    setSelectedLlmTargets((currentTargets) =>
+      areProviderTargetsEqual(currentTargets, legacyTargets)
+        ? currentTargets
+        : legacyTargets,
+    );
+    pendingSelectedLlmTargetsSaveRef.current = legacyTargets;
+    void flushSelectedLlmTargetSaves();
+  }, [summary]);
 
   async function handleSelectedLlmTargetsChange(
     nextTargets: ProviderModelTarget[],
@@ -8294,18 +8298,6 @@ export function BullpenAutoRunScheduleCard({
     };
   }, [summary?.settings.auto_live_enabled, trackedRunId]);
 
-  useEffect(() => {
-    if (!scheduleSettingsDirty || action !== null) return;
-    const timeoutId = window.setTimeout(() => {
-      void handleSaveScheduleSettings({ silentSuccess: true });
-    }, 600);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-    // handleSaveScheduleSettings intentionally reads the latest schedule input values.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduleSettingsDirty, scheduleStartInput, scheduleRefreshInput, action]);
 
   useEffect(() => {
     if (!llmExecutionSettingsDirty || action !== null) return;
@@ -8369,6 +8361,19 @@ export function BullpenAutoRunScheduleCard({
       setScheduleSettingsSaveBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!scheduleSettingsDirty || action !== null) return;
+    const timeoutId = window.setTimeout(() => {
+      void handleSaveScheduleSettings({ silentSuccess: true });
+    }, 600);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+    // handleSaveScheduleSettings intentionally reads the latest schedule input values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scheduleSettingsDirty, scheduleStartInput, scheduleRefreshInput, action]);
 
   async function handleEnableAutoRuns() {
     setAction("enable");
