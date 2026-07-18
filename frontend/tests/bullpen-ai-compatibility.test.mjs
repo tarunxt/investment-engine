@@ -177,7 +177,7 @@ test("Bullpen preflight uses the selected market's by-date instead of a stale ev
 
 test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-invest endpoint", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const urlsSource = readFileSync(
@@ -193,7 +193,7 @@ test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-inves
 
 test("Bullpen x AI investment result is shown below the Invest button", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const investmentsSectionSource = readFileSync(
@@ -218,7 +218,7 @@ test("Bullpen x AI investment result is shown below the Invest button", () => {
 
 test("Bullpen x AI shows selectable auto-run schedule tiles without the manual run-now button", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const autoRunCardSource = readFileSync(
@@ -327,7 +327,7 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
 
 test("Bullpen x AI run-now request can reuse the current scan snapshot before manual LLM selection exists", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
 
@@ -343,7 +343,7 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
 
 test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM runs", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const autoRunCardSource = readFileSync(
@@ -431,7 +431,7 @@ test("Bullpen x AI Stage 2 prompt dialogs fall back to the saved run prompt temp
 
 test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const investmentsSectionSource = readFileSync(
@@ -684,7 +684,7 @@ test("Bullpen x AI market prediction filter excludes largest-company-by-market-c
 
 test("Bullpen x AI exclusions dialog includes exact-rule copy for tile drilldowns", () => {
   const pageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const dialogSource = readFileSync(
@@ -703,7 +703,7 @@ test("Bullpen x AI exclusions dialog includes exact-rule copy for tile drilldown
 
 test("Bullpen x AI active positions stay included in LLM runs and share the events-table layout", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const investmentsSectionSource = readFileSync(
@@ -749,7 +749,7 @@ test("Bullpen x AI active positions stay included in LLM runs and share the even
 
 test("Bullpen x AI stage refreshes keep fresh opportunities and active positions synced to canonical Polymarket odds", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const currentOddsRouteSource = readFileSync(
@@ -798,7 +798,7 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
 
 test("Bullpen x AI keeps retrying auto-claim while the same resolved positions remain claimable", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
 
@@ -904,7 +904,7 @@ test("Bullpen auto-run summary sync keeps completed run visible after refresh", 
 
 test("Bullpen x AI keeps BullpenQuestionsTable as the single canonical Events Summary table", () => {
   const bullpenAiPageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
   const scheduleCardSource = readFileSync(
@@ -1004,7 +1004,7 @@ test("auto-run active position sync uses the shared event identity resolver", ()
     "utf8",
   );
   const pageSource = readFileSync(
-    new URL("../app/console/bullpen-ai/page.tsx", import.meta.url),
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
     "utf8",
   );
 
