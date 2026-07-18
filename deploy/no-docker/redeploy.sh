@@ -19,6 +19,7 @@ BACKEND_LIVE_URL="${BACKEND_LIVE_URL:-http://127.0.0.1:8000/health/live}"
 BACKEND_READY_URL="${BACKEND_READY_URL:-http://127.0.0.1:8000/health/ready}"
 FRONTEND_SMOKE_URL="${FRONTEND_SMOKE_URL:-http://127.0.0.1:3000/login}"
 FRONTEND_CONSOLE_SMOKE_URL="${FRONTEND_CONSOLE_SMOKE_URL:-http://127.0.0.1:3000/console/dashboard}"
+FRONTEND_BULLPEN_AI_SMOKE_URL="${FRONTEND_BULLPEN_AI_SMOKE_URL:-http://127.0.0.1:3000/console/bullpen-ai}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 SMOKE_RETRIES="${SMOKE_RETRIES:-30}"
 SMOKE_RETRY_SLEEP_SECONDS="${SMOKE_RETRY_SLEEP_SECONDS:-2}"
@@ -855,6 +856,7 @@ if [[ "$SCOPE" == "full" ]]; then
   # dashboard too so a broken App Router/proxy artifact fails the release
   # instead of surfacing as a production 500 after deployment.
   smoke_check "frontend console dashboard" "$FRONTEND_CONSOLE_SMOKE_URL"
+  smoke_check "frontend Bullpen AI console" "$FRONTEND_BULLPEN_AI_SMOKE_URL"
 fi
 
 CONFIG_ROLLBACK_ENABLED=false
