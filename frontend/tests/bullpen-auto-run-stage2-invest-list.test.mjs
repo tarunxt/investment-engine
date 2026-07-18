@@ -17,7 +17,7 @@ test("Stage 2 invest list keeps shortlisted BUY_NEW rows visible until Stage 3 f
   assert.match(source, /If a transferred event never became a concrete Step 2\s+buy plan/);
   assert.match(source, /Execution blocker \/ detail:/);
   assert.match(source, /row\.missingFromStage3/);
-  assert.match(source, /decision\.stage3_result\?\.replaceAll\("_", " "\) \?\? "Pending"/);
+  assert.match(source, /formatStage2TopTenHandoffOutcome/);
   assert.match(source, /showStage2TopTenEventsSummary/);
   assert.match(source, /<Stage2TopTenEventsSummaryTable/);
   assert.match(source, /testId="stage-three-step-two-events-summary"/);

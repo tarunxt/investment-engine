@@ -92,7 +92,6 @@ import {
   BullpenQuestionsTable,
   type BullpenQuestionsTableExtraColumn,
   type BullpenTableSortKey,
-  type BullpenQuestionsTableExtraColumn,
   type BullpenTableSortState,
 } from "./BullpenQuestionsTable";
 import {
