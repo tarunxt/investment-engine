@@ -8392,10 +8392,12 @@ export function BullpenAutoRunScheduleCard({
       }
       const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
-      const consoleLlmTargets = await ensureCanonicalStage2LlmTargets({
-        requireNonEmpty: true,
-      });
-      if (!consoleLlmTargets) {
+      const consoleLlmTargets = startWasNow
+        ? await ensureCanonicalStage2LlmTargets({
+            requireNonEmpty: true,
+          })
+        : await ensureCanonicalStage2LlmTargets();
+      if (startWasNow && !consoleLlmTargets) {
         return;
       }
       await apiService.updateBullpenAutoLiveSettings(
@@ -8442,11 +8444,19 @@ export function BullpenAutoRunScheduleCard({
         setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       }
       const nextSummary = await loadSummary({ preserveLoading: true });
-      setNotice(
-        nextSummary?.state.next_run_at
-          ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextSummary.state.next_run_at)}.`
-          : "Auto runs enabled.",
-      );
+      if (!startWasNow && (!consoleLlmTargets || consoleLlmTargets.length === 0)) {
+        setNotice(
+          nextSummary?.state.next_run_at
+            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextSummary.state.next_run_at)}. Select at least one LLM before that run so Stage 2 can execute.`
+            : "Auto runs enabled. Select at least one LLM before the first run so Stage 2 can execute.",
+        );
+      } else {
+        setNotice(
+          nextSummary?.state.next_run_at
+            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextSummary.state.next_run_at)}.`
+            : "Auto runs enabled.",
+        );
+      }
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
