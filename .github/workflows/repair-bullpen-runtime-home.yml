@@ -7,13 +7,13 @@ on:
         description: Type REPAIR_BULLPEN_RUNTIME to confirm the production Bullpen credential home can be updated and services restarted.
         required: true
         type: string
-      credential_home:
-        description: Shared Bullpen credential home the backend and frontend should use.
-        required: true
-        default: /var/lib/credx/bullpen
+      credential_dir:
+        description: Bullpen credential directory to repair. Leave blank to use the service user's default ~/.bullpen directory.
+        required: false
+        default: ""
         type: string
-      source_home:
-        description: Existing Bullpen credential directory to copy from when repairing the shared runtime home.
+      source_dir:
+        description: Existing Bullpen credential directory to copy from when repairing the service runtime home.
         required: true
         default: /home/ubuntu/.bullpen
         type: string
@@ -54,8 +54,8 @@ jobs:
             BACKEND_ENV_FILE="/etc/investor/backend.env"
             FRONTEND_ENV_FILE="/etc/investor/frontend.env"
             BULLPEN_BIN="/usr/local/bin/bullpen"
-            CREDENTIAL_HOME="${{ inputs.credential_home }}"
-            SOURCE_HOME="${{ inputs.source_home }}"
+            CREDENTIAL_DIR_INPUT="${{ inputs.credential_dir }}"
+            SOURCE_DIR="${{ inputs.source_dir }}"
 
             if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
               APP_ROOT="$LEGACY_APP_ROOT"
@@ -63,6 +63,16 @@ jobs:
 
             if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
               APP_USER="$LEGACY_APP_USER"
+            fi
+
+            APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+            if [[ -z "$APP_HOME" ]]; then
+              APP_HOME="/home/$APP_USER"
+            fi
+            if [[ -n "$CREDENTIAL_DIR_INPUT" ]]; then
+              CREDENTIAL_DIR="$CREDENTIAL_DIR_INPUT"
+            else
+              CREDENTIAL_DIR="$APP_HOME/.bullpen"
             fi
 
             resolve_systemd_service_name() {
@@ -123,48 +133,48 @@ jobs:
 
             echo "==> App root: $APP_ROOT"
             echo "==> App user: $APP_USER"
+            echo "==> App home: $APP_HOME"
             echo "==> Backend env: $BACKEND_ENV_FILE"
             echo "==> Frontend env: $FRONTEND_ENV_FILE"
             echo "==> Bullpen bin: $BULLPEN_BIN"
-            echo "==> Shared credential home: $CREDENTIAL_HOME"
-            echo "==> Bootstrap source home: $SOURCE_HOME"
+            echo "==> Service credential dir: $CREDENTIAL_DIR"
+            echo "==> Bootstrap source dir: $SOURCE_DIR"
 
             sudo test -x "$BULLPEN_BIN"
             sudo test -f "$BACKEND_ENV_FILE"
             sudo test -f "$FRONTEND_ENV_FILE"
             id "$APP_USER" >/dev/null
 
-            if [[ -d "$SOURCE_HOME" ]]; then
-              if credentials_present "$SOURCE_HOME"; then
+            if [[ -d "$SOURCE_DIR" ]]; then
+              if credentials_present "$SOURCE_DIR"; then
                 echo "==> Source credential store detected"
               else
-                echo "Source credential directory exists but does not contain Bullpen credentials: $SOURCE_HOME" >&2
+                echo "Source credential directory exists but does not contain Bullpen credentials: $SOURCE_DIR" >&2
                 exit 1
               fi
-            elif ! credentials_present "$CREDENTIAL_HOME"; then
-              echo "Neither the shared Bullpen credential home nor the bootstrap source contains credentials." >&2
+            elif ! credentials_present "$CREDENTIAL_DIR"; then
+              echo "Neither the service Bullpen credential dir nor the bootstrap source contains credentials." >&2
               exit 1
             fi
 
-            echo "==> Preparing shared Bullpen credential home"
-            sudo mkdir -p "$CREDENTIAL_HOME"
-            if credentials_present "$CREDENTIAL_HOME"; then
-              sudo cp -a "$CREDENTIAL_HOME" "$CREDENTIAL_HOME.bak.$(date +%Y%m%d%H%M%S)"
+            echo "==> Preparing service Bullpen credential dir"
+            sudo mkdir -p "$CREDENTIAL_DIR"
+            if credentials_present "$CREDENTIAL_DIR"; then
+              sudo cp -a "$CREDENTIAL_DIR" "$CREDENTIAL_DIR.bak.$(date +%Y%m%d%H%M%S)"
             fi
-            if [[ -d "$SOURCE_HOME" && "$SOURCE_HOME" != "$CREDENTIAL_HOME" ]]; then
-              sudo rsync -a --delete "$SOURCE_HOME"/ "$CREDENTIAL_HOME"/
+            if [[ -d "$SOURCE_DIR" && "$SOURCE_DIR" != "$CREDENTIAL_DIR" ]]; then
+              sudo rsync -a --delete "$SOURCE_DIR"/ "$CREDENTIAL_DIR"/
             fi
-            sudo chown -R "$APP_USER":"$APP_USER" "$CREDENTIAL_HOME"
-            sudo find "$CREDENTIAL_HOME" -type d -exec chmod 700 {} \;
-            sudo find "$CREDENTIAL_HOME" -type f -exec chmod 600 {} \;
-            credentials_present "$CREDENTIAL_HOME"
+            sudo chown -R "$APP_USER":"$APP_USER" "$CREDENTIAL_DIR"
+            sudo find "$CREDENTIAL_DIR" -type d -exec chmod 700 {} \;
+            sudo find "$CREDENTIAL_DIR" -type f -exec chmod 600 {} \;
+            credentials_present "$CREDENTIAL_DIR"
 
             echo "==> Updating Bullpen runtime env in backend and frontend env files"
             sudo env \
               BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
               FRONTEND_ENV_FILE="$FRONTEND_ENV_FILE" \
               BULLPEN_BIN="$BULLPEN_BIN" \
-              CREDENTIAL_HOME="$CREDENTIAL_HOME" \
               python3 - <<'PY'
             import os
             from pathlib import Path
@@ -175,9 +185,8 @@ jobs:
             ]
             updates = {
                 "BULLPEN_BIN": os.environ["BULLPEN_BIN"],
-                "BULLPEN_HOME": os.environ["CREDENTIAL_HOME"],
-                "BULLPEN_CREDENTIALS_HOME": os.environ["CREDENTIAL_HOME"],
             }
+            removals = {"BULLPEN_HOME", "BULLPEN_CREDENTIALS_HOME"}
 
             for path in files:
                 lines = path.read_text(encoding="utf-8").splitlines()
@@ -194,6 +203,8 @@ jobs:
                     if key in updates:
                         output.append(f"{key}={updates[key]}")
                         seen.add(key)
+                    elif key in removals:
+                        continue
                     else:
                         output.append(line)
 
@@ -211,26 +222,19 @@ jobs:
 
             echo "==> Effective Bullpen env entries"
             sudo bash -lc "
-              grep -E '^(BULLPEN_BIN|BULLPEN_HOME|BULLPEN_CREDENTIALS_HOME)=' '$BACKEND_ENV_FILE'
-              grep -E '^(BULLPEN_BIN|BULLPEN_HOME|BULLPEN_CREDENTIALS_HOME)=' '$FRONTEND_ENV_FILE'
+              grep -E '^BULLPEN_BIN=' '$BACKEND_ENV_FILE'
+              grep -E '^BULLPEN_BIN=' '$FRONTEND_ENV_FILE'
             "
 
             echo "==> Verifying Bullpen runtime as the production service user"
             sudo -u "$APP_USER" -H bash -lc "
-              export HOME='$CREDENTIAL_HOME'
-              export BULLPEN_HOME='$CREDENTIAL_HOME'
-              export BULLPEN_CREDENTIALS_HOME='$CREDENTIAL_HOME'
+              export HOME='$APP_HOME'
+              unset BULLPEN_HOME
+              unset BULLPEN_CREDENTIALS_HOME
               '$BULLPEN_BIN' status
-              '$BULLPEN_BIN' polymarket positions --output json > /tmp/credx-bullpen-positions.json
-              python3 - <<'PY'
-              import json
-              from pathlib import Path
-
-              payload = json.loads(Path('/tmp/credx-bullpen-positions.json').read_text(encoding='utf-8'))
-              if not isinstance(payload, (dict, list)):
-                  raise SystemExit('Bullpen positions output was not JSON object/array')
-              print('Bullpen positions JSON verified')
-              PY
+              positions_file=\"\$HOME/credx-bullpen-positions.json\"
+              '$BULLPEN_BIN' polymarket positions --output json > \"\$positions_file\"
+              python3 -c 'import json, sys; payload = json.load(open(sys.argv[1], encoding=\"utf-8\")); assert isinstance(payload, (dict, list)); print(\"Bullpen positions JSON verified\")' \"\$positions_file\"
             "
 
             echo "==> Backend readiness"
