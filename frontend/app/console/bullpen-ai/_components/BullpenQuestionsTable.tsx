@@ -87,6 +87,14 @@ type BullpenTableColumnDefinition = {
   afterLabel?: ReactNode;
 };
 
+export type BullpenQuestionsTableExtraColumn = {
+  id: string;
+  label: string;
+  width: number;
+  align?: "left" | "center" | "right";
+  render: (question: BullpenQuestionRow, rowIndex: number) => ReactNode;
+};
+
 const DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS: BullpenTableColumnId[] =
   BULLPEN_TABLE_COLUMN_IDS.filter(
     (columnId) => columnId !== "noOdds" && columnId !== "llmNoOdds",
@@ -765,6 +773,7 @@ export function BullpenQuestionsTable({
   sortState,
   onToggleQuestion,
   onToggleSelectAll,
+  extraColumns = [],
 }: {
   snapshot: BullpenScanSnapshot | null;
   rowsOverride?: BullpenQuestionRow[];
@@ -787,6 +796,7 @@ export function BullpenQuestionsTable({
   sortState: BullpenTableSortState;
   onToggleQuestion: (questionId: string) => void;
   onToggleSelectAll: () => void;
+  extraColumns?: BullpenQuestionsTableExtraColumn[];
 }) {
   const [breakdownQuestion, setBreakdownQuestion] =
     useState<BullpenQuestionRow | null>(null);
@@ -871,7 +881,9 @@ export function BullpenQuestionsTable({
   const visibleColumnIds = columnOrder.filter((columnId) =>
     DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS.includes(columnId),
   );
-  const tableWidth = getBullpenTableWidth(columnWidths, visibleColumnIds);
+  const tableWidth =
+    getBullpenTableWidth(columnWidths, visibleColumnIds) +
+    extraColumns.reduce((total, column) => total + column.width, 0);
   const updatedAtLabel = formatUpdatedAt(updatedAt ?? snapshot?.scannedAt ?? null);
   const showUpdateUnavailableReason =
     updatedAtLabel === "—" && Boolean(updateUnavailableReason);
@@ -1154,6 +1166,9 @@ export function BullpenQuestionsTable({
             {visibleColumnIds.map((columnId) => (
               <col key={columnId} style={{ width: columnWidths[columnId] }} />
             ))}
+            {extraColumns.map((column) => (
+              <col key={`extra-${column.id}`} style={{ width: column.width }} />
+            ))}
           </colgroup>
           <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
             <tr>
@@ -1220,6 +1235,18 @@ export function BullpenQuestionsTable({
                   />
                 );
               })}
+              {extraColumns.map((column) => (
+                <th
+                  key={`extra-header-${column.id}`}
+                  className={cn(
+                    "whitespace-nowrap px-4 py-3 font-semibold",
+                    column.align === "center" && "text-center",
+                    column.align === "right" && "text-right",
+                  )}
+                >
+                  {column.label}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
@@ -1254,13 +1281,25 @@ export function BullpenQuestionsTable({
                         setShortlistReasonQuestion,
                       }),
                     )}
+                    {extraColumns.map((column) => (
+                      <td
+                        key={`extra-cell-${question.id}-${column.id}`}
+                        className={cn(
+                          "px-4 py-3 text-slate-700",
+                          column.align === "center" && "text-center",
+                          column.align === "right" && "text-right",
+                        )}
+                      >
+                        {column.render(question, rowIndex)}
+                      </td>
+                    ))}
                   </tr>
                 );
               })
             ) : (
               <tr>
                 <td
-                  colSpan={15}
+                  colSpan={visibleColumnIds.length + extraColumns.length}
                   className="px-4 py-12 text-center text-slate-500"
                 >
                   {isLoading ? "Scanning Bullpen..." : emptyMessage}
