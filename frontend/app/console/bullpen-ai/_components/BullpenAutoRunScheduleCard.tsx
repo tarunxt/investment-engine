@@ -7087,9 +7087,25 @@ function formatStageLastRunLabel(value: string | null) {
 
 function formatRunStatusLabel(status: BullpenAutoLiveRun["status"]) {
   if (status === "running") return "Running";
+  if (status === "confirming") return "Confirming";
   if (status === "completed") return "Completed";
+  if (status === "partial_success") return "Partial";
   if (status === "failed") return "Failed";
   return "Skipped";
+}
+
+function isActivelyWorkingRunStatus(
+  status: BullpenAutoLiveRun["status"] | null | undefined,
+) {
+  return status === "running" || status === "confirming";
+}
+
+function formatLatestRunSummaryTileLabel(run: BullpenAutoLiveRun | null) {
+  if (!run) return "Last run";
+  if (run.status === "failed") return "Last failed run";
+  if (run.status === "partial_success") return "Last partial run";
+  if (run.status === "skipped") return "Last skipped run";
+  return "Last completed run";
 }
 
 function runNeedsBullpenLogin(run: BullpenAutoLiveRun | null) {
@@ -8704,7 +8720,6 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
-  const workflowRunNeedsLogin = runNeedsBullpenLogin(workflowRun);
   const {
     activePositionQuestionByKey: stage3PreviewQuestionByKey,
     activePositionsNeedingAttention: stage3PreviewAttentionEntries,
@@ -8789,16 +8804,37 @@ export function BullpenAutoRunScheduleCard({
     (runActionRequested ||
       startNowActionRequested ||
       pendingRunId !== null ||
-      visibleRun?.status === "running" ||
-      Boolean(summary?.state.running) ||
-      Boolean(summary?.state.paused) ||
+      isActivelyWorkingRunStatus(visibleRun?.status) ||
       hasActiveWorkflowStage);
+  const latestTerminalRun =
+    summary?.latest_run && !isActivelyWorkingRunStatus(summary.latest_run.status)
+      ? summary.latest_run
+      : summary?.recent_runs.find(
+          (run) => !isActivelyWorkingRunStatus(run.status),
+        ) ?? null;
+  const latestTerminalRunSummary = latestTerminalRun
+    ? getRunSummaryDetails(latestTerminalRun.summary)
+    : null;
+  const latestTerminalRunOverview =
+    latestTerminalRunSummary?.overview ??
+    latestTerminalRun?.summary?.trim() ??
+    latestTerminalRun?.error_message?.trim() ??
+    null;
+  const workflowRunForSummaryTile =
+    selectedRunSummaryTile === "last" && !runIsActive
+      ? latestTerminalRun ?? workflowRun
+      : workflowRun;
   const workflowRunForMonitor =
-    selectedRunSummaryTile === "next" && !runIsActive ? null : workflowRun;
-  const workflowView =
     selectedRunSummaryTile === "next" && !runIsActive
-      ? buildBullpenAutoRunWorkflowView(null)
-      : liveWorkflowView;
+      ? null
+      : workflowRunForSummaryTile;
+  const workflowView = buildBullpenAutoRunWorkflowView(
+    workflowRunForMonitor,
+    runIsActive
+      ? pendingRunId ?? (action === "start-now" ? "start-now-pending" : null)
+      : null,
+    runTimerStartedAt,
+  );
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
   const showRunTimer =
     Boolean(runTimerStartedAt) && (runActionRequested || runIsActive);
@@ -8813,19 +8849,19 @@ export function BullpenAutoRunScheduleCard({
   const activeWorkflowStage =
     workflowView.stages.find((stage) => stage.isCurrent) ?? null;
   const workflowCurrentStageLabel = workflowSettled
-    ? "All 3 stages finished"
+    ? workflowRunForMonitor?.status === "completed"
+      ? "All 3 stages finished"
+      : workflowView.currentStageLabel
     : workflowView.currentStageLabel;
   const workflowStatusCopy = workflowView.statusCopy;
-  const monitorRunStatusLabel =
-    workflowRunForMonitor && !workflowSettled
-      ? formatRunStatusLabel(workflowRunForMonitor.status)
-      : workflowRunForMonitor
-        ? "Completed"
-        : null;
+  const monitorRunStatusLabel = workflowRunForMonitor
+    ? formatRunStatusLabel(workflowRunForMonitor.status)
+    : null;
+  const workflowRunNeedsLogin = runNeedsBullpenLogin(workflowRunForMonitor);
   const investWorkflowStage =
     workflowView.stages.find((stage) => stage.key === "invest") ?? null;
   const investStageImmediateSuccess =
-    workflowRun?.status === "running"
+    workflowRunForMonitor?.status === "running"
       ? getInvestStageImmediateSuccess(investWorkflowStage)
       : null;
 
@@ -8855,9 +8891,44 @@ export function BullpenAutoRunScheduleCard({
       : null;
   const investOnlyActionCompleted =
     action === "invest-now" && Boolean(investStageImmediateSuccess);
+  const latestRunFailureMessage =
+    !runIsActive && latestTerminalRun?.status === "failed"
+      ? latestTerminalRunOverview ??
+        "The last Auto Run failed. Open the run details for the backend error."
+      : null;
+  const latestRunFailureDetail =
+    latestRunFailureMessage &&
+    latestTerminalRun?.error_message &&
+    latestTerminalRun.error_message.trim() !== latestRunFailureMessage.trim()
+      ? latestTerminalRun.error_message
+      : null;
+  const latestTerminalRunTimestamp =
+    latestTerminalRun?.completed_at ??
+    latestTerminalRun?.started_at ??
+    summary?.state.last_run_at;
+  const lastRunTileClasses = runIsActive
+    ? "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm"
+    : selectedRunSummaryTile === "last"
+      ? latestTerminalRun?.status === "failed"
+        ? "border-rose-200 bg-rose-50 text-rose-950 shadow-sm"
+        : latestTerminalRun?.status === "partial_success" ||
+            latestTerminalRun?.status === "skipped"
+          ? "border-amber-200 bg-amber-50 text-amber-950 shadow-sm"
+          : "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm"
+      : "border-white/70 bg-white/80";
+  const stage2TargetSelectionWarning =
+    summary?.settings.auto_live_enabled &&
+    isConsoleProfileSelected(summary) &&
+    (summary.settings.console_llm_targets ?? []).length === 0
+      ? summary.state.next_run_at
+        ? `Stage 2 has no saved LLM targets. Open Stage 2 · Run LLM and select at least one provider/model before ${formatIstDateTime(summary.state.next_run_at)}.`
+        : "Stage 2 has no saved LLM targets. Open Stage 2 · Run LLM and select at least one provider/model before the next Auto Run."
+      : null;
   const displayNotice =
     investStageImmediateSuccess?.message ??
-    notice ??
+    (latestRunFailureMessage && notice?.trim() === latestRunFailureMessage.trim()
+      ? null
+      : notice) ??
     (runIsActive ? (activeWorkflowStage?.detail ?? workflowStatusCopy) : null);
   const backendExecutionGuardrail = findGuardrailCheck(
     summary,
@@ -8949,10 +9020,6 @@ export function BullpenAutoRunScheduleCard({
       }),
     });
   };
-  const latestCompletedRun =
-    summary?.recent_runs.find((run) => run.status === "completed") ??
-    summary?.latest_run ??
-    null;
   const investOnlyDisabledReason = runIsActive
     ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
     : effectiveInvestOnlyRequest
@@ -9369,39 +9436,38 @@ export function BullpenAutoRunScheduleCard({
 
           <div
             role="button"
-            tabIndex={latestCompletedRun ? 0 : -1}
+            tabIndex={latestTerminalRun ? 0 : -1}
             onClick={() => {
               setSelectedRunSummaryTile("last");
-              if (latestCompletedRun) {
-                openRunDetailDialog(latestCompletedRun);
+              if (latestTerminalRun) {
+                openRunDetailDialog(latestTerminalRun);
               }
             }}
             onKeyDown={(event) => {
               if (event.key !== "Enter" && event.key !== " ") return;
               event.preventDefault();
               setSelectedRunSummaryTile("last");
-              if (latestCompletedRun) {
-                openRunDetailDialog(latestCompletedRun);
+              if (latestTerminalRun) {
+                openRunDetailDialog(latestTerminalRun);
               }
             }}
-            className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${
-              selectedRunSummaryTile === "last" || runIsActive
-                ? "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm"
-                : "border-white/70 bg-white/80"
-            } ${latestCompletedRun ? "cursor-pointer" : "cursor-not-allowed"}`}
+            className={`rounded-2xl border p-4 text-left transition hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-emerald-300 ${lastRunTileClasses} ${
+              latestTerminalRun ? "cursor-pointer" : "cursor-not-allowed"
+            }`}
             aria-pressed={selectedRunSummaryTile === "last" || runIsActive}
-            aria-disabled={!latestCompletedRun}
+            aria-disabled={!latestTerminalRun}
           >
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              {runIsActive ? "Run in Progress" : "Last completed run"}
+              {runIsActive
+                ? "Run in Progress"
+                : formatLatestRunSummaryTileLabel(latestTerminalRun)}
             </div>
             <span className="mt-2 block text-left text-sm font-semibold text-slate-950 underline-offset-4 transition hover:text-blue-700 hover:underline">
               {runIsActive ? "Started " : ""}
               {formatIstDateTime(
                 runIsActive
                   ? runTimerStartedAt
-                  : (latestCompletedRun?.started_at ??
-                      summary?.state.last_run_at),
+                  : latestTerminalRunTimestamp,
               )}
             </span>
             {runIsActive && workflowRunNeedsLogin ? (
@@ -9431,7 +9497,7 @@ export function BullpenAutoRunScheduleCard({
               </div>
             ) : (
               <p className="mt-1 text-xs text-slate-600">
-                {latestCompletedRun?.summary || "No auto-run result yet."}
+                {latestTerminalRunOverview || "No auto-run result yet."}
               </p>
             )}
           </div>
@@ -10527,6 +10593,26 @@ export function BullpenAutoRunScheduleCard({
                 : undefined
             }
           />
+        ) : null}
+
+        {latestRunFailureMessage ? (
+          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+            <p className="font-medium">{latestRunFailureMessage}</p>
+            {latestRunFailureDetail ? (
+              <div className="mt-1 text-xs leading-5 text-rose-800">
+                <ErrorCodeWithDetails
+                  detail={latestRunFailureDetail}
+                  detailClassName="text-rose-800"
+                />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {stage2TargetSelectionWarning ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {stage2TargetSelectionWarning}
+          </div>
         ) : null}
 
         {displayNotice ? (

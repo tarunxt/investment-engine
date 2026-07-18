@@ -245,6 +245,12 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunCardSource, /execution_steps/);
   assert.match(autoRunCardSource, /Next scheduled run/);
   assert.match(autoRunCardSource, /Last completed run/);
+  assert.match(autoRunCardSource, /Last failed run/);
+  assert.match(autoRunCardSource, /formatLatestRunSummaryTileLabel\(latestTerminalRun\)/);
+  assert.match(autoRunCardSource, /Stage 2 has no saved LLM targets/);
+  assert.match(autoRunCardSource, /latestRunFailureMessage/);
+  assert.match(autoRunCardSource, /isActivelyWorkingRunStatus\(visibleRun\?\.status\)/);
+  assert.doesNotMatch(autoRunCardSource, /Boolean\(summary\?\.state\.running\)/);
   assert.match(autoRunCardSource, /setSelectedRunSummaryTile\("next"\)/);
   assert.match(autoRunCardSource, /setSelectedRunSummaryTile\("last"\)/);
   assert.doesNotMatch(autoRunCardSource, /Fixed times: 6 AM, 12 PM, 6 PM, and 12 AM IST\./);
