@@ -19,3 +19,18 @@ test("Stage 2 invest list keeps shortlisted BUY_NEW rows visible until Stage 3 f
   assert.match(source, /row\.missingFromStage3/);
   assert.match(source, /decision\.stage3_result\?\.replaceAll\("_", " "\) \?\? "Pending"/);
 });
+
+test("Stage 2 handoff falls back to all reviewed Top 10 rows by returns/day", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenStage2TopTenHandoff.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /questionByMarketId: Map<string, BullpenQuestionRow>/);
+  assert.match(source, /reviewedTopTenMarketIds = \[\.\.\.questionByMarketId\.values\(\)\]/);
+  assert.match(source, /\.slice\(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS\)/);
+  assert.match(source, /return reviewedTopTenMarketIds;/);
+});

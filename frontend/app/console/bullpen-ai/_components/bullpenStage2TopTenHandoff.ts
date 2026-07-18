@@ -292,7 +292,10 @@ function buildStage2TopTenQuestionLookup(
   return lookup;
 }
 
-function buildTopCandidateMarketIdOrder(run: BullpenAutoLiveRun) {
+function buildTopCandidateMarketIdOrder(
+  run: BullpenAutoLiveRun,
+  questionByMarketId: Map<string, BullpenQuestionRow>,
+) {
   const stageResults = [...run.stage_results];
   const rankingOutputs = asRecord(
     stageResults.find((stage) => stage.stage_number === 6)?.outputs,
@@ -317,6 +320,22 @@ function buildTopCandidateMarketIdOrder(run: BullpenAutoLiveRun) {
   );
   if (marketIds.length > 0) {
     return marketIds;
+  }
+
+  const reviewedTopTenMarketIds = [...questionByMarketId.values()]
+    .filter((question) => question.returnsPerDay !== null)
+    .sort((left, right) => {
+      const returnsDelta =
+        (right.returnsPerDay ?? Number.NEGATIVE_INFINITY) -
+        (left.returnsPerDay ?? Number.NEGATIVE_INFINITY);
+      if (returnsDelta !== 0) return returnsDelta;
+      return left.question.localeCompare(right.question);
+    })
+    .slice(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS)
+    .map((question) => readString(question.marketId))
+    .filter((marketId): marketId is string => Boolean(marketId));
+  if (reviewedTopTenMarketIds.length > 0) {
+    return reviewedTopTenMarketIds;
   }
 
   return decisionsFallbackFromRun(run);
@@ -404,12 +423,15 @@ export function buildBullpenStage2TopTenHandoffRows({
 }) {
   if (!run) return [] as BullpenStage2TopTenHandoffRow[];
 
-  const topCandidateMarketIdOrder = buildTopCandidateMarketIdOrder(run);
+  const questionByMarketId = buildStage2TopTenQuestionLookup(run, decisions);
+  const topCandidateMarketIdOrder = buildTopCandidateMarketIdOrder(
+    run,
+    questionByMarketId,
+  );
   if (topCandidateMarketIdOrder.length === 0) {
     return [] as BullpenStage2TopTenHandoffRow[];
   }
 
-  const questionByMarketId = buildStage2TopTenQuestionLookup(run, decisions);
   const decisionByMarketId = buildDecisionLookup(decisions);
 
   return topCandidateMarketIdOrder.map((marketId, index) => {
