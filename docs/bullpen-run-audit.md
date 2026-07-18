@@ -142,6 +142,12 @@ The Stage 2 bundle now also captures the persisted `Stage 2 Top 10 -> Stage 3`
 handoff candidate market IDs so audits can verify that every queued Top 10 row
 either appeared in Stage 3 decisions or recorded a concrete blocker.
 
+When Stage 2 hands off saved rows for a Stage 3 reuse run, the persisted
+candidate row payload must keep the exact market-resolution rules plus supporting
+market context. Summaries such as parsed YES definitions, deadline labels, or
+prior blocker strings are not a substitute for the original rules text because
+Stage 3 re-parses those rows before planning new buy orders.
+
 Stage 2 snapshots also persist the eligible-universe coverage record:
 reviewed rows, skipped rows, completeness, and any stored blocker summary/fix
 used to explain why the full universe could not be reviewed and what should be
@@ -243,6 +249,7 @@ When changing Bullpen logic:
 * update validators and finding messages
 * update frontend run audit rendering if labels or sections changed
 * confirm Stage 2 Top 10 handoff rows still persist enough detail to explain why a queued row was planned, deferred, missing, or failed in Stage 3
+* confirm any saved Stage 2 -> Stage 3 reuse payload still preserves exact resolution rules instead of only derived summaries
 * add or update tests
 * review `AGENTS.md` synchronization contract
 

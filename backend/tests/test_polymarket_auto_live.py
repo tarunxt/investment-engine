@@ -44,6 +44,7 @@ from app.domains.polymarket_auto_live.engine import (
     PositionSnapshot,
     _execute_console_stage_two_shared_llm,
     _apply_next_cycle_schedule,
+    _manual_console_market,
     build_workflow_stage_result,
     reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
@@ -3824,6 +3825,10 @@ async def test_console_profile_defers_rate_limited_buy_without_fallback_write(
         "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
         lambda: RateLimitedExecutor(),
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.asyncio.sleep",
+        AsyncMock(),
+    )
 
     result = await BullpenAutoLiveEngine().execute(
         user_id=7,
@@ -3851,7 +3856,7 @@ async def test_console_profile_defers_rate_limited_buy_without_fallback_write(
         if decision.order_plan is not None and decision.order_plan.action == "buy"
     )
 
-    assert executor_calls == ["buy_limit"]
+    assert executor_calls == ["buy_limit", "buy_limit"]
     assert result.run.status == "failed"
     assert result.run.orders_planned == 1
     assert result.run.orders_submitted == 0
@@ -3859,6 +3864,149 @@ async def test_console_profile_defers_rate_limited_buy_without_fallback_write(
     assert buy_decision.order_plan.status == "rpc_rate_limited"
     assert invest_stage.outputs["buy_orders_unsubmitted"] == 1
     assert invest_stage.outputs["order_metrics"]["buy"]["rpc_rate_limited"] == 1
+
+
+@pytest.mark.anyio
+async def test_console_profile_retries_transient_rate_limited_buy_once(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will the transient rate-limited buy recover?",
+        slug="candidate-transient-rate-limit",
+        current_yes_odds=14,
+        current_no_odds=86,
+    )
+    executor_calls: list[str] = []
+
+    async def fake_read_console_wallet_positions():
+        return []
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen console",
+            source_url="https://example.com/bullpen",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def fake_refresh_live_controls(*, user_id: int):
+        assert user_id == 7
+        return _fake_live_controls()
+
+    async def fake_refresh_execution_quote(*, slug: str | None, side: str):
+        assert slug == candidate_market.slug
+        return SimpleNamespace(
+            market=candidate_market,
+            current_price_cents=(
+                candidate_market.current_yes_odds
+                if side == "YES"
+                else candidate_market.current_no_odds
+            ),
+            spread_cents=2,
+        )
+
+    class RetryThenSuccessExecutor:
+        def __init__(self):
+            self.buy_attempts = 0
+
+        async def buy_limit(self, **_kwargs):
+            executor_calls.append("buy_limit")
+            self.buy_attempts += 1
+            if self.buy_attempts == 1:
+                raise RuntimeError("HTTP 429 Too Many Requests. Retry-After: 2")
+            return "submitted-after-retry"
+
+        async def sell_limit(self, **_kwargs):
+            raise AssertionError("sell_limit should not run for a pure buy scenario")
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.CONSOLE_RANKED_EVENT_LIMIT",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda market, now: 8.5 if market.slug == candidate_market.slug else 0.5,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=88, fair_no=12),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_live_controls",
+        fake_refresh_live_controls,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
+        fake_refresh_execution_quote,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.bullpen_module.BullpenLiveExecutor",
+        lambda: RetryThenSuccessExecutor(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.asyncio.sleep",
+        AsyncMock(),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    buy_decision = next(
+        decision
+        for decision in result.decisions
+        if decision.order_plan is not None and decision.order_plan.action == "buy"
+    )
+
+    assert executor_calls == ["buy_limit", "buy_limit"]
+    assert result.run.status == "completed"
+    assert result.run.orders_planned == 1
+    assert result.run.orders_submitted == 1
+    assert buy_decision.order_plan.status == "submitted"
+    assert buy_decision.order_plan.execution_response == "submitted-after-retry"
+    assert "rate limit" not in result.run.summary.lower()
 
 
 @pytest.mark.anyio
@@ -4444,6 +4592,31 @@ def test_market_rules_fail_without_resolution_criteria():
     assert result.outcome_clear is False
     assert result.ambiguous is True
     assert result.fail_reason == "Resolution criteria are unavailable."
+
+
+def test_manual_console_market_prefers_exact_rules_over_generic_event_description():
+    row = BullpenAutoLiveConsoleCandidateInput(
+        question_id="question-1",
+        market_id="market-1",
+        market_title="Will event one happen by July 24?",
+        slug="event-one",
+        market_url="https://example.com/event-one",
+        close_time="2026-07-24T23:59:00Z",
+        theme="Politics",
+        current_yes_odds=18,
+        current_no_odds=82,
+        rules=(
+            'This market resolves to "Yes" if event one is officially confirmed '
+            'by July 24, 2026, 11:59 PM ET. Otherwise, it resolves to "No".'
+        ),
+        event_description="Generic background context about the broader story.",
+        market_context="Background context.",
+        resolution_source="Official source",
+    )
+
+    market = _manual_console_market(row)
+
+    assert market.description == row.rules
 
 
 def test_candidate_filter_reasons_block_sports_and_low_liquidity():

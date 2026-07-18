@@ -281,6 +281,15 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
             event_state: "Watching",
             yes_definition: "Official source resolves the event.",
             deadline_et: "July 7, 2026 8:00 PM ET",
+            stage2_context: {
+              exact_resolution_rules:
+                'This market resolves to "Yes" if the official election authority certifies event one by July 7, 2026, 8:00 PM ET. Otherwise, it resolves to "No".',
+              market_context: "Primary source: official election authority.",
+              resolution_source: "official election authority",
+            },
+            prepared_question_payload: {
+              preflight_evidence_block: "Only rely on official election authority bulletins.",
+            },
             llm_outputs: [
               {
                 provider: "openai",
@@ -356,11 +365,13 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
     confidence: "High",
     evidence_status: "Strong",
     event_state: "Watching",
-    rules: "Official source resolves the event. | Deadline ET: July 7, 2026 8:00 PM ET",
-    market_context: null,
-    resolution_source: null,
-    event_description: null,
-    preflight_evidence_block: null,
+    rules:
+      'This market resolves to "Yes" if the official election authority certifies event one by July 7, 2026, 8:00 PM ET. Otherwise, it resolves to "No".',
+    market_context: "Primary source: official election authority.",
+    resolution_source: "official election authority",
+    event_description:
+      'This market resolves to "Yes" if the official election authority certifies event one by July 7, 2026, 8:00 PM ET. Otherwise, it resolves to "No".',
+    preflight_evidence_block: "Only rely on official election authority bulletins.",
     selected: true,
     llm_outputs: [
       {
@@ -379,6 +390,69 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
       },
     ],
   });
+});
+
+test("Stage 3 invest plan synthesizes parseable legacy rules when only YES text survived", async () => {
+  const { buildBullpenStage3OnlyInvestPlan } = await loadStage3InvestModule();
+
+  const run = createRun({
+    stageResults: [
+      createStage(1, "scan", {
+        accepted_candidates: [
+          {
+            question_id: "question-legacy",
+            market_id: "market-legacy",
+            question: "Will legacy event happen by July 9?",
+            market_title: "Will legacy event happen by July 9?",
+            market_url: "https://example.com/market-legacy",
+            slug: "legacy-event",
+            close_time: "2026-07-09T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 39,
+            current_no_odds: 61,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-legacy",
+            question: "Will legacy event happen by July 9?",
+            market_url: "https://example.com/market-legacy",
+            slug: "legacy-event",
+            close_time: "2026-07-09T12:00:00Z",
+            returns_per_day: 1.2,
+            qualified: true,
+            selected_side: "NO",
+            fair_yes_probability_pct: 21,
+            fair_no_probability_pct: 79,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+            yes_definition: "legacy event happens by July 9, 2026",
+            deadline_et: "July 9, 2026 11:59 PM ET",
+          },
+        ],
+      }),
+      createStage(3, "invest", {}, "queued"),
+    ],
+  });
+
+  const plan = buildBullpenStage3OnlyInvestPlan(run);
+
+  assert.equal(plan.blockedReason, null);
+  assert.equal(plan.qualifiedCandidateCount, 1);
+  assert.equal(
+    plan.request?.console_profile?.candidate_rows[0]?.rules,
+    'This market resolves to "Yes" if legacy event happens by July 9, 2026. Otherwise, it resolves to "No".',
+  );
+  assert.equal(
+    plan.request?.console_profile?.candidate_rows[0]?.event_description,
+    'This market resolves to "Yes" if legacy event happens by July 9, 2026. Otherwise, it resolves to "No".',
+  );
 });
 
 test("Stage 3 invest plan only reuses ranked top-table candidate rows when saved ranking exists", async () => {

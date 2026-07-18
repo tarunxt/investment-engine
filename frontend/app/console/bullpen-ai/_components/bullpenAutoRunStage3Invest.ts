@@ -186,21 +186,87 @@ function buildAcceptedCandidateLookup(
   return lookup;
 }
 
-function buildRulesSummary(reviewedCandidate: Record<string, unknown>): string | null {
+function synthesizeLegacyResolutionRules(
+  reviewedCandidate: Record<string, unknown>,
+): string | null {
   const yesDefinition = readString(reviewedCandidate.yes_definition);
-  const deadlineEt = readString(reviewedCandidate.deadline_et);
-  const rulesFailReason = readString(reviewedCandidate.rules_fail_reason);
-
-  if (rulesFailReason) {
-    return rulesFailReason;
+  if (!yesDefinition) {
+    return null;
   }
+  return `This market resolves to "Yes" if ${yesDefinition}. Otherwise, it resolves to "No".`;
+}
 
-  const parts = [yesDefinition];
-  if (deadlineEt) {
-    parts.push(`Deadline ET: ${deadlineEt}`);
-  }
-  const summary = parts.filter(Boolean).join(" | ");
-  return summary.length > 0 ? summary : null;
+function buildExactResolutionRules(
+  reviewedCandidate: Record<string, unknown>,
+  acceptedCandidate: Record<string, unknown> | undefined,
+): string | null {
+  const stage2Context = asRecord(reviewedCandidate.stage2_context);
+  const preparedQuestionPayload = asRecord(reviewedCandidate.prepared_question_payload);
+
+  return (
+    readString(stage2Context?.exact_resolution_rules) ??
+    readString(preparedQuestionPayload?.polymarket_rules) ??
+    readString(acceptedCandidate?.rules) ??
+    readString(acceptedCandidate?.event_description) ??
+    readString(acceptedCandidate?.description) ??
+    synthesizeLegacyResolutionRules(reviewedCandidate)
+  );
+}
+
+function buildMarketContext(
+  reviewedCandidate: Record<string, unknown>,
+  acceptedCandidate: Record<string, unknown> | undefined,
+): string | null {
+  const stage2Context = asRecord(reviewedCandidate.stage2_context);
+  const preparedQuestionPayload = asRecord(reviewedCandidate.prepared_question_payload);
+
+  return (
+    readString(acceptedCandidate?.market_context) ??
+    readString(stage2Context?.market_context) ??
+    readString(preparedQuestionPayload?.polymarket_market_context) ??
+    null
+  );
+}
+
+function buildResolutionSource(
+  reviewedCandidate: Record<string, unknown>,
+  acceptedCandidate: Record<string, unknown> | undefined,
+): string | null {
+  const stage2Context = asRecord(reviewedCandidate.stage2_context);
+  const preparedQuestionPayload = asRecord(reviewedCandidate.prepared_question_payload);
+
+  return (
+    readString(acceptedCandidate?.resolution_source) ??
+    readString(stage2Context?.resolution_source) ??
+    readString(preparedQuestionPayload?.polymarket_resolution_source) ??
+    null
+  );
+}
+
+function buildEventDescription(
+  reviewedCandidate: Record<string, unknown>,
+  acceptedCandidate: Record<string, unknown> | undefined,
+  exactResolutionRules: string | null,
+): string | null {
+  return (
+    readString(acceptedCandidate?.event_description) ??
+    readString(acceptedCandidate?.description) ??
+    exactResolutionRules
+  );
+}
+
+function buildPreflightEvidenceBlock(
+  reviewedCandidate: Record<string, unknown>,
+  acceptedCandidate: Record<string, unknown> | undefined,
+): string | null {
+  const preparedQuestionPayload = asRecord(reviewedCandidate.prepared_question_payload);
+
+  return (
+    readString(acceptedCandidate?.preflight_evidence_block) ??
+    readString(reviewedCandidate.preflight_evidence_block) ??
+    readString(preparedQuestionPayload?.preflight_evidence_block) ??
+    null
+  );
 }
 
 function buildLlmOutputs(value: unknown): BullpenAutoLiveLlmOutput[] {
@@ -246,6 +312,10 @@ function buildCandidateRow(
   }
 
   const acceptedCandidate = acceptedCandidateByMarketId.get(marketId);
+  const exactResolutionRules = buildExactResolutionRules(
+    reviewedCandidate,
+    acceptedCandidate,
+  );
 
   return {
     question_id: readString(acceptedCandidate?.question_id) ?? marketId,
@@ -274,11 +344,18 @@ function buildCandidateRow(
     confidence: readString(reviewedCandidate.confidence),
     evidence_status: readString(reviewedCandidate.evidence_status),
     event_state: readString(reviewedCandidate.event_state),
-    rules: buildRulesSummary(reviewedCandidate),
-    market_context: readString(acceptedCandidate?.market_context),
-    resolution_source: readString(acceptedCandidate?.resolution_source),
-    event_description: readString(acceptedCandidate?.event_description),
-    preflight_evidence_block: readString(acceptedCandidate?.preflight_evidence_block),
+    rules: exactResolutionRules,
+    market_context: buildMarketContext(reviewedCandidate, acceptedCandidate),
+    resolution_source: buildResolutionSource(reviewedCandidate, acceptedCandidate),
+    event_description: buildEventDescription(
+      reviewedCandidate,
+      acceptedCandidate,
+      exactResolutionRules,
+    ),
+    preflight_evidence_block: buildPreflightEvidenceBlock(
+      reviewedCandidate,
+      acceptedCandidate,
+    ),
     selected: true,
     llm_outputs: buildLlmOutputs(reviewedCandidate.llm_outputs),
   };

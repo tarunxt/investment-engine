@@ -153,6 +153,8 @@ _ORIGINAL_RUN_LLM_CONSENSUS = run_llm_consensus
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS = 60
+BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS = 1
+BULLPEN_RPC_RATE_LIMIT_RETRY_DELAY_SECONDS = 1
 EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS = 3
 EXIT_SETTLEMENT_TIMEOUT_SECONDS = 18
 _SETTLED_ORDER_STATUSES = {"submitted", "confirmed"}
@@ -1956,7 +1958,7 @@ def _manual_console_market(
         current_no_odds=row.current_no_odds,
         volume_usd=row.volume_usd,
         liquidity_usd=row.liquidity_usd,
-        description=row.event_description or row.rules,
+        description=row.rules or row.event_description,
         outcome_labels=["Yes", "No"],
         event_slug=None,
         best_bid_cents=row.best_bid_cents,
@@ -2106,7 +2108,14 @@ def _reused_manual_active_position_context(
 def _serialize_scan_candidate(
     market: ScannedMarket,
 ) -> dict[str, object]:
+    raw = market.raw if isinstance(market.raw, dict) else {}
     return {
+        "question_id": (
+            str(raw.get("question_id")).strip()
+            if isinstance(raw.get("question_id"), str)
+            and str(raw.get("question_id")).strip()
+            else market.market_id
+        ),
         "market_id": market.market_id,
         "question": market.question,
         "market_title": market.question,
@@ -2118,6 +2127,29 @@ def _serialize_scan_candidate(
         "current_no_odds": market.current_no_odds,
         "volume_usd": market.volume_usd,
         "liquidity_usd": market.liquidity_usd,
+        "best_bid_cents": market.best_bid_cents,
+        "best_ask_cents": market.best_ask_cents,
+        "spread_cents": market.spread_cents,
+        "rules": market.description,
+        "event_description": market.description,
+        "market_context": (
+            str(raw.get("market_context")).strip()
+            if isinstance(raw.get("market_context"), str)
+            and str(raw.get("market_context")).strip()
+            else None
+        ),
+        "resolution_source": (
+            str(raw.get("resolution_source")).strip()
+            if isinstance(raw.get("resolution_source"), str)
+            and str(raw.get("resolution_source")).strip()
+            else None
+        ),
+        "preflight_evidence_block": (
+            str(raw.get("preflight_evidence_block")).strip()
+            if isinstance(raw.get("preflight_evidence_block"), str)
+            and str(raw.get("preflight_evidence_block")).strip()
+            else None
+        ),
         "force_include": market.force_include,
     }
 
@@ -8968,6 +9000,29 @@ class BullpenAutoLiveEngine:
                     timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
                 )
 
+            async def _submit_with_rpc_retry(submitter: Callable[[], object]) -> str:
+                last_exc: Exception | None = None
+                for attempt in range(BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS + 1):
+                    try:
+                        return await submitter()  # type: ignore[misc]
+                    except Exception as exc:
+                        last_exc = exc
+                        if (
+                            attempt >= BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS
+                            or not _is_rpc_rate_limited_error(str(exc))
+                        ):
+                            raise
+                        logger.warning(
+                            "Retrying Stage 3 %s submission for %s after RPC rate limit (%s/%s).",
+                            order_plan.action,
+                            decision.market_title,
+                            attempt + 1,
+                            BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS,
+                        )
+                        await asyncio.sleep(BULLPEN_RPC_RATE_LIMIT_RETRY_DELAY_SECONDS)
+                if last_exc is not None:
+                    raise last_exc
+
             def _record_submitted_buy_position() -> None:
                 new_positions.append(
                     PositionSnapshot(
@@ -9001,18 +9056,25 @@ class BullpenAutoLiveEngine:
 
             try:
                 if order_plan.action == "buy":
-                    order_plan.execution_response = await _submit_buy_order()
+                    order_plan.execution_response = await _submit_with_rpc_retry(
+                        _submit_buy_order
+                    )
                     _record_submitted_buy_position()
                 else:
-                    order_plan.execution_response = await asyncio.wait_for(
-                        executor.sell_limit(
-                            market_id=market_id_for_execution,
-                            outcome="Yes" if order_plan.side == "YES" else "No",
-                            shares=order_plan.shares,
-                            min_price=cents_to_decimal(order_plan.limit_price_cents),
-                            max_reprice_attempts=settings.max_reprice_attempts,
-                        ),
-                        timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                    async def _submit_sell_order() -> str:
+                        return await asyncio.wait_for(
+                            executor.sell_limit(
+                                market_id=market_id_for_execution,
+                                outcome="Yes" if order_plan.side == "YES" else "No",
+                                shares=order_plan.shares,
+                                min_price=cents_to_decimal(order_plan.limit_price_cents),
+                                max_reprice_attempts=settings.max_reprice_attempts,
+                            ),
+                            timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                        )
+
+                    order_plan.execution_response = await _submit_with_rpc_retry(
+                        _submit_sell_order
                     )
                     new_positions = [
                         position
