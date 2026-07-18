@@ -6097,6 +6097,106 @@ async def test_console_profile_manual_scan_rows_skip_backend_rescan_and_run_llm_
     )
 
 
+@pytest.mark.anyio
+async def test_console_profile_stage2_failure_returns_empty_decisions(monkeypatch):
+    fixed_now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+    manual_rows = [
+        BullpenAutoLiveConsoleCandidateInput(
+            question_id="candidate-market-1",
+            market_id="candidate-market-1",
+            market_title="Candidate market 1",
+            slug="candidate-market-1",
+            market_url="https://polymarket.com/event/candidate-market-1",
+            close_time="2026-06-24T00:00:00+00:00",
+            theme="Politics",
+            current_yes_odds=19,
+            current_no_odds=81,
+            returns_per_day=7.6,
+            rules='This market will resolve to "Yes" if candidate X wins.',
+            selected=True,
+            llm_outputs=[],
+        )
+    ]
+    failed_output = BullpenAutoLiveLlmOutput(
+        provider="openai",
+        model="gpt-4o-mini",
+        error="provider unavailable",
+        completed_at=fixed_now.isoformat(),
+    )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: (
+            [failed_output],
+            SimpleNamespace(
+                fair_yes_probability_pct=None,
+                fair_no_probability_pct=None,
+                average_yes=None,
+                median_yes=None,
+                trimmed_mean_yes=None,
+                iqr_yes=None,
+                trimmed_range_yes=None,
+                min_yes=None,
+                max_yes=None,
+                spread_yes=None,
+                disagreement_level="Unknown",
+                disagreement_category="NO_USABLE_OUTPUTS",
+                adjudication_required=False,
+                consensus_method="none",
+                rationale_mismatch_count=0,
+                confidence=None,
+                evidence_status=None,
+                event_state=None,
+                provider_error_rate=1.0,
+            ),
+        ),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(
+            request_context=BullpenAutoLiveRunOnceRequest(
+                console_profile=BullpenAutoLiveConsoleRunContext(
+                    source_label="Bullpen CLI",
+                    scanned_at=fixed_now.isoformat(),
+                    total_candidates=1,
+                    candidate_rows=manual_rows,
+                )
+            )
+        ),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    assert result.decisions == []
+    assert result.run.status == "failed"
+    assert result.run.decisions_count == 0
+    assert result.run.stage_results[1].outputs["phase_status"] == "failed"
+
+
+
 async def _execute_auto_live(
     monkeypatch,
     *,

@@ -5835,7 +5835,7 @@ class BullpenAutoLiveEngine:
             run.diagnostics.ranking_exit_enabled = False
             run.diagnostics.new_buy_enabled = False
             self._report_progress(progress_callback, run, state)
-            return EngineResult(run=run, state=state, positions=positions)
+            return EngineResult(run=run, decisions=[], state=state, positions=positions)
 
         active_review_context_by_key = {
             str(context["position_key"]): context
