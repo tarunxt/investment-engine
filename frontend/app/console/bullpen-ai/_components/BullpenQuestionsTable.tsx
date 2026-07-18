@@ -20,7 +20,9 @@ import {
 } from "lucide-react";
 
 import {
+  getBullpenTopTenStrongestLlmOddsRows,
   getBullpenLlmReviewState,
+  hasBullpenStrongLlmOdds,
   hasBullpenLlmAnalysis,
   type BullpenQuestionRow,
   type BullpenScanSnapshot,
@@ -255,27 +257,6 @@ function sortQuestions(
     }
 
     return sortState.direction === "asc" ? result : result * -1;
-  });
-}
-
-const STRONGEST_LLM_ODDS_THRESHOLD = 80;
-const TOP_LLM_OPPORTUNITIES_LIMIT = 10;
-
-function hasStrongestLlmOdds(
-  question: Pick<BullpenQuestionRow, "llmYesOdds" | "llmNoOdds">,
-) {
-  return (
-    Math.max(question.llmYesOdds ?? -Infinity, question.llmNoOdds ?? -Infinity) >=
-    STRONGEST_LLM_ODDS_THRESHOLD
-  );
-}
-
-function sortByReturnsPerDayDescending(questions: BullpenQuestionRow[]) {
-  return [...questions].sort((left, right) => {
-    const returnsDifference =
-      (right.returnsPerDay ?? -Infinity) - (left.returnsPerDay ?? -Infinity);
-    if (returnsDifference !== 0) return returnsDifference;
-    return left.question.localeCompare(right.question);
   });
 }
 
@@ -547,6 +528,7 @@ function renderBullpenTableCell({
   question,
   rowIndex,
   hasLlmAnalysis,
+  displayDensity,
   selectedQuestionIds,
   selectionEnabled,
   onToggleQuestion,
@@ -557,16 +539,26 @@ function renderBullpenTableCell({
   question: BullpenQuestionRow;
   rowIndex: number;
   hasLlmAnalysis: boolean;
+  displayDensity: "default" | "compact";
   selectedQuestionIds: Set<string>;
   selectionEnabled: boolean;
   onToggleQuestion: (questionId: string) => void;
   setBreakdownQuestion: (question: BullpenQuestionRow) => void;
   setShortlistReasonQuestion: (question: BullpenQuestionRow) => void;
 }) {
+  const isCompact = displayDensity === "compact";
+  const cellPaddingClass = isCompact ? "px-4 py-2" : "px-4 py-3";
+  const questionLinkSpacingClass = isCompact ? "mt-1 gap-2" : "mt-2 gap-3";
+  const questionTextClass = cn(
+    "break-words",
+    isCompact ? "line-clamp-2 leading-5" : "leading-5",
+  );
+  const stackedValueSpacingClass = isCompact ? "mt-0.5" : "mt-1";
+
   switch (columnId) {
     case "select":
       return (
-        <td key={columnId} className="px-4 py-3">
+        <td key={columnId} className={cellPaddingClass}>
           <input
             type="checkbox"
             checked={selectedQuestionIds.has(question.id)}
@@ -580,14 +572,20 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="whitespace-nowrap px-4 py-3 text-center font-semibold text-slate-600"
+          className={cn(
+            cellPaddingClass,
+            "whitespace-nowrap text-center font-semibold text-slate-600",
+          )}
         >
           {rowIndex + 1}
         </td>
       );
     case "question":
       return (
-        <td key={columnId} className="px-4 py-3 font-medium text-slate-900">
+        <td
+          key={columnId}
+          className={cn(cellPaddingClass, "font-medium text-slate-900")}
+        >
           <div className="flex items-start gap-2">
             <button
               type="button"
@@ -599,10 +597,15 @@ function renderBullpenTableCell({
             >
               <Info className="h-3 w-3" />
             </button>
-            <div className="break-words leading-5">{question.question}</div>
+            <div className={questionTextClass}>{question.question}</div>
           </div>
           {question.marketUrl ? (
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs font-normal text-slate-500">
+            <div
+              className={cn(
+                "flex flex-wrap items-center text-xs font-normal text-slate-500",
+                questionLinkSpacingClass,
+              )}
+            >
               <a
                 href={question.marketUrl}
                 target="_blank"
@@ -620,7 +623,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          className={cn(
+            cellPaddingClass,
+            "truncate whitespace-nowrap text-slate-600",
+          )}
           title={formatDate(question.closeTime) || undefined}
         >
           {formatDate(question.closeTime)}
@@ -630,7 +636,7 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="whitespace-nowrap px-4 py-3 text-slate-600"
+          className={cn(cellPaddingClass, "whitespace-nowrap text-slate-600")}
         >
           {formatDays(question.daysUntilClose)}
         </td>
@@ -639,7 +645,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          className={cn(
+            cellPaddingClass,
+            "truncate whitespace-nowrap text-slate-600",
+          )}
           title={question.category || undefined}
         >
           {question.category}
@@ -649,7 +658,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          className={cn(
+            cellPaddingClass,
+            "truncate whitespace-nowrap text-slate-600",
+          )}
           title={formatOutcomeSummary(question)}
         >
           {formatOutcomeSummary(question)}
@@ -659,12 +671,12 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="whitespace-nowrap px-4 py-3 text-xs font-semibold"
+          className={cn(cellPaddingClass, "whitespace-nowrap text-xs font-semibold")}
         >
           <div className="text-emerald-700">
             Yes: {formatOdds(question.yesOdds)}
           </div>
-          <div className="mt-1 text-rose-700">
+          <div className={cn(stackedValueSpacingClass, "text-rose-700")}>
             No: {formatOdds(question.noOdds)}
           </div>
         </td>
@@ -680,7 +692,8 @@ function renderBullpenTableCell({
           </span>
           <span
             className={cn(
-              "mt-1 block",
+              stackedValueSpacingClass,
+              "block",
               getLlmOddsCellClass(question.llmNoOdds),
             )}
           >
@@ -692,7 +705,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-violet-700"
+          className={cn(
+            cellPaddingClass,
+            "whitespace-nowrap text-xs font-semibold text-violet-700",
+          )}
         >
           {hasLlmAnalysis ? (
             <button
@@ -713,7 +729,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="whitespace-nowrap px-4 py-3 font-semibold text-slate-700"
+          className={cn(
+            cellPaddingClass,
+            "whitespace-nowrap font-semibold text-slate-700",
+          )}
         >
           {formatReturnsPerDay(question.returnsPerDay)}
         </td>
@@ -723,7 +742,8 @@ function renderBullpenTableCell({
         <td
           key={columnId}
           className={cn(
-            "whitespace-nowrap px-4 py-3 text-right font-semibold text-slate-700",
+            cellPaddingClass,
+            "whitespace-nowrap text-right font-semibold text-slate-700",
             question.isAmountToBeInvestedHighlighted
               ? "bg-fuchsia-500 text-slate-950"
               : "",
@@ -736,7 +756,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          className={cn(
+            cellPaddingClass,
+            "truncate whitespace-nowrap text-slate-600",
+          )}
           title={question.volume || "—"}
         >
           {question.volume || "—"}
@@ -746,7 +769,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className="truncate whitespace-nowrap px-4 py-3 text-slate-600"
+          className={cn(
+            cellPaddingClass,
+            "truncate whitespace-nowrap text-slate-600",
+          )}
           title={question.liquidity || "—"}
         >
           {question.liquidity || "—"}
@@ -773,6 +799,7 @@ export function BullpenQuestionsTable({
   visibleColumnIds,
   persistColumnPreferences = true,
   showPresetFilters = true,
+  displayDensity = "default",
   extraColumns = [],
   onSortChange,
   selectedQuestionIds,
@@ -799,6 +826,7 @@ export function BullpenQuestionsTable({
   visibleColumnIds?: BullpenTableColumnId[];
   persistColumnPreferences?: boolean;
   showPresetFilters?: boolean;
+  displayDensity?: "default" | "compact";
   extraColumns?: BullpenQuestionsTableExtraColumn[];
   onSortChange: (key: BullpenTableSortKey) => void;
   selectedQuestionIds: Set<string>;
@@ -836,10 +864,9 @@ export function BullpenQuestionsTable({
   const resizeStateRef = useRef<ResizeState | null>(null);
   const horizontalScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const allRows = rowsOverride ?? (snapshot ? snapshot.questions : []);
-  const strongestLlmOddsRows = allRows.filter(hasStrongestLlmOdds);
-  const topTenStrongestLlmOddsRows = sortByReturnsPerDayDescending(
-    strongestLlmOddsRows,
-  ).slice(0, TOP_LLM_OPPORTUNITIES_LIMIT);
+  const strongestLlmOddsRows = allRows.filter(hasBullpenStrongLlmOdds);
+  const topTenStrongestLlmOddsRows =
+    getBullpenTopTenStrongestLlmOddsRows(allRows);
   const topTenStrongestLlmOddsIds = new Set(
     topTenStrongestLlmOddsRows.map((question) => question.id),
   );
@@ -892,9 +919,16 @@ export function BullpenQuestionsTable({
   ).length;
   const allVisibleSelected =
     selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
-  const visibleBaseColumnIds = columnOrder.filter((columnId) =>
-    requestedVisibleColumnIds.includes(columnId),
-  );
+  const normalizeRequestedColumnOrder = (current: BullpenTableColumnId[]) => {
+    const retained = current.filter((columnId) =>
+      requestedVisibleColumnIds.includes(columnId),
+    );
+    const missing = requestedVisibleColumnIds.filter(
+      (columnId) => !retained.includes(columnId),
+    );
+    return [...retained, ...missing];
+  };
+  const visibleBaseColumnIds = normalizeRequestedColumnOrder(columnOrder);
   const tableWidth =
     getBullpenTableWidth(columnWidths, visibleBaseColumnIds) +
     extraColumns.reduce(
@@ -904,22 +938,6 @@ export function BullpenQuestionsTable({
   const updatedAtLabel = formatUpdatedAt(updatedAt ?? snapshot?.scannedAt ?? null);
   const showUpdateUnavailableReason =
     updatedAtLabel === "—" && Boolean(updateUnavailableReason);
-
-  useEffect(() => {
-    setColumnOrder((current) => {
-      const retained = current.filter((columnId) =>
-        requestedVisibleColumnIds.includes(columnId),
-      );
-      const missing = requestedVisibleColumnIds.filter(
-        (columnId) => !retained.includes(columnId),
-      );
-      const next = [...retained, ...missing];
-      return next.length === current.length &&
-        next.every((columnId, index) => columnId === current[index])
-        ? current
-        : next;
-    });
-  }, [requestedVisibleColumnIds]);
 
   const setColumnWidth = (
     columnId: ResizableBullpenTableColumnId,
@@ -981,11 +999,12 @@ export function BullpenQuestionsTable({
     if (sourceColumnId === targetColumnId) return;
 
     setColumnOrder((current) => {
-      const sourceIndex = current.indexOf(sourceColumnId);
-      const targetIndex = current.indexOf(targetColumnId);
+      const normalizedCurrent = normalizeRequestedColumnOrder(current);
+      const sourceIndex = normalizedCurrent.indexOf(sourceColumnId);
+      const targetIndex = normalizedCurrent.indexOf(targetColumnId);
       if (sourceIndex === -1 || targetIndex === -1) return current;
 
-      const next = [...current];
+      const next = [...normalizedCurrent];
       const [sourceColumn] = next.splice(sourceIndex, 1);
       next.splice(targetIndex, 0, sourceColumn);
       return next;
@@ -1320,6 +1339,7 @@ export function BullpenQuestionsTable({
                         question,
                         rowIndex,
                         hasLlmAnalysis,
+                        displayDensity,
                         selectedQuestionIds,
                         selectionEnabled,
                         onToggleQuestion,
@@ -1331,7 +1351,9 @@ export function BullpenQuestionsTable({
                       <td
                         key={column.id}
                         className={cn(
-                          "px-4 py-3 align-top text-slate-700",
+                          displayDensity === "compact"
+                            ? "px-4 py-2 align-top text-slate-700"
+                            : "px-4 py-3 align-top text-slate-700",
                           column.align === "center"
                             ? "text-center"
                             : column.align === "right"

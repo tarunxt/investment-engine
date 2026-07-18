@@ -1,4 +1,7 @@
-import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import {
+  getBullpenTopTenStrongestLlmOddsRows,
+  type BullpenQuestionRow,
+} from "@/lib/bullpen-ai";
 import type { BullpenAutoLiveDecision, BullpenAutoLiveRun } from "@/types/api";
 
 import { buildBullpenAutoRunWorkflowView } from "./bullpenAutoRunProgress";
@@ -322,16 +325,10 @@ function buildTopCandidateMarketIdOrder(
     return marketIds.slice(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS);
   }
 
-  const reviewedTopTenMarketIds = [...questionByMarketId.values()]
-    .filter((question) => question.returnsPerDay !== null)
-    .sort((left, right) => {
-      const returnsDelta =
-        (right.returnsPerDay ?? Number.NEGATIVE_INFINITY) -
-        (left.returnsPerDay ?? Number.NEGATIVE_INFINITY);
-      if (returnsDelta !== 0) return returnsDelta;
-      return left.question.localeCompare(right.question);
-    })
-    .slice(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS)
+  const reviewedTopTenMarketIds = getBullpenTopTenStrongestLlmOddsRows(
+    [...questionByMarketId.values()],
+    DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+  )
     .map((question) => readString(question.marketId))
     .filter((marketId): marketId is string => Boolean(marketId));
   if (reviewedTopTenMarketIds.length > 0) {

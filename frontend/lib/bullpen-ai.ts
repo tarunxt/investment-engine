@@ -4,6 +4,7 @@ import type {
   PolymarketEventRuntimeMetadata,
 } from "@/types/api";
 import {
+  DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
   hasBullpenQualifiedLlmSide,
 } from "@/lib/bullpenStage2To3Strategy";
@@ -1113,6 +1114,32 @@ export function hasBullpenStrongLlmOdds(
     | undefined,
 ) {
   return hasBullpenQualifiedLlmSide(question);
+}
+
+function sortBullpenQuestionsByReturnsPerDayDescending<
+  T extends Pick<BullpenQuestionRow, "question" | "returnsPerDay">,
+>(questions: T[]) {
+  return [...questions].sort((left, right) => {
+    const returnsDifference =
+      (right.returnsPerDay ?? Number.NEGATIVE_INFINITY) -
+      (left.returnsPerDay ?? Number.NEGATIVE_INFINITY);
+    if (returnsDifference !== 0) return returnsDifference;
+    return left.question.localeCompare(right.question);
+  });
+}
+
+export function getBullpenTopTenStrongestLlmOddsRows<
+  T extends Pick<
+    BullpenQuestionRow,
+    "question" | "returnsPerDay" | "llmYesOdds" | "llmNoOdds"
+  >,
+>(
+  questions: T[],
+  limit = DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+) {
+  return sortBullpenQuestionsByReturnsPerDayDescending(
+    questions.filter((question) => hasBullpenStrongLlmOdds(question)),
+  ).slice(0, limit);
 }
 
 function pickBullpenConsensusLabel(

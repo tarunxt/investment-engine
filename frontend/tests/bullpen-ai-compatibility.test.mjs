@@ -992,12 +992,54 @@ test("Events Summary can filter strongest LLM odds and rank its top 10 by return
 
   assert.match(questionsTableSource, /Strongest LLM odds ≥ 80%/);
   assert.match(questionsTableSource, />\s*Top 10\s*</);
-  assert.match(questionsTableSource, /const STRONGEST_LLM_ODDS_THRESHOLD = 80/);
-  assert.match(questionsTableSource, /sortByReturnsPerDayDescending/);
-  assert.match(questionsTableSource, /TOP_LLM_OPPORTUNITIES_LIMIT/);
+  assert.match(questionsTableSource, /hasBullpenStrongLlmOdds/);
+  assert.match(questionsTableSource, /getBullpenTopTenStrongestLlmOddsRows/);
   assert.match(questionsTableSource, /"active-retained"/);
   assert.match(questionsTableSource, /"event-exit"/);
   assert.match(questionsTableSource, /"new-opportunity"/);
+});
+
+test("Bullpen Top 10 helper keeps only strongest-odds rows and orders them by returns per day", async () => {
+  const { getBullpenTopTenStrongestLlmOddsRows } = await loadBullpenAiModule();
+
+  const rows = [
+    {
+      ...createQuestionRow(),
+      id: "excluded",
+      question: "Excluded even with huge returns",
+      llmYesOdds: 79,
+      llmNoOdds: 21,
+      returnsPerDay: 999,
+    },
+    ...Array.from({ length: 11 }, (_, index) => ({
+      ...createQuestionRow(),
+      id: `qualified-${index}`,
+      question: `Qualified ${String.fromCharCode(65 + index)}`,
+      llmYesOdds: index === 5 ? 18 : 85,
+      llmNoOdds: index === 5 ? 82 : 15,
+      returnsPerDay: 50 - index,
+    })),
+  ];
+
+  const result = getBullpenTopTenStrongestLlmOddsRows(rows);
+
+  assert.equal(result.length, 10);
+  assert.deepEqual(
+    result.map((row) => row.id),
+    [
+      "qualified-0",
+      "qualified-1",
+      "qualified-2",
+      "qualified-3",
+      "qualified-4",
+      "qualified-5",
+      "qualified-6",
+      "qualified-7",
+      "qualified-8",
+      "qualified-9",
+    ],
+  );
+  assert.ok(!result.some((row) => row.id === "excluded"));
 });
 
 test("Bullpen x AI Stage 2 popup keeps responsive dialog sizing and left-edge table scroll reset", () => {
@@ -1023,6 +1065,8 @@ test("Bullpen x AI Stage 2 popup keeps responsive dialog sizing and left-edge ta
   assert.match(scheduleCardSource, /updatedAt=\{eventsSummaryUpdatedAt\}/);
   assert.match(scheduleCardSource, /scrollResetKey=\{state\.run\?\.id \?\? "stage-two-llm-run"\}/);
   assert.match(questionsTableSource, /scrollResetKey\?: string \| number \| null;/);
+  assert.match(questionsTableSource, /displayDensity\?: "default" \| "compact";/);
+  assert.match(questionsTableSource, /line-clamp-2/);
   assert.match(questionsTableSource, /scrollTo\(\{\s*left: 0,/);
 });
 

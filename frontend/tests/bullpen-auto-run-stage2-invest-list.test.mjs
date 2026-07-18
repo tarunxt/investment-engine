@@ -24,7 +24,22 @@ test("Stage 2 invest list keeps shortlisted BUY_NEW rows visible until Stage 3 f
   assert.match(source, /Saved Stage 2 transfer queue/);
 });
 
-test("Stage 2 handoff falls back to all reviewed Top 10 rows by returns/day", () => {
+test("Stage 2 invest list can collapse into a compact Events Summary view", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /const \[isCompactRows, setIsCompactRows\] = useState\(false\);/);
+  assert.match(source, /Collapse Stage 2 invest rows/);
+  assert.match(source, /Expand Stage 2 invest rows/);
+  assert.match(source, /displayDensity=\{isCompactRows \? "compact" : "default"\}/);
+});
+
+test("Stage 2 handoff fallback reuses the canonical strongest-odds Top 10 selector", () => {
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/bullpenStage2TopTenHandoff.ts",
@@ -34,7 +49,7 @@ test("Stage 2 handoff falls back to all reviewed Top 10 rows by returns/day", ()
   );
 
   assert.match(source, /questionByMarketId: Map<string, BullpenQuestionRow>/);
-  assert.match(source, /reviewedTopTenMarketIds = \[\.\.\.questionByMarketId\.values\(\)\]/);
-  assert.match(source, /\.slice\(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS\)/);
+  assert.match(source, /getBullpenTopTenStrongestLlmOddsRows/);
+  assert.match(source, /\[\.\.\.questionByMarketId\.values\(\)\]/);
   assert.match(source, /return reviewedTopTenMarketIds;/);
 });

@@ -13,6 +13,7 @@ import {
   CalendarClock,
   CheckCircle2,
   ChevronDown,
+  ChevronUp,
   Clock3,
   Copy,
   History,
@@ -1245,15 +1246,6 @@ function getStageTwoInvestExecutionTone(
   return "neutral";
 }
 
-function getStageTwoInvestExecutionReason(decision: BullpenAutoLiveDecision) {
-  return (
-    decision.order_plan?.detail ||
-    decision.stage3_result_reason ||
-    decision.summary ||
-    decision.reason
-  );
-}
-
 function formatStage2TopTenHandoffOutcome(row: BullpenStage2TopTenHandoffRow) {
   if (row.missingFromStage3) return "Missing from Stage 3";
   return row.displayDecision.stage3_result?.replaceAll("_", " ") ?? "Pending";
@@ -1282,12 +1274,14 @@ function buildStage2TopTenEventsSummaryRows(
 function Stage2TopTenEventsSummaryTable({
   rows,
   run,
+  displayDensity = "default",
   emptyMessage,
   headerContent,
   testId,
 }: {
   rows: BullpenStage2TopTenHandoffRow[];
   run: BullpenAutoLiveRun | null;
+  displayDensity?: "default" | "compact";
   emptyMessage: string;
   headerContent?: ReactNode;
   testId?: string;
@@ -1296,6 +1290,7 @@ function Stage2TopTenEventsSummaryTable({
     key: "returnsPerDay",
     direction: "desc",
   });
+  const isCompact = displayDensity === "compact";
   const questionRows = buildStage2TopTenEventsSummaryRows(rows);
   const rowByQuestionId = new Map(
     questionRows.map((question, index) => [question.id, rows[index]]),
@@ -1324,7 +1319,7 @@ function Stage2TopTenEventsSummaryTable({
                 : "border-slate-200 bg-white text-slate-700";
 
         return (
-          <div className="space-y-1">
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               Rank #{row.rank}
             </p>
@@ -1333,10 +1328,15 @@ function Stage2TopTenEventsSummaryTable({
             >
               {executionStatus}
             </span>
-            <p className="text-xs text-slate-500">
-              {row.missingFromBuyPlan
-                ? "Still waiting for a concrete Step 2 buy plan."
-                : "Concrete Step 2 buy plan was created."}
+            <p
+              className={`text-xs text-slate-500${isCompact ? " line-clamp-1" : ""}`}
+              title={
+                row.missingFromBuyPlan
+                  ? "Still waiting for a concrete Step 2 buy plan."
+                  : "Concrete Step 2 buy plan was created."
+              }
+            >
+              {row.missingFromBuyPlan ? "Plan pending" : "Plan ready"}
             </p>
           </div>
         );
@@ -1352,16 +1352,24 @@ function Stage2TopTenEventsSummaryTable({
         const decision = row.displayDecision;
 
         return (
-          <div className="space-y-1">
-            <p className="font-semibold text-slate-950">
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+            <p
+              className={`font-semibold text-slate-950${isCompact ? " line-clamp-1" : ""}`}
+              title={formatStage2TopTenHandoffOutcome(row)}
+            >
               {formatStage2TopTenHandoffOutcome(row)}
             </p>
-            <p className="text-xs text-slate-500">
+            <p
+              className={`text-xs text-slate-500${isCompact ? " line-clamp-1" : ""}`}
+              title={`${decision.decision.replaceAll("_", " ")} · Side ${decision.side}`}
+            >
               {decision.decision.replaceAll("_", " ")} · Side {decision.side}
             </p>
-            <p className="text-xs text-slate-500">
-              {decision.risk_status.replaceAll("_", " ")}
-            </p>
+            {isCompact ? null : (
+              <p className="text-xs text-slate-500">
+                {decision.risk_status.replaceAll("_", " ")}
+              </p>
+            )}
           </div>
         );
       },
@@ -1377,15 +1385,20 @@ function Stage2TopTenEventsSummaryTable({
 
         if (!decision.order_plan) {
           return (
-            <div className="space-y-1">
+            <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
               <p className="font-semibold text-slate-950">No order planned</p>
-              <p className="text-xs leading-5 text-slate-600">{row.reason}</p>
+              <p
+                className={`text-xs leading-5 text-slate-600${isCompact ? " line-clamp-2" : ""}`}
+                title={row.reason}
+              >
+                {row.reason}
+              </p>
             </div>
           );
         }
 
         return (
-          <div className="space-y-1">
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
             <p className="font-semibold capitalize text-slate-950">
               {decision.order_plan.status.replaceAll("_", " ")}
             </p>
@@ -1393,12 +1406,21 @@ function Stage2TopTenEventsSummaryTable({
               {formatMoney(decision.order_plan.order_size_usd)} at{" "}
               {formatPriceCents(decision.order_plan.limit_price_cents)}
             </p>
-            <div className="text-xs leading-5 text-slate-600">
-              <ErrorCodeWithDetails
-                detail={decision.order_plan.detail}
-                detailClassName="text-slate-600"
-              />
-            </div>
+            {isCompact ? (
+              <p
+                className="line-clamp-2 text-xs leading-5 text-slate-600"
+                title={decision.order_plan.detail}
+              >
+                {decision.order_plan.detail}
+              </p>
+            ) : (
+              <div className="text-xs leading-5 text-slate-600">
+                <ErrorCodeWithDetails
+                  detail={decision.order_plan.detail}
+                  detailClassName="text-slate-600"
+                />
+              </div>
+            )}
           </div>
         );
       },
@@ -1416,11 +1438,18 @@ function Stage2TopTenEventsSummaryTable({
         const executionReason = row.reason;
 
         return (
-          <div className="space-y-1">
-            <p className="text-sm leading-6 text-slate-700">
+          <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
+            <p
+              className={
+                isCompact
+                  ? "line-clamp-2 text-xs leading-5 text-slate-700"
+                  : "text-sm leading-6 text-slate-700"
+              }
+              title={rationale || "No in-depth details were captured for this row."}
+            >
               {rationale || "No in-depth details were captured for this row."}
             </p>
-            {executionReason !== rationale ? (
+            {executionReason !== rationale && !isCompact ? (
               <p className="text-xs leading-5 text-slate-500">
                 <span className="font-semibold text-slate-700">
                   Execution blocker / detail:
@@ -1459,6 +1488,7 @@ function Stage2TopTenEventsSummaryTable({
         ]}
         persistColumnPreferences={false}
         showPresetFilters={false}
+        displayDensity={displayDensity}
         extraColumns={extraColumns}
         onSortChange={(key) =>
           setSortState((current) => ({
@@ -6679,17 +6709,43 @@ function StageTwoInvestEventsDialog({
   state: StageTwoInvestEventsDialogState;
   onClose: () => void;
 }) {
+  const [isCompactRows, setIsCompactRows] = useState(false);
+
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
       <div className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-[1500px] flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
+          <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
               Stage 2 Output
             </p>
-            <h2 className="mt-1 text-xl font-semibold text-slate-950">
-              New Events to Invest in: {state.rows.length}
-            </h2>
+            <div className="mt-1 flex items-center gap-2">
+              <h2 className="text-xl font-semibold text-slate-950">
+                New Events to Invest in: {state.rows.length}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setIsCompactRows((current) => !current)}
+                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-300"
+                aria-pressed={isCompactRows}
+                aria-label={
+                  isCompactRows
+                    ? "Expand Stage 2 invest rows"
+                    : "Collapse Stage 2 invest rows"
+                }
+                title={
+                  isCompactRows
+                    ? "Expand Stage 2 invest rows"
+                    : "Collapse Stage 2 invest rows"
+                }
+              >
+                {isCompactRows ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronUp className="h-4 w-4" />
+                )}
+              </button>
+            </div>
             <p className="mt-2 text-sm text-slate-600">
               Persisted Stage 2 Top 10 candidates that Stage 3 is trying to
               execute. If a transferred event never became a concrete Step 2
@@ -6709,6 +6765,7 @@ function StageTwoInvestEventsDialog({
           <Stage2TopTenEventsSummaryTable
             rows={state.rows}
             run={null}
+            displayDensity={isCompactRows ? "compact" : "default"}
             testId="stage-two-invest-events-summary"
             emptyMessage="No persisted Stage 2 Top 10 handoff rows were returned for this run."
             headerContent={
