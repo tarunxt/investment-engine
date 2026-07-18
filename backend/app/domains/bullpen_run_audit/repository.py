@@ -1,0 +1,406 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+import hashlib
+import json
+from typing import Any
+
+from sqlalchemy import Select, and_, desc, func, or_, select
+from sqlalchemy.orm import Session, selectinload
+
+from app.domains.bullpen_run_audit.models import (
+    BullpenRunAuditBlobRecord,
+    BullpenRunAuditEventRecord,
+    BullpenRunAuditFeedbackRecord,
+    BullpenRunAuditFeedbackSubcallRecord,
+    BullpenRunAuditFindingRecord,
+    BullpenRunAuditFormulaRecord,
+    BullpenRunAuditManualCheckRecord,
+    BullpenRunAuditRemarkRecord,
+    BullpenRunAuditSnapshotRecord,
+    BullpenRunAuditStageRecord,
+)
+from app.domains.bullpen_run_audit.sanitizer import sanitize_secret_value
+from app.domains.polymarket_auto_live.models import (
+    PolymarketAutoLiveDecisionRecord,
+    PolymarketAutoLiveOrderIntentRecord,
+    PolymarketAutoLiveRunRecord,
+)
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat()
+
+
+def stable_blob_id(payload: Any) -> str:
+    if isinstance(payload, str):
+        value = payload
+    else:
+        value = json.dumps(
+            sanitize_secret_value(payload),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+class BullpenRunAuditRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_run_records(
+        self,
+        *,
+        user_id: int,
+        run_status: str | None = None,
+        triggered_by: str | None = None,
+        dry_live_mode: str | None = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        run_id_search: str | None = None,
+    ) -> list[PolymarketAutoLiveRunRecord]:
+        query: Select[tuple[PolymarketAutoLiveRunRecord]] = select(PolymarketAutoLiveRunRecord).where(
+            PolymarketAutoLiveRunRecord.user_id == user_id
+        )
+        if run_status:
+            query = query.where(PolymarketAutoLiveRunRecord.status == run_status)
+        if triggered_by:
+            query = query.where(PolymarketAutoLiveRunRecord.triggered_by == triggered_by)
+        if dry_live_mode == "dry":
+            query = query.where(PolymarketAutoLiveRunRecord.dry_run.is_(True))
+        elif dry_live_mode == "live":
+            query = query.where(PolymarketAutoLiveRunRecord.dry_run.is_(False))
+        if from_date is not None:
+            query = query.where(PolymarketAutoLiveRunRecord.started_at >= from_date)
+        if to_date is not None:
+            query = query.where(PolymarketAutoLiveRunRecord.started_at <= to_date)
+        if run_id_search:
+            query = query.where(PolymarketAutoLiveRunRecord.id.ilike(f"%{run_id_search.strip()}%"))
+        query = query.order_by(
+            desc(PolymarketAutoLiveRunRecord.started_at),
+            desc(PolymarketAutoLiveRunRecord.created_at),
+        )
+        return list(self.session.execute(query).scalars().all())
+
+    def get_run_record(self, *, user_id: int, run_id: str) -> PolymarketAutoLiveRunRecord | None:
+        return self.session.execute(
+            select(PolymarketAutoLiveRunRecord).where(
+                and_(
+                    PolymarketAutoLiveRunRecord.user_id == user_id,
+                    PolymarketAutoLiveRunRecord.id == run_id,
+                )
+            )
+        ).scalar_one_or_none()
+
+    def get_run_decision_records(
+        self,
+        *,
+        user_id: int,
+        run_id: str,
+    ) -> list[PolymarketAutoLiveDecisionRecord]:
+        query = (
+            select(PolymarketAutoLiveDecisionRecord)
+            .where(
+                and_(
+                    PolymarketAutoLiveDecisionRecord.user_id == user_id,
+                    PolymarketAutoLiveDecisionRecord.run_id == run_id,
+                )
+            )
+            .order_by(
+                desc(PolymarketAutoLiveDecisionRecord.created_at),
+                desc(PolymarketAutoLiveDecisionRecord.updated_at),
+            )
+        )
+        return list(self.session.execute(query).scalars().all())
+
+    def get_run_order_intent_records(
+        self,
+        *,
+        user_id: int,
+        run_id: str,
+    ) -> list[PolymarketAutoLiveOrderIntentRecord]:
+        query = (
+            select(PolymarketAutoLiveOrderIntentRecord)
+            .where(
+                and_(
+                    PolymarketAutoLiveOrderIntentRecord.user_id == user_id,
+                    PolymarketAutoLiveOrderIntentRecord.run_id == run_id,
+                )
+            )
+            .options(selectinload(PolymarketAutoLiveOrderIntentRecord.attempts))
+            .options(selectinload(PolymarketAutoLiveOrderIntentRecord.reservations))
+            .order_by(desc(PolymarketAutoLiveOrderIntentRecord.created_at))
+        )
+        return list(self.session.execute(query).scalars().unique().all())
+
+    def get_current_snapshot(
+        self,
+        *,
+        user_id: int,
+        run_id: str,
+    ) -> BullpenRunAuditSnapshotRecord | None:
+        query = (
+            select(BullpenRunAuditSnapshotRecord)
+            .where(
+                and_(
+                    BullpenRunAuditSnapshotRecord.user_id == user_id,
+                    BullpenRunAuditSnapshotRecord.run_id == run_id,
+                    BullpenRunAuditSnapshotRecord.is_current.is_(True),
+                )
+            )
+            .options(selectinload(BullpenRunAuditSnapshotRecord.findings))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.feedback_generations))
+            .order_by(desc(BullpenRunAuditSnapshotRecord.snapshot_version))
+            .limit(1)
+        )
+        return self.session.execute(query).scalar_one_or_none()
+
+    def get_snapshot(
+        self,
+        *,
+        user_id: int,
+        snapshot_id: int,
+    ) -> BullpenRunAuditSnapshotRecord | None:
+        query = (
+            select(BullpenRunAuditSnapshotRecord)
+            .where(
+                and_(
+                    BullpenRunAuditSnapshotRecord.user_id == user_id,
+                    BullpenRunAuditSnapshotRecord.id == snapshot_id,
+                )
+            )
+            .options(selectinload(BullpenRunAuditSnapshotRecord.stages))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.events))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.formulas))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.findings))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.remarks))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.manual_checks))
+            .options(selectinload(BullpenRunAuditSnapshotRecord.feedback_generations))
+        )
+        return self.session.execute(query).scalar_one_or_none()
+
+    def create_blob(
+        self,
+        *,
+        payload: Any,
+        content_type: str,
+        sanitized: bool = True,
+    ) -> BullpenRunAuditBlobRecord:
+        sanitized_payload = sanitize_secret_value(payload)
+        blob_id = stable_blob_id(sanitized_payload)
+        existing = self.session.get(BullpenRunAuditBlobRecord, blob_id)
+        if existing is not None:
+            return existing
+        if isinstance(sanitized_payload, str):
+            payload_json = None
+            payload_text = sanitized_payload
+            size_bytes = len(payload_text.encode("utf-8"))
+        else:
+            payload_json = sanitized_payload
+            payload_text = None
+            size_bytes = len(
+                json.dumps(payload_json, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            )
+        record = BullpenRunAuditBlobRecord(
+            id=blob_id,
+            content_type=content_type,
+            sanitized=sanitized,
+            size_bytes=size_bytes,
+            payload_json=payload_json,
+            payload_text=payload_text,
+        )
+        self.session.add(record)
+        self.session.flush()
+        return record
+
+    def clear_current_snapshot_children(self, snapshot_id: int) -> None:
+        self.session.query(BullpenRunAuditStageRecord).filter(
+            BullpenRunAuditStageRecord.snapshot_id == snapshot_id
+        ).delete(synchronize_session=False)
+        self.session.query(BullpenRunAuditEventRecord).filter(
+            BullpenRunAuditEventRecord.snapshot_id == snapshot_id
+        ).delete(synchronize_session=False)
+        self.session.query(BullpenRunAuditFormulaRecord).filter(
+            BullpenRunAuditFormulaRecord.snapshot_id == snapshot_id
+        ).delete(synchronize_session=False)
+        self.session.query(BullpenRunAuditFindingRecord).filter(
+            BullpenRunAuditFindingRecord.snapshot_id == snapshot_id
+        ).delete(synchronize_session=False)
+
+    def latest_snapshot_version_for_run(self, *, user_id: int, run_id: str) -> int:
+        value = self.session.execute(
+            select(func.max(BullpenRunAuditSnapshotRecord.snapshot_version)).where(
+                and_(
+                    BullpenRunAuditSnapshotRecord.user_id == user_id,
+                    BullpenRunAuditSnapshotRecord.run_id == run_id,
+                )
+            )
+        ).scalar_one_or_none()
+        return int(value or 0)
+
+    def demote_current_snapshots(self, *, user_id: int, run_id: str) -> None:
+        self.session.query(BullpenRunAuditSnapshotRecord).filter(
+            and_(
+                BullpenRunAuditSnapshotRecord.user_id == user_id,
+                BullpenRunAuditSnapshotRecord.run_id == run_id,
+                BullpenRunAuditSnapshotRecord.is_current.is_(True),
+            )
+        ).update({"is_current": False}, synchronize_session=False)
+
+    def latest_feedback_for_snapshot(
+        self,
+        *,
+        snapshot_id: int,
+        provider: str,
+        model: str,
+        prompt_version: str,
+        snapshot_hash: str | None,
+    ) -> BullpenRunAuditFeedbackRecord | None:
+        query = (
+            select(BullpenRunAuditFeedbackRecord)
+            .where(
+                and_(
+                    BullpenRunAuditFeedbackRecord.snapshot_id == snapshot_id,
+                    BullpenRunAuditFeedbackRecord.provider == provider,
+                    BullpenRunAuditFeedbackRecord.model == model,
+                    BullpenRunAuditFeedbackRecord.prompt_version == prompt_version,
+                    BullpenRunAuditFeedbackRecord.snapshot_hash == snapshot_hash,
+                )
+            )
+            .order_by(desc(BullpenRunAuditFeedbackRecord.created_at))
+            .limit(1)
+        )
+        return self.session.execute(query).scalar_one_or_none()
+
+    def latest_feedback_for_snapshot_any(
+        self,
+        *,
+        snapshot_id: int,
+    ) -> BullpenRunAuditFeedbackRecord | None:
+        query = (
+            select(BullpenRunAuditFeedbackRecord)
+            .where(BullpenRunAuditFeedbackRecord.snapshot_id == snapshot_id)
+            .order_by(desc(BullpenRunAuditFeedbackRecord.created_at))
+            .limit(1)
+        )
+        return self.session.execute(query).scalar_one_or_none()
+
+    def get_feedback(
+        self,
+        *,
+        user_id: int,
+        feedback_id: int,
+    ) -> BullpenRunAuditFeedbackRecord | None:
+        query = (
+            select(BullpenRunAuditFeedbackRecord)
+            .join(BullpenRunAuditSnapshotRecord)
+            .where(
+                and_(
+                    BullpenRunAuditFeedbackRecord.id == feedback_id,
+                    BullpenRunAuditSnapshotRecord.user_id == user_id,
+                )
+            )
+            .options(selectinload(BullpenRunAuditFeedbackRecord.subcalls))
+        )
+        return self.session.execute(query).scalar_one_or_none()
+
+    def list_feedback_for_snapshot(
+        self,
+        *,
+        snapshot_id: int,
+    ) -> list[BullpenRunAuditFeedbackRecord]:
+        query = (
+            select(BullpenRunAuditFeedbackRecord)
+            .where(BullpenRunAuditFeedbackRecord.snapshot_id == snapshot_id)
+            .order_by(desc(BullpenRunAuditFeedbackRecord.created_at))
+        )
+        return list(self.session.execute(query).scalars().all())
+
+    def list_snapshots_query(
+        self,
+        *,
+        user_id: int,
+        stage_failure: str | None = None,
+        audit_status: str | None = None,
+        finding_severity: str | None = None,
+        feedback_generated: bool | None = None,
+        run_status: str | None = None,
+        triggered_by: str | None = None,
+        dry_live_mode: str | None = None,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        run_id_search: str | None = None,
+    ) -> Select[tuple[BullpenRunAuditSnapshotRecord]]:
+        query = select(BullpenRunAuditSnapshotRecord).where(
+            and_(
+                BullpenRunAuditSnapshotRecord.user_id == user_id,
+                BullpenRunAuditSnapshotRecord.is_current.is_(True),
+            )
+        )
+        if run_status:
+            query = query.where(BullpenRunAuditSnapshotRecord.run_status == run_status)
+        if triggered_by:
+            query = query.where(BullpenRunAuditSnapshotRecord.triggered_by == triggered_by)
+        if dry_live_mode == "dry":
+            query = query.where(BullpenRunAuditSnapshotRecord.dry_run.is_(True))
+        elif dry_live_mode == "live":
+            query = query.where(BullpenRunAuditSnapshotRecord.dry_run.is_(False))
+        if from_date is not None:
+            query = query.where(BullpenRunAuditSnapshotRecord.started_at >= from_date)
+        if to_date is not None:
+            query = query.where(BullpenRunAuditSnapshotRecord.started_at <= to_date)
+        if run_id_search:
+            query = query.where(BullpenRunAuditSnapshotRecord.run_id.ilike(f"%{run_id_search.strip()}%"))
+        if stage_failure == "stage-1":
+            query = query.where(BullpenRunAuditSnapshotRecord.stage1_status == "fail")
+        elif stage_failure == "stage-2":
+            query = query.where(BullpenRunAuditSnapshotRecord.stage2_status == "fail")
+        elif stage_failure == "stage-3":
+            query = query.where(BullpenRunAuditSnapshotRecord.stage3_status == "fail")
+        if audit_status:
+            query = query.where(BullpenRunAuditSnapshotRecord.audit_status == audit_status)
+        if feedback_generated is True:
+            query = query.where(
+                BullpenRunAuditSnapshotRecord.feedback_status.in_(("completed", "processing", "queued"))
+            )
+        elif feedback_generated is False:
+            query = query.where(BullpenRunAuditSnapshotRecord.feedback_status.is_(None))
+        if finding_severity:
+            severity_field = {
+                "critical": BullpenRunAuditSnapshotRecord.findings_critical,
+                "high": BullpenRunAuditSnapshotRecord.findings_high,
+                "medium": BullpenRunAuditSnapshotRecord.findings_medium,
+                "low": BullpenRunAuditSnapshotRecord.findings_low,
+                "info": BullpenRunAuditSnapshotRecord.findings_info,
+            }.get(finding_severity)
+            if severity_field is not None:
+                query = query.where(severity_field > 0)
+        return query.order_by(
+            desc(BullpenRunAuditSnapshotRecord.started_at),
+            desc(BullpenRunAuditSnapshotRecord.created_at),
+        )
+
+    def list_latest_remarks(self, *, snapshot_id: int) -> list[BullpenRunAuditRemarkRecord]:
+        query = (
+            select(BullpenRunAuditRemarkRecord)
+            .where(BullpenRunAuditRemarkRecord.snapshot_id == snapshot_id)
+            .order_by(desc(BullpenRunAuditRemarkRecord.created_at))
+        )
+        return list(self.session.execute(query).scalars().all())
+
+    def list_manual_checks(self, *, snapshot_id: int) -> list[BullpenRunAuditManualCheckRecord]:
+        query = (
+            select(BullpenRunAuditManualCheckRecord)
+            .where(BullpenRunAuditManualCheckRecord.snapshot_id == snapshot_id)
+            .order_by(desc(BullpenRunAuditManualCheckRecord.created_at))
+        )
+        return list(self.session.execute(query).scalars().all())

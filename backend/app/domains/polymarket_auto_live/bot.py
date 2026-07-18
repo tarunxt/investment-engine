@@ -13,6 +13,7 @@ from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
 )
+from app.domains.bullpen_run_audit.provenance import build_native_run_audit_metadata
 from app.domains.polymarket_auto_live.order_intent_service import (
     cancel_order_intent_for_user_sync,
     get_run_orders_for_user_sync,
@@ -172,6 +173,15 @@ def build_initial_scan_stage_result(
         outputs=outputs,
         started_at=started_at,
         completed_at=None,
+    )
+
+
+def _native_audit_metadata(settings: BullpenAutoLiveSettings) -> dict[str, object]:
+    return build_native_run_audit_metadata(
+        settings_snapshot=settings.model_dump(mode="json"),
+        prompt_template=settings.console_llm_prompt_template,
+        execution_version=None,
+        strategy_version=settings.strategy_profile,
     )
 
 
@@ -418,6 +428,7 @@ class BullpenAutoLiveBot:
                     completed_at=utc_now(),
                     summary="Emergency stop is active.",
                     guardrail_checks=self._build_guardrail_checks(settings, state),
+                    audit_metadata=_native_audit_metadata(settings),
                 )
                 run_record = self._new_run_record(run)
                 session.add(run_record)
@@ -437,6 +448,7 @@ class BullpenAutoLiveBot:
                     completed_at=utc_now(),
                     summary=f"Run {running_run.id} is already in progress.",
                     guardrail_checks=self._build_guardrail_checks(settings, state),
+                    audit_metadata=_native_audit_metadata(settings),
                 )
                 session.add(self._new_run_record(run))
                 state.last_action = run.summary
@@ -462,6 +474,7 @@ class BullpenAutoLiveBot:
                     )
                 ],
                 request_context=request,
+                audit_metadata=_native_audit_metadata(settings),
             )
             session.add(self._new_run_record(run))
             state.last_action = run.summary

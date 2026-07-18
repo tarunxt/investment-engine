@@ -197,9 +197,16 @@ export function TradeAnalysisListClient() {
             LLM reasoning, computed tags, realized P&amp;L, and reinforcement signals.
           </p>
         </div>
-        <Button asChild className="shrink-0 bg-purple-700 text-white hover:bg-purple-800">
-          <Link href={URLs.routes.console.bullpenAi()}>Bullpen x AI</Link>
-        </Button>
+        <div className="flex shrink-0 flex-col gap-2">
+          <Button asChild className="bg-purple-700 text-white hover:bg-purple-800">
+            <Link href={URLs.routes.console.bullpenAi()}>Bullpen x AI</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>
+              Runs Analysis
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Card className="rounded-none border-slate-200 shadow-none">

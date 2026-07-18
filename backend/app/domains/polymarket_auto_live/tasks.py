@@ -11,6 +11,8 @@ from app.core.logging import get_logger
 from app.domains.bullpen_trade_analysis.service import (
     sync_auto_live_position_snapshots_sync,
 )
+from app.domains.bullpen_run_audit.provenance import build_native_run_audit_metadata
+from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
@@ -175,6 +177,18 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
         if run.status != "running":
             logger.info("Skipping inactive Auto-Live run %s with status %s", run_id, run.status)
             return
+        try:
+            materialize_run_audit_snapshot_sync(
+                session,
+                user_id=user_id,
+                run_id=run_id,
+                force=True,
+                freeze=False,
+            )
+            session.commit()
+        except Exception:
+            logger.exception("Initial Bullpen run audit materialization failed for run %s", run_id)
+            session.rollback()
 
         settings, state = _synchronize_state(user_id, repo)
         position_records = repo.list_open_position_records(user_id)
@@ -245,6 +259,18 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                 run=run,
                 state=state,
             )
+            try:
+                materialize_run_audit_snapshot_sync(
+                    session,
+                    user_id=user_id,
+                    run_id=run_id,
+                    force=True,
+                    freeze=True,
+                )
+                session.commit()
+            except Exception:
+                logger.exception("Final Bullpen run audit freeze failed for run %s", run_id)
+                session.rollback()
             logger.exception("Auto-Live run %s exhausted retries", run_id)
             return
 
@@ -278,6 +304,18 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                 engine_result.state.last_run_at = synced_run.completed_at or _utc_now().isoformat()
                 repo.save_state(user_id, engine_result.state)
                 session.commit()
+        try:
+            materialize_run_audit_snapshot_sync(
+                session,
+                user_id=user_id,
+                run_id=run_id,
+                force=True,
+                freeze=engine_result.run.status in {"completed", "partial_success", "failed", "skipped"},
+            )
+            session.commit()
+        except Exception:
+            logger.exception("Bullpen run audit post-run materialization failed for run %s", run_id)
+            session.rollback()
             dispatch_due_auto_live_order_intents.delay()  # type: ignore[attr-defined]
         try:
             sync_auto_live_position_snapshots_sync(
@@ -370,6 +408,12 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                         started_at=now.isoformat(),
                     )
                 ],
+                audit_metadata=build_native_run_audit_metadata(
+                    settings_snapshot=settings.model_dump(mode="json"),
+                    prompt_template=settings.console_llm_prompt_template,
+                    execution_version=None,
+                    strategy_version=settings.strategy_profile,
+                ),
             )
             repo.save_run(user_id, run)
             repo.save_state(user_id, state)

@@ -118,6 +118,30 @@ docker exec -it investor-backend-1 alembic upgrade head
 * Prefer the `investor-*` systemd service names when giving production commands: `investor-backend`, `investor-celery-worker`, `investor-celery-beat`, and `investor-frontend`.
 * For this systemd production deployment, always use `/etc/investor/*.env` paths when discussing environment files.
 
+<!-- BULLPEN_RUN_AUDIT_SYNC_CONTRACT -->
+## Bullpen Run Audit Synchronization Contract
+
+Any future change to Bullpen Stage 1, Stage 2, or Stage 3 inputs, outputs, filters,
+LLM prompts, evidence fields, formula logic, rankings, tie-breakers, guardrails,
+capital sizing, decisions, exits, orders, execution or reconciliation states, or
+error handling is incomplete unless the Bullpen Runs Audit system is updated in the
+same task.
+
+Future agents and Codex tasks must update, as applicable:
+
+* Audit capture calls and adapters
+* Snapshot or schema versioning
+* Formula and algorithm registry entries
+* Deterministic validators and finding rules
+* API schemas and route responses
+* Run audit UI labels and renderers
+* Legacy compatibility and backfill mapping
+* Tests
+* `docs/bullpen-run-audit.md`
+
+Bullpen audit changes must preserve backward compatibility for existing frozen
+snapshots. If new Bullpen behavior cannot be represented by the current audit schema,
+create a new schema version or migration path instead of rewriting historical facts.
 
 # STRICT RULES
 

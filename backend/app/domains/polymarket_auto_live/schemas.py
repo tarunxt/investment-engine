@@ -759,6 +759,7 @@ class BullpenAutoLiveRun(BaseModel):
     order_intent_ids: list[str] = Field(default_factory=list)
     diagnostics: BullpenAutoLiveRunDiagnostics = Field(default_factory=BullpenAutoLiveRunDiagnostics)
     request_context: BullpenAutoLiveRunOnceRequest | None = None
+    audit_metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class BullpenAutoLiveState(BaseModel):

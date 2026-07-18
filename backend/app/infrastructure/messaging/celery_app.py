@@ -30,6 +30,7 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders": {"queue": "beat"},
+    "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -71,6 +72,7 @@ celery.autodiscover_tasks([
     "app.domains.auth",
     "app.domains.runs",
     "app.domains.google_sheets",
+    "app.domains.bullpen_run_audit",
     "app.domains.polymarket_auto_live",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",

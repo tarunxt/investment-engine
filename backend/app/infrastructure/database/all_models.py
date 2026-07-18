@@ -8,6 +8,18 @@ from app.domains.bullpen_trade_analysis.models import (  # noqa: F401
     BullpenTradeAnalysisRecord,
     BullpenTradeAnalysisSnapshotRecord,
 )
+from app.domains.bullpen_run_audit.models import (  # noqa: F401
+    BullpenRunAuditBlobRecord,
+    BullpenRunAuditEventRecord,
+    BullpenRunAuditFeedbackRecord,
+    BullpenRunAuditFeedbackSubcallRecord,
+    BullpenRunAuditFindingRecord,
+    BullpenRunAuditFormulaRecord,
+    BullpenRunAuditManualCheckRecord,
+    BullpenRunAuditRemarkRecord,
+    BullpenRunAuditSnapshotRecord,
+    BullpenRunAuditStageRecord,
+)
 from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401

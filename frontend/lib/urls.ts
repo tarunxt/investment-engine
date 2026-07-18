@@ -186,6 +186,21 @@ const bullpenTradeAnalysisApiUrls = {
     `${resolveApiBaseUrl()}/bullpen-ai/trade-analysis/${tradeId}/post-trade-analysis`,
 };
 
+const bullpenRunAuditApiUrls = {
+  list: () => `${resolveApiBaseUrl()}/bullpen-ai/run-audits`,
+  detail: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}`,
+  materialize: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/materialize`,
+  section: (runId: string, section: string) =>
+    `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/sections/${section}`,
+  findings: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/findings`,
+  remarks: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/remarks`,
+  manualChecks: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/manual-checks`,
+  feedback: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/feedback`,
+  feedbackDetail: (runId: string, feedbackId: number) =>
+    `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/feedback/${feedbackId}`,
+  export: (runId: string) => `${resolveApiBaseUrl()}/bullpen-ai/run-audits/${runId}/export`,
+};
+
 const tradingBotsApiUrls = {
   summary: () => `${resolveApiBaseUrl()}/trading-bots/summary`,
   overview: () => `${resolveApiBaseUrl()}/trading-bots/overview`,
@@ -360,6 +375,7 @@ export const URLs = {
 
   bullpenAutoLive: bullpenAutoLiveApiUrls,
   bullpenTradeAnalysis: bullpenTradeAnalysisApiUrls,
+  bullpenRunAudit: bullpenRunAuditApiUrls,
   polymarketAutoLive: bullpenAutoLiveApiUrls,
 
   tradingBots: tradingBotsApiUrls,
@@ -459,6 +475,9 @@ export const URLs = {
       bullpenAiAnalyseEvents: () => "/console/bullpen-ai/analyse-events",
       bullpenAiAnalyseEventDetail: (tradeId: string) =>
         `/console/bullpen-ai/analyse-events/${tradeId}`,
+      bullpenAiAnalyseRuns: () => "/console/bullpen-ai/analyse-runs",
+      bullpenAiAnalyseRunDetail: (runId: string) =>
+        `/console/bullpen-ai/analyse-runs/${runId}`,
       bullpenAiAutoLive: () => "/console/trading-bots/bullpen-ai-auto-live",
       bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
       bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",

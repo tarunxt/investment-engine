@@ -14,6 +14,7 @@ from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
+from app.domains.bullpen_run_audit.router import router as bullpen_run_audit_router
 from app.domains.bullpen_trade_analysis.router import (
     router as bullpen_trade_analysis_router,
 )
@@ -49,6 +50,18 @@ from app.domains.bullpen_trade_analysis.models import (  # noqa: F401
     BullpenTradeAnalysisLlmRecord,
     BullpenTradeAnalysisRecord,
     BullpenTradeAnalysisSnapshotRecord,
+)
+from app.domains.bullpen_run_audit.models import (  # noqa: F401
+    BullpenRunAuditBlobRecord,
+    BullpenRunAuditEventRecord,
+    BullpenRunAuditFeedbackRecord,
+    BullpenRunAuditFeedbackSubcallRecord,
+    BullpenRunAuditFindingRecord,
+    BullpenRunAuditFormulaRecord,
+    BullpenRunAuditManualCheckRecord,
+    BullpenRunAuditRemarkRecord,
+    BullpenRunAuditSnapshotRecord,
+    BullpenRunAuditStageRecord,
 )
 from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
@@ -224,6 +237,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(bullpen_run_audit_router)
 app.include_router(bullpen_trade_analysis_router)
 app.include_router(cost_drivers_router)
 app.include_router(google_sheets_router)

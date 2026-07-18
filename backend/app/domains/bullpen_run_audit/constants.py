@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+from typing import Final
+
+BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 1
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-18"
+BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
+BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-18"
+
+SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
+SNAPSHOT_SOURCE_RECONSTRUCTED: Final[str] = "reconstructed"
+
+SNAPSHOT_STATUS_WORKING: Final[str] = "working"
+SNAPSHOT_STATUS_FROZEN: Final[str] = "frozen"
+SNAPSHOT_STATUS_INCOMPLETE: Final[str] = "incomplete"
+
+FINDING_SEVERITIES: Final[tuple[str, ...]] = (
+    "critical",
+    "high",
+    "medium",
+    "low",
+    "info",
+)
+
+MANUAL_CHECK_STATUSES: Final[tuple[str, ...]] = (
+    "unchecked",
+    "pass",
+    "fail",
+    "not_applicable",
+)
+
+AUDIT_SECTION_KEYS: Final[tuple[str, ...]] = (
+    "overview",
+    "stage-1",
+    "stage-2",
+    "stage-3",
+    "formulas",
+    "guardrails",
+    "raw",
+)
+
+AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
+    {
+        "algorithm_key": "stage2_consensus_statistics",
+        "stage": "stage-2",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket.bullpen_llm_execution",
+        "source_function": "compute_llm_consensus",
+        "label": "Stage 2 consensus statistics",
+    },
+    {
+        "algorithm_key": "candidate_returns_per_day",
+        "stage": "stage-1",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "candidate_returns_per_day",
+        "label": "Candidate returns per day",
+    },
+    {
+        "algorithm_key": "position_returns_per_day",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "position_returns_per_day",
+        "label": "Active position returns per day",
+    },
+    {
+        "algorithm_key": "stage3_rank_and_selection",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "_serialize_stage3_decision_row",
+        "label": "Stage 3 ranking and selection",
+    },
+    {
+        "algorithm_key": "order_funnel_aggregation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "summarize_run_orders_sync",
+        "label": "Order funnel aggregation",
+    },
+)
+
+DEFAULT_MANUAL_CHECKS: Final[tuple[dict[str, str], ...]] = (
+    {
+        "check_key": "stage1_input_completeness",
+        "label": "Stage 1 input completeness",
+        "description": "Confirm the run captured the expected scan inputs and source metadata.",
+    },
+    {
+        "check_key": "filter_exclusion_correctness",
+        "label": "Filter and exclusion correctness",
+        "description": "Confirm exclusion rules and filter reasons match the source data.",
+    },
+    {
+        "check_key": "market_identity_rules",
+        "label": "Market identity and rules",
+        "description": "Confirm the market identity and resolution rules are correct.",
+    },
+    {
+        "check_key": "stage2_llm_coverage",
+        "label": "Stage 2 LLM coverage",
+        "description": "Confirm every expected candidate received Stage 2 LLM review.",
+    },
+    {
+        "check_key": "evidence_freshness",
+        "label": "Evidence freshness and relevance",
+        "description": "Confirm the evidence packet reflects relevant and current facts.",
+    },
+    {
+        "check_key": "probability_rationale_consistency",
+        "label": "Probability and rationale consistency",
+        "description": "Confirm the numeric probabilities match the written rationales.",
+    },
+    {
+        "check_key": "consensus_correctness",
+        "label": "Consensus correctness",
+        "description": "Confirm consensus aggregation used only valid LLM outputs.",
+    },
+    {
+        "check_key": "handoff_completeness",
+        "label": "Stage 2 to Stage 3 handoff",
+        "description": "Confirm qualified Stage 2 candidates were handed off into Stage 3.",
+    },
+    {
+        "check_key": "ranking_tie_breaks",
+        "label": "Ranking and tie-breaks",
+        "description": "Confirm ranking, ordering, and tie-breaks are deterministic.",
+    },
+    {
+        "check_key": "capital_slot_constraints",
+        "label": "Capital and slot constraints",
+        "description": "Confirm slot, exposure, and capital constraints were enforced.",
+    },
+    {
+        "check_key": "guardrail_enforcement",
+        "label": "Guardrail enforcement",
+        "description": "Confirm blocking guardrails actually prevented selection and execution.",
+    },
+    {
+        "check_key": "execution_consistency",
+        "label": "Order and execution consistency",
+        "description": "Confirm plans, intents, attempts, and terminal order states line up.",
+    },
+    {
+        "check_key": "audit_persistence_completeness",
+        "label": "Audit persistence completeness",
+        "description": "Confirm the persisted audit contains the required sections and evidence.",
+    },
+)
+
+BULLPEN_AUDIT_CRITICAL_SOURCE_FILES: Final[tuple[str, ...]] = (
+    "backend/app/domains/polymarket_auto_live/engine.py",
+    "backend/app/domains/polymarket_auto_live/tasks.py",
+    "backend/app/domains/polymarket_auto_live/order_intent_service.py",
+    "backend/app/domains/polymarket/bullpen_llm_execution.py",
+    "backend/app/domains/bullpen_run_audit/service.py",
+    "backend/app/domains/bullpen_run_audit/validators.py",
+)
+
+FEEDBACK_PROMPT_FILE: Final[str] = "backend/prompts/bullpen-run-audit-v1.txt"
+

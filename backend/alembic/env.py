@@ -14,10 +14,24 @@ from app.domains.jobs.models import Job  # noqa: F401
 from app.domains.polymarket.models import PolymarketRedeemAttemptRecord  # noqa: F401
 from app.domains.polymarket_auto_live.models import (  # noqa: F401
     PolymarketAutoLiveDecisionRecord,
+    PolymarketAutoLiveOrderAttemptRecord,
+    PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLivePositionRecord,
     PolymarketAutoLiveRunRecord,
     PolymarketAutoLiveSettingsRecord,
     PolymarketAutoLiveStateRecord,
+)
+from app.domains.bullpen_run_audit.models import (  # noqa: F401
+    BullpenRunAuditBlobRecord,
+    BullpenRunAuditEventRecord,
+    BullpenRunAuditFeedbackRecord,
+    BullpenRunAuditFeedbackSubcallRecord,
+    BullpenRunAuditFindingRecord,
+    BullpenRunAuditFormulaRecord,
+    BullpenRunAuditManualCheckRecord,
+    BullpenRunAuditRemarkRecord,
+    BullpenRunAuditSnapshotRecord,
+    BullpenRunAuditStageRecord,
 )
 from app.domains.prompts.models import Prompt  # noqa: F401
 from app.domains.runs.models import Run, RunJob  # noqa: F401

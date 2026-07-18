@@ -59,6 +59,18 @@ import {
     BullpenAutoLiveDecision,
     BullpenAutoLiveState,
     BullpenAutoLiveSummaryResponse,
+    BullpenRunAuditDetailResponse,
+    BullpenRunAuditFeedbackCreateRequest,
+    BullpenRunAuditFeedbackDetail,
+    BullpenRunAuditFeedbackSummary,
+    BullpenRunAuditFinding,
+    BullpenRunAuditListResponse,
+    BullpenRunAuditManualCheck,
+    BullpenRunAuditManualCheckUpdateRequest,
+    BullpenRunAuditMaterializeResponse,
+    BullpenRunAuditRemark,
+    BullpenRunAuditRemarkCreateRequest,
+    BullpenRunAuditSectionResponse,
     TradingBotsSummaryResponse,
     TradingBotsOverviewResponse,
     ZerodhaLoginUrlResponse,
@@ -204,6 +216,42 @@ export interface IApiService {
     getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
     retryBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     cancelBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
+    getBullpenRunAudits(params?: {
+        page?: number;
+        limit?: number;
+        status?: string;
+        triggeredBy?: string;
+        dryLiveMode?: string;
+        fromDate?: string;
+        toDate?: string;
+        stageFailure?: string;
+        auditStatus?: string;
+        findingSeverity?: string;
+        feedbackGenerated?: boolean;
+        runIdSearch?: string;
+    }): Promise<BullpenRunAuditListResponse>;
+    getBullpenRunAuditDetail(runId: string): Promise<BullpenRunAuditDetailResponse>;
+    materializeBullpenRunAudit(runId: string): Promise<BullpenRunAuditMaterializeResponse>;
+    getBullpenRunAuditSection(runId: string, section: string): Promise<BullpenRunAuditSectionResponse>;
+    getBullpenRunAuditFindings(runId: string): Promise<BullpenRunAuditFinding[]>;
+    addBullpenRunAuditRemark(
+        runId: string,
+        data: BullpenRunAuditRemarkCreateRequest,
+    ): Promise<BullpenRunAuditRemark>;
+    updateBullpenRunAuditManualCheck(
+        runId: string,
+        data: BullpenRunAuditManualCheckUpdateRequest,
+    ): Promise<BullpenRunAuditManualCheck>;
+    createBullpenRunAuditFeedback(
+        runId: string,
+        data: BullpenRunAuditFeedbackCreateRequest,
+    ): Promise<BullpenRunAuditFeedbackSummary>;
+    getBullpenRunAuditFeedback(runId: string): Promise<BullpenRunAuditFeedbackSummary[]>;
+    getBullpenRunAuditFeedbackDetail(
+        runId: string,
+        feedbackId: number,
+    ): Promise<BullpenRunAuditFeedbackDetail>;
+    exportBullpenRunAudit(runId: string): Promise<Record<string, unknown>>;
     runBullpenAutoLiveOnce(data?: BullpenAutoLiveRunOnceRequest): Promise<BullpenAutoLiveRun>;
     startBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     stopBullpenAutoLive(): Promise<BullpenAutoLiveState>;

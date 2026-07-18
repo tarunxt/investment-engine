@@ -40,6 +40,18 @@ import {
   BullpenAutoLiveDecision,
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
+  BullpenRunAuditDetailResponse,
+  BullpenRunAuditFeedbackCreateRequest,
+  BullpenRunAuditFeedbackDetail,
+  BullpenRunAuditFeedbackSummary,
+  BullpenRunAuditFinding,
+  BullpenRunAuditListResponse,
+  BullpenRunAuditManualCheck,
+  BullpenRunAuditManualCheckUpdateRequest,
+  BullpenRunAuditMaterializeResponse,
+  BullpenRunAuditRemark,
+  BullpenRunAuditRemarkCreateRequest,
+  BullpenRunAuditSectionResponse,
   BullpenTradeAnalysisDetailResponse,
   BullpenTradeAnalysisListResponse,
   PolymarketBotState,
@@ -1074,6 +1086,132 @@ class apiServiceClass implements IApiService {
   ): Promise<BullpenTradeAnalysisDetailResponse> {
     return this.post<BullpenTradeAnalysisDetailResponse>(
       URLs.bullpenTradeAnalysis.recompute(tradeId),
+    );
+  }
+
+  getBullpenRunAudits(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    triggeredBy?: string;
+    dryLiveMode?: string;
+    fromDate?: string;
+    toDate?: string;
+    stageFailure?: string;
+    auditStatus?: string;
+    findingSeverity?: string;
+    feedbackGenerated?: boolean;
+    runIdSearch?: string;
+  }): Promise<BullpenRunAuditListResponse> {
+    const query = new URLSearchParams();
+    if (params?.page) query.set("page", String(params.page));
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.status) query.set("status", params.status);
+    if (params?.triggeredBy) query.set("triggered_by", params.triggeredBy);
+    if (params?.dryLiveMode) query.set("dry_live_mode", params.dryLiveMode);
+    if (params?.fromDate) query.set("from_date", params.fromDate);
+    if (params?.toDate) query.set("to_date", params.toDate);
+    if (params?.stageFailure) query.set("stage_failure", params.stageFailure);
+    if (params?.auditStatus) query.set("audit_status", params.auditStatus);
+    if (params?.findingSeverity) {
+      query.set("finding_severity", params.findingSeverity);
+    }
+    if (typeof params?.feedbackGenerated === "boolean") {
+      query.set("feedback_generated", String(params.feedbackGenerated));
+    }
+    if (params?.runIdSearch) query.set("run_id_search", params.runIdSearch);
+    const baseUrl = URLs.bullpenRunAudit.list();
+    const url = query.size > 0 ? `${baseUrl}?${query.toString()}` : baseUrl;
+    return this.get<BullpenRunAuditListResponse>(url, { cache: "no-store" });
+  }
+
+  getBullpenRunAuditDetail(
+    runId: string,
+  ): Promise<BullpenRunAuditDetailResponse> {
+    return this.get<BullpenRunAuditDetailResponse>(
+      URLs.bullpenRunAudit.detail(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  materializeBullpenRunAudit(
+    runId: string,
+  ): Promise<BullpenRunAuditMaterializeResponse> {
+    return this.post<BullpenRunAuditMaterializeResponse>(
+      URLs.bullpenRunAudit.materialize(runId),
+    );
+  }
+
+  getBullpenRunAuditSection(
+    runId: string,
+    section: string,
+  ): Promise<BullpenRunAuditSectionResponse> {
+    return this.get<BullpenRunAuditSectionResponse>(
+      URLs.bullpenRunAudit.section(runId, section),
+      { cache: "no-store" },
+    );
+  }
+
+  getBullpenRunAuditFindings(runId: string): Promise<BullpenRunAuditFinding[]> {
+    return this.get<BullpenRunAuditFinding[]>(
+      URLs.bullpenRunAudit.findings(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  addBullpenRunAuditRemark(
+    runId: string,
+    data: BullpenRunAuditRemarkCreateRequest,
+  ): Promise<BullpenRunAuditRemark> {
+    return this.post<BullpenRunAuditRemark>(
+      URLs.bullpenRunAudit.remarks(runId),
+      data,
+    );
+  }
+
+  updateBullpenRunAuditManualCheck(
+    runId: string,
+    data: BullpenRunAuditManualCheckUpdateRequest,
+  ): Promise<BullpenRunAuditManualCheck> {
+    return this.post<BullpenRunAuditManualCheck>(
+      URLs.bullpenRunAudit.manualChecks(runId),
+      data,
+    );
+  }
+
+  createBullpenRunAuditFeedback(
+    runId: string,
+    data: BullpenRunAuditFeedbackCreateRequest,
+  ): Promise<BullpenRunAuditFeedbackSummary> {
+    return this.post<BullpenRunAuditFeedbackSummary>(
+      URLs.bullpenRunAudit.feedback(runId),
+      data,
+    );
+  }
+
+  getBullpenRunAuditFeedback(
+    runId: string,
+  ): Promise<BullpenRunAuditFeedbackSummary[]> {
+    return this.get<BullpenRunAuditFeedbackSummary[]>(
+      URLs.bullpenRunAudit.feedback(runId),
+      { cache: "no-store" },
+    );
+  }
+
+  getBullpenRunAuditFeedbackDetail(
+    runId: string,
+    feedbackId: number,
+  ): Promise<BullpenRunAuditFeedbackDetail> {
+    return this.get<BullpenRunAuditFeedbackDetail>(
+      URLs.bullpenRunAudit.feedbackDetail(runId, feedbackId),
+      { cache: "no-store" },
+    );
+  }
+
+  exportBullpenRunAudit(runId: string): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>(
+      URLs.bullpenRunAudit.export(runId),
+      { cache: "no-store" },
     );
   }
 

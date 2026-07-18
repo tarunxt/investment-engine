@@ -248,6 +248,243 @@ export interface Stage2MarketContext {
   legacy_preflight_evidence_block?: string | null;
 }
 
+export interface BullpenRunAuditSummaryItem {
+  run_id: string;
+  snapshot_id: number;
+  snapshot_version: number;
+  run_status: string;
+  triggered_by: string;
+  dry_run: boolean;
+  live_execution_requested: boolean;
+  live_execution_attempted: boolean;
+  started_at: string;
+  completed_at?: string | null;
+  duration_seconds?: number | null;
+  execution_version?: string | null;
+  strategy_version?: string | null;
+  backend_commit_sha?: string | null;
+  frontend_build_sha?: string | null;
+  deployment_id?: string | null;
+  stage1_status?: string | null;
+  stage2_status?: string | null;
+  stage3_status?: string | null;
+  scanned_candidate_count: number;
+  candidate_rows_before_llm: number;
+  llm_candidate_count: number;
+  llm_configured_call_count: number;
+  llm_attempted_call_count: number;
+  llm_succeeded_call_count: number;
+  llm_failed_call_count: number;
+  qualified_candidate_count: number;
+  ranked_count: number;
+  final_selection_count: number;
+  decisions_count: number;
+  orders_planned: number;
+  orders_submitted: number;
+  orders_confirmed: number;
+  orders_filled: number;
+  orders_permanently_failed: number;
+  findings_critical: number;
+  findings_high: number;
+  findings_medium: number;
+  findings_low: number;
+  findings_info: number;
+  validation_failure_count: number;
+  provider_failure_count: number;
+  incomplete_data_count: number;
+  manual_deficiency_count: number;
+  source_kind: "native" | "reconstructed";
+  lifecycle_status: "working" | "frozen" | "incomplete";
+  audit_status: string;
+  completeness_pct: number;
+  feedback_status?: "queued" | "processing" | "completed" | "failed" | null;
+  feedback_provider?: string | null;
+  feedback_model?: string | null;
+}
+
+export interface BullpenRunAuditListResponse {
+  items: BullpenRunAuditSummaryItem[];
+  page: number;
+  limit: number;
+  total: number;
+  total_pages: number;
+}
+
+export interface BullpenRunAuditMetadata {
+  snapshot_id: number;
+  snapshot_version: number;
+  snapshot_schema_version: number;
+  run_id: string;
+  run_status: string;
+  triggered_by: string;
+  started_at: string;
+  completed_at?: string | null;
+  duration_seconds?: number | null;
+  dry_run: boolean;
+  live_execution_requested: boolean;
+  live_execution_attempted: boolean;
+  execution_version?: string | null;
+  strategy_version?: string | null;
+  source_kind: "native" | "reconstructed";
+  lifecycle_status: "working" | "frozen" | "incomplete";
+  audit_status: string;
+  completeness_pct: number;
+  canonical_bundle_hash?: string | null;
+  backend_commit_sha?: string | null;
+  frontend_build_sha?: string | null;
+  deployment_id?: string | null;
+  build_time?: string | null;
+  alembic_revision?: string | null;
+  settings_hash?: string | null;
+  section_index: Record<string, { present: boolean; size_bytes: number }>;
+  provenance: Record<string, unknown>;
+  missing_fields: Array<Record<string, unknown> | string>;
+}
+
+export interface BullpenRunAuditFinding {
+  id: number;
+  code: string;
+  rule_version: string;
+  severity: "critical" | "high" | "medium" | "low" | "info";
+  stage: string;
+  category: string;
+  title: string;
+  explanation: string;
+  observed_value?: string | null;
+  expected_value?: string | null;
+  blocking: boolean;
+  classification: string;
+  suggested_remediation?: string | null;
+  evidence_pointers: unknown[];
+  detection_metadata: Record<string, unknown>;
+  resolution_status: string;
+  resolution_remark?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenRunAuditRemark {
+  id: number;
+  scope_type: string;
+  scope_id?: string | null;
+  remark_type: string;
+  body: string;
+  author_label?: string | null;
+  metadata: Record<string, unknown>;
+  supersedes_remark_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenRunAuditManualCheck {
+  id: number;
+  check_key: string;
+  check_label: string;
+  status: "unchecked" | "pass" | "fail" | "not_applicable";
+  scope_type: string;
+  scope_id?: string | null;
+  description?: string | null;
+  remark?: string | null;
+  metadata: Record<string, unknown>;
+  supersedes_check_id?: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenRunAuditFeedbackSummary {
+  id: number;
+  status: "queued" | "processing" | "completed" | "failed";
+  provider: string;
+  model: string;
+  prompt_version: string;
+  prompt_hash: string;
+  report_version: string;
+  chunk_count: number;
+  chunk_coverage_pct: number;
+  snapshot_hash?: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost: number;
+  latency_seconds: number;
+  error_message?: string | null;
+  codex_prompt?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+}
+
+export interface BullpenRunAuditFeedbackSubcall {
+  id: number;
+  chunk_index: number;
+  section_keys: unknown[];
+  status: string;
+  provider: string;
+  model: string;
+  prompt_hash: string;
+  parsed_output?: Record<string, unknown> | null;
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost: number;
+  latency_seconds: number;
+  coverage_pct: number;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BullpenRunAuditFeedbackDetail extends BullpenRunAuditFeedbackSummary {
+  report_json: Record<string, unknown>;
+  subcalls: BullpenRunAuditFeedbackSubcall[];
+}
+
+export interface BullpenRunAuditDetailResponse {
+  snapshot: BullpenRunAuditMetadata;
+  findings_summary: Record<string, number>;
+  findings: BullpenRunAuditFinding[];
+  latest_manual_checks: BullpenRunAuditManualCheck[];
+  manual_check_history: BullpenRunAuditManualCheck[];
+  remarks: BullpenRunAuditRemark[];
+  feedback_history: BullpenRunAuditFeedbackSummary[];
+  available_sections: string[];
+}
+
+export interface BullpenRunAuditSectionResponse {
+  run_id: string;
+  snapshot_id: number;
+  canonical_bundle_hash?: string | null;
+  section: string;
+  data: unknown;
+}
+
+export interface BullpenRunAuditMaterializeResponse {
+  status: string;
+  snapshot: BullpenRunAuditMetadata;
+}
+
+export interface BullpenRunAuditRemarkCreateRequest {
+  scope_type: string;
+  scope_id?: string | null;
+  remark_type?: string;
+  body: string;
+  metadata?: Record<string, unknown>;
+  supersedes_remark_id?: number | null;
+}
+
+export interface BullpenRunAuditManualCheckUpdateRequest {
+  check_key: string;
+  status: "unchecked" | "pass" | "fail" | "not_applicable";
+  scope_type?: string;
+  scope_id?: string | null;
+  remark?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BullpenRunAuditFeedbackCreateRequest {
+  provider: string;
+  model: string;
+  force_rerun?: boolean;
+}
+
 export interface PolymarketEventQuestionPayload {
   question_ref: string;
   question_id: string;
