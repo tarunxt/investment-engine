@@ -8358,8 +8358,7 @@ class BullpenAutoLiveEngine:
                 decision.market_id
                 for decision in sell_execution_decisions
                 if decision.order_plan is not None
-                and decision.order_plan.status
-                not in {"failed", "deferred", "rpc_rate_limited"}
+                and decision.order_plan.status not in {"skipped", "cancelled"}
             }
             visible_active_market_ids = {
                 position.market_id
@@ -8398,28 +8397,10 @@ class BullpenAutoLiveEngine:
                 else "unavailable",
             }
 
-        async def _plan_stage3_buy_orders(
-            *,
-            step2_block_reason: str | None = None,
-        ) -> None:
+        async def _plan_stage3_buy_orders() -> None:
             nonlocal buy_execution_decisions, stage3_buy_refresh_snapshot
 
             if not ranked_buy_candidate_decisions:
-                buy_execution_decisions = []
-                return
-
-            if step2_block_reason:
-                block_outputs = {
-                    "order_usd_source": "post_exit_blocked",
-                    **stage2_universe_status,
-                    **stage2_strategy_metadata,
-                }
-                for decision in ranked_buy_candidate_decisions:
-                    _mark_ranked_buy_candidate_unplanned(
-                        decision,
-                        reason=step2_block_reason,
-                        outputs=block_outputs,
-                    )
                 buy_execution_decisions = []
                 return
 
@@ -9258,86 +9239,32 @@ class BullpenAutoLiveEngine:
                         )
                         is not None
                     ):
-                        recovery_decisions = [
-                            candidate
-                            for candidate in decisions
-                            if candidate.order_plan is not None
-                            and candidate.order_plan.action in {"sell", "redeem"}
-                            and candidate.order_plan.status
-                            in {"submitted", "settlement_pending", "confirmed"}
-                        ]
-                        _, recovered_balance = await _poll_exit_settlement(
-                            decisions=recovery_decisions,
-                            baseline_balance_usd=available_balance_before_step1,
+                        order_plan.status = "failed"
+                        order_plan.detail = (
+                            "Stage 3 attempted this buy immediately without waiting for "
+                            "earlier sell/redeem settlement, but Bullpen rejected the "
+                            f"write for insufficient collateral: {error_message}"
                         )
-                        collateral_confirmed = (
-                            available_balance_before_step1 is not None
-                            and recovered_balance is not None
-                            and recovered_balance > available_balance_before_step1 + 0.009
-                        ) or (
-                            bool(recovery_decisions)
-                            and not any(
-                                candidate.order_plan is not None
-                                and candidate.order_plan.status == "settlement_pending"
-                                for candidate in recovery_decisions
+                        decision.stage_results.append(
+                            build_stage_result(
+                                stage_number=7,
+                                status="fail",
+                                reason=order_plan.detail,
+                                outputs=order_plan.model_dump(mode="json"),
+                                hard_block=True,
                             )
                         )
-                        if collateral_confirmed:
-                            try:
-                                if not await _revalidate_buy_order_for_submission():
-                                    return
-                                order_plan.execution_response = await _submit_buy_order()
-                                _record_submitted_buy_position()
-                                order_plan.status = "submitted"
-                                order_plan.executed_at = utc_now_iso()
-                                order_plan.detail = (
-                                    "Limit order submitted successfully after collateral "
-                                    "reconciliation confirmed settlement."
-                                )
-                                decision.stage_results.append(
-                                    build_stage_result(
-                                        stage_number=7,
-                                        status="pass",
-                                        reason=order_plan.detail,
-                                        outputs=order_plan.model_dump(mode="json"),
-                                    )
-                                )
-                                running_failed_orders = 0
-                                _safe_trade_analysis_capture(
-                                    "auto-live stage3 buy execution",
-                                    capture_auto_live_buy_result_sync,
-                                    user_id=user_id,
-                                    entry_reference=trade_analysis_reference,
-                                    raw_execution_response=order_plan.execution_response,
-                                )
-                                return
-                            except Exception as retry_exc:
-                                exc = retry_exc
-                                error_message = str(retry_exc)
-                        else:
-                            order_plan.status = "waiting_for_collateral"
-                            order_plan.detail = (
-                                "Bullpen buy is still waiting for confirmed collateral "
-                                "settlement, so the row was deferred without submitting a new buy."
-                            )
-                            decision.stage_results.append(
-                                build_stage_result(
-                                    stage_number=7,
-                                    status="warning",
-                                    reason=order_plan.detail,
-                                    outputs=order_plan.model_dump(mode="json"),
-                                )
-                            )
-                            _safe_trade_analysis_capture(
-                                "auto-live stage3 buy deferred",
-                                capture_auto_live_buy_result_sync,
-                                user_id=user_id,
-                                entry_reference=trade_analysis_reference,
-                                raw_execution_response=None,
-                                failed=True,
-                                failure_reason=order_plan.detail,
-                            )
-                            return
+                        running_failed_orders += 1
+                        _safe_trade_analysis_capture(
+                            "auto-live stage3 buy failure",
+                            capture_auto_live_buy_result_sync,
+                            user_id=user_id,
+                            entry_reference=trade_analysis_reference,
+                            raw_execution_response=None,
+                            failed=True,
+                            failure_reason=order_plan.detail,
+                        )
+                        return
                 if _is_rpc_rate_limited_error(str(exc)):
                     order_plan.status = "rpc_rate_limited"
                     order_plan.detail = (
@@ -9454,55 +9381,18 @@ class BullpenAutoLiveEngine:
         else:
             for decision in sell_execution_decisions:
                 await _execute_actionable_decision(decision, step_key="sell")
-        step2_block_reason: str | None = None
         if sell_execution_decisions and not state.dry_run and not execution_v2_handoff:
             _, available_balance_after_step1 = await _poll_exit_settlement(
                 decisions=sell_execution_decisions,
                 baseline_balance_usd=available_balance_before_step1,
             )
-            blocked_exit_orders = [
-                decision
-                for decision in sell_execution_decisions
-                if decision.order_plan is not None
-                and decision.order_plan.status in {"failed", "deferred", "rpc_rate_limited"}
-            ]
-            unsettled_exit_orders = [
-                decision
-                for decision in sell_execution_decisions
-                if decision.order_plan is not None
-                and decision.order_plan.status == "settlement_pending"
-            ]
-            if blocked_exit_orders or unsettled_exit_orders:
-                waiting_reason = (
-                    "Waiting for earlier sell/redeem settlement confirmation before "
-                    "submitting dependent buys."
-                    if unsettled_exit_orders and not blocked_exit_orders
-                    else "An earlier sell/redeem did not settle cleanly, so dependent buys "
-                    "stayed waiting for collateral instead of submitting a new write."
-                )
-                step2_block_reason = waiting_reason
-                report_invest_stage_progress(
-                    phase_status="running",
-                    reason=(
-                        "Stage 3 Step 2 is waiting for Step 1 sell/redeem settlement "
-                        "before it can invest the planned buy rows."
-                        if unsettled_exit_orders and not blocked_exit_orders
-                        else "Stage 3 Step 2 kept the planned buy rows waiting because "
-                        "Step 1 did not settle cleanly."
-                    ),
-                    completed_items=processed_decision_rows,
-                    execution_gate_reason=waiting_reason,
-                    current_step_key="buy",
-                    current_step_detail=waiting_reason,
-                    completed_at=None,
-                )
-            elif (
+            if (
                 available_balance_before_step1 is not None
                 and available_balance_after_step1 is not None
                 and available_balance_after_step1 > available_balance_before_step1
             ):
                 available_balance_before_step1 = available_balance_after_step1
-        await _plan_stage3_buy_orders(step2_block_reason=step2_block_reason)
+        await _plan_stage3_buy_orders()
         if execution_v2_handoff:
             for decision in buy_execution_decisions:
                 if decision.order_plan is None or decision.order_plan.status != "planned":

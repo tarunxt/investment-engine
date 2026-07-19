@@ -241,6 +241,14 @@ the transferred Stage 2 Top 10 queue independently from whether a concrete
 Stage 3 buy `order_plan` was later created. Concrete buy-order counts remain
 separately persisted through the Stage 3 order funnel fields so audits can
 distinguish queue handoff, blocker handling, and actual Bullpen write attempts.
+For runs using the live legacy Step 3 executor, earlier sell/redeem settlement
+or failure status must no longer be recorded as a prerequisite blocker for
+creating or attempting a Step 2 buy plan. When a ranked buy cannot be placed,
+the persisted Stage 3 reason should describe the direct buy-side outcome such
+as slot guardrails, fresh-balance limits, or an immediate Bullpen insufficient-
+collateral rejection. Historical snapshots that already froze the legacy
+"wait for earlier sell/redeem settlement" blocker remain valid and must not be
+rewritten.
 
 ### Guardrails
 

@@ -2767,6 +2767,18 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_w
         lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
     )
     monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+    monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_live_controls",
         fake_refresh_live_controls,
     )
@@ -2791,6 +2803,9 @@ async def test_console_profile_stage_3_progress_exposes_live_decision_rows_for_w
             dry_run=False,
             allow_live_execution=True,
             require_manual_confirmation=False,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(dry_run=False),
@@ -2958,6 +2973,18 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
         lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
     )
     monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=92,
+            fair_no=8,
+        ),
+    )
+    monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_live_controls",
         fake_refresh_live_controls,
     )
@@ -2982,6 +3009,9 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
             dry_run=False,
             allow_live_execution=True,
             require_manual_confirmation=False,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(dry_run=False),
@@ -3138,6 +3168,18 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
         lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
     )
     monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=92,
+            fair_no=8,
+        ),
+    )
+    monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_live_controls",
         fake_refresh_live_controls,
     )
@@ -3158,6 +3200,9 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
             dry_run=False,
             allow_live_execution=True,
             require_manual_confirmation=False,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(dry_run=False),
@@ -3165,10 +3210,10 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
         historical_decisions=[],
     )
 
-    assert executor_calls == ["sell_limit"]
+    assert executor_calls == ["sell_limit", "buy_limit"]
     assert result.run.status == "failed"
-    assert result.run.orders_planned == 1
-    assert result.run.orders_submitted == 0
+    assert result.run.orders_planned == 2
+    assert result.run.orders_submitted == 1
     assert "Will the active position fail to exit first?" in result.run.summary
     assert "was not submitted" in result.run.summary
     assert result.state.last_error == result.run.summary
@@ -3189,10 +3234,12 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
     buy_decision = next(
         decision for decision in result.decisions if decision.decision == "BUY_NEW"
     )
-    assert buy_decision.order_plan is None
-    assert buy_decision.reason == (
-        "An earlier sell/redeem did not settle cleanly, so dependent buys stayed "
-        "waiting for collateral instead of submitting a new write."
+    assert buy_decision.order_plan is not None
+    assert buy_decision.order_plan.action == "buy"
+    assert buy_decision.order_plan.status == "submitted"
+    assert (
+        buy_decision.reason
+        == "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
     )
 
 
@@ -3679,7 +3726,9 @@ async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v011
 
 
 @pytest.mark.anyio
-async def test_console_profile_defers_buys_until_exit_settlement_confirms(monkeypatch):
+async def test_console_profile_submits_buys_even_while_exit_settlement_is_pending(
+    monkeypatch,
+):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
     active_high_slug = "active-high"
     active_low_slug = "active-low"
@@ -3815,6 +3864,18 @@ async def test_console_profile_defers_buys_until_exit_settlement_confirms(monkey
         lambda *args, **kwargs: _fake_llm_consensus(fair_yes=10, fair_no=90),
     )
     monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=10,
+            fair_no=90,
+        ),
+    )
+    monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
@@ -3839,6 +3900,9 @@ async def test_console_profile_defers_buys_until_exit_settlement_confirms(monkey
             dry_run=False,
             allow_live_execution=True,
             require_manual_confirmation=False,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(dry_run=False),
@@ -3850,13 +3914,15 @@ async def test_console_profile_defers_buys_until_exit_settlement_confirms(monkey
         decision for decision in result.decisions if decision.decision == "BUY_NEW"
     ]
 
-    assert executor_calls[0][0] == "sell"
-    assert "buy" not in [name for name, _kwargs in executor_calls]
+    assert "buy" in [name for name, _kwargs in executor_calls]
     assert buy_decisions
-    assert all(decision.order_plan is None for decision in buy_decisions)
+    assert all(
+        decision.order_plan is not None and decision.order_plan.status == "submitted"
+        for decision in buy_decisions
+    )
     assert all(
         decision.reason
-        == "Waiting for earlier sell/redeem settlement confirmation before submitting dependent buys."
+        == "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
         for decision in buy_decisions
     )
 
@@ -4000,6 +4066,18 @@ async def test_console_profile_executes_buys_after_exit_settlement_confirms(monk
         lambda *args, **kwargs: _fake_llm_consensus(fair_yes=10, fair_no=90),
     )
     monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=10,
+            fair_no=90,
+        ),
+    )
+    monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
         fake_refresh_execution_quote,
     )
@@ -4024,6 +4102,9 @@ async def test_console_profile_executes_buys_after_exit_settlement_confirms(monk
             dry_run=False,
             allow_live_execution=True,
             require_manual_confirmation=False,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
         ),
         state=BullpenAutoLiveState(running=True),
         run=_run_snapshot(dry_run=False),
@@ -4031,7 +4112,6 @@ async def test_console_profile_executes_buys_after_exit_settlement_confirms(monk
         historical_decisions=[],
     )
 
-    assert executor_calls[0][0] == "sell"
     assert "buy" in [name for name, _kwargs in executor_calls]
     assert any(
         decision.order_plan is not None and decision.order_plan.action == "buy"
@@ -5603,6 +5683,121 @@ def _fake_llm_consensus(
         provider_error_rate=provider_error_rate,
     )
     return outputs, consensus
+
+
+def _fake_console_stage_two_shared_review(
+    *,
+    fixed_now: datetime,
+    fair_yes: float,
+    fair_no: float,
+):
+    async def fake_shared_review(
+        *,
+        llm_markets,
+        rules_by_market_id,
+        settings,
+        now,
+        target_progress_callback=None,
+    ):
+        targets = settings.console_llm_targets or [
+            BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+        ]
+        if target_progress_callback is not None:
+            target_progress_callback(
+                len(targets),
+                [
+                    {
+                        "provider": target.provider,
+                        "model": target.model,
+                        "status": "completed",
+                        "usable_event_count": len(llm_markets),
+                    }
+                    for target in targets
+                ],
+            )
+        _, consensus = _fake_llm_consensus(fair_yes=fair_yes, fair_no=fair_no)
+        outputs_by_market_id: dict[str, list[BullpenAutoLiveLlmOutput]] = {}
+        prepared_payload_by_market_id: dict[str, PolymarketEventQuestionPayload] = {}
+        question_runtime_by_market_id: dict[str, dict[str, object]] = {}
+        for llm_row in llm_markets:
+            market = llm_row.get("market")
+            if not isinstance(market, ScannedMarket):
+                continue
+            outputs_by_market_id[market.market_id] = [
+                BullpenAutoLiveLlmOutput(
+                    provider=target.provider,
+                    model=target.model,
+                    llm_yes_odds=fair_yes,
+                    llm_no_odds=fair_no,
+                    confidence="High",
+                    evidence_status="Strong",
+                    event_state="scheduled_not_occurred",
+                    rationale="Shared review returned usable odds.",
+                    completed_at=fixed_now.isoformat(),
+                )
+                for target in targets
+            ]
+            prepared_payload_by_market_id[market.market_id] = PolymarketEventQuestionPayload(
+                question_ref=market.market_id,
+                question_id=market.market_id,
+                market_id=market.market_id,
+                question=market.question,
+                close_time=market.close_time,
+                current_time_utc=fixed_now.isoformat(),
+                current_time_et=fixed_now.isoformat(),
+                deadline_et="2026-06-24 08:00:00 PM ET",
+                hours_remaining=rules_by_market_id[market.market_id].hours_remaining,
+                category=market.theme,
+                outcomes=["Yes", "No"],
+                current_yes_odds=market.current_yes_odds,
+                current_no_odds=market.current_no_odds,
+                market_url=market.market_url,
+                slug=market.slug,
+                polymarket_rules=(
+                    'This market will resolve to "Yes" if the event occurs by the deadline.'
+                ),
+            )
+            question_runtime_by_market_id[market.market_id] = {}
+        return ConsoleStageTwoSharedReview(
+            prepared_payload_by_market_id=prepared_payload_by_market_id,
+            question_runtime_by_market_id=question_runtime_by_market_id,
+            outputs_by_market_id=outputs_by_market_id,
+            consensus_by_market_id={
+                market.market_id: consensus
+                for llm_row in llm_markets
+                if isinstance((market := llm_row.get("market")), ScannedMarket)
+            },
+            execution_options=BullpenLlmExecutionOptions(
+                execution_mode="single_combined",
+                events_per_prompt=20,
+                target_count=len(targets),
+                prompt_template_hash="test-shared-review-hash",
+            ),
+            runtime_outputs={
+                "llm_execution_mode": "single_combined",
+                "llm_events_per_prompt": 20,
+                "llm_target_count": len(targets),
+                "llm_provider_target_count": len(targets),
+                "llm_selected_target_count": len(targets),
+                "llm_started_provider_target_count": len(targets),
+                "llm_completed_provider_target_count": len(targets),
+                "llm_usable_provider_target_count": len(targets),
+                "llm_passed_provider_target_count": len(targets),
+                "llm_failed_provider_target_count": 0,
+                "llm_prompt_template_hash": "test-shared-review-hash",
+                "llm_target_runs": [
+                    {
+                        "provider": target.provider,
+                        "model": target.model,
+                        "status": "completed",
+                        "usable_event_count": len(llm_markets),
+                    }
+                    for target in targets
+                ],
+            },
+        )
+
+    return fake_shared_review
 
 
 def _fake_rules(
