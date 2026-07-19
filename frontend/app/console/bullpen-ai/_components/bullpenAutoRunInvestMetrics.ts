@@ -10,6 +10,11 @@ export type InvestExecutionStepStatus =
   | "running"
   | "completed"
   | "blocked";
+export type Stage2TransferQueueMetricInfoKind =
+  | "transferred-rows"
+  | "concrete-buy-plans"
+  | "submitted-buy-plans"
+  | "waiting-blocked";
 export type InvestMetricDialogKind =
   | "decisions"
   | "planned"
@@ -29,6 +34,14 @@ type InvestMetricDialogDefinition = {
   includes: (decision: BullpenAutoLiveDecision) => boolean;
 };
 
+type Stage2TransferQueueMetricInfo = {
+  title: string;
+  summary: string;
+  conditions: string[];
+  prerequisites: string[];
+  workflow: string[];
+};
+
 const EVENT_EXIT_STATES = new Set(["EVENT_EXIT_PLANNED", "DUST_LOST"]);
 const RANKING_LLM_EXIT_STRATEGIES = new Set([
   "OUTSIDE_TOP_10_RETURNS_DAY",
@@ -36,6 +49,80 @@ const RANKING_LLM_EXIT_STRATEGIES = new Set([
 ]);
 const FORCED_EXIT_STRATEGIES = new Set(["CAPITAL_AWARE_FORCED_EXIT"]);
 const REDEEM_EXIT_STRATEGIES = new Set(["REDEEM_CLAIM"]);
+
+const STAGE2_TRANSFER_QUEUE_METRIC_INFO: Record<
+  Stage2TransferQueueMetricInfoKind,
+  Stage2TransferQueueMetricInfo
+> = {
+  "transferred-rows": {
+    title: "Transferred rows",
+    summary:
+      "The full saved Stage 2 Top 10 by Returns/day that Step 2 carries forward into the Stage 3 details popup, even before Stage 3 narrows that list into concrete buys.",
+    conditions: [
+      "The row qualified in the saved Stage 2 Events Summary and ranked inside the Top 10 by Returns/day.",
+      "The row remains part of the saved Stage 2 handoff queue even if Stage 3 later plans fewer buys.",
+    ],
+    prerequisites: [
+      "Stage 2 must have a reusable LLM-reviewed Events Summary snapshot for the run.",
+      "The event needs a valid market ID so the saved Stage 2 row can be matched inside Stage 3.",
+    ],
+    workflow: [
+      "Stage 2 reviews candidate events and saves the canonical Top 10 by Returns/day.",
+      "Stage 3 Step 2 loads that saved Top 10 queue first, independent of later planning or submission results.",
+    ],
+  },
+  "concrete-buy-plans": {
+    title: "Concrete buy plans",
+    summary:
+      "Transferred rows that passed Step 2 planning and received an actual Stage 3 buy order plan.",
+    conditions: [
+      "Stage 3 created an order plan whose action is buy for that transferred row.",
+      "The row survived Step 2 guardrails, sizing, and duplicate-position checks.",
+    ],
+    prerequisites: [
+      "Step 1 exit handling must finish first because cash and occupied slots can change after exits.",
+      "Live capital sizing must still produce a valid buy amount for the row.",
+    ],
+    workflow: [
+      "Stage 3 refreshes the saved Stage 2 queue after Step 1 and evaluates each transferred row.",
+      "Rows that still qualify become concrete buy plans and move from the transfer queue into planned orders.",
+    ],
+  },
+  "submitted-buy-plans": {
+    title: "Submitted",
+    summary:
+      "Concrete buy plans whose Bullpen order submission actually went through.",
+    conditions: [
+      "The row already had a concrete buy plan.",
+      "The buy order status advanced to a submitted or successful execution state.",
+    ],
+    prerequisites: [
+      "Bullpen order handling must accept the order without a blocker such as RPC, balance, or execution failure.",
+      "The planned order must still be valid at submission time after live checks refresh.",
+    ],
+    workflow: [
+      "Stage 3 submits concrete buy plans one at a time.",
+      "A submitted or confirmed response moves the row into the Submitted count.",
+    ],
+  },
+  "waiting-blocked": {
+    title: "Still waiting / blocked",
+    summary:
+      "Transferred rows that are still in the saved Stage 2 queue but do not yet have a concrete buy plan or a submitted order.",
+    conditions: [
+      "The row stayed in the transferred queue but Stage 3 never created a buy order plan for it.",
+      "The row can also remain here when Stage 3 recorded a blocker, a missing handoff, or another waiting reason.",
+    ],
+    prerequisites: [
+      "The event must already exist in the saved Stage 2 Top 10 transfer queue.",
+      "Some later Step 2 planning or execution condition must still be unresolved or blocked.",
+    ],
+    workflow: [
+      "The row stays visible in the popup so the saved Stage 2 Top 10 remains complete.",
+      "Its latest blocker or missing-handoff reason explains why it has not progressed into a concrete or submitted buy.",
+    ],
+  },
+};
 
 function hasOrderAction(
   decision: BullpenAutoLiveDecision,
@@ -275,4 +362,10 @@ export function getInvestMetricRows(
 ) {
   const definition = getInvestMetricDialogDefinition(kind);
   return decisions.filter(definition.includes);
+}
+
+export function getStage2TransferQueueMetricInfo(
+  kind: Stage2TransferQueueMetricInfoKind,
+) {
+  return STAGE2_TRANSFER_QUEUE_METRIC_INFO[kind];
 }

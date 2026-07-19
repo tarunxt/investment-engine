@@ -299,6 +299,16 @@ function buildTopCandidateMarketIdOrder(
   run: BullpenAutoLiveRun,
   questionByMarketId: Map<string, BullpenQuestionRow>,
 ) {
+  const reviewedTopTenMarketIds = getBullpenTopTenStrongestLlmOddsRows(
+    [...questionByMarketId.values()],
+    DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+  )
+    .map((question) => readString(question.marketId))
+    .filter((marketId): marketId is string => Boolean(marketId));
+  if (reviewedTopTenMarketIds.length > 0) {
+    return reviewedTopTenMarketIds;
+  }
+
   const stageResults = [...run.stage_results];
   const rankingOutputs = asRecord(
     stageResults.find((stage) => stage.stage_number === 6)?.outputs,
@@ -323,16 +333,6 @@ function buildTopCandidateMarketIdOrder(
   );
   if (marketIds.length > 0) {
     return marketIds.slice(0, DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS);
-  }
-
-  const reviewedTopTenMarketIds = getBullpenTopTenStrongestLlmOddsRows(
-    [...questionByMarketId.values()],
-    DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
-  )
-    .map((question) => readString(question.marketId))
-    .filter((marketId): marketId is string => Boolean(marketId));
-  if (reviewedTopTenMarketIds.length > 0) {
-    return reviewedTopTenMarketIds;
   }
 
   return decisionsFallbackFromRun(run);

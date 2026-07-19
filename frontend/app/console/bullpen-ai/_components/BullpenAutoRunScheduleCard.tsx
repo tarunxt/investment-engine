@@ -86,6 +86,7 @@ import {
 } from "./bullpenAutoRunStage3Invest";
 import {
   deriveInvestExecutionStepStatus,
+  getStage2TransferQueueMetricInfo,
   getInvestMetricDialogDefinition,
   getInvestMetricRows,
   getInvestStepMetricDialogKind,
@@ -93,6 +94,7 @@ import {
   isProcessedInvestOrderPlan,
   type InvestExecutionStepStatus,
   type InvestMetricDialogKind,
+  type Stage2TransferQueueMetricInfoKind,
 } from "./bullpenAutoRunInvestMetrics";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
 import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
@@ -3611,6 +3613,116 @@ function InvestMetricSummaryCard({
   );
 }
 
+function Stage2TransferQueueMetricSummaryCard({
+  kind,
+  label,
+  value,
+  cardClassName,
+  labelClassName,
+  valueClassName,
+  onOpenInfo,
+}: {
+  kind: Stage2TransferQueueMetricInfoKind;
+  label: string;
+  value: ReactNode;
+  cardClassName: string;
+  labelClassName: string;
+  valueClassName: string;
+  onOpenInfo: (kind: Stage2TransferQueueMetricInfoKind) => void;
+}) {
+  return (
+    <div className={cardClassName}>
+      <div className="flex items-center gap-1.5">
+        <p className={labelClassName}>{label}</p>
+        <button
+          type="button"
+          onClick={() => onOpenInfo(kind)}
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current/20 text-current transition hover:bg-white/70 focus:outline-none focus:ring-2 focus:ring-slate-300"
+          aria-label={`Show ${label} details`}
+          title={`Show ${label} details`}
+        >
+          <Info className="h-3 w-3" aria-hidden="true" />
+        </button>
+      </div>
+      <p className={valueClassName}>{value}</p>
+    </div>
+  );
+}
+
+function Stage2TransferQueueMetricInfoDialog({
+  kind,
+  onClose,
+}: {
+  kind: Stage2TransferQueueMetricInfoKind;
+  onClose: () => void;
+}) {
+  const definition = getStage2TransferQueueMetricInfo(kind);
+
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              Saved Stage 2 Transfer Queue
+            </p>
+            <h3 className="text-xl font-semibold text-slate-950">
+              {definition.title}
+            </h3>
+            <p className="text-sm text-slate-600">{definition.summary}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label={`Close ${definition.title} details`}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="space-y-5 px-6 py-5">
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Conditions
+            </p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {definition.conditions.map((item) => (
+                <li key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Prerequisites
+            </p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {definition.prerequisites.map((item) => (
+                <li key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Workflow
+            </p>
+            <ul className="mt-2 space-y-2 text-sm leading-6 text-slate-700">
+              {definition.workflow.map((item) => (
+                <li key={item} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RunDetailWorkerStages({
   run,
   decisions,
@@ -7047,6 +7159,8 @@ function InvestMetricDetailsDialog({
   onOpenEventExitInfo?: () => void;
   onOpenInvestEligibilityInfo?: (trigger: HTMLButtonElement | null) => void;
 }) {
+  const [transferQueueMetricInfoKind, setTransferQueueMetricInfoKind] =
+    useState<Stage2TransferQueueMetricInfoKind | null>(null);
   const metricDefinition = getInvestMetricDialogDefinition(state.kind);
   const rows = getInvestMetricRows(state.kind, state.decisions);
   const stage2TopTenHandoffRows = buildBullpenStage2TopTenHandoffRows({
@@ -7218,38 +7332,42 @@ function InvestMetricDetailsDialog({
                 Saved Stage 2 transfer queue
               </p>
               <div className="mt-3 grid gap-3 md:grid-cols-4">
-                <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                    Transferred rows
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-slate-950">
-                    {stage2TopTenHandoffRows.length.toLocaleString("en-IN")}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-blue-700">
-                    Concrete buy plans
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-blue-950">
-                    {concreteBuyPlanCount.toLocaleString("en-IN")}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                    Submitted
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-emerald-950">
-                    {submittedBuyPlanCount.toLocaleString("en-IN")}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-700">
-                    Still waiting / blocked
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-amber-950">
-                    {blockedOrWaitingBuyPlanCount.toLocaleString("en-IN")}
-                  </p>
-                </div>
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="transferred-rows"
+                  label="Transferred rows"
+                  value={stage2TopTenHandoffRows.length.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-slate-500"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-slate-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="concrete-buy-plans"
+                  label="Concrete buy plans"
+                  value={concreteBuyPlanCount.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-blue-700"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-blue-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="submitted-buy-plans"
+                  label="Submitted"
+                  value={submittedBuyPlanCount.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-emerald-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
+                <Stage2TransferQueueMetricSummaryCard
+                  kind="waiting-blocked"
+                  label="Still waiting / blocked"
+                  value={blockedOrWaitingBuyPlanCount.toLocaleString("en-IN")}
+                  cardClassName="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-700"
+                  labelClassName="text-[11px] font-semibold uppercase tracking-[0.14em]"
+                  valueClassName="mt-1 text-lg font-semibold text-amber-950"
+                  onOpenInfo={setTransferQueueMetricInfoKind}
+                />
               </div>
             </div>
           ) : (
@@ -7552,6 +7670,12 @@ function InvestMetricDetailsDialog({
           )}
         </div>
       </div>
+      {transferQueueMetricInfoKind ? (
+        <Stage2TransferQueueMetricInfoDialog
+          kind={transferQueueMetricInfoKind}
+          onClose={() => setTransferQueueMetricInfoKind(null)}
+        />
+      ) : null}
     </div>
   );
 }

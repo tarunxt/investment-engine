@@ -243,3 +243,19 @@ test("schedule card hides removed Stage 3 Step 1 exit shortlist copy", () => {
   assert.doesNotMatch(source, /Reuses the latest Stage 2-qualified rows/);
   assert.doesNotMatch(source, /No Step 2 Stage 3 planned orders were created/);
 });
+
+test("Stage 2 transfer queue metric definitions explain conditions, prerequisites, and workflow", async () => {
+  const { getStage2TransferQueueMetricInfo } = await loadInvestMetricsModule();
+
+  const transferredRows = getStage2TransferQueueMetricInfo("transferred-rows");
+  assert.match(transferredRows.summary, /saved Stage 2 Top 10 by Returns\/day/i);
+  assert.ok(transferredRows.conditions.length >= 2);
+  assert.ok(transferredRows.prerequisites.length >= 2);
+  assert.ok(transferredRows.workflow.length >= 2);
+
+  const waitingBlocked = getStage2TransferQueueMetricInfo("waiting-blocked");
+  assert.match(waitingBlocked.summary, /do not yet have a concrete buy plan/i);
+  assert.ok(
+    waitingBlocked.workflow.some((item) => /latest blocker or missing-handoff reason/i.test(item)),
+  );
+});
