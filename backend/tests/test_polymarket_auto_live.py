@@ -734,6 +734,20 @@ def test_console_schedule_uses_fixed_ist_slots():
     ) == datetime(2026, 6, 24, 18, 30, tzinfo=UTC)
 
 
+def test_auto_live_due_run_scan_uses_sub_minute_interval():
+    from celery.schedules import schedule
+
+    from app.infrastructure.messaging.celery_app import celery
+
+    due_scan = celery.conf.beat_schedule["polymarket-auto-live-due-run-scan"]
+
+    assert due_scan["task"] == (
+        "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs"
+    )
+    assert isinstance(due_scan["schedule"], schedule)
+    assert due_scan["schedule"].run_every.total_seconds() == 10.0
+
+
 def test_candidate_returns_per_day_accepts_naive_close_time():
     returns = candidate_returns_per_day(
         _market(
