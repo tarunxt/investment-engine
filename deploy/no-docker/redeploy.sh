@@ -310,8 +310,9 @@ validate_canonical_bullpen_backend_env() {
     require_effective_setting BULLPEN_ENV \"\$resolved_bullpen_env\" '$CANONICAL_BULLPEN_ENV'
     require_effective_setting BULLPEN_CREDENTIALS_HOME \"\$resolved_bullpen_credentials_home\" '$CANONICAL_BULLPEN_STORE'
 
-    if [[ \"$(id -un)\" != '$CANONICAL_BULLPEN_RUNTIME_OWNER' ]]; then
-      echo \"Deploy validations must run as $CANONICAL_BULLPEN_RUNTIME_OWNER to match the canonical Bullpen credential owner. Current user: $(id -un)\" >&2
+    actual_user=\"\$(id -un)\"
+    if [[ \"\$actual_user\" != '$CANONICAL_BULLPEN_RUNTIME_OWNER' ]]; then
+      echo \"Deploy validations must run as $CANONICAL_BULLPEN_RUNTIME_OWNER to match the canonical Bullpen credential owner. Current user: \$actual_user\" >&2
       exit 1
     fi
 
