@@ -164,6 +164,8 @@ const bullpenAutoLiveApiUrls = {
   runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
   reconcileRunOrders: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/reconcile`,
+  retryExitsAndContinueBuys: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/retry-exits-and-continue-buys`,
   decisions: () => `${resolveApiBaseUrl()}/polymarket/auto-live/decisions`,
   retryOrder: (intentId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/retry`,

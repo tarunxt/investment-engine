@@ -28,8 +28,15 @@ from app.domains.polymarket.redeem_coordinator import (
 from app.domains.polymarket_auto_live.config import (
     auto_live_execution_v2_shadow_only,
 )
-from app.domains.polymarket_auto_live.console_profile import read_console_wallet_positions
-from app.domains.polymarket_auto_live.execution import refresh_execution_quote, refresh_live_controls
+from app.domains.polymarket_auto_live.console_profile import (
+    read_console_wallet_positions,
+    read_console_wallet_positions_snapshot,
+)
+from app.domains.polymarket_auto_live.execution import (
+    refresh_balance,
+    refresh_execution_quote,
+    refresh_live_controls,
+)
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveCapitalReservationRecord,
     PolymarketAutoLiveDecisionRecord,
@@ -59,6 +66,12 @@ from app.domains.polymarket_auto_live.order_intents import (
     utc_now,
     utc_now_iso,
 )
+from app.domains.polymarket_auto_live.rpc_retry import (
+    compute_rpc_retry_delay_seconds,
+    extract_retry_after_seconds,
+    retry_budget_allows,
+)
+from app.domains.polymarket_auto_live.stage3_slots import classify_economic_slots
 from app.domains.polymarket_auto_live.repository import (
     apply_decision_to_record,
     apply_run_to_record,
@@ -79,7 +92,9 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 
 logger = get_logger("app.domains.polymarket_auto_live.order_intent_service")
 
-_EXECUTABLE_STATUSES = frozenset({"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"})
+_EXECUTABLE_STATUSES = frozenset(
+    {"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}
+)
 _RECONCILABLE_STATUSES = frozenset(
     {"SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING"}
 )
@@ -362,6 +377,40 @@ def _base_order_plan_for(decision: BullpenAutoLiveDecision) -> BullpenAutoLiveOr
     return decision.order_plan
 
 
+def _stage3_rpc_policy(run: BullpenAutoLiveRun) -> dict[str, float | int]:
+    snapshot = run.audit_metadata.get("settings_snapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+
+    def number(name: str, default: float) -> float:
+        value = snapshot.get(name, default)
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "attempts": int(number("stage3_rpc_retry_attempts", 3)),
+        "initial_delay_seconds": number("stage3_rpc_retry_initial_delay_seconds", 1),
+        "max_delay_seconds": number("stage3_rpc_retry_max_delay_seconds", 30),
+        "max_total_wait_seconds": number("stage3_rpc_retry_max_total_wait_seconds", 120),
+    }
+
+
+def _condition_id_for_decision(decision: BullpenAutoLiveDecision) -> str | None:
+    for stage in reversed(decision.stage_results):
+        value = stage.outputs.get("condition_id")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _dependency_exit_market_id(dependency_group: str | None) -> str | None:
+    if not dependency_group or ":" not in dependency_group:
+        return None
+    candidate = dependency_group.rsplit(":", 1)[-1].strip()
+    return candidate or None
+
+
 def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoLiveRunOrdersResponse) -> None:
     for stage in run.stage_results:
         if (
@@ -401,6 +450,220 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 else "pass"
             )
             break
+
+
+def _persist_stage3_reconciliation_diagnostics(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+    result: IntentSubmissionResult,
+) -> None:
+    run_record = session.get(PolymarketAutoLiveRunRecord, record.run_id)
+    if run_record is None:
+        return
+    run = record_to_run(run_record)
+    snapshot = (
+        result.raw_response.get("post_exit_snapshot")
+        if isinstance(result.raw_response, dict)
+        else None
+    )
+    terminal_entry = {
+        "market_id": record.market_id,
+        "order_id": record.remote_order_id,
+        "status": result.status,
+        "stage3_status": record.execution_metadata_json.get("stage3_status"),
+    }
+    for stage in run.stage_results:
+        if stage.stage_number != 3 and stage.outputs.get("workflow_stage_key") != "invest":
+            continue
+        diagnostics = stage.outputs.get("stage3_slot_diagnostics")
+        if not isinstance(diagnostics, dict):
+            break
+        if isinstance(snapshot, dict):
+            diagnostics.update(
+                {
+                    "post_exit_snapshot_source": snapshot.get("source"),
+                    "post_exit_snapshot_fetched_at": snapshot.get("fetched_at"),
+                    "raw_position_count": snapshot.get("raw_position_count"),
+                    "economically_active_position_count": snapshot.get(
+                        "economically_active_position_count"
+                    ),
+                    "excluded_position_records": snapshot.get(
+                        "excluded_position_records", []
+                    ),
+                    "deduplicated_occupied_market_ids": snapshot.get(
+                        "deduplicated_occupied_market_ids", []
+                    ),
+                    "free_slots_after_refresh": snapshot.get("free_slots_after_refresh"),
+                    "available_cash_after_refresh_usd": snapshot.get(
+                        "available_cash_usd"
+                    ),
+                }
+            )
+        terminal_statuses = diagnostics.setdefault("exit_terminal_statuses", [])
+        if isinstance(terminal_statuses, list):
+            terminal_statuses[:] = [
+                item
+                for item in terminal_statuses
+                if not isinstance(item, dict) or item.get("market_id") != record.market_id
+            ]
+            terminal_statuses.append(terminal_entry)
+        reservations = diagnostics.get("replacement_reservations")
+        if isinstance(reservations, list) and record.action in {"sell", "redeem"}:
+            for reservation in reservations:
+                if not isinstance(reservation, dict):
+                    continue
+                if reservation.get("exit_market_id") != record.market_id:
+                    continue
+                if result.status in INTENT_TERMINAL_SUCCESS_STATUSES and (
+                    not isinstance(snapshot, dict)
+                    or record.market_id
+                    not in set(snapshot.get("deduplicated_occupied_market_ids") or [])
+                ):
+                    reservation["status"] = "confirmed"
+                elif result.status in INTENT_TERMINAL_FAILURE_STATUSES:
+                    reservation["status"] = "released"
+                    reservation["reason"] = (
+                        f"Exit ended in terminal status {result.status}; replacement reservation released."
+                    )
+                else:
+                    reservation["status"] = "reserved"
+                    reservation["reason"] = (
+                        "Exit is submitted or partially filled; meaningful economic exposure still occupies the slot."
+                    )
+        break
+    apply_run_to_record(run_record, run, user_id=record.user_id)
+
+
+def persist_stage3_intent_diagnostics_sync(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+) -> None:
+    """Copy durable intent diagnostics into the saved run's Stage 3 payload."""
+
+    run_record = session.get(PolymarketAutoLiveRunRecord, record.run_id)
+    if run_record is None:
+        return
+    run = record_to_run(run_record)
+    for stage in run.stage_results:
+        if stage.stage_number != 3 and stage.outputs.get("workflow_stage_key") != "invest":
+            continue
+        diagnostics = stage.outputs.get("stage3_slot_diagnostics")
+        if not isinstance(diagnostics, dict):
+            break
+        if record.action in {"sell", "redeem"}:
+            intent_ids = diagnostics.setdefault("exit_intent_ids", [])
+            if isinstance(intent_ids, list) and record.id not in intent_ids:
+                intent_ids.append(record.id)
+            retry_history = diagnostics.setdefault("exit_retry_history", [])
+            if isinstance(retry_history, list):
+                retry_history[:] = [
+                    item
+                    for item in retry_history
+                    if not isinstance(item, dict) or item.get("intent_id") != record.id
+                ]
+                retry_history.append(
+                    {
+                        "intent_id": record.id,
+                        "history": list(
+                            record.execution_metadata_json.get(
+                                "stage3_rpc_retry_history", []
+                            )
+                        ),
+                    }
+                )
+            statuses = diagnostics.setdefault("exit_terminal_statuses", [])
+            if isinstance(statuses, list):
+                statuses[:] = [
+                    item
+                    for item in statuses
+                    if not isinstance(item, dict)
+                    or (
+                        item.get("intent_id") != record.id
+                        and item.get("market_id") != record.market_id
+                    )
+                ]
+                statuses.append(
+                    {
+                        "intent_id": record.id,
+                        "market_id": record.market_id,
+                        "order_id": record.remote_order_id,
+                        "status": record.status,
+                        "stage3_status": record.execution_metadata_json.get(
+                            "stage3_status"
+                        ),
+                    }
+                )
+            order_statuses = diagnostics.setdefault("exit_order_ids_and_statuses", [])
+            if isinstance(order_statuses, list):
+                order_statuses[:] = [
+                    item
+                    for item in order_statuses
+                    if not isinstance(item, dict)
+                    or (
+                        item.get("intent_id") != record.id
+                        and item.get("market_id") != record.market_id
+                    )
+                ]
+                order_statuses.append(
+                    {
+                        "intent_id": record.id,
+                        "market_id": record.market_id,
+                        "order_id": record.remote_order_id,
+                        "status": record.status,
+                        "filled_shares": record.filled_shares,
+                        "remaining_shares": record.remaining_shares,
+                        "detail": record.last_error_message,
+                    }
+                )
+        elif record.action == "buy":
+            buy_ids = diagnostics.setdefault("planned_buy_ids", [])
+            if isinstance(buy_ids, list) and record.id not in buy_ids:
+                buy_ids.append(record.id)
+            if record.status in {"SUBMITTED", "CONFIRMED", "FILLED"}:
+                submitted_ids = diagnostics.setdefault("submitted_buy_ids", [])
+                if isinstance(submitted_ids, list) and record.id not in submitted_ids:
+                    submitted_ids.append(record.id)
+        break
+    apply_run_to_record(run_record, run, user_id=record.user_id)
+
+
+def _persist_capacity_override_audit(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+) -> None:
+    if not record.execution_metadata_json.get("capacity_override_used"):
+        return
+    run_record = session.get(PolymarketAutoLiveRunRecord, record.run_id)
+    if run_record is None:
+        return
+    run = record_to_run(run_record)
+    audit = {
+        "used": True,
+        "run_id": record.run_id,
+        "intent_id": record.id,
+        "action": "stage3_capacity_override",
+        "reason": "Explicit operator setting bypassed only the slot-capacity gate.",
+        "recorded_at": utc_now_iso(),
+    }
+    run.payload = {
+        **dict(run.payload or {}),
+        "stage3_capacity_override_audit": audit,
+    }
+    for stage in run.stage_results:
+        if stage.stage_number != 3 and stage.outputs.get("workflow_stage_key") != "invest":
+            continue
+        diagnostics = stage.outputs.get("stage3_slot_diagnostics")
+        if isinstance(diagnostics, dict):
+            diagnostics["operator_override_enabled"] = True
+            diagnostics["operator_override_audit"] = audit
+            diagnostics["final_block_bypass_reason"] = (
+                "Explicit operator capacity override bypassed only the slot-capacity gate; all other guardrails remained active."
+            )
+        break
+    apply_run_to_record(run_record, run, user_id=record.user_id)
 
 
 def summarize_run_orders_sync(
@@ -531,6 +794,7 @@ def create_or_refresh_run_order_intents_sync(
     decisions: Sequence[BullpenAutoLiveDecision],
 ) -> list[BullpenAutoLiveOrderIntent]:
     created_or_existing: list[PolymarketAutoLiveOrderIntentRecord] = []
+    rpc_policy = _stage3_rpc_policy(run)
     for decision in decisions:
         order_plan = _base_order_plan_for(decision)
         if order_plan is None or order_plan.action not in {"buy", "sell", "redeem"}:
@@ -540,6 +804,22 @@ def create_or_refresh_run_order_intents_sync(
 
         intent = session.get(PolymarketAutoLiveOrderIntentRecord, order_plan.id)
         if intent is None:
+            initial_status = {
+                "filled": "FILLED",
+                "confirmed": "CONFIRMED",
+                "already_redeemed": "CONFIRMED",
+                "resolved_zero_payout": "CONFIRMED",
+                "cancelled": "CANCELLED",
+                "rejected": "REJECTED",
+                "timed_out": "TIMED_OUT",
+                "partially_filled": "PARTIALLY_FILLED",
+                "settlement_pending": "SETTLEMENT_PENDING",
+                # A CLI write can succeed without returning a remote order ID.
+                # Preserve that submitted state and reconcile it from wallet or
+                # trade history instead of ever issuing a duplicate write.
+                "submitted": "SUBMITTED",
+            }.get(order_plan.status, "READY")
+            persisted_submission = initial_status not in {"READY", "RETRY_WAIT"}
             intent = PolymarketAutoLiveOrderIntentRecord(
                 id=order_plan.id,
                 user_id=user_id,
@@ -549,11 +829,7 @@ def create_or_refresh_run_order_intents_sync(
                 action=order_plan.action,
                 market_id=decision.market_id,
                 slug=decision.slug,
-                condition_id=(
-                    decision.stage_results[-1].outputs.get("condition_id")
-                    if decision.stage_results
-                    else None
-                ),
+                condition_id=_condition_id_for_decision(decision),
                 side=order_plan.side,
                 requested_order_usd=order_plan.order_size_usd,
                 requested_shares=order_plan.shares,
@@ -562,11 +838,18 @@ def create_or_refresh_run_order_intents_sync(
                 current_shares=order_plan.shares,
                 current_limit_price_cents=order_plan.limit_price_cents,
                 max_slippage_cents=order_plan.max_slippage_cents,
-                status="READY",
-                retryable=True,
+                status=initial_status,
+                retryable=not persisted_submission,
                 attempt_count=0,
-                max_attempts=max(1, int(os.getenv("AUTO_LIVE_DEFAULT_MAX_ATTEMPTS", "4"))),
-                next_attempt_at=utc_now(),
+                max_attempts=max(
+                    1,
+                    int(
+                        rpc_policy["attempts"] + 1
+                        if order_plan.action in {"sell", "redeem"}
+                        else int(os.getenv("AUTO_LIVE_DEFAULT_MAX_ATTEMPTS", "4"))
+                    ),
+                ),
+                next_attempt_at=utc_now() if not persisted_submission else None,
                 priority=_intent_priority(order_plan.action),
                 idempotency_key=f"auto-live:{run.id}:{decision.id}:{order_plan.id}",
                 reserved_cash_usd=0,
@@ -582,7 +865,46 @@ def create_or_refresh_run_order_intents_sync(
                 execution_metadata_json={
                     "reservation_state": None,
                     "run_status": run.status,
+                    "stage3_status": (
+                        "EXIT_SUBMITTED"
+                        if order_plan.action in {"sell", "redeem"}
+                        and persisted_submission
+                        else "EXIT_NOT_SUBMITTED"
+                        if order_plan.action in {"sell", "redeem"}
+                        else order_plan.stage3_status or "BUY_READY"
+                    ),
+                    "stage3_rpc_retry_policy": rpc_policy,
+                    "stage3_rpc_retry_total_wait_seconds": 0.0,
+                    "stage3_rpc_retry_history": [],
+                    "dependency_exit_market_id": _dependency_exit_market_id(
+                        order_plan.dependency_group
+                    ),
+                    "stage3_capacity_policy": {
+                        "slot_limit": 10,
+                        "dust_threshold_usd": float(
+                            run.audit_metadata.get("settings_snapshot", {}).get(
+                                "bullpen_economic_dust_threshold_usd", 0.01
+                            )
+                        )
+                        if isinstance(run.audit_metadata.get("settings_snapshot"), dict)
+                        else 0.01,
+                        "capacity_override": bool(
+                            run.audit_metadata.get("settings_snapshot", {}).get(
+                                "stage3_capacity_override", False
+                            )
+                        )
+                        if isinstance(run.audit_metadata.get("settings_snapshot"), dict)
+                        else False,
+                    },
                 },
+                remote_order_id=order_plan.remote_order_id,
+                remote_transaction_hash=order_plan.remote_transaction_hash,
+                first_submitted_at=order_plan.executed_at if persisted_submission else None,
+                last_submitted_at=order_plan.executed_at if persisted_submission else None,
+                confirmed_at=order_plan.confirmed_at,
+                terminal_at=order_plan.terminal_at
+                if initial_status in INTENT_TERMINAL_SUCCESS_STATUSES | INTENT_TERMINAL_FAILURE_STATUSES
+                else None,
                 version=1,
             )
             session.add(intent)
@@ -590,15 +912,55 @@ def create_or_refresh_run_order_intents_sync(
             intent.requested_order_usd = order_plan.order_size_usd
             intent.requested_shares = order_plan.shares
             intent.requested_limit_price_cents = order_plan.limit_price_cents
-            if intent.status in {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"}:
+            if intent.status in {
+                "PLANNED",
+                "READY",
+                "RETRY_WAIT",
+                "WAITING_FOR_COLLATERAL",
+                "WAITING_FOR_EXIT",
+            }:
                 intent.current_order_usd = order_plan.order_size_usd
                 intent.current_shares = order_plan.shares
                 intent.current_limit_price_cents = order_plan.limit_price_cents
                 if intent.status == "PLANNED":
                     intent.status = "READY"
                 intent.retryable = True
-                intent.next_attempt_at = utc_now()
+                if intent.status == "READY" and intent.next_attempt_at is None:
+                    intent.next_attempt_at = utc_now()
             intent.dependency_group = order_plan.dependency_group
+            existing_metadata = dict(intent.execution_metadata_json or {})
+            existing_capacity_policy = existing_metadata.get("stage3_capacity_policy")
+            settings_snapshot = run.audit_metadata.get("settings_snapshot")
+            settings_snapshot = settings_snapshot if isinstance(settings_snapshot, dict) else {}
+            intent.execution_metadata_json = {
+                **existing_metadata,
+                "stage3_status": (
+                    "EXIT_NOT_SUBMITTED"
+                    if order_plan.action in {"sell", "redeem"}
+                    and not intent.remote_order_id
+                    else "BUY_READY"
+                    if order_plan.action == "buy"
+                    else order_plan.stage3_status
+                    or intent.execution_metadata_json.get("stage3_status")
+                ),
+                "stage3_rpc_retry_policy": rpc_policy,
+                "dependency_exit_market_id": (
+                    _dependency_exit_market_id(order_plan.dependency_group)
+                    or existing_metadata.get("dependency_exit_market_id")
+                ),
+                "stage3_capacity_policy": {
+                    "slot_limit": 10,
+                    "dust_threshold_usd": float(
+                        settings_snapshot.get("bullpen_economic_dust_threshold_usd", 0.01)
+                        or 0.01
+                    ),
+                    "capacity_override": bool(
+                        settings_snapshot.get("stage3_capacity_override", False)
+                    ),
+                }
+                if not isinstance(existing_capacity_policy, dict)
+                else existing_capacity_policy,
+            }
 
         created_or_existing.append(intent)
 
@@ -750,6 +1112,92 @@ def _lock_intent_for_execution(session: Session, intent_id: str) -> PolymarketAu
     return session.execute(query).scalar_one_or_none()
 
 
+def _defer_buy_until_exit(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+    attempt: PolymarketAutoLiveOrderAttemptRecord,
+) -> bool:
+    """Keep a reserved replacement buy queued until its exit is terminal."""
+
+    if record.action != "buy" or not record.dependency_group:
+        return False
+    sibling = session.execute(
+        select(PolymarketAutoLiveOrderIntentRecord)
+        .where(PolymarketAutoLiveOrderIntentRecord.run_id == record.run_id)
+        .where(PolymarketAutoLiveOrderIntentRecord.dependency_group == record.dependency_group)
+        .where(PolymarketAutoLiveOrderIntentRecord.action.in_(("sell", "redeem")))
+        .where(PolymarketAutoLiveOrderIntentRecord.id != record.id)
+        .order_by(PolymarketAutoLiveOrderIntentRecord.created_at.asc())
+    ).scalars().first()
+    if sibling is None or sibling.status in INTENT_TERMINAL_SUCCESS_STATUSES:
+        return False
+    record.status = "DEFERRED" if sibling.status == "FAILED_PERMANENT" else "WAITING_FOR_EXIT"
+    record.retryable = record.status != "DEFERRED"
+    record.next_attempt_at = utc_now() + timedelta(seconds=5) if record.retryable else None
+    record.last_error_code = "SETTLEMENT_PENDING"
+    record.last_error_message = (
+        f"Replacement buy is reserved for exit {sibling.market_id}; exit status is {sibling.status}."
+    )
+    record.execution_metadata_json = {
+        **dict(record.execution_metadata_json or {}),
+        "stage3_status": "REPLACEMENT_SLOT_RESERVED",
+        "dependency_exit_intent_id": sibling.id,
+        "dependency_exit_market_id": sibling.market_id,
+    }
+    attempt.completed_at = utc_now()
+    attempt.result_status = record.status
+    attempt.error_code = "SETTLEMENT_PENDING"
+    attempt.error_message = record.last_error_message
+    return True
+
+
+def _position_matches_intent(
+    position: object,
+    *,
+    market_id: str | None,
+    condition_id: str | None,
+    side: str | None,
+) -> bool:
+    if side and str(getattr(position, "side", "")).upper() != side.upper():
+        return False
+    aliases = {
+        str(value).strip().lower()
+        for value in (
+            getattr(position, "market_id", None),
+            getattr(position, "condition_id", None),
+        )
+        if isinstance(value, str) and value.strip()
+    }
+    target_aliases = {
+        str(value).strip().lower()
+        for value in (market_id, condition_id)
+        if isinstance(value, str) and value.strip()
+    }
+    return bool(aliases & target_aliases)
+
+
+def _post_exit_snapshot_metadata(
+    snapshot,
+    *,
+    dust_threshold_usd: float = 0.01,
+) -> dict[str, object]:
+    allocation = classify_economic_slots(
+        snapshot.raw_positions or snapshot.positions,
+        dust_threshold_usd=dust_threshold_usd,
+    )
+    payload: dict[str, object] = {
+        "source": snapshot.source,
+        "fetched_at": snapshot.fetched_at,
+        "raw_position_count": snapshot.raw_position_count,
+        "economically_active_position_count": allocation.economically_active_position_count,
+        "excluded_position_records": allocation.excluded_position_records,
+        "deduplicated_occupied_market_ids": allocation.deduplicated_occupied_market_ids,
+        "free_slots_after_refresh": max(0, 10 - allocation.economically_active_position_count),
+    }
+    return payload
+
+
 async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> PreparedIntentSubmission:
     live_controls = await refresh_live_controls(user_id=intent.user_id)
     if live_controls.emergency_stopped:
@@ -781,6 +1229,99 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
     shares = intent.current_shares or intent.requested_shares
     limit_price_cents = intent.current_limit_price_cents or intent.requested_limit_price_cents
     if intent.action == "buy":
+        capacity_policy = intent.execution_metadata_json.get("stage3_capacity_policy")
+        capacity_policy = capacity_policy if isinstance(capacity_policy, dict) else {}
+        dust_threshold = float(capacity_policy.get("dust_threshold_usd", 0.01) or 0.01)
+        live_snapshot = await read_console_wallet_positions_snapshot(
+            force_fresh=True,
+            caller_source="auto-live-stage3-buy-pre-submit",
+            max_age_seconds=0,
+        )
+        if live_snapshot.source != "live-cli":
+            raise AutoLiveExecutorError(
+                code="BALANCE_UNAVAILABLE",
+                message="Stage 3 buy pre-submit rejected a non-live wallet snapshot; retry after a fresh live-cli refresh.",
+                retryable=True,
+            )
+        exit_confirmed_at = parse_datetime(
+            str(intent.dependency_metadata_json.get("exit_confirmed_at"))
+            if intent.dependency_metadata_json.get("exit_confirmed_at")
+            else None
+        )
+        snapshot_fetched_at = parse_datetime(live_snapshot.fetched_at)
+        if exit_confirmed_at is not None and (
+            snapshot_fetched_at is None or snapshot_fetched_at <= exit_confirmed_at
+        ):
+            raise AutoLiveExecutorError(
+                code="BALANCE_UNAVAILABLE",
+                message="Stage 3 buy pre-submit rejected a wallet snapshot fetched before the confirmed exit; retry after a newer live-cli snapshot.",
+                retryable=True,
+            )
+        allocation = classify_economic_slots(
+            live_snapshot.raw_positions or live_snapshot.positions,
+            dust_threshold_usd=dust_threshold,
+        )
+        if any(
+            _position_matches_intent(
+                position,
+                market_id=intent.market_id,
+                condition_id=intent.condition_id,
+                side=intent.side,
+            )
+            for position in allocation.active_positions
+        ):
+            raise AutoLiveExecutorError(
+                code="PERMANENT_REJECTION",
+                message="Stage 3 buy pre-submit found existing economic exposure in this market after the live refresh; duplicate exposure is not allowed.",
+                retryable=False,
+            )
+        replacement_confirmed = intent.dependency_metadata_json.get("exit_confirmed_at")
+        dependency_exit_market_id = intent.execution_metadata_json.get(
+            "dependency_exit_market_id"
+        )
+        if replacement_confirmed and isinstance(dependency_exit_market_id, str):
+            if any(
+                _position_matches_intent(
+                    position,
+                    market_id=dependency_exit_market_id,
+                    condition_id=None,
+                    side=None,
+                )
+                for position in allocation.active_positions
+            ):
+                raise AutoLiveExecutorError(
+                    code="CAPACITY_BLOCKED",
+                    message=(
+                        "Stage 3 confirmed the replacement exit, but the fresh live-cli snapshot "
+                        f"still shows meaningful exposure in exit market {dependency_exit_market_id}; "
+                        "the replacement slot remains occupied."
+                    ),
+                    retryable=True,
+                )
+        override_enabled = bool(capacity_policy.get("capacity_override", False))
+        slot_limit = int(capacity_policy.get("slot_limit", 10) or 10)
+        intent.execution_metadata_json = {
+            **dict(intent.execution_metadata_json or {}),
+            "capacity_override_used": bool(
+                override_enabled
+                and allocation.economically_active_position_count >= slot_limit
+                and not replacement_confirmed
+            ),
+        }
+        if (
+            allocation.economically_active_position_count >= slot_limit
+            and not replacement_confirmed
+            and not override_enabled
+        ):
+            raise AutoLiveExecutorError(
+                code="CAPACITY_BLOCKED",
+                message=(
+                    "Stage 3 buy pre-submit found genuine economic capacity at "
+                    f"{allocation.economically_active_position_count}/{slot_limit}; "
+                    "the saved buy remains blocked until an exit is confirmed or the audited operator override is enabled."
+                ),
+                retryable=False,
+            )
         if not intent.slug or not intent.side:
             raise AutoLiveExecutorError(
                 code="QUOTE_UNAVAILABLE",
@@ -979,7 +1520,7 @@ async def _submit_prepared_intent(
             last_error = exc
         except Exception as exc:
             last_error = classify_executor_error(
-                str(exc),
+                exc,
                 during_write=True,
                 provider_alias=alias,
             )
@@ -994,6 +1535,145 @@ async def _submit_prepared_intent(
         message="No RPC provider was available to submit this intent.",
         retryable=True,
     )
+
+
+def _apply_executor_error(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+    attempt: PolymarketAutoLiveOrderAttemptRecord,
+    exc: AutoLiveExecutorError,
+) -> None:
+    """Persist one failed attempt, including the bounded Stage 3 RPC policy."""
+
+    now = utc_now()
+    metadata = dict(record.execution_metadata_json or {})
+    record.last_error_code = exc.code
+    record.last_error_message = sanitize_message(exc.message)
+    record.error_class = "transient" if exc.retryable else "permanent"
+    attempt.completed_at = now
+    attempt.error_code = exc.code
+    attempt.error_message = sanitize_message(exc.message)
+    if exc.retry_after_seconds is not None:
+        attempt.retry_after_seconds = exc.retry_after_seconds
+
+    if exc.code == "RPC_RATE_LIMITED":
+        policy = metadata.get("stage3_rpc_retry_policy")
+        policy = policy if isinstance(policy, dict) else {}
+        try:
+            attempts = max(0, int(policy.get("attempts", 3)))
+            initial_delay = max(0.0, float(policy.get("initial_delay_seconds", 1)))
+            max_delay = max(initial_delay, float(policy.get("max_delay_seconds", 30)))
+            max_total = max(0.0, float(policy.get("max_total_wait_seconds", 120)))
+        except (TypeError, ValueError):
+            attempts, initial_delay, max_delay, max_total = 3, 1.0, 30.0, 120.0
+
+        history = metadata.get("stage3_rpc_retry_history")
+        history = list(history) if isinstance(history, list) else []
+        prior_total = float(metadata.get("stage3_rpc_retry_total_wait_seconds", 0) or 0)
+        retry_index = len(history)
+        retry_count = retry_index + 1
+        delay = compute_rpc_retry_delay_seconds(
+            attempt_number=retry_count,
+            initial_delay_seconds=initial_delay,
+            max_delay_seconds=max_delay,
+            retry_after_seconds=extract_retry_after_seconds(exc),
+        )
+        total_wait = prior_total + delay
+        history.append(
+            {
+                "attempt": record.attempt_count,
+                "retry_count": retry_count,
+                "error": sanitize_message(exc.message),
+                "retry_after_seconds": exc.retry_after_seconds,
+                "delay_seconds": round(delay, 3),
+                "recorded_at": _isoformat(now),
+            }
+        )
+        metadata.update(
+            {
+                "stage3_rpc_retry_policy": {
+                    "attempts": attempts,
+                    "initial_delay_seconds": initial_delay,
+                    "max_delay_seconds": max_delay,
+                    "max_total_wait_seconds": max_total,
+                },
+                "stage3_rpc_retry_history": history,
+                "stage3_rpc_retry_total_wait_seconds": round(total_wait, 3),
+            }
+        )
+        if retry_budget_allows(
+            retry_count=retry_index,
+            total_wait_seconds=total_wait,
+            attempts=attempts,
+            max_total_wait_seconds=max_total,
+        ):
+            record.status = "RETRY_WAIT"
+            record.retryable = True
+            record.next_attempt_at = now + timedelta(seconds=delay)
+            metadata["stage3_status"] = "EXIT_RPC_RETRYING"
+            attempt.result_status = "RETRY_WAIT"
+        else:
+            record.status = "FAILED_PERMANENT"
+            record.retryable = False
+            record.next_attempt_at = None
+            record.terminal_at = now
+            record.error_class = "transient_retry_exhausted"
+            record.last_error_message = (
+                f"Bullpen RPC rate-limit retry budget exhausted after {retry_count} retries "
+                f"and {total_wait:.1f}s total wait. {sanitize_message(exc.message) or 'No remote order was submitted.'}"
+            )
+            metadata["stage3_status"] = "EXIT_FAILED_PERMANENTLY"
+            metadata["stage3_rpc_retry_exhausted"] = True
+            attempt.result_status = "FAILED_PERMANENT"
+        record.execution_metadata_json = metadata
+        return
+
+    record.retryable = exc.retryable
+    if exc.ambiguous_submission:
+        record.status = "CONFIRMING"
+        record.next_attempt_at = compute_next_retry_at(
+            code="AMBIGUOUS_SUBMISSION",
+            attempt_count=record.attempt_count,
+            retry_after_seconds=exc.retry_after_seconds,
+        )
+        attempt.result_status = "CONFIRMING"
+    elif exc.retryable:
+        record.status = (
+            "WAITING_FOR_COLLATERAL"
+            if exc.code == "INSUFFICIENT_COLLATERAL"
+            else "RETRY_WAIT"
+        )
+        record.next_attempt_at = compute_next_retry_at(
+            code=exc.code,
+            attempt_count=record.attempt_count,
+            retry_after_seconds=exc.retry_after_seconds,
+        )
+        attempt.result_status = record.status
+    elif exc.code == "CONDITION_ID_UNAVAILABLE":
+        record.status = "DEFERRED"
+        record.terminal_at = now
+        attempt.result_status = "DEFERRED"
+    elif exc.code == "CAPACITY_BLOCKED":
+        record.status = "DEFERRED"
+        record.retryable = True
+        record.next_attempt_at = None
+        attempt.result_status = "DEFERRED"
+        record.last_error_message = sanitize_message(exc.message)
+    else:
+        record.status = "FAILED_PERMANENT"
+        record.terminal_at = now
+        attempt.result_status = "FAILED_PERMANENT"
+
+    if record.action in {"sell", "redeem"}:
+        metadata["stage3_status"] = (
+            "EXIT_RPC_RETRYING" if record.retryable else "EXIT_FAILED_PERMANENTLY"
+        )
+    elif exc.code == "CAPACITY_BLOCKED":
+        metadata["stage3_status"] = "GENUINE_CAPACITY_BLOCK"
+    else:
+        metadata["stage3_status"] = "BUY_FAILED"
+    record.execution_metadata_json = metadata
 
 
 def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = None) -> str | None:
@@ -1031,6 +1711,22 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
         session.commit()
         intent = _intent_to_schema(record)
 
+    with SyncSessionLocal() as session:
+        record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
+        attempt = session.execute(
+            select(PolymarketAutoLiveOrderAttemptRecord)
+            .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
+            .where(PolymarketAutoLiveOrderAttemptRecord.attempt_number == record.attempt_count)
+        ).scalar_one() if record is not None else None
+        if record is not None and attempt is not None and _defer_buy_until_exit(
+            session, record=record, attempt=attempt
+        ):
+            sync_run_and_decisions_from_intents_sync(
+                session, user_id=record.user_id, run_id=record.run_id
+            )
+            session.commit()
+            return record.status
+
     try:
         prepared = run_with_bullpen_runtime_cleanup(
             _prepare_intent_submission(intent)
@@ -1045,27 +1741,7 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
                 .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
                 .where(PolymarketAutoLiveOrderAttemptRecord.attempt_number == record.attempt_count)
             ).scalar_one()
-            record.last_error_code = exc.code
-            record.last_error_message = sanitize_message(exc.message)
-            record.retryable = exc.retryable
-            record.error_class = "transient" if exc.retryable else "permanent"
-            if exc.retryable:
-                record.status = "RETRY_WAIT"
-                record.next_attempt_at = compute_next_retry_at(
-                    code=exc.code,
-                    attempt_count=record.attempt_count,
-                    retry_after_seconds=exc.retry_after_seconds,
-                )
-            elif exc.code == "CONDITION_ID_UNAVAILABLE":
-                record.status = "DEFERRED"
-                record.terminal_at = utc_now()
-            else:
-                record.status = "FAILED_PERMANENT"
-                record.terminal_at = utc_now()
-            attempt.completed_at = utc_now()
-            attempt.result_status = record.status
-            attempt.error_code = exc.code
-            attempt.error_message = sanitize_message(exc.message)
+            _apply_executor_error(session, record=record, attempt=attempt, exc=exc)
             sync_run_and_decisions_from_intents_sync(
                 session,
                 user_id=record.user_id,
@@ -1073,6 +1749,23 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             )
             session.commit()
             return record.status
+
+    if prepared.action == "buy" and prepared.intent_id:
+        with SyncSessionLocal() as session:
+            record = session.get(PolymarketAutoLiveOrderIntentRecord, prepared.intent_id)
+            if record is not None:
+                # _prepare_intent_submission marked this only after all other
+                # capacity and duplicate-exposure checks passed.
+                record.execution_metadata_json = {
+                    **dict(record.execution_metadata_json or {}),
+                    **{
+                        key: value
+                        for key, value in intent.execution_metadata_json.items()
+                        if key in {"capacity_override_used"}
+                    },
+                }
+                _persist_capacity_override_audit(session, record=record)
+                session.commit()
 
     if prepared.action == "buy":
         reserved = False
@@ -1128,42 +1821,8 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
                 .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
                 .where(PolymarketAutoLiveOrderAttemptRecord.attempt_number == record.attempt_count)
             ).scalar_one()
-            record.last_error_code = exc.code
-            record.last_error_message = sanitize_message(exc.message)
-            record.retryable = exc.retryable
-            record.error_class = "transient" if exc.retryable else "permanent"
-            attempt.completed_at = utc_now()
-            attempt.error_code = exc.code
-            attempt.error_message = sanitize_message(exc.message)
-            if exc.ambiguous_submission:
-                record.status = "CONFIRMING"
-                record.next_attempt_at = compute_next_retry_at(
-                    code="AMBIGUOUS_SUBMISSION",
-                    attempt_count=record.attempt_count,
-                    retry_after_seconds=exc.retry_after_seconds,
-                )
-                attempt.result_status = "CONFIRMING"
-            elif exc.retryable:
-                record.status = (
-                    "WAITING_FOR_COLLATERAL"
-                    if exc.code == "INSUFFICIENT_COLLATERAL"
-                    else "RETRY_WAIT"
-                )
-                record.next_attempt_at = compute_next_retry_at(
-                    code=exc.code,
-                    attempt_count=record.attempt_count,
-                    retry_after_seconds=exc.retry_after_seconds,
-                )
-                attempt.result_status = record.status
-            elif exc.code == "CONDITION_ID_UNAVAILABLE":
-                record.status = "DEFERRED"
-                record.terminal_at = utc_now()
-                attempt.result_status = "DEFERRED"
-            else:
-                record.status = "FAILED_PERMANENT"
-                record.terminal_at = utc_now()
-                attempt.result_status = "FAILED_PERMANENT"
-            if record.status in {"RETRY_WAIT", "WAITING_FOR_COLLATERAL", "DEFERRED", "FAILED_PERMANENT"}:
+            _apply_executor_error(session, record=record, attempt=attempt, exc=exc)
+            if record.status in {"DEFERRED", "FAILED_PERMANENT"}:
                 _release_reservation(session, record)
             sync_run_and_decisions_from_intents_sync(
                 session,
@@ -1185,6 +1844,17 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
         now = utc_now()
         record.status = result.status
         record.retryable = result.retryable
+        if record.action in {"sell", "redeem"}:
+            stage3_status = {
+                "SUBMITTED": "EXIT_SUBMITTED",
+                "CONFIRMING": "EXIT_OPEN_UNFILLED",
+                "PARTIALLY_FILLED": "EXIT_PARTIALLY_FILLED",
+                "SETTLEMENT_PENDING": "POST_EXIT_REFRESH_PENDING",
+                "CONFIRMED": "EXIT_SUBMITTED",
+                "FILLED": "EXIT_SUBMITTED",
+            }.get(result.status, "EXIT_NOT_SUBMITTED")
+        else:
+            stage3_status = "BUY_SUBMITTED" if result.status in {"SUBMITTED", "CONFIRMING"} else "BUY_READY"
         record.current_order_usd = result.current_order_usd if result.current_order_usd is not None else record.current_order_usd
         record.current_shares = result.current_shares if result.current_shares is not None else record.current_shares
         record.current_limit_price_cents = result.current_limit_price_cents if result.current_limit_price_cents is not None else record.current_limit_price_cents
@@ -1212,6 +1882,7 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
         record.execution_metadata_json = {
             **dict(record.execution_metadata_json or {}),
             "provider_alias": result.provider_alias,
+            "stage3_status": stage3_status,
         }
         attempt.completed_at = now
         attempt.result_status = result.status
@@ -1261,12 +1932,244 @@ def _matching_trade(history: Sequence[object], *, market_id: str, side: str) -> 
 
 
 async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentSubmissionResult:
-    wallet_positions = await read_console_wallet_positions()
+    if intent.action == "sell" and intent.remote_order_id:
+        try:
+            poll_payload = await BullpenLiveExecutor().poll_order(
+                order_id=intent.remote_order_id,
+                interval_seconds=1,
+                timeout_seconds=5,
+            )
+            payload = poll_payload if isinstance(poll_payload, dict) else {}
+            status = str(
+                payload.get("status")
+                or payload.get("orderStatus")
+                or payload.get("state")
+                or ""
+            ).strip().lower().replace("-", "_")
+            filled = _safe_float(
+                payload.get("filledShares")
+                or payload.get("filled_shares")
+                or payload.get("filled")
+            )
+            remaining = _safe_float(
+                payload.get("remainingShares")
+                or payload.get("remaining_shares")
+                or payload.get("remaining")
+            )
+            average = _safe_float(
+                payload.get("averageFillPriceCents")
+                or payload.get("average_fill_price_cents")
+                or payload.get("avgPriceCents")
+            )
+            if status in {"filled", "confirmed", "complete", "completed", "redeemed"}:
+                fresh_snapshot = await read_console_wallet_positions_snapshot(
+                    force_fresh=True,
+                    caller_source="auto-live-stage3-post-exit-intent-reconcile",
+                    max_age_seconds=0,
+                )
+                submitted_at = parse_datetime(intent.last_submitted_at or intent.first_submitted_at)
+                fetched_at = parse_datetime(fresh_snapshot.fetched_at)
+                if fresh_snapshot.source != "live-cli" or (
+                    submitted_at is not None
+                    and (fetched_at is None or fetched_at <= submitted_at)
+                ):
+                    return IntentSubmissionResult(
+                        status="SETTLEMENT_PENDING",
+                        detail="Bullpen marked the exit filled, but the required fresh live-cli post-exit snapshot is not yet available.",
+                        retryable=True,
+                        next_attempt_at=_next_confirmation_attempt_at(intent),
+                    )
+                capacity_policy = intent.execution_metadata_json.get("stage3_capacity_policy")
+                capacity_policy = capacity_policy if isinstance(capacity_policy, dict) else {}
+                snapshot_metadata = _post_exit_snapshot_metadata(
+                    fresh_snapshot,
+                    dust_threshold_usd=float(
+                        capacity_policy.get("dust_threshold_usd", 0.01) or 0.01
+                    ),
+                )
+                allocation = classify_economic_slots(
+                    fresh_snapshot.raw_positions or fresh_snapshot.positions,
+                    dust_threshold_usd=float(
+                        capacity_policy.get("dust_threshold_usd", 0.01) or 0.01
+                    ),
+                )
+                try:
+                    balance = await refresh_balance()
+                    snapshot_metadata["available_cash_usd"] = (
+                        balance.available_balance_usd
+                        if balance.status == "ready"
+                        else None
+                    )
+                    snapshot_metadata["balance_status"] = balance.status
+                except Exception as balance_exc:
+                    snapshot_metadata["available_cash_usd"] = None
+                    snapshot_metadata["balance_status"] = "unavailable"
+                    snapshot_metadata["balance_error"] = sanitize_message(str(balance_exc))
+                remaining_positions = [
+                    position
+                    for position in allocation.active_positions
+                    if _position_matches_intent(
+                        position,
+                        market_id=intent.market_id,
+                        condition_id=intent.condition_id,
+                        side=intent.side,
+                    )
+                    and float(getattr(position, "shares", 0.0) or 0.0) > 0
+                ]
+                if remaining_positions:
+                    remaining_shares = sum(
+                        float(getattr(position, "shares", 0.0) or 0.0)
+                        for position in remaining_positions
+                    )
+                    return IntentSubmissionResult(
+                        status="PARTIALLY_FILLED",
+                        detail=(
+                            "Bullpen reported the Event Exit filled, but the fresh live-cli "
+                            "snapshot still shows meaningful economic exposure; the replacement slot remains occupied."
+                        ),
+                        retryable=True,
+                        filled_shares=filled,
+                        remaining_shares=remaining_shares,
+                        average_fill_price_cents=average,
+                        next_attempt_at=_next_confirmation_attempt_at(intent),
+                        raw_response={"post_exit_snapshot": snapshot_metadata},
+                    )
+                return IntentSubmissionResult(
+                    status="FILLED",
+                    detail="Bullpen order polling confirmed the Event Exit is filled.",
+                    retryable=False,
+                    filled_shares=filled or intent.current_shares or intent.requested_shares,
+                    remaining_shares=0.0,
+                    average_fill_price_cents=average,
+                    raw_response={"post_exit_snapshot": snapshot_metadata},
+                )
+            if status in {"partially_filled", "partial", "partial_fill"}:
+                remaining_value = remaining if remaining is not None else max(
+                    0.0,
+                    float(intent.current_shares or intent.requested_shares or 0.0)
+                    - float(filled or 0.0),
+                )
+                capacity_policy = intent.execution_metadata_json.get(
+                    "stage3_capacity_policy"
+                )
+                capacity_policy = capacity_policy if isinstance(capacity_policy, dict) else {}
+                dust_threshold = float(
+                    capacity_policy.get("dust_threshold_usd", 0.01) or 0.01
+                )
+                remaining_value_usd = remaining_value * float(
+                    intent.current_limit_price_cents
+                    or intent.requested_limit_price_cents
+                    or 0.0
+                ) / 100
+                if remaining_value_usd <= dust_threshold:
+                    return IntentSubmissionResult(
+                        status="CONFIRMED",
+                        detail=(
+                            "Bullpen partially filled the Event Exit; the remaining exposure is "
+                            f"dust ({remaining_value_usd:.4f} USD) and does not occupy a slot."
+                        ),
+                        retryable=False,
+                        filled_shares=filled,
+                        remaining_shares=remaining_value,
+                        average_fill_price_cents=average,
+                    )
+                return IntentSubmissionResult(
+                    status="PARTIALLY_FILLED",
+                    detail="Bullpen order polling found a partial Event Exit fill; remaining exposure stays occupied.",
+                    retryable=True,
+                    filled_shares=filled,
+                    remaining_shares=remaining_value,
+                    average_fill_price_cents=average,
+                    next_attempt_at=_next_confirmation_attempt_at(intent),
+                )
+            if status in {"rejected", "failed", "error"}:
+                return IntentSubmissionResult(
+                    status="REJECTED",
+                    detail="Bullpen order polling reported that the Event Exit was rejected.",
+                    retryable=False,
+                    filled_shares=filled,
+                    remaining_shares=remaining,
+                )
+            if status in {"cancelled", "canceled"}:
+                return IntentSubmissionResult(
+                    status="CANCELLED",
+                    detail="Bullpen order polling reported that the Event Exit was cancelled.",
+                    retryable=False,
+                    filled_shares=filled,
+                    remaining_shares=remaining,
+                )
+            if status in {"timed_out", "timeout"}:
+                return IntentSubmissionResult(
+                    status="TIMED_OUT",
+                    detail="Bullpen order polling timed out before the Event Exit filled.",
+                    retryable=False,
+                    filled_shares=filled,
+                    remaining_shares=remaining or intent.remaining_shares,
+                )
+            if status in {"open", "unfilled", "pending", "submitted", "confirming"}:
+                return IntentSubmissionResult(
+                    status="CONFIRMING",
+                    detail="Bullpen polling confirmed the Event Exit is submitted but still unfilled; the slot remains occupied.",
+                    retryable=True,
+                    filled_shares=filled,
+                    remaining_shares=remaining or intent.remaining_shares,
+                    average_fill_price_cents=average,
+                    next_attempt_at=_next_confirmation_attempt_at(intent),
+                )
+        except AutoLiveExecutorError:
+            raise
+        except Exception as exc:
+            classified = classify_executor_error(str(exc), during_write=False)
+            if classified.code == "RPC_RATE_LIMITED":
+                return IntentSubmissionResult(
+                    status="CONFIRMING",
+                    detail=f"Exit polling was rate limited; preserving the submitted intent: {classified.message}",
+                    retryable=True,
+                    next_attempt_at=_next_confirmation_attempt_at(intent),
+                    last_error_code=classified.code,
+                )
+
+    if intent.action == "sell":
+        live_snapshot = await read_console_wallet_positions_snapshot(
+            force_fresh=True,
+            caller_source="auto-live-stage3-post-exit-intent-reconcile",
+            max_age_seconds=0,
+        )
+        submitted_at = parse_datetime(intent.last_submitted_at or intent.first_submitted_at)
+        fetched_at = parse_datetime(live_snapshot.fetched_at)
+        if live_snapshot.source != "live-cli" or (
+            submitted_at is not None and (fetched_at is None or fetched_at <= submitted_at)
+        ):
+            return IntentSubmissionResult(
+                status="SETTLEMENT_PENDING",
+                detail=(
+                    "Post-exit wallet refresh was not a fresh live-cli snapshot fetched after the exit attempt; "
+                    "the economic slot remains occupied."
+                ),
+                retryable=True,
+                next_attempt_at=_next_confirmation_attempt_at(intent),
+            )
+        wallet_positions = live_snapshot.positions
+        fallback_snapshot_metadata = _post_exit_snapshot_metadata(live_snapshot)
+    else:
+        wallet_positions = await read_console_wallet_positions()
     trade_history = await BullpenTradeHistoryReader().refresh()
     redeemed_history = await BullpenRedeemedTradesReader().refresh()
     now = utc_now()
     if intent.action == "buy":
-        position = _matching_position(wallet_positions, market_id=intent.market_id, side=intent.side)
+        position = next(
+            (
+                item
+                for item in wallet_positions
+                if _position_matches_intent(
+                    item,
+                    market_id=intent.market_id,
+                    condition_id=intent.condition_id,
+                    side=intent.side,
+                )
+            ),
+            None,
+        )
         if position is not None:
             current_shares = _safe_float(getattr(position, "shares", None)) or 0.0
             target_shares = float(intent.current_shares or intent.requested_shares or 0.0)
@@ -1316,6 +2219,7 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
                     retryable=False,
                     filled_shares=baseline_shares,
                     remaining_shares=0.0,
+                    raw_response={"post_exit_snapshot": fallback_snapshot_metadata},
                 )
             return IntentSubmissionResult(
                 status="PARTIALLY_FILLED",
@@ -1351,16 +2255,21 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
         (
             position
             for position in wallet_positions
-            if getattr(position, "condition_id", None) == intent.condition_id
+            if _position_matches_intent(
+                position,
+                market_id=intent.market_id,
+                condition_id=intent.condition_id,
+                side=None,
+            )
         ),
         None,
     )
     if matching_position is None:
         return IntentSubmissionResult(
             status="CONFIRMED",
-            detail="Wallet reconciliation no longer shows the redeemable condition.",
-            retryable=False,
-        )
+                detail="Wallet reconciliation no longer shows the redeemable condition.",
+                retryable=False,
+            )
     return IntentSubmissionResult(
         status="SETTLEMENT_PENDING",
         detail="Redeem reconciliation is still waiting for settlement.",
@@ -1384,6 +2293,25 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
         record.retryable = result.retryable
         record.last_error_message = result.detail
         record.last_error_code = result.last_error_code
+        if record.action in {"sell", "redeem"}:
+            record.execution_metadata_json = {
+                **dict(record.execution_metadata_json or {}),
+                "stage3_status": {
+                    "SUBMITTED": "EXIT_SUBMITTED",
+                    "CONFIRMING": "EXIT_OPEN_UNFILLED",
+                    "PARTIALLY_FILLED": "EXIT_PARTIALLY_FILLED",
+                    "CONFIRMED": "EXIT_SUBMITTED",
+                    "FILLED": "EXIT_SUBMITTED",
+                    "REJECTED": "EXIT_FAILED_PERMANENTLY",
+                    "CANCELLED": "EXIT_FAILED_PERMANENTLY",
+                    "TIMED_OUT": "EXIT_FAILED_PERMANENTLY",
+                }.get(result.status, "POST_EXIT_REFRESH_PENDING"),
+            }
+        elif record.action == "buy" and result.status in {"SUBMITTED", "CONFIRMING"}:
+            record.execution_metadata_json = {
+                **dict(record.execution_metadata_json or {}),
+                "stage3_status": "BUY_SUBMITTED",
+            }
         if result.filled_shares is not None:
             record.filled_shares = float(result.filled_shares)
         elif record.filled_shares is None:
@@ -1398,6 +2326,33 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
             else record.average_fill_price_cents
         )
         record.next_attempt_at = result.next_attempt_at
+        if result.status in INTENT_TERMINAL_FAILURE_STATUSES:
+            record.terminal_at = utc_now()
+            record.retryable = False
+            if record.dependency_group:
+                for replacement in session.execute(
+                    select(PolymarketAutoLiveOrderIntentRecord)
+                    .where(PolymarketAutoLiveOrderIntentRecord.run_id == record.run_id)
+                    .where(PolymarketAutoLiveOrderIntentRecord.dependency_group == record.dependency_group)
+                    .where(PolymarketAutoLiveOrderIntentRecord.action == "buy")
+                    .where(
+                        PolymarketAutoLiveOrderIntentRecord.status.in_(
+                            ("READY", "WAITING_FOR_EXIT", "RETRY_WAIT")
+                        )
+                    )
+                ).scalars():
+                    replacement.status = "DEFERRED"
+                    replacement.retryable = False
+                    replacement.next_attempt_at = None
+                    replacement.last_error_code = "SETTLEMENT_PENDING"
+                    replacement.last_error_message = (
+                        f"Replacement slot released because exit {record.market_id} ended in {result.status}."
+                    )
+                    replacement.execution_metadata_json = {
+                        **dict(replacement.execution_metadata_json or {}),
+                        "stage3_status": "BUY_FAILED",
+                        "replacement_reservation_released_at": utc_now_iso(),
+                    }
         if result.status in INTENT_TERMINAL_SUCCESS_STATUSES:
             record.confirmed_at = utc_now()
             record.terminal_at = utc_now()
@@ -1413,10 +2368,35 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
             for waiting in session.execute(
                 select(PolymarketAutoLiveOrderIntentRecord).where(
                     PolymarketAutoLiveOrderIntentRecord.run_id == record.run_id
-                ).where(PolymarketAutoLiveOrderIntentRecord.status == "WAITING_FOR_COLLATERAL")
+                ).where(
+                    PolymarketAutoLiveOrderIntentRecord.status.in_(
+                        ("WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT")
+                    )
+                )
             ).scalars():
+                waiting_for_exit = waiting.status == "WAITING_FOR_EXIT"
+                if waiting_for_exit and waiting.dependency_group != record.dependency_group:
+                    continue
                 waiting.status = "READY"
+                waiting.retryable = True
                 waiting.next_attempt_at = utc_now()
+                waiting.execution_metadata_json = {
+                    **dict(waiting.execution_metadata_json or {}),
+                    "stage3_status": "BUY_READY",
+                    "dependency_exit_market_id": record.market_id,
+                }
+                if waiting_for_exit:
+                    waiting.dependency_metadata_json = {
+                        **dict(waiting.dependency_metadata_json or {}),
+                        "state": "ready",
+                        "exit_confirmed_at": utc_now_iso(),
+                        "exit_intent_id": record.id,
+                    }
+        _persist_stage3_reconciliation_diagnostics(
+            session,
+            record=record,
+            result=result,
+        )
         sync_run_and_decisions_from_intents_sync(
             session,
             user_id=record.user_id,
@@ -1436,6 +2416,133 @@ def get_run_orders_for_user_sync(*, user_id: int, run_id: str) -> BullpenAutoLiv
 def retry_order_intent_for_user_sync(*, user_id: int, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
     with SyncSessionLocal() as session:
         return retry_order_intent_sync(session, user_id=user_id, intent_id=intent_id)
+
+
+def retry_failed_exits_and_continue_buys_sync(
+    *,
+    user_id: int,
+    run_id: str,
+) -> BullpenAutoLiveRunOrdersResponse:
+    """Resume one saved run without rebuilding its Stage 1/2 analysis."""
+
+    with SyncSessionLocal() as session:
+        run_record = session.get(PolymarketAutoLiveRunRecord, run_id)
+        if run_record is None or run_record.user_id != user_id:
+            raise ValueError("Saved Auto-Live run not found.")
+
+        # Older runs may have been persisted by the legacy synchronous path.
+        # Backfill only the already persisted order plans; never infer a new
+        # order from an LLM row or rerun analysis here.
+        existing = session.execute(
+            select(PolymarketAutoLiveOrderIntentRecord)
+            .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+        ).scalars().all()
+        if not existing:
+            run = record_to_run(run_record)
+            decision_records = session.execute(
+                select(PolymarketAutoLiveDecisionRecord)
+                .where(PolymarketAutoLiveDecisionRecord.user_id == user_id)
+                .where(PolymarketAutoLiveDecisionRecord.run_id == run_id)
+                .order_by(PolymarketAutoLiveDecisionRecord.created_at.asc())
+            ).scalars().all()
+            saved_decisions = [record_to_decision(item) for item in decision_records]
+            replacement_by_buy_market: dict[str, str] = {}
+            for stage in run.stage_results:
+                diagnostics = stage.outputs.get("stage3_slot_diagnostics")
+                if not isinstance(diagnostics, dict):
+                    continue
+                reservations = diagnostics.get("replacement_reservations")
+                if not isinstance(reservations, list):
+                    continue
+                for reservation in reservations:
+                    if not isinstance(reservation, dict):
+                        continue
+                    buy_market = reservation.get("replacement_market_id")
+                    exit_market = reservation.get("exit_market_id")
+                    if isinstance(buy_market, str) and isinstance(exit_market, str):
+                        replacement_by_buy_market[buy_market] = exit_market
+            for decision in saved_decisions:
+                if decision.order_plan is None or decision.order_plan.action != "buy":
+                    continue
+                exit_market_id = replacement_by_buy_market.get(decision.market_id)
+                if exit_market_id:
+                    decision.order_plan = decision.order_plan.model_copy(
+                        update={
+                            "dependency_group": (
+                                f"stage3-replacement:{run_id}:{exit_market_id}"
+                            )
+                        }
+                    )
+            create_or_refresh_run_order_intents_sync(
+                session,
+                user_id=user_id,
+                run=run,
+                decisions=saved_decisions,
+            )
+            existing = session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord)
+                .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+            ).scalars().all()
+
+        resumed_at = utc_now_iso()
+        for intent in existing:
+            if intent.remote_order_id or intent.remote_transaction_hash:
+                continue
+            if intent.action in {"sell", "redeem"} and intent.status in {
+                "READY",
+                "RETRY_WAIT",
+                "WAITING_FOR_COLLATERAL",
+                "WAITING_FOR_EXIT",
+                "DEFERRED",
+                "FAILED_PERMANENT",
+            }:
+                intent.status = "READY"
+                intent.retryable = True
+                intent.terminal_at = None
+                intent.next_attempt_at = utc_now()
+                intent.last_error_message = None
+                intent.execution_metadata_json = {
+                    **dict(intent.execution_metadata_json or {}),
+                    "stage3_status": "EXIT_NOT_SUBMITTED",
+                    "operator_resume_action": "Retry failed exits and continue buys",
+                    "operator_resume_at": resumed_at,
+                }
+            elif intent.action == "buy" and intent.status in {
+                "READY",
+                "RETRY_WAIT",
+                "WAITING_FOR_COLLATERAL",
+                "WAITING_FOR_EXIT",
+                "DEFERRED",
+            }:
+                intent.status = "READY"
+                intent.retryable = True
+                intent.next_attempt_at = utc_now()
+                intent.execution_metadata_json = {
+                    **dict(intent.execution_metadata_json or {}),
+                    "stage3_status": "BUY_READY",
+                    "operator_resume_action": "Retry failed exits and continue buys",
+                    "operator_resume_at": resumed_at,
+                }
+
+        run_record.payload = {
+            **dict(run_record.payload or {}),
+            "stage3_resume_action": {
+                "action": "Retry failed exits and continue buys",
+                "at": resumed_at,
+                "same_run": True,
+                "llm_analysis_rerun": False,
+            },
+        }
+        session.flush()
+        sync_run_and_decisions_from_intents_sync(session, user_id=user_id, run_id=run_id)
+        session.commit()
+        return summarize_run_orders_sync(session, user_id=user_id, run_id=run_id)
+
+
+def retry_failed_exits_and_continue_buys_for_user_sync(
+    *, user_id: int, run_id: str
+) -> BullpenAutoLiveRunOrdersResponse:
+    return retry_failed_exits_and_continue_buys_sync(user_id=user_id, run_id=run_id)
 
 
 def cancel_order_intent_for_user_sync(*, user_id: int, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:

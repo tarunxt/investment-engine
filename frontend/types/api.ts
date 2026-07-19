@@ -2005,6 +2005,20 @@ export type BullpenAutoLiveOrderPlanStatus =
   | "rejected"
   | "timed_out"
   | "failed";
+export type BullpenAutoLiveStage3Status =
+  | "EXIT_RPC_RETRYING"
+  | "EXIT_NOT_SUBMITTED"
+  | "EXIT_SUBMITTED"
+  | "EXIT_OPEN_UNFILLED"
+  | "EXIT_PARTIALLY_FILLED"
+  | "EXIT_FAILED_PERMANENTLY"
+  | "POST_EXIT_REFRESH_PENDING"
+  | "REPLACEMENT_SLOT_RESERVED"
+  | "GENUINE_CAPACITY_BLOCK"
+  | "CAPACITY_OVERRIDE_USED"
+  | "BUY_READY"
+  | "BUY_SUBMITTED"
+  | "BUY_FAILED";
 export type BullpenAutoLiveOrderAction = "buy" | "sell" | "hold" | "redeem";
 export type BullpenAutoLiveOutcomeSide = "YES" | "NO";
 export type BullpenAutoLiveOrderIntentStatus =
@@ -2017,11 +2031,14 @@ export type BullpenAutoLiveOrderIntentStatus =
   | "PARTIALLY_FILLED"
   | "SETTLEMENT_PENDING"
   | "WAITING_FOR_COLLATERAL"
+  | "WAITING_FOR_EXIT"
   | "CONFIRMED"
   | "FILLED"
   | "DEFERRED"
   | "CANCELLED"
-  | "FAILED_PERMANENT";
+  | "FAILED_PERMANENT"
+  | "REJECTED"
+  | "TIMED_OUT";
 export type BullpenAutoLiveReservationStatus =
   | "active"
   | "consumed"
@@ -2055,6 +2072,7 @@ export type BullpenAutoLiveExecutorErrorCode =
   | "CONDITION_ID_UNAVAILABLE"
   | "EMERGENCY_STOP"
   | "PERMANENT_REJECTION"
+  | "CAPACITY_BLOCKED"
   | "AMBIGUOUS_SUBMISSION";
 export type BullpenAutoLiveTriggeredBy =
   | "manual"
@@ -2100,6 +2118,11 @@ export interface BullpenAutoLiveSettings {
   stage3_exit_poll_timeout_seconds: number;
   stage3_exit_poll_interval_seconds: number;
   bullpen_economic_dust_threshold_usd: number;
+  stage3_rpc_retry_attempts: number;
+  stage3_rpc_retry_initial_delay_seconds: number;
+  stage3_rpc_retry_max_delay_seconds: number;
+  stage3_rpc_retry_max_total_wait_seconds: number;
+  stage3_capacity_override: boolean;
   exit_edge_pp: number;
   trim_edge_pp: number;
   rebalance_interval_minutes: number;
@@ -2319,6 +2342,7 @@ export interface BullpenAutoLiveOrderPlan {
   side: BullpenAutoLiveOutcomeSide;
   order_type: "limit";
   status: BullpenAutoLiveOrderPlanStatus;
+  stage3_status?: BullpenAutoLiveStage3Status | null;
   market_id: string;
   market_title: string;
   dependency_group?: string | null;
@@ -2468,6 +2492,8 @@ export interface BullpenAutoLiveDecision {
   selection_required?: boolean;
   selected_for_auto_invest?: boolean | null;
   selection_block_reason?: string | null;
+  stage3_status?: BullpenAutoLiveStage3Status | null;
+  stage3_blocker?: Record<string, unknown> | null;
   order_plan?: BullpenAutoLiveOrderPlan | null;
   exit_signals: BullpenAutoLiveExitSignal[];
   exit_state: BullpenAutoLiveExitState;

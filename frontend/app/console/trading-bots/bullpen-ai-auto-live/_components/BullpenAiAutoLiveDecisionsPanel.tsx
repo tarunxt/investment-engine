@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   ExternalLink,
+  Loader2,
   MinusCircle,
   XCircle,
 } from "lucide-react";
@@ -120,6 +121,24 @@ function formatDateTime(value: string | null | undefined) {
 
 function labelize(value: string) {
   return value.replace(/[_-]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function orderBlockerLabel(decision: BullpenAutoLiveDecision) {
+  const plan = decision.order_plan;
+  const blocker = decision.stage3_blocker;
+  const status = decision.stage3_status || plan?.stage3_status;
+  const detail = plan?.detail || decision.selection_block_reason || decision.reason;
+  const parts = [status ? labelize(status) : null, detail];
+  if (plan?.dependency_group) parts.push(`dependency ${plan.dependency_group}`);
+  if (plan?.attempt_count) parts.push(`retry count ${plan.attempt_count}`);
+  if (plan?.next_retry_at) parts.push(`next retry ${formatDateTime(plan.next_retry_at)}`);
+  if (blocker?.related_exit_market) parts.push(`related exit ${String(blocker.related_exit_market)}`);
+  if (blocker?.occupied_slots !== undefined) parts.push(`occupied ${String(blocker.occupied_slots)}`);
+  if (blocker?.reserved_replacement_slots !== undefined) {
+    parts.push(`reserved ${String(blocker.reserved_replacement_slots)}`);
+  }
+  if (blocker?.available_cash !== undefined) parts.push(`cash ${formatMoney(Number(blocker.available_cash))}`);
+  return parts.filter(Boolean).join(" • ");
 }
 
 function renderJson(value: unknown) {
@@ -437,12 +456,15 @@ function ExpandedDecisionRow({
 
 export function BullpenAiAutoLiveDecisionsPanel({
   summary,
+  onRetryExitsAndContinueBuys,
 }: {
   summary: BullpenAutoLiveSummaryResponse | null;
+  onRetryExitsAndContinueBuys?: (runId: string) => Promise<void>;
 }) {
   const [filterKey, setFilterKey] = useState<AutoLiveDecisionFilterKey>("all");
   const [sortKey, setSortKey] = useState<AutoLiveDecisionSortKey>("highest-score");
   const [openRowIds, setOpenRowIds] = useState<string[]>([]);
+  const [retryingExits, setRetryingExits] = useState(false);
 
   const latestRun = summary?.latest_run ?? summary?.recent_runs?.[0] ?? null;
   const latestRunDecisions = (summary?.recent_decisions ?? []).filter(
@@ -507,6 +529,24 @@ export function BullpenAiAutoLiveDecisionsPanel({
                     {labelize(latestRun.triggered_by)}
                   </span>
                 </>
+              ) : null}
+              {latestRun && onRetryExitsAndContinueBuys ? (
+                <button
+                  className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-amber-900 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={retryingExits}
+                  onClick={async () => {
+                    setRetryingExits(true);
+                    try {
+                      await onRetryExitsAndContinueBuys(latestRun.id);
+                    } finally {
+                      setRetryingExits(false);
+                    }
+                  }}
+                  type="button"
+                >
+                  {retryingExits ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                  Retry failed exits and continue buys
+                </button>
               ) : null}
             </div>
           </div>
@@ -711,7 +751,7 @@ export function BullpenAiAutoLiveDecisionsPanel({
                       "Proposed order",
                       "Decision",
                       "Status",
-                      "Reason",
+                      "Order / blocker",
                       "Updated at",
                     ].map((column) => (
                       <th
@@ -792,7 +832,7 @@ export function BullpenAiAutoLiveDecisionsPanel({
                             </span>
                           </td>
                           <td className="px-4 py-4 text-sm leading-6 text-slate-700">
-                            <div className="max-w-[24rem]">{row.decision.reason}</div>
+                            <div className="max-w-[30rem]">{orderBlockerLabel(row.decision)}</div>
                           </td>
                           <td className="px-4 py-4 text-sm text-slate-700">{formatDateTime(row.decision.updated_at)}</td>
                         </tr>

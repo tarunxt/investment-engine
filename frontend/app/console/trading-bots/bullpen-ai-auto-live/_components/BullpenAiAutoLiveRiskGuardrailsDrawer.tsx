@@ -463,6 +463,18 @@ export function BullpenAiAutoLiveRiskGuardrailsDrawer({
               </Alert>
             ) : null}
 
+            {draft.stage3_capacity_override === true ? (
+              <Alert className="mt-4 border-rose-400 bg-rose-100 text-rose-950">
+                <ShieldAlert className="size-4" />
+                <AlertTitle>Stage 3 capacity override is enabled</AlertTitle>
+                <AlertDescription>
+                  This is an audited operator action. It bypasses only the slot-capacity gate;
+                  all live cash, duplicate-market, exposure, pricing, slippage, cooldown, and
+                  execution guardrails remain enforced. Turn it off unless you intentionally need it.
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             {dangerousLiveEnable ? (
               <div className="mt-4 rounded-[24px] border border-rose-300 bg-rose-50 px-4 py-4">
                 <Label

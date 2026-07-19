@@ -8,6 +8,10 @@ import os
 from typing import Iterable, Sequence
 
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket_auto_live.rpc_retry import (
+    extract_retry_after_seconds,
+    is_rpc_rate_limited,
+)
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveOrderFunnel,
     BullpenAutoLiveOrderIntent,
@@ -22,14 +26,19 @@ INTENT_PENDING_CONFIRMATION_STATUSES = frozenset(
         "PARTIALLY_FILLED",
         "SETTLEMENT_PENDING",
         "WAITING_FOR_COLLATERAL",
+        "WAITING_FOR_EXIT",
     }
 )
 INTENT_TERMINAL_SUCCESS_STATUSES = frozenset({"CONFIRMED", "FILLED"})
 INTENT_TERMINAL_FAILURE_STATUSES = frozenset(
-    {"DEFERRED", "CANCELLED", "FAILED_PERMANENT"}
+    {"DEFERRED", "CANCELLED", "FAILED_PERMANENT", "REJECTED", "TIMED_OUT"}
 )
-INTENT_READY_STATUSES = frozenset({"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"})
-INTENT_RETRYABLE_STATUSES = frozenset({"RETRY_WAIT", "WAITING_FOR_COLLATERAL", "DEFERRED"})
+INTENT_READY_STATUSES = frozenset(
+    {"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}
+)
+INTENT_RETRYABLE_STATUSES = frozenset(
+    {"RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT", "DEFERRED"}
+)
 TRANSIENT_ERROR_CODES = frozenset(
     {
         "RPC_RATE_LIMITED",
@@ -150,12 +159,12 @@ def _message_has_any(message: str, markers: Sequence[str]) -> bool:
 
 
 def classify_executor_error(
-    message: str,
+    message: object,
     *,
     during_write: bool = False,
     provider_alias: str | None = None,
 ) -> AutoLiveExecutorError:
-    sanitized = sanitize_message(message) or "Unknown Bullpen execution failure."
+    sanitized = sanitize_message(str(message)) or "Unknown Bullpen execution failure."
     lowered = sanitized.lower()
 
     def _error(
@@ -174,15 +183,13 @@ def classify_executor_error(
             provider_alias=provider_alias,
         )
 
-    if "retry-after" in lowered:
-        retry_after_seconds = _extract_retry_after_seconds(lowered)
+    if is_rpc_rate_limited(sanitized):
+        retry_after = extract_retry_after_seconds(message)
         return _error(
             "RPC_RATE_LIMITED",
             retryable=True,
-            retry_after_seconds=retry_after_seconds,
+            retry_after_seconds=(math.ceil(retry_after) if retry_after is not None else None),
         )
-    if "429" in lowered or "rate limit" in lowered:
-        return _error("RPC_RATE_LIMITED", retryable=True)
     if "504" in lowered or "gateway timeout" in lowered:
         return _error(
             "AMBIGUOUS_SUBMISSION" if during_write else "HTTP_504",
@@ -250,17 +257,6 @@ def classify_executor_error(
     if _message_has_any(lowered, ("locked", "unlock is required")):
         return _error("LIVE_LOCKED", retryable=True)
     return _error("PERMANENT_REJECTION", retryable=False)
-
-
-def _extract_retry_after_seconds(message: str) -> int | None:
-    digits = "".join(ch if ch.isdigit() else " " for ch in message)
-    parts = [part for part in digits.split() if part]
-    if not parts:
-        return None
-    try:
-        return max(0, int(parts[0]))
-    except ValueError:
-        return None
 
 
 def max_attempts_for_error(code: str) -> int:
@@ -332,11 +328,14 @@ def intent_status_to_order_plan_status(status: str) -> str:
         "PARTIALLY_FILLED": "partially_filled",
         "SETTLEMENT_PENDING": "settlement_pending",
         "WAITING_FOR_COLLATERAL": "waiting_for_collateral",
+        "WAITING_FOR_EXIT": "waiting_for_exit",
         "CONFIRMED": "confirmed",
         "FILLED": "filled",
         "DEFERRED": "deferred",
         "CANCELLED": "cancelled",
         "FAILED_PERMANENT": "failed_permanent",
+        "REJECTED": "rejected",
+        "TIMED_OUT": "timed_out",
     }.get(status, "failed")
 
 
@@ -375,6 +374,9 @@ def build_order_plan_from_intent(
             if intent.execution_metadata_json.get("reservation_state") is not None
             else existing.reservation_state,
             "reservation_amount_usd": intent.reserved_cash_usd,
+            "stage3_status": str(intent.execution_metadata_json.get("stage3_status"))
+            if intent.execution_metadata_json.get("stage3_status")
+            else existing.stage3_status,
             "filled_shares": intent.filled_shares,
             "remaining_shares": intent.remaining_shares,
             "average_fill_price_cents": intent.average_fill_price_cents,

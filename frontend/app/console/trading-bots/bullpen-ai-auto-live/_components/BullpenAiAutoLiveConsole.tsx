@@ -470,6 +470,22 @@ export function BullpenAiAutoLiveConsole() {
     }
   }
 
+  async function handleRetryExitsAndContinueBuys(runId: string) {
+    if (
+      !window.confirm(
+        "Retry only failed or unsubmitted exits for this saved run, refresh live state, and continue remaining eligible buys? Stage 1 and Stage 2 analysis will not rerun.",
+      )
+    ) {
+      return;
+    }
+    try {
+      await apiService.retryBullpenAutoLiveExitsAndContinueBuys(runId);
+      await reloadDashboard();
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+    }
+  }
+
   async function handleEmergencyStopToggle(emergencyStopped: boolean) {
     setEmergencyBusy(emergencyStopped ? "clear" : "activate");
     try {
@@ -956,7 +972,10 @@ export function BullpenAiAutoLiveConsole() {
               </CardContent>
             </Card>
 
-            <BullpenAiAutoLiveDecisionsPanel summary={summary} />
+            <BullpenAiAutoLiveDecisionsPanel
+              onRetryExitsAndContinueBuys={handleRetryExitsAndContinueBuys}
+              summary={summary}
+            />
           </div>
         </div>
       </div>

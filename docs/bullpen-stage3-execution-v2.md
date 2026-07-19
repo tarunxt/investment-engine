@@ -28,6 +28,7 @@ Intent states:
 - `PARTIALLY_FILLED`
 - `SETTLEMENT_PENDING`
 - `WAITING_FOR_COLLATERAL`
+- `WAITING_FOR_EXIT`
 - `CONFIRMED`
 - `FILLED`
 - `DEFERRED`
@@ -153,12 +154,24 @@ Execution attempts:
 
 Recommended production rollout:
 
-1. Deploy code and Alembic migration.
-2. Leave `AUTO_LIVE_EXECUTION_V2_ENABLED=false`.
+1. Deploy code and verify the existing order-intent Alembic revision is applied.
+2. Keep `AUTO_LIVE_EXECUTION_V2_ENABLED` unset or set it to `true`; durable
+   intents are now the default for live Stage 3 execution.
 3. Optionally set `AUTO_LIVE_EXECUTION_V2_SHADOW_ONLY=true` and inspect queued intent payloads without live writes.
-4. Enable `AUTO_LIVE_EXECUTION_V2_ENABLED=true`.
-5. Disable `AUTO_LIVE_EXECUTION_V2_SHADOW_ONLY`.
-6. Watch Stage 3 run funnels and intent retry/reconciliation behavior in the console.
+4. Disable `AUTO_LIVE_EXECUTION_V2_SHADOW_ONLY`.
+5. Watch Stage 3 run funnels and intent retry/reconciliation behavior in the console.
+
+Setting `AUTO_LIVE_EXECUTION_V2_ENABLED=false` is an explicit rollback lever;
+the legacy path retains bounded in-process retries but cannot provide worker-safe
+intent persistence before submission.
+
+Stage 3 RPC writes use the saved settings `stage3_rpc_retry_attempts`,
+`stage3_rpc_retry_initial_delay_seconds`, `stage3_rpc_retry_max_delay_seconds`,
+and `stage3_rpc_retry_max_total_wait_seconds`. A Bullpen `Retry-After` response
+is honored; otherwise the worker uses bounded exponential backoff with jitter.
+Sell, redeem, buy, cancel, and retry writes pass through the shared authenticated
+Bullpen runtime lock. The “Retry failed exits and continue buys” action resumes
+the existing run and never recreates an intent with a remote order reference.
 
 ## Migration
 

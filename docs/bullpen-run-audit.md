@@ -252,6 +252,31 @@ market/side deduplication, replacement reservations, free slots, and any safe
 stale-slot bypass. The audit schema remains additive so frozen legacy snapshots
 without these optional diagnostics remain readable and are not rewritten.
 
+The Stage 3 slot-allocation diagnostics also persist `exit_intent_ids`,
+`exit_retry_history`, `exit_terminal_statuses`, `planned_buy_ids`,
+`submitted_buy_ids`, `post_exit_snapshot_source`, `post_exit_snapshot_fetched_at`,
+and the final blocker or bypass reason. Every saved Event Exit intent carries its
+run and decision identity, condition/market identity, side, size, limit price,
+idempotency key, retry count, last error, next retry time, and partial-fill
+amounts. Rate-limit retries use the persisted Stage 3 retry policy and history;
+they become terminal only after the configured attempt and total-wait budgets are
+exhausted. A submitted-but-unfilled or meaningfully partial exit continues to
+occupy its economic slot. A confirmed exit wakes only its one-for-one replacement
+intent after a fresh live-cli wallet and cash refresh.
+
+Decision rows expose the explicit execution states `EXIT_RPC_RETRYING`,
+`EXIT_NOT_SUBMITTED`, `EXIT_SUBMITTED`, `EXIT_OPEN_UNFILLED`,
+`EXIT_PARTIALLY_FILLED`, `EXIT_FAILED_PERMANENTLY`,
+`POST_EXIT_REFRESH_PENDING`, `REPLACEMENT_SLOT_RESERVED`,
+`GENUINE_CAPACITY_BLOCK`, `CAPACITY_OVERRIDE_USED`, `BUY_READY`,
+`BUY_SUBMITTED`, and `BUY_FAILED`. The operator action “Retry failed exits and
+continue buys” is tied to the same saved run, is idempotent, does not rerun Stage 1
+or Stage 2, and never resets an intent that already has a remote order or
+transaction reference. `stage3_capacity_override` defaults false and is audited
+as an explicit operator bypass of only the slot-capacity gate; live cash,
+duplicate-market, market-validity, order-size, exposure, slippage, pricing, and
+cooldown guardrails remain active.
+
 The Step 2 `planned`, `processed`, and `submitted` tiles are expected to track
 the transferred Stage 2 Top 10 queue independently from whether a concrete
 Stage 3 buy `order_plan` was later created. Concrete buy-order counts remain

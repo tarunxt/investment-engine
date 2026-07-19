@@ -409,6 +409,21 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     detection_metadata={"occupied_slots_before_exit": occupied_before},
                 )
             )
+        if slot_diagnostics.get("operator_override_enabled") and not slot_diagnostics.get(
+            "operator_override_audit"
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_CAPACITY_OVERRIDE_NOT_AUDITED",
+                    severity="high",
+                    stage="stage-3",
+                    category="slot-allocation",
+                    title="Stage 3 capacity override lacks operator audit evidence",
+                    explanation="A capacity override may only bypass the slot gate when the explicit operator action is persisted.",
+                    blocking=True,
+                    evidence_pointers=["/stage_3/stage3_slot_diagnostics/operator_override_audit"],
+                )
+            )
 
     orders = stage_3.get("order_intents") if isinstance(stage_3.get("order_intents"), list) else []
     decisions_by_id = {

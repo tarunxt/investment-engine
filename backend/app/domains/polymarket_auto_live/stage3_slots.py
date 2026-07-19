@@ -92,6 +92,12 @@ def classify_economic_slots(
         "redeemed": "fully redeemed position",
         "settled": "fully redeemed position",
         "stale_or_unknown": "stale/non-active position record",
+        "closed_position": "closed position",
+        "fully_exited": "fully exited position",
+        "fully_redeemed_position": "fully redeemed position",
+        "positive_payout": "positive-payout claimable position",
+        "claimable": "positive-payout claimable position",
+        "settlement": "settlement-only record",
     }
 
     for position in rows:
@@ -100,7 +106,7 @@ def classify_economic_slots(
             excluded.append(_position_record(position, reason="missing canonical market or side", canonical_key=key))
             continue
 
-        state_reason = excluded_states.get(position.classification)
+        state_reason = excluded_states.get(str(position.classification or "").lower())
         if state_reason is None and (
             position.is_claimable
             or (position.claimable_value_usd or 0.0) > dust_threshold_usd
@@ -122,9 +128,35 @@ def classify_economic_slots(
             )
             continue
 
-        existing = candidates.get(key)
+        # A saved-run row may carry a condition ID while the live CLI row only
+        # carries a market ID (or vice versa).  Treat either identifier as an
+        # alias of the same condition/side instead of consuming two slots.
+        matching_key = next(
+            (
+                candidate_key
+                for candidate_key, existing_position in candidates.items()
+                if candidate_key[1] == key[1]
+                and (
+                    (
+                        position.condition_id
+                        and existing_position.condition_id
+                        and position.condition_id.strip().lower()
+                        == existing_position.condition_id.strip().lower()
+                    )
+                    or (
+                        position.market_id
+                        and existing_position.market_id
+                        and position.market_id.strip().lower()
+                        == existing_position.market_id.strip().lower()
+                    )
+                )
+            ),
+            None,
+        )
+        existing = candidates.get(matching_key or key)
         if existing is not None:
-            existing_value = candidate_values[key]
+            existing_key = matching_key or key
+            existing_value = candidate_values[existing_key]
             # Keep the strongest live row. The slot is keyed by condition and
             # side, so duplicate API/CLI/saved rows must never add another slot.
             if value > existing_value:
@@ -135,8 +167,8 @@ def classify_economic_slots(
                         canonical_key=key,
                     )
                 )
-                candidates[key] = position
-                candidate_values[key] = value
+                candidates[existing_key] = position
+                candidate_values[existing_key] = value
             else:
                 excluded.append(
                     _position_record(

@@ -57,6 +57,7 @@ _POLYMARKET_WRITE_VERBS = {
     "activate",
     "approve",
     "buy",
+    "cancel",
     "claim",
     "consolidate",
     "limit-buy",

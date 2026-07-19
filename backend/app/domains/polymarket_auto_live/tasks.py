@@ -35,6 +35,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     execute_order_intent_sync,
     get_intent_user_id_sync,
     list_due_order_intent_ids_sync,
+    persist_stage3_intent_diagnostics_sync,
     reconcile_order_intent_sync,
     sync_run_and_decisions_from_intents_sync,
 )
@@ -65,6 +66,29 @@ def _utc_now() -> datetime:
 
 class AutoLiveRunCancelled(RuntimeError):
     """Raised when a user-cancelled run should stop persisting worker progress."""
+
+
+def _refresh_order_intent_audit_sync(intent_id: str) -> None:
+    with SyncSessionLocal() as session:
+        record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
+        if record is None:
+            return
+        persist_stage3_intent_diagnostics_sync(session, record=record)
+        try:
+            materialize_run_audit_snapshot_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+                force=True,
+                freeze=False,
+            )
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.exception(
+                "Stage 3 order-intent audit refresh failed for intent %s",
+                intent_id,
+            )
 
 
 def _position_snapshot_from_record(record) -> PositionSnapshot:
@@ -232,6 +256,7 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                     positions=positions,
                     historical_decisions=historical_decisions,
                     progress_callback=persist_progress,
+                    durable_execution=auto_live_execution_v2_enabled(),
                 )
             )
         except AutoLiveRunCancelled:
@@ -339,12 +364,44 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             and engine_result.run.live_execution_requested
             and not engine_result.run.dry_run
         ):
-            create_or_refresh_run_order_intents_sync(
+            persisted_intents = create_or_refresh_run_order_intents_sync(
                 session,
                 user_id=user_id,
                 run=engine_result.run,
                 decisions=engine_result.decisions,
             )
+            for stage in engine_result.run.stage_results:
+                if stage.stage_number != 3 and stage.outputs.get("workflow_stage_key") != "invest":
+                    continue
+                diagnostics = stage.outputs.get("stage3_slot_diagnostics")
+                if isinstance(diagnostics, dict):
+                    diagnostics.update(
+                        {
+                            "exit_intent_ids": [
+                                intent.id
+                                for intent in persisted_intents
+                                if intent.action in {"sell", "redeem"}
+                            ],
+                            "planned_buy_ids": [
+                                intent.id for intent in persisted_intents if intent.action == "buy"
+                            ],
+                            "exit_retry_history": [
+                                {
+                                    "intent_id": intent.id,
+                                    "history": intent.execution_metadata_json.get(
+                                        "stage3_rpc_retry_history", []
+                                    ),
+                                }
+                                for intent in persisted_intents
+                                if intent.action in {"sell", "redeem"}
+                            ],
+                        }
+                    )
+                break
+            # Persist the additive Stage 3 audit fields before the intent
+            # synchronizer reads the saved run back from the database.
+            repo.save_run(user_id, engine_result.run)
+            session.flush()
             synced_run = sync_run_and_decisions_from_intents_sync(
                 session,
                 user_id=user_id,
@@ -487,7 +544,7 @@ def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
         executable_ids = list_due_order_intent_ids_sync(
             session,
             limit=limit,
-            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"),
+            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
         )
         reconcilable_ids = list_due_order_intent_ids_sync(
             session,
@@ -509,6 +566,7 @@ def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
 )
 def execute_auto_live_order_intent(self, intent_id: str) -> None:
     execute_order_intent_sync(intent_id, worker_task_id=self.request.id)
+    _refresh_order_intent_audit_sync(intent_id)
 
 
 @celery.task(
@@ -518,7 +576,34 @@ def execute_auto_live_order_intent(self, intent_id: str) -> None:
     queue="ai",
 )
 def reconcile_auto_live_order_intent(self, intent_id: str) -> None:
-    reconcile_order_intent_sync(intent_id)
+    status = reconcile_order_intent_sync(intent_id)
+    _refresh_order_intent_audit_sync(intent_id)
+    if status not in {"CONFIRMED", "FILLED"}:
+        return
+    # A confirmed exit may have just released a reserved replacement slot.
+    # Queue only the same run's due intents; no Stage 1/2 task is created.
+    with SyncSessionLocal() as session:
+        record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
+        if record is None:
+            return
+        due_ids = list_due_order_intent_ids_sync(
+            session,
+            limit=50,
+            statuses=("READY", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            now=_utc_now(),
+        )
+        if due_ids:
+            due_ids = list(
+                session.execute(
+                    select(PolymarketAutoLiveOrderIntentRecord.id)
+                    .where(PolymarketAutoLiveOrderIntentRecord.id.in_(due_ids))
+                    .where(PolymarketAutoLiveOrderIntentRecord.run_id == record.run_id)
+                )
+                .scalars()
+                .all()
+            )
+    for due_id in due_ids:
+        execute_auto_live_order_intent.delay(due_id)  # type: ignore[attr-defined]
 
 
 @celery.task(
@@ -552,6 +637,7 @@ def reconcile_auto_live_run_orders(run_id: str) -> None:
 )
 def retry_auto_live_order_intent(self, intent_id: str) -> None:
     execute_order_intent_sync(intent_id, worker_task_id=self.request.id)
+    _refresh_order_intent_audit_sync(intent_id)
 
 
 @celery.task(

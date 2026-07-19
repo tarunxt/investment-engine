@@ -1029,6 +1029,14 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  retryBullpenAutoLiveExitsAndContinueBuys(
+    runId: string,
+  ): Promise<BullpenAutoLiveRunOrdersResponse> {
+    return this.post<BullpenAutoLiveRunOrdersResponse>(
+      URLs.bullpenAutoLive.retryExitsAndContinueBuys(runId),
+    );
+  }
+
   getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
     return this.get<BullpenAutoLiveDecision[]>(URLs.bullpenAutoLive.decisions());
   }

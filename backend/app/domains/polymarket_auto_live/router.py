@@ -117,6 +117,21 @@ async def reconcile_auto_live_run_order_states(
         raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
 
 
+@router.post(
+    "/runs/{run_id}/retry-exits-and-continue-buys",
+    response_model=BullpenAutoLiveRunOrdersResponse,
+)
+async def retry_failed_exits_and_continue_buys(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.retry_failed_exits_and_continue_buys(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
+
+
 @router.get("/decisions", response_model=list[BullpenAutoLiveDecision])
 async def list_auto_live_decisions(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)

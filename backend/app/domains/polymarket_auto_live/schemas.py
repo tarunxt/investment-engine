@@ -21,6 +21,21 @@ AutoLiveStageStatus = Literal["pass", "fail", "warning", "skipped"]
 AutoLiveRuntimeStatus = Literal["running", "paused", "stopped", "error", "not-configured"]
 AutoLiveRuntimeMode = Literal["dry-run", "analysis-only", "live-trading"]
 AutoLiveStage3Result = Literal["SELECTED", "OUTSIDE_TOP_10", "BLOCKED"]
+AutoLiveStage3Status = Literal[
+    "EXIT_RPC_RETRYING",
+    "EXIT_NOT_SUBMITTED",
+    "EXIT_SUBMITTED",
+    "EXIT_OPEN_UNFILLED",
+    "EXIT_PARTIALLY_FILLED",
+    "EXIT_FAILED_PERMANENTLY",
+    "POST_EXIT_REFRESH_PENDING",
+    "REPLACEMENT_SLOT_RESERVED",
+    "GENUINE_CAPACITY_BLOCK",
+    "CAPACITY_OVERRIDE_USED",
+    "BUY_READY",
+    "BUY_SUBMITTED",
+    "BUY_FAILED",
+]
 AutoLiveOrderPlanStatus = Literal[
     "planned",
     "ready",
@@ -101,11 +116,14 @@ AutoLiveOrderIntentStatus = Literal[
     "PARTIALLY_FILLED",
     "SETTLEMENT_PENDING",
     "WAITING_FOR_COLLATERAL",
+    "WAITING_FOR_EXIT",
     "CONFIRMED",
     "FILLED",
     "DEFERRED",
     "CANCELLED",
     "FAILED_PERMANENT",
+    "REJECTED",
+    "TIMED_OUT",
 ]
 AutoLiveReservationStatus = Literal["active", "consumed", "released"]
 AutoLiveExecutorErrorCode = Literal[
@@ -137,6 +155,7 @@ AutoLiveExecutorErrorCode = Literal[
     "CONDITION_ID_UNAVAILABLE",
     "EMERGENCY_STOP",
     "PERMANENT_REJECTION",
+    "CAPACITY_BLOCKED",
     "AMBIGUOUS_SUBMISSION",
 ]
 
@@ -217,6 +236,11 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     stage3_exit_poll_timeout_seconds: int = Field(default=30, ge=1, le=900)
     stage3_exit_poll_interval_seconds: float = Field(default=3, gt=0, le=60)
     bullpen_economic_dust_threshold_usd: float = Field(default=0.01, ge=0)
+    stage3_rpc_retry_attempts: int = Field(default=1, ge=0, le=20)
+    stage3_rpc_retry_initial_delay_seconds: float = Field(default=1, ge=0, le=300)
+    stage3_rpc_retry_max_delay_seconds: float = Field(default=30, ge=0, le=900)
+    stage3_rpc_retry_max_total_wait_seconds: float = Field(default=120, ge=0, le=3600)
+    stage3_capacity_override: bool = False
 
     exit_edge_pp: float = Field(default=3, ge=0)
     trim_edge_pp: float = Field(default=8, ge=0)
@@ -311,6 +335,10 @@ class BullpenAutoLiveSettingsBase(BaseModel):
             )
         if self.max_order_usd < self.min_order_usd:
             raise ValueError("max_order_usd must be greater than or equal to min_order_usd")
+        if self.stage3_rpc_retry_max_delay_seconds < self.stage3_rpc_retry_initial_delay_seconds:
+            raise ValueError(
+                "stage3_rpc_retry_max_delay_seconds must be greater than or equal to stage3_rpc_retry_initial_delay_seconds"
+            )
         if self.allow_live_execution and not self.limit_orders_only:
             raise ValueError(
                 "allow_live_execution cannot be enabled when limit_orders_only is false"
@@ -363,6 +391,11 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     stage3_exit_poll_timeout_seconds: int | None = Field(default=None, ge=1, le=900)
     stage3_exit_poll_interval_seconds: float | None = Field(default=None, gt=0, le=60)
     bullpen_economic_dust_threshold_usd: float | None = Field(default=None, ge=0)
+    stage3_rpc_retry_attempts: int | None = Field(default=None, ge=0, le=20)
+    stage3_rpc_retry_initial_delay_seconds: float | None = Field(default=None, ge=0, le=300)
+    stage3_rpc_retry_max_delay_seconds: float | None = Field(default=None, ge=0, le=900)
+    stage3_rpc_retry_max_total_wait_seconds: float | None = Field(default=None, ge=0, le=3600)
+    stage3_capacity_override: bool | None = None
 
     exit_edge_pp: float | None = Field(default=None, ge=0)
     trim_edge_pp: float | None = Field(default=None, ge=0)
@@ -652,6 +685,7 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     side: AutoLiveOutcomeSide
     order_type: Literal["limit"] = "limit"
     status: AutoLiveOrderPlanStatus = "planned"
+    stage3_status: AutoLiveStage3Status | None = None
     market_id: str
     market_title: str
     dependency_group: str | None = None
@@ -778,6 +812,8 @@ class BullpenAutoLiveDecision(BaseModel):
     selection_required: bool = False
     selected_for_auto_invest: bool | None = None
     selection_block_reason: str | None = None
+    stage3_status: AutoLiveStage3Status | None = None
+    stage3_blocker: dict[str, object] | None = None
     order_plan: BullpenAutoLiveOrderPlan | None = None
     exit_signals: list[BullpenAutoLiveExitSignal] = Field(default_factory=list)
     exit_state: AutoLiveExitState = "ACTIVE"

@@ -213,6 +213,7 @@ export interface IApiService {
     getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
     getBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     reconcileBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
+    retryBullpenAutoLiveExitsAndContinueBuys(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
     retryBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     cancelBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;

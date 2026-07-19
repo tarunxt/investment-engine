@@ -44,7 +44,9 @@ def auto_live_backend_execution_env_detail() -> str:
 
 
 def auto_live_execution_v2_enabled() -> bool:
-    return _bool_from_env(AUTO_LIVE_EXECUTION_V2_ENV_VAR, False)
+    # Durable intents are the safe default for live Stage 3 execution.  Keep
+    # the environment switch as an explicit rollback lever for operators.
+    return _bool_from_env(AUTO_LIVE_EXECUTION_V2_ENV_VAR, True)
 
 
 def auto_live_execution_v2_shadow_only() -> bool:

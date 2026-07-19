@@ -72,7 +72,6 @@ from app.domains.polymarket_auto_live.console_profile import (
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
-    auto_live_execution_v2_enabled,
 )
 from app.domains.polymarket_auto_live.evidence import EvidencePacket, build_evidence_packet
 from app.domains.polymarket_auto_live.event_exit import (
@@ -113,6 +112,11 @@ from app.domains.polymarket_auto_live.normalization import (
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
 from app.domains.polymarket_auto_live.stage3_slots import (
     classify_economic_slots,
+)
+from app.domains.polymarket_auto_live.rpc_retry import (
+    compute_rpc_retry_delay_seconds,
+    extract_retry_after_seconds,
+    is_rpc_rate_limited,
 )
 from app.domains.polymarket_auto_live.scanner import (
     ScanRejectedMarket,
@@ -163,8 +167,6 @@ _ORIGINAL_RUN_LLM_CONSENSUS = run_llm_consensus
 
 logger = get_logger("app.domains.polymarket_auto_live.engine")
 BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS = 60
-BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS = 1
-BULLPEN_RPC_RATE_LIMIT_RETRY_DELAY_SECONDS = 1
 EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS = 3
 EXIT_SETTLEMENT_TIMEOUT_SECONDS = 18
 _EXIT_TERMINAL_SUCCESS_STATUSES = {
@@ -2025,14 +2027,7 @@ def _wallet_position_matches_redeem_condition(
 
 
 def _is_rpc_rate_limited_error(message: str) -> bool:
-    lowered = message.lower()
-    return (
-        "429" in lowered
-        or "too many requests" in lowered
-        or "retry-after" in lowered
-        or "rate limit" in lowered
-        or "rate-limit" in lowered
-    )
+    return is_rpc_rate_limited(message)
 
 
 def _reconcile_historical_pending_exit_keys(
@@ -2290,6 +2285,18 @@ async def _poll_exit_settlement(
             order_plan.average_fill_price_cents = max(0.0, min(100.0, average_fill_price))
 
         order_plan.status = effective_status  # type: ignore[assignment]
+        order_plan.stage3_status = {
+            "submitted": "EXIT_SUBMITTED",
+            "confirming": "EXIT_OPEN_UNFILLED",
+            "partially_filled": "EXIT_PARTIALLY_FILLED",
+            "filled": "EXIT_SUBMITTED",
+            "confirmed": "EXIT_SUBMITTED",
+            "already_redeemed": "EXIT_SUBMITTED",
+            "resolved_zero_payout": "EXIT_SUBMITTED",
+            "timed_out": "EXIT_OPEN_UNFILLED",
+            "rejected": "EXIT_FAILED_PERMANENTLY",
+            "cancelled": "EXIT_FAILED_PERMANENTLY",
+        }.get(effective_status, "POST_EXIT_REFRESH_PENDING")
         detail = _order_response_value(effective_response, ("detail", "message", "reason"))
         if not isinstance(detail, str) or not detail.strip():
             detail = {
@@ -3581,6 +3588,7 @@ class BullpenAutoLiveEngine:
         positions: list[PositionSnapshot],
         historical_decisions: list[BullpenAutoLiveDecision],
         progress_callback: ProgressCallback | None = None,
+        durable_execution: bool = False,
     ) -> EngineResult:
         now = utc_now()
         state.dry_run = effective_dry_run(settings)
@@ -3609,6 +3617,7 @@ class BullpenAutoLiveEngine:
                 global_guardrails=global_guardrails,
                 now=now,
                 progress_callback=progress_callback,
+                durable_execution=durable_execution,
             )
         daily_loss_stop_hit, weekly_loss_stop_hit = _daily_weekly_loss_stops(
             historical_decisions,
@@ -4851,6 +4860,7 @@ class BullpenAutoLiveEngine:
         global_guardrails: list[BullpenAutoLiveGuardrailCheck],
         now: datetime,
         progress_callback: ProgressCallback | None = None,
+        durable_execution: bool = False,
     ) -> EngineResult:
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         manual_console_context = (
@@ -7151,21 +7161,32 @@ class BullpenAutoLiveEngine:
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
         stage3_buy_refresh_snapshot: dict[str, object] = {}
+        initial_slot_allocation = classify_economic_slots(
+            active_bullpen_wallet_positions,
+            dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
+        )
         stage3_slot_diagnostics: dict[str, object] = {
             "slot_limit": CONSOLE_RANKED_EVENT_LIMIT,
-            "occupied_slots_before_exit": len(
-                {position.market_id for position in position_snapshots if position.market_id}
-            ),
+            "occupied_slots_before_exit": initial_slot_allocation.economically_active_position_count,
             "planned_exit_market_ids": [],
             "exit_order_ids_and_statuses": [],
             "post_exit_snapshot_source": None,
             "post_exit_snapshot_fetched_at": None,
-            "raw_position_count": 0,
-            "economically_active_position_count": 0,
-            "excluded_position_records": [],
-            "deduplicated_occupied_market_ids": [],
+            "raw_position_count": initial_slot_allocation.raw_position_count,
+            "economically_active_position_count": initial_slot_allocation.economically_active_position_count,
+            "excluded_position_records": initial_slot_allocation.excluded_position_records,
+            "deduplicated_occupied_market_ids": initial_slot_allocation.deduplicated_occupied_market_ids,
+            "available_cash_before_exit_usd": None,
+            "available_cash_after_refresh_usd": None,
             "free_slots_after_refresh": None,
             "replacement_reservations": [],
+            "exit_intent_ids": [],
+            "exit_retry_history": [],
+            "exit_terminal_statuses": [],
+            "planned_buy_ids": [],
+            "submitted_buy_ids": [],
+            "operator_override_enabled": bool(settings.stage3_capacity_override),
+            "operator_override_audit": None,
             "final_block_bypass_reason": None,
         }
         stage3_exit_execution_attempt_at: str | None = None
@@ -7644,6 +7665,9 @@ class BullpenAutoLiveEngine:
                     ),
                     action="buy" if decision_action == "BUY_NEW" else "sell",
                     side=side,  # type: ignore[arg-type]
+                    stage3_status=(
+                        "BUY_READY" if decision_action == "BUY_NEW" else "EXIT_NOT_SUBMITTED"
+                    ),
                     market_id=market.market_id,
                     market_title=market.question,
                     order_size_usd=round(order_usd, 2),
@@ -7673,6 +7697,9 @@ class BullpenAutoLiveEngine:
                 theme=market.theme,
                 side=side,  # type: ignore[arg-type]
                 decision=decision_action,  # type: ignore[arg-type]
+                stage3_status=(
+                    "BUY_READY" if decision_action == "BUY_NEW" else "EXIT_NOT_SUBMITTED"
+                ),
                 risk_status="Ready" if decision_action in {"BUY_NEW", "EXIT"} else "Watch",
                 price_cents=round(price_cents or 0, 2),
                 current_yes_odds=market.current_yes_odds,
@@ -8724,7 +8751,7 @@ class BullpenAutoLiveEngine:
         execution_v2_handoff = bool(
             actionable_decisions
             and not state.dry_run
-            and auto_live_execution_v2_enabled()
+            and durable_execution
             and settings.auto_live_enabled
             and settings.allow_live_execution
         )
@@ -8736,6 +8763,9 @@ class BullpenAutoLiveEngine:
             state.balance_status = "pass" if live_controls.balance.status == "ready" else "fail"
             state.emergency_stopped = settings.emergency_stop or live_controls.emergency_stopped
             available_balance_before_step1 = live_controls.balance.available_balance_usd
+            stage3_slot_diagnostics["available_cash_before_exit_usd"] = (
+                available_balance_before_step1
+            )
             if settings.emergency_stop or live_controls.emergency_stopped:
                 execution_block_reasons.append("Emergency stop is active.")
             if not live_controls.unlocked:
@@ -8839,6 +8869,40 @@ class BullpenAutoLiveEngine:
             stage3_slot_diagnostics["final_block_bypass_reason"] = reason
             decision.reason = reason
             decision.summary = reason
+            decision.stage3_status = (
+                "GENUINE_CAPACITY_BLOCK"
+                if "capacity" in reason.lower() or "10-position" in reason.lower()
+                else "POST_EXIT_REFRESH_PENDING"
+                if "refresh" in reason.lower()
+                else "BUY_FAILED"
+            )
+            decision.stage3_blocker = {
+                "exact_blocker": reason,
+                "related_exit_market": (
+                    replacement_reservations.get(decision.market_id, {}).get("exit_market_id")
+                    if isinstance(replacement_reservations.get(decision.market_id), dict)
+                    else None
+                ),
+                "exit_order_status": None,
+                "retry_count": 0,
+                "next_retry_time": None,
+                "occupied_slots": (
+                    outputs.get("occupied_positions")
+                    if isinstance(outputs, dict) and outputs.get("occupied_positions") is not None
+                    else stage3_slot_diagnostics.get("occupied_slots_before_exit")
+                ),
+                "reserved_replacement_slots": len(
+                    [
+                        item
+                        for item in stage3_slot_diagnostics.get("replacement_reservations", [])
+                        if isinstance(item, dict) and item.get("status") == "reserved"
+                    ]
+                ),
+                "available_cash": outputs.get("cash_in_hand_usd") if isinstance(outputs, dict) else None,
+                "operator_action_available": bool(
+                    decision.stage3_status == "GENUINE_CAPACITY_BLOCK"
+                ),
+            }
             decision.target_exposure_usd = 0
             decision.score = 0
             decision.order_plan = None
@@ -8870,6 +8934,9 @@ class BullpenAutoLiveEngine:
             occupied_positions: int,
             available_slots: int,
             order_usd_source: str,
+            dependency_group: str | None = None,
+            reserved_replacement: bool = False,
+            capacity_override_used: bool = False,
         ) -> None:
             planned_reason = (
                 "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
@@ -8888,6 +8955,13 @@ class BullpenAutoLiveEngine:
             }
             decision.reason = planned_reason
             decision.summary = planned_reason
+            decision.stage3_status = (
+                "CAPACITY_OVERRIDE_USED"
+                if capacity_override_used
+                else "REPLACEMENT_SLOT_RESERVED"
+                if reserved_replacement
+                else "BUY_READY"
+            )
             decision.target_exposure_usd = round(order_usd, 2)
             decision.score = round(order_usd, 2)
             _set_stage3_decision_result(
@@ -8911,8 +8985,16 @@ class BullpenAutoLiveEngine:
                 ),
                 action="buy",
                 side=decision.side,
+                stage3_status=(
+                    "CAPACITY_OVERRIDE_USED"
+                    if capacity_override_used
+                    else "REPLACEMENT_SLOT_RESERVED"
+                    if reserved_replacement
+                    else "BUY_READY"
+                ),
                 market_id=decision.market_id,
                 market_title=decision.market_title,
+                dependency_group=dependency_group,
                 order_size_usd=round(order_usd, 2),
                 shares=0,
                 limit_price_cents=max(0.01, round(decision.price_cents, 2)),
@@ -8996,6 +9078,9 @@ class BullpenAutoLiveEngine:
             )
             free_slots = int(breakdown["available_slots"] or 0)
             stage3_slot_diagnostics["free_slots_after_refresh"] = free_slots
+            stage3_slot_diagnostics["available_cash_after_refresh_usd"] = breakdown[
+                "cash_in_hand_usd"
+            ]
             return {
                 "source": snapshot_source,
                 "snapshot_fetched_at": snapshot_fetched_at,
@@ -9057,6 +9142,26 @@ class BullpenAutoLiveEngine:
 
             for decision in ranked_buy_candidate_decisions:
                 reservation = replacement_reservations.get(decision.market_id)
+                reserved_for_async_exit = bool(
+                    reservation is not None
+                    and not state.dry_run
+                    and reservation.get("status") == "reserved"
+                    and execution_v2_handoff
+                )
+                capacity_override_used = bool(
+                    settings.stage3_capacity_override and not reserved_for_async_exit
+                )
+                if capacity_override_used:
+                    stage3_slot_diagnostics["operator_override_audit"] = {
+                        "used": True,
+                        "run_id": run.id,
+                        "action": "stage3_capacity_override",
+                        "reason": "Explicit operator setting bypassed only the slot-capacity gate for this buy.",
+                        "recorded_at": utc_now_iso(),
+                    }
+                    stage3_slot_diagnostics["final_block_bypass_reason"] = (
+                        "Explicit operator capacity override bypassed only the slot-capacity gate; all other guardrails remained active."
+                    )
                 current_breakdown = build_console_trade_amount_breakdown(
                     available_balance_usd=remaining_cash,
                     occupied_position_count=len(occupied_market_ids),
@@ -9095,6 +9200,7 @@ class BullpenAutoLiveEngine:
                     reservation is not None
                     and not state.dry_run
                     and reservation.get("status") == "reserved"
+                    and not execution_v2_handoff
                 ):
                     reservation_reason = (
                         "This ranked replacement is reserved for the corresponding rank-out exit; "
@@ -9144,7 +9250,11 @@ class BullpenAutoLiveEngine:
                     stage3_slot_diagnostics["final_block_bypass_reason"] = balance_reason
                     continue
 
-                if current_available_slots <= 0:
+                if (
+                    current_available_slots <= 0
+                    and not reserved_for_async_exit
+                    and not capacity_override_used
+                ):
                     stale_bypass = False
                     if reservation is not None and reservation.get("status") == "confirmed":
                         exit_market_id = reservation.get("exit_market_id")
@@ -9202,6 +9312,12 @@ class BullpenAutoLiveEngine:
                         continue
 
                 order_usd = float(current_breakdown["order_usd"] or 0.0)
+                if capacity_override_used and order_usd <= 0:
+                    order_usd = min(
+                        float(settings.console_order_usd),
+                        float(settings.max_order_usd),
+                        max(0.0, remaining_cash),
+                    )
                 if order_usd <= 0:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
@@ -9221,7 +9337,11 @@ class BullpenAutoLiveEngine:
                     )
                     continue
 
-                if len(occupied_market_ids) + 1 > CONSOLE_RANKED_EVENT_LIMIT:
+                if (
+                    len(occupied_market_ids) + 1 > CONSOLE_RANKED_EVENT_LIMIT
+                    and not reserved_for_async_exit
+                    and not capacity_override_used
+                ):
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
                         reason="Planning this buy would exceed the 10-position Bullpen limit, so the guardrail blocked it.",
@@ -9236,7 +9356,15 @@ class BullpenAutoLiveEngine:
                     occupied_positions=current_occupied_positions,
                     available_slots=current_available_slots,
                     order_usd_source=str(refreshed_state["source"]),
+                    dependency_group=(
+                        f"stage3-replacement:{run.id}:{reservation['exit_market_id']}"
+                        if reserved_for_async_exit and reservation is not None
+                        else None
+                    ),
+                    reserved_replacement=reserved_for_async_exit,
+                    capacity_override_used=capacity_override_used,
                 )
+                stage3_slot_diagnostics["planned_buy_ids"].append(decision.order_plan.id)
                 occupied_market_ids.add(decision.market_id)
                 planned_buy_market_ids.add(decision.market_id)
                 remaining_cash = round(max(0.0, remaining_cash - order_usd), 2)
@@ -9387,16 +9515,55 @@ class BullpenAutoLiveEngine:
                                 "was deferred until Bullpen can map the condition safely."
                             )
                         else:
-                            redeem_result = await asyncio.wait_for(
-                                submit_scoped_redeem(
-                                    user_id=user_id,
-                                    condition_ids=condition_ids,
-                                    source="auto_live_stage3_redeem",
-                                    executor=executor,
-                                    read_wallet_positions=read_console_wallet_positions,
-                                ),
-                                timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
-                            )
+                            redeem_result = None
+                            redeem_waited = 0.0
+                            for redeem_attempt in range(
+                                max(0, int(settings.stage3_rpc_retry_attempts)) + 1
+                            ):
+                                try:
+                                    redeem_result = await asyncio.wait_for(
+                                        submit_scoped_redeem(
+                                            user_id=user_id,
+                                            condition_ids=condition_ids,
+                                            source="auto_live_stage3_redeem",
+                                            executor=executor,
+                                            read_wallet_positions=read_console_wallet_positions,
+                                        ),
+                                        timeout=BULLPEN_ORDER_SUBMISSION_TIMEOUT_SECONDS,
+                                    )
+                                    break
+                                except Exception as redeem_exc:
+                                    if (
+                                        not _is_rpc_rate_limited_error(str(redeem_exc))
+                                        or redeem_attempt
+                                        >= int(settings.stage3_rpc_retry_attempts)
+                                    ):
+                                        raise
+                                    delay = compute_rpc_retry_delay_seconds(
+                                        attempt_number=redeem_attempt + 1,
+                                        initial_delay_seconds=settings.stage3_rpc_retry_initial_delay_seconds,
+                                        max_delay_seconds=settings.stage3_rpc_retry_max_delay_seconds,
+                                        retry_after_seconds=extract_retry_after_seconds(redeem_exc),
+                                    )
+                                    redeem_waited += delay
+                                    if redeem_waited > settings.stage3_rpc_retry_max_total_wait_seconds:
+                                        raise
+                                    order_plan.stage3_status = "EXIT_RPC_RETRYING"
+                                    order_plan.retryable = True
+                                    order_plan.attempt_count = redeem_attempt + 1
+                                    order_plan.next_retry_at = (
+                                        datetime.now(UTC) + timedelta(seconds=delay)
+                                    ).isoformat()
+                                    logger.warning(
+                                        "Retrying Stage 3 redeem for %s after RPC rate limit (%s/%s) in %.2fs.",
+                                        decision.market_title,
+                                        redeem_attempt + 1,
+                                        settings.stage3_rpc_retry_attempts,
+                                        delay,
+                                    )
+                                    await asyncio.sleep(delay)
+                            if redeem_result is None:
+                                raise RuntimeError("Redeem retry loop ended without a result.")
                             order_plan.execution_response = redeem_result.submission_response
                             if redeem_result.submitted_condition_ids:
                                 claim = getattr(executor, "claim", None)
@@ -9465,9 +9632,18 @@ class BullpenAutoLiveEngine:
                         message = str(exc)
                         if _is_rpc_rate_limited_error(message):
                             order_plan.status = "rpc_rate_limited"
+                            order_plan.stage3_status = "EXIT_FAILED_PERMANENTLY"
+                            order_plan.retryable = False
+                            order_plan.attempt_count = max(
+                                order_plan.attempt_count,
+                                int(settings.stage3_rpc_retry_attempts) + 1,
+                            )
                             order_plan.detail = (
-                                "Bullpen redeem/claim hit an RPC rate limit, so the row was "
-                                "deferred without any fallback wallet write."
+                                "Bullpen redeem/claim hit an RPC rate limit and exhausted the "
+                                f"configured retry budget ({settings.stage3_rpc_retry_attempts} retries; "
+                                f"max total wait {settings.stage3_rpc_retry_max_total_wait_seconds:g}s). "
+                                "No remote wallet write was submitted. Use 'Retry failed exits and continue buys' "
+                                "to resume this saved run."
                             )
                         else:
                             order_plan.status = "failed"
@@ -9849,24 +10025,54 @@ class BullpenAutoLiveEngine:
 
             async def _submit_with_rpc_retry(submitter: Callable[[], object]) -> str:
                 last_exc: Exception | None = None
-                for attempt in range(BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS + 1):
+                retry_attempts = max(0, int(settings.stage3_rpc_retry_attempts))
+                total_wait_seconds = 0.0
+                retry_started_at = time.monotonic()
+                for attempt in range(retry_attempts + 1):
                     try:
                         return await submitter()  # type: ignore[misc]
                     except Exception as exc:
                         last_exc = exc
+                        rate_limited = _is_rpc_rate_limited_error(str(exc))
                         if (
-                            attempt >= BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS
-                            or not _is_rpc_rate_limited_error(str(exc))
+                            attempt >= retry_attempts
+                            or not rate_limited
                         ):
                             raise
+                        retry_after = extract_retry_after_seconds(exc)
+                        delay = compute_rpc_retry_delay_seconds(
+                            attempt_number=attempt + 1,
+                            initial_delay_seconds=settings.stage3_rpc_retry_initial_delay_seconds,
+                            max_delay_seconds=settings.stage3_rpc_retry_max_delay_seconds,
+                            retry_after_seconds=retry_after,
+                        )
+                        total_wait_seconds += delay
+                        if (
+                            total_wait_seconds > settings.stage3_rpc_retry_max_total_wait_seconds
+                            or time.monotonic() - retry_started_at
+                            + total_wait_seconds
+                            > settings.stage3_rpc_retry_max_total_wait_seconds
+                        ):
+                            raise
+                        order_plan.stage3_status = (
+                            "EXIT_RPC_RETRYING"
+                            if order_plan.action in {"sell", "redeem"}
+                            else "BUY_FAILED"
+                        )
+                        order_plan.retryable = True
+                        order_plan.attempt_count = attempt + 1
+                        order_plan.next_retry_at = (
+                            datetime.now(UTC) + timedelta(seconds=delay)
+                        ).isoformat()
                         logger.warning(
-                            "Retrying Stage 3 %s submission for %s after RPC rate limit (%s/%s).",
+                            "Retrying Stage 3 %s submission for %s after RPC rate limit (%s/%s) in %.2fs.",
                             order_plan.action,
                             decision.market_title,
                             attempt + 1,
-                            BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS,
+                            retry_attempts,
+                            delay,
                         )
-                        await asyncio.sleep(BULLPEN_RPC_RATE_LIMIT_RETRY_DELAY_SECONDS)
+                        await asyncio.sleep(delay)
                 if last_exc is not None:
                     raise last_exc
 
@@ -9930,6 +10136,11 @@ class BullpenAutoLiveEngine:
                         or _extract_remote_order_id(order_plan.execution_response)
                     )
                 order_plan.status = "submitted"
+                order_plan.stage3_status = (
+                    "EXIT_SUBMITTED" if order_plan.action in {"sell", "redeem"} else "BUY_SUBMITTED"
+                )
+                if order_plan.action == "buy":
+                    stage3_slot_diagnostics["submitted_buy_ids"].append(order_plan.id)
                 order_plan.executed_at = utc_now_iso()
                 order_plan.detail = "Limit order submitted successfully."
                 decision.stage_results.append(
@@ -10041,9 +10252,22 @@ class BullpenAutoLiveEngine:
                         return
                 if _is_rpc_rate_limited_error(str(exc)):
                     order_plan.status = "rpc_rate_limited"
+                    order_plan.stage3_status = (
+                        "EXIT_FAILED_PERMANENTLY"
+                        if order_plan.action in {"sell", "redeem"}
+                        else "BUY_FAILED"
+                    )
+                    order_plan.retryable = False
+                    order_plan.attempt_count = max(
+                        order_plan.attempt_count,
+                        int(settings.stage3_rpc_retry_attempts) + 1,
+                    )
                     order_plan.detail = (
-                        "Bullpen order handling hit an RPC rate limit, so this row was "
-                        "deferred without any fallback transaction."
+                        "Bullpen order handling hit an RPC rate limit and exhausted the "
+                        f"configured retry budget ({settings.stage3_rpc_retry_attempts} retries; "
+                        f"max total wait {settings.stage3_rpc_retry_max_total_wait_seconds:g}s). "
+                        "No remote order was submitted. Use 'Retry failed exits and continue buys' "
+                        "to resume this saved run."
                     )
                     decision.stage_results.append(
                         build_stage_result(
@@ -10183,6 +10407,14 @@ class BullpenAutoLiveEngine:
                         "filled_shares": order_plan.filled_shares,
                         "remaining_shares": order_plan.remaining_shares,
                         "detail": order_plan.detail,
+                    }
+                )
+                stage3_slot_diagnostics["exit_terminal_statuses"].append(
+                    {
+                        "market_id": decision.market_id,
+                        "order_id": order_plan.remote_order_id,
+                        "status": order_plan.status,
+                        "stage3_status": order_plan.stage3_status,
                     }
                 )
                 reservation = next(

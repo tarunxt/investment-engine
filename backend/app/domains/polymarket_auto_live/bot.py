@@ -18,6 +18,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     cancel_order_intent_for_user_sync,
     get_run_orders_for_user_sync,
     refresh_run_order_state_for_user_sync,
+    retry_failed_exits_and_continue_buys_for_user_sync,
     retry_order_intent_for_user_sync,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
@@ -466,6 +467,27 @@ class BullpenAutoLiveBot:
             intent_id=intent_id,
         )
         retry_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+        return summary
+
+    async def retry_failed_exits_and_continue_buys(
+        self, run_id: str
+    ) -> BullpenAutoLiveRunOrdersResponse:
+        """Resume the existing run's persisted intents without new analysis."""
+
+        from app.domains.polymarket_auto_live.tasks import (
+            execute_auto_live_order_intent,
+            reconcile_auto_live_run_orders,
+        )
+
+        summary = await asyncio.to_thread(
+            retry_failed_exits_and_continue_buys_for_user_sync,
+            user_id=self.user_id,
+            run_id=run_id,
+        )
+        reconcile_auto_live_run_orders.delay(run_id)  # type: ignore[attr-defined]
+        for order in summary.orders:
+            if order.status == "READY" and order.action in {"sell", "redeem", "buy"}:
+                execute_auto_live_order_intent.delay(order.id)  # type: ignore[attr-defined]
         return summary
 
     async def cancel_order_intent(self, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
