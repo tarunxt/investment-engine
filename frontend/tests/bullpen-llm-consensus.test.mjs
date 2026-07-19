@@ -194,7 +194,7 @@ test("computeBullpenLlmConsensus flags true two-sided disagreement only when bot
 });
 
 
-test("getBullpenReturnsPerDayBreakdown uses current odds matching strongest LLM side", async () => {
+test("getBullpenReturnsPerDayBreakdown uses unpriced upside for current odds matching strongest LLM side", async () => {
   const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();
 
   assert.deepEqual(
@@ -211,7 +211,7 @@ test("getBullpenReturnsPerDayBreakdown uses current odds matching strongest LLM 
       daysUntilClose: 1.7,
       llmYesOdds: 12.5,
       llmNoOdds: 87.5,
-      result: 14.41,
+      result: 44.41,
     },
   );
 
@@ -229,7 +229,7 @@ test("getBullpenReturnsPerDayBreakdown uses current odds matching strongest LLM 
       daysUntilClose: 1.7,
       llmYesOdds: 60,
       llmNoOdds: 40,
-      result: 45.59,
+      result: 13.24,
     },
   );
 });

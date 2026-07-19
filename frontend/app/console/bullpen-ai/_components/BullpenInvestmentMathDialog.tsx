@@ -129,7 +129,7 @@ export function BullpenInvestmentMathDialog({
   const returnsCard = question ? (
     <CalculationCard
       title="Returns/day"
-      formula="Current odds on strongest LLM side / days left"
+      formula="(100 - current odds on strongest LLM side) / days left"
       summary={formatPercent(returnsBreakdown!.result)}
       highlighted={focus === "returnsPerDay"}
     >
@@ -141,7 +141,7 @@ export function BullpenInvestmentMathDialog({
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`Current ${returnsBreakdown!.currentSide ?? "—"} odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"} / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days = ${returnsBreakdown!.result.toFixed(2)}% per day`}
+            {`(100 - Current ${returnsBreakdown!.currentSide ?? "—"} odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"}) / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days = ${returnsBreakdown!.result.toFixed(2)}% per day`}
           </div>
           <div className="mt-4">
             <MetricRow
