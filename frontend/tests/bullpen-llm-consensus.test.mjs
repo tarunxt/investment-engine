@@ -211,7 +211,7 @@ test("getBullpenReturnsPerDayBreakdown matches spreadsheet column O", async () =
       daysUntilClose: 1.7,
       llmYesOdds: 12.5,
       llmNoOdds: 87.5,
-      result: 11.47,
+      result: 47.35,
     },
   );
 
@@ -229,7 +229,7 @@ test("getBullpenReturnsPerDayBreakdown matches spreadsheet column O", async () =
       daysUntilClose: 1.7,
       llmYesOdds: 60,
       llmNoOdds: 40,
-      result: 13.24,
+      result: 45.59,
     },
   );
 });

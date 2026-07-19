@@ -5,7 +5,7 @@ from typing import Final
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 1
 BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-18-stage2-universe"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
-BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-18"
+BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-19"
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
 SNAPSHOT_SOURCE_RECONSTRUCTED: Final[str] = "reconstructed"
@@ -51,18 +51,18 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "candidate_returns_per_day",
         "stage": "stage-1",
-        "algorithm_version": "v1",
-        "source_module": "app.domains.polymarket_auto_live.engine",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "candidate_returns_per_day",
         "label": "Candidate returns per day",
     },
     {
         "algorithm_key": "llm_returns_per_day",
         "stage": "stage-2",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "llm_returns_per_day",
-        "label": "LLM returns per day",
+        "label": "Stage 2 current-odds returns per day",
     },
     {
         "algorithm_key": "position_returns_per_day",

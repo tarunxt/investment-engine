@@ -5760,6 +5760,8 @@ class BullpenAutoLiveEngine:
                         llm_no_odds=fair_no,
                         close_time=market.close_time,
                         now=now,
+                        current_yes_odds=market.current_yes_odds,
+                        current_no_odds=market.current_no_odds,
                     )
                     selected_side, strongest_llm_odds = _stronger_probability_side(
                         yes_probability=llm_consensus.fair_yes_probability_pct,

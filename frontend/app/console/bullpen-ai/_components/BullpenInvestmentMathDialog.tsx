@@ -129,33 +129,33 @@ export function BullpenInvestmentMathDialog({
   const returnsCard = question ? (
     <CalculationCard
       title="Returns/day"
-      formula="Max(LLM Yes odds, LLM No odds) / days left"
+      formula="Max(Current Yes odds, Current No odds) / days left"
       summary={formatPercent(returnsBreakdown!.result)}
       highlighted={focus === "returnsPerDay"}
     >
       {returnsBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
-          This value is only available when the row has current Yes and No odds,
-          consensus LLM odds, and a positive number of days until close.
+          This value is only available when the row has current Yes and No odds
+          and a positive number of days until close.
         </p>
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`Max LLM odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"} / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days = ${returnsBreakdown!.result.toFixed(2)}% per day`}
+            {`Max current odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"} / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days = ${returnsBreakdown!.result.toFixed(2)}% per day`}
           </div>
           <div className="mt-4">
             <MetricRow
-              label="Strongest LLM side"
+              label="Strongest current side"
               value={
                 returnsBreakdown!.currentSide
-                  ? `${returnsBreakdown!.currentSide} (LLM Yes ${formatOdds(
-                      returnsBreakdown!.llmYesOdds,
-                    )}, LLM No ${formatOdds(returnsBreakdown!.llmNoOdds)})`
+                  ? `${returnsBreakdown!.currentSide} (Current Yes ${formatOdds(
+                      question?.yesOdds ?? null,
+                    )}, Current No ${formatOdds(question?.noOdds ?? null)})`
                   : "—"
               }
             />
             <MetricRow
-              label="LLM odds used"
+              label="Current odds used"
               value={
                 returnsBreakdown!.currentSide
                   ? `${returnsBreakdown!.currentSide} ${formatOdds(

@@ -982,21 +982,21 @@ test("Bullpen x AI keeps BullpenQuestionsTable as the single canonical Events Su
 });
 
 
-test("Bullpen returns/day uses strongest LLM odds divided by days left", async () => {
+test("Bullpen returns/day uses strongest current odds divided by days left", async () => {
   const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();
 
   const result = getBullpenReturnsPerDayBreakdown({
     ...createQuestionRow(),
-    yesOdds: null,
-    noOdds: null,
+    yesOdds: 10.5,
+    noOdds: 89.5,
     llmYesOdds: 5,
     llmNoOdds: 95,
     daysUntilClose: 2.7,
   });
 
   assert.equal(result.currentSide, "No");
-  assert.equal(result.currentOdds, 95);
-  assert.equal(result.result, 35.19);
+  assert.equal(result.currentOdds, 89.5);
+  assert.equal(result.result, 33.15);
 });
 
 test("Events Summary can filter strongest LLM odds and rank its top 10 by returns per day", () => {
