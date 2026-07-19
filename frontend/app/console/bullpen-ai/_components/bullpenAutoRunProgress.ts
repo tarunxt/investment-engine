@@ -38,6 +38,7 @@ export type BullpenAutoRunActivePositionView = {
   closeTime: string | null;
   conditionId: string | null;
   isClaimable: boolean;
+  classification: string | null;
 };
 
 export type BullpenAutoRunWorkflowStageView = {
@@ -109,6 +110,14 @@ const WORKFLOW_DEFINITIONS: WorkflowDefinition[] = [
     defaultItemLabel: "rows",
   },
 ];
+
+const NON_ACTIVE_POSITION_CLASSIFICATIONS = new Set([
+  "closed",
+  "positive_payout_claimable",
+  "resolved_zero_payout",
+  "settlement_pending",
+  "stale_or_unknown",
+]);
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim().length > 0
@@ -457,6 +466,21 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
         readString(record.market_title) ?? readString(record.question);
       if (!marketId || !marketTitle) return null;
 
+      const classification = readString(record.classification);
+      if (classification && classification !== "active") {
+        return null;
+      }
+      if (
+        !classification &&
+        (readBoolean(record.is_claimable) ||
+          readBoolean(record.isClaimable) ||
+          NON_ACTIVE_POSITION_CLASSIFICATIONS.has(
+            readString(record.economic_classification) ?? "",
+          ))
+      ) {
+        return null;
+      }
+
       return {
         positionKey:
           readString(record.position_key) ??
@@ -476,6 +500,7 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
         conditionId: readString(record.condition_id),
         isClaimable:
           readBoolean(record.is_claimable) || readBoolean(record.isClaimable),
+        classification,
       } satisfies BullpenAutoRunActivePositionView;
     })
     .filter((position): position is BullpenAutoRunActivePositionView =>

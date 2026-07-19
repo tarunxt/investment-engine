@@ -91,7 +91,13 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
     export function buildBullpenPositionsDiagnostics() {
       return {
         excludedPositionCount: 0,
+        diagnosticPositionCount: 0,
+        settlementPendingCount: 0,
+        staleOrUnknownCount: 0,
+        closedPositionCount: 0,
         resolvedZeroPayoutCount: 0,
+        settlementPendingPositions: [],
+        diagnosticPositions: [],
         excludedPositions: [],
       };
     }

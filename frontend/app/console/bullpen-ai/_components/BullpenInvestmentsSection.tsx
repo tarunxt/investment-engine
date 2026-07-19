@@ -21,12 +21,14 @@ import {
   type BullpenInvestmentRow,
 } from "@/lib/bullpenInvestments";
 import { formatApiTimestamp } from "@/lib/datetime";
-import type {
-  BullpenActivePositionView,
-  BullpenLiveHealth,
-  BullpenLiveSnapshot,
-  BullpenPositionsFallback,
-  BullpenPositionsSource,
+import {
+  isActiveBullpenPosition,
+  type BullpenActivePositionView,
+  type BullpenLiveHealth,
+  type BullpenLiveSnapshot,
+  type BullpenPositionsDiagnostics,
+  type BullpenPositionsFallback,
+  type BullpenPositionsSource,
 } from "@/lib/bullpenPositions";
 import { cn } from "@/lib/utils";
 import type { BullpenAutoLiveDecision, BullpenAutoLiveRun } from "@/types/api";
@@ -65,6 +67,7 @@ type BullpenInvestmentsSectionProps = {
   positionsError: string | null;
   positionsFallback: BullpenPositionsFallback | null;
   positionsHealth: BullpenLiveHealth | null;
+  positionsDiagnostics: BullpenPositionsDiagnostics | null;
   positionsLastUpdatedAt: string | null;
   sectionsLastRefreshedAt?: string | null;
   positionsSource: BullpenPositionsSource | null;
@@ -548,6 +551,7 @@ export function BullpenInvestmentsSection({
   positionsError,
   positionsFallback,
   positionsHealth,
+  positionsDiagnostics,
   positionsLastUpdatedAt,
   sectionsLastRefreshedAt,
   positionsSource,
@@ -571,7 +575,7 @@ export function BullpenInvestmentsSection({
   const [isGroupingInfoOpen, setIsGroupingInfoOpen] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
-  const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const openActivePositions = activePositions.filter(isActiveBullpenPosition);
   const {
     activePositionQuestionByKey,
     activePositionsNeedingAttention,
@@ -1127,6 +1131,7 @@ export function BullpenInvestmentsSection({
           onClose={() => setIsPositionsDialogOpen(false)}
           onRefresh={onRefreshPositions}
           positions={activePositions}
+          positionsDiagnostics={positionsDiagnostics}
           positionsError={positionsError}
           positionsFallback={positionsFallback}
           positionsHealth={positionsHealth}

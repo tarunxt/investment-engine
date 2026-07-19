@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 
 os.environ.setdefault(
     "DATABASE_URL",
@@ -57,7 +58,51 @@ def test_unresolved_missing_price_stays_stale_unknown():
             "shares": 4,
             "resolution_status": "open",
             "end_date": "2026-08-01",
-        }
+        },
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert classification.state == "stale_or_unknown"
+    assert classification.is_claimable is False
+
+
+def test_upstream_redeemable_zero_value_v0115_row_stays_non_active():
+    classification = classify_bullpen_position(
+        {
+            "market": "Will Claude Fable 5 be restored for US customers by July 3, 2026?",
+            "outcome": "No",
+            "shares": 6.0975,
+            "current_price": 0,
+            "current_value": 0,
+            "expected_payout_usdc": 0,
+            "redeemable": False,
+            "upstream_redeemable": True,
+            "resolution_status": "unknown",
+            "end_date": "2026-07-03",
+        },
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert classification.state == "resolved_zero_payout"
+    assert classification.is_claimable is False
+    assert classification.claimable_value_usd is None
+
+
+def test_future_open_position_with_temporary_pricing_gap_is_quarantined():
+    classification = classify_bullpen_position(
+        {
+            "market": "Will Trump meet with Netanyahu by July 24, 2026?",
+            "outcome": "No",
+            "shares": 4,
+            "current_price": None,
+            "current_value": None,
+            "expected_payout_usdc": 0,
+            "redeemable": False,
+            "upstream_redeemable": False,
+            "resolution_status": "open",
+            "end_date": "2026-07-24",
+        },
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
     )
 
     assert classification.state == "stale_or_unknown"

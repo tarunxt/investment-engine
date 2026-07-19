@@ -120,9 +120,11 @@ import {
   type BullpenActivePositionView,
   type BullpenLiveHealth,
   type BullpenLiveSnapshot,
+  type BullpenPositionsDiagnostics,
   type BullpenPositionsFallback,
   type BullpenPositionsResponse,
   type BullpenPositionsSource,
+  isActiveBullpenPosition,
 } from "@/lib/bullpenPositions";
 
 const TABS: {
@@ -360,7 +362,7 @@ function buildSnapshotBackfilledActivePositionAnalyses(
   }
 
   const analysesByPositionKey: Record<string, BullpenActivePositionLlmAnalysis> = {};
-  for (const position of activePositions.filter((item) => !item.isClaimable)) {
+  for (const position of activePositions.filter(isActiveBullpenPosition)) {
     const questionMatch = BullpenEventIdentityResolver.resolveMatch({
       target: buildBullpenEventIdentityFromPosition(position),
       candidates: snapshotCandidates,
@@ -407,7 +409,7 @@ function buildMergedActivePositionAnalyses({
     snapshotCollections: [manualSnapshotsByMode, autoSnapshotsByMode],
   });
 
-  for (const position of activePositions.filter((item) => !item.isClaimable)) {
+  for (const position of activePositions.filter(isActiveBullpenPosition)) {
     const merged = pickPreferredBullpenActivePositionAnalysis(
       currentAnalyses[position.key],
       snapshotAnalysesByPositionKey[position.key],
@@ -1475,6 +1477,8 @@ function BullpenAiPageContent() {
   const [positionsError, setPositionsError] = useState<string | null>(null);
   const [positionsFallback, setPositionsFallback] =
     useState<BullpenPositionsFallback | null>(null);
+  const [positionsDiagnostics, setPositionsDiagnostics] =
+    useState<BullpenPositionsDiagnostics | null>(null);
   const [positionsHealth, setPositionsHealth] =
     useState<BullpenLiveHealth | null>(null);
   const [claimPositionsError, setClaimPositionsError] = useState<string | null>(
@@ -1745,7 +1749,9 @@ function BullpenAiPageContent() {
     : [];
   const selectedQuestionIdSet = new Set(selectedQuestionIds);
   const selectedQuestionCount = selectedQuestionIds.length;
-  const openActivePositions = activePositions.filter((position) => !position.isClaimable);
+  const openActivePositions = activePositions.filter((position) =>
+    isActiveBullpenPosition(position),
+  );
   const getBullpenSelectionConstraint = (
     provider: ProviderInfo,
     _model: string,
@@ -2431,6 +2437,7 @@ function BullpenAiPageContent() {
       setActivePositions(livePositions);
       setHasLoadedPositions(true);
       setPositionsFallback(livePositionsPayload.fallback || null);
+      setPositionsDiagnostics(livePositionsPayload.diagnostics || null);
       setPositionsHealth(livePositionsPayload.health || null);
       setPositionsSource(livePositionsPayload.positionsSource || null);
       setLastSuccessfulLiveSnapshot(normalizedLiveSnapshot);
@@ -2650,7 +2657,7 @@ function BullpenAiPageContent() {
       return refreshedQuestion || question;
     });
     const refreshedOpenActivePositions = refreshedPositionsResult.positions.filter(
-      (position) => !position.isClaimable,
+      (position) => isActiveBullpenPosition(position),
     );
     const llmTargetSet = buildBullpenLlmRunTargetSet({
       activePositions: refreshedOpenActivePositions,
@@ -3396,8 +3403,9 @@ function BullpenAiPageContent() {
           "visible question",
         )}.`,
         `Updated ${formatCountLabel(
-          positionsRefreshResult.positions.filter((position) => !position.isClaimable)
-            .length,
+          positionsRefreshResult.positions.filter((position) =>
+            isActiveBullpenPosition(position),
+          ).length,
           "active position",
         )}.`,
       ];
@@ -4281,7 +4289,13 @@ function BullpenAiPageContent() {
             <BullpenInvestmentsSection
               activePositions={activePositions}
               activePositionQuestions={activePositionQuestionsForLlm}
-              activePositionsCount={hasLoadedPositions ? activePositions.length : null}
+              activePositionsCount={
+                hasLoadedPositions
+                  ? activePositions.filter((position) =>
+                      isActiveBullpenPosition(position),
+                    ).length
+                  : null
+              }
               candidates={
                 selectionEnabled
                   ? currentShortlistedInvestmentCandidates
@@ -4314,6 +4328,7 @@ function BullpenAiPageContent() {
               onClearAll={clearInvestmentCandidates}
               positionsError={positionsError}
               positionsFallback={positionsFallback}
+              positionsDiagnostics={positionsDiagnostics}
               positionsHealth={positionsHealth}
               positionsLastUpdatedAt={positionsLastUpdatedAt}
               sectionsLastRefreshedAt={pickLatestTimestamp(

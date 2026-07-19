@@ -5,7 +5,10 @@ import type {
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
 } from "@/types/api";
-import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import {
+  isActiveBullpenPosition,
+  type BullpenActivePositionView,
+} from "@/lib/bullpenPositions";
 import {
   mergeBullpenStage2To3StrategyOutputs,
   readBullpenStage2To3StrategyMetadata,
@@ -87,6 +90,8 @@ const SAVED_RUN_NON_ACTIVE_CLASSIFICATIONS = new Set([
   "closed",
   "positive_payout_claimable",
   "resolved_zero_payout",
+  "settlement_pending",
+  "stale_or_unknown",
 ]);
 const RECONCILING_EXIT_ACTIONS = new Set(["sell", "redeem"]);
 
@@ -499,12 +504,17 @@ function buildSavedRunActivePositionMarketIdSet(
     .map((item) => asRecord(item))
     .filter((record) => {
       const classification = readString(record?.classification);
+      if (classification) {
+        return classification === "active";
+      }
       return (
         !readBoolean(record?.is_claimable) &&
         !readBoolean(record?.isClaimable) &&
         !(
-          classification &&
-          SAVED_RUN_NON_ACTIVE_CLASSIFICATIONS.has(classification)
+          readString(record?.economic_classification) &&
+          SAVED_RUN_NON_ACTIVE_CLASSIFICATIONS.has(
+            readString(record?.economic_classification) ?? "",
+          )
         )
       );
     })
@@ -518,7 +528,7 @@ function buildLiveActivePositionMarketIdSet(
 ): Set<string> {
   return new Set(
     activePositions
-      .filter((position) => !position.isClaimable)
+      .filter(isActiveBullpenPosition)
       .map((position) => readString(position.marketId))
       .filter((marketId): marketId is string => Boolean(marketId)),
   );

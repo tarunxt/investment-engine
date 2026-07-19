@@ -154,6 +154,33 @@ If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
 write revert the run back to an in-progress state.
 
+Stage 1 wallet outputs are partitioned explicitly and the audit snapshot must
+preserve those partitions without re-deriving them on read:
+
+* `active_positions_found`: only rows classified as `active`
+* `available_for_claim`: only `positive_payout_claimable`
+* `settlement_pending_positions`: closed rows with redeemability signals but
+  no verified payout amount yet
+* `excluded_position_diagnostics`: stale, resolved-zero, or otherwise excluded
+  rows that must never flow into Stage 2, Stage 3, or top-10 sizing math
+
+`settlement_pending`, `stale_or_unknown`, `resolved_zero_payout`, and `closed`
+rows are diagnostic-only for new runs after Sunday, July 19, 2026. Historical
+completed runs may still display their persisted legacy payloads unchanged.
+
+The Stage 1 frozen wallet snapshot now also carries cache-safety provenance:
+
+* Bullpen credential artifact inode, `mtime_ns`, and file size from
+  `credentials.json.enc`
+* non-secret Bullpen account identity or wallet address when available
+* `position_classifier_version`
+
+Audit consumers must treat a classifier-version bump, credential artifact
+change, or account-identity mismatch as a different runtime snapshot lineage.
+Only read-only UI fallback may surface stale Redis snapshots after a lock
+timeout; a Stage 1 `force_fresh` run snapshot must not silently downgrade to a
+stale wallet snapshot.
+
 ### Stage 2
 
 Persisted candidate reviews, per-model outputs, Stage 2 LLM runtime payloads, and

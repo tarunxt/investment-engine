@@ -38,7 +38,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
       avg_price: "0.45",
       current_price: "0.50",
       current_value: "5.00",
-      end_date: "2026-06-25",
+      end_date: "2026-07-25",
       status: "open",
     },
     () => null,
@@ -101,7 +101,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
       current_price: "0.50",
       current_value: "2.50",
       invested_usd: "2.75",
-      end_date: "2026-06-25",
+      end_date: "2026-07-25",
       status: "open",
     },
     () => null,
@@ -125,7 +125,6 @@ test("Bullpen positions do not treat plain won status as claimable", async () =>
       outcome: "No",
       shares: "6",
       avg_price: "0.92",
-      current_price: "0.95",
       status: "won",
     },
     () => null,
@@ -137,9 +136,9 @@ test("Bullpen positions do not treat plain won status as claimable", async () =>
       outcome: "No",
       shares: "3",
       avg_price: "0.8",
-      current_price: "1",
       status: "won",
       redeemable: true,
+      claimable_value: "3",
     },
     () => null,
   );
@@ -169,7 +168,7 @@ test("Bullpen CLI position extraction ignores nested history and activity rows",
           avg_price: 0.44,
           current_price: 0.41,
           invested_usd: 2.2,
-          end_date: "2026-06-30",
+          end_date: "2026-07-30",
         },
       ],
       history: [
@@ -326,49 +325,40 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
   const rows = [
     {
       slug: "claude-fable-july-3",
-      market: "Will Claude Fable 5 be restored for US customers by July 3?",
+      market: "Will Claude Fable 5 be restored for US customers by July 3, 2026?",
       outcome: "No",
       shares: 6.0975,
       current_price: 0,
       current_value: 0,
       expected_payout_usdc: 0,
-      redeemable: true,
+      redeemable: false,
+      upstream_redeemable: true,
       resolution_status: "unknown",
       end_date: "2026-07-03",
     },
     {
-      slug: "egypt-vs-iran-ou-05",
-      market: "Egypt vs. IR Iran: O/U 0.5",
-      outcome: "Under",
-      shares: 5.8823,
-      current_price: 0,
-      current_value: 0,
-      expected_payout_usdc: 0,
-      redeemable: true,
-      resolution_status: "unknown",
-      end_date: "2026-06-27",
-    },
-    {
       slug: "claude-fable-july-2",
-      market: "Will Claude Fable 5 be restored for US customers by July 2?",
+      market: "Will Claude Fable 5 be restored for US customers by July 2, 2026?",
       outcome: "No",
       shares: 5.4347,
       current_price: 0,
       current_value: 0,
       expected_payout_usdc: 0,
-      redeemable: true,
+      redeemable: false,
+      upstream_redeemable: true,
       resolution_status: "unknown",
       end_date: "2026-07-02",
     },
     {
       slug: "claude-fable-july-1",
-      market: "Will Claude Fable 5 be restored for US customers by July 1?",
+      market: "Will Claude Fable 5 be restored for US customers by July 1, 2026?",
       outcome: "No",
       shares: 5.3763,
       current_price: 0,
       current_value: 0,
       expected_payout_usdc: 0,
-      redeemable: true,
+      redeemable: false,
+      upstream_redeemable: true,
       resolution_status: "unknown",
       end_date: "2026-07-01",
     },
@@ -380,21 +370,24 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
       current_price: 0,
       current_value: 0,
       expected_payout_usdc: 0,
-      redeemable: true,
+      redeemable: false,
+      upstream_redeemable: true,
       resolution_status: "unknown",
       end_date: "2026-06-26",
     },
     {
-      slug: "new-zealand-vs-belgium-ou-35",
-      market: "New Zealand vs. Belgium: O/U 3.5",
-      outcome: "Under",
-      shares: 3.9215,
-      current_price: 0,
-      current_value: 0,
+      slug: "trump-netanyahu-july-24-2026",
+      market: "Will Trump meet with Netanyahu by July 24, 2026?",
+      outcome: "No",
+      shares: 4.5,
+      avg_price: 0.61,
+      current_price: 0.64,
+      current_value: 2.88,
       expected_payout_usdc: 0,
-      redeemable: true,
-      resolution_status: "unknown",
-      end_date: "2026-06-27",
+      redeemable: false,
+      upstream_redeemable: false,
+      resolution_status: "open",
+      end_date: "2026-07-24",
     },
   ];
 
@@ -403,13 +396,18 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
   const diagnostics = buildBullpenPositionsDiagnostics(positions);
   const summary = summarizeBullpenPositions(visiblePositions, null);
 
-  assert.equal(visiblePositions.length, 0);
-  assert.equal(summary.activeCount, 0);
+  assert.equal(visiblePositions.length, 1);
+  assert.equal(
+    visiblePositions[0].marketTitle,
+    "Will Trump meet with Netanyahu by July 24, 2026?",
+  );
+  assert.equal(visiblePositions[0].economicClassification, "active");
+  assert.equal(summary.activeCount, 1);
   assert.equal(summary.claimableCount, 0);
   assert.equal(summary.claimableValue, 0);
-  assert.equal(diagnostics.excludedPositionCount, 6);
-  assert.equal(diagnostics.resolvedZeroPayoutCount, 6);
-  assert.equal(diagnostics.excludedPositions.length, 6);
+  assert.equal(diagnostics.excludedPositionCount, 4);
+  assert.equal(diagnostics.resolvedZeroPayoutCount, 4);
+  assert.equal(diagnostics.excludedPositions.length, 4);
   assert.ok(
     diagnostics.excludedPositions.every(
       (position) => position.economicClassification === "resolved_zero_payout",

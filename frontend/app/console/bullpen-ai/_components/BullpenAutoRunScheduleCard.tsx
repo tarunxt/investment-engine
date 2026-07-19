@@ -48,7 +48,10 @@ import {
   buildBullpenEventIdentityFromDecision,
   buildBullpenEventIdentityFromPosition,
 } from "@/lib/bullpenEventIdentityResolver";
-import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
+import {
+  isActiveBullpenPosition,
+  type BullpenActivePositionView,
+} from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, apiService } from "@/services/api";
 import type {
@@ -1020,17 +1023,22 @@ type WorkflowStageView = ReturnType<
   typeof buildBullpenAutoRunWorkflowView
 >["stages"][number];
 
+function isWorkflowActivePosition(position: WorkflowStageView["activePositionsFound"][number]) {
+  return !position.isClaimable && (position.classification === null || position.classification === "active");
+}
+
 function getStageActivePositionCounts(stage: WorkflowStageView) {
+  const claimableFromOutputs = Array.isArray(stage.outputs.available_for_claim)
+    ? stage.outputs.available_for_claim.length
+    : null;
   const claimableFromSnapshot = stage.activePositionsFound.filter(
     (position) => position.isClaimable,
   ).length;
-  const openFromSnapshot = stage.activePositionsFound.filter(
-    (position) => !position.isClaimable,
-  ).length;
+  const openFromSnapshot = stage.activePositionsFound.length;
 
   return {
     open: openFromSnapshot,
-    claimable: claimableFromSnapshot,
+    claimable: claimableFromOutputs ?? claimableFromSnapshot,
   };
 }
 
@@ -2241,7 +2249,7 @@ function buildLiveAlreadyInvestedRecords({
   const records = new Map<string, BullpenStage3AlreadyInvestedRecord>();
 
   for (const position of activePositions) {
-    if (position.isClaimable) {
+    if (!isActiveBullpenPosition(position)) {
       continue;
     }
     const marketId = position.marketId?.trim();
@@ -3044,9 +3052,7 @@ function StageOneOutputDialog({
   const claimablePositions = state.activePositions.filter(
     (position) => position.isClaimable,
   );
-  const activePositions = state.activePositions.filter(
-    (position) => !position.isClaimable,
-  );
+  const activePositions = state.activePositions.filter(isWorkflowActivePosition);
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">

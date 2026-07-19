@@ -14,6 +14,9 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from app.domains.polymarket import bullpen as bullpen_module
+from app.domains.polymarket.position_classification import (
+    BULLPEN_POSITION_CLASSIFIER_VERSION,
+)
 from app.domains.polymarket import runtime_broker as runtime_broker_module
 from app.domains.polymarket.runtime_broker import (
     BullpenCommandDiagnostics,
@@ -27,6 +30,7 @@ from app.domains.polymarket.runtime_broker import (
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 
 AUTH_READY_CACHE_KEY = "bullpen:runtime:auth:ready"
+POSITIONS_SNAPSHOT_CACHE_KEY = "bullpen:runtime:positions:snapshot"
 
 
 class FakeRedis:
@@ -117,12 +121,21 @@ def _credential_artifact(
     )
 
 
-def _build_snapshot(*, seconds_ago: int = 0) -> BullpenPositionsSnapshot:
+def _build_snapshot(
+    *,
+    seconds_ago: int = 0,
+    credential_artifact: BullpenCredentialArtifact | None = None,
+    account_identity: str | None = "wallet-a",
+    position_classifier_version: int = BULLPEN_POSITION_CLASSIFIER_VERSION,
+) -> BullpenPositionsSnapshot:
     fetched_at = datetime.now(UTC).timestamp() - seconds_ago
     return BullpenPositionsSnapshot(
         payload={"positions": []},
         fetched_at=datetime.fromtimestamp(fetched_at, tz=UTC).isoformat(),
         cli_version="bullpen 0.1.115",
+        credential_artifact=credential_artifact or _credential_artifact(),
+        account_identity=account_identity,
+        position_classifier_version=position_classifier_version,
         auth_checked_at="2026-07-19T12:00:00+00:00",
         source="live-cli",
         freshness_state="fresh",
@@ -487,6 +500,122 @@ async def test_positions_refresh_uses_waited_snapshot_after_lock_timeout(monkeyp
     assert snapshot.source == "redis-cache"
     assert snapshot.freshness_state == "cached"
     assert snapshot.diagnostics.cache_status == "hit"
+
+
+@pytest.mark.anyio
+async def test_positions_refresh_force_fresh_rejects_stale_waited_snapshot_after_lock_timeout(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    waited_snapshot = _build_snapshot(seconds_ago=120)
+
+    @asynccontextmanager
+    async def fake_acquire(*args, **kwargs):
+        raise LockAcquisitionError("lock busy")
+        yield
+
+    async def fake_poll_for_positions_snapshot(**kwargs):
+        return waited_snapshot
+
+    monkeypatch.setattr(broker._lock, "acquire", fake_acquire)
+    monkeypatch.setattr(
+        broker,
+        "_poll_for_positions_snapshot",
+        fake_poll_for_positions_snapshot,
+    )
+
+    with pytest.raises(BullpenRuntimeCommandError) as exc_info:
+        await broker.get_positions_snapshot(force_fresh=True, max_age_seconds=1)
+
+    assert exc_info.value.classification == "lock_timeout"
+
+
+@pytest.mark.anyio
+async def test_read_cached_positions_snapshot_invalidates_when_classifier_version_changes(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    artifact = _credential_artifact()
+    snapshot = _build_snapshot(
+        credential_artifact=artifact,
+        position_classifier_version=BULLPEN_POSITION_CLASSIFIER_VERSION - 1,
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    await broker._redis.set(
+        POSITIONS_SNAPSHOT_CACHE_KEY,
+        snapshot.model_dump_json(),
+        ex=60,
+    )
+
+    cached = await broker.read_cached_positions_snapshot()
+
+    assert cached is None
+    assert await broker._redis.get(POSITIONS_SNAPSHOT_CACHE_KEY) is None
+
+
+@pytest.mark.anyio
+async def test_read_cached_positions_snapshot_invalidates_when_account_identity_changes(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    artifact = _credential_artifact()
+    snapshot = _build_snapshot(
+        credential_artifact=artifact,
+        account_identity="wallet-a",
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    await broker._write_auth_ready_cache(
+        cache_key=AUTH_READY_CACHE_KEY,
+        checked_at="2026-07-19T12:00:00+00:00",
+        credential_artifact=artifact,
+        account_identity="wallet-b",
+    )
+    await broker._redis.set(
+        POSITIONS_SNAPSHOT_CACHE_KEY,
+        snapshot.model_dump_json(),
+        ex=60,
+    )
+
+    cached = await broker.read_cached_positions_snapshot()
+
+    assert cached is None
+    assert await broker._redis.get(POSITIONS_SNAPSHOT_CACHE_KEY) is None
+
+
+@pytest.mark.anyio
+async def test_read_cached_positions_snapshot_invalidates_when_credential_artifact_changes(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    snapshot_artifact = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    current_artifact = _credential_artifact(inode=12, mtime_ns=22, size=33)
+    snapshot = _build_snapshot(credential_artifact=snapshot_artifact)
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: current_artifact,
+    )
+    await broker._redis.set(
+        POSITIONS_SNAPSHOT_CACHE_KEY,
+        snapshot.model_dump_json(),
+        ex=60,
+    )
+
+    cached = await broker.read_cached_positions_snapshot()
+
+    assert cached is None
+    assert await broker._redis.get(POSITIONS_SNAPSHOT_CACHE_KEY) is None
 
 
 @pytest.mark.anyio

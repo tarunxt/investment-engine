@@ -15,6 +15,9 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket.position_classification import (
+    BULLPEN_POSITION_CLASSIFIER_VERSION,
+)
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 
 logger = get_logger(__name__)
@@ -102,6 +105,7 @@ class BullpenAuthReadyCache(BaseModel):
     credential_artifact: BullpenCredentialArtifact = Field(
         default_factory=BullpenCredentialArtifact
     )
+    account_identity: str | None = None
 
 
 class BullpenRuntimeConfigSnapshot(BaseModel):
@@ -139,6 +143,8 @@ class BullpenPositionsSnapshot(BaseModel):
     credential_artifact: BullpenCredentialArtifact = Field(
         default_factory=BullpenCredentialArtifact
     )
+    account_identity: str | None = None
+    position_classifier_version: int = BULLPEN_POSITION_CLASSIFIER_VERSION
     auth_checked_at: str | None = None
     source: Literal["live-cli", "redis-cache"] = "live-cli"
     freshness_state: Literal["fresh", "cached", "stale"] = "fresh"
@@ -180,6 +186,8 @@ class BullpenPositionsSnapshotMetadata(BaseModel):
     credential_artifact: BullpenCredentialArtifact = Field(
         default_factory=BullpenCredentialArtifact
     )
+    account_identity: str | None = None
+    position_classifier_version: int = BULLPEN_POSITION_CLASSIFIER_VERSION
     auth_checked_at: str | None = None
     source: Literal["live-cli", "redis-cache"] = "live-cli"
     freshness_state: Literal["fresh", "cached", "stale"] = "fresh"
@@ -450,6 +458,87 @@ def _credential_artifact_matches(
     )
 
 
+_ACCOUNT_IDENTITY_KEYS = {
+    "wallet",
+    "wallet_address",
+    "walletaddress",
+    "proxy_wallet",
+    "proxywallet",
+    "address",
+    "public_key",
+    "publickey",
+    "account",
+    "account_id",
+    "accountid",
+    "user",
+    "user_id",
+    "userid",
+    "owner",
+}
+_ACCOUNT_IDENTITY_CONTAINER_KEYS = {
+    "summary",
+    "account",
+    "user",
+    "wallet",
+    "identity",
+    "metadata",
+    "meta",
+}
+
+
+def _normalize_account_identity(value: object) -> str | None:
+    if isinstance(value, str):
+        normalized = value.strip()
+        if not normalized:
+            return None
+        return normalized.lower() if normalized.startswith("0x") else normalized
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return None
+
+
+def _extract_account_identity(value: Any, *, max_depth: int = 3) -> str | None:
+    def walk(current: Any, depth: int) -> str | None:
+        if depth > max_depth:
+            return None
+        if isinstance(current, dict):
+            for key, nested in current.items():
+                normalized_key = str(key).strip().lower()
+                if normalized_key in _ACCOUNT_IDENTITY_KEYS:
+                    direct = _normalize_account_identity(nested)
+                    if direct:
+                        return direct
+                if normalized_key in _ACCOUNT_IDENTITY_CONTAINER_KEYS:
+                    nested_identity = walk(nested, depth + 1)
+                    if nested_identity:
+                        return nested_identity
+            return None
+        if isinstance(current, list):
+            for item in current:
+                nested_identity = walk(item, depth + 1)
+                if nested_identity:
+                    return nested_identity
+        return None
+
+    return walk(value, 0)
+
+
+def _snapshot_matches_runtime(
+    snapshot: BullpenPositionsSnapshot,
+    *,
+    current_credential: BullpenCredentialArtifact,
+    auth_cache: BullpenAuthReadyCache | None,
+) -> bool:
+    if snapshot.position_classifier_version != BULLPEN_POSITION_CLASSIFIER_VERSION:
+        return False
+    if not _credential_artifact_matches(snapshot.credential_artifact, current_credential):
+        return False
+    current_account_identity = auth_cache.account_identity if auth_cache else None
+    if current_account_identity and snapshot.account_identity != current_account_identity:
+        return False
+    return True
+
+
 def _build_auth_refresh_failure(payload: Any, reason: str) -> BullpenRuntimeCommandError:
     return BullpenRuntimeCommandError(
         redact_secrets(reason),
@@ -698,10 +787,12 @@ class BullpenRuntimeBroker:
         cache_key: str,
         checked_at: str,
         credential_artifact: BullpenCredentialArtifact,
+        account_identity: str | None = None,
     ) -> None:
         payload = BullpenAuthReadyCache(
             checked_at=checked_at,
             credential_artifact=credential_artifact,
+            account_identity=account_identity,
         )
         await self._redis.set(
             cache_key,
@@ -722,6 +813,8 @@ class BullpenRuntimeBroker:
             fetched_at=snapshot.fetched_at,
             cli_version=snapshot.cli_version,
             credential_artifact=snapshot.credential_artifact,
+            account_identity=snapshot.account_identity,
+            position_classifier_version=snapshot.position_classifier_version,
             auth_checked_at=snapshot.auth_checked_at,
             source=snapshot.source,
             freshness_state=snapshot.freshness_state,
@@ -964,7 +1057,7 @@ class BullpenRuntimeBroker:
         timeout_seconds: int = _CLI_DEFAULT_TIMEOUT_SECONDS,
     ) -> BullpenPositionsSnapshot:
         cache_key = f"{_REDIS_PREFIX}:positions:snapshot"
-        cached = await self._read_positions_snapshot(cache_key)
+        cached = await self._read_valid_positions_snapshot(cache_key)
         if cached and not force_fresh and self._snapshot_is_fresh(cached, max_age_seconds):
             cached.source = "redis-cache"
             cached.freshness_state = "cached"
@@ -1001,7 +1094,7 @@ class BullpenRuntimeBroker:
         max_age_seconds: int,
         timeout_seconds: int,
     ) -> BullpenPositionsSnapshot:
-        cached = await self._read_positions_snapshot(cache_key)
+        cached = await self._read_valid_positions_snapshot(cache_key)
         if cached and not force_fresh and self._snapshot_is_fresh(cached, max_age_seconds):
             cached.source = "redis-cache"
             cached.freshness_state = "cached"
@@ -1014,7 +1107,7 @@ class BullpenRuntimeBroker:
                 ttl=_POSITIONS_LOCK_TTL_SECONDS,
                 timeout=_POSITIONS_LOCK_TIMEOUT_SECONDS,
             ) as lease:
-                cached = await self._read_positions_snapshot(cache_key)
+                cached = await self._read_valid_positions_snapshot(cache_key)
                 if cached and not force_fresh and self._snapshot_is_fresh(
                     cached, max_age_seconds
                 ):
@@ -1057,12 +1150,24 @@ class BullpenRuntimeBroker:
                         exit_code=result.exit_code,
                         signal=result.signal,
                     ) from exc
+                auth_cache = await self._read_auth_ready_cache(
+                    f"{_REDIS_PREFIX}:auth:ready"
+                )
                 snapshot = BullpenPositionsSnapshot(
                     payload=payload,
                     fetched_at=_utc_now_iso(),
                     cli_version=result.diagnostics.bullpen_version
                     or self._version_cache_value,
                     credential_artifact=result.diagnostics.credential_artifact,
+                    account_identity=(
+                        _extract_account_identity(payload)
+                        or (
+                            auth_cache.account_identity
+                            if auth_cache is not None
+                            else None
+                        )
+                    ),
+                    position_classifier_version=BULLPEN_POSITION_CLASSIFIER_VERSION,
                     auth_checked_at=auth_checked_at,
                     source="live-cli",
                     freshness_state="fresh",
@@ -1090,16 +1195,10 @@ class BullpenRuntimeBroker:
                 max_age_seconds=max_age_seconds,
                 timeout_seconds=_POSITIONS_LOCK_TIMEOUT_SECONDS,
             )
-            if waited is not None:
+            if waited is not None and self._snapshot_is_fresh(waited, max_age_seconds):
                 waited.source = "redis-cache"
-                waited.freshness_state = (
-                    "cached"
-                    if self._snapshot_is_fresh(waited, max_age_seconds)
-                    else "stale"
-                )
-                waited.diagnostics.cache_status = (
-                    "hit" if waited.freshness_state == "cached" else "stale"
-                )
+                waited.freshness_state = "cached"
+                waited.diagnostics.cache_status = "hit"
                 return waited
             raise BullpenRuntimeCommandError(
                 f"Timed out waiting for Bullpen positions refresh: {redact_secrets(str(exc))}",
@@ -1290,6 +1389,7 @@ class BullpenRuntimeBroker:
             )
             raise
 
+        account_identity = _extract_account_identity(payload)
         final_credential = _stat_credential_artifact(_runtime_config())
         await self._write_auth_ready_cache(
             cache_key=cache_key,
@@ -1299,6 +1399,7 @@ class BullpenRuntimeBroker:
                 if final_credential.path is not None
                 else current_credential
             ),
+            account_identity=account_identity,
         )
         self._last_auth_checked_at = checked_at
         return checked_at
@@ -1314,8 +1415,27 @@ class BullpenRuntimeBroker:
         except Exception:
             return None
 
+    async def _read_valid_positions_snapshot(
+        self, cache_key: str
+    ) -> BullpenPositionsSnapshot | None:
+        snapshot = await self._read_positions_snapshot(cache_key)
+        if snapshot is None:
+            return None
+        current_credential = _stat_credential_artifact(_runtime_config())
+        auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
+        if _snapshot_matches_runtime(
+            snapshot,
+            current_credential=current_credential,
+            auth_cache=auth_cache,
+        ):
+            return snapshot
+        await self._redis.delete(cache_key)
+        return None
+
     async def read_cached_positions_snapshot(self) -> BullpenPositionsSnapshot | None:
-        return await self._read_positions_snapshot(f"{_REDIS_PREFIX}:positions:snapshot")
+        return await self._read_valid_positions_snapshot(
+            f"{_REDIS_PREFIX}:positions:snapshot"
+        )
 
     def _snapshot_is_fresh(
         self, snapshot: BullpenPositionsSnapshot, max_age_seconds: int
@@ -1339,11 +1459,11 @@ class BullpenRuntimeBroker:
     ) -> BullpenPositionsSnapshot | None:
         deadline = monotonic() + timeout_seconds
         while monotonic() < deadline:
-            snapshot = await self._read_positions_snapshot(cache_key)
+            snapshot = await self._read_valid_positions_snapshot(cache_key)
             if snapshot and self._snapshot_is_fresh(snapshot, max_age_seconds):
                 return snapshot
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
-        return await self._read_positions_snapshot(cache_key)
+        return await self._read_valid_positions_snapshot(cache_key)
 
     def _log_runtime_event(
         self, diagnostics: BullpenCommandDiagnostics, *, success: bool

@@ -42,7 +42,9 @@ from app.domains.polymarket.bullpen_llm_execution import (
 )
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.polymarket.position_classification import (
-    is_displayable_bullpen_position,
+    is_claimable_bullpen_position,
+    is_diagnostic_bullpen_position,
+    partition_bullpen_positions,
 )
 from app.domains.polymarket_auto_live.console_profile import (
     DEFAULT_CONSOLE_ORDER_USD,
@@ -2171,13 +2173,17 @@ def _serialize_active_wallet_position(
         "exposure_usd": position.exposure_usd,
         "average_price_cents": position.average_price_cents,
         "current_price_cents": position.current_price_cents,
+        "current_value_usd": position.current_value_usd,
         "current_yes_odds": position.current_yes_odds,
         "current_no_odds": position.current_no_odds,
         "close_time": position.close_time,
         "condition_id": position.condition_id,
         "is_claimable": position.is_claimable,
+        "raw_claimable_flag": position.raw_claimable_flag,
+        "upstream_redeemable": position.upstream_redeemable,
         "classification": position.classification,
         "classification_reason": position.classification_reason,
+        "claimable_value_usd": position.claimable_value_usd,
         "expected_payout_usdc": position.expected_payout_usdc,
         "resolution_status": position.resolution_status,
     }
@@ -2211,7 +2217,7 @@ def _active_position_market(
         best_ask_cents=None,
         spread_cents=None,
         force_include=True,
-        raw=None,
+        raw={"wallet_position_fallback": True},
     )
 
 
@@ -4794,24 +4800,17 @@ class BullpenAutoLiveEngine:
         persisted_positions_by_key = {
             f"{position.market_id}::{position.side}": position for position in positions
         }
-        excluded_wallet_positions = [
-            position
-            for position in enriched_wallet_positions
-            if not is_displayable_bullpen_position(position.classification)
-        ]
-        displayable_wallet_positions = [
-            position
-            for position in enriched_wallet_positions
-            if is_displayable_bullpen_position(position.classification)
-        ]
 
         def _is_bullpen_wallet_position(position: ConsoleWalletPosition) -> bool:
             position_key = f"{position.market_id}::{position.side}"
-            if position.is_claimable or position.classification == "resolved_zero_payout":
-                # Resolved winning positions can disappear from the market scan
-                # before the wallet finishes settlement classification, so keep
-                # them visible for Stage 1 diagnostics even when hydration
-                # cannot recover the market row.
+            if (
+                is_claimable_bullpen_position(position.classification)
+                or is_diagnostic_bullpen_position(position.classification)
+            ):
+                # Closed, settling, and claimable rows can disappear from the
+                # active market scan before the wallet finishes surfacing their
+                # final economic status, so keep them visible for Stage 1
+                # diagnostics even when hydration cannot recover the market row.
                 return True
             return (
                 position_key in persisted_positions_by_key
@@ -4820,13 +4819,11 @@ class BullpenAutoLiveEngine:
             )
 
         bullpen_wallet_positions = [
-            position
-            for position in displayable_wallet_positions
-            if _is_bullpen_wallet_position(position)
+            position for position in enriched_wallet_positions if _is_bullpen_wallet_position(position)
         ]
         non_bullpen_wallet_positions = [
             position
-            for position in displayable_wallet_positions
+            for position in enriched_wallet_positions
             if not _is_bullpen_wallet_position(position)
         ]
         if non_bullpen_wallet_positions:
@@ -4844,10 +4841,46 @@ class BullpenAutoLiveEngine:
                 ],
             )
 
+        wallet_position_partitions = partition_bullpen_positions(
+            bullpen_wallet_positions,
+            lambda position: position.classification,
+        )
+        active_bullpen_wallet_positions = wallet_position_partitions.active_positions
+        claimable_wallet_positions = (
+            wallet_position_partitions.positive_claimable_positions
+        )
+        settlement_pending_positions = (
+            wallet_position_partitions.settlement_pending_positions
+        )
+        stale_or_unknown_positions = wallet_position_partitions.stale_or_unknown_positions
+        resolved_zero_payout_positions = (
+            wallet_position_partitions.resolved_zero_payout_positions
+        )
+        closed_wallet_positions = wallet_position_partitions.closed_positions
+        excluded_position_diagnostics = [
+            *stale_or_unknown_positions,
+            *resolved_zero_payout_positions,
+            *closed_wallet_positions,
+        ]
+        serialized_active_positions_found = [
+            _serialize_active_wallet_position(position)
+            for position in active_bullpen_wallet_positions
+        ]
+        serialized_claimable_positions = [
+            _serialize_active_wallet_position(position)
+            for position in claimable_wallet_positions
+        ]
+        serialized_settlement_pending_positions = [
+            _serialize_active_wallet_position(position)
+            for position in settlement_pending_positions
+        ]
+        serialized_excluded_position_diagnostics = [
+            _serialize_active_wallet_position(position)
+            for position in excluded_position_diagnostics
+        ]
+
         position_snapshots: list[PositionSnapshot] = []
-        for position in bullpen_wallet_positions:
-            if position.is_claimable:
-                continue
+        for position in active_bullpen_wallet_positions:
             position_key = f"{position.market_id}::{position.side}"
             persisted_position = persisted_positions_by_key.get(position_key)
             matched_market = market_by_slug.get(position.slug) or market_by_id.get(position.market_id)
@@ -4909,9 +4942,6 @@ class BullpenAutoLiveEngine:
                     ),
                 )
             )
-        claimable_wallet_positions = [
-            position for position in bullpen_wallet_positions if position.is_claimable
-        ]
         (
             pending_historical_sell_keys,
             pending_historical_redeem_condition_ids,
@@ -4920,9 +4950,7 @@ class BullpenAutoLiveEngine:
             bullpen_wallet_positions,
         )
         active_position_market_count = _active_market_count(position_snapshots)
-        active_position_rows_before_llm = len(position_snapshots) + len(
-            claimable_wallet_positions
-        )
+        active_position_rows_before_llm = len(position_snapshots)
         reusable_manual_active_position_keys: set[str] = set()
         manual_active_positions_without_reusable_llm: list[ConsoleWalletPosition] = []
         if manual_console_rows_have_reusable_llm:
@@ -4932,9 +4960,7 @@ class BullpenAutoLiveEngine:
             manual_rows_by_slug = {
                 row.slug: row for row in accepted_manual_rows if row.slug
             }
-            for position in bullpen_wallet_positions:
-                if position.is_claimable:
-                    continue
+            for position in active_bullpen_wallet_positions:
                 position_key = f"{position.market_id}::{position.side}"
                 matched_row = manual_rows_by_market_id.get(position.market_id)
                 if matched_row is None and position.slug:
@@ -5059,6 +5085,25 @@ class BullpenAutoLiveEngine:
                 console_trade_amount_breakdown["max_positions"] or 0
             )
 
+        stage1_wallet_position_outputs = {
+            "live_wallet_positions": len(enriched_wallet_positions),
+            "active_wallet_positions": active_position_rows_before_llm,
+            "active_positions_found": serialized_active_positions_found,
+            "available_for_claim": serialized_claimable_positions,
+            "claimable_wallet_positions": len(claimable_wallet_positions),
+            "settlement_pending_positions": serialized_settlement_pending_positions,
+            "settlement_pending_positions_count": len(settlement_pending_positions),
+            "excluded_position_diagnostics": serialized_excluded_position_diagnostics,
+            "excluded_position_diagnostics_count": len(excluded_position_diagnostics),
+            # Backward-compatible alias for historical consumers that still
+            # read the older field name.
+            "excluded_wallet_positions": serialized_excluded_position_diagnostics,
+            "excluded_wallet_positions_count": len(excluded_position_diagnostics),
+            "stale_or_unknown_count": len(stale_or_unknown_positions),
+            "closed_wallet_positions_count": len(closed_wallet_positions),
+            "resolved_zero_payout_count": len(resolved_zero_payout_positions),
+        }
+
         set_run_stage_result(
             run,
             build_workflow_stage_result(
@@ -5071,13 +5116,7 @@ class BullpenAutoLiveEngine:
                 total_items=scanned_total_candidates,
                 item_label="events",
                 outputs={
-                    "live_wallet_positions": len(enriched_wallet_positions),
-                    "active_wallet_positions": active_position_rows_before_llm,
-                    "active_positions_found": [
-                        _serialize_active_wallet_position(position)
-                        for position in bullpen_wallet_positions
-                    ],
-                    "claimable_wallet_positions": len(claimable_wallet_positions),
+                    **stage1_wallet_position_outputs,
                     "pending_historical_exit_positions": len(pending_historical_sell_keys),
                     "pending_historical_redeem_conditions": len(
                         pending_historical_redeem_condition_ids
@@ -5100,16 +5139,6 @@ class BullpenAutoLiveEngine:
                     "console_trade_max_positions": console_trade_amount_breakdown[
                         "max_positions"
                     ],
-                    "excluded_wallet_positions": [
-                        _serialize_active_wallet_position(position)
-                        for position in excluded_wallet_positions
-                    ],
-                    "excluded_wallet_positions_count": len(excluded_wallet_positions),
-                    "resolved_zero_payout_count": sum(
-                        1
-                        for position in excluded_wallet_positions
-                        if position.classification == "resolved_zero_payout"
-                    ),
                     "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                     "scanned_candidates": scanned_total_candidates,
                     "active_position_rows_before_llm": active_position_rows_before_llm,
@@ -5368,8 +5397,7 @@ class BullpenAutoLiveEngine:
                     ),
                     "returns_per_day": position_returns_per_day(position, now=now),
                 }
-                for position in bullpen_wallet_positions
-                if not position.is_claimable
+                for position in active_bullpen_wallet_positions
             ]
             candidate_rows.sort(
                 key=lambda item: (
@@ -5437,23 +5465,7 @@ class BullpenAutoLiveEngine:
                     total_items=scanned_total_candidates,
                     item_label="events",
                     outputs={
-                        "live_wallet_positions": len(enriched_wallet_positions),
-                        "active_wallet_positions": active_position_rows_before_llm,
-                        "active_positions_found": [
-                            _serialize_active_wallet_position(position)
-                            for position in bullpen_wallet_positions
-                        ],
-                        "claimable_wallet_positions": len(claimable_wallet_positions),
-                        "excluded_wallet_positions": [
-                            _serialize_active_wallet_position(position)
-                            for position in excluded_wallet_positions
-                        ],
-                        "excluded_wallet_positions_count": len(excluded_wallet_positions),
-                        "resolved_zero_payout_count": sum(
-                            1
-                            for position in excluded_wallet_positions
-                            if position.classification == "resolved_zero_payout"
-                        ),
+                        **stage1_wallet_position_outputs,
                         "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                         "scanned_candidates": scanned_total_candidates,
                         "active_position_rows_before_llm": active_position_rows_before_llm,
@@ -6409,9 +6421,7 @@ class BullpenAutoLiveEngine:
             and str(context["position_key"]) in persisted_stage3_active_position_keys
         }
         active_rank_rows = []
-        for position in bullpen_wallet_positions:
-            if position.is_claimable:
-                continue
+        for position in active_bullpen_wallet_positions:
             position_key = f"{position.market_id}::{position.side}"
             review_context = active_review_context_by_key.get(position_key)
             if not review_context or not bool(review_context.get("qualified")):
@@ -7112,9 +7122,7 @@ class BullpenAutoLiveEngine:
         }
         evaluated_active_positions: list[dict[str, object]] = []
 
-        for position in bullpen_wallet_positions:
-            if position.is_claimable:
-                continue
+        for position in active_bullpen_wallet_positions:
             returns_per_day = position_returns_per_day(position, now=now)
             key = f"{position.market_id}::{position.side}"
             if key in pending_historical_sell_keys:

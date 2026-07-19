@@ -24,6 +24,8 @@ export type BullpenActivePositionView = {
   economicClassification: BullpenPositionEconomicClassification;
   classificationReason: string;
   isClaimable: boolean;
+  claimableSignal: boolean;
+  upstreamRedeemable: boolean;
   claimableValue: number | null;
   returnsPerDay: number | null;
   rules: string | null;
@@ -56,7 +58,13 @@ export type BullpenExcludedPositionDiagnostic = {
 
 export type BullpenPositionsDiagnostics = {
   excludedPositionCount: number;
+  diagnosticPositionCount: number;
+  settlementPendingCount: number;
+  staleOrUnknownCount: number;
+  closedPositionCount: number;
   resolvedZeroPayoutCount: number;
+  settlementPendingPositions: BullpenExcludedPositionDiagnostic[];
+  diagnosticPositions: BullpenExcludedPositionDiagnostic[];
   excludedPositions: BullpenExcludedPositionDiagnostic[];
 };
 
@@ -166,6 +174,8 @@ export type BullpenCliPosition = {
   title?: unknown;
   unrealizedPnl?: unknown;
   unrealized_pnl?: unknown;
+  upstream_redeemable?: unknown;
+  upstreamRedeemable?: unknown;
 };
 
 export type BullpenCliPositionsPayload = {
@@ -463,6 +473,13 @@ function extractClaimableStatus(value: BullpenCliPosition) {
   return /\b(claim|redeem|claimable|redeemable)\b/.test(claimText);
 }
 
+function extractUpstreamRedeemableStatus(value: BullpenCliPosition) {
+  return Boolean(
+    readBoolean(value.upstream_redeemable) ??
+      readBoolean(value.upstreamRedeemable),
+  );
+}
+
 function readResolutionStatus(value: BullpenCliPosition) {
   return readString(value.resolution_status ?? value.resolutionStatus ?? value.status);
 }
@@ -482,7 +499,9 @@ function classifyBullpenPosition({
   expectedPayoutUsd,
   payoutValueUsd,
   claimableFlag,
+  upstreamRedeemable,
   resolutionStatus,
+  authoritativeMarketOpen = false,
   nowMs = Date.now(),
 }: {
   shares: number;
@@ -492,13 +511,17 @@ function classifyBullpenPosition({
   expectedPayoutUsd: number | null;
   payoutValueUsd: number | null;
   claimableFlag: boolean;
+  upstreamRedeemable: boolean;
   resolutionStatus: string | null;
+  authoritativeMarketOpen?: boolean;
   nowMs?: number;
 }): {
   economicClassification: BullpenPositionEconomicClassification;
   classificationReason: string;
   isClaimable: boolean;
   claimableValue: number | null;
+  claimableSignal: boolean;
+  upstreamRedeemable: boolean;
 } {
   const pastCloseTime = hasPastCloseTime(closeTime, nowMs);
   const normalizedResolutionStatus = resolutionStatus?.trim().toLowerCase() || null;
@@ -514,15 +537,21 @@ function classifyBullpenPosition({
     );
   const positivePayoutVerified =
     isPositiveValue(expectedPayoutUsd) ||
-    (claimableFlag &&
-      (isPositiveValue(payoutValueUsd) || isPositiveValue(currentValue)));
+    isPositiveValue(payoutValueUsd) ||
+    ((pastCloseTime === true || resolvedByStatus || claimableFlag || upstreamRedeemable) &&
+      isPositiveValue(currentValue));
+  const closeTimeIsPast = pastCloseTime === true && !authoritativeMarketOpen;
+  const redeemabilityExists = claimableFlag || upstreamRedeemable;
 
-  if (shares <= VALUE_EPSILON && !claimableFlag) {
+  if (shares <= VALUE_EPSILON && !positivePayoutVerified) {
     return {
       economicClassification: "closed",
-      classificationReason: "No positive Bullpen shares remain for this row.",
+      classificationReason:
+        "No economically meaningful Bullpen exposure remains for this row.",
       isClaimable: false,
       claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
     };
   }
 
@@ -532,54 +561,75 @@ function classifyBullpenPosition({
     return {
       economicClassification: "positive_payout_claimable",
       classificationReason:
-        "Bullpen reported fresh positive payout evidence for this resolved position.",
+        "Bullpen reported verified positive payout evidence for this resolved position.",
       isClaimable: true,
       claimableValue: claimableValue === null ? null : round(claimableValue, 2),
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
     };
   }
 
   if (
-    claimableFlag &&
-    (pastCloseTime !== false || resolvedByStatus) &&
+    closeTimeIsPast &&
     isExplicitZeroValue(currentValue) &&
     isExplicitZeroValue(expectedPayoutUsd)
   ) {
     return {
       economicClassification: "resolved_zero_payout",
       classificationReason:
-        "Bullpen marked the row redeemable after close, but both current value and expected payout are explicitly zero.",
+        "The market has closed and both current value and expected payout are explicitly zero.",
       isClaimable: false,
       claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
     };
   }
 
-  if (claimableFlag && (pastCloseTime !== false || resolvedByStatus)) {
+  if (closeTimeIsPast && redeemabilityExists) {
     return {
       economicClassification: "settlement_pending",
       classificationReason:
-        "Bullpen marked the row claimable, but no fresh positive payout value has been proven yet.",
+        "The market has closed and Bullpen exposes redeemability, but no verified payout amount is available yet.",
       isClaimable: false,
       claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
     };
   }
 
-  if (currentPrice === null && currentValue === null && openByStatus !== false) {
+  if (currentPrice === null && currentValue === null) {
     return {
       economicClassification: "stale_or_unknown",
       classificationReason:
-        "The market still looks open or unresolved, but Bullpen did not provide enough fresh pricing to value it safely.",
+        "Bullpen did not provide enough fresh pricing to treat this row as an economically active position.",
       isClaimable: false,
       claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
     };
   }
 
-  if (pastCloseTime && !openByStatus && !resolvedByStatus) {
+  if (closeTimeIsPast) {
     return {
       economicClassification: "stale_or_unknown",
       classificationReason:
-        "The event close time has passed, but Bullpen did not provide enough settlement evidence to classify it safely.",
+        "The event close time has passed, but Bullpen did not provide enough settlement evidence to keep it active.",
       isClaimable: false,
       claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
+    };
+  }
+
+  if (resolvedByStatus && !authoritativeMarketOpen) {
+    return {
+      economicClassification: "stale_or_unknown",
+      classificationReason:
+        "Bullpen marked the row as resolved or closed, but did not provide verified payout evidence.",
+      isClaimable: false,
+      claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
     };
   }
 
@@ -589,17 +639,27 @@ function classifyBullpenPosition({
       "This row still looks like an economically active Bullpen position.",
     isClaimable: false,
     claimableValue: null,
+    claimableSignal: claimableFlag,
+    upstreamRedeemable,
   };
 }
 
 function applyBullpenPositionClassification(
   position: Omit<
     BullpenActivePositionView,
-    "economicClassification" | "classificationReason" | "isClaimable" | "claimableValue" | "returnsPerDay"
+    | "economicClassification"
+    | "classificationReason"
+    | "isClaimable"
+    | "claimableSignal"
+    | "upstreamRedeemable"
+    | "claimableValue"
+    | "returnsPerDay"
   > & {
     rawClaimableFlag?: boolean;
+    rawUpstreamRedeemable?: boolean;
     claimableValue: number | null;
     returnsPerDay?: number | null;
+    authoritativeMarketOpen?: boolean;
   },
 ) {
   const classification = classifyBullpenPosition({
@@ -610,16 +670,22 @@ function applyBullpenPositionClassification(
     expectedPayoutUsd: position.expectedPayoutUsd,
     payoutValueUsd: position.claimableValue,
     claimableFlag: Boolean(position.rawClaimableFlag),
+    upstreamRedeemable: Boolean(position.rawUpstreamRedeemable),
     resolutionStatus: position.resolutionStatus,
+    authoritativeMarketOpen: Boolean(position.authoritativeMarketOpen),
   });
   const basePosition = { ...position };
   delete basePosition.rawClaimableFlag;
+  delete basePosition.rawUpstreamRedeemable;
+  delete basePosition.authoritativeMarketOpen;
 
   return {
     ...basePosition,
     economicClassification: classification.economicClassification,
     classificationReason: classification.classificationReason,
     isClaimable: classification.isClaimable,
+    claimableSignal: classification.claimableSignal,
+    upstreamRedeemable: classification.upstreamRedeemable,
     claimableValue: classification.claimableValue,
     returnsPerDay: calculateBullpenPositionReturnsPerDay({
       closeTime: position.closeTime,
@@ -799,6 +865,13 @@ function mergeBullpenCliPosition(
       existing.resolutionStatus ??
       incoming.resolution_status ??
       incoming.resolutionStatus,
+    upstream_redeemable:
+      readBoolean(existing.upstream_redeemable ?? existing.upstreamRedeemable) ??
+      readBoolean(incoming.upstream_redeemable ?? incoming.upstreamRedeemable) ??
+      existing.upstream_redeemable ??
+      existing.upstreamRedeemable ??
+      incoming.upstream_redeemable ??
+      incoming.upstreamRedeemable,
   } satisfies BullpenCliPosition;
 }
 
@@ -870,6 +943,7 @@ export function normalizeBullpenPosition(
   const closeDate = readString(value.end_date ?? value.endDate);
   const closeTime = buildBullpenCloseTimeFromDateOnly(closeDate);
   const rawClaimableFlag = extractClaimableStatus(value);
+  const rawUpstreamRedeemable = extractUpstreamRedeemableStatus(value);
   const { yesOdds, noOdds } = deriveBullpenPositionOddsPair({
     outcome,
     currentPrice,
@@ -914,6 +988,7 @@ export function normalizeBullpenPosition(
     closeTime,
     resolutionStatus,
     rawClaimableFlag,
+    rawUpstreamRedeemable,
     claimableValue: claimableValue === null ? null : round(claimableValue, 2),
     rules: null,
     marketContext: null,
@@ -997,7 +1072,10 @@ function mergeBullpenPositionViews(
     noOdds,
     resolutionStatus:
       existing.resolutionStatus ?? incoming.resolutionStatus,
-    rawClaimableFlag: existing.isClaimable || incoming.isClaimable,
+    rawClaimableFlag:
+      existing.claimableSignal || incoming.claimableSignal,
+    rawUpstreamRedeemable:
+      existing.upstreamRedeemable || incoming.upstreamRedeemable,
     claimableValue,
     rules: existing.rules ?? incoming.rules,
     marketContext: existing.marketContext ?? incoming.marketContext,
@@ -1073,10 +1151,14 @@ export function applyBullpenPositionMarketData(
     unrealizedPnl,
     unrealizedPnlPercent,
     marketUrl: marketData.marketUrl ?? position.marketUrl,
-    rawClaimableFlag:
-      position.isClaimable ||
-      position.economicClassification === "settlement_pending" ||
-      position.economicClassification === "resolved_zero_payout",
+    rawClaimableFlag: position.claimableSignal,
+    rawUpstreamRedeemable: position.upstreamRedeemable,
+    authoritativeMarketOpen: Boolean(
+      marketData.slug ||
+        marketData.marketUrl ||
+        marketData.yesOdds !== undefined ||
+        marketData.noOdds !== undefined,
+    ),
     rules: marketData.rules ?? position.rules,
     marketContext: marketData.marketContext ?? position.marketContext,
     resolutionSource:
@@ -1119,6 +1201,7 @@ export function buildTrackedBullpenPositionViews(
         closeTime,
         resolutionStatus: "open",
         rawClaimableFlag: false,
+        rawUpstreamRedeemable: false,
         claimableValue: null,
         rules: marketUpdate?.rules ?? null,
         marketContext: marketUpdate?.marketContext ?? null,
@@ -1152,36 +1235,115 @@ function sumUnrealizedPnl(positions: BullpenActivePositionView[]) {
   );
 }
 
+export function isActiveBullpenPosition(position: BullpenActivePositionView) {
+  return position.economicClassification === "active";
+}
+
+export function isClaimableBullpenPosition(position: BullpenActivePositionView) {
+  return position.economicClassification === "positive_payout_claimable";
+}
+
+export function isDiagnosticBullpenPosition(position: BullpenActivePositionView) {
+  return (
+    position.economicClassification === "settlement_pending" ||
+    position.economicClassification === "stale_or_unknown" ||
+    position.economicClassification === "resolved_zero_payout" ||
+    position.economicClassification === "closed"
+  );
+}
+
+type BullpenPositionPartitions = {
+  activePositions: BullpenActivePositionView[];
+  positiveClaimablePositions: BullpenActivePositionView[];
+  settlementPendingPositions: BullpenActivePositionView[];
+  staleOrUnknownPositions: BullpenActivePositionView[];
+  resolvedZeroPayoutPositions: BullpenActivePositionView[];
+  closedPositions: BullpenActivePositionView[];
+};
+
+export function partitionBullpenPositions(
+  positions: BullpenActivePositionView[],
+): BullpenPositionPartitions {
+  const partitions: BullpenPositionPartitions = {
+    activePositions: [],
+    positiveClaimablePositions: [],
+    settlementPendingPositions: [],
+    staleOrUnknownPositions: [],
+    resolvedZeroPayoutPositions: [],
+    closedPositions: [],
+  };
+
+  for (const position of positions) {
+    switch (position.economicClassification) {
+      case "active":
+        partitions.activePositions.push(position);
+        break;
+      case "positive_payout_claimable":
+        partitions.positiveClaimablePositions.push(position);
+        break;
+      case "settlement_pending":
+        partitions.settlementPendingPositions.push(position);
+        break;
+      case "stale_or_unknown":
+        partitions.staleOrUnknownPositions.push(position);
+        break;
+      case "resolved_zero_payout":
+        partitions.resolvedZeroPayoutPositions.push(position);
+        break;
+      case "closed":
+        partitions.closedPositions.push(position);
+        break;
+    }
+  }
+
+  return partitions;
+}
+
+function toDiagnosticPosition(
+  position: BullpenActivePositionView,
+): BullpenExcludedPositionDiagnostic {
+  return {
+    key: position.key,
+    marketId: position.marketId,
+    slug: position.slug,
+    conditionId: position.conditionId,
+    marketTitle: position.marketTitle,
+    outcome: position.outcome,
+    shares: position.shares,
+    closeTime: position.closeTime,
+    currentValue: position.currentValue,
+    expectedPayoutUsd: position.expectedPayoutUsd,
+    economicClassification: position.economicClassification,
+    classificationReason: position.classificationReason,
+  };
+}
+
 export function buildBullpenPositionsDiagnostics(
   positions: BullpenActivePositionView[],
 ): BullpenPositionsDiagnostics {
-  const excludedPositions = positions
-    .filter(
-      (position) =>
-        position.economicClassification === "resolved_zero_payout" ||
-        position.economicClassification === "closed",
-    )
-    .map((position) => ({
-      key: position.key,
-      marketId: position.marketId,
-      slug: position.slug,
-      conditionId: position.conditionId,
-      marketTitle: position.marketTitle,
-      outcome: position.outcome,
-      shares: position.shares,
-      closeTime: position.closeTime,
-      currentValue: position.currentValue,
-      expectedPayoutUsd: position.expectedPayoutUsd,
-      economicClassification: position.economicClassification,
-      classificationReason: position.classificationReason,
-    }));
+  const partitions = partitionBullpenPositions(positions);
+  const settlementPendingPositions = partitions.settlementPendingPositions.map(
+    toDiagnosticPosition,
+  );
+  const excludedPositions = [
+    ...partitions.staleOrUnknownPositions,
+    ...partitions.resolvedZeroPayoutPositions,
+    ...partitions.closedPositions,
+  ].map(toDiagnosticPosition);
+  const diagnosticPositions = [
+    ...settlementPendingPositions,
+    ...excludedPositions,
+  ];
 
   return {
     excludedPositionCount: excludedPositions.length,
-    resolvedZeroPayoutCount: excludedPositions.filter(
-      (position) =>
-        position.economicClassification === "resolved_zero_payout",
-    ).length,
+    diagnosticPositionCount: diagnosticPositions.length,
+    settlementPendingCount: settlementPendingPositions.length,
+    staleOrUnknownCount: partitions.staleOrUnknownPositions.length,
+    closedPositionCount: partitions.closedPositions.length,
+    resolvedZeroPayoutCount: partitions.resolvedZeroPayoutPositions.length,
+    settlementPendingPositions,
+    diagnosticPositions,
     excludedPositions,
   };
 }
@@ -1191,8 +1353,8 @@ export function filterDisplayBullpenPositions(
 ) {
   return positions.filter(
     (position) =>
-      position.economicClassification !== "resolved_zero_payout" &&
-      position.economicClassification !== "closed",
+      isActiveBullpenPosition(position) ||
+      isClaimableBullpenPosition(position),
   );
 }
 
@@ -1200,13 +1362,9 @@ export function summarizeBullpenPositions(
   positions: BullpenActivePositionView[],
   summary?: Record<string, unknown> | null,
 ): BullpenPositionsSummary {
-  const claimablePositions = positions.filter((position) => position.isClaimable);
-  const activePositions = positions.filter(
-    (position) =>
-      position.economicClassification === "active" ||
-      position.economicClassification === "settlement_pending" ||
-      position.economicClassification === "stale_or_unknown",
-  );
+  const partitions = partitionBullpenPositions(positions);
+  const claimablePositions = partitions.positiveClaimablePositions;
+  const activePositions = partitions.activePositions;
   const claimableValue = round(
     claimablePositions.reduce(
       (total, position) =>
@@ -1234,7 +1392,7 @@ export function buildClaimableBullpenSignature(
   positions: BullpenActivePositionView[],
 ) {
   return positions
-    .filter((position) => position.isClaimable)
+    .filter((position) => isClaimableBullpenPosition(position))
     .map((position) => position.key)
     .sort((left, right) => left.localeCompare(right))
     .join("|");

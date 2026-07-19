@@ -22,10 +22,20 @@ async function loadStage3InvestModule() {
     new URL("../lib/bullpenStage2To3Strategy.ts", import.meta.url),
     "utf8",
   );
+  const positionsSource = readFileSync(
+    new URL("../lib/bullpenPositions.ts", import.meta.url),
+    "utf8",
+  );
   const strategyPath = path.join(tempDir, "bullpenStage2To3Strategy.mjs");
+  const positionsPath = path.join(tempDir, "bullpenPositions.mjs");
   writeFileSync(
     strategyPath,
     transpileModuleSource(strategySource, "bullpenStage2To3Strategy.ts"),
+    "utf8",
+  );
+  writeFileSync(
+    positionsPath,
+    transpileModuleSource(positionsSource, "bullpenPositions.ts"),
     "utf8",
   );
   const source = readFileSync(
@@ -38,10 +48,15 @@ async function loadStage3InvestModule() {
   const modulePath = path.join(tempDir, "bullpenAutoRunStage3Invest.mjs");
   writeFileSync(
     modulePath,
-    transpileModuleSource(source, "bullpenAutoRunStage3Invest.ts").replace(
-      'from "@/lib/bullpenStage2To3Strategy";',
-      `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
-    ),
+    transpileModuleSource(source, "bullpenAutoRunStage3Invest.ts")
+      .replace(
+        'from "@/lib/bullpenPositions";',
+        `from ${JSON.stringify(pathToFileURL(positionsPath).href)};`,
+      )
+      .replace(
+        'from "@/lib/bullpenStage2To3Strategy";',
+        `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
+      ),
     "utf8",
   );
 
@@ -890,11 +905,16 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
         noOdds: 82,
         currentPrice: 0.82,
         currentValue: 5,
+        expectedPayoutUsd: null,
         unrealizedPnl: 0,
         unrealizedPnlPercent: 0,
         marketUrl: "https://example.com/market-1",
         closeTime: "2026-07-07T12:00:00Z",
+        economicClassification: "active",
+        classificationReason: "Open Bullpen position.",
         isClaimable: false,
+        claimableSignal: false,
+        upstreamRedeemable: false,
         claimableValue: null,
         returnsPerDay: 1.7,
         rules: null,

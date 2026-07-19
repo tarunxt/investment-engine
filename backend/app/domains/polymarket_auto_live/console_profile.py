@@ -11,7 +11,11 @@ from app.domains.polymarket.bullpen import run_first_bullpen_json
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket.position_classification import (
     classify_bullpen_position,
+    extract_bullpen_claimable_value_usd,
     extract_bullpen_claimable_flag,
+    extract_bullpen_expected_payout_usdc,
+    extract_bullpen_resolution_status,
+    extract_bullpen_upstream_redeemable_flag,
 )
 from app.domains.polymarket_auto_live.category import (
     collect_polymarket_record_category_labels,
@@ -149,13 +153,17 @@ class ConsoleWalletPosition:
     average_price_cents: float
     exposure_usd: float
     current_price_cents: float | None
+    current_value_usd: float | None
     current_yes_odds: float | None
     current_no_odds: float | None
     close_time: str | None
     theme: str
     is_claimable: bool
+    raw_claimable_flag: bool = False
+    upstream_redeemable: bool = False
     classification: str = "active"
     classification_reason: str = "This row still looks like an economically active Bullpen position."
+    claimable_value_usd: float | None = None
     expected_payout_usdc: float | None = None
     resolution_status: str | None = None
 
@@ -898,6 +906,48 @@ def _position_aliases(position: ConsoleWalletPosition) -> list[str]:
     return deduped_aliases
 
 
+def _classify_console_wallet_position(
+    position: ConsoleWalletPosition,
+    *,
+    authoritative_market_is_open: bool | None = None,
+):
+    return classify_bullpen_position(
+        {
+            "shares": position.shares,
+            "resolution_status": position.resolution_status,
+        },
+        shares=position.shares,
+        current_price=position.current_price_cents,
+        current_value=position.current_value_usd,
+        close_time=position.close_time,
+        claimable_flag=position.raw_claimable_flag,
+        upstream_redeemable_flag=position.upstream_redeemable,
+        expected_payout_usdc=position.expected_payout_usdc,
+        claimable_value_usd=position.claimable_value_usd,
+        authoritative_market_is_open=authoritative_market_is_open,
+    )
+
+
+def _apply_console_wallet_position_classification(
+    position: ConsoleWalletPosition,
+    *,
+    authoritative_market_is_open: bool | None = None,
+) -> ConsoleWalletPosition:
+    classification = _classify_console_wallet_position(
+        position,
+        authoritative_market_is_open=authoritative_market_is_open,
+    )
+    return replace(
+        position,
+        is_claimable=classification.is_claimable,
+        classification=classification.state,
+        classification_reason=classification.reason,
+        claimable_value_usd=classification.claimable_value_usd,
+        expected_payout_usdc=classification.expected_payout_usdc,
+        resolution_status=classification.resolution_status,
+    )
+
+
 def _merge_console_wallet_position(
     existing: ConsoleWalletPosition,
     incoming: ConsoleWalletPosition,
@@ -925,15 +975,33 @@ def _merge_console_wallet_position(
                 (total_current_value_usd / total_priced_shares) * 100,
                 4,
             )
+    current_value_usd = (
+        round(
+            sum(
+                lot.current_value_usd or 0.0
+                for lot in (existing, incoming)
+                if lot.current_value_usd is not None
+            ),
+            2,
+        )
+        if existing.current_value_usd is not None or incoming.current_value_usd is not None
+        else (
+            round(total_shares * (current_price_cents / 100), 2)
+            if current_price_cents is not None
+            else None
+        )
+    )
+    claimable_value_usd = (
+        round(
+            (existing.claimable_value_usd or 0.0) + (incoming.claimable_value_usd or 0.0),
+            2,
+        )
+        if existing.claimable_value_usd is not None or incoming.claimable_value_usd is not None
+        else None
+    )
 
     yes_odds, no_odds = _position_yes_no_odds(existing.side, current_price_cents)
-    classification = existing.classification
-    classification_reason = existing.classification_reason
-    if existing.classification == "active" and incoming.classification != "active":
-        classification = incoming.classification
-        classification_reason = incoming.classification_reason
-
-    return ConsoleWalletPosition(
+    merged_position = ConsoleWalletPosition(
         market_id=existing.market_id or incoming.market_id,
         slug=existing.slug or incoming.slug,
         condition_id=existing.condition_id or incoming.condition_id,
@@ -948,15 +1016,17 @@ def _merge_console_wallet_position(
         average_price_cents=average_price_cents,
         exposure_usd=total_exposure_usd,
         current_price_cents=current_price_cents,
+        current_value_usd=current_value_usd,
         current_yes_odds=(
             yes_odds if yes_odds is not None else existing.current_yes_odds
         ),
         current_no_odds=no_odds if no_odds is not None else existing.current_no_odds,
         close_time=existing.close_time or incoming.close_time,
         theme=existing.theme or incoming.theme,
-        is_claimable=existing.is_claimable or incoming.is_claimable,
-        classification=classification,
-        classification_reason=classification_reason,
+        is_claimable=False,
+        raw_claimable_flag=existing.raw_claimable_flag or incoming.raw_claimable_flag,
+        upstream_redeemable=existing.upstream_redeemable or incoming.upstream_redeemable,
+        claimable_value_usd=claimable_value_usd,
         expected_payout_usdc=(
             existing.expected_payout_usdc
             if existing.expected_payout_usdc is not None
@@ -964,6 +1034,7 @@ def _merge_console_wallet_position(
         ),
         resolution_status=existing.resolution_status or incoming.resolution_status,
     )
+    return _apply_console_wallet_position_classification(merged_position)
 
 
 def _aggregate_console_wallet_positions(
@@ -1040,13 +1111,11 @@ def parse_console_wallet_positions_payload(
             current_value_usd = round(shares * (current_price_cents / 100), 2)
         event_slug = _read_string(row.get("event_slug") or row.get("eventSlug"))
         close_time = _extract_close_time(row.get("end_date") or row.get("endDate"))
-        classification = classify_bullpen_position(
-            row,
-            shares=shares,
-            current_price=current_price_cents,
-            current_value=current_value_usd,
-            close_time=close_time,
-        )
+        raw_claimable_flag = extract_bullpen_claimable_flag(row)
+        upstream_redeemable = extract_bullpen_upstream_redeemable_flag(row)
+        claimable_value_usd = extract_bullpen_claimable_value_usd(row)
+        expected_payout_usdc = extract_bullpen_expected_payout_usdc(row)
+        resolution_status = extract_bullpen_resolution_status(row)
 
         positions.append(
             ConsoleWalletPosition(
@@ -1063,20 +1132,29 @@ def parse_console_wallet_positions_payload(
                 average_price_cents=round(average_price_cents, 4),
                 exposure_usd=exposure_usd,
                 current_price_cents=current_price_cents,
+                current_value_usd=current_value_usd,
                 current_yes_odds=yes_odds,
                 current_no_odds=no_odds,
                 close_time=close_time,
                 theme="Bullpen Wallet",
-                is_claimable=classification.is_claimable,
-                classification=classification.state,
-                classification_reason=classification.reason,
-                expected_payout_usdc=classification.expected_payout_usdc,
-                resolution_status=classification.resolution_status,
+                is_claimable=False,
+                raw_claimable_flag=raw_claimable_flag,
+                upstream_redeemable=upstream_redeemable,
+                claimable_value_usd=claimable_value_usd,
+                expected_payout_usdc=expected_payout_usdc,
+                resolution_status=resolution_status,
             )
         )
 
-    positive_share_positions = [position for position in positions if position.shares > 0]
-    return _aggregate_console_wallet_positions(positive_share_positions)
+    classified_positions = [
+        _apply_console_wallet_position_classification(position) for position in positions
+    ]
+    eligible_positions = [
+        position
+        for position in classified_positions
+        if position.shares > 0 or position.classification != "closed"
+    ]
+    return _aggregate_console_wallet_positions(eligible_positions)
 
 
 async def read_console_wallet_positions(
@@ -1105,6 +1183,10 @@ def apply_scanned_market_to_position(
     if market is None:
         return position
 
+    authoritative_market_is_open = not (
+        isinstance(market.raw, dict) and market.raw.get("wallet_position_fallback")
+    )
+
     if position.side == "YES":
         current_price_cents = market.current_yes_odds
     elif position.side == "NO":
@@ -1119,15 +1201,24 @@ def apply_scanned_market_to_position(
     if current_no_odds is None and current_yes_odds is not None:
         current_no_odds = round(100 - current_yes_odds, 2)
 
-    return replace(
+    enriched_position = replace(
         position,
         market_id=market.market_id or position.market_id,
         slug=market.slug or position.slug,
         market_title=market.question or position.market_title,
         market_url=market.market_url or position.market_url,
         current_price_cents=current_price_cents,
+        current_value_usd=(
+            round(position.shares * (current_price_cents / 100), 2)
+            if current_price_cents is not None
+            else position.current_value_usd
+        ),
         current_yes_odds=current_yes_odds,
         current_no_odds=current_no_odds,
         close_time=market.close_time or position.close_time,
         theme=market.theme or position.theme,
+    )
+    return _apply_console_wallet_position_classification(
+        enriched_position,
+        authoritative_market_is_open=authoritative_market_is_open,
     )

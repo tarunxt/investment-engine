@@ -3,12 +3,16 @@
 import { ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import type {
-  BullpenActivePositionView,
-  BullpenLiveHealth,
-  BullpenLiveSnapshot,
-  BullpenPositionsFallback,
-  BullpenPositionsSource,
+import {
+  isActiveBullpenPosition,
+  isClaimableBullpenPosition,
+  type BullpenActivePositionView,
+  type BullpenExcludedPositionDiagnostic,
+  type BullpenLiveHealth,
+  type BullpenLiveSnapshot,
+  type BullpenPositionsDiagnostics,
+  type BullpenPositionsFallback,
+  type BullpenPositionsSource,
 } from "@/lib/bullpenPositions";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
@@ -24,6 +28,7 @@ type BullpenPositionsDialogProps = {
   onClose: () => void;
   onRefresh: () => void;
   positions: BullpenActivePositionView[];
+  positionsDiagnostics: BullpenPositionsDiagnostics | null;
   positionsError: string | null;
   positionsFallback: BullpenPositionsFallback | null;
   positionsHealth: BullpenLiveHealth | null;
@@ -181,8 +186,10 @@ function sortPositions(
   left: BullpenActivePositionView,
   right: BullpenActivePositionView,
 ) {
-  if (left.isClaimable !== right.isClaimable) {
-    return left.isClaimable ? -1 : 1;
+  const leftClaimable = isClaimableBullpenPosition(left);
+  const rightClaimable = isClaimableBullpenPosition(right);
+  if (leftClaimable !== rightClaimable) {
+    return leftClaimable ? -1 : 1;
   }
   const leftTime = left.closeTime
     ? new Date(left.closeTime).getTime()
@@ -192,6 +199,109 @@ function sortPositions(
     : Number.POSITIVE_INFINITY;
   if (leftTime !== rightTime) return leftTime - rightTime;
   return left.marketTitle.localeCompare(right.marketTitle);
+}
+
+function formatDiagnosticClassification(
+  value: BullpenExcludedPositionDiagnostic["economicClassification"],
+) {
+  switch (value) {
+    case "settlement_pending":
+      return "Settlement pending";
+    case "stale_or_unknown":
+      return "Stale or unknown";
+    case "resolved_zero_payout":
+      return "Resolved zero payout";
+    case "closed":
+      return "Closed";
+    case "positive_payout_claimable":
+      return "Claimable";
+    case "active":
+    default:
+      return "Active";
+  }
+}
+
+function DiagnosticTable({
+  title,
+  description,
+  rows,
+  toneClasses,
+}: {
+  title: string;
+  description: string;
+  rows: BullpenExcludedPositionDiagnostic[];
+  toneClasses: {
+    border: string;
+    header: string;
+    tableHead: string;
+  };
+}) {
+  if (rows.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className={`overflow-hidden rounded-2xl border ${toneClasses.border}`}>
+      <div className={`border-b px-4 py-4 ${toneClasses.header}`}>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em]">
+          {title}
+        </p>
+        <p className="mt-1 text-sm">{description}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className={toneClasses.tableHead}>
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Market
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Close
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Classification
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Value
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide">
+                Reason
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map((position) => (
+              <tr key={position.key} className="align-top">
+                <td className="max-w-xl px-4 py-3">
+                  <div className="font-medium text-slate-950">
+                    {position.marketTitle}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {position.outcome} · {formatShares(position.shares)} shares
+                  </div>
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-600">
+                  {formatDate(position.closeTime)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                  {formatDiagnosticClassification(position.economicClassification)}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                  <div>{formatMoney(position.currentValue)}</div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    Expected payout: {formatMoney(position.expectedPayoutUsd)}
+                  </div>
+                </td>
+                <td className="min-w-[20rem] px-4 py-3 text-slate-700">
+                  {position.classificationReason}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 export function BullpenPositionsDialog({
@@ -205,14 +315,18 @@ export function BullpenPositionsDialog({
   onClose,
   onRefresh,
   positions,
+  positionsDiagnostics,
   positionsError,
   positionsFallback,
   positionsHealth,
   positionsSource,
 }: BullpenPositionsDialogProps) {
   const sortedPositions = [...positions].sort(sortPositions);
-  const claimablePositions = sortedPositions.filter((position) => position.isClaimable);
-  const activePositions = sortedPositions.filter((position) => !position.isClaimable);
+  const claimablePositions = sortedPositions.filter(isClaimableBullpenPosition);
+  const activePositions = sortedPositions.filter(isActiveBullpenPosition);
+  const settlementPendingPositions =
+    positionsDiagnostics?.settlementPendingPositions ?? [];
+  const excludedDiagnostics = positionsDiagnostics?.excludedPositions ?? [];
   const claimableValue = claimablePositions.reduce(
     (total, position) =>
       total + (position.claimableValue ?? position.currentValue ?? position.costBasis),
@@ -246,7 +360,8 @@ export function BullpenPositionsDialog({
             </h2>
             <p className="text-sm text-slate-600">
               Current Bullpen holdings, including resolved events that are ready
-              to be redeemed or claimed.
+              to be redeemed or claimed. Settlement and stale rows are tracked
+              separately below and do not count as active.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -569,6 +684,29 @@ export function BullpenPositionsDialog({
                 )}
               </tbody>
             </table>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            <DiagnosticTable
+              title={`Settlement Pending (${settlementPendingPositions.length})`}
+              description="Post-close rows with redeemability signals but no verified payout amount yet. These stay out of active counts, Stage 2, and Stage 3."
+              rows={settlementPendingPositions}
+              toneClasses={{
+                border: "border-amber-200",
+                header: "border-amber-200 bg-amber-50 text-amber-950",
+                tableHead: "bg-amber-50/60 text-amber-900",
+              }}
+            />
+            <DiagnosticTable
+              title={`Diagnostics (${excludedDiagnostics.length})`}
+              description="Expired, stale, resolved-zero, or otherwise excluded Bullpen rows kept for operator review only."
+              rows={excludedDiagnostics}
+              toneClasses={{
+                border: "border-slate-200",
+                header: "border-slate-200 bg-slate-50 text-slate-900",
+                tableHead: "bg-slate-50 text-slate-500",
+              }}
+            />
           </div>
         </div>
       </div>

@@ -3449,14 +3449,183 @@ async def test_console_profile_excludes_zero_payout_residues_from_stage3_counts(
 
     stage_one = result.run.stage_results[0]
     stage_three = next(
-        stage for stage in result.run.stage_results if "redeem_planned" in stage.outputs
+        (
+            stage
+            for stage in result.run.stage_results
+            if "redeem_planned" in stage.outputs
+        ),
+        None,
     )
 
     assert stage_one.outputs["active_position_rows_before_llm"] == 0
     assert stage_one.outputs["claimable_wallet_positions"] == 0
     assert stage_one.outputs["resolved_zero_payout_count"] == 6
-    assert stage_three.outputs["redeem_planned"] == 0
-    assert stage_three.outputs["orders_planned"] == 0
+    if stage_three is not None:
+        assert stage_three.outputs["redeem_planned"] == 0
+        assert stage_three.outputs["orders_planned"] == 0
+
+
+@pytest.mark.anyio
+async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v0115_payload(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)
+    parsed_positions = await read_console_wallet_positions(
+        snapshot_payload={
+            "positions": [
+                {
+                    "slug": "claude-fable-july-3",
+                    "market": "Will Claude Fable 5 be restored for US customers by July 3, 2026?",
+                    "outcome": "No",
+                    "shares": 6.0975,
+                    "avg_price": 0.92,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-07-03",
+                },
+                {
+                    "slug": "claude-fable-july-2",
+                    "market": "Will Claude Fable 5 be restored for US customers by July 2, 2026?",
+                    "outcome": "No",
+                    "shares": 5.4347,
+                    "avg_price": 0.91,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-07-02",
+                },
+                {
+                    "slug": "claude-fable-july-1",
+                    "market": "Will Claude Fable 5 be restored for US customers by July 1, 2026?",
+                    "outcome": "No",
+                    "shares": 5.3763,
+                    "avg_price": 0.9,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-07-01",
+                },
+                {
+                    "slug": "project-alpha-june-26",
+                    "market": "Will Project Alpha launch by June 26, 2026?",
+                    "outcome": "No",
+                    "shares": 5.2631,
+                    "avg_price": 0.87,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-06-26",
+                },
+                {
+                    "slug": "trump-netanyahu-july-24-2026",
+                    "market": "Will Trump meet with Netanyahu by July 24, 2026?",
+                    "outcome": "No",
+                    "shares": 4.5,
+                    "avg_price": 0.61,
+                    "current_price": 0.64,
+                    "current_value": 2.88,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": False,
+                    "resolution_status": "open",
+                    "end_date": "2026-07-24",
+                },
+            ]
+        }
+    )
+
+    async def fake_read_console_wallet_positions():
+        return parsed_positions
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[],
+            rejected=[],
+            total_candidates=0,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now", lambda: fixed_now
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    stage_one = result.run.stage_results[0]
+    stage_two = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs["workflow_stage_key"] == "llm"
+    )
+    stage_three = next(
+        (
+            stage
+            for stage in result.run.stage_results
+            if stage.outputs["workflow_stage_key"] == "invest"
+        ),
+        None,
+    )
+    active_rows = stage_one.outputs["active_positions_found"]
+    active_market_titles = {row["market_title"] for row in active_rows}
+    excluded_titles = {
+        "Will Claude Fable 5 be restored for US customers by July 3, 2026?",
+        "Will Claude Fable 5 be restored for US customers by July 2, 2026?",
+        "Will Claude Fable 5 be restored for US customers by July 1, 2026?",
+        "Will Project Alpha launch by June 26, 2026?",
+    }
+
+    assert len(active_rows) == 1
+    assert active_market_titles == {"Will Trump meet with Netanyahu by July 24, 2026?"}
+    assert stage_one.outputs["active_position_rows_before_llm"] == 1
+    assert stage_one.outputs["claimable_wallet_positions"] == 0
+    assert len(stage_one.outputs["available_for_claim"]) == 0
+    assert len(stage_one.outputs["settlement_pending_positions"]) == 0
+    assert stage_one.outputs["resolved_zero_payout_count"] == 4
+    assert stage_one.outputs["excluded_position_diagnostics_count"] == 4
+    assert all(row["classification"] == "active" for row in active_rows)
+
+    stage_two_payload = json.dumps(stage_two.outputs)
+    for title in excluded_titles:
+        assert title not in stage_two_payload
+        if stage_three is not None:
+            assert title not in json.dumps(stage_three.outputs)
 
 
 @pytest.mark.anyio
@@ -4505,7 +4674,6 @@ async def test_console_wallet_positions_do_not_treat_won_status_as_claimable():
                     "outcome": "No",
                     "shares": 6,
                     "avg_price": 0.92,
-                    "current_price": 0.95,
                     "status": "won",
                 },
                 {
@@ -4514,9 +4682,9 @@ async def test_console_wallet_positions_do_not_treat_won_status_as_claimable():
                     "outcome": "No",
                     "shares": 3,
                     "avg_price": 0.8,
-                    "current_price": 1,
                     "status": "won",
                     "redeemable": True,
+                    "claimable_value": 3,
                 },
             ]
         }
@@ -4556,6 +4724,102 @@ async def test_console_wallet_positions_preserve_explicit_zero_payout_residues(
 
 
 @pytest.mark.anyio
+async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_trump_row_stays_active():
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
+            "positions": [
+                {
+                    "slug": "claude-fable-july-3",
+                    "market": "Will Claude Fable 5 be restored for US customers by July 3, 2026?",
+                    "outcome": "No",
+                    "shares": 6.0975,
+                    "avg_price": 0.92,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-07-03",
+                },
+                {
+                    "slug": "claude-fable-july-2",
+                    "market": "Will Claude Fable 5 be restored for US customers by July 2, 2026?",
+                    "outcome": "No",
+                    "shares": 5.4347,
+                    "avg_price": 0.91,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-07-02",
+                },
+                {
+                    "slug": "claude-fable-july-1",
+                    "market": "Will Claude Fable 5 be restored for US customers by July 1, 2026?",
+                    "outcome": "No",
+                    "shares": 5.3763,
+                    "avg_price": 0.9,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-07-01",
+                },
+                {
+                    "slug": "project-alpha-june-26",
+                    "market": "Will Project Alpha launch by June 26, 2026?",
+                    "outcome": "No",
+                    "shares": 5.2631,
+                    "avg_price": 0.87,
+                    "current_price": 0,
+                    "current_value": 0,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": True,
+                    "resolution_status": "unknown",
+                    "end_date": "2026-06-26",
+                },
+                {
+                    "slug": "trump-netanyahu-july-24-2026",
+                    "market": "Will Trump meet with Netanyahu by July 24, 2026?",
+                    "outcome": "No",
+                    "shares": 4.5,
+                    "avg_price": 0.61,
+                    "current_price": 0.64,
+                    "current_value": 2.88,
+                    "expected_payout_usdc": 0,
+                    "redeemable": False,
+                    "upstream_redeemable": False,
+                    "resolution_status": "open",
+                    "end_date": "2026-07-24",
+                },
+            ]
+        }
+    )
+
+    by_slug = {position.slug: position for position in positions}
+    expired_slugs = {
+        "claude-fable-july-3",
+        "claude-fable-july-2",
+        "claude-fable-july-1",
+        "project-alpha-june-26",
+    }
+
+    assert all(by_slug[slug].classification == "resolved_zero_payout" for slug in expired_slugs)
+    assert all(by_slug[slug].is_claimable is False for slug in expired_slugs)
+    assert all(by_slug[slug].classification != "active" for slug in expired_slugs)
+    assert by_slug["trump-netanyahu-july-24-2026"].classification == "active"
+    assert by_slug["trump-netanyahu-july-24-2026"].market_title == (
+        "Will Trump meet with Netanyahu by July 24, 2026?"
+    )
+
+
+@pytest.mark.anyio
 async def test_console_wallet_positions_ignore_nested_history_claim_rows():
     positions = await read_console_wallet_positions(
         snapshot_payload={
@@ -4569,7 +4833,7 @@ async def test_console_wallet_positions_ignore_nested_history_claim_rows():
                         "avg_price": 0.44,
                         "current_price": 0.41,
                         "invested_usd": 2.2,
-                        "end_date": "2026-06-30T23:59:00+00:00",
+                        "end_date": "2026-07-30T23:59:00+00:00",
                     }
                 ],
                 "history": [
@@ -5083,6 +5347,7 @@ def _console_wallet_position(
     shares: float = 10,
     average_price_cents: float = 45,
     exposure_usd: float = 4.5,
+    current_value_usd: float | None = None,
     close_time: str | None = None,
     side: str = "NO",
     is_claimable: bool = False,
@@ -5101,6 +5366,11 @@ def _console_wallet_position(
         average_price_cents=average_price_cents,
         exposure_usd=exposure_usd,
         current_price_cents=current_price_cents,
+        current_value_usd=(
+            current_value_usd
+            if current_value_usd is not None
+            else round((shares * current_price_cents) / 100, 4)
+        ),
         current_yes_odds=round(100 - current_price_cents, 2),
         current_no_odds=round(current_price_cents, 2),
         close_time=close_time,

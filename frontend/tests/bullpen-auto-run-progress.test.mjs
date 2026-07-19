@@ -848,7 +848,66 @@ test("Bullpen auto-run workflow view exposes Stage 1 active Bullpen positions", 
     conditionId:
       "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
     isClaimable: false,
+    classification: null,
   });
+});
+
+test("Bullpen auto-run workflow view filters non-active Stage 1 rows from active_positions_found", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-active-filtered",
+    triggered_by: "manual",
+    status: "completed",
+    dry_run: false,
+    started_at: "2026-07-19T05:00:00Z",
+    completed_at: "2026-07-19T05:02:00Z",
+    summary: "Candidate scan completed.",
+    live_execution_requested: true,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+        active_positions_found: [
+          {
+            position_key: "market-active::NO",
+            market_id: "market-active",
+            market_title: "Will Trump meet with Netanyahu by July 24, 2026?",
+            side: "NO",
+            classification: "active",
+          },
+          {
+            position_key: "market-zero::NO",
+            market_id: "market-zero",
+            market_title: "Expired residue",
+            side: "NO",
+            classification: "resolved_zero_payout",
+            is_claimable: false,
+          },
+          {
+            position_key: "market-pending::NO",
+            market_id: "market-pending",
+            market_title: "Settlement pending residue",
+            side: "NO",
+            classification: "settlement_pending",
+            is_claimable: false,
+          },
+        ],
+      }),
+    ],
+  });
+
+  assert.deepEqual(
+    view.stages[0].activePositionsFound.map((position) => position.marketId),
+    ["market-active"],
+  );
 });
 
 test("Bullpen auto-run workflow view keeps derived Stage 3 inputs even when Invest never started", async () => {
