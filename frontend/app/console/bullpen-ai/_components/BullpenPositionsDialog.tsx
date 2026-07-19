@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { ExternalLink, Loader2, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,12 @@ import {
 } from "@/lib/bullpenPositions";
 import { formatApiTimestamp } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
+import {
+  BullpenReturnsPerDayFormulaDialog,
+  BullpenReturnsPerDayHeader,
+  BullpenReturnsPerDayValueButton,
+} from "./BullpenReturnsPerDayInfo";
 
 type BullpenPositionsDialogProps = {
   claimError: string | null;
@@ -321,6 +329,10 @@ export function BullpenPositionsDialog({
   positionsHealth,
   positionsSource,
 }: BullpenPositionsDialogProps) {
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayPosition, setReturnsPerDayPosition] =
+    useState<BullpenActivePositionView | null>(null);
   const sortedPositions = [...positions].sort(sortPositions);
   const claimablePositions = sortedPositions.filter(isClaimableBullpenPosition);
   const activePositions = sortedPositions.filter(isActiveBullpenPosition);
@@ -597,7 +609,11 @@ export function BullpenPositionsDialog({
                   <th className="px-4 py-3">Date</th>
                   <th className="px-4 py-3">Average</th>
                   <th className="px-4 py-3">Current</th>
-                  <th className="px-4 py-3">Returns/day</th>
+                  <th className="px-4 py-3">
+                    <BullpenReturnsPerDayHeader
+                      onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+                    />
+                  </th>
                   <th className="px-4 py-3">Value</th>
                   <th className="px-4 py-3">Action</th>
                 </tr>
@@ -638,7 +654,13 @@ export function BullpenPositionsDialog({
                         {formatPrice(position.currentPrice)}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                        {formatReturnsPerDay(position.returnsPerDay)}
+                        <BullpenReturnsPerDayValueButton
+                          disabled={position.returnsPerDay === null}
+                          onOpen={() => setReturnsPerDayPosition(position)}
+                          ariaLabel={`Show Returns/day calculation for ${position.marketTitle}`}
+                        >
+                          {formatReturnsPerDay(position.returnsPerDay)}
+                        </BullpenReturnsPerDayValueButton>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3">
                         <div className="font-semibold text-slate-950">
@@ -710,6 +732,18 @@ export function BullpenPositionsDialog({
           </div>
         </div>
       </div>
+      {returnsPerDayPosition ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          position={returnsPerDayPosition}
+          onClose={() => setReturnsPerDayPosition(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

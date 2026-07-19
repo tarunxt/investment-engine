@@ -42,7 +42,13 @@ import {
   type BullpenTableColumnId,
   type BullpenTableColumnWidths,
 } from "./bullpenTableColumnWidths";
+import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
 import { BullpenLlmBreakdownDialog } from "./BullpenLlmBreakdownDialog";
+import {
+  BullpenReturnsPerDayFormulaDialog,
+  BullpenReturnsPerDayHeaderInfo,
+  BullpenReturnsPerDayValueButton,
+} from "./BullpenReturnsPerDayInfo";
 import { BullpenStage3ShortlistReasonDialog } from "./BullpenStage3ShortlistReasonDialog";
 
 export type BullpenTableSortKey =
@@ -534,6 +540,7 @@ function renderBullpenTableCell({
   onToggleQuestion,
   setBreakdownQuestion,
   setShortlistReasonQuestion,
+  setReturnsPerDayQuestion,
 }: {
   columnId: BullpenTableColumnId;
   question: BullpenQuestionRow;
@@ -545,6 +552,7 @@ function renderBullpenTableCell({
   onToggleQuestion: (questionId: string) => void;
   setBreakdownQuestion: (question: BullpenQuestionRow) => void;
   setShortlistReasonQuestion: (question: BullpenQuestionRow) => void;
+  setReturnsPerDayQuestion: (question: BullpenQuestionRow) => void;
 }) {
   const isCompact = displayDensity === "compact";
   const cellPaddingClass = isCompact ? "px-4 py-2" : "px-4 py-3";
@@ -734,7 +742,13 @@ function renderBullpenTableCell({
             "whitespace-nowrap font-semibold text-slate-700",
           )}
         >
-          {formatReturnsPerDay(question.returnsPerDay)}
+          <BullpenReturnsPerDayValueButton
+            disabled={question.returnsPerDay === null}
+            onOpen={() => setReturnsPerDayQuestion(question)}
+            ariaLabel={`Show Returns/day calculation for ${question.question}`}
+          >
+            {formatReturnsPerDay(question.returnsPerDay)}
+          </BullpenReturnsPerDayValueButton>
         </td>
       );
     case "amountToBeInvested":
@@ -841,6 +855,10 @@ export function BullpenQuestionsTable({
     useState<BullpenQuestionRow | null>(null);
   const [isAmountHighlightDialogOpen, setIsAmountHighlightDialogOpen] =
     useState(false);
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   const requestedVisibleColumnIds =
     visibleColumnIds ?? DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS;
   const [columnWidths, setColumnWidths] = useState<BullpenTableColumnWidths>(
@@ -1140,6 +1158,11 @@ export function BullpenQuestionsTable({
       columnId: "returnsPerDay",
       label: "Returns/day",
       sortKey: "returnsPerDay",
+      afterLabel: (
+        <BullpenReturnsPerDayHeaderInfo
+          onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+        />
+      ),
     },
     amountToBeInvested: {
       columnId: "amountToBeInvested",
@@ -1345,6 +1368,7 @@ export function BullpenQuestionsTable({
                         onToggleQuestion,
                         setBreakdownQuestion,
                         setShortlistReasonQuestion,
+                        setReturnsPerDayQuestion,
                       }),
                     )}
                     {extraColumns.map((column) => (
@@ -1395,6 +1419,18 @@ export function BullpenQuestionsTable({
           historicalDecisions={historicalDecisions}
           currentTopTenQuestionIds={topTenStrongestLlmOddsIds}
           onClose={() => setShortlistReasonQuestion(null)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
         />
       ) : null}
       {isAmountHighlightDialogOpen ? (
