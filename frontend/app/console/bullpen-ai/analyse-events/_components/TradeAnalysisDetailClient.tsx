@@ -223,7 +223,7 @@ export function TradeAnalysisDetailClient() {
             <p className="text-sm text-rose-700">{error || "Trade record not found."}</p>
             <Button asChild variant="outline">
               <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
-                Back to Analyse Events
+                Back to Trade Analysis
               </Link>
             </Button>
           </CardContent>
@@ -241,12 +241,12 @@ export function TradeAnalysisDetailClient() {
         <div className="space-y-3">
           <Button asChild variant="outline" size="sm">
             <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
-              Back to Analyse Events
+              Back to Trade Analysis
             </Link>
           </Button>
           <div className="space-y-2">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
-              Bullpen x AI
+              Trade Analysis
             </p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-950">
               {trade.title}

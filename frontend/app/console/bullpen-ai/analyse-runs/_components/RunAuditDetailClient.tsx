@@ -1046,7 +1046,7 @@ export function RunAuditDetailClient() {
           </Button>
           <div className="space-y-2">
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
-              Bullpen x AI
+              Trade Analysis
             </p>
             <h1 className="text-3xl font-bold tracking-tight text-slate-950">
               Bullpen Run Audit

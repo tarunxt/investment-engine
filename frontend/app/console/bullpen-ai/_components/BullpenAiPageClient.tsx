@@ -3649,7 +3649,7 @@ function BullpenAiPageContent() {
           </div>
           <Button asChild>
             <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
-              Analyse Events
+              Trade Analysis
             </Link>
           </Button>
         </div>
