@@ -28,19 +28,37 @@ type BullpenFallbackSource =
   | "tracked-positions"
   | null;
 
-type BackendBullpenDoctor = {
-  ok?: boolean;
-  message?: string | null;
-  checked_at?: string | null;
-  bullpen_login_observed_at?: string | null;
-  bullpen_jwt_expires_at?: string | null;
-  bullpen_jwt_seconds_remaining?: number | null;
+type BackendBullpenCredentialArtifact = {
+  path?: string | null;
+  inode?: number | null;
+  mtime_ns?: number | null;
+  size?: number | null;
 };
 
 type BackendBullpenCommandDiagnostics = {
   effective_home?: string | null;
   bullpen_version?: string | null;
   error_classification?: string | null;
+  credential_artifact?: BackendBullpenCredentialArtifact | null;
+};
+
+type BackendBullpenBrokerHealth = {
+  ok?: boolean;
+  checked_at?: string | null;
+  message?: string | null;
+  command_category?: string | null;
+  error_classification?: string | null;
+  cli_version?: string | null;
+  command_path?: string | null;
+  effective_home?: string | null;
+  credential_artifact?: BackendBullpenCredentialArtifact | null;
+};
+
+type BackendBullpenRuntimeFailure = {
+  occurred_at?: string | null;
+  command_category?: string | null;
+  classification?: string | null;
+  message?: string | null;
 };
 
 type BackendBullpenPositionsSnapshot = {
@@ -57,15 +75,10 @@ type BackendBullpenRuntimePositionsResponse = {
   ok: boolean;
   snapshot?: BackendBullpenPositionsSnapshot | null;
   stale_snapshot?: BackendBullpenPositionsSnapshot | null;
-  error?: string | null;
-};
-
-type BackendBullpenRuntimeHealthResponse = {
-  ok: boolean;
-  checked_at: string;
-  doctor?: BackendBullpenDoctor | null;
-  snapshot?: BackendBullpenPositionsSnapshot | null;
-  stale_snapshot?: BackendBullpenPositionsSnapshot | null;
+  broker_health?: BackendBullpenBrokerHealth | null;
+  auth_checked_at?: string | null;
+  last_failure?: BackendBullpenRuntimeFailure | null;
+  cli_version?: string | null;
   error?: string | null;
 };
 
@@ -274,39 +287,50 @@ function buildHealthActionNeeded(
 }
 
 function buildLiveHealth(
-  payload: BackendBullpenRuntimeHealthResponse | null,
+  payload: BackendBullpenRuntimePositionsResponse | null,
   snapshot: BackendBullpenPositionsSnapshot | null,
 ): BullpenLiveHealth | null {
   if (!payload && !snapshot) {
     return null;
   }
 
-  const doctor = payload?.doctor || null;
+  const brokerHealth = payload?.broker_health || null;
+  const lastFailure = payload?.last_failure || null;
   const diagnosticClassification =
-    snapshot?.diagnostics?.error_classification || payload?.error || doctor?.message;
+    snapshot?.diagnostics?.error_classification ||
+    brokerHealth?.error_classification ||
+    lastFailure?.classification ||
+    payload?.error;
   const classification = normalizeHealthClassification(diagnosticClassification);
-  const credentialHome = snapshot?.diagnostics?.effective_home || "/home/investor";
+  const credentialHome =
+    brokerHealth?.effective_home ||
+    snapshot?.diagnostics?.effective_home ||
+    "/home/investor";
   const message =
     coerceErrorMessage(payload?.error) ||
-    coerceErrorMessage(doctor?.message) ||
+    coerceErrorMessage(lastFailure?.message) ||
+    coerceErrorMessage(brokerHealth?.message) ||
     (payload?.ok
       ? "Bullpen runtime health is ready."
       : "Bullpen runtime health is unavailable.");
+  const commandPath =
+    brokerHealth?.command_path || process.env.BULLPEN_BIN || "/usr/local/bin/bullpen";
 
   return {
-    ok: Boolean(payload?.ok && doctor?.ok !== false),
+    ok: Boolean(payload?.ok && brokerHealth?.ok !== false),
     classification,
     stdout: null,
     stderr: null,
     exitCode: null,
     signal: null,
-    commandPath: process.env.BULLPEN_BIN || "/usr/local/bin/bullpen",
-    attemptedPaths: [process.env.BULLPEN_BIN || "/usr/local/bin/bullpen"],
+    commandPath,
+    attemptedPaths: [commandPath],
     timedOut: classification === "TIMEOUT",
     timestamp:
-      doctor?.checked_at ||
-      payload?.checked_at ||
       snapshot?.auth_checked_at ||
+      payload?.auth_checked_at ||
+      brokerHealth?.checked_at ||
+      lastFailure?.occurred_at ||
       new Date().toISOString(),
     credentialHome,
     message,
@@ -354,24 +378,15 @@ export async function GET(request: NextRequest) {
     ? Math.min(Math.max(requestedMaxAge, 0), 300)
     : 20;
 
-  let backendHealth: BackendBullpenRuntimeHealthResponse | null = null;
   let backendPositions: BackendBullpenRuntimePositionsResponse | null = null;
 
   try {
-    [backendHealth, backendPositions] = (await Promise.all([
-      fetchBackendRuntimeJson("/polymarket/runtime/health", {
+    backendPositions = (await fetchBackendRuntimeJson(
+      `/polymarket/runtime/positions?force_fresh=${forceFresh ? "true" : "false"}&max_age_seconds=${maxAgeSeconds}`,
+      {
         accessToken,
-      }) as Promise<BackendBullpenRuntimeHealthResponse>,
-      fetchBackendRuntimeJson(
-        `/polymarket/runtime/positions?force_fresh=${forceFresh ? "true" : "false"}&max_age_seconds=${maxAgeSeconds}`,
-        {
-          accessToken,
-        },
-      ) as Promise<BackendBullpenRuntimePositionsResponse>,
-    ])) as [
-      BackendBullpenRuntimeHealthResponse,
-      BackendBullpenRuntimePositionsResponse,
-    ];
+      },
+    )) as BackendBullpenRuntimePositionsResponse;
   } catch (error) {
     const sanitizedMessage =
       redactBullpenSensitiveText(
@@ -380,9 +395,17 @@ export async function GET(request: NextRequest) {
     const fallbackHealth = buildLiveHealth(
       {
         ok: false,
-        checked_at: new Date().toISOString(),
-        doctor: {
+        broker_health: {
           ok: false,
+          message: sanitizedMessage,
+          checked_at: new Date().toISOString(),
+          error_classification: sanitizedMessage,
+          command_path: process.env.BULLPEN_BIN || "/usr/local/bin/bullpen",
+          effective_home: "/home/investor",
+        },
+        last_failure: {
+          occurred_at: new Date().toISOString(),
+          classification: sanitizedMessage,
           message: sanitizedMessage,
         },
         error: sanitizedMessage,
@@ -441,18 +464,11 @@ export async function GET(request: NextRequest) {
     backendPositions?.snapshot || null,
   );
   const staleSnapshot = await buildLiveSnapshotFromBackend(
-    backendPositions?.stale_snapshot ||
-      backendHealth?.snapshot ||
-      backendHealth?.stale_snapshot ||
-      null,
+    backendPositions?.stale_snapshot || null,
   );
   const health = buildLiveHealth(
-    backendHealth,
-    backendPositions?.snapshot ||
-      backendPositions?.stale_snapshot ||
-      backendHealth?.snapshot ||
-      backendHealth?.stale_snapshot ||
-      null,
+    backendPositions,
+    backendPositions?.snapshot || backendPositions?.stale_snapshot || null,
   );
 
   if (backendPositions?.ok && liveSnapshot) {
@@ -507,10 +523,7 @@ export async function GET(request: NextRequest) {
         message:
           "Live Bullpen runtime is unavailable and no shared wallet snapshot is cached, so Cred-X is showing tracked positions only as a fallback. Do not auto-trade or auto-claim from fallback data.",
       }),
-      error:
-        coerceErrorMessage(backendPositions?.error) ||
-        coerceErrorMessage(backendHealth?.error) ||
-        undefined,
+      error: coerceErrorMessage(backendPositions?.error) || undefined,
     } satisfies BullpenPositionsResponse);
   } catch (fallbackError) {
     const fallbackMessage =
@@ -534,7 +547,7 @@ export async function GET(request: NextRequest) {
           source: null,
           message: null,
         }),
-        error: `${coerceErrorMessage(backendPositions?.error) || coerceErrorMessage(backendHealth?.error) || "Bullpen runtime is unavailable."} Tracked-position fallback also failed: ${fallbackMessage}`,
+        error: `${coerceErrorMessage(backendPositions?.error) || "Bullpen runtime is unavailable."} Tracked-position fallback also failed: ${fallbackMessage}`,
       } satisfies BullpenPositionsResponse,
       { status: 503 },
     );

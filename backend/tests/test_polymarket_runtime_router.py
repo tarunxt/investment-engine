@@ -16,9 +16,12 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.polymarket.router import router as polymarket_router
 from app.domains.polymarket.runtime_broker import (
     BullpenCommandDiagnostics,
+    BullpenCredentialArtifact,
+    BullpenPositionsSnapshotMetadata,
     BullpenPositionsSnapshot,
+    BullpenRuntimeCachedHealth,
+    BullpenRuntimePassiveHealth,
 )
-from app.domains.polymarket.schemas import PolymarketDoctorStatus
 
 
 def _current_user():
@@ -43,23 +46,50 @@ async def test_runtime_health_reads_cached_snapshot_without_refetching_positions
             effective_home="/home/investor",
         ),
     )
+    snapshot_metadata = BullpenPositionsSnapshotMetadata(
+        fetched_at=snapshot.fetched_at,
+        cli_version=snapshot.cli_version,
+        credential_artifact=BullpenCredentialArtifact(
+            path="/home/investor/.bullpen/credentials.json.enc",
+            inode=11,
+            mtime=22.0,
+            mtime_ns=22,
+            size=33,
+        ),
+        auth_checked_at=snapshot.auth_checked_at,
+        source=snapshot.source,
+        freshness_state=snapshot.freshness_state,
+        diagnostics=snapshot.diagnostics,
+    )
 
     class FakeBroker:
-        async def read_cached_positions_snapshot(self):
-            return snapshot
-
         async def get_positions_snapshot(self, *args, **kwargs):
             raise AssertionError(
                 "Runtime health must not trigger a fresh positions snapshot."
             )
 
-    class FakeLiveExecutor:
-        async def doctor(self):
-            return PolymarketDoctorStatus(ok=True, message="Bullpen runtime healthy.")
+        async def read_passive_health(self):
+            return BullpenRuntimePassiveHealth(
+                ok=True,
+                checked_at="2026-07-19T12:05:00+00:00",
+                broker_health=BullpenRuntimeCachedHealth(
+                    ok=True,
+                    checked_at="2026-07-19T12:05:00+00:00",
+                    message="Cached broker health is ready.",
+                    cli_version="bullpen 0.1.115",
+                    command_path="/usr/local/bin/bullpen",
+                    effective_home="/home/investor",
+                    credential_artifact=snapshot_metadata.credential_artifact,
+                ),
+                auth_checked_at="2026-07-19T12:00:00+00:00",
+                latest_snapshot=snapshot_metadata,
+                last_failure=None,
+                cli_version="bullpen 0.1.115",
+                command_path="/usr/local/bin/bullpen",
+            )
 
-    async def fake_get_bot(user_id: int):
-        assert user_id == 7
-        return SimpleNamespace(live_executor=FakeLiveExecutor())
+    async def fake_get_bot(_user_id: int):
+        raise AssertionError("Passive runtime health must not invoke bot doctor checks.")
 
     app = FastAPI()
     app.include_router(polymarket_router)
@@ -84,4 +114,6 @@ async def test_runtime_health_reads_cached_snapshot_without_refetching_positions
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
-    assert payload["snapshot"]["payload"] == {"positions": []}
+    assert payload["snapshot"]["fetched_at"] == snapshot.fetched_at
+    assert "payload" not in payload["snapshot"]
+    assert payload["doctor"]["message"] == "Cached broker health is ready."

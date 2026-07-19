@@ -9,6 +9,9 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.polymarket.runtime_broker import (
     BullpenPositionsSnapshot,
+    BullpenPositionsSnapshotMetadata,
+    BullpenRuntimeCachedHealth,
+    BullpenRuntimeFailure,
     get_bullpen_runtime_broker,
 )
 from app.domains.polymarket.schemas import (
@@ -31,10 +34,30 @@ class BullpenRuntimePositionsResponse(BaseModel):
     ok: bool
     snapshot: BullpenPositionsSnapshot | None = None
     stale_snapshot: BullpenPositionsSnapshot | None = None
+    broker_health: BullpenRuntimeCachedHealth | None = None
+    auth_checked_at: str | None = None
+    latest_snapshot: BullpenPositionsSnapshotMetadata | None = None
+    last_failure: BullpenRuntimeFailure | None = None
+    cli_version: str | None = None
     error: str | None = None
 
 
 class BullpenRuntimeHealthResponse(BaseModel):
+    ok: bool
+    checked_at: str
+    doctor: object
+    snapshot: BullpenPositionsSnapshotMetadata | None = None
+    stale_snapshot: BullpenPositionsSnapshotMetadata | None = None
+    broker_health: BullpenRuntimeCachedHealth | None = None
+    auth_checked_at: str | None = None
+    latest_snapshot: BullpenPositionsSnapshotMetadata | None = None
+    last_failure: BullpenRuntimeFailure | None = None
+    cli_version: str | None = None
+    command_path: str | None = None
+    error: str | None = None
+
+
+class BullpenRuntimeDiagnosticsResponse(BaseModel):
     ok: bool
     checked_at: str
     doctor: object
@@ -78,17 +101,55 @@ async def get_bullpen_runtime_positions(
             force_fresh=force_fresh,
             max_age_seconds=max_age_seconds,
         )
-        return BullpenRuntimePositionsResponse(ok=True, snapshot=snapshot)
+        passive_health = await broker.read_passive_health()
+        return BullpenRuntimePositionsResponse(
+            ok=True,
+            snapshot=snapshot,
+            broker_health=passive_health.broker_health,
+            auth_checked_at=passive_health.auth_checked_at,
+            latest_snapshot=passive_health.latest_snapshot,
+            last_failure=passive_health.last_failure,
+            cli_version=passive_health.cli_version,
+        )
     except Exception as exc:
+        passive_health = await broker.read_passive_health()
         return BullpenRuntimePositionsResponse(
             ok=False,
             stale_snapshot=stale_snapshot,
+            broker_health=passive_health.broker_health,
+            auth_checked_at=passive_health.auth_checked_at,
+            latest_snapshot=passive_health.latest_snapshot,
+            last_failure=passive_health.last_failure,
+            cli_version=passive_health.cli_version,
             error=_http_error_detail(exc),
         )
 
 
 @router.get("/runtime/health", response_model=BullpenRuntimeHealthResponse)
 async def get_bullpen_runtime_health(
+    current_user: User = Depends(get_current_user),
+):
+    del current_user
+    broker = get_bullpen_runtime_broker()
+    passive_health = await broker.read_passive_health()
+    return BullpenRuntimeHealthResponse(
+        ok=passive_health.ok,
+        checked_at=passive_health.checked_at,
+        doctor=passive_health.broker_health.model_dump(mode="json"),
+        snapshot=passive_health.latest_snapshot,
+        stale_snapshot=passive_health.latest_snapshot,
+        broker_health=passive_health.broker_health,
+        auth_checked_at=passive_health.auth_checked_at,
+        latest_snapshot=passive_health.latest_snapshot,
+        last_failure=passive_health.last_failure,
+        cli_version=passive_health.cli_version,
+        command_path=passive_health.command_path,
+        error=passive_health.last_failure.message if not passive_health.ok and passive_health.last_failure else None,
+    )
+
+
+@router.get("/runtime/diagnostics", response_model=BullpenRuntimeDiagnosticsResponse)
+async def get_bullpen_runtime_diagnostics(
     current_user: User = Depends(get_current_user),
 ):
     bot = await _get_bot(current_user)
@@ -98,7 +159,7 @@ async def get_bullpen_runtime_health(
     doctor: object | None = None
     try:
         doctor = await bot.live_executor.doctor()
-        return BullpenRuntimeHealthResponse(
+        return BullpenRuntimeDiagnosticsResponse(
             ok=bool(getattr(doctor, "ok", False)),
             checked_at=checked_at,
             doctor=doctor,
@@ -107,7 +168,7 @@ async def get_bullpen_runtime_health(
     except Exception as exc:
         if doctor is None:
             doctor = {"ok": False, "message": _http_error_detail(exc)}
-        return BullpenRuntimeHealthResponse(
+        return BullpenRuntimeDiagnosticsResponse(
             ok=False,
             checked_at=checked_at,
             doctor=doctor,

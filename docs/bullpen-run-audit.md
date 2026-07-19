@@ -145,6 +145,11 @@ later stages instead of letting Stage 2, Stage 3, UI polling, health routes, or
 background monitors spawn their own Bullpen wallet refresh. Cached UI and health
 reads may reuse the shared Redis snapshot for roughly 15-30 seconds, but they
 must not become a second credential owner or a parallel auth refresh path.
+When that forced fresh wallet snapshot fails, Stage 1 must record a failed
+workflow stage with the sanitized wallet-refresh error, and the persisted Stage 2
+and Stage 3 workflow results must remain explicitly blocked with
+`blocked_by_stage1_wallet_refresh=true` instead of continuing with fallback
+wallet rereads.
 If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
 write revert the run back to an in-progress state.

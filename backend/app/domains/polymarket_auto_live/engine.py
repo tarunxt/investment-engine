@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import asyncio
 import time
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
@@ -4666,8 +4667,94 @@ class BullpenAutoLiveEngine:
                         reason=reason,
                     )
 
+        def fail_stage_one_wallet_refresh(reason: str) -> EngineResult:
+            completed_at = utc_now_iso()
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=1,
+                    workflow_stage_key="scan",
+                    phase_status="failed",
+                    status="fail",
+                    reason=reason,
+                    completed_items=0,
+                    total_items=scanned_total_candidates,
+                    item_label="events",
+                    outputs={
+                        "source_label": scan_source_label,
+                        "source_url": scan_source_url,
+                        "accepted_candidates": stage1_accepted_candidates,
+                        "rejected_candidates": stage1_rejected_candidates,
+                        "wallet_refresh_error": reason,
+                    },
+                    guardrails_checked=global_guardrails,
+                    completed_at=completed_at,
+                ),
+            )
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=2,
+                    workflow_stage_key="llm",
+                    phase_status="blocked",
+                    status="warning",
+                    reason="Stage 2 remained blocked because Stage 1 could not refresh fresh Bullpen wallet positions.",
+                    completed_items=0,
+                    total_items=0,
+                    item_label="events",
+                    outputs={
+                        **stage2_universe_status,
+                        "blocked_by_stage1_wallet_refresh": True,
+                    },
+                    guardrails_checked=global_guardrails,
+                    hard_block=True,
+                    completed_at=completed_at,
+                ),
+            )
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=3,
+                    workflow_stage_key="invest",
+                    phase_status="blocked",
+                    status="warning",
+                    reason="Stage 3 remained blocked because Stage 1 could not refresh fresh Bullpen wallet positions.",
+                    completed_items=0,
+                    total_items=0,
+                    item_label="rows",
+                    outputs={
+                        **stage2_universe_status,
+                        **stage2_strategy_metadata,
+                        "blocked_by_stage1_wallet_refresh": True,
+                    },
+                    guardrails_checked=global_guardrails,
+                    hard_block=True,
+                    completed_at=completed_at,
+                ),
+            )
+            run.completed_at = completed_at
+            run.status = "failed"
+            run.error_message = reason
+            run.summary = reason
+            run.diagnostics.stage2_has_usable_reviews = False
+            run.diagnostics.ranking_enabled = False
+            run.diagnostics.ranking_exit_enabled = False
+            run.diagnostics.new_buy_enabled = False
+            self._report_progress(progress_callback, run, state)
+            return EngineResult(run=run, decisions=[], state=state, positions=positions)
+
         console_balance_task = asyncio.create_task(refresh_balance())
-        live_wallet_positions = await live_wallet_positions_task
+        try:
+            live_wallet_positions = await live_wallet_positions_task
+        except Exception as exc:
+            console_balance_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await console_balance_task
+            reason = (
+                "Stage 1 failed because Cred-X could not refresh fresh Bullpen wallet positions: "
+                f"{exc}"
+            )
+            return fail_stage_one_wallet_refresh(reason)
         unsupported_live_wallet_positions = [
             position
             for position in live_wallet_positions

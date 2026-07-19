@@ -18,12 +18,15 @@ from app.domains.polymarket import runtime_broker as runtime_broker_module
 from app.domains.polymarket.runtime_broker import (
     BullpenCommandDiagnostics,
     BullpenCredentialArtifact,
+    BullpenPositionsSnapshotMetadata,
     BullpenPositionsSnapshot,
     BullpenRawCommandResult,
     BullpenRuntimeBroker,
     BullpenRuntimeCommandError,
 )
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
+
+AUTH_READY_CACHE_KEY = "bullpen:runtime:auth:ready"
 
 
 class FakeRedis:
@@ -48,10 +51,19 @@ class FakeRedis:
         self._values[key] = (value, expires_at)
         return True
 
-    async def eval(self, _script: str, _numkeys: int, key: str, token: str):
+    async def delete(self, key: str):
+        removed = key in self._values
+        self._values.pop(key, None)
+        return 1 if removed else 0
+
+    async def eval(self, _script: str, _numkeys: int, key: str, token: str, *args):
         existing = await self.get(key)
         if existing != token:
             return 0
+        if args:
+            ttl = int(args[0])
+            self._values[key] = (token, time.time() + ttl)
+            return 1
         self._values.pop(key, None)
         return 1
 
@@ -89,6 +101,22 @@ def _build_raw_result(
     )
 
 
+def _credential_artifact(
+    *,
+    path: str = "/home/investor/.bullpen/credentials.json.enc",
+    inode: int = 11,
+    mtime_ns: int = 22,
+    size: int = 33,
+) -> BullpenCredentialArtifact:
+    return BullpenCredentialArtifact(
+        path=path,
+        inode=inode,
+        mtime=mtime_ns / 1_000_000_000,
+        mtime_ns=mtime_ns,
+        size=size,
+    )
+
+
 def _build_snapshot(*, seconds_ago: int = 0) -> BullpenPositionsSnapshot:
     fetched_at = datetime.now(UTC).timestamp() - seconds_ago
     return BullpenPositionsSnapshot(
@@ -114,14 +142,11 @@ async def test_positions_refresh_singleflight_shares_one_cli_execution(monkeypat
     started = asyncio.Event()
     release = asyncio.Event()
 
-    async def fake_ensure_auth_ready(*, force_refresh: bool = False):
-        assert force_refresh is False
+    async def fake_ensure_auth_ready_under_lock(**kwargs):
+        assert kwargs["force_refresh"] is False
         return "2026-07-19T12:00:00+00:00"
 
-    async def fake_cli_version():
-        return "bullpen 0.1.115"
-
-    async def fake_execute_raw(*args, **kwargs):
+    async def fake_execute_raw_under_lock(*args, **kwargs):
         nonlocal calls
         calls += 1
         started.set()
@@ -144,9 +169,16 @@ async def test_positions_refresh_singleflight_shares_one_cli_execution(monkeypat
             )
         )
 
-    monkeypatch.setattr(broker, "ensure_auth_ready", fake_ensure_auth_ready)
-    monkeypatch.setattr(broker, "cli_version", fake_cli_version)
-    monkeypatch.setattr(broker, "execute_raw", fake_execute_raw)
+    monkeypatch.setattr(
+        broker,
+        "ensure_auth_ready_under_lock",
+        fake_ensure_auth_ready_under_lock,
+    )
+    monkeypatch.setattr(
+        broker,
+        "_execute_raw_under_lock",
+        fake_execute_raw_under_lock,
+    )
 
     first = asyncio.create_task(broker.get_positions_snapshot(force_fresh=True))
     await started.wait()
@@ -162,6 +194,55 @@ async def test_positions_refresh_singleflight_shares_one_cli_execution(monkeypat
 
 
 @pytest.mark.anyio
+async def test_passive_health_polling_during_stage1_refresh_stays_cli_passive(monkeypatch):
+    broker = _build_broker(monkeypatch)
+    active_authenticated_commands = 0
+    max_authenticated_commands = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+    artifact = _credential_artifact()
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    await broker._write_auth_ready_cache(
+        cache_key=AUTH_READY_CACHE_KEY,
+        checked_at="2026-07-19T12:00:00+00:00",
+        credential_artifact=artifact,
+    )
+
+    async def fake_execute_process(args, **kwargs):
+        nonlocal active_authenticated_commands, max_authenticated_commands
+        if kwargs.get("requires_auth"):
+            active_authenticated_commands += 1
+            max_authenticated_commands = max(
+                max_authenticated_commands,
+                active_authenticated_commands,
+            )
+            started.set()
+            await release.wait()
+            active_authenticated_commands -= 1
+        return _build_raw_result(
+            json.dumps({"positions": []}),
+            command_category=kwargs.get("command_category", "positions"),
+        )
+
+    monkeypatch.setattr(broker, "_execute_process", fake_execute_process)
+
+    refresh_task = asyncio.create_task(broker.get_positions_snapshot(force_fresh=True))
+    await started.wait()
+    passive_health = await broker.read_passive_health()
+    release.set()
+    snapshot = await refresh_task
+
+    assert passive_health.auth_checked_at == "2026-07-19T12:00:00+00:00"
+    assert snapshot.payload == {"positions": []}
+    assert max_authenticated_commands == 1
+
+
+@pytest.mark.anyio
 async def test_execute_raw_retries_once_after_auth_rejection_and_refresh(monkeypatch):
     broker = _build_broker(monkeypatch)
     execute_calls: list[tuple[list[str], bool]] = []
@@ -170,11 +251,17 @@ async def test_execute_raw_retries_once_after_auth_rejection_and_refresh(monkeyp
     monkeypatch.setattr(
         runtime_broker_module,
         "_stat_credential_artifact",
-        lambda _config: BullpenCredentialArtifact(
-            path="/home/investor/.bullpen/config.toml",
-            inode=11,
-            mtime=22.0,
+        lambda _config: _credential_artifact(),
+    )
+    await broker._redis.set(
+        AUTH_READY_CACHE_KEY,
+        json.dumps(
+            {
+                "checked_at": "2026-07-19T12:00:00+00:00",
+                "credential_artifact": _credential_artifact().model_dump(mode="json"),
+            }
         ),
+        ex=60,
     )
 
     async def fake_execute_process(args, **kwargs):
@@ -197,6 +284,7 @@ async def test_execute_raw_retries_once_after_auth_rejection_and_refresh(monkeyp
     result = await broker.execute_raw(["polymarket", "positions", "--output", "json"])
 
     assert result.stdout == '{"positions": []}'
+    assert await broker._redis.get(AUTH_READY_CACHE_KEY) is None
     assert refresh_calls == 1
     assert len(execute_calls) == 2
     assert execute_calls[0][1] is False
@@ -204,21 +292,29 @@ async def test_execute_raw_retries_once_after_auth_rejection_and_refresh(monkeyp
 
 
 @pytest.mark.anyio
-async def test_execute_raw_rereads_rotated_credentials_before_retry(monkeypatch):
+@pytest.mark.parametrize(
+    ("updated_inode", "updated_mtime_ns", "updated_size"),
+    [
+        (12, 22, 33),
+        (11, 23, 33),
+        (11, 22, 34),
+    ],
+)
+async def test_ensure_auth_ready_refreshes_when_credentials_json_enc_metadata_changes(
+    monkeypatch,
+    updated_inode,
+    updated_mtime_ns,
+    updated_size,
+):
     broker = _build_broker(monkeypatch)
-    execute_calls = 0
     refresh_calls = 0
     artifacts = iter(
         [
-            BullpenCredentialArtifact(
-                path="/home/investor/.bullpen/config.toml",
-                inode=11,
-                mtime=22.0,
-            ),
-            BullpenCredentialArtifact(
-                path="/home/investor/.bullpen/config.toml",
-                inode=12,
-                mtime=23.0,
+            _credential_artifact(inode=11, mtime_ns=22, size=33),
+            _credential_artifact(
+                inode=updated_inode,
+                mtime_ns=updated_mtime_ns,
+                size=updated_size,
             ),
         ]
     )
@@ -229,29 +325,46 @@ async def test_execute_raw_rereads_rotated_credentials_before_retry(monkeypatch)
         lambda _config: next(artifacts),
     )
 
-    async def fake_execute_process(args, **kwargs):
-        nonlocal execute_calls
-        execute_calls += 1
-        if execute_calls == 1:
-            raise BullpenRuntimeCommandError(
-                "AUTH_REFRESH_REJECTED_LOGIN_REQUIRED",
-                classification="auth_rejected",
-            )
-        return _build_raw_result(json.dumps({"positions": []}))
-
     async def fake_refresh_auth_under_lock(**kwargs):
         nonlocal refresh_calls
         refresh_calls += 1
         return "2026-07-19T12:02:00+00:00"
 
-    monkeypatch.setattr(broker, "_execute_process", fake_execute_process)
     monkeypatch.setattr(broker, "_refresh_auth_under_lock", fake_refresh_auth_under_lock)
+    await broker._redis.set(
+        AUTH_READY_CACHE_KEY,
+        json.dumps(
+            {
+                "checked_at": "2026-07-19T12:00:00+00:00",
+                "credential_artifact": _credential_artifact(
+                    inode=11,
+                    mtime_ns=22,
+                    size=33,
+                ).model_dump(mode="json"),
+            }
+        ),
+        ex=60,
+    )
 
-    result = await broker.execute_raw(["polymarket", "positions", "--output", "json"])
+    checked_at = await broker.ensure_auth_ready(force_refresh=False)
 
-    assert result.stdout == '{"positions": []}'
-    assert execute_calls == 2
-    assert refresh_calls == 0
+    assert checked_at == "2026-07-19T12:02:00+00:00"
+    assert refresh_calls == 1
+
+
+def test_credential_artifact_candidates_prioritize_encrypted_credentials(monkeypatch):
+    monkeypatch.setenv("BULLPEN_HOME", "/home/investor/.bullpen")
+    monkeypatch.setenv("BULLPEN_AUTH_FILE", "/tmp/explicit-auth.json")
+
+    config = runtime_broker_module._runtime_config()
+    candidates = [str(candidate) for candidate in runtime_broker_module._credential_artifact_candidates(config)]
+
+    assert candidates == [
+        "/home/investor/.bullpen/credentials.json.enc",
+        "/home/investor/.bullpen/credentials.json",
+        "/tmp/explicit-auth.json",
+        "/home/investor/.bullpen",
+    ]
 
 
 @pytest.mark.anyio
@@ -263,11 +376,7 @@ async def test_execute_raw_caps_auth_retry_at_one_attempt(monkeypatch):
     monkeypatch.setattr(
         runtime_broker_module,
         "_stat_credential_artifact",
-        lambda _config: BullpenCredentialArtifact(
-            path="/home/investor/.bullpen/config.toml",
-            inode=11,
-            mtime=22.0,
-        ),
+        lambda _config: _credential_artifact(),
     )
 
     async def fake_execute_process(args, **kwargs):
@@ -292,6 +401,69 @@ async def test_execute_raw_caps_auth_retry_at_one_attempt(monkeypatch):
     assert exc_info.value.classification == "auth_rejected"
     assert execute_calls == 2
     assert refresh_calls == 1
+
+
+@pytest.mark.anyio
+async def test_authenticated_commands_share_one_global_cli_lock_across_brokers(
+    monkeypatch,
+):
+    redis = FakeRedis()
+    broker_one = _build_broker(monkeypatch, redis)
+    broker_two = _build_broker(monkeypatch, redis)
+    active_authenticated_commands = 0
+    max_authenticated_commands = 0
+    first_started = asyncio.Event()
+    release = asyncio.Event()
+    artifact = _credential_artifact()
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    await broker_one._write_auth_ready_cache(
+        cache_key=AUTH_READY_CACHE_KEY,
+        checked_at="2026-07-19T12:00:00+00:00",
+        credential_artifact=artifact,
+    )
+
+    async def fake_execute_process(args, **kwargs):
+        nonlocal active_authenticated_commands, max_authenticated_commands
+        if kwargs.get("requires_auth"):
+            active_authenticated_commands += 1
+            max_authenticated_commands = max(
+                max_authenticated_commands,
+                active_authenticated_commands,
+            )
+            if not first_started.is_set():
+                first_started.set()
+                await release.wait()
+            active_authenticated_commands -= 1
+        return _build_raw_result(
+            json.dumps({"positions": []}),
+            command_category=kwargs.get("command_category", "positions"),
+            auth_refresh_attempted=bool(kwargs.get("auth_refresh_attempted")),
+        )
+
+    monkeypatch.setattr(broker_one, "_execute_process", fake_execute_process)
+    monkeypatch.setattr(broker_two, "_execute_process", fake_execute_process)
+
+    first = asyncio.create_task(
+        broker_one.execute_raw(["polymarket", "positions", "--output", "json"])
+    )
+    await first_started.wait()
+    second = asyncio.create_task(
+        broker_two.execute_raw(["polymarket", "positions", "--output", "json"])
+    )
+    await asyncio.sleep(0.1)
+
+    assert max_authenticated_commands == 1
+    assert second.done() is False
+
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert max_authenticated_commands == 1
 
 
 @pytest.mark.anyio

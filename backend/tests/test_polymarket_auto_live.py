@@ -1812,6 +1812,90 @@ async def test_console_profile_stage_2_fails_clearly_when_frozen_targets_are_emp
 
 
 @pytest.mark.anyio
+async def test_console_profile_blocks_stage_2_and_stage_3_when_fresh_wallet_positions_fail(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will Stage 1 wallet refresh failure block later stages?",
+        slug="stage-1-wallet-refresh-failure",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+
+    async def fake_read_console_wallet_positions():
+        raise RuntimeError("fresh positions refresh failed")
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    stage1 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "scan"
+    )
+    stage2 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    stage3 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+
+    assert result.run.status == "failed"
+    assert result.decisions == []
+    assert "could not refresh fresh bullpen wallet positions" in result.run.summary.lower()
+    assert stage1.outputs["phase_status"] == "failed"
+    assert stage2.outputs["phase_status"] == "blocked"
+    assert stage3.outputs["phase_status"] == "blocked"
+    assert stage2.outputs["blocked_by_stage1_wallet_refresh"] is True
+    assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+
+
+@pytest.mark.anyio
 async def test_console_profile_stage_2_keeps_provider_and_parsing_failures_attributed_to_the_correct_model(
     monkeypatch,
 ):

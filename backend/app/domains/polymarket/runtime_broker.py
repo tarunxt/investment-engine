@@ -28,14 +28,16 @@ _AUTH_READY_TTL_SECONDS = 60
 _CLI_VERSION_TTL_SECONDS = 300
 _POSITIONS_SNAPSHOT_TTL_SECONDS = 300
 _POSITIONS_FRESH_SECONDS = 20
-_POSITIONS_LOCK_TTL_SECONDS = 45
+_POSITIONS_LOCK_TTL_SECONDS = 120
 _POSITIONS_LOCK_TIMEOUT_SECONDS = 12
-_AUTH_LOCK_TTL_SECONDS = 25
-_AUTH_LOCK_TIMEOUT_SECONDS = 8
+_AUTHENTICATED_CLI_LOCK_TTL_SECONDS = 120
+_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS = 30
+_LOCK_RENEW_INTERVAL_SECONDS = 30
 _CLI_DEFAULT_TIMEOUT_SECONDS = 30
 _POLL_INTERVAL_SECONDS = 0.1
 _MAX_BUFFER_BYTES = 10 * 1024 * 1024
 _REDIS_PREFIX = "bullpen:runtime"
+_AUTHENTICATED_CLI_LOCK_KEY = f"{_REDIS_PREFIX}:authenticated-cli"
 _PRODUCTION_ENVIRONMENTS = {"production", "prod"}
 _STRICT_RUNTIME_OWNER = "investor"
 _READ_ONLY_FLAG = "--read-only"
@@ -91,6 +93,15 @@ class BullpenCredentialArtifact(BaseModel):
     path: str | None = None
     inode: int | None = None
     mtime: float | None = None
+    mtime_ns: int | None = None
+    size: int | None = None
+
+
+class BullpenAuthReadyCache(BaseModel):
+    checked_at: str
+    credential_artifact: BullpenCredentialArtifact = Field(
+        default_factory=BullpenCredentialArtifact
+    )
 
 
 class BullpenRuntimeConfigSnapshot(BaseModel):
@@ -140,6 +151,50 @@ class BullpenRawCommandResult(BaseModel):
     exit_code: int = 0
     signal: int | None = None
     diagnostics: BullpenCommandDiagnostics
+
+
+class BullpenRuntimeFailure(BaseModel):
+    occurred_at: str
+    command_category: str | None = None
+    classification: str | None = None
+    message: str
+
+
+class BullpenRuntimeCachedHealth(BaseModel):
+    ok: bool
+    checked_at: str
+    message: str
+    command_category: str | None = None
+    error_classification: str | None = None
+    cli_version: str | None = None
+    command_path: str | None = None
+    effective_home: str | None = None
+    credential_artifact: BullpenCredentialArtifact = Field(
+        default_factory=BullpenCredentialArtifact
+    )
+
+
+class BullpenPositionsSnapshotMetadata(BaseModel):
+    fetched_at: str
+    cli_version: str | None = None
+    credential_artifact: BullpenCredentialArtifact = Field(
+        default_factory=BullpenCredentialArtifact
+    )
+    auth_checked_at: str | None = None
+    source: Literal["live-cli", "redis-cache"] = "live-cli"
+    freshness_state: Literal["fresh", "cached", "stale"] = "fresh"
+    diagnostics: BullpenCommandDiagnostics
+
+
+class BullpenRuntimePassiveHealth(BaseModel):
+    ok: bool
+    checked_at: str
+    broker_health: BullpenRuntimeCachedHealth
+    auth_checked_at: str | None = None
+    latest_snapshot: BullpenPositionsSnapshotMetadata | None = None
+    last_failure: BullpenRuntimeFailure | None = None
+    cli_version: str | None = None
+    command_path: str | None = None
 
 
 def _utc_now_iso() -> str:
@@ -202,17 +257,13 @@ def _runtime_config() -> BullpenRuntimeConfigSnapshot:
 
 def _credential_artifact_candidates(config: BullpenRuntimeConfigSnapshot) -> list[Path]:
     home = Path(config.bullpen_home)
-    config_path = Path(config.bullpen_config)
+    explicit_auth_file = os.getenv("BULLPEN_AUTH_FILE")
     candidates = [
-        Path(os.getenv("BULLPEN_AUTH_FILE", "")).expanduser()
-        if os.getenv("BULLPEN_AUTH_FILE")
-        else None,
-        config_path,
-        home / "auth.json",
-        home / "session.json",
-        home / "tokens.json",
+        home / "credentials.json.enc",
         home / "credentials.json",
-        home / ".auth.json",
+        Path(explicit_auth_file).expanduser()
+        if explicit_auth_file
+        else None,
         home,
     ]
     unique: list[Path] = []
@@ -244,6 +295,8 @@ def _stat_credential_artifact(
             path=str(candidate),
             inode=int(candidate_stat.st_ino),
             mtime=float(candidate_stat.st_mtime),
+            mtime_ns=int(candidate_stat.st_mtime_ns),
+            size=int(candidate_stat.st_size),
         )
     return BullpenCredentialArtifact()
 
@@ -385,6 +438,75 @@ def _looks_like_auth_refresh_failure(payload: Any) -> str | None:
     return None
 
 
+def _credential_artifact_matches(
+    expected: BullpenCredentialArtifact,
+    actual: BullpenCredentialArtifact,
+) -> bool:
+    return (
+        expected.path == actual.path
+        and expected.inode == actual.inode
+        and expected.mtime_ns == actual.mtime_ns
+        and expected.size == actual.size
+    )
+
+
+def _build_auth_refresh_failure(payload: Any, reason: str) -> BullpenRuntimeCommandError:
+    return BullpenRuntimeCommandError(
+        redact_secrets(reason),
+        classification="auth_rejected",
+        stdout=json.dumps(payload) if isinstance(payload, dict) else None,
+    )
+
+
+def _validate_auth_refresh_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        raise BullpenRuntimeCommandError(
+            "Bullpen auth refresh returned an unexpected payload.",
+            classification="json_parse_error",
+        )
+
+    failure = _looks_like_auth_refresh_failure(payload)
+    if failure:
+        raise _build_auth_refresh_failure(payload, failure)
+
+    if payload.get("credentials_valid") is not True:
+        raise _build_auth_refresh_failure(
+            payload,
+            "Bullpen auth refresh did not confirm valid credentials.",
+        )
+    if payload.get("token_valid") is not True:
+        raise _build_auth_refresh_failure(
+            payload,
+            "Bullpen auth refresh did not confirm a valid Bullpen token.",
+        )
+    if payload.get("refresh_succeeded") is False:
+        raise _build_auth_refresh_failure(
+            payload,
+            "Bullpen auth refresh reported that token refresh failed.",
+        )
+    if payload.get("trade_auth_blocked") is True:
+        raise _build_auth_refresh_failure(
+            payload,
+            "Bullpen auth refresh reported that trading auth is blocked.",
+        )
+    if payload.get("requires_login") is True or payload.get("requires_auth") is True:
+        raise _build_auth_refresh_failure(
+            payload,
+            "Bullpen auth refresh still requires a manual login.",
+        )
+
+    remediation = payload.get("remediation")
+    if isinstance(remediation, dict):
+        action = str(remediation.get("action") or "").strip().lower()
+        if action and action != "none":
+            raise _build_auth_refresh_failure(
+                payload,
+                f"Bullpen auth refresh requires operator remediation: {action}.",
+            )
+
+    return _extract_auth_ready_timestamp(payload) or _utc_now_iso()
+
+
 class BullpenRuntimeBroker:
     def __init__(self) -> None:
         self._redis = aioredis.from_url(settings.redis_url, decode_responses=True)
@@ -392,6 +514,18 @@ class BullpenRuntimeBroker:
         self._positions_futures: dict[asyncio.AbstractEventLoop, asyncio.Future] = {}
         self._version_cache_value: str | None = None
         self._version_cache_expires_at: float = 0.0
+        config = _runtime_config()
+        self._last_auth_checked_at: str | None = None
+        self._last_failure: BullpenRuntimeFailure | None = None
+        self._last_health = BullpenRuntimeCachedHealth(
+            ok=False,
+            checked_at=_utc_now_iso(),
+            message="Bullpen runtime broker initialized. Awaiting the first authenticated command.",
+            cli_version=None,
+            command_path=config.bullpen_bin,
+            effective_home=config.home,
+            credential_artifact=_stat_credential_artifact(config),
+        )
 
     async def aclose(self) -> None:
         await self._redis.aclose()
@@ -447,6 +581,15 @@ class BullpenRuntimeBroker:
                 ),
             },
         )
+        self._last_health = BullpenRuntimeCachedHealth(
+            ok=True,
+            checked_at=_utc_now_iso(),
+            message="Bullpen runtime validated. Awaiting the next authenticated command.",
+            cli_version=self._version_cache_value,
+            command_path=config.bullpen_bin,
+            effective_home=config.home,
+            credential_artifact=_stat_credential_artifact(config),
+        )
         return config
 
     async def cli_version(self) -> str | None:
@@ -454,44 +597,203 @@ class BullpenRuntimeBroker:
         if self._version_cache_value and now < self._version_cache_expires_at:
             return self._version_cache_value
         try:
-            result = await self._execute_process(
-                ["--version"],
-                timeout_seconds=10,
-                command_category="version",
-                is_write=False,
-                requires_auth=False,
-            )
-        except BullpenRuntimeCommandError:
+            async with self._lock.acquire(
+                _AUTHENTICATED_CLI_LOCK_KEY,
+                ttl=_AUTHENTICATED_CLI_LOCK_TTL_SECONDS,
+                timeout=_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS,
+                renew_interval=_LOCK_RENEW_INTERVAL_SECONDS,
+            ) as lease:
+                return await self._cli_version_under_lock(
+                    lock_key=lease.lock_key,
+                    lock_wait_ms=lease.wait_duration_seconds * 1000,
+                )
+        except (BullpenRuntimeCommandError, LockAcquisitionError):
             return None
-        version = redact_secrets(result.stdout.strip() or result.stderr.strip())
-        self._version_cache_value = version or None
-        self._version_cache_expires_at = now + _CLI_VERSION_TTL_SECONDS
-        return self._version_cache_value
 
     async def ensure_auth_ready(self, *, force_refresh: bool = False) -> str:
         cache_key = f"{_REDIS_PREFIX}:auth:ready"
-        if not force_refresh:
-            cached = await self._redis.get(cache_key)
-            if cached:
-                return cached
-
+        observed_credential = _stat_credential_artifact(_runtime_config())
         async with self._lock.acquire(
-            f"{_REDIS_PREFIX}:auth-refresh",
-            ttl=_AUTH_LOCK_TTL_SECONDS,
-            timeout=_AUTH_LOCK_TIMEOUT_SECONDS,
+            _AUTHENTICATED_CLI_LOCK_KEY,
+            ttl=_AUTHENTICATED_CLI_LOCK_TTL_SECONDS,
+            timeout=_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS,
+            renew_interval=_LOCK_RENEW_INTERVAL_SECONDS,
         ) as lease:
-            if not force_refresh:
-                cached = await self._redis.get(cache_key)
-                if cached:
-                    return cached
-
-            checked_at = await self._refresh_auth_under_lock(
+            return await self.ensure_auth_ready_under_lock(
+                force_refresh=force_refresh,
                 cache_key=cache_key,
-                lease_lock_key=lease.lock_key,
-                lease_wait_ms=lease.wait_duration_seconds * 1000,
+                lock_key=lease.lock_key,
+                lock_wait_ms=lease.wait_duration_seconds * 1000,
+                observed_credential=observed_credential,
             )
 
-        return checked_at
+    async def ensure_auth_ready_under_lock(
+        self,
+        *,
+        force_refresh: bool,
+        cache_key: str,
+        lock_key: str | None,
+        lock_wait_ms: float | None,
+        observed_credential: BullpenCredentialArtifact | None = None,
+    ) -> str:
+        current_credential = _stat_credential_artifact(_runtime_config())
+        if not force_refresh:
+            cached = await self._read_auth_ready_cache(cache_key)
+            if cached and _credential_artifact_matches(
+                cached.credential_artifact,
+                current_credential,
+            ) and (
+                observed_credential is None
+                or _credential_artifact_matches(observed_credential, current_credential)
+            ):
+                self._last_auth_checked_at = cached.checked_at
+                return cached.checked_at
+
+        return await self._refresh_auth_under_lock(
+            cache_key=cache_key,
+            current_credential=current_credential,
+            lease_lock_key=lock_key,
+            lease_wait_ms=lock_wait_ms,
+        )
+
+    async def read_passive_health(self) -> BullpenRuntimePassiveHealth:
+        snapshot = await self.read_cached_positions_snapshot()
+        auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
+        latest_auth_checked_at = (
+            auth_cache.checked_at
+            if auth_cache is not None
+            else snapshot.auth_checked_at if snapshot is not None else self._last_auth_checked_at
+        )
+        return BullpenRuntimePassiveHealth(
+            ok=self._last_health.ok,
+            checked_at=_utc_now_iso(),
+            broker_health=self._last_health,
+            auth_checked_at=latest_auth_checked_at,
+            latest_snapshot=self._snapshot_metadata(snapshot),
+            last_failure=self._last_failure,
+            cli_version=self._version_cache_value,
+            command_path=_runtime_config().bullpen_bin,
+        )
+
+    async def _read_auth_ready_cache(
+        self,
+        cache_key: str,
+    ) -> BullpenAuthReadyCache | None:
+        raw = await self._redis.get(cache_key)
+        if not raw:
+            return None
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            text = raw.strip()
+            return BullpenAuthReadyCache(checked_at=text) if text else None
+        try:
+            return BullpenAuthReadyCache.model_validate(payload)
+        except Exception:
+            return None
+
+    async def _write_auth_ready_cache(
+        self,
+        *,
+        cache_key: str,
+        checked_at: str,
+        credential_artifact: BullpenCredentialArtifact,
+    ) -> None:
+        payload = BullpenAuthReadyCache(
+            checked_at=checked_at,
+            credential_artifact=credential_artifact,
+        )
+        await self._redis.set(
+            cache_key,
+            payload.model_dump_json(),
+            ex=_AUTH_READY_TTL_SECONDS,
+        )
+
+    async def _delete_auth_ready_cache(self, cache_key: str) -> None:
+        await self._redis.delete(cache_key)
+
+    def _snapshot_metadata(
+        self,
+        snapshot: BullpenPositionsSnapshot | None,
+    ) -> BullpenPositionsSnapshotMetadata | None:
+        if snapshot is None:
+            return None
+        return BullpenPositionsSnapshotMetadata(
+            fetched_at=snapshot.fetched_at,
+            cli_version=snapshot.cli_version,
+            credential_artifact=snapshot.credential_artifact,
+            auth_checked_at=snapshot.auth_checked_at,
+            source=snapshot.source,
+            freshness_state=snapshot.freshness_state,
+            diagnostics=snapshot.diagnostics,
+        )
+
+    def _update_cached_health(
+        self,
+        *,
+        ok: bool,
+        message: str,
+        command_category: str | None,
+        error_classification: str | None,
+        diagnostics: BullpenCommandDiagnostics,
+    ) -> None:
+        self._last_health = BullpenRuntimeCachedHealth(
+            ok=ok,
+            checked_at=_utc_now_iso(),
+            message=redact_secrets(message),
+            command_category=command_category,
+            error_classification=error_classification,
+            cli_version=diagnostics.bullpen_version or self._version_cache_value,
+            command_path=_runtime_config().bullpen_bin,
+            effective_home=diagnostics.effective_home,
+            credential_artifact=diagnostics.credential_artifact,
+        )
+
+    def _record_failure(
+        self,
+        *,
+        command_category: str | None,
+        classification: str | None,
+        message: str,
+        diagnostics: BullpenCommandDiagnostics,
+    ) -> None:
+        sanitized_message = redact_secrets(message)
+        self._last_failure = BullpenRuntimeFailure(
+            occurred_at=_utc_now_iso(),
+            command_category=command_category,
+            classification=classification,
+            message=sanitized_message,
+        )
+        self._update_cached_health(
+            ok=False,
+            message=sanitized_message,
+            command_category=command_category,
+            error_classification=classification,
+            diagnostics=diagnostics,
+        )
+
+    async def _cli_version_under_lock(
+        self,
+        *,
+        lock_key: str | None,
+        lock_wait_ms: float | None,
+    ) -> str | None:
+        now = monotonic()
+        if self._version_cache_value and now < self._version_cache_expires_at:
+            return self._version_cache_value
+        result = await self._execute_process(
+            ["--version"],
+            timeout_seconds=10,
+            command_category="version",
+            is_write=False,
+            requires_auth=False,
+            lock_key=lock_key,
+            lock_wait_ms=lock_wait_ms,
+        )
+        version = redact_secrets(result.stdout.strip() or result.stderr.strip())
+        self._version_cache_value = version or None
+        self._version_cache_expires_at = monotonic() + _CLI_VERSION_TTL_SECONDS
+        return self._version_cache_value
 
     async def execute_json(
         self,
@@ -553,9 +855,7 @@ class BullpenRuntimeBroker:
     ) -> BullpenRawCommandResult:
         category, is_write, requires_auth = _parse_command_category(args)
         sanitized_args = _sanitize_command_args(args, is_write=is_write)
-        observed_credential = _stat_credential_artifact(_runtime_config())
-        auth_refresh_attempted = False
-        try:
+        if not requires_auth:
             return await self._execute_process(
                 sanitized_args,
                 timeout_seconds=timeout_seconds,
@@ -564,54 +864,97 @@ class BullpenRuntimeBroker:
                 requires_auth=requires_auth,
                 extra_env=extra_env,
             )
+
+        async with self._lock.acquire(
+            _AUTHENTICATED_CLI_LOCK_KEY,
+            ttl=_AUTHENTICATED_CLI_LOCK_TTL_SECONDS,
+            timeout=_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS,
+            renew_interval=_LOCK_RENEW_INTERVAL_SECONDS,
+        ) as lease:
+            result = await self._execute_raw_under_lock(
+                sanitized_args,
+                timeout_seconds=timeout_seconds,
+                command_category=category,
+                is_write=is_write,
+                requires_auth=requires_auth,
+                extra_env=extra_env,
+                retry_auth_once=retry_auth_once,
+                lock_key=lease.lock_key,
+                lock_wait_ms=lease.wait_duration_seconds * 1000,
+            )
+        result.diagnostics.lock_hold_ms = (
+            lease.hold_duration_seconds * 1000
+            if lease.hold_duration_seconds is not None
+            else result.diagnostics.lock_hold_ms
+        )
+        return result
+
+    async def _execute_raw_under_lock(
+        self,
+        args: list[str],
+        *,
+        timeout_seconds: int,
+        command_category: str,
+        is_write: bool,
+        requires_auth: bool,
+        extra_env: dict[str, str] | None,
+        retry_auth_once: bool,
+        lock_key: str | None,
+        lock_wait_ms: float | None,
+    ) -> BullpenRawCommandResult:
+        initial_credential = _stat_credential_artifact(_runtime_config())
+        try:
+            return await self._execute_process(
+                args,
+                timeout_seconds=timeout_seconds,
+                command_category=command_category,
+                is_write=is_write,
+                requires_auth=requires_auth,
+                extra_env=extra_env,
+                lock_key=lock_key,
+                lock_wait_ms=lock_wait_ms,
+            )
         except BullpenRuntimeCommandError as exc:
             if not (retry_auth_once and requires_auth and not is_write):
                 raise
             if exc.classification != "auth_rejected":
                 raise
 
-            async with self._lock.acquire(
-                f"{_REDIS_PREFIX}:auth-refresh",
-                ttl=_AUTH_LOCK_TTL_SECONDS,
-                timeout=_AUTH_LOCK_TIMEOUT_SECONDS,
-            ) as lease:
-                auth_cache_key = f"{_REDIS_PREFIX}:auth:ready"
-                current_credential = _stat_credential_artifact(_runtime_config())
-                auth_ready_cached = await self._redis.get(auth_cache_key)
-                if (
-                    observed_credential.inode == current_credential.inode
-                    and observed_credential.mtime == current_credential.mtime
-                    and not auth_ready_cached
-                ):
-                    auth_refresh_attempted = True
-                    await self._refresh_auth_under_lock(
-                        cache_key=auth_cache_key,
-                        lease_lock_key=lease.lock_key,
-                        lease_wait_ms=lease.wait_duration_seconds * 1000,
-                    )
+            auth_cache_key = f"{_REDIS_PREFIX}:auth:ready"
+            await self._delete_auth_ready_cache(auth_cache_key)
+            current_credential = _stat_credential_artifact(_runtime_config())
+            if not _credential_artifact_matches(initial_credential, current_credential):
+                logger.info(
+                    "Bullpen credential artifact changed before auth refresh retry",
+                    extra={
+                        "before": initial_credential.model_dump(mode="json"),
+                        "after": current_credential.model_dump(mode="json"),
+                    },
+                )
 
-                try:
-                    retry_result = await self._execute_process(
-                        sanitized_args,
-                        timeout_seconds=timeout_seconds,
-                        command_category=category,
-                        is_write=is_write,
-                        requires_auth=requires_auth,
-                        extra_env=extra_env,
-                        auth_refresh_attempted=auth_refresh_attempted,
-                        lock_key=lease.lock_key,
-                        lock_wait_ms=lease.wait_duration_seconds * 1000,
-                    )
-                except BullpenRuntimeCommandError as retry_exc:
-                    retry_exc.classification = retry_exc.classification or "auth_rejected"
-                    raise retry_exc from exc
-
-            retry_result.diagnostics.lock_hold_ms = (
-                lease.hold_duration_seconds * 1000
-                if lease.hold_duration_seconds is not None
-                else retry_result.diagnostics.lock_hold_ms
+            await self._refresh_auth_under_lock(
+                cache_key=auth_cache_key,
+                current_credential=current_credential,
+                lease_lock_key=lock_key,
+                lease_wait_ms=lock_wait_ms,
             )
-            return retry_result
+            try:
+                return await self._execute_process(
+                    args,
+                    timeout_seconds=timeout_seconds,
+                    command_category=command_category,
+                    is_write=is_write,
+                    requires_auth=requires_auth,
+                    extra_env=extra_env,
+                    auth_refresh_attempted=True,
+                    lock_key=lock_key,
+                    lock_wait_ms=lock_wait_ms,
+                )
+            except BullpenRuntimeCommandError as retry_exc:
+                retry_exc.classification = (
+                    retry_exc.classification or exc.classification or "auth_rejected"
+                )
+                raise retry_exc from exc
 
     async def get_positions_snapshot(
         self,
@@ -680,17 +1023,45 @@ class BullpenRuntimeBroker:
                     cached.diagnostics.cache_status = "hit"
                     return cached
 
-                auth_checked_at = await self.ensure_auth_ready(force_refresh=False)
-                result = await self.execute_raw(
-                    ["polymarket", "positions", "--output", "json"],
-                    timeout_seconds=timeout_seconds,
-                    retry_auth_once=True,
-                )
-                payload = json.loads(result.stdout)
+                async with self._lock.acquire(
+                    _AUTHENTICATED_CLI_LOCK_KEY,
+                    ttl=_AUTHENTICATED_CLI_LOCK_TTL_SECONDS,
+                    timeout=_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS,
+                    renew_interval=_LOCK_RENEW_INTERVAL_SECONDS,
+                ) as auth_lease:
+                    auth_checked_at = await self.ensure_auth_ready_under_lock(
+                        force_refresh=False,
+                        cache_key=f"{_REDIS_PREFIX}:auth:ready",
+                        lock_key=auth_lease.lock_key,
+                        lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
+                    )
+                    result = await self._execute_raw_under_lock(
+                        ["polymarket", "positions", "--output", "json"],
+                        timeout_seconds=timeout_seconds,
+                        command_category="positions",
+                        is_write=False,
+                        requires_auth=True,
+                        extra_env=None,
+                        retry_auth_once=True,
+                        lock_key=auth_lease.lock_key,
+                        lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
+                    )
+                try:
+                    payload = json.loads(result.stdout)
+                except json.JSONDecodeError as exc:
+                    raise BullpenRuntimeCommandError(
+                        "Bullpen positions returned invalid JSON.",
+                        classification="json_parse_error",
+                        stdout=result.stdout,
+                        stderr=result.stderr,
+                        exit_code=result.exit_code,
+                        signal=result.signal,
+                    ) from exc
                 snapshot = BullpenPositionsSnapshot(
                     payload=payload,
                     fetched_at=_utc_now_iso(),
-                    cli_version=await self.cli_version(),
+                    cli_version=result.diagnostics.bullpen_version
+                    or self._version_cache_value,
                     credential_artifact=result.diagnostics.credential_artifact,
                     auth_checked_at=auth_checked_at,
                     source="live-cli",
@@ -699,8 +1070,6 @@ class BullpenRuntimeBroker:
                         update={
                             "command_category": "positions",
                             "cache_status": "miss",
-                            "lock_key": lease.lock_key,
-                            "lock_wait_ms": lease.wait_duration_seconds * 1000,
                         }
                     ),
                 )
@@ -787,6 +1156,12 @@ class BullpenRuntimeBroker:
             )
         except FileNotFoundError as exc:
             diagnostics.error_classification = "missing_runtime"
+            self._record_failure(
+                command_category=command_category,
+                classification="missing_runtime",
+                message=f"Bullpen CLI executable was not found: `{config.bullpen_bin}`.",
+                diagnostics=diagnostics,
+            )
             self._log_runtime_event(diagnostics, success=False)
             raise BullpenRuntimeCommandError(
                 f"Bullpen CLI executable was not found: `{config.bullpen_bin}`.",
@@ -802,6 +1177,12 @@ class BullpenRuntimeBroker:
             await process.communicate()
             diagnostics.error_classification = "timeout"
             diagnostics.lock_hold_ms = (monotonic() - started_at) * 1000
+            self._record_failure(
+                command_category=command_category,
+                classification="timeout",
+                message=f"Bullpen command timed out after {timeout_seconds}s.",
+                diagnostics=diagnostics,
+            )
             self._log_runtime_event(diagnostics, success=False)
             raise BullpenRuntimeCommandError(
                 f"Bullpen command timed out after {timeout_seconds}s.",
@@ -810,10 +1191,6 @@ class BullpenRuntimeBroker:
 
         stdout_text = stdout.decode("utf-8", errors="replace").strip()
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
-        if command_category != "version":
-            diagnostics.bullpen_version = (
-                diagnostics.bullpen_version or await self.cli_version()
-            )
         if diagnostics.lock_key is not None:
             diagnostics.lock_hold_ms = (monotonic() - started_at) * 1000
 
@@ -825,6 +1202,12 @@ class BullpenRuntimeBroker:
             )
             classification = _classify_runtime_error(message)
             diagnostics.error_classification = classification
+            self._record_failure(
+                command_category=command_category,
+                classification=classification,
+                message=message,
+                diagnostics=diagnostics,
+            )
             self._log_runtime_event(diagnostics, success=False)
             raise BullpenRuntimeCommandError(
                 message,
@@ -835,6 +1218,21 @@ class BullpenRuntimeBroker:
                 signal=process.returncode if process.returncode < 0 else None,
             )
 
+        if command_category == "version":
+            version = redact_secrets(stdout_text or stderr_text)
+            self._version_cache_value = version or None
+            self._version_cache_expires_at = monotonic() + _CLI_VERSION_TTL_SECONDS
+            diagnostics.bullpen_version = self._version_cache_value
+        else:
+            diagnostics.bullpen_version = self._version_cache_value
+
+        self._update_cached_health(
+            ok=True,
+            message=f"Bullpen command `{command_category}` completed.",
+            command_category=command_category,
+            error_classification=None,
+            diagnostics=diagnostics,
+        )
         self._log_runtime_event(diagnostics, success=True)
         return BullpenRawCommandResult(
             stdout=stdout_text,
@@ -848,6 +1246,7 @@ class BullpenRuntimeBroker:
         self,
         *,
         cache_key: str,
+        current_credential: BullpenCredentialArtifact,
         lease_lock_key: str | None,
         lease_wait_ms: float | None,
     ) -> str:
@@ -864,28 +1263,44 @@ class BullpenRuntimeBroker:
         try:
             payload = json.loads(result.stdout or "{}")
         except json.JSONDecodeError as exc:
-            raise BullpenRuntimeCommandError(
+            error = BullpenRuntimeCommandError(
                 "Bullpen auth refresh returned invalid JSON.",
                 classification="json_parse_error",
                 stdout=result.stdout,
                 stderr=result.stderr,
                 exit_code=result.exit_code,
                 signal=result.signal,
-            ) from exc
-
-        failure = _looks_like_auth_refresh_failure(payload)
-        if failure:
-            raise BullpenRuntimeCommandError(
-                failure,
-                classification="auth_rejected",
-                stdout=result.stdout,
-                stderr=result.stderr,
-                exit_code=result.exit_code,
-                signal=result.signal,
             )
+            self._record_failure(
+                command_category="doctor-auth-refresh",
+                classification=error.classification,
+                message=str(error),
+                diagnostics=result.diagnostics,
+            )
+            raise error from exc
 
-        checked_at = _extract_auth_ready_timestamp(payload) or _utc_now_iso()
-        await self._redis.set(cache_key, checked_at, ex=_AUTH_READY_TTL_SECONDS)
+        try:
+            checked_at = _validate_auth_refresh_payload(payload)
+        except BullpenRuntimeCommandError as exc:
+            self._record_failure(
+                command_category="doctor-auth-refresh",
+                classification=exc.classification,
+                message=str(exc),
+                diagnostics=result.diagnostics,
+            )
+            raise
+
+        final_credential = _stat_credential_artifact(_runtime_config())
+        await self._write_auth_ready_cache(
+            cache_key=cache_key,
+            checked_at=checked_at,
+            credential_artifact=(
+                final_credential
+                if final_credential.path is not None
+                else current_credential
+            ),
+        )
+        self._last_auth_checked_at = checked_at
         return checked_at
 
     async def _read_positions_snapshot(

@@ -4,9 +4,16 @@ Cred-X now exposes:
 
 - `GET /api/bullpen-ai/health`
 - `GET /api/bullpen-ai/positions`
+- `GET /polymarket/runtime/diagnostics`
 - `scripts/bullpen-healthcheck.ts`
 
 The healthcheck script reads the live Bullpen wallet snapshot, retries Bullpen redeem/claim whenever resolved positions still have verified positive payouts, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
+
+As of Sunday, July 19, 2026, ordinary runtime health polling is passive:
+`GET /api/bullpen-ai/health` and the frontend positions polling path must read
+cached broker/runtime metadata only and must not spawn Bullpen CLI subprocesses.
+Use `GET /polymarket/runtime/diagnostics` only for explicit operator-triggered
+active doctor/preflight checks.
 
 ## Required env
 
