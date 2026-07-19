@@ -30,6 +30,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
     candidate_returns_per_day,
+    llm_returns_per_day,
     console_market_filter_reasons,
     next_console_schedule_time,
     position_returns_per_day,
@@ -794,6 +795,17 @@ def test_candidate_returns_per_day_accepts_naive_close_time():
     )
 
     assert returns == 5.0
+
+
+def test_llm_returns_per_day_uses_strongest_llm_side_with_naive_close_time():
+    returns = llm_returns_per_day(
+        llm_yes_odds=5,
+        llm_no_odds=95,
+        close_time="2026-06-25T00:00:00",
+        now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
+    )
+
+    assert returns == 23.75
 
 
 def test_position_returns_per_day_accepts_naive_close_time():

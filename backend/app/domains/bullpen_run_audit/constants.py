@@ -57,6 +57,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "label": "Candidate returns per day",
     },
     {
+        "algorithm_key": "llm_returns_per_day",
+        "stage": "stage-2",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.console_profile",
+        "source_function": "llm_returns_per_day",
+        "label": "LLM returns per day",
+    },
+    {
         "algorithm_key": "position_returns_per_day",
         "stage": "stage-3",
         "algorithm_version": "v1",

@@ -1032,8 +1032,6 @@ export function getBullpenReturnsPerDayBreakdown({
   "yesOdds" | "noOdds" | "llmYesOdds" | "llmNoOdds" | "daysUntilClose"
 >): BullpenReturnsPerDayBreakdown {
   if (
-    yesOdds === null ||
-    noOdds === null ||
     llmYesOdds === null ||
     llmNoOdds === null ||
     daysUntilClose === null ||

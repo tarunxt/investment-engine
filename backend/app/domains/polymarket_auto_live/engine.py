@@ -58,6 +58,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     ConsoleScanResult,
     apply_scanned_market_to_position,
     candidate_returns_per_day,
+    llm_returns_per_day,
     console_market_filter_reasons,
     next_console_schedule_time,
     next_custom_console_schedule_time,
@@ -5754,6 +5755,12 @@ class BullpenAutoLiveEngine:
                         selected_manual_candidate_id_set
                     )
                     fair_no = llm_consensus.fair_no_probability_pct
+                    returns_per_day = llm_returns_per_day(
+                        llm_yes_odds=llm_consensus.fair_yes_probability_pct,
+                        llm_no_odds=fair_no,
+                        close_time=market.close_time,
+                        now=now,
+                    )
                     selected_side, strongest_llm_odds = _stronger_probability_side(
                         yes_probability=llm_consensus.fair_yes_probability_pct,
                         no_probability=fair_no,

@@ -869,6 +869,32 @@ def position_returns_per_day(
     return round((100 - position.current_price_cents) / days_until_close, 2)
 
 
+def llm_returns_per_day(
+    *,
+    llm_yes_odds: float | None,
+    llm_no_odds: float | None,
+    close_time: str | None,
+    now: datetime,
+) -> float | None:
+    if llm_yes_odds is None and llm_no_odds is None:
+        return None
+    if not close_time:
+        return None
+    parsed_close_time = _parse_close_time_utc(close_time)
+    if parsed_close_time is None:
+        return None
+    days_until_close = round((parsed_close_time - now).total_seconds() / 86_400, 1)
+    if days_until_close <= 0:
+        return None
+    strongest_llm_odds = max(
+        llm_yes_odds if llm_yes_odds is not None else float("-inf"),
+        llm_no_odds if llm_no_odds is not None else float("-inf"),
+    )
+    if strongest_llm_odds == float("-inf"):
+        return None
+    return round(strongest_llm_odds / days_until_close, 2)
+
+
 def candidate_returns_per_day(
     market: ScannedMarket,
     *,

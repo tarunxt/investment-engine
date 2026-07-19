@@ -320,6 +320,7 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert keys >= {
         "stage2_consensus_statistics",
         "candidate_returns_per_day",
+        "llm_returns_per_day",
         "position_returns_per_day",
         "stage3_rank_and_selection",
         "order_funnel_aggregation",
