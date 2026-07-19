@@ -797,17 +797,17 @@ def test_candidate_returns_per_day_accepts_naive_close_time():
     assert returns == 20.0
 
 
-def test_llm_returns_per_day_uses_strongest_current_side_with_naive_close_time():
+def test_llm_returns_per_day_uses_current_side_matching_strongest_llm_odds_with_naive_close_time():
     returns = llm_returns_per_day(
         llm_yes_odds=5,
         llm_no_odds=95,
         close_time="2026-06-25T00:00:00",
         now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
-        current_yes_odds=10.5,
-        current_no_odds=89.5,
+        current_yes_odds=75.5,
+        current_no_odds=24.5,
     )
 
-    assert returns == 22.38
+    assert returns == 6.12
 
 
 def test_position_returns_per_day_accepts_naive_close_time():
