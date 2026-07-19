@@ -70,11 +70,11 @@ fi
 
 default_service_prefix() {
   if [[ "$APP_ROOT" == "$LEGACY_APP_ROOT" || "$APP_USER" == "$LEGACY_APP_USER" ]]; then
-    printf 'investor\n'
+    printf 'investment-engine\n'
     return
   fi
 
-  printf 'investment-engine\n'
+  printf 'investor\n'
 }
 
 alternate_service_prefix() {
@@ -285,30 +285,43 @@ validate_canonical_bullpen_backend_env() {
     source '$BACKEND_ENV_FILE'
     set +a
 
-    require_exact_setting() {
+    require_effective_setting() {
       local name=\"\$1\"
-      local expected=\"\$2\"
-      local actual=\"\${!name:-}\"
+      local actual=\"\$2\"
+      local expected=\"\$3\"
 
       if [[ \"\$actual\" != \"\$expected\" ]]; then
-        echo \"\$name must equal \$expected in $BACKEND_ENV_FILE. Found '\${actual:-<unset>}'\" >&2
+        echo \"\$name must resolve to \$expected for the backend runtime. Found '\${actual:-<unset>}'\" >&2
         exit 1
       fi
     }
 
-    require_exact_setting HOME '$CANONICAL_BULLPEN_HOME'
-    require_exact_setting BULLPEN_BIN '$CANONICAL_BULLPEN_BIN'
-    require_exact_setting BULLPEN_HOME '$CANONICAL_BULLPEN_STORE'
-    require_exact_setting BULLPEN_CONFIG '$CANONICAL_BULLPEN_CONFIG'
-    require_exact_setting BULLPEN_ENV '$CANONICAL_BULLPEN_ENV'
+    resolved_home=\"\${HOME:-$CANONICAL_BULLPEN_HOME}\"
+    resolved_bullpen_bin=\"\${BULLPEN_BIN:-$CANONICAL_BULLPEN_BIN}\"
+    resolved_bullpen_home=\"\${BULLPEN_HOME:-\${BULLPEN_CREDENTIALS_HOME:-$CANONICAL_BULLPEN_STORE}}\"
+    resolved_bullpen_config=\"\${BULLPEN_CONFIG:-$CANONICAL_BULLPEN_CONFIG}\"
+    resolved_bullpen_env=\"\${BULLPEN_ENV:-$CANONICAL_BULLPEN_ENV}\"
+    resolved_bullpen_credentials_home=\"\${BULLPEN_CREDENTIALS_HOME:-\$resolved_bullpen_home}\"
 
-    if [[ -n \"\${BULLPEN_CREDENTIALS_HOME:-}\" ]] && [[ \"\${BULLPEN_CREDENTIALS_HOME:-}\" != '$CANONICAL_BULLPEN_STORE' ]]; then
-      echo \"BULLPEN_CREDENTIALS_HOME must equal $CANONICAL_BULLPEN_STORE when set. Found '\${BULLPEN_CREDENTIALS_HOME:-<unset>}'\" >&2
-      exit 1
-    fi
+    require_effective_setting HOME \"\$resolved_home\" '$CANONICAL_BULLPEN_HOME'
+    require_effective_setting BULLPEN_BIN \"\$resolved_bullpen_bin\" '$CANONICAL_BULLPEN_BIN'
+    require_effective_setting BULLPEN_HOME \"\$resolved_bullpen_home\" '$CANONICAL_BULLPEN_STORE'
+    require_effective_setting BULLPEN_CONFIG \"\$resolved_bullpen_config\" '$CANONICAL_BULLPEN_CONFIG'
+    require_effective_setting BULLPEN_ENV \"\$resolved_bullpen_env\" '$CANONICAL_BULLPEN_ENV'
+    require_effective_setting BULLPEN_CREDENTIALS_HOME \"\$resolved_bullpen_credentials_home\" '$CANONICAL_BULLPEN_STORE'
 
     if [[ \"$(id -un)\" != '$CANONICAL_BULLPEN_RUNTIME_OWNER' ]]; then
       echo \"Deploy validations must run as $CANONICAL_BULLPEN_RUNTIME_OWNER to match the canonical Bullpen credential owner. Current user: $(id -un)\" >&2
+      exit 1
+    fi
+
+    if [[ ! -x \"\$resolved_bullpen_bin\" ]]; then
+      echo \"Bullpen binary is missing or not executable at \$resolved_bullpen_bin\" >&2
+      exit 1
+    fi
+
+    if [[ ! -d \"\$resolved_bullpen_home\" ]]; then
+      echo \"Bullpen credential store is missing at \$resolved_bullpen_home\" >&2
       exit 1
     fi
   "

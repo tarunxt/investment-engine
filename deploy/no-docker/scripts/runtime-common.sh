@@ -48,11 +48,11 @@ default_service_prefix() {
   local app_user="$2"
 
   if [[ "$app_root" == "$LEGACY_APP_ROOT" || "$app_user" == "$LEGACY_APP_USER" ]]; then
-    printf 'investor\n'
+    printf 'investment-engine\n'
     return
   fi
 
-  printf 'investment-engine\n'
+  printf 'investor\n'
 }
 
 alternate_service_prefix() {
