@@ -220,6 +220,19 @@ reviewed rows, skipped rows, completeness, and any stored blocker summary/fix
 used to explain why the full universe could not be reviewed and what should be
 done next.
 
+Stage 2 candidate reviews and persisted `stage2_context` now also preserve the
+exact Gamma child-market rule provenance used by the Stage 3 buy gate:
+
+* matched Gamma market ID
+* match method: `condition_id`, `market_id`, or slug fallback
+* `exact_gamma_market_verified`
+* authoritative rule source field: `resolutionCriteria`, `resolution_criteria`,
+  `rules`, `description`, or `legacy_payload`
+* normalized rules text
+* YES-definition supporting sentence or clause
+* YES-definition extraction method and confidence
+* final rule gate result, including `bypassed_verified_binary_rules`
+
 Stage 2 LLM invocation counts now come only from persisted child provider/model
 executions. Wrapper task completion does not count as an LLM response, blank
 provider/model rows are treated as data-integrity failures, Stage 2 may end in
@@ -241,12 +254,18 @@ the transferred Stage 2 Top 10 queue independently from whether a concrete
 Stage 3 buy `order_plan` was later created. Concrete buy-order counts remain
 separately persisted through the Stage 3 order funnel fields so audits can
 distinguish queue handoff, blocker handling, and actual Bullpen write attempts.
+When persisted Step 2 queue counters are stale or incomplete, the rendered
+Stage 3 UI may reconcile them upward against persisted buy decision rows so a
+submitted Bullpen buy cannot still display `planned=0 / processed=0 /
+submitted=0`.
 For runs using the live legacy Step 3 executor, earlier sell/redeem settlement
 or failure status must no longer be recorded as a prerequisite blocker for
 creating or attempting a Step 2 buy plan. When a ranked buy cannot be placed,
 the persisted Stage 3 reason should describe the direct buy-side outcome such
 as slot guardrails, fresh-balance limits, or an immediate Bullpen insufficient-
-collateral rejection. Historical snapshots that already froze the legacy
+collateral rejection. Rules-specific blockers should distinguish unmatched exact
+Gamma child markets, authoritative-rule parsing failures, and verified-binary
+rule bypasses. Historical snapshots that already froze the legacy
 "wait for earlier sell/redeem settlement" blocker remain valid and must not be
 rewritten.
 

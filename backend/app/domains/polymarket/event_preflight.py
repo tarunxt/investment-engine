@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from html import unescape
 import json
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from app.core.logging import get_logger
 from app.domains.ai_providers.tools import web_search as web_search_tool
 from app.domains.ai_providers.web_metadata import dedupe_strings
 from app.domains.polymarket.stage2_models import (
@@ -18,7 +20,11 @@ from app.domains.polymarket.stage2_models import (
     Stage2FieldProvenance,
     Stage2MarketContext,
 )
-from app.domains.polymarket_auto_live.rules import evaluate_market_rules
+from app.domains.polymarket_auto_live.rules import (
+    contains_yes_resolution_language,
+    evaluate_market_rules,
+    normalize_resolution_text,
+)
 from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.runs.schemas import (
     PreparedPolymarketEventContext,
@@ -41,6 +47,7 @@ ET_ZONE = ZoneInfo("America/New_York")
 POLYMARKET_MARKET_CONTEXT_LABEL = (
     "Experimental AI-generated summary referencing Polymarket data."
 )
+logger = get_logger("app.domains.polymarket.event_preflight")
 
 FINANCE_HINTS = (
     "bitcoin",
@@ -98,6 +105,14 @@ STALE_FACT_RULES = (
         ),
     },
 )
+
+
+@dataclass
+class GammaMarketLookupResult:
+    record: dict[str, Any] | None = None
+    matched_gamma_market_id: str | None = None
+    match_method: str | None = None
+    exact_match_verified: bool = False
 
 
 def _to_array(value: object) -> list[object]:
@@ -249,8 +264,19 @@ def _read_outcome_odds(record: dict[str, Any]) -> tuple[float | None, float | No
     return yes_odds, no_odds
 
 
-def _extract_rules_text(record: dict[str, Any]) -> str | None:
-    return _normalize_text(_read_string(record, ["description", "rules"]))
+def _read_market_identifier(record: dict[str, Any]) -> str | None:
+    return _read_string(record, ["id", "marketId", "market_id"])
+
+
+def _extract_rules_text(record: dict[str, Any]) -> tuple[str | None, str | None]:
+    for field_name in ("resolutionCriteria", "resolution_criteria", "rules", "description"):
+        value = record.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        normalized = normalize_resolution_text(value)
+        if normalized:
+            return normalized, field_name
+    return None, None
 
 
 def _extract_resolution_source(record: dict[str, Any], rules_text: str | None) -> str | None:
@@ -369,15 +395,7 @@ def _fetch_event_market_context(market_url: str | None) -> str | None:
     return _extract_market_context_text(response.text)
 
 
-def _fetch_gamma_market(question: PolymarketEventQuestionPayload) -> dict[str, Any] | None:
-    params: list[tuple[str, str]] = []
-    if question.question_id.strip().isdigit():
-        params.append(("id", question.question_id.strip()))
-    if question.slug:
-        params.append(("slug", question.slug.strip()))
-    if not params:
-        return None
-
+def _fetch_gamma_market_records(params: list[tuple[str, str]]) -> list[dict[str, Any]]:
     response = httpx.get(
         POLYMARKET_GAMMA_MARKETS_URL,
         params=params,
@@ -388,37 +406,57 @@ def _fetch_gamma_market(question: PolymarketEventQuestionPayload) -> dict[str, A
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, list):
-        return None
+        return []
+    return [item for item in payload if isinstance(item, dict)]
 
-    requested_market_slug = _normalize_text(question.market_slug or question.slug)
-    requested_event_slug = _normalize_text(question.event_slug)
-    requested_market_url = _normalize_text(question.market_url)
-    requested_condition_id = _normalize_text(question.condition_id)
 
-    for item in payload:
-        if not isinstance(item, dict):
+def _fetch_gamma_market(question: PolymarketEventQuestionPayload) -> GammaMarketLookupResult:
+    requested_condition_id = _normalize_lookup_value(question.condition_id)
+    requested_market_ids = [
+        identifier
+        for identifier in (
+            _normalize_lookup_value(question.market_id),
+            _normalize_lookup_value(question.question_id),
+        )
+        if identifier
+    ]
+    requested_market_slug = _normalize_lookup_value(question.market_slug or question.slug)
+
+    query_plan: list[tuple[str, str, str]] = []
+    if requested_condition_id:
+        query_plan.append(("conditionId", requested_condition_id, "condition_id"))
+
+    seen_market_ids: set[str] = set()
+    for market_id in requested_market_ids:
+        if market_id in seen_market_ids:
             continue
-        item_id = _read_string(item, ["id"])
-        item_slug = _normalize_text(_canonical_market_slug(item))
-        item_event_slug = _normalize_text(_canonical_event_slug(item))
-        item_condition_id = _normalize_text(
-            _read_string(item, ["conditionId", "condition_id"])
-        )
-        item_market_url = _event_url(item_event_slug)
-        id_matches = item_id == question.question_id if question.question_id else False
-        market_slug_matches = bool(requested_market_slug and item_slug == requested_market_slug)
-        event_slug_matches = bool(requested_event_slug and item_event_slug == requested_event_slug)
-        condition_matches = bool(
-            requested_condition_id and item_condition_id == requested_condition_id
-        )
-        url_matches = bool(
-            requested_market_url
-            and item_market_url
-            and requested_market_url.rstrip("/") == item_market_url.rstrip("/")
-        )
-        if id_matches or market_slug_matches or event_slug_matches or condition_matches or url_matches:
-            return item
-    return None
+        seen_market_ids.add(market_id)
+        query_plan.append(("id", market_id, "market_id"))
+
+    if requested_market_slug:
+        query_plan.append(("slug", requested_market_slug, "slug"))
+
+    for param_name, requested_value, match_method in query_plan:
+        payload = _fetch_gamma_market_records([(param_name, requested_value)])
+        for item in payload:
+            if match_method == "condition_id":
+                candidate_value = _normalize_lookup_value(
+                    _read_string(item, ["conditionId", "condition_id"])
+                )
+            elif match_method == "market_id":
+                candidate_value = _normalize_lookup_value(_read_market_identifier(item))
+            else:
+                candidate_value = _normalize_lookup_value(_canonical_market_slug(item))
+            if candidate_value != requested_value:
+                continue
+            return GammaMarketLookupResult(
+                record=item,
+                matched_gamma_market_id=_read_market_identifier(item),
+                match_method=match_method,
+                exact_match_verified=True,
+            )
+
+    return GammaMarketLookupResult()
 
 
 def _parse_search_payload(raw: str) -> tuple[list[dict[str, str | None]], list[str]]:
@@ -931,13 +969,15 @@ def prepare_polymarket_event_context(
             or f"event-{index + 1}"
         )
         refreshed_question = question.question
+        refreshed_market_id = question.market_id or question.question_id
         refreshed_market_url = question.market_url
         refreshed_slug = question.slug
         refreshed_market_slug = question.market_slug or question.slug
         refreshed_event_slug = question.event_slug
         refreshed_yes_odds = question.current_yes_odds
         refreshed_no_odds = question.current_no_odds
-        refreshed_rules = question.polymarket_rules
+        refreshed_rules = normalize_resolution_text(question.polymarket_rules)
+        refreshed_rule_source_field = "legacy_payload" if refreshed_rules else None
         refreshed_market_context = question.polymarket_market_context
         refreshed_resolution_source = question.polymarket_resolution_source
         refreshed_condition_id = question.condition_id
@@ -966,12 +1006,14 @@ def prepare_polymarket_event_context(
             )
 
         try:
-            gamma_record = _fetch_gamma_market(question)
+            gamma_lookup = _fetch_gamma_market(question)
         except Exception as exc:
-            gamma_record = None
+            gamma_lookup = GammaMarketLookupResult()
             question_warnings.append(f"Polymarket Gamma refresh failed: {exc}")
+        gamma_record = gamma_lookup.record
 
         if gamma_record:
+            refreshed_market_id = _read_market_identifier(gamma_record) or refreshed_market_id
             refreshed_question = _read_string(
                 gamma_record,
                 ["question", "title", "name", "marketQuestion"],
@@ -993,7 +1035,7 @@ def prepare_polymarket_event_context(
             refreshed_slug = refreshed_market_slug or refreshed_slug
             refreshed_market_url = _event_url(refreshed_event_slug) or refreshed_market_url
             refreshed_yes_odds, refreshed_no_odds = _read_outcome_odds(gamma_record)
-            refreshed_rules = _extract_rules_text(gamma_record) or refreshed_rules
+            refreshed_rules, refreshed_rule_source_field = _extract_rules_text(gamma_record)
             refreshed_resolution_source = (
                 _extract_resolution_source(gamma_record, refreshed_rules)
                 or refreshed_resolution_source
@@ -1017,12 +1059,26 @@ def prepare_polymarket_event_context(
             note_provenance("question", source="gamma", validation_status="matched")
             note_provenance("canonical_market_slug", source="gamma", validation_status="matched")
             note_provenance("canonical_event_slug", source="gamma", validation_status="matched")
+            note_provenance("matched_gamma_market_id", source="gamma", validation_status="matched")
             note_provenance(
                 "canonical_market_url",
                 source="gamma",
                 validation_status="matched" if refreshed_market_url else "missing",
             )
-            note_provenance("exact_resolution_rules", source="gamma", validation_status="matched")
+            note_provenance(
+                "exact_resolution_rules",
+                source=(
+                    f"gamma.{refreshed_rule_source_field}"
+                    if refreshed_rule_source_field
+                    else "gamma"
+                ),
+                validation_status="matched" if refreshed_rules else "missing",
+                note=(
+                    None
+                    if refreshed_rules
+                    else "Exact Gamma child market matched, but direct rules fields were empty."
+                ),
+            )
             note_provenance("close_time", source="gamma", validation_status="matched")
             if refreshed_market_context:
                 note_provenance(
@@ -1031,9 +1087,13 @@ def prepare_polymarket_event_context(
                     validation_status="background_only",
                     note="Experimental AI-generated Polymarket summary is background context only.",
                 )
+            if not refreshed_rules:
+                question_warnings.append(
+                    "Exact Polymarket Gamma child market matched, but direct description/rules/resolutionCriteria fields were empty."
+                )
         else:
             question_warnings.append(
-                "No exact Polymarket Gamma record matched the requested market; kept the original scanner values."
+                "No exact Polymarket Gamma child market matched the saved condition ID / market ID / slug; kept the original scanner values but blocked Stage 3 from trusting unmatched rules."
             )
             note_provenance(
                 "canonical_market_url",
@@ -1041,9 +1101,15 @@ def prepare_polymarket_event_context(
                 validation_status="unresolved",
                 note="Gamma refresh did not return a verified market match.",
             )
+            note_provenance(
+                "exact_resolution_rules",
+                source="legacy_payload",
+                validation_status="unresolved",
+                note="Original scanner rules were kept only as a fallback because no exact Gamma child market was verified.",
+            )
 
         temp_market = ScannedMarket(
-            market_id=question.market_id or question.question_id,
+            market_id=refreshed_market_id,
             question=refreshed_question,
             market_url=refreshed_market_url,
             slug=refreshed_market_slug or refreshed_slug,
@@ -1063,12 +1129,65 @@ def prepare_polymarket_event_context(
                 "market_context": refreshed_market_context,
                 "resolution_source": refreshed_resolution_source,
                 "condition_id": refreshed_condition_id,
+                "matched_gamma_market_id": gamma_lookup.matched_gamma_market_id,
+                "gamma_match_method": gamma_lookup.match_method,
+                "exact_gamma_market_verified": gamma_lookup.exact_match_verified,
+                "authoritative_rule_source_field": refreshed_rule_source_field,
             },
         )
         refreshed_rule_evaluation = evaluate_market_rules(
             temp_market,
             now=now_utc,
             resolution_text=refreshed_rules,
+            exact_market_match_verified=gamma_lookup.exact_match_verified,
+        )
+        if not gamma_lookup.exact_match_verified:
+            refreshed_rule_evaluation.yes_definition = None
+            refreshed_rule_evaluation.ambiguous = True
+            refreshed_rule_evaluation.fail_reason = "Exact Gamma market match is unavailable."
+            refreshed_rule_evaluation.rule_gate_result = "blocked"
+        if refreshed_rule_evaluation.rule_gate_result == "bypassed_verified_binary_rules":
+            note_provenance(
+                "exact_yes_definition",
+                source="rules_parser",
+                validation_status="bypassed_verified_binary_rules",
+                note=(
+                    "Verified binary YES/NO rules safely bypassed the strict deterministic YES extractor."
+                ),
+            )
+        elif refreshed_rule_evaluation.yes_definition:
+            note_provenance(
+                "exact_yes_definition",
+                source="rules_parser",
+                validation_status="matched",
+                note=refreshed_rule_evaluation.yes_definition_extraction_method,
+            )
+        else:
+            note_provenance(
+                "exact_yes_definition",
+                source="rules_parser",
+                validation_status="blocked",
+                note=refreshed_rule_evaluation.fail_reason,
+            )
+        if (
+            not refreshed_rule_evaluation.yes_resolution_language_detected
+            and contains_yes_resolution_language(refreshed_rules)
+        ):
+            question_warnings.append(
+                "Rules mention YES resolution language, but no deterministic clause could be preserved."
+            )
+        logger.info(
+            "Polymarket rule gate question_id=%s market_id=%s condition_id=%s matched_gamma_market_id=%s match_method=%s rule_source_field=%s extraction_method=%s extraction_confidence=%s gate_result=%s normalized_rules=%s",
+            question.question_id,
+            refreshed_market_id,
+            refreshed_condition_id,
+            gamma_lookup.matched_gamma_market_id,
+            gamma_lookup.match_method,
+            refreshed_rule_source_field,
+            refreshed_rule_evaluation.yes_definition_extraction_method,
+            refreshed_rule_evaluation.yes_definition_extraction_confidence,
+            refreshed_rule_evaluation.rule_gate_result,
+            refreshed_rules,
         )
 
         search_results: list[dict[str, str | None]] = []
@@ -1151,7 +1270,7 @@ def prepare_polymarket_event_context(
             event_id=event_id,
             question_ref=question.question_ref,
             question_id=question.question_id,
-            market_id=question.market_id or question.question_id,
+            market_id=refreshed_market_id,
             condition_id=refreshed_condition_id,
             question=refreshed_question,
             canonical_market_url=refreshed_market_url,
@@ -1169,6 +1288,15 @@ def prepare_polymarket_event_context(
             liquidity_usd=refreshed_liquidity,
             exact_resolution_rules=refreshed_rules,
             exact_yes_definition=refreshed_rule_evaluation.yes_definition,
+            matched_gamma_market_id=gamma_lookup.matched_gamma_market_id,
+            gamma_match_method=gamma_lookup.match_method,
+            exact_gamma_market_verified=gamma_lookup.exact_match_verified,
+            authoritative_rule_source_field=refreshed_rule_source_field,
+            yes_definition_supporting_text=refreshed_rule_evaluation.yes_definition_supporting_text,
+            yes_definition_extraction_method=refreshed_rule_evaluation.yes_definition_extraction_method,
+            yes_definition_extraction_confidence=refreshed_rule_evaluation.yes_definition_extraction_confidence,
+            yes_resolution_language_detected=refreshed_rule_evaluation.yes_resolution_language_detected,
+            final_rule_gate_result=refreshed_rule_evaluation.rule_gate_result,
             resolution_source_description=refreshed_resolution_source,
             background_market_context=refreshed_market_context,
             background_context_warning=(
@@ -1206,10 +1334,12 @@ def prepare_polymarket_event_context(
                     "canonical_market_url",
                     "canonical_market_slug",
                     "canonical_event_slug",
+                    "matched_gamma_market_id",
                     "current_yes_odds",
                     "current_no_odds",
                     "close_time",
                     "exact_resolution_rules",
+                    "exact_yes_definition",
                     "resolution_source_description",
                 )
             },
@@ -1230,7 +1360,7 @@ def prepare_polymarket_event_context(
                     "slug": refreshed_market_slug or refreshed_slug,
                     "market_slug": refreshed_market_slug or refreshed_slug,
                     "event_slug": refreshed_event_slug,
-                    "market_id": question.market_id or question.question_id,
+                    "market_id": refreshed_market_id,
                     "condition_id": refreshed_condition_id,
                     "current_yes_odds": refreshed_yes_odds,
                     "current_no_odds": refreshed_no_odds,
@@ -1273,6 +1403,13 @@ def prepare_polymarket_event_context(
             ),
             "rule_quality_status": refreshed_rule_evaluation.rule_quality_status,
             "rule_fail_reason": refreshed_rule_evaluation.fail_reason,
+            "matched_gamma_market_id": gamma_lookup.matched_gamma_market_id,
+            "gamma_match_method": gamma_lookup.match_method,
+            "exact_gamma_market_verified": gamma_lookup.exact_match_verified,
+            "authoritative_rule_source_field": refreshed_rule_source_field,
+            "yes_definition_extraction_method": refreshed_rule_evaluation.yes_definition_extraction_method,
+            "yes_definition_extraction_confidence": refreshed_rule_evaluation.yes_definition_extraction_confidence,
+            "final_rule_gate_result": refreshed_rule_evaluation.rule_gate_result,
         }
 
     return PreparedPolymarketEventContext(

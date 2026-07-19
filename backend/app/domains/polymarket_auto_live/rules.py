@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html import unescape
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -12,13 +13,60 @@ from app.domains.polymarket_auto_live.scanner import ScannedMarket
 
 ET = ZoneInfo("America/New_York")
 
-YES_DEFINITION_PATTERN = re.compile(
-    r'resolve(?:s)?\s+to\s+"?yes"?\s+if\s+(?P<definition>.+?)(?:\.\s+otherwise|\.\s+if neither|\.\s+for the purposes|\.$)',
-    re.IGNORECASE | re.DOTALL,
+YES_TOKEN = r'["“”]?yes["“”]?'
+YES_RESOLUTION_TRAILING = (
+    rf'(?:will\s+be\s+resolved\s+as|(?:will\s+)?resolve(?:s|d)?(?:\s+to)?)\s+{YES_TOKEN}'
 )
-YES_DEFINITION_FALLBACK_PATTERN = re.compile(
-    r'\byes\b\s+(?:resolves|will resolve)\s+if\s+(?P<definition>.+?)(?:\.|$)',
-    re.IGNORECASE | re.DOTALL,
+OPTIONAL_MARKET_SUBJECT = r"(?:(?:this market|the market|market)\s+)?"
+YES_RESOLUTION_CONDITIONAL_PATTERNS: tuple[
+    tuple[str, Literal["high", "medium", "low", "none"], re.Pattern[str]],
+    ...,
+] = (
+    (
+        "pattern_resolves_to_yes_if",
+        "high",
+        re.compile(
+            rf"(?P<support>{OPTIONAL_MARKET_SUBJECT}(?:will\s+)?resolve(?:s|d)?\s+to\s+{YES_TOKEN}\s+"
+            rf"(?P<definition>(?:if|when)\s+.+?))(?=(?:[.;]|$))",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "pattern_resolves_yes_if",
+        "high",
+        re.compile(
+            rf"(?P<support>{OPTIONAL_MARKET_SUBJECT}(?:will\s+)?resolve(?:s|d)?\s+"
+            rf"{YES_TOKEN}\s+(?P<definition>(?:if|when)\s+.+?))(?=(?:[.;]|$))",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "pattern_resolved_as_yes_if",
+        "high",
+        re.compile(
+            rf"(?P<support>{OPTIONAL_MARKET_SUBJECT}will\s+be\s+resolved\s+as\s+"
+            rf"{YES_TOKEN}\s+(?P<definition>(?:if|when)\s+.+?))(?=(?:[.;]|$))",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "pattern_conditional_then_resolves_yes",
+        "medium",
+        re.compile(
+            rf"(?P<support>(?P<definition>(?:if|when)\s+.+?)\s*,\s*(?:then\s*)?"
+            rf"(?:this market|the market|market)\s+{YES_RESOLUTION_TRAILING})(?=(?:[.;]|$))",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "pattern_in_event_that_resolves_yes",
+        "medium",
+        re.compile(
+            rf"(?P<support>(?P<definition>in the event that\s+.+?)\s*,\s*(?:then\s*)?"
+            rf"(?:this market|the market|market)\s+{YES_RESOLUTION_TRAILING})(?=(?:[.;]|$))",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
 )
 DATE_WITH_OPTIONAL_TIME_PATTERN = re.compile(
     r"(?P<prefix>\bby\b|\bon\b|\bbefore\b|\bno later than\b)?\s*"
@@ -65,6 +113,20 @@ class RuleEvaluation:
     deadline_confidence: Literal["high", "medium", "low", "unresolved"] = "unresolved"
     current_time_utc: str | None = None
     warnings: list[str] = field(default_factory=list)
+    yes_definition_supporting_text: str | None = None
+    yes_definition_extraction_method: str | None = None
+    yes_definition_extraction_confidence: Literal["high", "medium", "low", "none"] = "none"
+    yes_resolution_language_detected: bool = False
+    rule_gate_result: Literal["passed", "blocked", "bypassed_verified_binary_rules"] = "blocked"
+
+
+@dataclass
+class YesDefinitionExtraction:
+    yes_definition: str | None
+    supporting_text: str | None
+    method: str | None
+    confidence: Literal["high", "medium", "low", "none"]
+    yes_resolution_language_detected: bool
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -93,17 +155,156 @@ def _normalize_text(value: str | None) -> str | None:
     return normalized or None
 
 
-def _extract_yes_definition(description: str | None) -> str | None:
-    if not description:
+def normalize_resolution_text(value: str | None) -> str | None:
+    if not value:
         return None
-    for pattern in (YES_DEFINITION_PATTERN, YES_DEFINITION_FALLBACK_PATTERN):
-        match = pattern.search(description)
-        if not match:
+    html_normalized = re.sub(
+        r"<br\s*/?>",
+        "\n",
+        value,
+        flags=re.IGNORECASE,
+    )
+    html_normalized = re.sub(r"</p\s*>", "\n", html_normalized, flags=re.IGNORECASE)
+    html_normalized = re.sub(r"<[^>]+>", " ", html_normalized)
+    normalized = unescape(html_normalized).replace("\xa0", " ")
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized or None
+
+
+def _split_resolution_sentences(description: str | None) -> list[str]:
+    normalized = normalize_resolution_text(description)
+    if not normalized:
+        return []
+    sentences = [
+        _normalize_text(sentence)
+        for sentence in re.split(r"(?<=[.!?;])\s+", normalized)
+    ]
+    return [sentence for sentence in sentences if sentence]
+
+
+def _sentence_contains_yes_resolution_language(sentence: str | None) -> bool:
+    if not sentence:
+        return False
+    has_yes = re.search(r"\byes\b", sentence, re.IGNORECASE)
+    has_resolve = re.search(
+        r"\b(?:resolve(?:s|d)?|resolved)\b",
+        sentence,
+        re.IGNORECASE,
+    )
+    has_conditional = re.search(
+        r"\b(?:if|when)\b|in the event that",
+        sentence,
+        re.IGNORECASE,
+    )
+    return bool(has_yes and has_resolve and has_conditional)
+
+
+def contains_yes_resolution_language(description: str | None) -> bool:
+    return any(
+        _sentence_contains_yes_resolution_language(sentence)
+        for sentence in _split_resolution_sentences(description)
+    )
+
+
+def _normalize_extracted_definition(value: str | None) -> str | None:
+    normalized = _normalize_text(value)
+    if not normalized:
+        return None
+    normalized = re.sub(r"^(?:if|when)\s+", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"^in the event that\s+",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = normalized.strip(" .,:;\"'“”")
+    return normalized or None
+
+
+def _extract_definition_from_sentence_fallback(sentence: str) -> str | None:
+    reverse_clause_match = re.search(
+        rf"(?P<definition>(?:if|when|in the event that)\s+.+?)\s*,\s*(?:then\s*)?"
+        rf"(?:this market|the market|market)\s+{YES_RESOLUTION_TRAILING}",
+        sentence,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if reverse_clause_match:
+        return _normalize_extracted_definition(reverse_clause_match.group("definition"))
+
+    direct_clause_match = re.search(
+        rf"(?:this market|the market|market)\s+{YES_RESOLUTION_TRAILING}\s+"
+        rf"(?P<definition>(?:if|when)\s+.+?)(?=(?:[.;]|$))",
+        sentence,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if direct_clause_match:
+        return _normalize_extracted_definition(direct_clause_match.group("definition"))
+
+    conditional_fragment_match = re.search(
+        r"(?P<definition>(?:if|when|in the event that)\s+.+)",
+        sentence,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if conditional_fragment_match:
+        return _normalize_extracted_definition(
+            conditional_fragment_match.group("definition")
+        )
+
+    return _normalize_extracted_definition(sentence)
+
+
+def _extract_yes_definition(description: str | None) -> YesDefinitionExtraction:
+    if not description:
+        return YesDefinitionExtraction(
+            yes_definition=None,
+            supporting_text=None,
+            method=None,
+            confidence="none",
+            yes_resolution_language_detected=False,
+        )
+
+    sentences = _split_resolution_sentences(description)
+    detected_yes_resolution_language = any(
+        _sentence_contains_yes_resolution_language(sentence)
+        for sentence in sentences
+    )
+
+    for sentence in sentences:
+        for method, confidence, pattern in YES_RESOLUTION_CONDITIONAL_PATTERNS:
+            match = pattern.search(sentence)
+            if not match:
+                continue
+            definition = _normalize_extracted_definition(match.group("definition"))
+            supporting_text = _normalize_text(match.group("support") or sentence)
+            if definition:
+                return YesDefinitionExtraction(
+                    yes_definition=definition,
+                    supporting_text=supporting_text,
+                    method=method,
+                    confidence=confidence,
+                    yes_resolution_language_detected=True,
+                )
+
+    for sentence in sentences:
+        if not _sentence_contains_yes_resolution_language(sentence):
             continue
-        definition = _normalize_text(match.group("definition"))
+        definition = _extract_definition_from_sentence_fallback(sentence)
         if definition:
-            return definition.rstrip(".")
-    return None
+            return YesDefinitionExtraction(
+                yes_definition=definition,
+                supporting_text=_normalize_text(sentence),
+                method="sentence_fallback",
+                confidence="low",
+                yes_resolution_language_detected=True,
+            )
+
+    return YesDefinitionExtraction(
+        yes_definition=None,
+        supporting_text=None,
+        method=None,
+        confidence="none",
+        yes_resolution_language_detected=detected_yes_resolution_language,
+    )
 
 
 def _detect_timezones(description: str | None) -> list[tuple[str, str]]:
@@ -264,9 +465,10 @@ def evaluate_market_rules(
     *,
     now: datetime | None = None,
     resolution_text: str | None = None,
+    exact_market_match_verified: bool = False,
 ) -> RuleEvaluation:
     now = now or datetime.now(UTC)
-    resolution_criteria = _normalize_text(resolution_text or market.description)
+    resolution_criteria = normalize_resolution_text(resolution_text or market.description)
     if not resolution_criteria:
         return RuleEvaluation(
             yes_definition=None,
@@ -280,9 +482,12 @@ def evaluate_market_rules(
             rule_quality_status="missing",
             deadline_confidence="unresolved",
             current_time_utc=now.isoformat(),
+            yes_definition_extraction_confidence="none",
+            rule_gate_result="blocked",
         )
 
-    yes_definition = _extract_yes_definition(resolution_criteria)
+    yes_extraction = _extract_yes_definition(resolution_criteria)
+    yes_definition = yes_extraction.yes_definition
     (
         deadline_utc_dt,
         timezone_name,
@@ -297,15 +502,25 @@ def evaluate_market_rules(
         market_close_time=market.close_time,
         now=now,
     )
+    outcomes_are_binary = (
+        {label.strip().lower() for label in market.outcome_labels} == {"yes", "no"}
+    )
+    bypass_verified_binary_rules = bool(
+        yes_extraction.method == "sentence_fallback"
+        and exact_market_match_verified
+        and resolution_criteria
+        and outcomes_are_binary
+        and deadline_confidence in {"high", "medium"}
+        and yes_extraction.yes_resolution_language_detected
+    )
+    if yes_extraction.method == "sentence_fallback" and not bypass_verified_binary_rules:
+        yes_definition = None
     hours_remaining = (
         round((deadline_utc_dt - now).total_seconds() / 3600, 2)
         if deadline_utc_dt is not None
         else None
     )
-    outcome_clear = bool(
-        yes_definition
-        and {label.strip().lower() for label in market.outcome_labels} == {"yes", "no"}
-    )
+    outcome_clear = bool(yes_definition and outcomes_are_binary)
     expired = bool(deadline_utc_dt and deadline_utc_dt <= now)
     rule_quality_status = _derive_rule_quality(
         resolution_criteria=resolution_criteria,
@@ -316,7 +531,20 @@ def evaluate_market_rules(
     ambiguous = not outcome_clear or rule_quality_status in {"missing", "contradictory"}
 
     fail_reason = None
-    if not yes_definition:
+    rule_gate_result: Literal["passed", "blocked", "bypassed_verified_binary_rules"] = "passed"
+    if bypass_verified_binary_rules:
+        ambiguous = False
+        warnings = [
+            *warnings,
+            "Verified binary-rule fallback accepted the authoritative YES sentence.",
+        ]
+        rule_gate_result = "bypassed_verified_binary_rules"
+    elif not yes_definition:
+        if yes_extraction.yes_resolution_language_detected:
+            warnings = [
+                *warnings,
+                "Detected YES-resolution language, but deterministic parsing could not verify the exact clause.",
+            ]
         fail_reason = "Exact YES resolution criteria are unavailable."
     elif deadline_utc_dt is None:
         fail_reason = "Deadline is unclear from the market rules."
@@ -326,6 +554,8 @@ def evaluate_market_rules(
         fail_reason = "Resolution rules are contradictory."
     elif ambiguous:
         fail_reason = "Market wording is too ambiguous."
+    if fail_reason:
+        rule_gate_result = "blocked"
 
     deadline_local = None
     if deadline_utc_dt is not None and timezone_iana:
@@ -355,4 +585,9 @@ def evaluate_market_rules(
         deadline_confidence=deadline_confidence,
         current_time_utc=now.isoformat(),
         warnings=warnings,
+        yes_definition_supporting_text=yes_extraction.supporting_text,
+        yes_definition_extraction_method=yes_extraction.method,
+        yes_definition_extraction_confidence=yes_extraction.confidence,
+        yes_resolution_language_detected=yes_extraction.yes_resolution_language_detected,
+        rule_gate_result=rule_gate_result,
     )

@@ -10,8 +10,11 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from app.domains.polymarket.event_preflight import (
+    GammaMarketLookupResult,
+    _fetch_gamma_market,
     build_polymarket_event_prompt_and_metadata,
     finalize_polymarket_event_runtime_metadata,
+    prepare_polymarket_event_context,
 )
 from app.domains.runs.schemas import PolymarketEventRunContext
 
@@ -66,16 +69,21 @@ class PolymarketEventPreflightTests(unittest.TestCase):
         fetch_event_market_context_mock,
         web_search_execute_mock,
     ):
-        fetch_gamma_market_mock.return_value = {
-            "id": "12345",
-            "slug": "acme-ipo",
-            "eventSlug": "acme-ipo",
-            "question": "Will Acme go public by December 31, 2026?",
-            "description": "Resolves YES if Acme starts trading on Nasdaq by Dec 31, 2026.",
-            "resolutionSource": "Nasdaq IPO calendar",
-            "outcomes": json.dumps(["Yes", "No"]),
-            "outcomePrices": json.dumps([0.35, 0.65]),
-        }
+        fetch_gamma_market_mock.return_value = GammaMarketLookupResult(
+            record={
+                "id": "12345",
+                "slug": "acme-ipo",
+                "eventSlug": "acme-ipo",
+                "question": "Will Acme go public by December 31, 2026?",
+                "description": "Resolves YES if Acme starts trading on Nasdaq by Dec 31, 2026.",
+                "resolutionSource": "Nasdaq IPO calendar",
+                "outcomes": json.dumps(["Yes", "No"]),
+                "outcomePrices": json.dumps([0.35, 0.65]),
+            },
+            matched_gamma_market_id="12345",
+            match_method="market_id",
+            exact_match_verified=True,
+        )
         fetch_event_market_context_mock.return_value = (
             "Experimental AI-generated summary referencing Polymarket data.\n"
             "Acme confirmed an IPO filing and is targeting a Nasdaq listing."
@@ -115,6 +123,11 @@ class PolymarketEventPreflightTests(unittest.TestCase):
             runtime_metadata["question_runtime"]["12345"]["internet_verified"],
             True,
         )
+        stage2_context = runtime_metadata["question_runtime"]["12345"]["stage2_context"]
+        self.assertEqual(stage2_context["matched_gamma_market_id"], "12345")
+        self.assertEqual(stage2_context["gamma_match_method"], "market_id")
+        self.assertEqual(stage2_context["authoritative_rule_source_field"], "description")
+        self.assertEqual(stage2_context["final_rule_gate_result"], "passed")
 
     def test_finalize_marks_stale_fact_without_requiring_model_side_search(self):
         context = _sample_context()
@@ -183,6 +196,145 @@ class PolymarketEventPreflightTests(unittest.TestCase):
         self.assertEqual(question_runtime["stale_fact_detected"], True)
         self.assertEqual(finalized["model_side_search_used"], False)
         self.assertEqual(finalized["stale_fact_detected"], True)
+
+    @patch("app.domains.polymarket.event_preflight.httpx.get")
+    def test_fetch_gamma_market_prefers_exact_condition_id_over_slug(self, httpx_get_mock):
+        class _Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return [
+                    {
+                        "id": "99999",
+                        "slug": "acme-ipo",
+                        "eventSlug": "acme-ipo",
+                        "conditionId": "condition-parent",
+                        "description": "Parent event text",
+                    },
+                    {
+                        "id": "12345",
+                        "slug": "acme-ipo-child",
+                        "eventSlug": "acme-ipo",
+                        "conditionId": "condition-child",
+                        "description": "Child market text",
+                    },
+                ]
+
+        httpx_get_mock.return_value = _Response()
+        question = _sample_context(require_fresh=False).question_payload[0].model_copy(
+            update={
+                "market_id": "12345",
+                "condition_id": "condition-child",
+                "slug": "acme-ipo",
+                "market_slug": "acme-ipo",
+            }
+        )
+
+        result = _fetch_gamma_market(question)
+
+        self.assertTrue(result.exact_match_verified)
+        self.assertEqual(result.match_method, "condition_id")
+        self.assertEqual(result.matched_gamma_market_id, "12345")
+        self.assertEqual(result.record["conditionId"], "condition-child")
+        self.assertEqual(
+            httpx_get_mock.call_args_list[0].kwargs["params"],
+            [("conditionId", "condition-child")],
+        )
+
+    @patch("app.domains.polymarket.event_preflight._fetch_event_market_context")
+    @patch("app.domains.polymarket.event_preflight._fetch_gamma_market")
+    def test_prepare_context_blocks_unmatched_gamma_rules_even_if_legacy_rules_parse(
+        self,
+        fetch_gamma_market_mock,
+        fetch_event_market_context_mock,
+    ):
+        fetch_gamma_market_mock.return_value = GammaMarketLookupResult()
+        fetch_event_market_context_mock.return_value = None
+
+        prepared = prepare_polymarket_event_context(_sample_context(require_fresh=False))
+
+        question_runtime = prepared.runtime_metadata["question_runtime"]["12345"]
+        stage2_context = question_runtime["stage2_context"]
+        self.assertEqual(
+            question_runtime["rule_fail_reason"],
+            "Exact Gamma market match is unavailable.",
+        )
+        self.assertEqual(stage2_context["final_rule_gate_result"], "blocked")
+        self.assertEqual(stage2_context["exact_gamma_market_verified"], False)
+        self.assertEqual(
+            stage2_context["authoritative_rule_source_field"],
+            "legacy_payload",
+        )
+        self.assertIsNone(stage2_context["exact_yes_definition"])
+
+    @patch("app.domains.polymarket.event_preflight._fetch_event_market_context")
+    @patch("app.domains.polymarket.event_preflight._fetch_gamma_market")
+    def test_prepare_context_marks_verified_binary_rule_bypass_for_exact_gamma_match(
+        self,
+        fetch_gamma_market_mock,
+        fetch_event_market_context_mock,
+    ):
+        fetch_gamma_market_mock.return_value = GammaMarketLookupResult(
+            record={
+                "id": "12345",
+                "slug": "iran-airspace-market",
+                "eventSlug": "iran-airspace-market",
+                "question": "Will Iran's airspace remain closed through July 20, 2026?",
+                "resolutionCriteria": (
+                    "According to Polymarket, this market resolves to Yes, if Iran's airspace "
+                    "remains closed through July 20, 2026, 11:59 PM ET."
+                ),
+                "outcomes": json.dumps(["Yes", "No"]),
+                "outcomePrices": json.dumps([0.89, 0.11]),
+                "conditionId": "condition-iran-airspace",
+                "endDate": "2026-07-21T03:59:00Z",
+            },
+            matched_gamma_market_id="12345",
+            match_method="condition_id",
+            exact_match_verified=True,
+        )
+        fetch_event_market_context_mock.return_value = None
+
+        prepared = prepare_polymarket_event_context(
+            _sample_context(require_fresh=False).model_copy(
+                update={
+                    "question_payload": [
+                        _sample_context(require_fresh=False).question_payload[0].model_copy(
+                            update={
+                                "question": "Will Iran's airspace remain closed through July 20, 2026?",
+                                "market_id": "12345",
+                                "condition_id": "condition-iran-airspace",
+                                "slug": "iran-airspace-market",
+                                "market_slug": "iran-airspace-market",
+                                "close_time": "2026-07-21T03:59:00Z",
+                                "closing_time": "2026-07-21T03:59:00Z",
+                            }
+                        )
+                    ]
+                }
+            )
+        )
+
+        stage2_context = prepared.runtime_metadata["question_runtime"]["12345"][
+            "stage2_context"
+        ]
+        self.assertEqual(
+            stage2_context["final_rule_gate_result"],
+            "bypassed_verified_binary_rules",
+        )
+        self.assertEqual(
+            stage2_context["yes_definition_extraction_method"],
+            "sentence_fallback",
+        )
+        self.assertEqual(
+            stage2_context["authoritative_rule_source_field"],
+            "resolutionCriteria",
+        )
+        self.assertEqual(
+            stage2_context["exact_yes_definition"],
+            "Iran's airspace remains closed through July 20, 2026, 11:59 PM ET",
+        )
 
 
 if __name__ == "__main__":

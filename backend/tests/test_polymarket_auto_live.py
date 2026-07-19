@@ -3038,6 +3038,9 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
     assert isinstance(execution_steps, list)
     assert execution_steps[0]["status"] == "completed"
     assert execution_steps[1]["status"] == "completed"
+    assert execution_steps[1]["planned_orders"] == 1
+    assert execution_steps[1]["processed_orders"] == 1
+    assert execution_steps[1]["submitted_orders"] == 1
     assert sell_limit_kwargs[0]["max_reprice_attempts"] == 2
 
     invest_stage = next(
@@ -5019,6 +5022,85 @@ def test_market_rules_extract_resolution_criteria_and_deadline():
     assert result.deadline_et == "2026-11-06 11:59:00 PM ET"
     assert result.hours_remaining is not None
     assert result.hours_remaining > 0
+
+
+@pytest.mark.parametrize(
+    ("description", "expected_method"),
+    [
+        (
+            'This market will resolve to "Yes" if Iran keeps its airspace closed through July 20, 2026, 11:59 PM ET.',
+            "pattern_resolves_to_yes_if",
+        ),
+        (
+            "This market resolves Yes if the Israel x Iran ceasefire continues through July 20, 2026, 11:59 PM ET.",
+            "pattern_resolves_yes_if",
+        ),
+        (
+            "This market will be resolved as Yes if Iran's airspace remains closed through July 20, 2026, 11:59 PM ET.",
+            "pattern_resolved_as_yes_if",
+        ),
+        (
+            "If Iran's airspace remains closed through July 20, 2026, 11:59 PM ET, this market resolves to Yes.",
+            "pattern_conditional_then_resolves_yes",
+        ),
+        (
+            "In the event that the Israel x Iran ceasefire continues through July 20, 2026, 11:59 PM ET, the market resolves to Yes.",
+            "pattern_in_event_that_resolves_yes",
+        ),
+    ],
+)
+def test_market_rules_support_common_yes_resolution_variants(
+    description,
+    expected_method,
+):
+    market = _market(
+        question="Will the rule parser accept this market by July 20?",
+        description=description,
+        close_time="2026-07-21T03:59:00+00:00",
+    )
+
+    result = evaluate_market_rules(
+        market,
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.fail_reason is None
+    assert result.rule_gate_result == "passed"
+    assert result.yes_definition_extraction_method == expected_method
+    assert result.yes_definition == (
+        "Iran keeps its airspace closed through July 20, 2026, 11:59 PM ET"
+        if "keeps its airspace closed" in description
+        else "the Israel x Iran ceasefire continues through July 20, 2026, 11:59 PM ET"
+        if "ceasefire" in description
+        else "Iran's airspace remains closed through July 20, 2026, 11:59 PM ET"
+    )
+
+
+def test_market_rules_verified_binary_sentence_fallback_unblocks_variant_wording():
+    market = _market(
+        question="Will Iran's airspace remain closed through July 20?",
+        description=(
+            "According to Polymarket, this market resolves to Yes, if Iran's airspace "
+            "remains closed through July 20, 2026, 11:59 PM ET."
+        ),
+        close_time="2026-07-21T03:59:00+00:00",
+    )
+
+    result = evaluate_market_rules(
+        market,
+        now=datetime(2026, 7, 19, 12, 0, tzinfo=UTC),
+        exact_market_match_verified=True,
+    )
+
+    assert result.fail_reason is None
+    assert result.rule_gate_result == "bypassed_verified_binary_rules"
+    assert result.yes_definition_extraction_method == "sentence_fallback"
+    assert result.yes_definition == (
+        "Iran's airspace remains closed through July 20, 2026, 11:59 PM ET"
+    )
+    assert result.yes_definition_supporting_text == (
+        "According to Polymarket, this market resolves to Yes, if Iran's airspace remains closed through July 20, 2026, 11:59 PM ET."
+    )
 
 
 def test_market_rules_prioritize_selected_question_deadline_over_background_rule_dates():

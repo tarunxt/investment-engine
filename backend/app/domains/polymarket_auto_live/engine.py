@@ -691,6 +691,124 @@ def _build_console_stage_two_question_payload(
     )
 
 
+def _read_stage2_context_value(
+    prepared_question_payload: PolymarketEventQuestionPayload | None,
+    question_runtime: dict[str, Any] | None,
+    key: str,
+) -> Any:
+    if (
+        isinstance(prepared_question_payload, PolymarketEventQuestionPayload)
+        and prepared_question_payload.stage2_context is not None
+    ):
+        value = getattr(prepared_question_payload.stage2_context, key, None)
+        if value is not None:
+            return value
+    if isinstance(question_runtime, dict):
+        stage2_context = question_runtime.get("stage2_context")
+        if isinstance(stage2_context, dict):
+            return stage2_context.get(key)
+    return None
+
+
+def _build_rule_gate_blocker_reason(
+    *,
+    rules: RuleEvaluation,
+    prepared_question_payload: PolymarketEventQuestionPayload | None = None,
+    question_runtime: dict[str, Any] | None = None,
+) -> str:
+    exact_gamma_market_verified = bool(
+        _read_stage2_context_value(
+            prepared_question_payload,
+            question_runtime,
+            "exact_gamma_market_verified",
+        )
+    )
+    rule_source_field = _read_stage2_context_value(
+        prepared_question_payload,
+        question_runtime,
+        "authoritative_rule_source_field",
+    )
+    extraction_method = (
+        rules.yes_definition_extraction_method
+        or _read_stage2_context_value(
+            prepared_question_payload,
+            question_runtime,
+            "yes_definition_extraction_method",
+        )
+        or "unknown parser path"
+    )
+    source_label = rule_source_field or "description / rules / resolutionCriteria"
+
+    if not exact_gamma_market_verified:
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because no exact Gamma child market matched the saved condition ID / market ID / slug, so the run refused to trust parent-event rules. "
+            "Fix: refresh the Polymarket mapping so Stage 2 stores the correct child-market condition ID, market ID, or slug."
+        )
+    if not rules.resolution_criteria:
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because the exact Gamma child market did not expose authoritative rules in description, rules, or resolutionCriteria. "
+            "Fix: refresh the exact child market payload so Stage 2 can persist the direct resolution rules."
+        )
+    if rules.fail_reason == "Exact YES resolution criteria are unavailable.":
+        if rules.yes_definition_extraction_method == "sentence_fallback":
+            return (
+                "LLM consensus completed, but Stage 3 did not plan this market because only the bounded sentence fallback found YES-resolution language in the exact Gamma child market rules and the remaining safety checks did not allow a bypass. "
+                "Fix: store the direct YES-resolution sentence and a reliable deadline on the exact child market rules."
+            )
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because the exact Gamma child market rules from "
+            f"{source_label} could not be parsed into a deterministic YES clause using {extraction_method}. "
+            "Fix: keep the exact child-market YES-resolution sentence in the saved rules or extend the parser for this wording."
+        )
+    if rules.fail_reason == "Deadline is unclear from the market rules.":
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because the exact Gamma child market rules did not expose a reliable deadline. "
+            "Fix: persist the child-market deadline or close date explicitly so the rules gate can verify time remaining."
+        )
+    if rules.fail_reason == "Market is already expired.":
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because the exact Gamma child market is already expired. "
+            "Fix: remove the stale market from the invest queue or refresh the current market snapshot."
+        )
+    if rules.fail_reason == "Resolution rules are contradictory.":
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because the exact Gamma child market rules contain contradictory resolution or timezone wording. "
+            "Fix: refresh the child-market rules and preserve the authoritative sentence that defines the deadline."
+        )
+    if rules.fail_reason:
+        return (
+            "LLM consensus completed, but Stage 3 did not plan this market because "
+            f"{rules.fail_reason.rstrip('.')}. "
+            "Fix: refresh the exact child-market rules and verify the saved identifiers before retrying."
+        )
+    return "Resolution rules were blocked before Stage 3 could plan a buy."
+
+
+def _build_rule_stage_status_reason(
+    *,
+    rules: RuleEvaluation,
+    prepared_question_payload: PolymarketEventQuestionPayload | None = None,
+    question_runtime: dict[str, Any] | None = None,
+    active_position: bool = False,
+) -> str:
+    if rules.rule_gate_result == "bypassed_verified_binary_rules":
+        return (
+            "Exact Gamma child market rules were verified and safely bypassed the strict YES parser after confirming binary YES/NO outcomes plus a reliable deadline."
+        )
+    if not rules.fail_reason:
+        return "Resolution criteria and deadline were parsed successfully from the exact Gamma child market."
+    blocker_reason = _build_rule_gate_blocker_reason(
+        rules=rules,
+        prepared_question_payload=prepared_question_payload,
+        question_runtime=question_runtime,
+    )
+    if active_position:
+        return (
+            f"{blocker_reason} LLM consensus still ran so the active position could be monitored."
+        )
+    return blocker_reason
+
+
 async def _execute_console_stage_two_shared_llm(
     *,
     llm_markets: list[dict[str, object]],
@@ -754,6 +872,11 @@ async def _execute_console_stage_two_shared_llm(
                     payload.stage2_context.exact_resolution_rules
                     if payload.stage2_context is not None
                     else payload.polymarket_rules
+                ),
+                exact_market_match_verified=bool(
+                    payload.stage2_context.exact_gamma_market_verified
+                    if payload.stage2_context is not None
+                    else False
                 ),
             )
     prepared_event_by_market_id = {
@@ -2403,9 +2526,22 @@ def _serialize_llm_review_context(
         ),
         "event_state": getattr(llm_consensus, "event_state", None) if llm_consensus else None,
         "yes_definition": getattr(rules, "yes_definition", None) if rules else None,
+        "yes_definition_supporting_text": (
+            getattr(rules, "yes_definition_supporting_text", None) if rules else None
+        ),
+        "yes_definition_extraction_method": (
+            getattr(rules, "yes_definition_extraction_method", None) if rules else None
+        ),
+        "yes_definition_extraction_confidence": (
+            getattr(rules, "yes_definition_extraction_confidence", None) if rules else None
+        ),
+        "yes_resolution_language_detected": (
+            getattr(rules, "yes_resolution_language_detected", None) if rules else None
+        ),
         "deadline_et": getattr(rules, "deadline_et", None) if rules else None,
         "hours_remaining": getattr(rules, "hours_remaining", None) if rules else None,
         "rules_fail_reason": getattr(rules, "fail_reason", None) if rules else None,
+        "rule_gate_result": getattr(rules, "rule_gate_result", None) if rules else None,
         "llm_outputs": [
             item.model_dump(mode="json")
             for item in llm_outputs
@@ -5703,9 +5839,10 @@ class BullpenAutoLiveEngine:
                             else (
                                 "LLM execution finished for the active position, but no usable odds were returned."
                                 if not has_usable_llm_output
-                                else (
-                                    "LLM consensus completed for the active position, but rule parsing "
-                                    f"remained incomplete because {rules_fail_reason.rstrip('.')}."
+                                else _build_rule_gate_blocker_reason(
+                                    rules=rules,
+                                    prepared_question_payload=prepared_question_payload,
+                                    question_runtime=question_runtime,
                                 )
                             )
                         )
@@ -5740,13 +5877,11 @@ class BullpenAutoLiveEngine:
                                     build_stage_result(
                                         stage_number=2,
                                         status="warning" if rules_fail_reason else "pass",
-                                        reason=(
-                                            "Resolution criteria and deadline were parsed successfully."
-                                            if not rules_fail_reason
-                                            else (
-                                                f"{rules_fail_reason} LLM consensus still ran so the active "
-                                                "position could be monitored."
-                                            )
+                                        reason=_build_rule_stage_status_reason(
+                                            rules=rules,
+                                            prepared_question_payload=prepared_question_payload,
+                                            question_runtime=question_runtime,
+                                            active_position=True,
                                         ),
                                         outputs={
                                             "close_time": market.close_time,
@@ -5754,6 +5889,20 @@ class BullpenAutoLiveEngine:
                                             "deadline_et": rules.deadline_et,
                                             "hours_remaining": rules.hours_remaining,
                                             "rules_fail_reason": rules_fail_reason,
+                                            "rule_gate_result": rules.rule_gate_result,
+                                            "yes_definition_supporting_text": rules.yes_definition_supporting_text,
+                                            "yes_definition_extraction_method": rules.yes_definition_extraction_method,
+                                            "yes_definition_extraction_confidence": rules.yes_definition_extraction_confidence,
+                                            "exact_gamma_market_verified": _read_stage2_context_value(
+                                                prepared_question_payload,
+                                                question_runtime,
+                                                "exact_gamma_market_verified",
+                                            ),
+                                            "authoritative_rule_source_field": _read_stage2_context_value(
+                                                prepared_question_payload,
+                                                question_runtime,
+                                                "authoritative_rule_source_field",
+                                            ),
                                         },
                                         hard_block=False,
                                     ),
@@ -5778,6 +5927,7 @@ class BullpenAutoLiveEngine:
                                             "evidence_status": llm_consensus.evidence_status,
                                             "event_state": llm_consensus.event_state,
                                             "rules_fail_reason": rules_fail_reason,
+                                            "rule_gate_result": rules.rule_gate_result,
                                         },
                                     ),
                                 ],
@@ -5826,9 +5976,10 @@ class BullpenAutoLiveEngine:
                             else (
                                 "Candidate did not pass the Events to invest in table thresholds."
                                 if not rules_fail_reason
-                                else (
-                                    "LLM consensus completed, but the market is still blocked because "
-                                    f"{rules_fail_reason.rstrip('.')}."
+                                else _build_rule_gate_blocker_reason(
+                                    rules=rules,
+                                    prepared_question_payload=prepared_question_payload,
+                                    question_runtime=question_runtime,
                                 )
                             )
                         )
@@ -5866,13 +6017,10 @@ class BullpenAutoLiveEngine:
                                 build_stage_result(
                                     stage_number=2,
                                     status="warning" if rules_fail_reason else "pass",
-                                    reason=(
-                                        "Resolution criteria and deadline were parsed successfully."
-                                        if not rules_fail_reason
-                                        else (
-                                            f"{rules_fail_reason} LLM consensus still ran, but this event "
-                                            "stayed blocked from Stage 3 qualification."
-                                        )
+                                    reason=_build_rule_stage_status_reason(
+                                        rules=rules,
+                                        prepared_question_payload=prepared_question_payload,
+                                        question_runtime=question_runtime,
                                     ),
                                     outputs={
                                         "close_time": market.close_time,
@@ -5880,6 +6028,20 @@ class BullpenAutoLiveEngine:
                                         "deadline_et": rules.deadline_et,
                                         "hours_remaining": rules.hours_remaining,
                                         "rules_fail_reason": rules_fail_reason,
+                                        "rule_gate_result": rules.rule_gate_result,
+                                        "yes_definition_supporting_text": rules.yes_definition_supporting_text,
+                                        "yes_definition_extraction_method": rules.yes_definition_extraction_method,
+                                        "yes_definition_extraction_confidence": rules.yes_definition_extraction_confidence,
+                                        "exact_gamma_market_verified": _read_stage2_context_value(
+                                            prepared_question_payload,
+                                            question_runtime,
+                                            "exact_gamma_market_verified",
+                                        ),
+                                        "authoritative_rule_source_field": _read_stage2_context_value(
+                                            prepared_question_payload,
+                                            question_runtime,
+                                            "authoritative_rule_source_field",
+                                        ),
                                         "selected": selected_for_auto_invest,
                                         "selected_required": selected_required,
                                     },
@@ -5901,9 +6063,10 @@ class BullpenAutoLiveEngine:
                                         else (
                                             "LLM execution finished, but no usable odds were returned for this candidate."
                                             if not has_usable_llm_output
-                                            else (
-                                                f"LLM consensus completed; rules parsing noted "
-                                                f"{rules_fail_reason.rstrip('.')} for review."
+                                            else _build_rule_stage_status_reason(
+                                                rules=rules,
+                                                prepared_question_payload=prepared_question_payload,
+                                                question_runtime=question_runtime,
                                             )
                                         )
                                     ),
@@ -5916,6 +6079,7 @@ class BullpenAutoLiveEngine:
                                         "evidence_status": llm_consensus.evidence_status,
                                         "event_state": llm_consensus.event_state,
                                         "rules_fail_reason": rules_fail_reason,
+                                        "rule_gate_result": rules.rule_gate_result,
                                     },
                                 ),
                                 build_stage_result(
@@ -5996,13 +6160,9 @@ class BullpenAutoLiveEngine:
                         build_stage_result(
                             stage_number=2,
                             status="warning" if rules_fail_reason else "pass",
-                            reason=(
-                                "Resolution criteria and deadline were parsed successfully."
-                                if not rules_fail_reason
-                                else (
-                                    f"{rules_fail_reason} LLM consensus still ran so the active "
-                                    "position could be monitored."
-                                )
+                            reason=_build_rule_stage_status_reason(
+                                rules=rules,
+                                active_position=True,
                             ),
                             outputs={
                                 "close_time": market.close_time,
@@ -6010,6 +6170,10 @@ class BullpenAutoLiveEngine:
                                 "deadline_et": rules.deadline_et,
                                 "hours_remaining": rules.hours_remaining,
                                 "rules_fail_reason": rules_fail_reason,
+                                "rule_gate_result": rules.rule_gate_result,
+                                "yes_definition_supporting_text": rules.yes_definition_supporting_text,
+                                "yes_definition_extraction_method": rules.yes_definition_extraction_method,
+                                "yes_definition_extraction_confidence": rules.yes_definition_extraction_confidence,
                             },
                             hard_block=False,
                         )
@@ -6039,10 +6203,7 @@ class BullpenAutoLiveEngine:
                     review_reason = (
                         "LLM consensus completed for the active position."
                         if not rules_fail_reason
-                        else (
-                            "LLM consensus completed for the active position, but rule parsing "
-                            f"remained incomplete because {rules_fail_reason.rstrip('.')}."
-                        )
+                        else _build_rule_gate_blocker_reason(rules=rules)
                     )
                     stage_results.append(
                         build_stage_result(
@@ -6062,6 +6223,7 @@ class BullpenAutoLiveEngine:
                                 "evidence_status": llm_consensus.evidence_status,
                                 "event_state": llm_consensus.event_state,
                                 "rules_fail_reason": rules_fail_reason,
+                                "rule_gate_result": rules.rule_gate_result,
                             },
                         )
                     )
@@ -6117,20 +6279,17 @@ class BullpenAutoLiveEngine:
                     build_stage_result(
                         stage_number=2,
                         status="warning" if rules_fail_reason else "pass",
-                        reason=(
-                            "Resolution criteria and deadline were parsed successfully."
-                            if not rules_fail_reason
-                            else (
-                                f"{rules_fail_reason} LLM consensus still ran, but this event "
-                                "stayed blocked from Stage 3 qualification."
-                            )
-                        ),
+                        reason=_build_rule_stage_status_reason(rules=rules),
                         outputs={
                             "close_time": market.close_time,
                             "yes_definition": rules.yes_definition,
                             "deadline_et": rules.deadline_et,
                             "hours_remaining": rules.hours_remaining,
                             "rules_fail_reason": rules_fail_reason,
+                            "rule_gate_result": rules.rule_gate_result,
+                            "yes_definition_supporting_text": rules.yes_definition_supporting_text,
+                            "yes_definition_extraction_method": rules.yes_definition_extraction_method,
+                            "yes_definition_extraction_confidence": rules.yes_definition_extraction_confidence,
                             "selected": selected_for_auto_invest,
                             "selected_required": selected_required,
                         },
@@ -6166,10 +6325,7 @@ class BullpenAutoLiveEngine:
                         reason=(
                             "LLM consensus completed for the candidate market."
                             if not rules_fail_reason
-                            else (
-                                f"LLM consensus completed; rules parsing noted "
-                                f"{rules_fail_reason.rstrip('.')} for review."
-                            )
+                            else _build_rule_stage_status_reason(rules=rules)
                         ),
                         outputs={
                             "fair_yes_probability_pct": llm_consensus.fair_yes_probability_pct,
@@ -6180,6 +6336,7 @@ class BullpenAutoLiveEngine:
                             "evidence_status": llm_consensus.evidence_status,
                             "event_state": llm_consensus.event_state,
                             "rules_fail_reason": rules_fail_reason,
+                            "rule_gate_result": rules.rule_gate_result,
                         },
                     )
                 )
@@ -6189,10 +6346,7 @@ class BullpenAutoLiveEngine:
                     else (
                         "Candidate did not pass the Events to invest in table thresholds."
                         if not rules_fail_reason
-                        else (
-                            "LLM consensus completed, but the market is still blocked because "
-                            f"{rules_fail_reason.rstrip('.')}."
-                        )
+                        else _build_rule_gate_blocker_reason(rules=rules)
                     )
                 )
                 stage_results.append(
@@ -6624,7 +6778,6 @@ class BullpenAutoLiveEngine:
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
         stage3_buy_refresh_snapshot: dict[str, object] = {}
-        stage3_buy_queue_market_ids: set[str] = set()
 
         def _current_stage3_order_counts() -> dict[str, int]:
             sell_planned = 0
@@ -6772,9 +6925,9 @@ class BullpenAutoLiveEngine:
             sell_planned = counts["sell_planned"]
             sell_processed = counts["sell_processed"]
             sell_submitted = counts["sell_submitted"]
-            buy_planned = counts["buy_queue_planned"]
-            buy_processed = counts["buy_queue_processed"]
-            buy_submitted = counts["buy_queue_submitted"]
+            buy_planned = max(counts["buy_queue_planned"], counts["buy_planned"])
+            buy_processed = max(counts["buy_queue_processed"], counts["buy_processed"])
+            buy_submitted = max(counts["buy_queue_submitted"], counts["buy_submitted"])
 
             steps: list[dict[str, object]] = []
             is_sell_step_complete = sell_processed >= sell_planned

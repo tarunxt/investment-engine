@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 Stage2SchemaVersion = Literal[2]
 Stage2RuleQualityStatus = Literal["complete", "partial", "missing", "contradictory"]
 Stage2DeadlineConfidence = Literal["high", "medium", "low", "unresolved"]
+Stage2YesExtractionConfidence = Literal["high", "medium", "low", "none"]
+Stage2RuleGateResult = Literal["passed", "blocked", "bypassed_verified_binary_rules"]
 Stage2EvidenceSufficiency = Literal["sufficient", "insufficient", "missing"]
 Stage2EvidenceSourceType = Literal[
     "official_government",
@@ -121,6 +123,15 @@ class Stage2MarketContext(BaseModel):
     liquidity_usd: float | None = Field(default=None, ge=0)
     exact_resolution_rules: str | None = None
     exact_yes_definition: str | None = None
+    matched_gamma_market_id: str | None = None
+    gamma_match_method: str | None = None
+    exact_gamma_market_verified: bool = False
+    authoritative_rule_source_field: str | None = None
+    yes_definition_supporting_text: str | None = None
+    yes_definition_extraction_method: str | None = None
+    yes_definition_extraction_confidence: Stage2YesExtractionConfidence = "none"
+    yes_resolution_language_detected: bool = False
+    final_rule_gate_result: Stage2RuleGateResult = "blocked"
     resolution_source_description: str | None = None
     background_market_context: str | None = None
     background_context_warning: str | None = None

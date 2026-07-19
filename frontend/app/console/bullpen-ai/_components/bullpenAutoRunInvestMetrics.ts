@@ -42,6 +42,20 @@ type Stage2TransferQueueMetricInfo = {
   workflow: string[];
 };
 
+export type InvestStepCountsSummary = {
+  plannedOrders: number;
+  processedOrders: number;
+  submittedOrders: number;
+  eventExitRows?: number;
+  rankingLlmPlannedOrders?: number;
+  forcedExitPlannedOrders?: number;
+  redeemPlannedOrders?: number;
+  redeemProcessedOrders?: number;
+  redeemSubmittedOrders?: number;
+  rankingLlmSubmittedOrders?: number;
+  forcedExitSubmittedOrders?: number;
+};
+
 const EVENT_EXIT_STATES = new Set(["EVENT_EXIT_PLANNED", "DUST_LOST"]);
 const RANKING_LLM_EXIT_STRATEGIES = new Set([
   "OUTSIDE_TOP_10_RETURNS_DAY",
@@ -167,6 +181,74 @@ function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
 
 function isPlannedDecision(decision: BullpenAutoLiveDecision) {
   return decision.order_plan?.status === "planned";
+}
+
+export function summarizeInvestStepCountsFromDecisions(
+  stepKey: InvestStepKey,
+  decisions: BullpenAutoLiveDecision[],
+): InvestStepCountsSummary {
+  if (stepKey === "buy") {
+    const buyDecisions = decisions.filter((decision) => hasOrderAction(decision, "buy"));
+    return {
+      plannedOrders: buyDecisions.length,
+      processedOrders: buyDecisions.filter((decision) =>
+        isProcessedInvestOrderPlan(decision.order_plan),
+      ).length,
+      submittedOrders: buyDecisions.filter((decision) =>
+        isSubmittedOrSuccessfulDecision(decision),
+      ).length,
+    };
+  }
+
+  const sellDecisions = decisions.filter((decision) => {
+    const action = decision.order_plan?.action;
+    return action === "sell" || action === "redeem";
+  });
+  const redeemDecisions = sellDecisions.filter(
+    (decision) =>
+      decision.order_plan?.action === "redeem" ||
+      hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES),
+  );
+  const rankingLlmDecisions = sellDecisions.filter((decision) =>
+    hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
+  );
+  const forcedExitDecisions = sellDecisions.filter((decision) =>
+    hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
+  );
+
+  return {
+    plannedOrders: sellDecisions.length,
+    processedOrders: sellDecisions.filter((decision) =>
+      isProcessedInvestOrderPlan(decision.order_plan),
+    ).length,
+    submittedOrders: sellDecisions.filter((decision) =>
+      isSubmittedOrSuccessfulDecision(decision),
+    ).length,
+    eventExitRows: decisions.filter((decision) =>
+      EVENT_EXIT_STATES.has(decision.exit_state),
+    ).length,
+    rankingLlmPlannedOrders: rankingLlmDecisions.filter((decision) =>
+      isPlannedDecision(decision),
+    ).length,
+    forcedExitPlannedOrders: forcedExitDecisions.filter((decision) =>
+      isPlannedDecision(decision),
+    ).length,
+    redeemPlannedOrders: redeemDecisions.filter((decision) =>
+      isPlannedDecision(decision),
+    ).length,
+    redeemProcessedOrders: redeemDecisions.filter((decision) =>
+      isProcessedInvestOrderPlan(decision.order_plan),
+    ).length,
+    redeemSubmittedOrders: redeemDecisions.filter((decision) =>
+      isSubmittedOrSuccessfulDecision(decision),
+    ).length,
+    rankingLlmSubmittedOrders: rankingLlmDecisions.filter((decision) =>
+      isSubmittedOrSuccessfulDecision(decision),
+    ).length,
+    forcedExitSubmittedOrders: forcedExitDecisions.filter((decision) =>
+      isSubmittedOrSuccessfulDecision(decision),
+    ).length,
+  };
 }
 
 export function deriveInvestExecutionStepStatus({

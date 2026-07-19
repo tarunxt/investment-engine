@@ -92,6 +92,7 @@ import {
   getInvestStepMetricDialogKind,
   getSellInvestMetricDialogKind,
   isProcessedInvestOrderPlan,
+  summarizeInvestStepCountsFromDecisions,
   type InvestExecutionStepStatus,
   type InvestMetricDialogKind,
   type Stage2TransferQueueMetricInfoKind,
@@ -2429,38 +2430,12 @@ function normalizeInvestExecutionStepStatus(
 }
 
 function getSubmittedSellSubpartCounts(decisions: BullpenAutoLiveDecision[]) {
-  const submittedSellDecisions = decisions.filter((decision) => {
-    const action = decision.order_plan?.action;
-    return (
-      (action === "sell" || action === "redeem") &&
-      isSubmittedOrSuccessfulDecision(decision)
-    );
-  });
-
-  const hasStrategy = (
-    decision: BullpenAutoLiveDecision,
-    strategies: Set<string>,
-  ) => decision.exit_signals.some((signal) => strategies.has(signal.strategy));
-
-  const rankingOrLlmStrategies = new Set([
-    "OUTSIDE_TOP_10_RETURNS_DAY",
-    "LLM_OR_ODDS_FILTER_EXIT",
-  ]);
-  const forcedExitStrategies = new Set(["CAPITAL_AWARE_FORCED_EXIT"]);
-  const redeemStrategies = new Set(["REDEEM_CLAIM"]);
+  const counts = summarizeInvestStepCountsFromDecisions("sell", decisions);
 
   return {
-    redeem: submittedSellDecisions.filter(
-      (decision) =>
-        decision.order_plan?.action === "redeem" ||
-        hasStrategy(decision, redeemStrategies),
-    ).length,
-    rankingOrLlm: submittedSellDecisions.filter((decision) =>
-      hasStrategy(decision, rankingOrLlmStrategies),
-    ).length,
-    forced: submittedSellDecisions.filter((decision) =>
-      hasStrategy(decision, forcedExitStrategies),
-    ).length,
+    redeem: counts.redeemSubmittedOrders ?? 0,
+    rankingOrLlm: counts.rankingLlmSubmittedOrders ?? 0,
+    forced: counts.forcedExitSubmittedOrders ?? 0,
   };
 }
 
@@ -2471,7 +2446,14 @@ function getInvestStageExecutionSteps(
   if (stage.key !== "invest") return [];
 
   const submittedSellSubpartCounts = getSubmittedSellSubpartCounts(decisions);
-  const hasDecisionRows = decisions.length > 0;
+  const sellDecisionCounts = summarizeInvestStepCountsFromDecisions(
+    "sell",
+    decisions,
+  );
+  const buyDecisionCounts = summarizeInvestStepCountsFromDecisions(
+    "buy",
+    decisions,
+  );
 
   const rawSteps = stage.outputs.execution_steps;
   if (!Array.isArray(rawSteps)) return [];
@@ -2494,8 +2476,15 @@ function getInvestStageExecutionSteps(
         return null;
       }
 
-      const plannedOrders = readStageOutputNumber(step.planned_orders) ?? 0;
-      const processedOrders = readStageOutputNumber(step.processed_orders) ?? 0;
+      const decisionCounts = key === "sell" ? sellDecisionCounts : buyDecisionCounts;
+      const plannedOrders = Math.max(
+        readStageOutputNumber(step.planned_orders) ?? 0,
+        decisionCounts.plannedOrders,
+      );
+      const processedOrders = Math.max(
+        readStageOutputNumber(step.processed_orders) ?? 0,
+        decisionCounts.processedOrders,
+      );
 
       return {
         key,
@@ -2511,27 +2500,66 @@ function getInvestStageExecutionSteps(
         detail: readStageOutputString(step.detail),
         plannedOrders,
         processedOrders,
-        submittedOrders: readStageOutputNumber(step.submitted_orders) ?? 0,
-        eventExitRows: readStageOutputNumber(step.event_exit_rows),
-        rankingLlmPlannedOrders: readStageOutputNumber(
-          step.ranking_llm_planned_orders,
+        submittedOrders: Math.max(
+          readStageOutputNumber(step.submitted_orders) ?? 0,
+          decisionCounts.submittedOrders,
         ),
-        forcedExitPlannedOrders: readStageOutputNumber(
-          step.forced_exit_planned_orders,
-        ),
-        redeemPlannedOrders: readStageOutputNumber(step.redeem_planned_orders),
-        redeemProcessedOrders: readStageOutputNumber(
-          step.redeem_processed_orders,
-        ),
-        redeemSubmittedOrders: hasDecisionRows
-          ? submittedSellSubpartCounts.redeem
-          : readStageOutputNumber(step.redeem_submitted_orders),
-        rankingLlmSubmittedOrders: hasDecisionRows
-          ? submittedSellSubpartCounts.rankingOrLlm
-          : readStageOutputNumber(step.ranking_llm_submitted_orders),
-        forcedExitSubmittedOrders: hasDecisionRows
-          ? submittedSellSubpartCounts.forced
-          : readStageOutputNumber(step.forced_exit_submitted_orders),
+        eventExitRows:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.event_exit_rows) ?? 0,
+                sellDecisionCounts.eventExitRows ?? 0,
+              )
+            : readStageOutputNumber(step.event_exit_rows),
+        rankingLlmPlannedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.ranking_llm_planned_orders) ?? 0,
+                sellDecisionCounts.rankingLlmPlannedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.ranking_llm_planned_orders),
+        forcedExitPlannedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.forced_exit_planned_orders) ?? 0,
+                sellDecisionCounts.forcedExitPlannedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.forced_exit_planned_orders),
+        redeemPlannedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.redeem_planned_orders) ?? 0,
+                sellDecisionCounts.redeemPlannedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.redeem_planned_orders),
+        redeemProcessedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.redeem_processed_orders) ?? 0,
+                sellDecisionCounts.redeemProcessedOrders ?? 0,
+              )
+            : readStageOutputNumber(step.redeem_processed_orders),
+        redeemSubmittedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.redeem_submitted_orders) ?? 0,
+                submittedSellSubpartCounts.redeem,
+              )
+            : readStageOutputNumber(step.redeem_submitted_orders),
+        rankingLlmSubmittedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.ranking_llm_submitted_orders) ?? 0,
+                submittedSellSubpartCounts.rankingOrLlm,
+              )
+            : readStageOutputNumber(step.ranking_llm_submitted_orders),
+        forcedExitSubmittedOrders:
+          key === "sell"
+            ? Math.max(
+                readStageOutputNumber(step.forced_exit_submitted_orders) ?? 0,
+                submittedSellSubpartCounts.forced,
+              )
+            : readStageOutputNumber(step.forced_exit_submitted_orders),
       };
     })
     .filter((step): step is InvestExecutionStepView => step !== null);
@@ -2540,12 +2568,17 @@ function getInvestStageExecutionSteps(
 function getLastInvestExecutionStep(
   run: BullpenAutoLiveRun | null,
   key: "sell" | "buy",
+  decisions: BullpenAutoLiveDecision[] = [],
 ) {
   const investStage = run?.stage_results.find(
     (stage) => stage.stage_number === 3 || stage.stage_name === "invest",
   );
   const rawSteps = investStage?.outputs.execution_steps;
   if (!Array.isArray(rawSteps)) return null;
+  const decisionCounts =
+    decisions.length > 0
+      ? summarizeInvestStepCountsFromDecisions(key, decisions)
+      : null;
 
   for (const rawStep of rawSteps) {
     if (!isRecord(rawStep) || readStageOutputString(rawStep.key) !== key) {
@@ -2553,29 +2586,74 @@ function getLastInvestExecutionStep(
     }
 
     return {
-      plannedOrders: readStageOutputNumber(rawStep.planned_orders) ?? 0,
-      processedOrders: readStageOutputNumber(rawStep.processed_orders) ?? 0,
-      submittedOrders: readStageOutputNumber(rawStep.submitted_orders) ?? 0,
-      eventExitRows: readStageOutputNumber(rawStep.event_exit_rows),
-      rankingLlmPlannedOrders: readStageOutputNumber(
-        rawStep.ranking_llm_planned_orders,
+      plannedOrders: Math.max(
+        readStageOutputNumber(rawStep.planned_orders) ?? 0,
+        decisionCounts?.plannedOrders ?? 0,
       ),
-      forcedExitPlannedOrders: readStageOutputNumber(
-        rawStep.forced_exit_planned_orders,
+      processedOrders: Math.max(
+        readStageOutputNumber(rawStep.processed_orders) ?? 0,
+        decisionCounts?.processedOrders ?? 0,
       ),
-      redeemPlannedOrders: readStageOutputNumber(rawStep.redeem_planned_orders),
-      redeemProcessedOrders: readStageOutputNumber(
-        rawStep.redeem_processed_orders,
+      submittedOrders: Math.max(
+        readStageOutputNumber(rawStep.submitted_orders) ?? 0,
+        decisionCounts?.submittedOrders ?? 0,
       ),
-      redeemSubmittedOrders: readStageOutputNumber(
-        rawStep.redeem_submitted_orders,
-      ),
-      rankingLlmSubmittedOrders: readStageOutputNumber(
-        rawStep.ranking_llm_submitted_orders,
-      ),
-      forcedExitSubmittedOrders: readStageOutputNumber(
-        rawStep.forced_exit_submitted_orders,
-      ),
+      eventExitRows:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.event_exit_rows) ?? 0,
+              decisionCounts?.eventExitRows ?? 0,
+            )
+          : readStageOutputNumber(rawStep.event_exit_rows),
+      rankingLlmPlannedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.ranking_llm_planned_orders) ?? 0,
+              decisionCounts?.rankingLlmPlannedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.ranking_llm_planned_orders),
+      forcedExitPlannedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.forced_exit_planned_orders) ?? 0,
+              decisionCounts?.forcedExitPlannedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.forced_exit_planned_orders),
+      redeemPlannedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.redeem_planned_orders) ?? 0,
+              decisionCounts?.redeemPlannedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.redeem_planned_orders),
+      redeemProcessedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.redeem_processed_orders) ?? 0,
+              decisionCounts?.redeemProcessedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.redeem_processed_orders),
+      redeemSubmittedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.redeem_submitted_orders) ?? 0,
+              decisionCounts?.redeemSubmittedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.redeem_submitted_orders),
+      rankingLlmSubmittedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.ranking_llm_submitted_orders) ?? 0,
+              decisionCounts?.rankingLlmSubmittedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.ranking_llm_submitted_orders),
+      forcedExitSubmittedOrders:
+        key === "sell"
+          ? Math.max(
+              readStageOutputNumber(rawStep.forced_exit_submitted_orders) ?? 0,
+              decisionCounts?.forcedExitSubmittedOrders ?? 0,
+            )
+          : readStageOutputNumber(rawStep.forced_exit_submitted_orders),
     };
   }
 
@@ -2803,14 +2881,32 @@ function getInvestExecutionStepStatusLabel(status: InvestExecutionStepStatus) {
 
 function getInvestStageCounters(
   stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
+  decisions: BullpenAutoLiveDecision[] = [],
 ) {
   if (stage.key !== "invest") return [];
 
-  const planned = readStageOutputNumber(stage.outputs.orders_planned);
-  const submitted = readStageOutputNumber(stage.outputs.orders_submitted);
-  if (planned === null && submitted === null) {
+  const sellCounts = summarizeInvestStepCountsFromDecisions("sell", decisions);
+  const buyCounts = summarizeInvestStepCountsFromDecisions("buy", decisions);
+  const rawPlanned = readStageOutputNumber(stage.outputs.orders_planned);
+  const rawSubmitted = readStageOutputNumber(stage.outputs.orders_submitted);
+  const derivedPlanned = sellCounts.plannedOrders + buyCounts.plannedOrders;
+  const derivedSubmitted = sellCounts.submittedOrders + buyCounts.submittedOrders;
+  if (
+    rawPlanned === null &&
+    rawSubmitted === null &&
+    derivedPlanned === 0 &&
+    derivedSubmitted === 0
+  ) {
     return [];
   }
+  const planned = Math.max(
+    rawPlanned ?? 0,
+    derivedPlanned,
+  );
+  const submitted = Math.max(
+    rawSubmitted ?? 0,
+    derivedSubmitted,
+  );
 
   return [
     { label: "Planned", value: planned ?? 0 },
@@ -3778,7 +3874,7 @@ function RunDetailWorkerStages({
       <div className="mt-3 grid gap-3 xl:grid-cols-3">
         {workflowView.stages.map((stage) => {
           const immediateSuccess = getInvestStageImmediateSuccess(stage);
-          const investStageCounters = getInvestStageCounters(stage);
+          const investStageCounters = getInvestStageCounters(stage, decisions);
           const investExecutionSteps = getInvestStageExecutionSteps(stage, decisions);
           const toneClasses = getWorkflowToneClasses(
             immediateSuccess ? "green" : stage.tone,
@@ -7194,7 +7290,7 @@ function InvestMetricDetailsDialog({
   const selectedStepSummary =
     selectedStepKey === null
       ? null
-      : getLastInvestExecutionStep(state.run, selectedStepKey);
+      : getLastInvestExecutionStep(state.run, selectedStepKey, state.decisions);
   const decisionsCount = getInvestStageMetric(
     state.stage,
     "decisions_count",
@@ -10448,7 +10544,7 @@ export function BullpenAutoRunScheduleCard({
                       },
                       { label: "Submitted", value: 0 },
                     ]
-                  : getInvestStageCounters(stage);
+                  : getInvestStageCounters(stage, stageDecisions);
               const investPreviewSteps = showQueuedInvestPreview
                 ? buildQueuedInvestPreviewSteps(
                     investOnlyPlan,

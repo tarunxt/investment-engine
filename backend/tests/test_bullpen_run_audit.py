@@ -315,6 +315,88 @@ def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
     }
 
 
+def test_build_bundle_preserves_stage2_rule_gate_provenance():
+    run_payload = {
+        "id": "run-rule-gate-provenance",
+        "status": "completed",
+        "triggered_by": "manual",
+        "started_at": "2026-07-19T10:00:00+00:00",
+        "completed_at": "2026-07-19T10:05:00+00:00",
+        "summary": "Stage 2 and Stage 3 finished.",
+        "stage_results": [
+            {
+                "stage_number": 2,
+                "status": "pass",
+                "reason": "Stage 2 finished.",
+                "outputs": {
+                    "workflow_stage_key": "llm",
+                    "llm_reviewed_candidates": [
+                        {
+                            "market_id": "market-1",
+                            "source_kind": "candidate",
+                            "qualified": True,
+                            "rule_gate_result": "bypassed_verified_binary_rules",
+                            "yes_definition_extraction_method": "sentence_fallback",
+                            "yes_definition_extraction_confidence": "low",
+                            "stage2_context": {
+                                "matched_gamma_market_id": "12345",
+                                "gamma_match_method": "condition_id",
+                                "exact_gamma_market_verified": True,
+                                "authoritative_rule_source_field": "resolutionCriteria",
+                                "final_rule_gate_result": "bypassed_verified_binary_rules",
+                            },
+                        }
+                    ],
+                },
+            },
+            {
+                "stage_number": 3,
+                "status": "warning",
+                "reason": "Stage 3 recorded a blocker.",
+                "outputs": {
+                    "workflow_stage_key": "invest",
+                    "decision_rows": [
+                        {
+                            "id": "decision-1",
+                            "market_id": "market-1",
+                            "stage3_result": "BLOCKED",
+                            "stage3_result_reason": (
+                                "LLM consensus completed, but Stage 3 did not plan this market because no exact Gamma child market matched the saved condition ID / market ID / slug. "
+                                "Fix: refresh the Polymarket mapping so Stage 2 stores the correct child-market identifiers."
+                            ),
+                            "reason": "Rule blocker",
+                            "summary": "Rule blocker",
+                            "order_plan": None,
+                        }
+                    ],
+                },
+            },
+        ],
+        "audit_metadata": {
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "settings_snapshot": {},
+        },
+        "diagnostics": {},
+    }
+
+    bundle = _build_bundle(
+        run_payload=run_payload,
+        decisions=[],
+        run_orders_payload={},
+        source_kind="native",
+        lifecycle_status="working",
+    )
+
+    review = bundle["stage_2"]["candidate_reviews"][0]
+    assert review["rule_gate_result"] == "bypassed_verified_binary_rules"
+    assert (
+        review["stage2_context"]["authoritative_rule_source_field"]
+        == "resolutionCriteria"
+    )
+    decision_row = bundle["stage_3"]["decision_rows"][0]
+    assert "Fix:" in decision_row["stage3_result_reason"]
+
+
 def test_algorithm_registry_contains_required_audit_keys():
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert keys >= {

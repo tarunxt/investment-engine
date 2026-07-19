@@ -140,6 +140,30 @@ test("Stage 3 metric filters break out sell, processed, and forced-exit rows", a
   );
 });
 
+test("decision rows recover submitted Step 2 counts when stored step tiles are stale", async () => {
+  const { summarizeInvestStepCountsFromDecisions } =
+    await loadInvestMetricsModule();
+
+  const decisions = [
+    createDecision({
+      id: "buy-submitted",
+      action: "buy",
+      status: "submitted",
+    }),
+    createDecision({
+      id: "buy-failed",
+      action: "buy",
+      status: "failed",
+    }),
+  ];
+
+  assert.deepEqual(summarizeInvestStepCountsFromDecisions("buy", decisions), {
+    plannedOrders: 2,
+    processedOrders: 2,
+    submittedOrders: 1,
+  });
+});
+
 
 test("planned Event Exit strategy filters exclude submitted rows", async () => {
   const { getInvestMetricRows, getSellInvestMetricDialogKind } =
