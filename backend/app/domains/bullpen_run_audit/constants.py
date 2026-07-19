@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 1
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-18-stage2-universe"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-economic-slots"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
-BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-19-returns-upside"
+BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-20-stage3-economic-slots"
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
 SNAPSHOT_SOURCE_RECONSTRUCTED: Final[str] = "reconstructed"
@@ -79,6 +79,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.engine",
         "source_function": "_serialize_stage3_decision_row",
         "label": "Stage 3 ranking and selection",
+    },
+    {
+        "algorithm_key": "stage3_economic_slot_allocation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.stage3_slots",
+        "source_function": "classify_economic_slots",
+        "label": "Stage 3 economic slot allocation and deduplication",
     },
     {
         "algorithm_key": "order_funnel_aggregation",

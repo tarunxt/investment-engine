@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict
 
 import asyncio
+import json
+import re
 import time
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -28,7 +30,6 @@ from app.domains.polymarket.redeem_coordinator import (
     REDEEM_ATTEMPT_CONFIRMED,
     REDEEM_ATTEMPT_PENDING,
     REDEEM_ATTEMPT_RESOLVED_ZERO_PAYOUT,
-    build_redeem_pending_detail,
     normalize_redeem_condition_ids,
     redeem_retry_cooldown_seconds,
     submit_scoped_redeem,
@@ -55,6 +56,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_SCHEDULE_HOURS,
     CONSOLE_SCAN_WINDOW_DAYS,
     ConsoleWalletPosition,
+    ConsoleWalletPositionsSnapshot,
     ConsoleScanResult,
     apply_scanned_market_to_position,
     candidate_returns_per_day,
@@ -64,6 +66,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     next_custom_console_schedule_time,
     position_returns_per_day,
     read_console_wallet_positions,
+    read_console_wallet_positions_snapshot,
     scan_console_profile_markets,
 )
 from app.domains.polymarket_auto_live.config import (
@@ -108,6 +111,9 @@ from app.domains.polymarket_auto_live.normalization import (
     normalize_auto_live_evidence_status,
 )
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
+from app.domains.polymarket_auto_live.stage3_slots import (
+    classify_economic_slots,
+)
 from app.domains.polymarket_auto_live.scanner import (
     ScanRejectedMarket,
     ScannedMarket,
@@ -161,8 +167,28 @@ BULLPEN_RPC_RATE_LIMIT_RETRY_ATTEMPTS = 1
 BULLPEN_RPC_RATE_LIMIT_RETRY_DELAY_SECONDS = 1
 EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS = 3
 EXIT_SETTLEMENT_TIMEOUT_SECONDS = 18
-_SETTLED_ORDER_STATUSES = {"submitted", "confirmed"}
-_UNSETTLED_EXIT_ORDER_STATUSES = {"submitted", "settlement_pending"}
+_EXIT_TERMINAL_SUCCESS_STATUSES = {
+    "confirmed",
+    "filled",
+    "already_redeemed",
+    "resolved_zero_payout",
+}
+_ORDER_ACCEPTED_STATUSES = {
+    "submitted",
+    "confirming",
+    "partially_filled",
+    "settlement_pending",
+    *_EXIT_TERMINAL_SUCCESS_STATUSES,
+}
+_SETTLED_ORDER_STATUSES = _EXIT_TERMINAL_SUCCESS_STATUSES
+_UNSETTLED_EXIT_ORDER_STATUSES = {
+    "submitted",
+    "confirming",
+    "partially_filled",
+    "settlement_pending",
+    "timed_out",
+}
+_ORIGINAL_READ_CONSOLE_WALLET_POSITIONS = read_console_wallet_positions
 CONSOLE_RANKING_FIELD = "returns_per_day"
 CONSOLE_RANKING_TIE_BREAK = "market_id"
 CONSOLE_SIZING_FORMULA = "cash_in_hand / (max_positions - occupied_positions)"
@@ -1518,6 +1544,33 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+async def _read_stage3_live_positions_snapshot() -> ConsoleWalletPositionsSnapshot:
+    """Read the post-exit wallet snapshot with freshness proof.
+
+    The identity check keeps older unit tests that replace the legacy reader
+    working without weakening production behavior. The real reader always
+    goes through the runtime broker, which waits for the shared refresh lock
+    and bypasses the Redis snapshot when ``force_fresh`` is set.
+    """
+
+    if read_console_wallet_positions is not _ORIGINAL_READ_CONSOLE_WALLET_POSITIONS:
+        positions = await read_console_wallet_positions()
+        return ConsoleWalletPositionsSnapshot(
+            positions=positions,
+            source="live-cli",
+            fetched_at=datetime.now(UTC).isoformat(),
+            raw_position_count=len(positions),
+            diagnostics={"test_compatibility_reader": True},
+            raw_positions=list(positions),
+        )
+
+    return await read_console_wallet_positions_snapshot(
+        force_fresh=True,
+        caller_source="auto-live-stage3-post-exit",
+        max_age_seconds=0,
+    )
+
+
 def _latest_execution_at(decisions: list[BullpenAutoLiveDecision]) -> str | None:
     latest: datetime | None = None
     latest_raw: str | None = None
@@ -1542,14 +1595,16 @@ def _latest_settled_market_timestamps(
     decisions: list[BullpenAutoLiveDecision],
     *,
     actions: set[str],
+    statuses: set[str] | None = None,
 ) -> dict[str, datetime]:
+    accepted_statuses = statuses or _SETTLED_ORDER_STATUSES
     latest_by_market_id: dict[str, datetime] = {}
     for decision in decisions:
         order_plan = decision.order_plan
         if (
             order_plan is None
             or order_plan.dry_run
-            or order_plan.status not in _SETTLED_ORDER_STATUSES
+            or order_plan.status not in accepted_statuses
             or order_plan.action not in actions
         ):
             continue
@@ -1570,10 +1625,12 @@ def _pending_submitted_buy_market_ids(
     latest_buy_by_market_id = _latest_settled_market_timestamps(
         decisions,
         actions={"buy"},
+        statuses=_ORDER_ACCEPTED_STATUSES,
     )
     latest_exit_by_market_id = _latest_settled_market_timestamps(
         decisions,
         actions={"sell", "redeem"},
+        statuses=_EXIT_TERMINAL_SUCCESS_STATUSES,
     )
     pending_market_ids: set[str] = set()
     for market_id, buy_timestamp in latest_buy_by_market_id.items():
@@ -1724,11 +1781,21 @@ def _collect_live_order_issues(
             order_plan is None
             or order_plan.dry_run
             or order_plan.status in _SETTLED_ORDER_STATUSES
+            or (
+                order_plan.action == "buy"
+                and order_plan.status in _ORDER_ACCEPTED_STATUSES
+            )
         ):
             continue
         stage7 = _decision_stage_result(decision, 7)
         detail = order_plan.detail.strip() or "No execution detail was recorded."
-        hard_failure = order_plan.status in {"failed", "cancelled"} or (
+        hard_failure = order_plan.status in {
+            "failed",
+            "failed_permanent",
+            "cancelled",
+            "rejected",
+            "timed_out",
+        } or (
             stage7 is not None and stage7.status == "fail"
         )
         issues.append(
@@ -1765,7 +1832,7 @@ def _summarize_live_order_issues(
         return (
             f"Live execution submitted {submitted_orders} of {planned_orders} planned orders. "
             f"The {action_label} for {row.get('market_title') or 'an unknown market'} "
-            f"was not submitted: {row.get('detail') or 'No execution detail was recorded.'}"
+            f"was not confirmed: {row.get('detail') or 'No execution detail was recorded.'}"
         )
 
     issue_label_parts: list[str] = []
@@ -1802,6 +1869,141 @@ def _llm_provider_error_rate_high(evaluated: list[CandidateEvaluation]) -> bool:
 
 def _completed_order_status(status: str | None) -> bool:
     return status in _SETTLED_ORDER_STATUSES
+
+
+def _walk_order_payload(value: object):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _walk_order_payload(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _walk_order_payload(nested)
+
+
+def _parse_order_response_payload(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def _order_response_value(value: object, keys: tuple[str, ...]) -> object | None:
+    normalized_keys = {key.lower() for key in keys}
+    for row in _walk_order_payload(_parse_order_response_payload(value)):
+        for key, nested in row.items():
+            if str(key).lower() in normalized_keys:
+                return nested
+    return None
+
+
+def _extract_remote_order_id(value: object) -> str | None:
+    order_id = _order_response_value(
+        value,
+        ("orderId", "order_id", "remoteOrderId", "remote_order_id", "id"),
+    )
+    if isinstance(order_id, (str, int)) and str(order_id).strip():
+        return str(order_id).strip()
+    if isinstance(value, str):
+        match = re.search(r"(?:order[_ -]?id)\s*[:=]\s*([A-Za-z0-9._:-]+)", value, re.I)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _normalize_remote_order_status(value: object) -> str | None:
+    raw_status = _order_response_value(
+        value,
+        ("status", "state", "orderStatus", "order_status", "result"),
+    )
+    if raw_status is None and isinstance(value, str):
+        raw_status = value
+    if not isinstance(raw_status, str):
+        return None
+    normalized = raw_status.strip().lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"filled", "complete", "completed", "executed", "success"}:
+        return "filled"
+    if normalized in {"confirmed", "already_redeemed", "resolved_zero_payout"}:
+        return normalized
+    if normalized in {
+        "partial",
+        "partially_filled",
+        "partiallyfilled",
+        "partial_fill",
+    }:
+        return "partially_filled"
+    if normalized in {"cancelled", "canceled", "expired", "cancel"}:
+        return "cancelled"
+    if normalized in {"rejected", "reject", "failed", "failure", "error"}:
+        return "rejected"
+    if normalized in {"open", "pending", "working", "live", "submitted", "accepted"}:
+        return "submitted"
+    if normalized in {"settlement_pending", "settling"}:
+        return "settlement_pending"
+    if normalized in {"timeout", "timed_out", "timedout"}:
+        return "timed_out"
+    return None
+
+
+def _order_response_number(value: object, keys: tuple[str, ...]) -> float | None:
+    raw_value = _order_response_value(value, keys)
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, (int, float)):
+        return float(raw_value)
+    if isinstance(raw_value, str):
+        try:
+            return float(raw_value.replace(",", "").strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _exit_has_meaningful_remaining_exposure(
+    order_plan: BullpenAutoLiveOrderPlan,
+    *,
+    dust_threshold_usd: float,
+) -> bool:
+    if order_plan.action != "sell":
+        return order_plan.status not in _EXIT_TERMINAL_SUCCESS_STATUSES
+    if order_plan.status != "partially_filled":
+        return order_plan.status not in _EXIT_TERMINAL_SUCCESS_STATUSES
+    remaining_value = order_plan.remaining_shares * (
+        order_plan.average_fill_price_cents or order_plan.limit_price_cents
+    ) / 100
+    return remaining_value > max(0.0, dust_threshold_usd)
+
+
+def _exit_releases_replacement_slot(
+    order_plan: BullpenAutoLiveOrderPlan,
+    *,
+    dust_threshold_usd: float,
+) -> bool:
+    return (
+        order_plan.status in _EXIT_TERMINAL_SUCCESS_STATUSES
+        or (
+            order_plan.status == "partially_filled"
+            and not _exit_has_meaningful_remaining_exposure(
+                order_plan,
+                dust_threshold_usd=dust_threshold_usd,
+            )
+        )
+    )
+
+
+def _serialize_stage3_refresh_state(state: dict[str, object]) -> dict[str, object]:
+    serialized = dict(state)
+    for key in (
+        "visible_active_market_ids",
+        "pending_submitted_buy_market_ids",
+        "occupied_market_ids",
+    ):
+        value = serialized.get(key)
+        if isinstance(value, set):
+            serialized[key] = sorted(value)
+    return serialized
 
 
 def _redeem_condition_ids_for_decision(decision: BullpenAutoLiveDecision) -> list[str]:
@@ -1883,72 +2085,243 @@ async def _poll_exit_settlement(
     *,
     decisions: list[BullpenAutoLiveDecision],
     baseline_balance_usd: float | None,
+    executor: object | None = None,
+    timeout_seconds: int = EXIT_SETTLEMENT_TIMEOUT_SECONDS,
+    interval_seconds: float = EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS,
+    dust_threshold_usd: float = 0.01,
 ) -> tuple[list[ConsoleWalletPosition] | None, float | None]:
     if not decisions:
         return None, baseline_balance_usd
 
-    deadline = asyncio.get_running_loop().time() + EXIT_SETTLEMENT_TIMEOUT_SECONDS
     latest_balance_usd = baseline_balance_usd
+    resolved_executor = executor or bullpen_module.BullpenLiveExecutor()
 
-    while True:
+    def _serialized_response(value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return str(value)
+
+    for decision in decisions:
+        order_plan = decision.order_plan
+        if (
+            order_plan is None
+            or order_plan.action not in {"sell", "redeem"}
+            or order_plan.status not in {"submitted", "settlement_pending", "confirming"}
+        ):
+            continue
+
+        submitted_response = order_plan.execution_response
+        response_status = _normalize_remote_order_status(submitted_response)
+        order_id = order_plan.remote_order_id or _extract_remote_order_id(submitted_response)
+        if order_id:
+            order_plan.remote_order_id = order_id
+
+        polled_response: object | None = None
+        poll_attempted = False
+        if response_status not in _EXIT_TERMINAL_SUCCESS_STATUSES | {"cancelled", "rejected"}:
+            if order_plan.action == "sell" and order_id:
+                poll_method = getattr(resolved_executor, "poll_order", None)
+                if poll_method is not None:
+                    poll_attempted = True
+                    try:
+                        polled_response = await asyncio.wait_for(
+                            poll_method(
+                                order_id=order_id,
+                                interval_seconds=interval_seconds,
+                                timeout_seconds=timeout_seconds,
+                            ),
+                            timeout=max(5, timeout_seconds + 15),
+                        )
+                    except Exception as exc:
+                        polled_response = {
+                            "status": "timed_out",
+                            "detail": f"Bullpen order polling did not complete: {exc}",
+                        }
+                else:
+                    polled_response = {
+                        "status": "timed_out",
+                        "detail": "The live executor did not expose Bullpen order polling.",
+                    }
+            elif order_plan.action == "sell":
+                polled_response = {
+                    "status": "timed_out",
+                    "detail": (
+                        "Event Exit order was submitted but Bullpen returned no remote order ID; "
+                        "the position was not treated as exited."
+                    ),
+                }
+            else:
+                # Redeem/claim has no CLOB order ID. Poll the same forced live
+                # wallet view until the redeemed condition disappears or the
+                # configured timeout is reached.
+                condition_ids = {
+                    condition_id.strip().lower()
+                    for condition_id in _redeem_condition_ids_for_decision(decision)
+                    if condition_id.strip()
+                }
+                if not condition_ids:
+                    condition_ids.add(decision.market_id.strip().lower())
+                redeem_deadline = asyncio.get_running_loop().time() + max(
+                    1, timeout_seconds
+                )
+                while True:
+                    try:
+                        wallet_snapshot = await _read_stage3_live_positions_snapshot()
+                        wallet_rows = wallet_snapshot.raw_positions or wallet_snapshot.positions
+                        excluded_classifications = {
+                            "closed",
+                            "resolved_zero_payout",
+                            "positive_payout_claimable",
+                            "settlement_pending",
+                            "stale_or_unknown",
+                        }
+                        matching_exposure = any(
+                            (
+                                (position.condition_id or position.market_id).strip().lower()
+                                in condition_ids
+                                and position.classification not in excluded_classifications
+                                and not position.is_claimable
+                                and (
+                                    position.current_value_usd
+                                    if position.current_value_usd is not None
+                                    else position.exposure_usd
+                                )
+                                > max(0.0, dust_threshold_usd)
+                            )
+                            for position in wallet_rows
+                        )
+                        if not matching_exposure:
+                            polled_response = {
+                                "status": "confirmed",
+                                "detail": (
+                                    "Redeem/claim confirmed by a forced live wallet refresh; "
+                                    "the old economic exposure is gone."
+                                ),
+                            }
+                            break
+                    except Exception as exc:
+                        logger.warning(
+                            "Stage 3 redeem reconciliation refresh failed for %s: %s",
+                            decision.market_id,
+                            exc,
+                        )
+                    remaining_seconds = redeem_deadline - asyncio.get_running_loop().time()
+                    if remaining_seconds <= 0:
+                        polled_response = {
+                            "status": "timed_out",
+                            "detail": (
+                                "Redeem/claim remained unconfirmed after the polling timeout; "
+                                "the replacement slot was released."
+                            ),
+                        }
+                        break
+                    await asyncio.sleep(min(max(0.1, interval_seconds), remaining_seconds))
+
+        # A poll command can return an open order when its own timeout expires.
+        # Normalize that result to an explicit timeout so submitted is never
+        # mistaken for a released slot.
+        if polled_response is not None and _normalize_remote_order_status(polled_response) == "submitted":
+            polled_response = {
+                **(polled_response if isinstance(polled_response, dict) else {}),
+                "status": "timed_out",
+                "detail": "Event Exit order remained open or unfilled until the polling timeout.",
+            }
+
+        effective_response = polled_response if poll_attempted else submitted_response
+        if poll_attempted:
+            effective_status = _normalize_remote_order_status(polled_response) or "timed_out"
+        else:
+            effective_status = _normalize_remote_order_status(effective_response) or response_status
+        if effective_status is None:
+            effective_status = "timed_out"
+
+        order_plan.execution_response = _serialized_response(effective_response)
+        filled_shares = _order_response_number(
+            effective_response,
+            (
+                "filledShares",
+                "filled_shares",
+                "filledSize",
+                "filled_size",
+                "executedShares",
+                "executed_shares",
+                "matchedShares",
+                "matched_shares",
+            ),
+        )
+        remaining_shares = _order_response_number(
+            effective_response,
+            (
+                "remainingShares",
+                "remaining_shares",
+                "remainingSize",
+                "remaining_size",
+                "openShares",
+                "open_shares",
+                "unfilledShares",
+                "unfilled_shares",
+            ),
+        )
+        if filled_shares is not None:
+            order_plan.filled_shares = max(0.0, filled_shares)
+        elif effective_status == "filled":
+            order_plan.filled_shares = max(0.0, order_plan.shares)
+        if remaining_shares is not None:
+            order_plan.remaining_shares = max(0.0, remaining_shares)
+        elif effective_status == "filled":
+            order_plan.remaining_shares = 0.0
+        elif effective_status == "partially_filled":
+            order_plan.remaining_shares = max(
+                0.0,
+                order_plan.shares - order_plan.filled_shares,
+            )
+        else:
+            order_plan.remaining_shares = max(0.0, order_plan.shares)
+        average_fill_price = _order_response_number(
+            effective_response,
+            ("averageFillPriceCents", "average_fill_price_cents", "fillPriceCents"),
+        )
+        if average_fill_price is not None:
+            order_plan.average_fill_price_cents = max(0.0, min(100.0, average_fill_price))
+
+        order_plan.status = effective_status  # type: ignore[assignment]
+        detail = _order_response_value(effective_response, ("detail", "message", "reason"))
+        if not isinstance(detail, str) or not detail.strip():
+            detail = {
+                "filled": "Event Exit order filled; the wallet refresh will verify the old exposure is gone.",
+                "partially_filled": (
+                    "Event Exit order partially filled; meaningful remaining economic exposure still controls slot occupancy."
+                    if _exit_has_meaningful_remaining_exposure(
+                        order_plan,
+                        dust_threshold_usd=dust_threshold_usd,
+                    )
+                    else "Event Exit order partially filled; the residual is at or below the economic dust threshold and the live refresh will verify slot release."
+                ),
+                "cancelled": "Event Exit order was cancelled; its replacement slot was released.",
+                "rejected": "Bullpen rejected the Event Exit order; its replacement slot was released.",
+                "timed_out": "Event Exit order is still open or unconfirmed after the polling timeout; its slot remains occupied.",
+                "settlement_pending": "Redeem/claim remains pending; its slot remains excluded from new-buy capacity until live refresh confirms removal.",
+            }.get(effective_status, "Bullpen returned an unrecognized Event Exit status.")
+        order_plan.detail = str(detail)
+        if effective_status in _EXIT_TERMINAL_SUCCESS_STATUSES:
+            order_plan.confirmed_at = utc_now_iso()
+            if order_plan.action == "sell":
+                decision.exit_state = "SOLD"
+        elif effective_status == "partially_filled":
+            decision.exit_state = "PARTIALLY_FILLED"
+        elif effective_status in {"cancelled", "rejected", "timed_out"}:
+            decision.exit_state = "FAILED"
+
         balance_state = await refresh_balance()
         if balance_state.status == "ready":
             latest_balance_usd = balance_state.available_balance_usd
 
-        unsettled = 0
-        for decision in decisions:
-            order_plan = decision.order_plan
-            if (
-                order_plan is None
-                or order_plan.action not in {"sell", "redeem"}
-                or order_plan.status not in {"submitted", "settlement_pending"}
-            ):
-                continue
-
-            if order_plan.action == "redeem":
-                if (
-                    baseline_balance_usd is not None
-                    and latest_balance_usd is not None
-                    and latest_balance_usd > baseline_balance_usd + 0.009
-                ):
-                    order_plan.status = "confirmed"
-                    order_plan.detail = (
-                        "Bullpen collateral increased after the redeem submission."
-                    )
-                    continue
-                pending_detail = build_redeem_pending_detail(
-                    list(condition_ids),
-                    attempt_count=1,
-                    retry_after_seconds=redeem_retry_cooldown_seconds(),
-                    on_chain_fallback_next=(
-                        "on-chain fallback"
-                        not in (order_plan.execution_response or "").lower()
-                    ),
-                )
-                order_plan.status = "settlement_pending"
-                order_plan.detail = pending_detail
-                unsettled += 1
-                continue
-
-            if (
-                baseline_balance_usd is not None
-                and latest_balance_usd is not None
-                and latest_balance_usd > baseline_balance_usd + 0.009
-            ):
-                order_plan.status = "confirmed"
-                order_plan.detail = (
-                    "Bullpen collateral increased after the exit submission."
-                )
-                continue
-            order_plan.status = "settlement_pending"
-            order_plan.detail = (
-                "Exit submitted, but the wallet still shows the original shares while settlement finishes."
-            )
-            unsettled += 1
-
-        if unsettled == 0 or asyncio.get_running_loop().time() >= deadline:
-            return None, latest_balance_usd
-        await asyncio.sleep(EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS)
+    return None, latest_balance_usd
 
 
 def _run_guardrails(
@@ -6778,6 +7151,24 @@ class BullpenAutoLiveEngine:
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
         stage3_buy_refresh_snapshot: dict[str, object] = {}
+        stage3_slot_diagnostics: dict[str, object] = {
+            "slot_limit": CONSOLE_RANKED_EVENT_LIMIT,
+            "occupied_slots_before_exit": len(
+                {position.market_id for position in position_snapshots if position.market_id}
+            ),
+            "planned_exit_market_ids": [],
+            "exit_order_ids_and_statuses": [],
+            "post_exit_snapshot_source": None,
+            "post_exit_snapshot_fetched_at": None,
+            "raw_position_count": 0,
+            "economically_active_position_count": 0,
+            "excluded_position_records": [],
+            "deduplicated_occupied_market_ids": [],
+            "free_slots_after_refresh": None,
+            "replacement_reservations": [],
+            "final_block_bypass_reason": None,
+        }
+        stage3_exit_execution_attempt_at: str | None = None
 
         def _current_stage3_order_counts() -> dict[str, int]:
             sell_planned = 0
@@ -6832,12 +7223,7 @@ class BullpenAutoLiveEngine:
                             redeem_processed += 1
                     else:
                         buy_processed += 1
-                if order_plan.status in {
-                    "submitted",
-                    "settlement_pending",
-                    "confirmed",
-                    "already_redeemed",
-                }:
+                if order_plan.status in _ORDER_ACCEPTED_STATUSES:
                     if is_sell:
                         sell_submitted += 1
                         if is_redeem:
@@ -7113,6 +7499,8 @@ class BullpenAutoLiveEngine:
                 stage_outputs["execution_mode_reason"] = execution_mode_reason
             if stage3_buy_refresh_snapshot:
                 stage_outputs["post_exit_buy_refresh"] = stage3_buy_refresh_snapshot
+            if stage3_slot_diagnostics:
+                stage_outputs["stage3_slot_diagnostics"] = stage3_slot_diagnostics
             if last_completed_market is not None:
                 stage_outputs["last_completed_market_id"] = last_completed_market.market_id
                 stage_outputs["last_completed_question"] = last_completed_market.question
@@ -8300,6 +8688,33 @@ class BullpenAutoLiveEngine:
                 and decision.order_plan.action in {"sell", "redeem"}
             )
         ]
+        rank_out_exit_decisions = [
+            decision
+            for decision in sell_execution_decisions
+            if any(
+                getattr(signal, "strategy", None) == "OUTSIDE_TOP_10_RETURNS_DAY"
+                for signal in decision.exit_signals
+            )
+        ]
+        replacement_reservations: dict[str, dict[str, object]] = {}
+        for candidate, exit_decision in zip(
+            ranked_buy_candidate_decisions,
+            rank_out_exit_decisions,
+        ):
+            replacement_reservations[candidate.market_id] = {
+                "replacement_market_id": candidate.market_id,
+                "replacement_side": candidate.side,
+                "exit_market_id": exit_decision.market_id,
+                "exit_side": exit_decision.order_plan.side if exit_decision.order_plan else exit_decision.side,
+                "status": "reserved",
+                "reason": "Rank-out exit reserved this slot for the ranked replacement buy.",
+            }
+        stage3_slot_diagnostics["planned_exit_market_ids"] = [
+            decision.market_id for decision in sell_execution_decisions
+        ]
+        stage3_slot_diagnostics["replacement_reservations"] = list(
+            replacement_reservations.values()
+        )
         buy_execution_decisions: list[BullpenAutoLiveDecision] = []
         actionable_decisions = [*sell_execution_decisions, *ranked_buy_candidate_decisions]
         planned_order_counts = _current_stage3_order_counts()
@@ -8421,6 +8836,7 @@ class BullpenAutoLiveEngine:
             reason: str,
             outputs: dict[str, object] | None = None,
         ) -> None:
+            stage3_slot_diagnostics["final_block_bypass_reason"] = reason
             decision.reason = reason
             decision.summary = reason
             decision.target_exposure_usd = 0
@@ -8507,37 +8923,82 @@ class BullpenAutoLiveEngine:
             )
 
         async def _refresh_stage3_buy_state() -> dict[str, object]:
-            simulated_exit_market_ids = {
-                decision.market_id
-                for decision in sell_execution_decisions
-                if decision.order_plan is not None
-                and decision.order_plan.status not in {"skipped", "cancelled"}
-            }
-            visible_active_market_ids = {
-                position.market_id
-                for position in position_snapshots
-                if position.exposure_usd > 0
-                and position.market_id not in simulated_exit_market_ids
-            }
+            snapshot_source = "stage1_snapshot_simulation"
+            snapshot_fetched_at: str | None = None
+            raw_position_count = len(position_snapshots)
+            excluded_position_records: list[dict[str, object]] = []
+            if state.dry_run:
+                visible_active_market_ids = {
+                    position.market_id
+                    for position in position_snapshots
+                    if position.exposure_usd > settings.bullpen_economic_dust_threshold_usd
+                }
+                economically_active_position_count = len(visible_active_market_ids)
+                deduplicated_occupied_market_ids = sorted(visible_active_market_ids)
+            else:
+                live_snapshot = await _read_stage3_live_positions_snapshot()
+                snapshot_source = live_snapshot.source
+                snapshot_fetched_at = live_snapshot.fetched_at
+                exit_attempt_at = _parse_iso_datetime(stage3_exit_execution_attempt_at)
+                fetched_at = _parse_iso_datetime(snapshot_fetched_at)
+                if snapshot_source != "live-cli":
+                    raise RuntimeError(
+                        "post-exit Bullpen positions refresh returned a cached snapshot instead of live-cli"
+                    )
+                if exit_attempt_at is not None and (
+                    fetched_at is None or fetched_at <= exit_attempt_at
+                ):
+                    raise RuntimeError(
+                        "post-exit Bullpen positions snapshot was not fetched after the Event Exit execution attempt"
+                    )
+                allocation = classify_economic_slots(
+                    live_snapshot.raw_positions or live_snapshot.positions,
+                    dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
+                )
+                visible_active_market_ids = set(allocation.occupied_market_ids)
+                raw_position_count = live_snapshot.raw_position_count
+                economically_active_position_count = allocation.economically_active_position_count
+                excluded_position_records = allocation.excluded_position_records
+                deduplicated_occupied_market_ids = allocation.deduplicated_occupied_market_ids
+
+            stage3_slot_diagnostics.update(
+                {
+                    "post_exit_snapshot_source": snapshot_source,
+                    "post_exit_snapshot_fetched_at": snapshot_fetched_at,
+                    "raw_position_count": raw_position_count,
+                    "economically_active_position_count": economically_active_position_count,
+                    "excluded_position_records": excluded_position_records,
+                    "deduplicated_occupied_market_ids": deduplicated_occupied_market_ids,
+                }
+            )
             pending_submitted_buy_market_ids = _pending_submitted_buy_market_ids(
                 [*historical_decisions, *decisions],
                 visible_active_market_ids=visible_active_market_ids,
             )
             occupied_market_ids = visible_active_market_ids | pending_submitted_buy_market_ids
-            available_balance_usd = available_balance_before_step1
-            if available_balance_usd is None:
-                cash_in_hand_usd = console_trade_amount_breakdown["cash_in_hand_usd"]
-                available_balance_usd = (
-                    float(cash_in_hand_usd)
-                    if isinstance(cash_in_hand_usd, (int, float))
-                    else None
-                )
+            available_balance_usd: float | None = None
+            if state.dry_run:
+                available_balance_usd = available_balance_before_step1
+                if available_balance_usd is None:
+                    cash_in_hand_usd = console_trade_amount_breakdown["cash_in_hand_usd"]
+                    available_balance_usd = (
+                        float(cash_in_hand_usd)
+                        if isinstance(cash_in_hand_usd, (int, float))
+                        else None
+                    )
+            else:
+                balance_state = await refresh_balance()
+                if balance_state.status == "ready":
+                    available_balance_usd = balance_state.available_balance_usd
             breakdown = build_console_trade_amount_breakdown(
                 available_balance_usd=available_balance_usd,
                 occupied_position_count=len(occupied_market_ids),
             )
+            free_slots = int(breakdown["available_slots"] or 0)
+            stage3_slot_diagnostics["free_slots_after_refresh"] = free_slots
             return {
-                "source": "stage1_snapshot_simulation",
+                "source": snapshot_source,
+                "snapshot_fetched_at": snapshot_fetched_at,
                 "visible_active_market_ids": visible_active_market_ids,
                 "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
                 "occupied_market_ids": occupied_market_ids,
@@ -8548,6 +9009,10 @@ class BullpenAutoLiveEngine:
                 "balance_status": "ready"
                 if breakdown["cash_in_hand_usd"] is not None
                 else "unavailable",
+                "raw_position_count": raw_position_count,
+                "economically_active_position_count": economically_active_position_count,
+                "excluded_position_records": excluded_position_records,
+                "deduplicated_occupied_market_ids": deduplicated_occupied_market_ids,
             }
 
         async def _plan_stage3_buy_orders() -> None:
@@ -8564,12 +9029,14 @@ class BullpenAutoLiveEngine:
                     "Stage 3 could not refresh Bullpen wallet state after Event Exits, so the ranked buys stayed deferred: "
                     f"{exc}"
                 )
+                stage3_slot_diagnostics["final_block_bypass_reason"] = refresh_reason
                 for decision in ranked_buy_candidate_decisions:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
                         reason=refresh_reason,
                         outputs={
                             "order_usd_source": "post_exit_refresh_failed",
+                            "stage3_slot_diagnostics": stage3_slot_diagnostics,
                             **stage2_universe_status,
                             **stage2_strategy_metadata,
                         },
@@ -8577,7 +9044,7 @@ class BullpenAutoLiveEngine:
                 buy_execution_decisions = []
                 return
 
-            stage3_buy_refresh_snapshot = dict(refreshed_state)
+            stage3_buy_refresh_snapshot = _serialize_stage3_refresh_state(refreshed_state)
             occupied_market_ids = set(
                 refreshed_state["occupied_market_ids"]  # type: ignore[arg-type]
             )
@@ -8589,6 +9056,7 @@ class BullpenAutoLiveEngine:
             )
 
             for decision in ranked_buy_candidate_decisions:
+                reservation = replacement_reservations.get(decision.market_id)
                 current_breakdown = build_console_trade_amount_breakdown(
                     available_balance_usd=remaining_cash,
                     occupied_position_count=len(occupied_market_ids),
@@ -8605,11 +9073,47 @@ class BullpenAutoLiveEngine:
                     "max_positions": int(current_breakdown["max_positions"] or 0),
                     "order_usd_source": refreshed_state["source"],
                     "console_trade_last_calculated_usd": last_calculated_console_order_usd,
+                    "raw_position_count": refreshed_state.get("raw_position_count"),
+                    "economically_active_position_count": refreshed_state.get(
+                        "economically_active_position_count"
+                    ),
+                    "excluded_position_records": refreshed_state.get(
+                        "excluded_position_records", []
+                    ),
+                    "deduplicated_occupied_market_ids": refreshed_state.get(
+                        "deduplicated_occupied_market_ids", []
+                    ),
+                    "post_exit_snapshot_source": refreshed_state.get("source"),
+                    "post_exit_snapshot_fetched_at": refreshed_state.get(
+                        "snapshot_fetched_at"
+                    ),
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                 }
 
-                if decision.market_id in occupied_market_ids:
+                if (
+                    reservation is not None
+                    and not state.dry_run
+                    and reservation.get("status") == "reserved"
+                ):
+                    reservation_reason = (
+                        "This ranked replacement is reserved for the corresponding rank-out exit; "
+                        "the exit must be confirmed and the live refresh must remove the old exposure first."
+                    )
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason=reservation_reason,
+                        outputs=current_outputs,
+                    )
+                    stage3_slot_diagnostics["final_block_bypass_reason"] = reservation_reason
+                    continue
+
+                candidate_market_aliases = {
+                    value.strip()
+                    for value in (decision.market_id, decision.slug)
+                    if isinstance(value, str) and value.strip()
+                }
+                if candidate_market_aliases & occupied_market_ids:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
                         reason="Market already has an active or submitted Bullpen position after the post-exit refresh, so Stage 3 did not plan another buy.",
@@ -8637,15 +9141,65 @@ class BullpenAutoLiveEngine:
                         reason=balance_reason,
                         outputs=current_outputs,
                     )
+                    stage3_slot_diagnostics["final_block_bypass_reason"] = balance_reason
                     continue
 
                 if current_available_slots <= 0:
-                    _mark_ranked_buy_candidate_unplanned(
-                        decision,
-                        reason="All Bullpen slots were still occupied after the post-exit refresh, so no new buy was planned.",
-                        outputs=current_outputs,
-                    )
-                    continue
+                    stale_bypass = False
+                    if reservation is not None and reservation.get("status") == "confirmed":
+                        exit_market_id = reservation.get("exit_market_id")
+                        excluded_records = refreshed_state.get("excluded_position_records") or []
+                        candidate_market_aliases = {
+                            value.strip()
+                            for value in (decision.market_id, decision.slug)
+                            if isinstance(value, str) and value.strip()
+                        }
+                        stale_bypass = bool(
+                            refreshed_state.get("source") == "live-cli"
+                            and isinstance(exit_market_id, str)
+                            and exit_market_id not in set(
+                                refreshed_state.get("visible_active_market_ids") or []
+                            )
+                            and any(
+                                isinstance(record, dict)
+                                and record.get("market_id") == exit_market_id
+                                and any(
+                                    marker in str(record.get("reason", "")).lower()
+                                    for marker in ("stale", "dust", "non-active", "closed", "resolved")
+                                )
+                                for record in excluded_records
+                            )
+                            and remaining_cash >= settings.min_order_usd
+                            and candidate_market_aliases.isdisjoint(occupied_market_ids)
+                        )
+                    if stale_bypass:
+                        exit_market_id = str(reservation["exit_market_id"])
+                        occupied_market_ids.discard(exit_market_id)
+                        current_breakdown = build_console_trade_amount_breakdown(
+                            available_balance_usd=remaining_cash,
+                            occupied_position_count=len(occupied_market_ids),
+                        )
+                        current_occupied_positions = int(
+                            current_breakdown["occupied_positions"] or 0
+                        )
+                        current_available_slots = int(
+                            current_breakdown["available_slots"] or 0
+                        )
+                        stage3_slot_diagnostics["final_block_bypass_reason"] = (
+                            "Replacement slot safely bypassed a confirmed exit's stale/dust/non-active record after live refresh."
+                        )
+                    else:
+                        block_reason = (
+                            "Portfolio capacity is genuinely full after the forced live refresh: "
+                            f"{current_occupied_positions}/{CONSOLE_RANKED_EVENT_LIMIT} economically active or pending markets remain."
+                        )
+                        _mark_ranked_buy_candidate_unplanned(
+                            decision,
+                            reason=block_reason,
+                            outputs=current_outputs,
+                        )
+                        stage3_slot_diagnostics["final_block_bypass_reason"] = block_reason
+                        continue
 
                 order_usd = float(current_breakdown["order_usd"] or 0.0)
                 if order_usd <= 0:
@@ -8686,6 +9240,14 @@ class BullpenAutoLiveEngine:
                 occupied_market_ids.add(decision.market_id)
                 planned_buy_market_ids.add(decision.market_id)
                 remaining_cash = round(max(0.0, remaining_cash - order_usd), 2)
+                if reservation is not None:
+                    reservation["status"] = "consumed"
+                    reservation["reason"] = (
+                        "Replacement buy planned immediately after the exit was confirmed and live refresh released the old exposure."
+                    )
+                    stage3_slot_diagnostics["final_block_bypass_reason"] = (
+                        "Replacement slot successfully released after the confirmed Event Exit and forced live refresh."
+                    )
 
             buy_execution_decisions = [
                 decision
@@ -8694,6 +9256,13 @@ class BullpenAutoLiveEngine:
                 and decision.order_plan.status == "planned"
                 and decision.order_plan.action == "buy"
             ]
+            stage3_slot_diagnostics["replacement_reservations"] = list(
+                replacement_reservations.values()
+            )
+            stage3_slot_diagnostics["free_slots_after_planned_buys"] = max(
+                0,
+                CONSOLE_RANKED_EVENT_LIMIT - len(occupied_market_ids),
+            )
             report_invest_stage_progress(
                 phase_status="running",
                 reason=(
@@ -8733,7 +9302,7 @@ class BullpenAutoLiveEngine:
             *,
             step_key: str,
         ) -> None:
-            nonlocal new_positions, running_failed_orders
+            nonlocal new_positions, running_failed_orders, stage3_exit_execution_attempt_at
 
             order_plan = decision.order_plan
             if order_plan is None or order_plan.status != "planned":
@@ -8953,7 +9522,9 @@ class BullpenAutoLiveEngine:
                     return True
 
                 refreshed_buy_state = await _refresh_stage3_buy_state()
-                stage3_buy_refresh_snapshot = dict(refreshed_buy_state)
+                stage3_buy_refresh_snapshot = _serialize_stage3_refresh_state(
+                    refreshed_buy_state
+                )
                 current_breakdown = build_console_trade_amount_breakdown(
                     available_balance_usd=(
                         float(refreshed_buy_state["cash_in_hand_usd"])
@@ -8983,15 +9554,23 @@ class BullpenAutoLiveEngine:
                     **stage2_strategy_metadata,
                 }
 
+                reservation = replacement_reservations.get(decision.market_id)
                 visible_active_market_ids = set(
                     refreshed_buy_state["visible_active_market_ids"]  # type: ignore[arg-type]
                 )
                 pending_submitted_buy_market_ids = set(
                     refreshed_buy_state["pending_submitted_buy_market_ids"]  # type: ignore[arg-type]
                 )
-                if (
-                    decision.market_id in visible_active_market_ids
-                    or decision.market_id in pending_submitted_buy_market_ids
+                refreshed_occupied_market_ids = set(
+                    refreshed_buy_state["occupied_market_ids"]  # type: ignore[arg-type]
+                )
+                candidate_market_aliases = {
+                    value.strip()
+                    for value in (decision.market_id, decision.slug)
+                    if isinstance(value, str) and value.strip()
+                }
+                if candidate_market_aliases & (
+                    visible_active_market_ids | pending_submitted_buy_market_ids
                 ):
                     order_plan.status = "deferred"
                     order_plan.detail = (
@@ -9003,16 +9582,60 @@ class BullpenAutoLiveEngine:
                         "Fresh Bullpen cash in hand is unavailable, so Stage 3 deferred this buy instead of reusing a cached amount."
                     )
                 elif int(current_breakdown["available_slots"] or 0) <= 0:
+                    exit_market_id = (
+                        reservation.get("exit_market_id") if reservation else None
+                    )
+                    excluded_records = refreshed_buy_state.get(
+                        "excluded_position_records"
+                    ) or []
+                    stale_bypass = bool(
+                        reservation is not None
+                        and reservation.get("status") in {"confirmed", "consumed"}
+                        and refreshed_buy_state.get("source") == "live-cli"
+                        and isinstance(exit_market_id, str)
+                        and exit_market_id not in visible_active_market_ids
+                        and any(
+                            isinstance(record, dict)
+                            and record.get("market_id") == exit_market_id
+                            and any(
+                                marker in str(record.get("reason", "")).lower()
+                                for marker in (
+                                    "stale",
+                                    "dust",
+                                    "non-active",
+                                    "closed",
+                                    "resolved",
+                                )
+                            )
+                            for record in excluded_records
+                        )
+                        and isinstance(current_breakdown["cash_in_hand_usd"], (int, float))
+                        and float(current_breakdown["cash_in_hand_usd"]) >= settings.min_order_usd
+                        and candidate_market_aliases.isdisjoint(refreshed_occupied_market_ids)
+                    )
+                    if stale_bypass:
+                        refreshed_occupied_market_ids.discard(str(exit_market_id))
+                        current_breakdown = build_console_trade_amount_breakdown(
+                            available_balance_usd=float(
+                                current_breakdown["cash_in_hand_usd"]
+                            ),
+                            occupied_position_count=len(refreshed_occupied_market_ids),
+                        )
+                if order_plan.status != "deferred" and (
+                    int(current_breakdown["available_slots"] or 0) <= 0
+                ):
                     order_plan.status = "deferred"
                     order_plan.detail = (
-                        "All Bullpen slots are occupied after the latest refresh, so Stage 3 deferred this buy."
+                        "Portfolio capacity is genuinely full after the forced live refresh: ten economically active or pending markets occupy the limit."
                     )
-                elif int(current_breakdown["occupied_positions"] or 0) + 1 > CONSOLE_RANKED_EVENT_LIMIT:
+                elif order_plan.status != "deferred" and int(
+                    current_breakdown["occupied_positions"] or 0
+                ) + 1 > CONSOLE_RANKED_EVENT_LIMIT:
                     order_plan.status = "deferred"
                     order_plan.detail = (
                         "Submitting this order would exceed the 10-position Bullpen limit, so the guardrail deferred it."
                     )
-                else:
+                elif order_plan.status != "deferred":
                     refreshed_order_usd = float(current_breakdown["order_usd"] or 0.0)
                     if refreshed_order_usd < settings.min_order_usd:
                         order_plan.status = "deferred"
@@ -9285,6 +9908,8 @@ class BullpenAutoLiveEngine:
                     )
                     _record_submitted_buy_position()
                 else:
+                    stage3_exit_execution_attempt_at = utc_now_iso()
+
                     async def _submit_sell_order() -> str:
                         return await asyncio.wait_for(
                             executor.sell_limit(
@@ -9300,14 +9925,10 @@ class BullpenAutoLiveEngine:
                     order_plan.execution_response = await _submit_with_rpc_retry(
                         _submit_sell_order
                     )
-                    new_positions = [
-                        position
-                        for position in new_positions
-                        if not (
-                            position.market_id == decision.market_id
-                            and position.side == order_plan.side
-                        )
-                    ]
+                    order_plan.remote_order_id = (
+                        order_plan.remote_order_id
+                        or _extract_remote_order_id(order_plan.execution_response)
+                    )
                 order_plan.status = "submitted"
                 order_plan.executed_at = utc_now_iso()
                 order_plan.detail = "Limit order submitted successfully."
@@ -9538,6 +10159,10 @@ class BullpenAutoLiveEngine:
             _, available_balance_after_step1 = await _poll_exit_settlement(
                 decisions=sell_execution_decisions,
                 baseline_balance_usd=available_balance_before_step1,
+                executor=executor,
+                timeout_seconds=settings.stage3_exit_poll_timeout_seconds,
+                interval_seconds=settings.stage3_exit_poll_interval_seconds,
+                dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
             )
             if (
                 available_balance_before_step1 is not None
@@ -9545,6 +10170,52 @@ class BullpenAutoLiveEngine:
                 and available_balance_after_step1 > available_balance_before_step1
             ):
                 available_balance_before_step1 = available_balance_after_step1
+            for decision in sell_execution_decisions:
+                order_plan = decision.order_plan
+                if order_plan is None:
+                    continue
+                stage3_slot_diagnostics["exit_order_ids_and_statuses"].append(
+                    {
+                        "market_id": decision.market_id,
+                        "side": order_plan.side,
+                        "order_id": order_plan.remote_order_id,
+                        "status": order_plan.status,
+                        "filled_shares": order_plan.filled_shares,
+                        "remaining_shares": order_plan.remaining_shares,
+                        "detail": order_plan.detail,
+                    }
+                )
+                reservation = next(
+                    (
+                        item
+                        for item in replacement_reservations.values()
+                        if item.get("exit_market_id") == decision.market_id
+                    ),
+                    None,
+                )
+                if reservation is not None:
+                    reservation["status"] = (
+                        "confirmed"
+                        if _exit_releases_replacement_slot(
+                            order_plan,
+                            dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
+                        )
+                        else "released"
+                    )
+                    reservation["exit_status"] = order_plan.status
+                    if order_plan.status not in _EXIT_TERMINAL_SUCCESS_STATUSES:
+                        reservation["reason"] = (
+                            "Event Exit partially filled but meaningful exposure remains; replacement reservation released."
+                            if order_plan.status == "partially_filled"
+                            and _exit_has_meaningful_remaining_exposure(
+                                order_plan,
+                                dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
+                            )
+                            else "Exit did not reach a terminal success state; replacement reservation released."
+                        )
+            stage3_slot_diagnostics["replacement_reservations"] = list(
+                replacement_reservations.values()
+            )
         await _plan_stage3_buy_orders()
         if execution_v2_handoff:
             for decision in buy_execution_decisions:
@@ -9790,6 +10461,7 @@ class BullpenAutoLiveEngine:
                     "execution_failure_message": execution_issue_summary,
                     "execution_mode_reason": simulation_reason if state.dry_run else None,
                     "post_exit_buy_refresh": stage3_buy_refresh_snapshot,
+                    "stage3_slot_diagnostics": stage3_slot_diagnostics,
                     "order_issues": live_order_issues,
                     "decision_summaries": [
                         {

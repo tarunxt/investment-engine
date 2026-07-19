@@ -724,6 +724,8 @@ def _build_bundle(
             "order_intents": order_intents,
             "order_metrics": stage3_outputs.get("order_metrics") or {},
             "execution_steps": stage3_outputs.get("execution_steps") or [],
+            "post_exit_buy_refresh": stage3_outputs.get("post_exit_buy_refresh") or {},
+            "stage3_slot_diagnostics": stage3_outputs.get("stage3_slot_diagnostics") or {},
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),
             "stage2_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
         },

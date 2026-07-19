@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -166,6 +166,18 @@ class ConsoleWalletPosition:
     claimable_value_usd: float | None = None
     expected_payout_usdc: float | None = None
     resolution_status: str | None = None
+
+
+@dataclass(frozen=True)
+class ConsoleWalletPositionsSnapshot:
+    """Parsed wallet positions together with the broker freshness proof."""
+
+    positions: list[ConsoleWalletPosition]
+    source: str
+    fetched_at: str
+    raw_position_count: int
+    diagnostics: dict[str, object]
+    raw_positions: list[ConsoleWalletPosition] = field(default_factory=list)
 
 
 @dataclass
@@ -1109,6 +1121,8 @@ def _aggregate_console_wallet_positions(
 
 def parse_console_wallet_positions_payload(
     parsed: object,
+    *,
+    aggregate: bool = True,
 ) -> list[ConsoleWalletPosition]:
     rows = _collect_console_position_rows(parsed)
     positions: list[ConsoleWalletPosition] = []
@@ -1191,7 +1205,11 @@ def parse_console_wallet_positions_payload(
         for position in classified_positions
         if position.shares > 0 or position.classification != "closed"
     ]
-    return _aggregate_console_wallet_positions(eligible_positions)
+    return (
+        _aggregate_console_wallet_positions(eligible_positions)
+        if aggregate
+        else classified_positions
+    )
 
 
 async def read_console_wallet_positions(
@@ -1201,18 +1219,54 @@ async def read_console_wallet_positions(
     snapshot_payload: object | None = None,
     max_age_seconds: int = CONSOLE_POSITIONS_TIMEOUT_SECONDS,
 ) -> list[ConsoleWalletPosition]:
+    snapshot = await read_console_wallet_positions_snapshot(
+        force_fresh=force_fresh,
+        caller_source=caller_source,
+        snapshot_payload=snapshot_payload,
+        max_age_seconds=max_age_seconds,
+    )
+    return snapshot.positions
+
+
+async def read_console_wallet_positions_snapshot(
+    *,
+    force_fresh: bool = True,
+    caller_source: str = "console-wallet",
+    snapshot_payload: object | None = None,
+    max_age_seconds: int = CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+) -> ConsoleWalletPositionsSnapshot:
+    broker_snapshot = None
     if snapshot_payload is None:
-        snapshot = await get_bullpen_runtime_broker().get_positions_snapshot(
+        broker_snapshot = await get_bullpen_runtime_broker().get_positions_snapshot(
             force_fresh=force_fresh,
             caller_source=caller_source,
             max_age_seconds=max_age_seconds,
             timeout_seconds=_console_positions_timeout_seconds(),
         )
-        parsed = snapshot.payload
+        parsed = broker_snapshot.payload
     else:
         parsed = snapshot_payload
 
-    return parse_console_wallet_positions_payload(parsed)
+    raw_positions = parse_console_wallet_positions_payload(parsed, aggregate=False)
+    positions = _aggregate_console_wallet_positions(
+        [
+            position
+            for position in raw_positions
+            if position.shares > 0 or position.classification != "closed"
+        ]
+    )
+    return ConsoleWalletPositionsSnapshot(
+        positions=positions,
+        source=broker_snapshot.source if broker_snapshot is not None else "provided-payload",
+        fetched_at=broker_snapshot.fetched_at if broker_snapshot is not None else datetime.now(UTC).isoformat(),
+        raw_position_count=len(_collect_console_position_rows(parsed)),
+        diagnostics=(
+            broker_snapshot.diagnostics.model_dump(mode="json")
+            if broker_snapshot is not None
+            else {"source": "provided-payload"}
+        ),
+        raw_positions=raw_positions,
+    )
 
 
 def apply_scanned_market_to_position(

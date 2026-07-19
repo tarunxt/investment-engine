@@ -2929,7 +2929,16 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
         async def sell_limit(self, **kwargs):
             executor_calls.append("sell_limit")
             sell_limit_kwargs.append(kwargs)
-            return "sell-limit-submitted"
+            return json.dumps({"orderId": "sell-order-1", "status": "submitted"})
+
+        async def poll_order(self, **kwargs):
+            assert kwargs["order_id"] == "sell-order-1"
+            return {
+                "orderId": "sell-order-1",
+                "status": "filled",
+                "filledShares": 7.5,
+                "remainingShares": 0,
+            }
 
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
     monkeypatch.setattr(
@@ -3213,12 +3222,12 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
         historical_decisions=[],
     )
 
-    assert executor_calls == ["sell_limit", "buy_limit"]
+    assert executor_calls == ["sell_limit"]
     assert result.run.status == "failed"
-    assert result.run.orders_planned == 2
-    assert result.run.orders_submitted == 1
+    assert result.run.orders_planned == 1
+    assert result.run.orders_submitted == 0
     assert "Will the active position fail to exit first?" in result.run.summary
-    assert "was not submitted" in result.run.summary
+    assert "was not confirmed" in result.run.summary
     assert result.state.last_error == result.run.summary
 
     invest_stage = next(
@@ -3237,12 +3246,10 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
     buy_decision = next(
         decision for decision in result.decisions if decision.decision == "BUY_NEW"
     )
-    assert buy_decision.order_plan is not None
-    assert buy_decision.order_plan.action == "buy"
-    assert buy_decision.order_plan.status == "submitted"
-    assert (
-        buy_decision.reason
-        == "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
+    assert buy_decision.order_plan is None
+    assert any(
+        marker in buy_decision.reason.lower()
+        for marker in ("capacity", "cash", "refresh")
     )
 
 
@@ -3828,7 +3835,16 @@ async def test_console_profile_submits_buys_even_while_exit_settlement_is_pendin
 
         async def sell_limit(self, **kwargs):
             executor_calls.append(("sell", kwargs))
-            return "sell submitted"
+            return json.dumps({"orderId": "confirmed-sell-1", "status": "submitted"})
+
+        async def poll_order(self, **kwargs):
+            assert kwargs["order_id"] == "confirmed-sell-1"
+            return {
+                "orderId": "confirmed-sell-1",
+                "status": "filled",
+                "filledShares": 10,
+                "remainingShares": 0,
+            }
 
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
     monkeypatch.setattr(
@@ -3919,14 +3935,20 @@ async def test_console_profile_submits_buys_even_while_exit_settlement_is_pendin
 
     assert "buy" in [name for name, _kwargs in executor_calls]
     assert buy_decisions
-    assert all(
-        decision.order_plan is not None and decision.order_plan.status == "submitted"
+    planned_buy_decisions = [
+        decision
         for decision in buy_decisions
+        if decision.order_plan is not None and decision.order_plan.action == "buy"
+    ]
+    assert planned_buy_decisions
+    assert all(
+        decision.order_plan.status == "submitted"
+        for decision in planned_buy_decisions
     )
     assert all(
         decision.reason
         == "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
-        for decision in buy_decisions
+        for decision in planned_buy_decisions
     )
 
 
@@ -4030,7 +4052,16 @@ async def test_console_profile_executes_buys_after_exit_settlement_confirms(monk
 
         async def sell_limit(self, **kwargs):
             executor_calls.append(("sell", kwargs))
-            return "sell submitted"
+            return json.dumps({"orderId": "confirmed-sell-1", "status": "submitted"})
+
+        async def poll_order(self, **kwargs):
+            assert kwargs["order_id"] == "confirmed-sell-1"
+            return {
+                "orderId": "confirmed-sell-1",
+                "status": "filled",
+                "filledShares": 10,
+                "remainingShares": 0,
+            }
 
     monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
     monkeypatch.setattr(

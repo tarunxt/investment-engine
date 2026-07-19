@@ -365,6 +365,51 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
             )
         )
 
+    slot_diagnostics = (
+        stage_3.get("stage3_slot_diagnostics")
+        if isinstance(stage_3.get("stage3_slot_diagnostics"), dict)
+        else {}
+    )
+    if slot_diagnostics:
+        snapshot_source = slot_diagnostics.get("post_exit_snapshot_source")
+        planned_exits = slot_diagnostics.get("planned_exit_market_ids")
+        if planned_exits and snapshot_source not in {"live-cli", "stage1_snapshot_simulation"}:
+            findings.append(
+                _finding(
+                    code="STAGE3_POST_EXIT_SNAPSHOT_SOURCE_INVALID",
+                    severity="high",
+                    stage="stage-3",
+                    category="slot-allocation",
+                    title="Stage 3 post-exit snapshot source is not auditable",
+                    explanation="A run planned Event Exit orders but did not record a live-cli or explicitly simulated post-exit snapshot source.",
+                    observed_value=str(snapshot_source),
+                    expected_value="live-cli for live execution; stage1_snapshot_simulation for dry-run",
+                    blocking=True,
+                    evidence_pointers=["/stage_3/stage3_slot_diagnostics/post_exit_snapshot_source"],
+                )
+            )
+        occupied_before = _float(slot_diagnostics.get("occupied_slots_before_exit"))
+        slot_limit = _float(slot_diagnostics.get("slot_limit"))
+        economically_active = _float(
+            slot_diagnostics.get("economically_active_position_count")
+        )
+        if slot_limit is not None and economically_active is not None and economically_active > slot_limit:
+            findings.append(
+                _finding(
+                    code="STAGE3_ECONOMIC_SLOTS_EXCEED_LIMIT",
+                    severity="high",
+                    stage="stage-3",
+                    category="slot-allocation",
+                    title="Economic slot allocation exceeds the portfolio limit",
+                    explanation="The post-exit economic exposure classifier counted more active positions than the configured top-10 limit.",
+                    observed_value=str(economically_active),
+                    expected_value=f"<= {int(slot_limit)}",
+                    blocking=True,
+                    evidence_pointers=["/stage_3/stage3_slot_diagnostics"],
+                    detection_metadata={"occupied_slots_before_exit": occupied_before},
+                )
+            )
+
     orders = stage_3.get("order_intents") if isinstance(stage_3.get("order_intents"), list) else []
     decisions_by_id = {
         str(decision.get("id")): decision for decision in decisions if isinstance(decision, dict)

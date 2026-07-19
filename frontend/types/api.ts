@@ -2002,6 +2002,8 @@ export type BullpenAutoLiveOrderPlanStatus =
   | "resolved_zero_payout"
   | "skipped"
   | "cancelled"
+  | "rejected"
+  | "timed_out"
   | "failed";
 export type BullpenAutoLiveOrderAction = "buy" | "sell" | "hold" | "redeem";
 export type BullpenAutoLiveOutcomeSide = "YES" | "NO";
@@ -2095,6 +2097,9 @@ export interface BullpenAutoLiveSettings {
   max_slippage_cents: number;
   trade_cooldown_hours_per_market: number;
   max_reprice_attempts: number;
+  stage3_exit_poll_timeout_seconds: number;
+  stage3_exit_poll_interval_seconds: number;
+  bullpen_economic_dust_threshold_usd: number;
   exit_edge_pp: number;
   trim_edge_pp: number;
   rebalance_interval_minutes: number;

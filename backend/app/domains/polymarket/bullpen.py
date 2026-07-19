@@ -628,6 +628,37 @@ class BullpenLiveExecutor:
                 retry_args[min_price_index] = f"{retry_min_price:.4f}"
                 current_args = retry_args
 
+    async def poll_order(
+        self,
+        *,
+        order_id: str,
+        interval_seconds: float = 3,
+        timeout_seconds: int = 30,
+    ) -> object:
+        """Wait for one CLOB order to reach a terminal state.
+
+        The Bullpen CLI owns the provider-specific order lookup and terminal
+        status vocabulary. Keeping this call behind the executor preserves the
+        provider abstraction used by Auto-Live and makes the Stage 3 polling
+        behavior straightforward to fake in tests.
+        """
+        return await run_bullpen_json(
+            [
+                "polymarket",
+                "poll-order",
+                order_id,
+                "--interval",
+                str(max(0.1, interval_seconds)),
+                "--timeout",
+                str(max(1, timeout_seconds)),
+                "--output",
+                "json",
+                "--read-only",
+                "--non-interactive",
+            ],
+            timeout_seconds=max(15, timeout_seconds + 15),
+        )
+
     async def _execute_buy_with_limit(
         self,
         *,

@@ -40,6 +40,8 @@ AutoLiveOrderPlanStatus = Literal[
     "resolved_zero_payout",
     "skipped",
     "cancelled",
+    "rejected",
+    "timed_out",
     "failed",
 ]
 AutoLiveOrderAction = Literal["buy", "sell", "hold", "redeem"]
@@ -208,6 +210,14 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     trade_cooldown_hours_per_market: float = Field(default=2, ge=0)
     max_reprice_attempts: int = Field(default=2, ge=0)
 
+    # Stage 3 uses these values only for slot accounting and exit
+    # confirmation. They are deliberately separate from order sizing so a
+    # tiny residual token balance cannot consume one of the ten portfolio
+    # slots indefinitely.
+    stage3_exit_poll_timeout_seconds: int = Field(default=30, ge=1, le=900)
+    stage3_exit_poll_interval_seconds: float = Field(default=3, gt=0, le=60)
+    bullpen_economic_dust_threshold_usd: float = Field(default=0.01, ge=0)
+
     exit_edge_pp: float = Field(default=3, ge=0)
     trim_edge_pp: float = Field(default=8, ge=0)
     rebalance_interval_minutes: int = Field(default=240, ge=1)
@@ -350,6 +360,9 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     max_slippage_cents: float | None = Field(default=None, ge=0)
     trade_cooldown_hours_per_market: float | None = Field(default=None, ge=0)
     max_reprice_attempts: int | None = Field(default=None, ge=0)
+    stage3_exit_poll_timeout_seconds: int | None = Field(default=None, ge=1, le=900)
+    stage3_exit_poll_interval_seconds: float | None = Field(default=None, gt=0, le=60)
+    bullpen_economic_dust_threshold_usd: float | None = Field(default=None, ge=0)
 
     exit_edge_pp: float | None = Field(default=None, ge=0)
     trim_edge_pp: float | None = Field(default=None, ge=0)

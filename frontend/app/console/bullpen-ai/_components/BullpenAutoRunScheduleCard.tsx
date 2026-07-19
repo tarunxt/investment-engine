@@ -1334,6 +1334,8 @@ function getStageTwoInvestExecutionTone(
     status === "failed" ||
     status === "failed_permanent" ||
     status === "cancelled" ||
+    status === "rejected" ||
+    status === "timed_out" ||
     status === "deferred" ||
     status === "rpc_rate_limited" ||
     status === "waiting_for_collateral" ||
@@ -1510,9 +1512,9 @@ function Stage2TopTenEventsSummaryTable({
             {isCompact ? (
               <p
                 className="line-clamp-2 text-xs leading-5 text-slate-600"
-                title={decision.order_plan.detail}
+                title={getPlannedOrderBrief(decision)}
               >
-                {decision.order_plan.detail}
+                {getPlannedOrderBrief(decision)}
               </p>
             ) : (
               <div className="text-xs leading-5 text-slate-600">
@@ -4380,7 +4382,48 @@ function buildDecisionReturnsPerDayQuestion(
   } as BullpenQuestionRow;
 }
 
+function humanizeStage3CapacityMessage(
+  decision: BullpenAutoLiveDecision,
+): string | null {
+  const detail = (
+    decision.order_plan?.detail ?? decision.reason ?? decision.summary ?? ""
+  ).trim();
+  const normalized = detail.toLowerCase();
+  if (
+    normalized.includes("open or unfilled") ||
+    normalized.includes("still open") ||
+    normalized.includes("unconfirmed after the polling timeout")
+  ) {
+    return "Event Exit order is still open or unfilled; its slot remains occupied.";
+  }
+  if (
+    normalized.includes("partially filled") &&
+    (normalized.includes("meaningful") || normalized.includes("exposure"))
+  ) {
+    return "Event Exit partially filled; meaningful remaining exposure still occupies the slot.";
+  }
+  if (normalized.includes("cached") || normalized.includes("stale snapshot")) {
+    return "Bullpen returned a cached or stale positions snapshot; no replacement buy was planned.";
+  }
+  if (
+    normalized.includes("dust") ||
+    normalized.includes("resolved") ||
+    normalized.includes("non-active")
+  ) {
+    return "A dust, resolved, or non-active position was excluded from slot usage; the replacement slot was released.";
+  }
+  if (normalized.includes("portfolio capacity is genuinely full")) {
+    return "Portfolio capacity is genuinely reached: ten economically active markets already occupy the limit.";
+  }
+  if (normalized.includes("replacement slot successfully released")) {
+    return "Replacement slot successfully released after the confirmed Event Exit and live refresh.";
+  }
+  return null;
+}
+
 function getPlannedOrderBrief(decision: BullpenAutoLiveDecision) {
+  const capacityMessage = humanizeStage3CapacityMessage(decision);
+  if (capacityMessage) return capacityMessage;
   return (
     decision.order_plan?.detail ??
     decision.reason ??
@@ -7740,14 +7783,14 @@ function InvestMetricDetailsDialog({
                                 )}
                                 <br />
                                 <ErrorCodeWithDetails
-                                  detail={decision.order_plan.detail}
+                                  detail={getPlannedOrderBrief(decision)}
                                   detailClassName="text-slate-700"
                                 />
                               </>
                             ) : (
                               <>
                                 <br />
-                                {decision.reason}
+                                {getPlannedOrderBrief(decision)}
                               </>
                             )}
                           </td>

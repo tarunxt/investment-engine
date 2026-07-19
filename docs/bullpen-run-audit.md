@@ -243,11 +243,14 @@ provider/model rows are treated as data-integrity failures, Stage 2 may end in
 Decision rows, guardrail outcomes, ranking and selection results, order intents,
 execution steps, order funnel metrics, and the mirrored Stage 2 handoff queue
 used to explain why a Top 10 row did or did not become a concrete Step 2 buy
-plan. Post-exit buy planning must now derive from the Stage 1 wallet snapshot
-handoff and its deterministic simulation state rather than triggering an
-independent mid-run Bullpen wallet reread. When the centralized fresh snapshot
-fails, Stage 2 and Stage 3 are expected to stay blocked instead of continuing
-with ad hoc wallet refreshes.
+plan. Stage 3 Event Exits now persist the exit order IDs and terminal/partial
+statuses, then force a Bullpen CLI positions refresh through the shared runtime
+broker. The snapshot must prove `source=live-cli` and must be fetched after the
+exit attempt before economic slot allocation runs. Slot diagnostics retain raw
+and economically active counts, excluded records and reasons, canonical
+market/side deduplication, replacement reservations, free slots, and any safe
+stale-slot bypass. The audit schema remains additive so frozen legacy snapshots
+without these optional diagnostics remain readable and are not rewritten.
 
 The Step 2 `planned`, `processed`, and `submitted` tiles are expected to track
 the transferred Stage 2 Top 10 queue independently from whether a concrete
@@ -258,16 +261,15 @@ When persisted Step 2 queue counters are stale or incomplete, the rendered
 Stage 3 UI may reconcile them upward against persisted buy decision rows so a
 submitted Bullpen buy cannot still display `planned=0 / processed=0 /
 submitted=0`.
-For runs using the live legacy Step 3 executor, earlier sell/redeem settlement
-or failure status must no longer be recorded as a prerequisite blocker for
-creating or attempting a Step 2 buy plan. When a ranked buy cannot be placed,
-the persisted Stage 3 reason should describe the direct buy-side outcome such
-as slot guardrails, fresh-balance limits, or an immediate Bullpen insufficient-
-collateral rejection. Rules-specific blockers should distinguish unmatched exact
-Gamma child markets, authoritative-rule parsing failures, and verified-binary
-rule bypasses. Historical snapshots that already froze the legacy
-"wait for earlier sell/redeem settlement" blocker remain valid and must not be
-rewritten.
+An exit that is merely submitted or still open never releases a slot. A partial
+exit releases one only when the remaining economic exposure is at or below the
+configured dust threshold. A ranked replacement is reserved for its specific
+rank-out exit and is executable only after the exit is confirmed and the live
+snapshot shows the old exposure removed. When a ranked buy cannot be placed,
+the persisted Stage 3 reason should distinguish an open/unfilled exit, a
+meaningful partial remainder, stale cache, excluded dust/resolution, genuine
+capacity, or a successfully released replacement slot. Historical snapshots
+without these diagnostics remain valid and must not be rewritten.
 
 ### Guardrails
 
