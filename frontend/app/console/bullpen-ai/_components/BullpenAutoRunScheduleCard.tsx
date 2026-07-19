@@ -39,6 +39,7 @@ import {
   type BullpenQuestionRow,
   getBullpenAmountToBeInvestedBreakdown,
   getBullpenReturnsPerDayBreakdown,
+  getBullpenTopTenStrongestLlmOddsRows,
 } from "@/lib/bullpen-ai";
 import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
 import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
@@ -206,7 +207,9 @@ type RunDetailDialogState = {
 };
 
 type StageTwoInvestEventsDialogState = {
-  rows: BullpenStage2TopTenHandoffRow[];
+  rows: BullpenQuestionRow[];
+  updatedAt: string | null;
+  updateUnavailableReason?: string;
 };
 
 type StageTwoLlmRunDialogState = {
@@ -1109,12 +1112,12 @@ function getStageTwoStats(
       ? stageTwoTargets.filter((target) => hasStageTwoLlmIdentity(target)).length
       : null) ??
     Math.max(llmsCompleted, 0);
-  const stage2TopTenHandoffCount = run
-    ? buildBullpenStage2TopTenHandoffRows({ run, decisions }).length
+  const stage2TopInvestRowCount = run
+    ? buildStageTwoInvestEventsDialogState({ run, decisions })?.rows.length ?? 0
     : 0;
   const newEventsToInvestIn =
-    stage2TopTenHandoffCount > 0
-      ? stage2TopTenHandoffCount
+    stage2TopInvestRowCount > 0
+      ? stage2TopInvestRowCount
       : getStageTwoInvestableDecisions(decisions).length;
 
   return {
@@ -1127,6 +1130,72 @@ function getStageTwoStats(
     llmsFailed: llmOutcomeCounts.failed,
     llmsSelected,
     newEventsToInvestIn,
+  };
+}
+
+function buildStageTwoInvestEventsDialogState({
+  run,
+  decisions,
+}: {
+  run: BullpenAutoLiveRun | null;
+  decisions: BullpenAutoLiveDecision[];
+}): StageTwoInvestEventsDialogState | null {
+  if (!run) return null;
+
+  const workflowView = buildBullpenAutoRunWorkflowView(run);
+  const scanWorkflowStage =
+    workflowView.stages.find((stage) => stage.key === "scan") ?? null;
+  const llmWorkflowStage =
+    workflowView.stages.find((stage) => stage.key === "llm") ?? null;
+
+  if (!llmWorkflowStage) {
+    return {
+      rows: [],
+      updatedAt: null,
+      updateUnavailableReason:
+        "Timestamp unavailable because this run did not save a Stage 2 Events Summary.",
+    };
+  }
+
+  const scanStageResult = getRunWorkflowStageResult(run, "scan", 1);
+  const llmStageResult = getRunWorkflowStageResult(run, "llm", 2);
+  const reviewedRows = getHistoricalStageTwoLlmReviewedRows(
+    llmWorkflowStage,
+    scanWorkflowStage?.scanCandidates ?? [],
+  );
+  const eventsSummaryAsOfTimestamp = resolveStageTwoHistoricalAsOfTimestamp({
+    reviewedRows,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+    stageCompletedAt:
+      llmStageResult?.completed_at ?? llmWorkflowStage.timerCompletedAt,
+    runStartedAt: run.started_at ?? llmWorkflowStage.timerStartedAt,
+    runCompletedAt: run.completed_at ?? null,
+    nowMs: Date.now(),
+  });
+  const eventsSummaryRows = buildHistoricalStageTwoEventsSummaryRows({
+    reviewedRows,
+    decisions,
+    runId: run.id,
+    asOfTimestamp: eventsSummaryAsOfTimestamp,
+  });
+  const updatedAt = resolveStageTwoEventsSummaryUpdatedAt({
+    reviewedRows,
+    stageCompletedAt:
+      llmStageResult?.completed_at ?? llmWorkflowStage.timerCompletedAt,
+    scanCompletedAt:
+      scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
+  });
+
+  return {
+    rows: getBullpenTopTenStrongestLlmOddsRows(
+      eventsSummaryRows,
+      DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+    ),
+    updatedAt,
+    updateUnavailableReason: updatedAt
+      ? undefined
+      : "Timestamp unavailable because this view is reconstructed from the saved Stage 2 Events Summary.",
   };
 }
 
@@ -1660,16 +1729,17 @@ function StageTwoRunStats({
   hideNumbers?: boolean;
   decisions?: BullpenAutoLiveDecision[];
   scanStageForPositionSnapshot?: WorkflowStageView;
-  onOpenInvestEvents?: (rows: BullpenStage2TopTenHandoffRow[]) => void;
+  onOpenInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenScanCandidateDialog?: (
     stage: WorkflowStageView,
     mode: ScanCandidateDialogMode,
   ) => void;
 }) {
-  const stage2TopTenHandoffRows = run
-    ? buildBullpenStage2TopTenHandoffRows({ run, decisions })
-    : [];
+  const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({
+    run,
+    decisions,
+  });
   const stats = getStageTwoStats(stage, decisions, run);
   const positionDialogStage = scanStageForPositionSnapshot ?? stage;
   const positionStats = scanStageForPositionSnapshot
@@ -1852,10 +1922,14 @@ function StageTwoRunStats({
         )}
       </div>
       <div>
-        {onOpenInvestEvents && stage2TopTenHandoffRows.length > 0 ? (
+        {onOpenInvestEvents && (stage2InvestEventsState?.rows.length ?? 0) > 0 ? (
           <button
             type="button"
-            onClick={() => onOpenInvestEvents(stage2TopTenHandoffRows)}
+            onClick={() => {
+              if (stage2InvestEventsState) {
+                onOpenInvestEvents(stage2InvestEventsState);
+              }
+            }}
             className="text-left font-medium text-emerald-800 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
             aria-label={`Open details for ${displayStat(stats.newEventsToInvestIn)} new events to invest in`}
           >
@@ -3547,7 +3621,7 @@ function RunDetailWorkerStages({
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
-  onOpenStageTwoInvestEvents?: (rows: BullpenStage2TopTenHandoffRow[]) => void;
+  onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
@@ -3747,7 +3821,7 @@ function RunDetailDialog({
   state: RunDetailDialogState;
   onClose: () => void;
   onOpenScanFilters?: () => void;
-  onOpenStageTwoInvestEvents?: (rows: BullpenStage2TopTenHandoffRow[]) => void;
+  onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenMetricDetails?: (
     run: BullpenAutoLiveRun,
@@ -4552,7 +4626,7 @@ function RunHistoryMetricTiles({
   decisions,
   onOpenMetricDetails,
 }: RunHistoryMetricTilesProps) {
-  const stage2TopTenHandoffRows = buildBullpenStage2TopTenHandoffRows({
+  const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({
     run,
     decisions,
   });
@@ -4569,8 +4643,8 @@ function RunHistoryMetricTiles({
     decisions,
   ).length;
   const newEventsToInvestCount =
-    stage2TopTenHandoffRows.length > 0
-      ? stage2TopTenHandoffRows.length
+    (stage2InvestEventsState?.rows.length ?? 0) > 0
+      ? stage2InvestEventsState?.rows.length ?? 0
       : getInvestMetricRows("buy-planned", decisions).length;
   const newEventsInvestedCount = getInvestMetricRows(
     "buy-submitted",
@@ -6750,7 +6824,10 @@ function StageTwoLlmRunBreakupDialog({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="flex-1 overflow-auto px-6 py-5">
+        <div
+          className="flex-1 overflow-auto px-6 py-5"
+          data-testid="stage-two-invest-events-summary"
+        >
           <div className="rounded-2xl border border-amber-100 bg-amber-50/70 p-4 text-sm text-amber-950">
             <p className="font-semibold">Summary</p>
             <p className="mt-1 leading-6">
@@ -6850,6 +6927,10 @@ function StageTwoInvestEventsDialog({
   onClose: () => void;
 }) {
   const [isCompactRows, setIsCompactRows] = useState(false);
+  const [sortState, setSortState] = useState<BullpenTableSortState>({
+    key: "returnsPerDay",
+    direction: "desc",
+  });
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4">
@@ -6887,9 +6968,9 @@ function StageTwoInvestEventsDialog({
               </button>
             </div>
             <p className="mt-2 text-sm text-slate-600">
-              Persisted Stage 2 Top 10 candidates that Stage 3 is trying to
-              execute. If a transferred event never became a concrete Step 2
-              buy plan, its latest blocker is shown here.
+              Stage 2 Top 10 events ranked by Returns/day. This table comes
+              straight from the saved Stage 2 Events Summary and does not
+              depend on Stage 3 planning or execution.
             </p>
           </div>
           <button
@@ -6902,19 +6983,50 @@ function StageTwoInvestEventsDialog({
           </button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-5">
-          <Stage2TopTenEventsSummaryTable
-            rows={state.rows}
-            run={null}
-            displayDensity={isCompactRows ? "compact" : "default"}
-            testId="stage-two-invest-events-summary"
-            emptyMessage="No persisted Stage 2 Top 10 handoff rows were returned for this run."
+          <BullpenQuestionsTable
+            snapshot={null}
+            rowsOverride={state.rows}
+            emptyMessage="No Stage 2 Top 10 rows were returned for this run."
             headerContent={
               <div className="rounded-2xl border border-blue-100 bg-blue-50/70 px-4 py-3 text-sm text-blue-950">
-                This Events Summary view mirrors the Stage 3 Step 2 planned
-                queue layout so every transferred Stage 2 Top 10 row carries
-                the same Stage 3 status, outcome, and blocker columns.
+                This Events Summary view shows the saved Stage 2 Top 10 by
+                Returns/day, independent of any later Stage 3 ranking,
+                blockers, or order execution.
               </div>
             }
+            updatedAt={state.updatedAt}
+            updateUnavailableReason={state.updateUnavailableReason}
+            scrollResetKey={`stage-two-invest-events-${state.rows.length}`}
+            isLoading={false}
+            onSortChange={(key) =>
+              setSortState((current) => ({
+                key,
+                direction:
+                  current.key === key && current.direction === "desc"
+                    ? "asc"
+                    : "desc",
+              }))
+            }
+            selectedQuestionIds={new Set<string>()}
+            selectionEnabled={false}
+            sortState={sortState}
+            onToggleQuestion={() => undefined}
+            onToggleSelectAll={() => undefined}
+            visibleColumnIds={[
+              "serialNumber",
+              "question",
+              "closeTime",
+              "category",
+              "yesOdds",
+              "noOdds",
+              "llmYesOdds",
+              "llmNoOdds",
+              "returnsPerDay",
+              "amountToBeInvested",
+            ]}
+            persistColumnPreferences={false}
+            showPresetFilters={false}
+            displayDensity={isCompactRows ? "compact" : "default"}
           />
         </div>
       </div>
@@ -10412,11 +10524,7 @@ export function BullpenAutoRunScheduleCard({
                           stage={stage}
                           hideNumbers={!showStageNumbers}
                           decisions={investRunDecisions}
-                          onOpenInvestEvents={(rows) =>
-                            setStageTwoInvestEventsDialog({
-                              rows,
-                            })
-                          }
+                          onOpenInvestEvents={setStageTwoInvestEventsDialog}
                           onOpenLlmRunDetails={setStageTwoLlmRunDialog}
                           onOpenScanCandidateDialog={openScanCandidateDialog}
                           scanStageForPositionSnapshot={workflowView.stages.find(
@@ -10960,9 +11068,7 @@ export function BullpenAutoRunScheduleCard({
             state={runDetailDialog}
             onClose={() => setRunDetailDialog(null)}
             onOpenScanFilters={onOpenScanFilters}
-            onOpenStageTwoInvestEvents={(rows) =>
-              setStageTwoInvestEventsDialog({ rows })
-            }
+            onOpenStageTwoInvestEvents={setStageTwoInvestEventsDialog}
             onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
             onOpenMetricDetails={openRunInvestMetricDialog}
           />
