@@ -793,7 +793,7 @@ def test_candidate_returns_per_day_accepts_naive_close_time():
         now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
     )
 
-    assert returns == 5.0
+    assert returns == 20.0
 
 
 def test_position_returns_per_day_accepts_naive_close_time():
@@ -807,7 +807,7 @@ def test_position_returns_per_day_accepts_naive_close_time():
         now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
     )
 
-    assert returns == 5.0
+    assert returns == 20.0
 
 
 @pytest.mark.anyio
