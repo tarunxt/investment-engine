@@ -7072,21 +7072,30 @@ function InvestMetricDetailsDialog({
     }
     return left.market_title.localeCompare(right.market_title);
   });
+  const selectedStepKey = state.kind.startsWith("sell-")
+    ? "sell"
+    : state.kind.startsWith("buy-")
+      ? "buy"
+      : null;
+  const selectedStepSummary =
+    selectedStepKey === null
+      ? null
+      : getLastInvestExecutionStep(state.run, selectedStepKey);
   const decisionsCount = getInvestStageMetric(
     state.stage,
     "decisions_count",
     state.run.decisions_count,
   );
-  const plannedCount = getInvestStageMetric(
-    state.stage,
-    "orders_planned",
-    state.run.orders_planned,
-  );
-  const submittedCount = getInvestStageMetric(
-    state.stage,
-    "orders_submitted",
-    state.run.orders_submitted,
-  );
+  const plannedCount =
+    selectedStepSummary?.plannedOrders ??
+    getInvestStageMetric(state.stage, "orders_planned", state.run.orders_planned);
+  const submittedCount =
+    selectedStepSummary?.submittedOrders ??
+    getInvestStageMetric(
+      state.stage,
+      "orders_submitted",
+      state.run.orders_submitted,
+    );
   const activePositionRows = state.stage
     ? readStageOutputNumber(state.stage.outputs.active_position_rows)
     : null;

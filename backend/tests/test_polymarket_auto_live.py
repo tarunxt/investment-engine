@@ -47,6 +47,7 @@ from app.domains.polymarket_auto_live.engine import (
     _execute_console_stage_two_shared_llm,
     _apply_next_cycle_schedule,
     _manual_console_market,
+    _summarize_stage3_step2_buy_queue,
     build_workflow_stage_result,
     reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
@@ -8086,6 +8087,80 @@ def _run_snapshot(
         request_context=request_context,
         stage2_llm_targets_snapshot=stage2_llm_targets_snapshot,
     )
+
+
+def test_summarize_stage3_step2_buy_queue_tracks_transferred_rows_separately_from_buy_orders():
+    timestamp = "2026-07-19T00:00:00+00:00"
+
+    def build_buy_decision(
+        market_id: str,
+        *,
+        stage3_result: str = "SELECTED",
+        order_status: str | None = None,
+    ) -> BullpenAutoLiveDecision:
+        order_plan = (
+            BullpenAutoLiveOrderPlan.model_construct(
+                id=f"{market_id}-order",
+                action="buy",
+                side="YES",
+                status=order_status,
+                market_id=market_id,
+                market_title=market_id,
+                order_size_usd=5.0,
+                shares=10.0,
+                limit_price_cents=50.0,
+                max_slippage_cents=2.0,
+                dry_run=False,
+                detail="Test order",
+                created_at=timestamp,
+            )
+            if order_status is not None
+            else None
+        )
+        return BullpenAutoLiveDecision.model_construct(
+            id=f"{market_id}-decision",
+            run_id="run-1",
+            created_at=timestamp,
+            updated_at=timestamp,
+            market_id=market_id,
+            market_title=market_id,
+            side="YES",
+            decision="BUY_NEW",
+            reason="Test decision",
+            summary="Test decision",
+            stage3_result=stage3_result,
+            stage_results=[],
+            order_plan=order_plan,
+            exit_signals=[],
+        )
+
+    counts = _summarize_stage3_step2_buy_queue(
+        [
+            build_buy_decision("market-queued"),
+            build_buy_decision("market-blocked", stage3_result="BLOCKED"),
+            build_buy_decision("market-submitted", order_status="submitted"),
+            build_buy_decision("market-planned", order_status="planned"),
+            BullpenAutoLiveDecision.model_construct(
+                id="outside-queue-decision",
+                run_id="run-1",
+                created_at=timestamp,
+                updated_at=timestamp,
+                market_id="outside-queue",
+                market_title="outside-queue",
+                side="YES",
+                decision="BUY_NEW",
+                reason="Ignored",
+                summary="Ignored",
+                stage3_result="SELECTED",
+                stage_results=[],
+                order_plan=None,
+                exit_signals=[],
+            ),
+        ],
+        {"market-queued", "market-blocked", "market-submitted", "market-planned"},
+    )
+
+    assert counts == {"planned": 4, "processed": 2, "submitted": 1}
 
 
 @pytest.mark.anyio

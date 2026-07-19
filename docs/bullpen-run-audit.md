@@ -236,6 +236,12 @@ independent mid-run Bullpen wallet reread. When the centralized fresh snapshot
 fails, Stage 2 and Stage 3 are expected to stay blocked instead of continuing
 with ad hoc wallet refreshes.
 
+The Step 2 `planned`, `processed`, and `submitted` tiles are expected to track
+the transferred Stage 2 Top 10 queue independently from whether a concrete
+Stage 3 buy `order_plan` was later created. Concrete buy-order counts remain
+separately persisted through the Stage 3 order funnel fields so audits can
+distinguish queue handoff, blocker handling, and actual Bullpen write attempts.
+
 ### Guardrails
 
 Run-level guardrails plus decision-specific guardrail payloads.

@@ -1550,6 +1550,47 @@ def _decision_stage_result(
     )
 
 
+def _summarize_stage3_step2_buy_queue(
+    decisions: list[BullpenAutoLiveDecision],
+    queue_market_ids: set[str],
+) -> dict[str, int]:
+    submitted_buy_statuses = {
+        "submitted",
+        "settlement_pending",
+        "confirmed",
+        "confirming",
+        "partially_filled",
+        "filled",
+    }
+    planned = 0
+    processed = 0
+    submitted = 0
+
+    for decision in decisions:
+        if decision.decision != "BUY_NEW" or decision.market_id not in queue_market_ids:
+            continue
+        planned += 1
+        order_plan = decision.order_plan
+        if order_plan is not None and order_plan.action == "buy":
+            if order_plan.status != "planned":
+                processed += 1
+            if order_plan.status in submitted_buy_statuses:
+                submitted += 1
+            continue
+        if (
+            decision.stage3_result == "BLOCKED"
+            or _decision_stage_result(decision, 5) is not None
+            or _decision_stage_result(decision, 7) is not None
+        ):
+            processed += 1
+
+    return {
+        "planned": planned,
+        "processed": processed,
+        "submitted": submitted,
+    }
+
+
 def _collect_live_order_issues(
     decisions: list[BullpenAutoLiveDecision],
 ) -> list[dict[str, object]]:
@@ -6505,6 +6546,7 @@ class BullpenAutoLiveEngine:
             for row in ranking_top_rows
             if row["kind"] == "candidate"
         ]
+        stage3_buy_queue_market_ids = set(ranking_top_candidate_market_id_order)
         candidate_final_rank_by_market_id = {
             str(row["market_id"]): index
             for index, row in enumerate(combined_rank_rows, start=1)
@@ -6582,6 +6624,7 @@ class BullpenAutoLiveEngine:
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
         stage3_buy_refresh_snapshot: dict[str, object] = {}
+        stage3_buy_queue_market_ids: set[str] = set()
 
         def _current_stage3_order_counts() -> dict[str, int]:
             sell_planned = 0
@@ -6590,12 +6633,22 @@ class BullpenAutoLiveEngine:
             buy_planned = 0
             buy_processed = 0
             buy_submitted = 0
+            buy_queue_planned = 0
+            buy_queue_processed = 0
+            buy_queue_submitted = 0
             event_exit_rows = 0
             ranking_llm_sell_planned = 0
             forced_exit_sell_planned = 0
             redeem_planned = 0
             redeem_processed = 0
             redeem_submitted = 0
+            buy_queue_counts = _summarize_stage3_step2_buy_queue(
+                decisions,
+                stage3_buy_queue_market_ids,
+            )
+            buy_queue_planned = buy_queue_counts["planned"]
+            buy_queue_processed = buy_queue_counts["processed"]
+            buy_queue_submitted = buy_queue_counts["submitted"]
 
             for current in decisions:
                 if current.exit_state in {"EVENT_EXIT_PLANNED", "DUST_LOST"}:
@@ -6652,6 +6705,9 @@ class BullpenAutoLiveEngine:
                 "buy_planned": buy_planned,
                 "buy_processed": buy_processed,
                 "buy_submitted": buy_submitted,
+                "buy_queue_planned": buy_queue_planned,
+                "buy_queue_processed": buy_queue_processed,
+                "buy_queue_submitted": buy_queue_submitted,
                 # Aggregate order metrics are used by the Stage 3 tile to show
                 # invest/sell order execution progress. Redeem/claim rows are
                 # surfaced in the Step 1-specific metrics below, but they should
@@ -6716,9 +6772,9 @@ class BullpenAutoLiveEngine:
             sell_planned = counts["sell_planned"]
             sell_processed = counts["sell_processed"]
             sell_submitted = counts["sell_submitted"]
-            buy_planned = counts["buy_planned"]
-            buy_processed = counts["buy_processed"]
-            buy_submitted = counts["buy_submitted"]
+            buy_planned = counts["buy_queue_planned"]
+            buy_processed = counts["buy_queue_processed"]
+            buy_submitted = counts["buy_queue_submitted"]
 
             steps: list[dict[str, object]] = []
             is_sell_step_complete = sell_processed >= sell_planned
@@ -6876,6 +6932,9 @@ class BullpenAutoLiveEngine:
                 "buy_orders_planned": counts["buy_planned"],
                 "buy_orders_processed": counts["buy_processed"],
                 "buy_orders_submitted": counts["buy_submitted"],
+                "buy_queue_planned": counts["buy_queue_planned"],
+                "buy_queue_processed": counts["buy_queue_processed"],
+                "buy_queue_submitted": counts["buy_queue_submitted"],
                 "execution_steps": execution_steps,
                 "order_metrics": order_metrics,
                 "execution_step_key": current_step_key,
@@ -9636,6 +9695,9 @@ class BullpenAutoLiveEngine:
                     "buy_orders_planned": final_order_counts["buy_planned"],
                     "buy_orders_processed": final_order_counts["buy_processed"],
                     "buy_orders_submitted": final_order_counts["buy_submitted"],
+                    "buy_queue_planned": final_order_counts["buy_queue_planned"],
+                    "buy_queue_processed": final_order_counts["buy_queue_processed"],
+                    "buy_queue_submitted": final_order_counts["buy_queue_submitted"],
                     "buy_orders_failed": buy_order_hard_failure_count,
                     "buy_orders_unsubmitted": buy_order_issue_count,
                     "execution_steps": final_execution_steps,
