@@ -7,7 +7,7 @@ import pwd
 import stat
 from pathlib import Path
 from time import monotonic
-from typing import Any, Literal
+from typing import Any, Awaitable, Literal, TypeVar
 
 import redis.asyncio as aioredis
 from pydantic import BaseModel, Field
@@ -21,6 +21,7 @@ from app.domains.polymarket.position_classification import (
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 
 logger = get_logger(__name__)
+_T = TypeVar("_T")
 
 _DEFAULT_BULLPEN_BIN = "/usr/local/bin/bullpen"
 _DEFAULT_HOME = "/home/investor"
@@ -209,6 +210,13 @@ def _utc_now_iso() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat()
+
+
+def _running_loop_or_none() -> asyncio.AbstractEventLoop | None:
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        return None
 
 
 def _effective_user_name() -> str | None:
@@ -1476,18 +1484,41 @@ class BullpenRuntimeBroker:
 
 
 _runtime_broker: BullpenRuntimeBroker | None = None
+_runtime_broker_loop: asyncio.AbstractEventLoop | None = None
 
 
 def get_bullpen_runtime_broker() -> BullpenRuntimeBroker:
-    global _runtime_broker
-    if _runtime_broker is None:
+    global _runtime_broker, _runtime_broker_loop
+    current_loop = _running_loop_or_none()
+    if (
+        _runtime_broker is None
+        or (
+            current_loop is not None
+            and _runtime_broker_loop is not None
+            and _runtime_broker_loop is not current_loop
+        )
+    ):
         _runtime_broker = BullpenRuntimeBroker()
+        _runtime_broker_loop = current_loop
+    elif current_loop is not None and _runtime_broker_loop is None:
+        _runtime_broker_loop = current_loop
     return _runtime_broker
 
 
 async def close_bullpen_runtime_broker() -> None:
-    global _runtime_broker
+    global _runtime_broker, _runtime_broker_loop
     if _runtime_broker is None:
         return
     await _runtime_broker.aclose()
     _runtime_broker = None
+    _runtime_broker_loop = None
+
+
+def run_with_bullpen_runtime_cleanup(awaitable: Awaitable[_T]) -> _T:
+    async def runner() -> _T:
+        try:
+            return await awaitable
+        finally:
+            await close_bullpen_runtime_broker()
+
+    return asyncio.run(runner())

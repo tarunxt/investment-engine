@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -14,6 +12,7 @@ from app.domains.bullpen_trade_analysis.service import (
 from app.domains.bullpen_run_audit.provenance import build_native_run_audit_metadata
 from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket.runtime_broker import run_with_bullpen_runtime_cleanup
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
     _stage2_llm_targets_snapshot,
@@ -224,7 +223,7 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                     state=current_state,
                 )
 
-            engine_result = asyncio.run(
+            engine_result = run_with_bullpen_runtime_cleanup(
                 BullpenAutoLiveEngine().execute(
                     user_id=user_id,
                     settings=settings,

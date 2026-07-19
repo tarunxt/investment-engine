@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import asyncio
 import json
 import os
 from dataclasses import dataclass
@@ -18,6 +16,7 @@ from app.domains.polymarket.bullpen import (
     BullpenRedeemedTradesReader,
     BullpenTradeHistoryReader,
 )
+from app.domains.polymarket.runtime_broker import run_with_bullpen_runtime_cleanup
 from app.domains.polymarket.redeem_coordinator import (
     REDEEM_ATTEMPT_ALREADY_REDEEMED,
     REDEEM_ATTEMPT_CONFIRMED,
@@ -1033,7 +1032,9 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
         intent = _intent_to_schema(record)
 
     try:
-        prepared = asyncio.run(_prepare_intent_submission(intent))
+        prepared = run_with_bullpen_runtime_cleanup(
+            _prepare_intent_submission(intent)
+        )
     except AutoLiveExecutorError as exc:
         with SyncSessionLocal() as session:
             record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
@@ -1114,7 +1115,9 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
                 return record.status
 
     try:
-        result = asyncio.run(_submit_prepared_intent(prepared))
+        result = run_with_bullpen_runtime_cleanup(
+            _submit_prepared_intent(prepared)
+        )
     except AutoLiveExecutorError as exc:
         with SyncSessionLocal() as session:
             record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
@@ -1372,7 +1375,7 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
         if record is None:
             return None
         intent = _intent_to_schema(record)
-    result = asyncio.run(_reconcile_intent_async(intent))
+    result = run_with_bullpen_runtime_cleanup(_reconcile_intent_async(intent))
     with SyncSessionLocal() as session:
         record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
         if record is None:

@@ -75,6 +75,40 @@ class FakeRedis:
         return None
 
 
+class LoopBoundRedis(FakeRedis):
+    def __init__(self) -> None:
+        super().__init__()
+        self._owner_loop: asyncio.AbstractEventLoop | None = None
+
+    def _assert_current_loop(self) -> None:
+        loop = asyncio.get_running_loop()
+        if self._owner_loop is None:
+            self._owner_loop = loop
+            return
+        if self._owner_loop is not loop:
+            raise RuntimeError("Event loop is closed")
+
+    async def get(self, key: str):
+        self._assert_current_loop()
+        return await super().get(key)
+
+    async def set(self, key: str, value: str, ex: int | None = None, nx: bool = False):
+        self._assert_current_loop()
+        return await super().set(key, value, ex=ex, nx=nx)
+
+    async def delete(self, key: str):
+        self._assert_current_loop()
+        return await super().delete(key)
+
+    async def eval(self, _script: str, _numkeys: int, key: str, token: str, *args):
+        self._assert_current_loop()
+        return await super().eval(_script, _numkeys, key, token, *args)
+
+    async def aclose(self):
+        self._assert_current_loop()
+        return await super().aclose()
+
+
 def _build_broker(
     monkeypatch: pytest.MonkeyPatch,
     fake_redis: FakeRedis | None = None,
@@ -85,6 +119,63 @@ def _build_broker(
     broker._redis = redis
     broker._lock = RedisLock(redis)
     return broker
+
+
+def test_get_broker_recreates_async_singleton_for_new_event_loop(monkeypatch):
+    created_redis: list[LoopBoundRedis] = []
+
+    def fake_from_url(*args, **kwargs):
+        redis = LoopBoundRedis()
+        created_redis.append(redis)
+        return redis
+
+    monkeypatch.setattr(runtime_broker_module.aioredis, "from_url", fake_from_url)
+    monkeypatch.setattr(runtime_broker_module, "_runtime_broker", None)
+    monkeypatch.setattr(runtime_broker_module, "_runtime_broker_loop", None)
+
+    async def touch_broker() -> tuple[int, None]:
+        broker = runtime_broker_module.get_bullpen_runtime_broker()
+        snapshot = await broker.read_cached_positions_snapshot()
+        return id(broker), snapshot
+
+    first_broker_id, first_snapshot = asyncio.run(touch_broker())
+    second_broker_id, second_snapshot = asyncio.run(touch_broker())
+
+    assert first_snapshot is None
+    assert second_snapshot is None
+    assert first_broker_id != second_broker_id
+    assert len(created_redis) == 2
+
+
+def test_run_with_bullpen_runtime_cleanup_resets_global_broker(monkeypatch):
+    created_redis: list[LoopBoundRedis] = []
+
+    def fake_from_url(*args, **kwargs):
+        redis = LoopBoundRedis()
+        created_redis.append(redis)
+        return redis
+
+    monkeypatch.setattr(runtime_broker_module.aioredis, "from_url", fake_from_url)
+    monkeypatch.setattr(runtime_broker_module, "_runtime_broker", None)
+    monkeypatch.setattr(runtime_broker_module, "_runtime_broker_loop", None)
+
+    async def touch_broker() -> int:
+        broker = runtime_broker_module.get_bullpen_runtime_broker()
+        await broker.read_cached_positions_snapshot()
+        return id(broker)
+
+    first_broker_id = runtime_broker_module.run_with_bullpen_runtime_cleanup(
+        touch_broker()
+    )
+    assert runtime_broker_module._runtime_broker is None
+    assert runtime_broker_module._runtime_broker_loop is None
+
+    second_broker_id = runtime_broker_module.run_with_bullpen_runtime_cleanup(
+        touch_broker()
+    )
+
+    assert first_broker_id != second_broker_id
+    assert len(created_redis) == 2
 
 
 def _build_raw_result(
