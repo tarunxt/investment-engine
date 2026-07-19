@@ -79,6 +79,36 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _parse_state_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _state_has_due_scheduled_run(
+    settings: BullpenAutoLiveSettings,
+    state: BullpenAutoLiveState,
+    *,
+    reference_time: datetime,
+) -> bool:
+    if (
+        not settings.auto_live_enabled
+        or settings.emergency_stop
+        or not state.running
+        or state.paused
+        or not state.next_run_at
+    ):
+        return False
+    next_run_at = _parse_state_datetime(state.next_run_at)
+    return bool(next_run_at is not None and next_run_at <= reference_time)
+
+
 def round_money(value: float | None) -> float | None:
     if value is None:
         return None
@@ -321,16 +351,54 @@ class BullpenAutoLiveBot:
             return settings
 
     async def get_state(self) -> BullpenAutoLiveState:
+        should_enqueue_due_run = False
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
-            _, state = await self._get_active_run_or_recover(repo, settings, state)
+            active_run, state = await self._get_active_run_or_recover(repo, settings, state)
+            should_enqueue_due_run = active_run is None and _state_has_due_scheduled_run(
+                settings,
+                state,
+                reference_time=datetime.now(UTC),
+            )
+            if should_enqueue_due_run:
+                state.last_action = "Queued scheduled Auto-Live run from state poll."
             await repo.save_state(self.user_id, state)
             await session.commit()
-            return state
+
+        if should_enqueue_due_run:
+            await self.run_once(triggered_by="scheduler")
+            async with AsyncSessionLocal() as session:
+                repo = AsyncPolymarketAutoLiveRepository(session)
+                settings = await repo.ensure_settings(self.user_id)
+                state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+                await repo.save_state(self.user_id, state)
+                await session.commit()
+                return state
+
+        return state
 
     async def get_summary(self) -> BullpenAutoLiveSummary:
+        should_enqueue_due_run = False
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            settings = await repo.ensure_settings(self.user_id)
+            state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+            active_run, state = await self._get_active_run_or_recover(repo, settings, state)
+            should_enqueue_due_run = active_run is None and _state_has_due_scheduled_run(
+                settings,
+                state,
+                reference_time=datetime.now(UTC),
+            )
+            if should_enqueue_due_run:
+                state.last_action = "Queued scheduled Auto-Live run from summary poll."
+                await repo.save_state(self.user_id, state)
+                await session.commit()
+
+        if should_enqueue_due_run:
+            await self.run_once(triggered_by="scheduler")
+
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
