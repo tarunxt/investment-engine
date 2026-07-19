@@ -888,13 +888,14 @@ def llm_returns_per_day(
     days_until_close = round((parsed_close_time - now).total_seconds() / 86_400, 1)
     if days_until_close <= 0:
         return None
-    strongest_current_odds = max(
-        current_yes_odds if current_yes_odds is not None else float("-inf"),
-        current_no_odds if current_no_odds is not None else float("-inf"),
-    )
-    if strongest_current_odds == float("-inf"):
+    if llm_yes_odds is None or llm_no_odds is None:
         return None
-    return round(strongest_current_odds / days_until_close, 2)
+    current_odds_for_strongest_llm_side = (
+        current_yes_odds if llm_yes_odds >= llm_no_odds else current_no_odds
+    )
+    if current_odds_for_strongest_llm_side is None:
+        return None
+    return round(current_odds_for_strongest_llm_side / days_until_close, 2)
 
 
 def candidate_returns_per_day(

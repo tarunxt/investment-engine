@@ -114,7 +114,7 @@ export function BullpenReturnsPerDayFormulaDialog({
               New event rows
             </div>
             <p className="mt-3 font-semibold text-slate-950">
-              Max(Current Yes odds, Current No odds) / days left
+              Current odds on strongest LLM side / days left
             </p>
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">

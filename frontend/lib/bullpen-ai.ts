@@ -1047,9 +1047,20 @@ export function getBullpenReturnsPerDayBreakdown({
     };
   }
 
-  // Returns/day ranks the strongest current Yes/No market odds by time remaining:
-  // strongest(Current Yes odds, Current No odds) / days left.
-  const currentSide = yesOdds >= noOdds ? "Yes" : "No";
+  if (llmYesOdds === null || llmNoOdds === null) {
+    return {
+      currentOdds: null,
+      currentSide: null,
+      daysUntilClose,
+      llmYesOdds,
+      llmNoOdds,
+      result: null,
+    };
+  }
+
+  // Returns/day uses the current odds for the side matching the strongest LLM odds:
+  // current odds on strongest(LLM Yes odds, LLM No odds) side / days left.
+  const currentSide = llmYesOdds >= llmNoOdds ? "Yes" : "No";
   const currentOdds = currentSide === "Yes" ? yesOdds : noOdds;
 
   return {
