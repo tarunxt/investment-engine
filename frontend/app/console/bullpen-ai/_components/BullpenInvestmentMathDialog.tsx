@@ -129,7 +129,7 @@ export function BullpenInvestmentMathDialog({
   const returnsCard = question ? (
     <CalculationCard
       title="Returns/day"
-      formula="If LLM No > 50%, (100 - Current No) / days; otherwise (100 - Current Yes) / days"
+      formula="Max(LLM Yes odds, LLM No odds) / days left"
       summary={formatPercent(returnsBreakdown!.result)}
       highlighted={focus === "returnsPerDay"}
     >
@@ -141,21 +141,21 @@ export function BullpenInvestmentMathDialog({
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`(100 - ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"}) / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} = ${returnsBreakdown!.result.toFixed(2)}% per day`}
+            {`Max LLM odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"} / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days = ${returnsBreakdown!.result.toFixed(2)}% per day`}
           </div>
           <div className="mt-4">
             <MetricRow
-              label="Spreadsheet side"
+              label="Strongest LLM side"
               value={
                 returnsBreakdown!.currentSide
-                  ? `${returnsBreakdown!.currentSide} (LLM No ${formatOdds(
-                      returnsBreakdown!.llmNoOdds,
-                    )})`
+                  ? `${returnsBreakdown!.currentSide} (LLM Yes ${formatOdds(
+                      returnsBreakdown!.llmYesOdds,
+                    )}, LLM No ${formatOdds(returnsBreakdown!.llmNoOdds)})`
                   : "—"
               }
             />
             <MetricRow
-              label="Current odds used"
+              label="LLM odds used"
               value={
                 returnsBreakdown!.currentSide
                   ? `${returnsBreakdown!.currentSide} ${formatOdds(

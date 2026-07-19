@@ -459,24 +459,38 @@ def _build_formula_records(
                 "source_kind": review.get("source_kind"),
             }
             outputs_json = {"returns_per_day": float(returns_per_day)}
+            source_kind = str(review.get("source_kind") or "")
+            is_active_position = source_kind == "active_position"
             records.append(
                 BullpenRunAuditFormulaRecord(
                     snapshot_id=snapshot_id,
-                    logical_stage_number=1,
-                    scope_type="candidate",
+                    logical_stage_number=3 if is_active_position else 2,
+                    scope_type="position" if is_active_position else "candidate",
                     scope_id=market_id,
-                    algorithm_key="candidate_returns_per_day",
-                    human_name="Candidate returns per day",
+                    algorithm_key=(
+                        "position_returns_per_day"
+                        if is_active_position
+                        else "llm_returns_per_day"
+                    ),
+                    human_name=(
+                        "Active position returns per day"
+                        if is_active_position
+                        else "LLM returns per day"
+                    ),
                     algorithm_version="v1",
-                    source_module="app.domains.polymarket_auto_live.engine",
-                    source_function="candidate_returns_per_day",
+                    source_module="app.domains.polymarket_auto_live.console_profile",
+                    source_function=(
+                        "position_returns_per_day"
+                        if is_active_position
+                        else "llm_returns_per_day"
+                    ),
                     inputs_json=inputs_json,
                     intermediates_json={},
                     output_json=outputs_json,
                     recorded_value_json=outputs_json,
                     recomputed_value_json=outputs_json,
                     difference_json={"delta": 0},
-                    units="usd_per_day",
+                    units="percentage_points_per_day",
                     validation_status="match",
                     formula_hash=_formula_hash(inputs_json, outputs_json),
                 )
