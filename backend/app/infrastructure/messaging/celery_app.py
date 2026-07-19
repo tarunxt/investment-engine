@@ -1,6 +1,6 @@
 from celery import Celery
 from kombu import Queue
-from celery.schedules import crontab
+from celery.schedules import crontab, schedule
 
 from app.core.config import settings
 
@@ -50,7 +50,11 @@ celery.conf.beat_schedule = {
     },
     "polymarket-auto-live-due-run-scan": {
         "task": "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs",
-        "schedule": crontab(minute="*"),
+        # Auto-Live users can choose an exact start minute from the UI.  A
+        # minute-only beat tick can miss that timestamp for almost a full minute
+        # when the user starts just after the tick, so scan due runs frequently
+        # while keeping the actual long-running work on the ai queue.
+        "schedule": schedule(run_every=10.0),
     },
     "polymarket-auto-live-order-intent-dispatch": {
         "task": "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents",
