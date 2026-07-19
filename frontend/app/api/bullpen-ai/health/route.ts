@@ -1,24 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-import {
-  buildBullpenHealthReport,
-  readLastSuccessfulBullpenLiveSnapshot,
-  syncBullpenLiveSnapshot,
-} from "../_lib/bullpenHealth";
+import { fetchBackendRuntimeJson } from "../_lib/backendBullpenRuntime";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET() {
-  const liveResult = await syncBullpenLiveSnapshot();
-  const snapshot =
-    liveResult.snapshot || (await readLastSuccessfulBullpenLiveSnapshot());
-  const report = buildBullpenHealthReport({
-    health: liveResult.health,
-    snapshot,
+export async function GET(request: NextRequest) {
+  const accessToken = request.cookies.get("app_access_token")?.value || null;
+  const payload = await fetchBackendRuntimeJson("/polymarket/runtime/health", {
+    accessToken,
   });
 
-  return NextResponse.json(report, {
-    status: liveResult.ok ? 200 : 503,
+  return NextResponse.json(payload, {
+    status:
+      payload && typeof payload === "object" && "ok" in payload && payload.ok
+        ? 200
+        : 503,
   });
 }

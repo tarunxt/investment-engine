@@ -1,6 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -14,11 +11,7 @@ import {
   inferPolymarketCategoryFromText,
   POLYMARKET_DEFAULT_CATEGORY,
 } from "./_lib/polymarketCategory";
-import {
-  BULLPEN_BIN_CANDIDATES,
-  buildBullpenProcessEnv,
-  parseBullpenJsonOutput,
-} from "./_lib/bullpenCli";
+import { fetchBackendRuntimeJson } from "./_lib/backendBullpenRuntime";
 import {
   BULLPEN_SOURCE_URLS,
   normalizeBullpenScanFilters,
@@ -56,8 +49,6 @@ type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
   _customExcludeMarketPredictionsKeywords: string[];
   _customExcludeTweetCountQuestionsKeywords: string[];
 };
-
-const execFileAsync = promisify(execFile);
 
 const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
@@ -1184,53 +1175,7 @@ function sourceHasFutureCandidates<
 }
 
 async function runBullpenDiscover() {
-  const errors: string[] = [];
-  const commandVariants = [
-    [
-      "polymarket",
-      "discover",
-      "--status",
-      "active",
-      "--limit",
-      String(CLI_DISCOVER_LIMIT),
-      "--output",
-      "json",
-    ],
-    [
-      "polymarket",
-      "discover",
-      "--status",
-      "active",
-      "--sort",
-      "newest",
-      "--limit",
-      String(CLI_DISCOVER_LIMIT),
-      "--output",
-      "json",
-    ],
-  ];
-
-  for (const candidate of BULLPEN_BIN_CANDIDATES) {
-    for (const args of commandVariants) {
-      try {
-        const { stdout } = await execFileAsync(candidate, args, {
-          env: buildBullpenProcessEnv({ readOnly: true }),
-          timeout: 25_000,
-          maxBuffer: 10 * 1024 * 1024,
-        });
-        return parseBullpenJsonOutput(stdout);
-      } catch (error) {
-        const command = `${candidate} ${args.join(" ")}`;
-        errors.push(
-          error instanceof Error
-            ? `${command}: ${error.message}`
-            : `${command}: failed`,
-        );
-      }
-    }
-  }
-
-  throw new Error(`Bullpen CLI scan failed (${errors.join("; ")})`);
+  return fetchBackendRuntimeJson("/polymarket/runtime/discover");
 }
 
 async function fetchGammaMarkets(mode: ScanMode, filters: BullpenScanFilters) {

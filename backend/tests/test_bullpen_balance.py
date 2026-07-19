@@ -202,7 +202,6 @@ def test_bullpen_process_env_uses_service_home_when_home_is_root(monkeypatch):
     env = bullpen.bullpen_process_env(read_only=True)
 
     assert env["HOME"] == "/home/investment-engine"
-    assert env["BULLPEN_READ_ONLY"] == "true"
     assert env["BULLPEN_NON_INTERACTIVE"] == "true"
 
 
@@ -214,15 +213,29 @@ def test_bullpen_process_env_allows_explicit_credentials_home(monkeypatch):
 
     assert env["HOME"] == "/srv/bullpen"
     assert "BULLPEN_READ_ONLY" not in env
-    assert "BULLPEN_NON_INTERACTIVE" not in env
+    assert env["BULLPEN_NON_INTERACTIVE"] == "true"
 
 
 @pytest.mark.anyio
 async def test_run_first_bullpen_json_includes_runtime_context_in_failure(monkeypatch):
-    async def fake_run_bullpen_json(args, *, timeout_seconds=20):
-        raise bullpen.BullpenCommandError("not logged in. Run: bullpen login")
+    class FakeBroker:
+        async def execute_first_json(
+            self,
+            command_variants,
+            *,
+            timeout_seconds: int,
+            extra_env=None,
+            retry_auth_once: bool = True,
+        ):
+            assert command_variants == [["polymarket", "positions", "--output", "json"]]
+            assert timeout_seconds == 20
+            assert retry_auth_once is True
+            raise bullpen.BullpenRuntimeCommandError(
+                "not logged in. Run: bullpen login",
+                classification="auth_rejected",
+            )
 
-    monkeypatch.setattr(bullpen, "run_bullpen_json", fake_run_bullpen_json)
+    monkeypatch.setattr(bullpen, "get_bullpen_runtime_broker", lambda: FakeBroker())
     monkeypatch.setattr(
         bullpen,
         "bullpen_runtime_context",
@@ -264,13 +277,18 @@ Account
 
 
 @pytest.mark.anyio
-async def test_bullpen_doctor_accepts_active_status_when_preflight_has_stale_refresh_token(monkeypatch):
+async def test_bullpen_doctor_rejects_active_status_when_preflight_has_stale_refresh_token(monkeypatch):
     status_output = """
 Account
   Status:           Logged in
   JWT expires:      2026-06-14 17:39:06 UTC (in 13m 48s)
   JWT observed:     2026-06-14 17:24:08 UTC; client expires in 14m 58s
 """
+
+    class FakeBroker:
+        async def ensure_auth_ready(self, *, force_refresh: bool = False):
+            assert force_refresh is False
+            return "2026-06-14T17:25:00+00:00"
 
     async def fake_run_bullpen(args, *, timeout_seconds, read_only):
         if args == ["status"]:
@@ -282,6 +300,7 @@ Account
             )
         raise AssertionError(f"unexpected args: {args}")
 
+    monkeypatch.setattr(bullpen, "get_bullpen_runtime_broker", lambda: FakeBroker())
     monkeypatch.setattr(bullpen, "run_bullpen", fake_run_bullpen)
     monkeypatch.setattr(
         bullpen,
@@ -300,19 +319,24 @@ Account
 
     doctor = await bullpen.BullpenLiveExecutor().doctor()
 
-    assert doctor.ok is True
-    assert "active JWT" in doctor.message
+    assert doctor.ok is False
+    assert "doctor failed" in doctor.message
     assert doctor.bullpen_jwt_seconds_remaining == 846
 
 
 @pytest.mark.anyio
-async def test_bullpen_doctor_accepts_active_status_when_preflight_has_transient_transport_error(monkeypatch):
+async def test_bullpen_doctor_rejects_active_status_when_preflight_has_transient_transport_error(monkeypatch):
     status_output = """
 Account
   Status:           Logged in
   JWT expires:      2026-06-14 17:39:06 UTC (in 13m 48s)
   JWT observed:     2026-06-14 17:24:08 UTC; client expires in 14m 58s
 """
+
+    class FakeBroker:
+        async def ensure_auth_ready(self, *, force_refresh: bool = False):
+            assert force_refresh is False
+            return "2026-06-14T17:25:00+00:00"
 
     async def fake_run_bullpen(args, *, timeout_seconds, read_only):
         if args == ["status"]:
@@ -326,6 +350,7 @@ Account
             )
         raise AssertionError(f"unexpected args: {args}")
 
+    monkeypatch.setattr(bullpen, "get_bullpen_runtime_broker", lambda: FakeBroker())
     monkeypatch.setattr(bullpen, "run_bullpen", fake_run_bullpen)
     monkeypatch.setattr(
         bullpen,
@@ -344,8 +369,8 @@ Account
 
     doctor = await bullpen.BullpenLiveExecutor().doctor()
 
-    assert doctor.ok is True
-    assert "transient transport error" in doctor.message
+    assert doctor.ok is False
+    assert "doctor failed" in doctor.message
     assert doctor.bullpen_jwt_seconds_remaining == 846
 
 

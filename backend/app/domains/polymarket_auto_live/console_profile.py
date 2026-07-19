@@ -8,6 +8,7 @@ from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from app.domains.polymarket.bullpen import run_first_bullpen_json
+from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket.position_classification import (
     classify_bullpen_position,
     extract_bullpen_claimable_flag,
@@ -998,12 +999,9 @@ def _aggregate_console_wallet_positions(
     return list(grouped_positions.values())
 
 
-async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
-    parsed = await run_first_bullpen_json(
-        _POSITIONS_COMMAND_VARIANTS,
-        timeout_seconds=_console_positions_timeout_seconds(),
-        wait_for_login=False,
-    )
+def parse_console_wallet_positions_payload(
+    parsed: object,
+) -> list[ConsoleWalletPosition]:
     rows = _collect_console_position_rows(parsed)
     positions: list[ConsoleWalletPosition] = []
 
@@ -1079,6 +1077,25 @@ async def read_console_wallet_positions() -> list[ConsoleWalletPosition]:
 
     positive_share_positions = [position for position in positions if position.shares > 0]
     return _aggregate_console_wallet_positions(positive_share_positions)
+
+
+async def read_console_wallet_positions(
+    *,
+    force_fresh: bool = True,
+    snapshot_payload: object | None = None,
+    max_age_seconds: int = CONSOLE_POSITIONS_TIMEOUT_SECONDS,
+) -> list[ConsoleWalletPosition]:
+    if snapshot_payload is None:
+        snapshot = await get_bullpen_runtime_broker().get_positions_snapshot(
+            force_fresh=force_fresh,
+            max_age_seconds=max_age_seconds,
+            timeout_seconds=_console_positions_timeout_seconds(),
+        )
+        parsed = snapshot.payload
+    else:
+        parsed = snapshot_payload
+
+    return parse_console_wallet_positions_payload(parsed)
 
 
 def apply_scanned_market_to_position(

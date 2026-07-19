@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.polymarket.runtime_broker import (
+    BullpenPositionsSnapshot,
+    get_bullpen_runtime_broker,
+)
 from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
@@ -18,6 +25,26 @@ from app.domains.polymarket.schemas import (
 from app.domains.polymarket.service import polymarket_bot_manager
 
 router = APIRouter(prefix="/polymarket", tags=["polymarket"])
+
+
+class BullpenRuntimePositionsResponse(BaseModel):
+    ok: bool
+    snapshot: BullpenPositionsSnapshot | None = None
+    stale_snapshot: BullpenPositionsSnapshot | None = None
+    error: str | None = None
+
+
+class BullpenRuntimeHealthResponse(BaseModel):
+    ok: bool
+    checked_at: str
+    doctor: object
+    snapshot: BullpenPositionsSnapshot | None = None
+    stale_snapshot: BullpenPositionsSnapshot | None = None
+    error: str | None = None
+
+
+class BullpenRuntimeSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
 
 
 async def _get_bot(current_user: User) -> object:
@@ -35,6 +62,102 @@ def _http_error_detail(exc: Exception) -> str:
 async def get_polymarket_state(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
     return await bot.get_state()
+
+
+@router.get("/runtime/positions", response_model=BullpenRuntimePositionsResponse)
+async def get_bullpen_runtime_positions(
+    force_fresh: bool = Query(default=False),
+    max_age_seconds: int = Query(default=20, ge=0, le=300),
+    current_user: User = Depends(get_current_user),
+):
+    del current_user
+    broker = get_bullpen_runtime_broker()
+    stale_snapshot = await broker.read_cached_positions_snapshot()
+    try:
+        snapshot = await broker.get_positions_snapshot(
+            force_fresh=force_fresh,
+            max_age_seconds=max_age_seconds,
+        )
+        return BullpenRuntimePositionsResponse(ok=True, snapshot=snapshot)
+    except Exception as exc:
+        return BullpenRuntimePositionsResponse(
+            ok=False,
+            stale_snapshot=stale_snapshot,
+            error=_http_error_detail(exc),
+        )
+
+
+@router.get("/runtime/health", response_model=BullpenRuntimeHealthResponse)
+async def get_bullpen_runtime_health(
+    current_user: User = Depends(get_current_user),
+):
+    bot = await _get_bot(current_user)
+    broker = get_bullpen_runtime_broker()
+    checked_at = datetime.now(UTC).isoformat()
+    cached_snapshot = await broker.read_cached_positions_snapshot()
+    doctor: object | None = None
+    try:
+        doctor = await bot.live_executor.doctor()
+        return BullpenRuntimeHealthResponse(
+            ok=bool(getattr(doctor, "ok", False)),
+            checked_at=checked_at,
+            doctor=doctor,
+            snapshot=cached_snapshot,
+        )
+    except Exception as exc:
+        if doctor is None:
+            doctor = {"ok": False, "message": _http_error_detail(exc)}
+        return BullpenRuntimeHealthResponse(
+            ok=False,
+            checked_at=checked_at,
+            doctor=doctor,
+            stale_snapshot=cached_snapshot,
+            error=_http_error_detail(exc),
+        )
+
+
+@router.get("/runtime/discover")
+async def get_bullpen_runtime_discover(
+):
+    broker = get_bullpen_runtime_broker()
+    return await broker.execute_first_json(
+        [
+            [
+                "polymarket",
+                "discover",
+                "--status",
+                "active",
+                "--limit",
+                "1000",
+                "--output",
+                "json",
+            ],
+            [
+                "polymarket",
+                "discover",
+                "--status",
+                "active",
+                "--sort",
+                "newest",
+                "--limit",
+                "1000",
+                "--output",
+                "json",
+            ],
+        ],
+        timeout_seconds=25,
+    )
+
+
+@router.post("/runtime/search")
+async def search_bullpen_runtime_markets(
+    request: BullpenRuntimeSearchRequest,
+):
+    broker = get_bullpen_runtime_broker()
+    return await broker.execute_json(
+        ["polymarket", "search", request.query, "--output", "json"],
+        timeout_seconds=20,
+    )
 
 
 @router.post("/start", response_model=PolymarketBotState)

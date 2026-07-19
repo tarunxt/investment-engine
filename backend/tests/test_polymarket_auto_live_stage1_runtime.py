@@ -80,40 +80,45 @@ async def test_console_wallet_positions_use_fast_timeout_without_login_wait(
 ):
     captured: dict[str, object] = {}
 
-    async def fake_run_first_bullpen_json(
-        _command_variants,
-        *,
-        timeout_seconds: int,
-        extra_env=None,
-        wait_for_login: bool = True,
-    ):
-        captured["timeout_seconds"] = timeout_seconds
-        captured["wait_for_login"] = wait_for_login
-        return {
-            "positions": [
-                {
-                    "slug": "fast-wallet-position",
-                    "market": "Fast wallet position",
-                    "outcome": "No",
-                    "shares": 4,
-                    "avg_price": 0.45,
-                    "current_price": 0.4,
-                    "invested_usd": 1.8,
-                    "end_date": "2026-07-19T00:00:00+00:00",
+    class FakeBroker:
+        async def get_positions_snapshot(
+            self,
+            *,
+            force_fresh: bool,
+            max_age_seconds: int,
+            timeout_seconds: int,
+        ):
+            captured["force_fresh"] = force_fresh
+            captured["max_age_seconds"] = max_age_seconds
+            captured["timeout_seconds"] = timeout_seconds
+            return SimpleNamespace(
+                payload={
+                    "positions": [
+                        {
+                            "slug": "fast-wallet-position",
+                            "market": "Fast wallet position",
+                            "outcome": "No",
+                            "shares": 4,
+                            "avg_price": 0.45,
+                            "current_price": 0.4,
+                            "invested_usd": 1.8,
+                            "end_date": "2026-07-19T00:00:00+00:00",
+                        }
+                    ]
                 }
-            ]
-        }
+            )
 
     monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
+        "app.domains.polymarket_auto_live.console_profile.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
     )
 
     positions = await read_console_wallet_positions()
 
     assert captured == {
+        "force_fresh": True,
+        "max_age_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
         "timeout_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
-        "wait_for_login": False,
     }
     assert len(positions) == 1
     assert positions[0].slug == "fast-wallet-position"
@@ -123,44 +128,88 @@ async def test_console_wallet_positions_use_fast_timeout_without_login_wait(
 async def test_console_wallet_positions_allow_timeout_env_override(monkeypatch):
     captured: dict[str, object] = {}
 
-    async def fake_run_first_bullpen_json(
-        _command_variants,
-        *,
-        timeout_seconds: int,
-        extra_env=None,
-        wait_for_login: bool = True,
-    ):
-        captured["timeout_seconds"] = timeout_seconds
-        captured["wait_for_login"] = wait_for_login
-        return {
-            "positions": [
-                {
-                    "slug": "env-timeout-wallet-position",
-                    "market": "Env timeout wallet position",
-                    "outcome": "Yes",
-                    "shares": 2,
-                    "avg_price": 0.51,
-                    "current_price": 0.55,
-                    "invested_usd": 1.02,
-                    "end_date": "2026-07-19T00:00:00+00:00",
+    class FakeBroker:
+        async def get_positions_snapshot(
+            self,
+            *,
+            force_fresh: bool,
+            max_age_seconds: int,
+            timeout_seconds: int,
+        ):
+            captured["force_fresh"] = force_fresh
+            captured["max_age_seconds"] = max_age_seconds
+            captured["timeout_seconds"] = timeout_seconds
+            return SimpleNamespace(
+                payload={
+                    "positions": [
+                        {
+                            "slug": "env-timeout-wallet-position",
+                            "market": "Env timeout wallet position",
+                            "outcome": "Yes",
+                            "shares": 2,
+                            "avg_price": 0.51,
+                            "current_price": 0.55,
+                            "invested_usd": 1.02,
+                            "end_date": "2026-07-19T00:00:00+00:00",
+                        }
+                    ]
                 }
-            ]
-        }
+            )
 
     monkeypatch.setenv(CONSOLE_POSITIONS_TIMEOUT_ENV_VAR, "27")
     monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
+        "app.domains.polymarket_auto_live.console_profile.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
     )
 
     positions = await read_console_wallet_positions()
 
     assert captured == {
+        "force_fresh": True,
+        "max_age_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
         "timeout_seconds": 27,
-        "wait_for_login": False,
     }
     assert len(positions) == 1
     assert positions[0].slug == "env-timeout-wallet-position"
+
+
+@pytest.mark.anyio
+async def test_console_wallet_positions_reuse_provided_snapshot_payload_without_refetch(
+    monkeypatch,
+):
+    broker_called = False
+
+    class FakeBroker:
+        async def get_positions_snapshot(self, **_kwargs):
+            nonlocal broker_called
+            broker_called = True
+            raise AssertionError("Broker should not be called when snapshot payload is supplied")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
+            "positions": [
+                {
+                    "slug": "snapshot-wallet-position",
+                    "market": "Snapshot wallet position",
+                    "outcome": "No",
+                    "shares": 5,
+                    "avg_price": 0.37,
+                    "current_price": 0.41,
+                    "invested_usd": 1.85,
+                    "end_date": "2026-07-21T00:00:00+00:00",
+                }
+            ]
+        }
+    )
+
+    assert broker_called is False
+    assert len(positions) == 1
+    assert positions[0].slug == "snapshot-wallet-position"
 
 
 @pytest.mark.anyio

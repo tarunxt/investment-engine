@@ -1,241 +1,81 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import os from "node:os";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
-import { autoClaimBullpenResolvedPositions } from "../app/api/bullpen-ai/_lib/bullpenHealth.ts";
+const FRONTEND_ROOT = path.resolve(process.cwd(), "frontend");
+const BULLPEN_API_ROOT = path.join(FRONTEND_ROOT, "app", "api", "bullpen-ai");
+const SOURCE_ROOTS = [
+  path.join(FRONTEND_ROOT, "app"),
+  path.join(FRONTEND_ROOT, "lib"),
+];
 
-function buildClaimableSnapshot() {
-  return {
-    positions: [
-      {
-        key: "resolved-market::yes",
-        marketId: "resolved-market",
-        conditionId:
-          "0x1111111111111111111111111111111111111111111111111111111111111111",
-        marketTitle: "Resolved market",
-        outcome: "Yes",
-        shares: 2,
-        averagePrice: 0.45,
-        costBasis: 0.9,
-        yesOdds: 100,
-        noOdds: 0,
-        currentPrice: 1,
-        currentValue: 2,
-        unrealizedPnl: 1.1,
-        unrealizedPnlPercent: 122.22,
-        marketUrl: "https://example.com/resolved-market",
-        closeTime: "2026-07-01T00:00:00.000Z",
-        isClaimable: true,
-        claimableValue: 2,
-        returnsPerDay: null,
-        rules: null,
-        marketContext: null,
-        resolutionSource: null,
-      },
-    ],
-    summary: {
-      activeCount: 1,
-      claimableCount: 1,
-      claimableValue: 2,
-      cashBalance: null,
-      totalValue: 2,
-      unrealizedPnl: 1.1,
-      walletValue: 2,
-    },
-    fetchedAt: "2026-07-01T00:00:00.000Z",
-    source: "live-cli",
-  };
+function walkSourceFiles(rootDir) {
+  const files = [];
+
+  for (const entry of readdirSync(rootDir)) {
+    const entryPath = path.join(rootDir, entry);
+    const entryStat = statSync(entryPath);
+    if (entryStat.isDirectory()) {
+      files.push(...walkSourceFiles(entryPath));
+      continue;
+    }
+    if (/\.(ts|tsx|js|jsx|mjs)$/.test(entry)) {
+      files.push(entryPath);
+    }
+  }
+
+  return files;
 }
 
-test("Bullpen auto-claim retries unchanged claimable positions after cooldown and resets once the queue clears", async (t) => {
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "bullpen-health-auto-claim-"),
+test("frontend Bullpen routes proxy the backend runtime instead of spawning Bullpen locally", () => {
+  const positionsRouteSource = readFileSync(
+    path.join(BULLPEN_API_ROOT, "positions", "route.ts"),
+    "utf8",
   );
-  const previousStateDir = process.env.BULLPEN_HEALTH_STATE_DIR;
-  const previousAutoClaim = process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
-  const previousCooldown = process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS;
-  const previousFallbackAttempt =
-    process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT;
+  const healthRouteSource = readFileSync(
+    path.join(BULLPEN_API_ROOT, "health", "route.ts"),
+    "utf8",
+  );
+  const discoverRouteSource = readFileSync(
+    path.join(BULLPEN_API_ROOT, "route.ts"),
+    "utf8",
+  );
 
-  process.env.BULLPEN_HEALTH_STATE_DIR = tempDir;
-  process.env.BULLPEN_AUTO_CLAIM_RESOLVED = "true";
-  process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS = "60000";
-  process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT = "2";
-
-  t.after(async () => {
-    if (previousStateDir === undefined) {
-      delete process.env.BULLPEN_HEALTH_STATE_DIR;
-    } else {
-      process.env.BULLPEN_HEALTH_STATE_DIR = previousStateDir;
-    }
-    if (previousAutoClaim === undefined) {
-      delete process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
-    } else {
-      process.env.BULLPEN_AUTO_CLAIM_RESOLVED = previousAutoClaim;
-    }
-    if (previousCooldown === undefined) {
-      delete process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS;
-    } else {
-      process.env.BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS = previousCooldown;
-    }
-    if (previousFallbackAttempt === undefined) {
-      delete process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT;
-    } else {
-      process.env.BULLPEN_AUTO_CLAIM_ON_CHAIN_FALLBACK_ATTEMPT =
-        previousFallbackAttempt;
-    }
-    await rm(tempDir, { recursive: true, force: true });
-  });
-
-  const calls = [];
-  const execFileImpl = async (file, args, options) => {
-    calls.push({
-      file,
-      args,
-      home: options.env.HOME || null,
-      readOnly: options.env.BULLPEN_READ_ONLY || null,
-    });
-    return {
-      stdout: "{}",
-      stderr: "",
-      exitCode: 0,
-      signal: null,
-    };
-  };
-  const commandCandidates = ["/usr/local/bin/bullpen"];
-  const snapshot = buildClaimableSnapshot();
-
-  const first = await autoClaimBullpenResolvedPositions(snapshot, {
-    commandCandidates,
-    execFileImpl,
-    now: () => "2026-07-01T00:00:00.000Z",
-  });
-  assert.equal(first.attempted, true);
-  assert.equal(first.submitted, true);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].args, [
-    "polymarket",
-    "redeem",
-    "--condition-ids",
-    "0x1111111111111111111111111111111111111111111111111111111111111111",
-    "--yes",
-    "--non-interactive",
-    "--output",
-    "json",
-  ]);
-  assert.equal(calls[0].readOnly, null);
-
-  const second = await autoClaimBullpenResolvedPositions(snapshot, {
-    commandCandidates,
-    execFileImpl,
-    now: () => "2026-07-01T00:00:30.000Z",
-  });
-  assert.equal(second.attempted, false);
-  assert.equal(second.skippedReason, "cooldown");
-  assert.equal(calls.length, 1);
-
-  const third = await autoClaimBullpenResolvedPositions(snapshot, {
-    commandCandidates,
-    execFileImpl,
-    now: () => "2026-07-01T00:01:05.000Z",
-  });
-  assert.equal(third.attempted, true);
-  assert.equal(third.submitted, true);
-  assert.equal(calls.length, 2);
-  assert.deepEqual(calls[1].args, [
-    "polymarket",
-    "redeem",
-    "--condition-ids",
-    "0x1111111111111111111111111111111111111111111111111111111111111111",
-    "--on-chain-fallback",
-    "--yes",
-    "--non-interactive",
-    "--output",
-    "json",
-  ]);
-
-  const clearedSnapshot = {
-    ...snapshot,
-    positions: [],
-    summary: {
-      ...snapshot.summary,
-      activeCount: 0,
-      claimableCount: 0,
-      claimableValue: 0,
-    },
-  };
-
-  const cleared = await autoClaimBullpenResolvedPositions(clearedSnapshot, {
-    commandCandidates,
-    execFileImpl,
-    now: () => "2026-07-01T00:02:00.000Z",
-  });
-  assert.equal(cleared.attempted, false);
-  assert.equal(cleared.skippedReason, "no-claimable-positions");
-
-  const fourth = await autoClaimBullpenResolvedPositions(snapshot, {
-    commandCandidates,
-    execFileImpl,
-    now: () => "2026-07-01T00:02:05.000Z",
-  });
-  assert.equal(fourth.attempted, true);
-  assert.equal(fourth.submitted, true);
-  assert.equal(calls.length, 3);
-  assert.equal(calls[2].args.includes("--on-chain-fallback"), false);
+  assert.match(positionsRouteSource, /fetchBackendRuntimeJson/);
+  assert.match(positionsRouteSource, /\/polymarket\/runtime\/positions/);
+  assert.match(healthRouteSource, /\/polymarket\/runtime\/health/);
+  assert.match(discoverRouteSource, /\/polymarket\/runtime\/discover/);
+  assert.doesNotMatch(positionsRouteSource, /syncBullpenLiveSnapshot/);
+  assert.doesNotMatch(positionsRouteSource, /readLastSuccessfulBullpenLiveSnapshot/);
 });
 
-test("Bullpen auto-claim skips claimable rows that do not have verified condition ids", async (t) => {
-  const tempDir = await mkdtemp(
-    path.join(os.tmpdir(), "bullpen-health-auto-claim-missing-condition-"),
+test("frontend source tree contains no Bullpen child_process or execFile runtime usage", () => {
+  const sourceFiles = SOURCE_ROOTS.flatMap((rootDir) => walkSourceFiles(rootDir));
+  const offenders = [];
+
+  for (const sourceFile of sourceFiles) {
+    const source = readFileSync(sourceFile, "utf8");
+    if (/node:child_process/.test(source)) {
+      offenders.push(`${sourceFile}: node:child_process import`);
+    }
+    if (/\bpromisify\s*\(\s*execFile\s*\)/.test(source)) {
+      offenders.push(`${sourceFile}: promisify(execFile)`);
+    }
+    if (/\bexecFileAsync\s*\(/.test(source)) {
+      offenders.push(`${sourceFile}: execFileAsync(...)`);
+    }
+  }
+
+  assert.deepEqual(offenders, []);
+});
+
+test("legacy frontend Bullpen runtime helper was removed", () => {
+  const legacyHelperPath = path.join(
+    BULLPEN_API_ROOT,
+    "_lib",
+    "bullpenHealth.ts",
   );
-  const previousStateDir = process.env.BULLPEN_HEALTH_STATE_DIR;
-  const previousAutoClaim = process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
 
-  process.env.BULLPEN_HEALTH_STATE_DIR = tempDir;
-  process.env.BULLPEN_AUTO_CLAIM_RESOLVED = "true";
-
-  t.after(async () => {
-    if (previousStateDir === undefined) {
-      delete process.env.BULLPEN_HEALTH_STATE_DIR;
-    } else {
-      process.env.BULLPEN_HEALTH_STATE_DIR = previousStateDir;
-    }
-    if (previousAutoClaim === undefined) {
-      delete process.env.BULLPEN_AUTO_CLAIM_RESOLVED;
-    } else {
-      process.env.BULLPEN_AUTO_CLAIM_RESOLVED = previousAutoClaim;
-    }
-    await rm(tempDir, { recursive: true, force: true });
-  });
-
-  const calls = [];
-  const snapshot = {
-    ...buildClaimableSnapshot(),
-    positions: [
-      {
-        ...buildClaimableSnapshot().positions[0],
-        conditionId: null,
-      },
-    ],
-  };
-
-  const result = await autoClaimBullpenResolvedPositions(snapshot, {
-    commandCandidates: ["/usr/local/bin/bullpen"],
-    execFileImpl: async (...args) => {
-      calls.push(args);
-      return {
-        stdout: "{}",
-        stderr: "",
-        exitCode: 0,
-        signal: null,
-      };
-    },
-    now: () => "2026-07-01T00:00:00.000Z",
-  });
-
-  assert.equal(result.attempted, false);
-  assert.equal(result.skippedReason, "no-claimable-positions");
-  assert.equal(calls.length, 0);
+  assert.throws(() => statSync(legacyHelperPath));
 });

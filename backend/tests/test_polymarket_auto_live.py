@@ -4346,9 +4346,9 @@ def test_record_to_decision_drops_malformed_legacy_order_plan():
 
 
 @pytest.mark.anyio
-async def test_console_wallet_positions_parse_top_level_positions_payload(monkeypatch):
-    async def fake_run_first_bullpen_json(*_args, **_kwargs):
-        return {
+async def test_console_wallet_positions_parse_top_level_positions_payload():
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
             "positions": [
                 {
                     "slug": "candidate-x-win",
@@ -4362,13 +4362,7 @@ async def test_console_wallet_positions_parse_top_level_positions_payload(monkey
                 }
             ]
         }
-
-    monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
     )
-
-    positions = await read_console_wallet_positions()
 
     assert len(positions) == 1
     assert positions[0].market_id == "candidate-x-win"
@@ -4378,9 +4372,9 @@ async def test_console_wallet_positions_parse_top_level_positions_payload(monkey
 
 
 @pytest.mark.anyio
-async def test_console_wallet_positions_aggregate_duplicate_lots(monkeypatch):
-    async def fake_run_first_bullpen_json(*_args, **_kwargs):
-        return {
+async def test_console_wallet_positions_aggregate_duplicate_lots():
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
             "positions": [
                 {
                     "condition_id": "0xabc",
@@ -4405,13 +4399,7 @@ async def test_console_wallet_positions_aggregate_duplicate_lots(monkeypatch):
                 },
             ]
         }
-
-    monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
     )
-
-    positions = await read_console_wallet_positions()
 
     assert len(positions) == 1
     assert positions[0].slug == "candidate-x-win"
@@ -4423,9 +4411,9 @@ async def test_console_wallet_positions_aggregate_duplicate_lots(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_console_wallet_positions_do_not_treat_won_status_as_claimable(monkeypatch):
-    async def fake_run_first_bullpen_json(*_args, **_kwargs):
-        return {
+async def test_console_wallet_positions_do_not_treat_won_status_as_claimable():
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
             "positions": [
                 {
                     "slug": "closed-history-row",
@@ -4448,13 +4436,7 @@ async def test_console_wallet_positions_do_not_treat_won_status_as_claimable(mon
                 },
             ]
         }
-
-    monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
     )
-
-    positions = await read_console_wallet_positions()
 
     by_slug = {position.slug: position for position in positions}
     assert by_slug["closed-history-row"].is_claimable is False
@@ -4463,10 +4445,9 @@ async def test_console_wallet_positions_do_not_treat_won_status_as_claimable(mon
 
 @pytest.mark.anyio
 async def test_console_wallet_positions_preserve_explicit_zero_payout_residues(
-    monkeypatch,
 ):
-    async def fake_run_first_bullpen_json(*_args, **_kwargs):
-        return {
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
             "positions": [
                 {
                     "slug": "resolved-zero-payout",
@@ -4482,13 +4463,7 @@ async def test_console_wallet_positions_preserve_explicit_zero_payout_residues(
                 }
             ]
         }
-
-    monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
     )
-
-    positions = await read_console_wallet_positions()
 
     assert len(positions) == 1
     assert positions[0].current_price_cents == 0
@@ -4497,9 +4472,9 @@ async def test_console_wallet_positions_preserve_explicit_zero_payout_residues(
 
 
 @pytest.mark.anyio
-async def test_console_wallet_positions_ignore_nested_history_claim_rows(monkeypatch):
-    async def fake_run_first_bullpen_json(*_args, **_kwargs):
-        return {
+async def test_console_wallet_positions_ignore_nested_history_claim_rows():
+    positions = await read_console_wallet_positions(
+        snapshot_payload={
             "data": {
                 "positions": [
                     {
@@ -4538,13 +4513,7 @@ async def test_console_wallet_positions_ignore_nested_history_claim_rows(monkeyp
                 ],
             }
         }
-
-    monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
-        fake_run_first_bullpen_json,
     )
-
-    positions = await read_console_wallet_positions()
 
     assert [position.slug for position in positions] == ["active-open-row"]
     assert positions[0].is_claimable is False

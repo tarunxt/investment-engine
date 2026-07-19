@@ -137,6 +137,14 @@ must use short worker-safe timeouts and must not block on manual Bullpen login
 polling. The current worker contract is a 5 second discover timeout, a 20 second
 default positions timeout with `BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS`
 available for bounded overrides, and the existing bounded balance timeout path.
+As of Sunday, July 19, 2026, authenticated Bullpen reads must flow through one
+centralized backend runtime broker backed by Redis locking and a canonical Redis
+positions snapshot. Stage 1 is the only stage allowed to request a forced fresh
+wallet snapshot for a run, and that immutable snapshot payload must be handed to
+later stages instead of letting Stage 2, Stage 3, UI polling, health routes, or
+background monitors spawn their own Bullpen wallet refresh. Cached UI and health
+reads may reuse the shared Redis snapshot for roughly 15-30 seconds, but they
+must not become a second credential owner or a parallel auth refresh path.
 If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
 write revert the run back to an in-progress state.
@@ -173,7 +181,11 @@ provider/model rows are treated as data-integrity failures, Stage 2 may end in
 Decision rows, guardrail outcomes, ranking and selection results, order intents,
 execution steps, order funnel metrics, and the mirrored Stage 2 handoff queue
 used to explain why a Top 10 row did or did not become a concrete Step 2 buy
-plan.
+plan. Post-exit buy planning must now derive from the Stage 1 wallet snapshot
+handoff and its deterministic simulation state rather than triggering an
+independent mid-run Bullpen wallet reread. When the centralized fresh snapshot
+fails, Stage 2 and Stage 3 are expected to stay blocked instead of continuing
+with ad hoc wallet refreshes.
 
 ### Guardrails
 
@@ -258,6 +270,9 @@ When changing Bullpen logic:
 * update `AUDITED_ALGORITHM_REGISTRY`
 * update validators and finding messages
 * update frontend run audit rendering if labels or sections changed
+* preserve the single Bullpen runtime broker, single auth-refresh owner, and
+  single Stage 1 wallet snapshot contract unless the audit schema, tests, and
+  docs are updated together
 * preserve the non-interactive Stage 1 runtime contract for background Bullpen
   scan, positions, and balance reads unless the audit docs and tests are updated
   in the same task

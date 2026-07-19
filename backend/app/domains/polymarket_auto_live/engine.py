@@ -1720,11 +1720,9 @@ async def _poll_exit_settlement(
         return None, baseline_balance_usd
 
     deadline = asyncio.get_running_loop().time() + EXIT_SETTLEMENT_TIMEOUT_SECONDS
-    latest_positions: list[ConsoleWalletPosition] | None = None
     latest_balance_usd = baseline_balance_usd
 
     while True:
-        latest_positions = await read_console_wallet_positions()
         balance_state = await refresh_balance()
         if balance_state.status == "ready":
             latest_balance_usd = balance_state.available_balance_usd
@@ -1740,28 +1738,6 @@ async def _poll_exit_settlement(
                 continue
 
             if order_plan.action == "redeem":
-                condition_ids = set(_redeem_condition_ids_for_decision(decision))
-                matching_positions = [
-                    position
-                    for position in latest_positions
-                    if _wallet_position_matches_redeem_condition(position, condition_ids)
-                ]
-                if not matching_positions:
-                    order_plan.status = "confirmed"
-                    order_plan.detail = (
-                        "Bullpen no longer shows the redeemable position after submission."
-                    )
-                    continue
-                if all(
-                    position.classification == "resolved_zero_payout"
-                    for position in matching_positions
-                ):
-                    order_plan.status = "resolved_zero_payout"
-                    order_plan.detail = (
-                        "Bullpen still shows the residue in diagnostics, but the payout is "
-                        "explicitly zero so no further redeem is needed."
-                    )
-                    continue
                 if (
                     baseline_balance_usd is not None
                     and latest_balance_usd is not None
@@ -1786,21 +1762,6 @@ async def _poll_exit_settlement(
                 unsettled += 1
                 continue
 
-            matching_position = next(
-                (
-                    position
-                    for position in latest_positions
-                    if position.market_id == decision.market_id and position.side == order_plan.side
-                ),
-                None,
-            )
-            current_shares = matching_position.shares if matching_position is not None else 0.0
-            if matching_position is None or current_shares + 0.000001 < order_plan.shares:
-                order_plan.status = "confirmed"
-                order_plan.detail = (
-                    "Bullpen wallet shares dropped after the exit submission."
-                )
-                continue
             if (
                 baseline_balance_usd is not None
                 and latest_balance_usd is not None
@@ -1818,7 +1779,7 @@ async def _poll_exit_settlement(
             unsettled += 1
 
         if unsettled == 0 or asyncio.get_running_loop().time() >= deadline:
-            return latest_positions, latest_balance_usd
+            return None, latest_balance_usd
         await asyncio.sleep(EXIT_SETTLEMENT_POLL_INTERVAL_SECONDS)
 
 
@@ -8230,73 +8191,38 @@ class BullpenAutoLiveEngine:
             )
 
         async def _refresh_stage3_buy_state() -> dict[str, object]:
-            if state.dry_run:
-                simulated_exit_market_ids = {
-                    decision.market_id
-                    for decision in sell_execution_decisions
-                    if decision.order_plan is not None
-                    and decision.order_plan.status in {"planned", "skipped"}
-                }
-                visible_active_market_ids = {
-                    position.market_id
-                    for position in position_snapshots
-                    if position.exposure_usd > 0
-                    and position.market_id not in simulated_exit_market_ids
-                }
-                pending_submitted_buy_market_ids = _pending_submitted_buy_market_ids(
-                    historical_decisions,
-                    visible_active_market_ids=visible_active_market_ids,
-                )
-                occupied_market_ids = (
-                    visible_active_market_ids | pending_submitted_buy_market_ids
-                )
-                cash_in_hand_usd = console_trade_amount_breakdown["cash_in_hand_usd"]
-                breakdown = build_console_trade_amount_breakdown(
-                    available_balance_usd=(
-                        float(cash_in_hand_usd)
-                        if isinstance(cash_in_hand_usd, (int, float))
-                        else None
-                    ),
-                    occupied_position_count=len(occupied_market_ids),
-                )
-                return {
-                    "source": "post_exit_simulation",
-                    "visible_active_market_ids": visible_active_market_ids,
-                    "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
-                    "occupied_market_ids": occupied_market_ids,
-                    "cash_in_hand_usd": breakdown["cash_in_hand_usd"],
-                    "occupied_positions": int(breakdown["occupied_positions"] or 0),
-                    "available_slots": int(breakdown["available_slots"] or 0),
-                    "max_positions": int(breakdown["max_positions"] or 0),
-                    "balance_status": "ready"
-                    if breakdown["cash_in_hand_usd"] is not None
-                    else "unavailable",
-                }
-
-            refreshed_wallet_positions = await read_console_wallet_positions()
+            simulated_exit_market_ids = {
+                decision.market_id
+                for decision in sell_execution_decisions
+                if decision.order_plan is not None
+                and decision.order_plan.status
+                not in {"failed", "deferred", "rpc_rate_limited"}
+            }
             visible_active_market_ids = {
                 position.market_id
-                for position in refreshed_wallet_positions
-                if not position.is_claimable
-                and is_displayable_bullpen_position(position.classification)
+                for position in position_snapshots
+                if position.exposure_usd > 0
+                and position.market_id not in simulated_exit_market_ids
             }
             pending_submitted_buy_market_ids = _pending_submitted_buy_market_ids(
                 [*historical_decisions, *decisions],
                 visible_active_market_ids=visible_active_market_ids,
             )
             occupied_market_ids = visible_active_market_ids | pending_submitted_buy_market_ids
-            balance_state = await refresh_balance()
-            available_balance_usd = (
-                balance_state.available_balance_usd
-                if balance_state.status == "ready"
-                else None
-            )
+            available_balance_usd = available_balance_before_step1
+            if available_balance_usd is None:
+                cash_in_hand_usd = console_trade_amount_breakdown["cash_in_hand_usd"]
+                available_balance_usd = (
+                    float(cash_in_hand_usd)
+                    if isinstance(cash_in_hand_usd, (int, float))
+                    else None
+                )
             breakdown = build_console_trade_amount_breakdown(
                 available_balance_usd=available_balance_usd,
                 occupied_position_count=len(occupied_market_ids),
             )
             return {
-                "source": "post_exit_live_refresh",
+                "source": "stage1_snapshot_simulation",
                 "visible_active_market_ids": visible_active_market_ids,
                 "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
                 "occupied_market_ids": occupied_market_ids,
@@ -8304,8 +8230,9 @@ class BullpenAutoLiveEngine:
                 "occupied_positions": int(breakdown["occupied_positions"] or 0),
                 "available_slots": int(breakdown["available_slots"] or 0),
                 "max_positions": int(breakdown["max_positions"] or 0),
-                "balance_status": balance_state.status,
-                "balance_message": balance_state.message,
+                "balance_status": "ready"
+                if breakdown["cash_in_hand_usd"] is not None
+                else "unavailable",
             }
 
         async def _plan_stage3_buy_orders(

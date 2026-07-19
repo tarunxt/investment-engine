@@ -1,19 +1,12 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import type { BullpenQuestion } from "@/lib/bullpen-ai";
 
+import { fetchBackendRuntimeJson } from "./backendBullpenRuntime.ts";
 import {
   collectPolymarketCategoryLabels,
   formatPolymarketCategory,
   inferPolymarketCategoryFromText,
   shouldReplaceCategory,
 } from "./polymarketCategory.ts";
-import {
-  BULLPEN_BIN_CANDIDATES,
-  buildBullpenProcessEnv,
-  parseBullpenJsonOutput,
-} from "./bullpenCli.ts";
 
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
@@ -23,8 +16,6 @@ const MARKET_CONTEXT_CAPTURE_CHARS = 40_000;
 const MAX_MARKET_CONTEXT_UPDATES = 6;
 const POLYMARKET_MARKET_CONTEXT_LABEL =
   "Experimental AI-generated summary referencing Polymarket data.";
-const execFileAsync = promisify(execFile);
-
 type CanonicalizableQuestion = Pick<BullpenQuestion, "id" | "slug" | "marketUrl">;
 type SearchableCanonicalizableQuestion = CanonicalizableQuestion & {
   question?: string | null;
@@ -635,92 +626,80 @@ export async function resolvePolymarketMarkets<
 async function searchBullpenMarketByQuestion(question: string) {
   const normalizedQuestion = normalizeQuestionLookupValue(question);
 
-  for (const candidate of BULLPEN_BIN_CANDIDATES) {
-    try {
-      const { stdout } = await execFileAsync(
-        candidate,
-        ["polymarket", "search", question, "--output", "json"],
-        {
-          env: buildBullpenProcessEnv({ readOnly: true }),
-          timeout: 20_000,
-          maxBuffer: 5 * 1024 * 1024,
-        },
-      );
-      const payload = parseBullpenJsonOutput(stdout) as {
-        events?: Array<{
+  try {
+    const payload = (await fetchBackendRuntimeJson("/polymarket/runtime/search", {
+      method: "POST",
+      body: { query: question },
+    })) as {
+      events?: Array<{
+        slug?: string | null;
+        markets?: Array<{
+          question?: string | null;
           slug?: string | null;
-          markets?: Array<{
-            question?: string | null;
-            slug?: string | null;
-            outcomes?: Array<{
-              name?: string | null;
-              price?: number | null;
-              probability?: number | null;
-            }>;
+          outcomes?: Array<{
+            name?: string | null;
+            price?: number | null;
+            probability?: number | null;
           }>;
         }>;
-      };
-      const markets = payload.events?.flatMap((event) =>
-        (event.markets || []).map((market) => ({
-          ...market,
-          eventSlug: event.slug || null,
-        })),
-      );
-      const matchedMarket = markets?.find(
-        (market) =>
-          typeof market.question === "string" &&
-          normalizeQuestionLookupValue(market.question) === normalizedQuestion,
-      );
-      if (!matchedMarket || !matchedMarket.slug) {
-        continue;
-      }
-
-      const yesOutcome = matchedMarket.outcomes?.find(
-        (outcome) =>
-          normalizeQuestionLookupValue(outcome.name || "") === "yes",
-      );
-      const noOutcome = matchedMarket.outcomes?.find(
-        (outcome) =>
-          normalizeQuestionLookupValue(outcome.name || "") === "no",
-      );
-      const toPercent = (value: number | null | undefined) =>
-        typeof value === "number" ? Number((value * 100).toFixed(2)) : null;
-
-      const fallbackMarket = {
-        id: matchedMarket.slug,
-        slug: matchedMarket.slug,
-        marketUrl: buildPolymarketEventUrl(matchedMarket.eventSlug || null),
-      } satisfies CanonicalizableQuestion;
-
-      try {
-        const resolved = await resolvePolymarketMarkets([fallbackMarket]);
-        const refreshed = resolved[fallbackMarket.id];
-        if (refreshed) {
-          return refreshed;
-        }
-      } catch {
-        // Fall through to the CLI-derived fallback below.
-      }
-
-      return {
-        id: fallbackMarket.id,
-        slug: fallbackMarket.slug,
-        marketUrl: fallbackMarket.marketUrl,
-        category: null,
-        yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
-        noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
-        bestBidPrice: null,
-        bestAskPrice: null,
-        rules: null,
-        marketContext: null,
-        resolutionSource: null,
-      } satisfies ResolvedPolymarketMarket;
-    } catch {
-      continue;
+      }>;
+    };
+    const markets = payload.events?.flatMap((event) =>
+      (event.markets || []).map((market) => ({
+        ...market,
+        eventSlug: event.slug || null,
+      })),
+    );
+    const matchedMarket = markets?.find(
+      (market) =>
+        typeof market.question === "string" &&
+        normalizeQuestionLookupValue(market.question) === normalizedQuestion,
+    );
+    if (!matchedMarket || !matchedMarket.slug) {
+      return null;
     }
-  }
 
-  return null;
+    const yesOutcome = matchedMarket.outcomes?.find(
+      (outcome) => normalizeQuestionLookupValue(outcome.name || "") === "yes",
+    );
+    const noOutcome = matchedMarket.outcomes?.find(
+      (outcome) => normalizeQuestionLookupValue(outcome.name || "") === "no",
+    );
+    const toPercent = (value: number | null | undefined) =>
+      typeof value === "number" ? Number((value * 100).toFixed(2)) : null;
+
+    const fallbackMarket = {
+      id: matchedMarket.slug,
+      slug: matchedMarket.slug,
+      marketUrl: buildPolymarketEventUrl(matchedMarket.eventSlug || null),
+    } satisfies CanonicalizableQuestion;
+
+    try {
+      const resolved = await resolvePolymarketMarkets([fallbackMarket]);
+      const refreshed = resolved[fallbackMarket.id];
+      if (refreshed) {
+        return refreshed;
+      }
+    } catch {
+      // Fall through to the backend Bullpen search fallback below.
+    }
+
+    return {
+      id: fallbackMarket.id,
+      slug: fallbackMarket.slug,
+      marketUrl: fallbackMarket.marketUrl,
+      category: null,
+      yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
+      noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
+      bestBidPrice: null,
+      bestAskPrice: null,
+      rules: null,
+      marketContext: null,
+      resolutionSource: null,
+    } satisfies ResolvedPolymarketMarket;
+  } catch {
+    return null;
+  }
 }
 
 export async function resolvePolymarketMarketsWithQuestionFallback<

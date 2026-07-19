@@ -10,6 +10,10 @@ import shutil
 from collections.abc import Iterable
 
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket.runtime_broker import (
+    BullpenRuntimeCommandError,
+    get_bullpen_runtime_broker,
+)
 from app.domains.polymarket.schemas import (
     PolymarketBalanceState,
     PolymarketBullpenRedeemedTrade,
@@ -312,9 +316,7 @@ def bullpen_process_env(
         env["HOME"] = configured_home
     elif service_home and (not env.get("HOME") or env.get("HOME") == "/root"):
         env["HOME"] = service_home
-    if read_only:
-        env["BULLPEN_READ_ONLY"] = "true"
-        env["BULLPEN_NON_INTERACTIVE"] = "true"
+    env["BULLPEN_NON_INTERACTIVE"] = "true"
     if extra_env:
         env.update(extra_env)
     return env
@@ -365,45 +367,16 @@ async def run_bullpen(
     read_only: bool,
     extra_env: dict[str, str] | None = None,
 ) -> str:
-    env = bullpen_process_env(read_only=read_only, extra_env=extra_env)
-
     try:
-        process = await asyncio.create_subprocess_exec(
-            bullpen_executable(),
-            *args,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
+        result = await get_bullpen_runtime_broker().execute_raw(
+            args,
+            timeout_seconds=timeout_seconds,
+            extra_env=extra_env,
+            retry_auth_once=read_only,
         )
-    except FileNotFoundError as exc:
-        raise BullpenCommandError(_bullpen_install_hint()) from exc
-    except PermissionError as exc:
-        raise BullpenCommandError(
-            f"Bullpen CLI executable is not runnable: {redact_secrets(str(exc))}. "
-            "Verify BULLPEN_BIN points to an executable file owned/readable by the backend service user."
-        ) from exc
-
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout_seconds
-        )
-    except asyncio.TimeoutError as exc:
-        process.kill()
-        await process.communicate()
-        raise BullpenCommandError(
-            f"Command timed out after {timeout_seconds}s"
-        ) from exc
-
-    stdout_text = stdout.decode("utf-8", errors="replace").strip()
-    stderr_text = stderr.decode("utf-8", errors="replace").strip()
-    if process.returncode != 0:
-        message = (
-            stderr_text
-            or stdout_text
-            or f"Command exited with code {process.returncode}"
-        )
-        raise BullpenCommandError(redact_secrets(message))
-    return stdout_text
+        return result.stdout
+    except BullpenRuntimeCommandError as exc:
+        raise BullpenCommandError(redact_secrets(str(exc))) from exc
 
 
 async def run_bullpen_json(
@@ -412,13 +385,14 @@ async def run_bullpen_json(
     timeout_seconds: int = 20,
     extra_env: dict[str, str] | None = None,
 ) -> object:
-    stdout = await run_bullpen(
-        args,
-        timeout_seconds=timeout_seconds,
-        read_only=True,
-        extra_env=extra_env,
-    )
-    return json.loads(stdout)
+    try:
+        return await get_bullpen_runtime_broker().execute_json(
+            args,
+            timeout_seconds=timeout_seconds,
+            extra_env=extra_env,
+        )
+    except BullpenRuntimeCommandError as exc:
+        raise BullpenCommandError(redact_secrets(str(exc))) from exc
 
 
 async def run_first_bullpen_json(
@@ -428,46 +402,19 @@ async def run_first_bullpen_json(
     extra_env: dict[str, str] | None = None,
     wait_for_login: bool = True,
 ) -> object:
-    variants = list(command_variants)
-    errors: list[str] = []
-    runtime_context = bullpen_runtime_context(read_only=True)
-    for args in variants:
-            try:
-                return await run_bullpen_json(
-                    args,
-                    timeout_seconds=timeout_seconds,
-                    extra_env=extra_env,
-                )
-            except Exception as exc:
-                errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
-    if wait_for_login and errors and _is_auth_required_error(" | ".join(errors)):
-        login_confirmed = await wait_for_bullpen_login()
-        if login_confirmed:
-            retry_errors: list[str] = []
-            for args in variants:
-                try:
-                    return await run_bullpen_json(
-                        args,
-                        timeout_seconds=timeout_seconds,
-                        extra_env=extra_env,
-                    )
-                except Exception as exc:
-                    retry_errors.append(f"{' '.join(args)} => {redact_secrets(str(exc))}")
-            errors.extend(
-                [
-                    "Login was confirmed automatically; retried original Bullpen command variants.",
-                    *retry_errors,
-                ]
-            )
-        else:
-            errors.append(
-                "Bullpen login was still not confirmed after "
-                f"{BULLPEN_LOGIN_POLL_TIMEOUT_SECONDS}s of automatic 10s status checks."
-            )
-    raise BullpenCommandError(
-        "All Bullpen command variants failed "
-        f"({format_bullpen_runtime_context(runtime_context)}): " + " | ".join(errors)
-    )
+    try:
+        return await get_bullpen_runtime_broker().execute_first_json(
+            list(command_variants),
+            timeout_seconds=timeout_seconds,
+            extra_env=extra_env,
+            retry_auth_once=wait_for_login,
+        )
+    except BullpenRuntimeCommandError as exc:
+        runtime_context = bullpen_runtime_context(read_only=True)
+        raise BullpenCommandError(
+            "All Bullpen command variants failed "
+            f"({format_bullpen_runtime_context(runtime_context)}): {redact_secrets(str(exc))}"
+        ) from exc
 
 
 async def wait_for_bullpen_login(
@@ -475,17 +422,12 @@ async def wait_for_bullpen_login(
     poll_interval_seconds: int = BULLPEN_LOGIN_POLL_INTERVAL_SECONDS,
     timeout_seconds: int = BULLPEN_LOGIN_POLL_TIMEOUT_SECONDS,
 ) -> bool:
-    """Poll Bullpen status until a manually completed login is visible."""
+    """Poll centralized auth readiness without ever triggering device login."""
     deadline = asyncio.get_running_loop().time() + max(0, timeout_seconds)
     while True:
         try:
-            stdout = await run_bullpen(
-                ["status"],
-                timeout_seconds=min(15, max(1, poll_interval_seconds)),
-                read_only=True,
-            )
-            if _has_active_bullpen_session(parse_bullpen_session(stdout)):
-                return True
+            await get_bullpen_runtime_broker().ensure_auth_ready(force_refresh=False)
+            return True
         except Exception:
             pass
 
@@ -541,63 +483,42 @@ class BullpenLiveExecutor:
         checked_at = utc_now()
         runtime_context = bullpen_runtime_context(read_only=True)
         runtime_context_label = format_bullpen_runtime_context(runtime_context)
-        checks = [
-            (["status"], True, "status"),
-            (["polymarket", "preflight"], False, "preflight"),
-        ]
         session: dict[str, object] = {}
-        failures: list[str] = []
-        passed: list[str] = []
-        for args, read_only, label in checks:
-            try:
-                stdout = await run_bullpen(
-                    args, timeout_seconds=45, read_only=read_only
-                )
-                if label == "status":
-                    session = parse_bullpen_session(stdout)
-                passed.append(label)
-            except Exception as exc:
-                failures.append(f"{label}: {redact_secrets(str(exc))}")
-        if not failures:
+
+        try:
+            status_stdout = await run_bullpen(
+                ["status"],
+                timeout_seconds=15,
+                read_only=True,
+            )
+            session = parse_bullpen_session(status_stdout)
+        except Exception:
+            session = {}
+
+        try:
+            await get_bullpen_runtime_broker().ensure_auth_ready(force_refresh=False)
+            await run_bullpen(
+                ["polymarket", "preflight"],
+                timeout_seconds=45,
+                read_only=True,
+            )
+        except Exception as exc:
             return PolymarketDoctorStatus(
                 checked_at=checked_at,
-                ok=True,
-                message="Bullpen status and preflight checks passed.",
+                ok=False,
+                message=(
+                    "Bullpen doctor failed "
+                    f"using {runtime_context_label}: {redact_secrets(str(exc))}"
+                ),
                 **session,
             )
-        failure_message = "; ".join(failures)
-        if "status" in passed and _has_active_bullpen_session(session):
-            if _is_refresh_token_rejected_error(failure_message):
-                return PolymarketDoctorStatus(
-                    checked_at=checked_at,
-                    ok=True,
-                    message=(
-                        "Bullpen status passed with an active JWT; preflight reported a "
-                        "stale refresh-token error after login, so status is being "
-                        "used as the auth source of truth. Preflight detail: "
-                        f"{failure_message}"
-                    ),
-                    **session,
-                )
-            if _is_transient_bullpen_preflight_error(failure_message):
-                return PolymarketDoctorStatus(
-                    checked_at=checked_at,
-                    ok=True,
-                    message=(
-                        "Bullpen status passed with an active JWT; preflight reported a "
-                        "transient transport error, so status is being used as the "
-                        "auth source of truth for this run. Preflight detail: "
-                        f"{failure_message}"
-                    ),
-                    **session,
-                )
+
         return PolymarketDoctorStatus(
             checked_at=checked_at,
-            ok=False,
+            ok=True,
             message=(
-                "Bullpen doctor failed "
-                f"using {runtime_context_label} after {', '.join(passed) or 'no'} "
-                f"passed checks: {failure_message}"
+                "Bullpen auth refresh and preflight checks passed. "
+                "Passive status remains diagnostic-only."
             ),
             **session,
         )

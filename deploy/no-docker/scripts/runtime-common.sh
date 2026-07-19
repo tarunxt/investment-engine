@@ -2,10 +2,16 @@
 
 set -euo pipefail
 
-DEFAULT_APP_ROOT="/srv/investment-engine"
-LEGACY_APP_ROOT="/srv/investor"
-DEFAULT_APP_USER="investment-engine"
-LEGACY_APP_USER="investor"
+DEFAULT_APP_ROOT="/srv/investor"
+LEGACY_APP_ROOT="/srv/investment-engine"
+DEFAULT_APP_USER="investor"
+LEGACY_APP_USER="investment-engine"
+CANONICAL_BULLPEN_RUNTIME_OWNER="investor"
+CANONICAL_BULLPEN_HOME="/home/investor"
+CANONICAL_BULLPEN_STORE="/home/investor/.bullpen"
+CANONICAL_BULLPEN_CONFIG="/home/investor/.bullpen/config.toml"
+CANONICAL_BULLPEN_ENV="production"
+CANONICAL_BULLPEN_BIN="/usr/local/bin/bullpen"
 
 runtime_repo_root() {
   local script_dir
@@ -126,6 +132,99 @@ resolve_role_service_name() {
   resolve_systemd_service_name \
     "$(service_name_for_role "$prefix" "$role")" \
     "$(service_name_for_role "$alternate" "$role")"
+}
+
+service_is_active() {
+  local service_name="$1"
+  systemctl is-active --quiet "$service_name" >/dev/null 2>&1
+}
+
+service_family_has_active_backend_member() {
+  local prefix="$1"
+  local role service_name
+
+  for role in backend celery-worker celery-beat celery-beat-worker; do
+    service_name="$(service_name_for_role "$prefix" "$role")"
+    if service_is_active "$service_name"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+ensure_single_backend_service_family_active() {
+  local investor_active=false
+  local investment_engine_active=false
+
+  if service_family_has_active_backend_member "investor"; then
+    investor_active=true
+  fi
+
+  if service_family_has_active_backend_member "investment-engine"; then
+    investment_engine_active=true
+  fi
+
+  if [[ "$investor_active" == "true" && "$investment_engine_active" == "true" ]]; then
+    echo "Both investor-* and investment-engine-* backend/worker service families are active. Stop one family before starting the canonical Bullpen runtime." >&2
+    return 1
+  fi
+}
+
+validate_canonical_bullpen_runtime_env() {
+  local actual_user
+
+  actual_user="$(id -un)"
+  export BULLPEN_BIN="${BULLPEN_BIN:-$CANONICAL_BULLPEN_BIN}"
+  export BULLPEN_HOME="${BULLPEN_HOME:-$CANONICAL_BULLPEN_STORE}"
+  export BULLPEN_CREDENTIALS_HOME="${BULLPEN_CREDENTIALS_HOME:-$BULLPEN_HOME}"
+  export BULLPEN_CONFIG="${BULLPEN_CONFIG:-$CANONICAL_BULLPEN_CONFIG}"
+  export BULLPEN_ENV="${BULLPEN_ENV:-$CANONICAL_BULLPEN_ENV}"
+
+  if [[ "$actual_user" != "$CANONICAL_BULLPEN_RUNTIME_OWNER" ]]; then
+    echo "Bullpen runtime must run as Unix user $CANONICAL_BULLPEN_RUNTIME_OWNER, found $actual_user." >&2
+    return 1
+  fi
+
+  if [[ "${HOME:-}" != "$CANONICAL_BULLPEN_HOME" ]]; then
+    echo "HOME must be $CANONICAL_BULLPEN_HOME for Bullpen runtime, found ${HOME:-<unset>}." >&2
+    return 1
+  fi
+
+  if [[ "$BULLPEN_BIN" != "$CANONICAL_BULLPEN_BIN" ]]; then
+    echo "BULLPEN_BIN must be $CANONICAL_BULLPEN_BIN, found $BULLPEN_BIN." >&2
+    return 1
+  fi
+
+  if [[ "$BULLPEN_HOME" != "$CANONICAL_BULLPEN_STORE" ]]; then
+    echo "BULLPEN_HOME must be $CANONICAL_BULLPEN_STORE, found $BULLPEN_HOME." >&2
+    return 1
+  fi
+
+  if [[ "$BULLPEN_CREDENTIALS_HOME" != "$CANONICAL_BULLPEN_STORE" ]]; then
+    echo "BULLPEN_CREDENTIALS_HOME must be $CANONICAL_BULLPEN_STORE, found $BULLPEN_CREDENTIALS_HOME." >&2
+    return 1
+  fi
+
+  if [[ "$BULLPEN_CONFIG" != "$CANONICAL_BULLPEN_CONFIG" ]]; then
+    echo "BULLPEN_CONFIG must be $CANONICAL_BULLPEN_CONFIG, found $BULLPEN_CONFIG." >&2
+    return 1
+  fi
+
+  if [[ "$BULLPEN_ENV" != "$CANONICAL_BULLPEN_ENV" ]]; then
+    echo "BULLPEN_ENV must be $CANONICAL_BULLPEN_ENV, found $BULLPEN_ENV." >&2
+    return 1
+  fi
+
+  if [[ ! -x "$BULLPEN_BIN" ]]; then
+    echo "Bullpen binary is missing or not executable at $BULLPEN_BIN." >&2
+    return 1
+  fi
+
+  if [[ ! -d "$BULLPEN_HOME" ]]; then
+    echo "Bullpen credential store is missing at $BULLPEN_HOME." >&2
+    return 1
+  fi
 }
 
 python_bin_for_app() {

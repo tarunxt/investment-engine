@@ -27,6 +27,10 @@ from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.polymarket.router import router as polymarket_router
+from app.domains.polymarket.runtime_broker import (
+    close_bullpen_runtime_broker,
+    get_bullpen_runtime_broker,
+)
 from app.domains.polymarket.service import polymarket_bot_manager
 from app.domains.polymarket_auto_live.router import router as polymarket_auto_live_router
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
@@ -134,6 +138,7 @@ async def lifespan(app: FastAPI):
     logger.info("Database: %s", settings.database_url.split("@")[-1])
     logger.info("Redis: %s", settings.redis_url)
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
+    get_bullpen_runtime_broker().validate_startup()
 
     # Seed default prompts (idempotent — only inserts if missing)
     async with AsyncSessionLocal() as db:
@@ -144,6 +149,7 @@ async def lifespan(app: FastAPI):
     await polymarket_bot_manager.shutdown()
     await polymarket_auto_live_bot_manager.shutdown()
     await polymarket_direct_bot_manager.shutdown()
+    await close_bullpen_runtime_broker()
     await async_engine.dispose()
     logger.info("Shutdown complete")
 

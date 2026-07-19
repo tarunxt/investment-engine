@@ -3,18 +3,24 @@
 set -euo pipefail
 
 SCOPE="${1:-full}"
-DEFAULT_APP_ROOT="/srv/investment-engine"
-LEGACY_APP_ROOT="/srv/investor"
-DEFAULT_APP_USER="investment-engine"
-LEGACY_APP_USER="investor"
+DEFAULT_APP_ROOT="/srv/investor"
+LEGACY_APP_ROOT="/srv/investment-engine"
+DEFAULT_APP_USER="investor"
+LEGACY_APP_USER="investment-engine"
 DEFAULT_BACKEND_ENV_FILE="/etc/investor/backend.env"
 DEFAULT_FRONTEND_ENV_FILE="/etc/investor/frontend.env"
+CANONICAL_BULLPEN_RUNTIME_OWNER="investor"
+CANONICAL_BULLPEN_HOME="/home/investor"
+CANONICAL_BULLPEN_STORE="/home/investor/.bullpen"
+CANONICAL_BULLPEN_CONFIG="/home/investor/.bullpen/config.toml"
+CANONICAL_BULLPEN_ENV="production"
+CANONICAL_BULLPEN_BIN="/usr/local/bin/bullpen"
 APP_ROOT="${APP_ROOT:-$DEFAULT_APP_ROOT}"
 APP_USER="${APP_USER:-$DEFAULT_APP_USER}"
 BACKEND_ENV_FILE="${BACKEND_ENV_FILE:-$DEFAULT_BACKEND_ENV_FILE}"
 FRONTEND_ENV_FILE="${FRONTEND_ENV_FILE:-$DEFAULT_FRONTEND_ENV_FILE}"
 SKIP_GIT_SYNC="${SKIP_GIT_SYNC:-false}"
-BULLPEN_VERSION="${BULLPEN_VERSION:-0.1.101}"
+BULLPEN_VERSION="${BULLPEN_VERSION:-0.1.115}"
 BACKEND_LIVE_URL="${BACKEND_LIVE_URL:-http://127.0.0.1:8000/health/live}"
 BACKEND_READY_URL="${BACKEND_READY_URL:-http://127.0.0.1:8000/health/ready}"
 FRONTEND_SMOKE_URL="${FRONTEND_SMOKE_URL:-http://127.0.0.1:3000/login}"
@@ -148,6 +154,43 @@ resolve_role_service_name() {
     "$(service_name_for_role "$alternate" "$role")"
 }
 
+service_is_active() {
+  local service_name="$1"
+  systemctl is-active --quiet "$service_name" >/dev/null 2>&1
+}
+
+service_family_has_active_backend_member() {
+  local prefix="$1"
+  local role service_name
+
+  for role in backend celery-worker celery-beat celery-beat-worker; do
+    service_name="$(service_name_for_role "$prefix" "$role")"
+    if service_is_active "$service_name"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+validate_no_duplicate_backend_service_families() {
+  local investor_active=false
+  local investment_engine_active=false
+
+  if service_family_has_active_backend_member "investor"; then
+    investor_active=true
+  fi
+
+  if service_family_has_active_backend_member "investment-engine"; then
+    investment_engine_active=true
+  fi
+
+  if [[ "$investor_active" == "true" && "$investment_engine_active" == "true" ]]; then
+    echo "Both investor-* and investment-engine-* backend/worker service families are active. Stop one family before deploying the canonical Bullpen runtime." >&2
+    exit 1
+  fi
+}
+
 run_as_app_user() {
   local script="$1"
   sudo -u "$APP_USER" -H bash -lc "$(printf 'set -euo pipefail\n%s' "$script")"
@@ -234,47 +277,40 @@ validate_backend_env_file() {
   "
 }
 
-validate_bullpen_env_alignment() {
+validate_canonical_bullpen_backend_env() {
   run_as_app_user "
     set -euo pipefail
 
     set -a
     source '$BACKEND_ENV_FILE'
-    backend_bullpen_bin=\${BULLPEN_BIN:-}
-    backend_bullpen_home=\${BULLPEN_HOME:-}
-    backend_bullpen_credentials_home=\${BULLPEN_CREDENTIALS_HOME:-}
     set +a
 
-    set -a
-    source '$FRONTEND_ENV_FILE'
-    frontend_bullpen_bin=\${BULLPEN_BIN:-}
-    frontend_bullpen_home=\${BULLPEN_HOME:-}
-    frontend_bullpen_credentials_home=\${BULLPEN_CREDENTIALS_HOME:-}
-    set +a
-
-    compare_bullpen_setting() {
+    require_exact_setting() {
       local name=\"\$1\"
-      local backend_value=\"\$2\"
-      local frontend_value=\"\$3\"
+      local expected=\"\$2\"
+      local actual=\"\${!name:-}\"
 
-      if [[ -z \"\$backend_value\" && -z \"\$frontend_value\" ]]; then
-        return 0
-      fi
-
-      if [[ -z \"\$backend_value\" || -z \"\$frontend_value\" ]]; then
-        echo \"\$name must be set in both $BACKEND_ENV_FILE and $FRONTEND_ENV_FILE once Bullpen is configured. Backend='\$backend_value' Frontend='\$frontend_value'\" >&2
-        exit 1
-      fi
-
-      if [[ \"\$backend_value\" != \"\$frontend_value\" ]]; then
-        echo \"\$name differs between $BACKEND_ENV_FILE (\$backend_value) and $FRONTEND_ENV_FILE (\$frontend_value). The Bullpen popup and Auto-Live worker will read different Bullpen sessions.\" >&2
+      if [[ \"\$actual\" != \"\$expected\" ]]; then
+        echo \"\$name must equal \$expected in $BACKEND_ENV_FILE. Found '\${actual:-<unset>}'\" >&2
         exit 1
       fi
     }
 
-    compare_bullpen_setting BULLPEN_BIN \"\$backend_bullpen_bin\" \"\$frontend_bullpen_bin\"
-    compare_bullpen_setting BULLPEN_HOME \"\$backend_bullpen_home\" \"\$frontend_bullpen_home\"
-    compare_bullpen_setting BULLPEN_CREDENTIALS_HOME \"\$backend_bullpen_credentials_home\" \"\$frontend_bullpen_credentials_home\"
+    require_exact_setting HOME '$CANONICAL_BULLPEN_HOME'
+    require_exact_setting BULLPEN_BIN '$CANONICAL_BULLPEN_BIN'
+    require_exact_setting BULLPEN_HOME '$CANONICAL_BULLPEN_STORE'
+    require_exact_setting BULLPEN_CONFIG '$CANONICAL_BULLPEN_CONFIG'
+    require_exact_setting BULLPEN_ENV '$CANONICAL_BULLPEN_ENV'
+
+    if [[ -n \"\${BULLPEN_CREDENTIALS_HOME:-}\" ]] && [[ \"\${BULLPEN_CREDENTIALS_HOME:-}\" != '$CANONICAL_BULLPEN_STORE' ]]; then
+      echo \"BULLPEN_CREDENTIALS_HOME must equal $CANONICAL_BULLPEN_STORE when set. Found '\${BULLPEN_CREDENTIALS_HOME:-<unset>}'\" >&2
+      exit 1
+    fi
+
+    if [[ \"$(id -un)\" != '$CANONICAL_BULLPEN_RUNTIME_OWNER' ]]; then
+      echo \"Deploy validations must run as $CANONICAL_BULLPEN_RUNTIME_OWNER to match the canonical Bullpen credential owner. Current user: $(id -un)\" >&2
+      exit 1
+    fi
   "
 }
 
@@ -726,6 +762,8 @@ install_bullpen_cli_if_needed() {
   ensure_bullpen_runtime_links "$bullpen_bin"
 }
 
+validate_no_duplicate_backend_service_families
+
 BACKEND_SERVICE_NAME="$(resolve_role_service_name backend)"
 WORKER_SERVICE_NAME="$(resolve_role_service_name celery-worker)"
 BEAT_SERVICE_NAME="$(resolve_role_service_name celery-beat)"
@@ -747,10 +785,10 @@ echo "==> Beat worker service: $BEAT_WORKER_SERVICE_NAME (managed=$BEAT_WORKER_M
 echo "==> Frontend service: $FRONTEND_SERVICE_NAME"
 
 validate_backend_env_file
+validate_canonical_bullpen_backend_env
 install_bullpen_cli_if_needed
 if [[ "$SCOPE" == "full" ]]; then
   validate_frontend_env_file
-  validate_bullpen_env_alignment
 fi
 
 if [[ "$SKIP_GIT_SYNC" != "true" ]]; then
