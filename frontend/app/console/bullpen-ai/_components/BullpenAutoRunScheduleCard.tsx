@@ -69,6 +69,12 @@ import {
   buildBullpenAutoRunWorkflowView,
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
+import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
+import {
+  BullpenReturnsPerDayFormulaDialog,
+  BullpenReturnsPerDayHeader,
+  BullpenReturnsPerDayValueButton,
+} from "./BullpenReturnsPerDayInfo";
 import { BullpenStage2To3StrategyDialog } from "./BullpenStage2To3StrategyDialog";
 import {
   buildBullpenStage3InvestPreviewSteps,
@@ -645,6 +651,21 @@ const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
 // The summary already includes the recent runs and decisions. Refreshing it at
 // this cadence keeps run progress visible without saturating the backend while
 // a long-running Auto-Live task is active.
+
+function buildScanCandidateReturnsPerDayQuestion(
+  candidate: ScanCandidateDialogCandidate,
+): BullpenQuestionRow {
+  return {
+    question: candidate.question,
+    yesOdds: candidate.currentYesOdds,
+    noOdds: candidate.currentNoOdds,
+    llmYesOdds: candidate.llmYesOdds,
+    llmNoOdds: candidate.llmNoOdds,
+    daysUntilClose: calculateDaysUntilClose(candidate.closeTime),
+    returnsPerDay: candidate.returnsPerDay,
+  } as BullpenQuestionRow;
+}
+
 const POLL_INTERVAL_MS = 10_000;
 const RUN_TIMER_INTERVAL_MS = 1_000;
 
@@ -3048,6 +3069,10 @@ function StageOneOutputDialog({
   state: ScanCandidateDialogState;
   onClose: () => void;
 }) {
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   const showActivePositionsFirst = state.mode === "active-positions";
   const claimablePositions = state.activePositions.filter(
     (position) => position.isClaimable,
@@ -3319,7 +3344,11 @@ function StageOneOutputDialog({
                         <th className="px-4 py-3">Current No odds %</th>
                         <th className="px-4 py-3">LLM Yes Odds</th>
                         <th className="px-4 py-3">LLM No Odds</th>
-                        <th className="px-4 py-3">Returns/day</th>
+                        <th className="px-4 py-3">
+                          <BullpenReturnsPerDayHeader
+                            onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+                          />
+                        </th>
                         <th className="px-4 py-3">Amount to be invested</th>
                         <th className="px-4 py-3">Volume</th>
                         <th className="px-4 py-3">Liquidity</th>
@@ -3367,7 +3396,15 @@ function StageOneOutputDialog({
                             {formatOddsPercent(candidate.llmNoOdds)}
                           </td>
                           <td className="px-4 py-3 align-top font-semibold text-slate-700">
-                            {formatReturnsPerDay(candidate.returnsPerDay)}
+                            <BullpenReturnsPerDayValueButton
+                              disabled={candidate.returnsPerDay === null}
+                              onOpen={() => setReturnsPerDayQuestion(
+                                buildScanCandidateReturnsPerDayQuestion(candidate),
+                              )}
+                              ariaLabel={`Show Returns/day calculation for ${candidate.question}`}
+                            >
+                              {formatReturnsPerDay(candidate.returnsPerDay)}
+                            </BullpenReturnsPerDayValueButton>
                           </td>
                           <td className="px-4 py-3 align-top font-semibold text-slate-700">
                             {formatInvestAmount(candidate.amountToBeInvested)}
@@ -3393,6 +3430,30 @@ function StageOneOutputDialog({
           </div>
         </div>
       </div>
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -4020,6 +4081,23 @@ function getDecisionReturnsPerDay(decision: BullpenAutoLiveDecision) {
   return (decision.edge_pp / decision.hours_remaining) * 24;
 }
 
+function buildDecisionReturnsPerDayQuestion(
+  decision: BullpenAutoLiveDecision,
+): BullpenQuestionRow {
+  return {
+    question: decision.market_title,
+    yesOdds: decision.current_yes_odds ?? null,
+    noOdds: decision.current_no_odds ?? null,
+    llmYesOdds: decision.fair_yes_probability_pct ?? null,
+    llmNoOdds: decision.fair_no_probability_pct ?? null,
+    daysUntilClose:
+      decision.hours_remaining && decision.hours_remaining > 0
+        ? decision.hours_remaining / 24
+        : null,
+    returnsPerDay: getDecisionReturnsPerDay(decision),
+  } as BullpenQuestionRow;
+}
+
 function getPlannedOrderBrief(decision: BullpenAutoLiveDecision) {
   return (
     decision.order_plan?.detail ??
@@ -4044,6 +4122,10 @@ function Stage3DecisionTable({
   onOpenPlannedOrderDetail?: (state: PlannedOrderDetailState) => void;
   onOpenLlmOdds?: (decision: BullpenAutoLiveDecision) => void;
 }) {
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   return (
     <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/60">
       <div className="border-b border-white/80 px-4 py-3">
@@ -4067,7 +4149,11 @@ function Stage3DecisionTable({
                 <th className="px-4 py-3">Current No odds %</th>
                 <th className="px-4 py-3">LLM Yes Odds</th>
                 <th className="px-4 py-3">LLM No Odds</th>
-                <th className="px-4 py-3">Returns/day</th>
+                <th className="px-4 py-3">
+                  <BullpenReturnsPerDayHeader
+                    onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+                  />
+                </th>
                 <th className="px-4 py-3">Detail</th>
               </tr>
             </thead>
@@ -4150,7 +4236,17 @@ function Stage3DecisionTable({
                       </button>
                     </td>
                     <td className="px-4 py-3 tabular-nums text-slate-700">
-                      {formatReturnsPerDay(getDecisionReturnsPerDay(decision))}
+                      <BullpenReturnsPerDayValueButton
+                        disabled={getDecisionReturnsPerDay(decision) === null}
+                        onOpen={() =>
+                          setReturnsPerDayQuestion(
+                            buildDecisionReturnsPerDayQuestion(decision),
+                          )
+                        }
+                        ariaLabel={`Show Returns/day calculation for ${decision.market_title}`}
+                      >
+                        {formatReturnsPerDay(getDecisionReturnsPerDay(decision))}
+                      </BullpenReturnsPerDayValueButton>
                     </td>
                     <td className="min-w-64 px-4 py-3 text-slate-700">
                       {plannedButNotSubmitted && onOpenPlannedOrderDetail ? (
@@ -4198,6 +4294,18 @@ function Stage3DecisionTable({
       ) : (
         <p className="px-4 py-5 text-sm text-slate-600">{emptyMessage}</p>
       )}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -5288,6 +5396,10 @@ export function StageTwoLlmRunDetailsDialog({
       direction: "desc",
     });
   const [dialogNowMs, setDialogNowMs] = useState(() => Date.now());
+  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
+    useState(false);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   const llmOutputGroupRefs = useRef(new Map<string, HTMLElement>());
   const stats = getStageTwoStats(state.stage, state.decisions, state.run);
   const overlapCount = Math.max(
@@ -5723,7 +5835,11 @@ export function StageTwoLlmRunDetailsDialog({
                               <th className="px-3 py-3">Current No odds %</th>
                               <th className="px-3 py-3">LLM Yes Odds</th>
                               <th className="px-3 py-3">LLM No Odds</th>
-                              <th className="px-3 py-3">Returns/day</th>
+                              <th className="px-3 py-3">
+                                <BullpenReturnsPerDayHeader
+                                  onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
+                                />
+                              </th>
                               <th className="px-3 py-3">Action</th>
                               <th className="px-3 py-3">Risk</th>
                               <th className="min-w-80 px-3 py-3">
@@ -5805,7 +5921,13 @@ export function StageTwoLlmRunDetailsDialog({
                                     </span>
                                   </td>
                                   <td className="px-3 py-3 font-semibold tabular-nums text-slate-700">
-                                    {formatReturnsPerDay(row.returnsPerDay)}
+                                    <BullpenReturnsPerDayValueButton
+                                      disabled={row.returnsPerDay === null}
+                                      onOpen={() => setReturnsPerDayQuestion(row.row as BullpenQuestionRow)}
+                                      ariaLabel={`Show Returns/day calculation for ${row.question}`}
+                                    >
+                                      {formatReturnsPerDay(row.returnsPerDay)}
+                                    </BullpenReturnsPerDayValueButton>
                                   </td>
                                   <td className="px-3 py-3">
                                     {dialogState ? (
@@ -5998,6 +6120,18 @@ export function StageTwoLlmRunDetailsDialog({
           stats={stats}
           overlapCount={overlapCount}
           onClose={() => setBreakupKind(null)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
+        />
+      ) : null}
+      {isReturnsPerDayFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
         />
       ) : null}
     </div>
