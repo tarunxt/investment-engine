@@ -199,10 +199,11 @@ contention without exposing secrets.
 ### Stage 2
 
 Persisted candidate reviews, per-model outputs, Stage 2 LLM runtime payloads, and
-qualified handoff inputs. Stage 2 returns/day is rendered from the current market
-odds on the same side as the strongest LLM Yes/No odds divided by days left when
-usable current and LLM odds are available, falling back to the persisted worker
-value only for legacy rows without recomputable odds.
+qualified handoff inputs. Stage 2 returns/day is rendered as the unpriced upside
+for the current market odds on the same side as the strongest LLM Yes/No odds
+divided by days left: `(100 - current side odds) / days left`. This is used
+when usable current and LLM odds are available, falling back to the persisted
+worker value only for legacy rows without recomputable odds.
 
 The Stage 2 bundle now also captures the persisted `Stage 2 Top 10 -> Stage 3`
 handoff candidate market IDs so audits can verify that every queued Top 10 row

@@ -895,7 +895,7 @@ def llm_returns_per_day(
     )
     if current_odds_for_strongest_llm_side is None:
         return None
-    return round(current_odds_for_strongest_llm_side / days_until_close, 2)
+    return round((100 - current_odds_for_strongest_llm_side) / days_until_close, 2)
 
 
 def candidate_returns_per_day(
@@ -919,7 +919,7 @@ def candidate_returns_per_day(
     )
     if strongest_current_odds == float("-inf"):
         return None
-    return round(strongest_current_odds / days_until_close, 2)
+    return round((100 - strongest_current_odds) / days_until_close, 2)
 
 
 def active_position_slug_set(positions: list[ConsoleWalletPosition]) -> set[str]:
