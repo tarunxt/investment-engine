@@ -475,9 +475,9 @@ def _build_formula_records(
                     human_name=(
                         "Active position returns per day"
                         if is_active_position
-                        else "LLM returns per day"
+                        else "Stage 2 current-odds returns per day"
                     ),
-                    algorithm_version="v1",
+                    algorithm_version="v1" if is_active_position else "v2",
                     source_module="app.domains.polymarket_auto_live.console_profile",
                     source_function=(
                         "position_returns_per_day"

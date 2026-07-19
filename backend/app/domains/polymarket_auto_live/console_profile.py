@@ -875,8 +875,10 @@ def llm_returns_per_day(
     llm_no_odds: float | None,
     close_time: str | None,
     now: datetime,
+    current_yes_odds: float | None = None,
+    current_no_odds: float | None = None,
 ) -> float | None:
-    if llm_yes_odds is None and llm_no_odds is None:
+    if current_yes_odds is None and current_no_odds is None:
         return None
     if not close_time:
         return None
@@ -886,13 +888,13 @@ def llm_returns_per_day(
     days_until_close = round((parsed_close_time - now).total_seconds() / 86_400, 1)
     if days_until_close <= 0:
         return None
-    strongest_llm_odds = max(
-        llm_yes_odds if llm_yes_odds is not None else float("-inf"),
-        llm_no_odds if llm_no_odds is not None else float("-inf"),
+    strongest_current_odds = max(
+        current_yes_odds if current_yes_odds is not None else float("-inf"),
+        current_no_odds if current_no_odds is not None else float("-inf"),
     )
-    if strongest_llm_odds == float("-inf"):
+    if strongest_current_odds == float("-inf"):
         return None
-    return round(strongest_llm_odds / days_until_close, 2)
+    return round(strongest_current_odds / days_until_close, 2)
 
 
 def candidate_returns_per_day(
@@ -900,7 +902,9 @@ def candidate_returns_per_day(
     *,
     now: datetime,
 ) -> float | None:
-    if market.current_no_odds is None or not market.close_time:
+    if market.current_yes_odds is None and market.current_no_odds is None:
+        return None
+    if not market.close_time:
         return None
     close_time = _parse_close_time_utc(market.close_time)
     if close_time is None:
@@ -908,7 +912,13 @@ def candidate_returns_per_day(
     days_until_close = round((close_time - now).total_seconds() / 86_400, 1)
     if days_until_close <= 0:
         return None
-    return round((100 - market.current_no_odds) / days_until_close, 2)
+    strongest_current_odds = max(
+        market.current_yes_odds if market.current_yes_odds is not None else float("-inf"),
+        market.current_no_odds if market.current_no_odds is not None else float("-inf"),
+    )
+    if strongest_current_odds == float("-inf"):
+        return None
+    return round(strongest_current_odds / days_until_close, 2)
 
 
 def active_position_slug_set(positions: list[ConsoleWalletPosition]) -> set[str]:
