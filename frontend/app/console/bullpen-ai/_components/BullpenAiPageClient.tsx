@@ -259,6 +259,14 @@ type RefreshBullpenPositionsResult = {
   error: string | null;
 };
 
+type BullpenPositionsRefreshMode = "passive" | "manual";
+
+type RefreshBullpenPositionsOptions = {
+  suppressAutoClaim?: boolean;
+  refreshMode?: BullpenPositionsRefreshMode;
+  callerSource?: string;
+};
+
 const MONTH_INDEX_BY_NAME: Record<string, string> = {
   january: "01",
   february: "02",
@@ -1660,11 +1668,17 @@ function BullpenAiPageContent() {
       return;
     }
     if (claimPositionsTaskRef.current) return;
-    void refreshBullpenPositions();
+    void refreshBullpenPositions({
+      refreshMode: "passive",
+      callerSource: "ui-interval-poll",
+    });
   });
 
   useEffect(() => {
-    void refreshBullpenPositions();
+    void refreshBullpenPositions({
+      refreshMode: "passive",
+      callerSource: "ui-mount",
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2382,6 +2396,8 @@ function BullpenAiPageContent() {
         );
         const refreshedPositionsResult = await refreshBullpenPositions({
           suppressAutoClaim: true,
+          refreshMode: "passive",
+          callerSource: "ui-claim-followup",
         });
         const remainingClaimablePositions = refreshedPositionsResult.positions.filter(
           (position) => position.isClaimable,
@@ -2416,15 +2432,32 @@ function BullpenAiPageContent() {
   }
 
   async function refreshBullpenPositions(
-    options?: { suppressAutoClaim?: boolean },
+    options?: RefreshBullpenPositionsOptions,
   ): Promise<RefreshBullpenPositionsResult> {
     setIsLoadingPositions(true);
     setPositionsError(null);
 
     try {
-      const livePositionsResponse = await fetch("/api/bullpen-ai/positions", {
-        cache: "no-store",
+      const refreshMode = options?.refreshMode ?? "passive";
+      const callerSource =
+        options?.callerSource?.trim() ||
+        (refreshMode === "manual" ? "ui-manual-refresh" : "ui-passive-refresh");
+      const params = new URLSearchParams({
+        caller_source: callerSource,
+        max_age_seconds: "20",
       });
+      if (refreshMode === "manual") {
+        params.set("force_fresh", "true");
+      } else {
+        params.set("passive", "true");
+      }
+
+      const livePositionsResponse = await fetch(
+        `/api/bullpen-ai/positions?${params.toString()}`,
+        {
+        cache: "no-store",
+        },
+      );
       const livePositionsPayload =
         (await livePositionsResponse.json()) as BullpenPositionsResponse;
       const normalizedLiveSnapshot = normalizeLiveSnapshot(
@@ -2543,6 +2576,8 @@ function BullpenAiPageContent() {
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     const positionsRefreshTask = refreshBullpenPositions({
       suppressAutoClaim: true,
+      refreshMode: "passive",
+      callerSource: "ui-scan-preflight",
     }).catch((error) => ({
       positions: activePositions,
       error: `Failed to refresh Bullpen wallet positions during scan: ${normalizeError(error)}.`,
@@ -2648,6 +2683,8 @@ function BullpenAiPageContent() {
           : Promise.resolve(null),
         refreshBullpenPositions({
           suppressAutoClaim: true,
+          refreshMode: "passive",
+          callerSource: "ui-llm-preflight",
         }),
       ]);
     const refreshedSelectedQuestions = selectedQuestions.map((question) => {
@@ -3322,7 +3359,10 @@ function BullpenAiPageContent() {
         await apiService.polymarketManualInvest({
           orders: selectedOrders,
         });
-      void refreshBullpenPositions();
+      void refreshBullpenPositions({
+        refreshMode: "passive",
+        callerSource: "ui-invest-followup",
+      });
       const executedOrders = response.orders.filter(
         (order) => order.status === "executed",
       );
@@ -3395,6 +3435,8 @@ function BullpenAiPageContent() {
         }),
         refreshBullpenPositions({
           suppressAutoClaim: true,
+          refreshMode: "passive",
+          callerSource: "ui-current-odds-followup",
         }),
       ]);
       const summaryParts = [
@@ -3765,7 +3807,11 @@ function BullpenAiPageContent() {
           });
         }}
         onRunCompleted={() => {
-          void refreshBullpenPositions({ suppressAutoClaim: true });
+          void refreshBullpenPositions({
+            suppressAutoClaim: true,
+            refreshMode: "passive",
+            callerSource: "ui-run-completed",
+          });
         }}
       />
 
@@ -4320,7 +4366,10 @@ function BullpenAiPageContent() {
               }}
               onInvest={investInSelectedEvents}
               onRefreshPositions={() => {
-                void refreshBullpenPositions();
+                void refreshBullpenPositions({
+                  refreshMode: "manual",
+                  callerSource: "ui-manual-refresh",
+                });
               }}
               onRefreshCurrentOdds={handleRefreshCurrentOdds}
               onToggleQuestion={toggleInvestmentSelection}

@@ -40,6 +40,14 @@ type BackendBullpenCommandDiagnostics = {
   bullpen_version?: string | null;
   error_classification?: string | null;
   credential_artifact?: BackendBullpenCredentialArtifact | null;
+  refresh_requested_at?: string | null;
+  caller_source?: string | null;
+  snapshot_producer_source?: string | null;
+  produced_by_another_refresh?: boolean | null;
+  refresh_lock_key?: string | null;
+  refresh_lock_wait_ms?: number | null;
+  refresh_lock_ttl_seconds?: number | null;
+  refresh_lock_age_ms?: number | null;
 };
 
 type BackendBullpenBrokerHealth = {
@@ -370,6 +378,10 @@ export async function GET(request: NextRequest) {
   const forceFresh = ["1", "true", "yes"].includes(
     request.nextUrl.searchParams.get("force_fresh")?.trim().toLowerCase() || "",
   );
+  const passive = ["1", "true", "yes"].includes(
+    request.nextUrl.searchParams.get("passive")?.trim().toLowerCase() || "",
+  );
+  const callerSource = request.nextUrl.searchParams.get("caller_source")?.trim() || "";
   const requestedMaxAge = Number.parseInt(
     request.nextUrl.searchParams.get("max_age_seconds") || "",
     10,
@@ -381,8 +393,18 @@ export async function GET(request: NextRequest) {
   let backendPositions: BackendBullpenRuntimePositionsResponse | null = null;
 
   try {
+    const backendQuery = new URLSearchParams({
+      force_fresh: forceFresh ? "true" : "false",
+      max_age_seconds: String(maxAgeSeconds),
+    });
+    if (passive) {
+      backendQuery.set("passive", "true");
+    }
+    if (callerSource) {
+      backendQuery.set("caller_source", callerSource);
+    }
     backendPositions = (await fetchBackendRuntimeJson(
-      `/polymarket/runtime/positions?force_fresh=${forceFresh ? "true" : "false"}&max_age_seconds=${maxAgeSeconds}`,
+      `/polymarket/runtime/positions?${backendQuery.toString()}`,
       {
         accessToken,
       },

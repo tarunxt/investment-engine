@@ -3,7 +3,8 @@ import json
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +61,19 @@ class FakeRedis:
         self._values.pop(key, None)
         return 1 if removed else 0
 
+    async def ttl(self, key: str):
+        record = self._values.get(key)
+        if not record:
+            return -2
+        _, expires_at = record
+        if expires_at is None:
+            return -1
+        remaining = expires_at - time.time()
+        if remaining <= 0:
+            self._values.pop(key, None)
+            return -2
+        return max(0, int(remaining))
+
     async def eval(self, _script: str, _numkeys: int, key: str, token: str, *args):
         existing = await self.get(key)
         if existing != token:
@@ -99,6 +113,10 @@ class LoopBoundRedis(FakeRedis):
     async def delete(self, key: str):
         self._assert_current_loop()
         return await super().delete(key)
+
+    async def ttl(self, key: str):
+        self._assert_current_loop()
+        return await super().ttl(key)
 
     async def eval(self, _script: str, _numkeys: int, key: str, token: str, *args):
         self._assert_current_loop()
@@ -183,6 +201,7 @@ def _build_raw_result(
     *,
     command_category: str = "positions",
     auth_refresh_attempted: bool = False,
+    credential_artifact: BullpenCredentialArtifact | None = None,
 ) -> BullpenRawCommandResult:
     return BullpenRawCommandResult(
         stdout=stdout,
@@ -192,6 +211,7 @@ def _build_raw_result(
             unix_user="investor",
             effective_home="/home/investor",
             auth_refresh_attempted=auth_refresh_attempted,
+            credential_artifact=credential_artifact or BullpenCredentialArtifact(),
         ),
     )
 
@@ -571,9 +591,12 @@ async def test_authenticated_commands_share_one_global_cli_lock_across_brokers(
 
 
 @pytest.mark.anyio
-async def test_positions_refresh_uses_waited_snapshot_after_lock_timeout(monkeypatch):
+async def test_positions_refresh_uses_waited_snapshot_from_another_refresh(
+    monkeypatch,
+):
     broker = _build_broker(monkeypatch)
     waited_snapshot = _build_snapshot()
+    waited_snapshot.diagnostics.caller_source = "stage1-owner"
 
     @asynccontextmanager
     async def fake_acquire(*args, **kwargs):
@@ -581,44 +604,418 @@ async def test_positions_refresh_uses_waited_snapshot_after_lock_timeout(monkeyp
         yield
 
     async def fake_poll_for_positions_snapshot(**kwargs):
-        return waited_snapshot
+        published_snapshot = waited_snapshot.model_copy(
+            update={
+                "fetched_at": (
+                    datetime.fromisoformat(kwargs["refresh_requested_at"])
+                    + timedelta(milliseconds=1)
+                ).isoformat()
+            }
+        )
+        published_snapshot.diagnostics.caller_source = "stage1-owner"
+        return runtime_broker_module._PositionsRefreshWaitOutcome(
+            snapshot=published_snapshot,
+            lock_state=runtime_broker_module._PositionsRefreshLockState(
+                lock_key="lock:bullpen:runtime:positions-refresh",
+                token="owner-token",
+                ttl_seconds=90,
+                age_ms=1500.0,
+                caller_source="stage1-owner",
+                refresh_requested_at=kwargs["refresh_requested_at"],
+            ),
+            waited_ms=1250.0,
+        )
 
     monkeypatch.setattr(broker._lock, "acquire", fake_acquire)
     monkeypatch.setattr(broker, "_poll_for_positions_snapshot", fake_poll_for_positions_snapshot)
 
-    snapshot = await broker.get_positions_snapshot(force_fresh=True)
+    snapshot = await broker.get_positions_snapshot(
+        force_fresh=True,
+        caller_source="stage1-waiter",
+    )
 
     assert snapshot.source == "redis-cache"
-    assert snapshot.freshness_state == "cached"
+    assert snapshot.freshness_state == "fresh"
     assert snapshot.diagnostics.cache_status == "hit"
+    assert snapshot.diagnostics.caller_source == "stage1-waiter"
+    assert snapshot.diagnostics.snapshot_producer_source == "stage1-owner"
+    assert snapshot.diagnostics.produced_by_another_refresh is True
+    assert snapshot.diagnostics.refresh_lock_key == "lock:bullpen:runtime:positions-refresh"
+    assert snapshot.diagnostics.refresh_lock_wait_ms == 1250.0
 
 
 @pytest.mark.anyio
-async def test_positions_refresh_force_fresh_rejects_stale_waited_snapshot_after_lock_timeout(
+async def test_poll_for_positions_snapshot_rejects_stale_snapshot_for_force_fresh_waiter(
     monkeypatch,
 ):
     broker = _build_broker(monkeypatch)
-    waited_snapshot = _build_snapshot(seconds_ago=120)
-
-    @asynccontextmanager
-    async def fake_acquire(*args, **kwargs):
-        raise LockAcquisitionError("lock busy")
-        yield
-
-    async def fake_poll_for_positions_snapshot(**kwargs):
-        return waited_snapshot
-
-    monkeypatch.setattr(broker._lock, "acquire", fake_acquire)
-    monkeypatch.setattr(
-        broker,
-        "_poll_for_positions_snapshot",
-        fake_poll_for_positions_snapshot,
+    artifact = _credential_artifact()
+    waited_snapshot = _build_snapshot(
+        seconds_ago=120,
+        credential_artifact=artifact,
     )
 
-    with pytest.raises(BullpenRuntimeCommandError) as exc_info:
-        await broker.get_positions_snapshot(force_fresh=True, max_age_seconds=1)
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    await broker._redis.set(
+        POSITIONS_SNAPSHOT_CACHE_KEY,
+        waited_snapshot.model_dump_json(),
+        ex=300,
+    )
 
-    assert exc_info.value.classification == "lock_timeout"
+    outcome = await broker._poll_for_positions_snapshot(
+        cache_key=POSITIONS_SNAPSHOT_CACHE_KEY,
+        force_fresh=True,
+        max_age_seconds=1,
+        timeout_seconds=0.05,
+        refresh_requested_at=datetime.now(UTC).isoformat(),
+    )
+
+    assert outcome.snapshot is None
+
+
+@pytest.mark.anyio
+async def test_passive_ui_poll_waits_for_stage1_refresh_without_starting_second_cli(
+    monkeypatch,
+):
+    redis = FakeRedis()
+    broker_stage1 = _build_broker(monkeypatch, redis)
+    broker_ui = _build_broker(monkeypatch, redis)
+    artifact = _credential_artifact()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    monkeypatch.setattr(runtime_broker_module, "_POLL_INTERVAL_SECONDS", 0.01)
+
+    async def fake_ensure_auth_ready_under_lock(**kwargs):
+        return "2026-07-19T12:00:00+00:00"
+
+    async def fake_execute_raw_under_lock(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return _build_raw_result(
+            json.dumps({"positions": []}),
+            credential_artifact=artifact,
+        )
+
+    for broker in (broker_stage1, broker_ui):
+        monkeypatch.setattr(
+            broker,
+            "ensure_auth_ready_under_lock",
+            fake_ensure_auth_ready_under_lock,
+        )
+        monkeypatch.setattr(
+            broker,
+            "_execute_raw_under_lock",
+            fake_execute_raw_under_lock,
+        )
+
+    stage1_task = asyncio.create_task(
+        broker_stage1.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="stage1-console-profile",
+        )
+    )
+    await started.wait()
+    ui_task = asyncio.create_task(
+        broker_ui.get_positions_snapshot(
+            allow_refresh=False,
+            caller_source="ui-interval-poll",
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    assert calls == 1
+
+    release.set()
+    stage1_snapshot, ui_snapshot = await asyncio.gather(stage1_task, ui_task)
+
+    assert stage1_snapshot.source == "live-cli"
+    assert ui_snapshot.source == "redis-cache"
+    assert ui_snapshot.diagnostics.caller_source == "ui-interval-poll"
+    assert (
+        ui_snapshot.diagnostics.snapshot_producer_source
+        == "stage1-console-profile"
+    )
+    assert ui_snapshot.diagnostics.produced_by_another_refresh is True
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_cross_broker_force_fresh_callers_share_one_cli_execution(
+    monkeypatch,
+):
+    redis = FakeRedis()
+    broker_one = _build_broker(monkeypatch, redis)
+    broker_two = _build_broker(monkeypatch, redis)
+    artifact = _credential_artifact()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    monkeypatch.setattr(runtime_broker_module, "_POLL_INTERVAL_SECONDS", 0.01)
+
+    async def fake_ensure_auth_ready_under_lock(**kwargs):
+        return "2026-07-19T12:00:00+00:00"
+
+    async def fake_execute_raw_under_lock(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return _build_raw_result(
+            json.dumps({"positions": []}),
+            credential_artifact=artifact,
+        )
+
+    for broker in (broker_one, broker_two):
+        monkeypatch.setattr(
+            broker,
+            "ensure_auth_ready_under_lock",
+            fake_ensure_auth_ready_under_lock,
+        )
+        monkeypatch.setattr(
+            broker,
+            "_execute_raw_under_lock",
+            fake_execute_raw_under_lock,
+        )
+
+    first = asyncio.create_task(
+        broker_one.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="force-fresh-owner",
+        )
+    )
+    await started.wait()
+    second = asyncio.create_task(
+        broker_two.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="force-fresh-waiter",
+        )
+    )
+    await asyncio.sleep(0.05)
+
+    assert calls == 1
+
+    release.set()
+    first_snapshot, second_snapshot = await asyncio.gather(first, second)
+
+    assert first_snapshot.source == "live-cli"
+    assert second_snapshot.source == "redis-cache"
+    assert second_snapshot.freshness_state == "fresh"
+    assert second_snapshot.diagnostics.caller_source == "force-fresh-waiter"
+    assert (
+        second_snapshot.diagnostics.snapshot_producer_source
+        == "force-fresh-owner"
+    )
+    assert second_snapshot.diagnostics.produced_by_another_refresh is True
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_stage1_force_fresh_survives_other_refresh_with_30s_auth_lock_wait(
+    monkeypatch,
+):
+    redis = FakeRedis()
+    broker_owner = _build_broker(monkeypatch, redis)
+    broker_stage1 = _build_broker(monkeypatch, redis)
+    artifact = _credential_artifact()
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    monkeypatch.setattr(runtime_broker_module, "_POLL_INTERVAL_SECONDS", 0.01)
+
+    async def fake_ensure_auth_ready_under_lock(**kwargs):
+        return "2026-07-19T12:00:00+00:00"
+
+    async def fake_execute_raw_under_lock(*args, **kwargs):
+        started.set()
+        await release.wait()
+        result = _build_raw_result(
+            json.dumps({"positions": []}),
+            credential_artifact=artifact,
+        )
+        result.diagnostics.lock_wait_ms = kwargs.get("lock_wait_ms")
+        return result
+
+    def _wrap_lock_acquire(original_acquire):
+        def wrapped_acquire(key, ttl=30, timeout=10, renew_interval=None):
+            if key == runtime_broker_module._AUTHENTICATED_CLI_LOCK_KEY:
+                @asynccontextmanager
+                async def fake_auth_lease():
+                    yield SimpleNamespace(
+                        lock_key=f"lock:{key}",
+                        wait_duration_seconds=30.0,
+                        hold_duration_seconds=0.0,
+                        ttl_seconds=ttl,
+                        token="auth-token",
+                    )
+
+                return fake_auth_lease()
+            return original_acquire(
+                key,
+                ttl=ttl,
+                timeout=timeout,
+                renew_interval=renew_interval,
+            )
+
+        return wrapped_acquire
+
+    for broker in (broker_owner, broker_stage1):
+        monkeypatch.setattr(
+            broker,
+            "ensure_auth_ready_under_lock",
+            fake_ensure_auth_ready_under_lock,
+        )
+        monkeypatch.setattr(
+            broker,
+            "_execute_raw_under_lock",
+            fake_execute_raw_under_lock,
+        )
+        monkeypatch.setattr(
+            broker._lock,
+            "acquire",
+            _wrap_lock_acquire(broker._lock.acquire),
+        )
+
+    owner_task = asyncio.create_task(
+        broker_owner.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="manual-refresh-owner",
+        )
+    )
+    await started.wait()
+    stage1_task = asyncio.create_task(
+        broker_stage1.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="stage1-console-profile",
+        )
+    )
+    await asyncio.sleep(0.05)
+    release.set()
+    owner_snapshot, stage1_snapshot = await asyncio.gather(owner_task, stage1_task)
+
+    assert owner_snapshot.diagnostics.lock_wait_ms == 30_000
+    assert stage1_snapshot.source == "redis-cache"
+    assert stage1_snapshot.freshness_state == "fresh"
+    assert stage1_snapshot.diagnostics.caller_source == "stage1-console-profile"
+    assert (
+        stage1_snapshot.diagnostics.snapshot_producer_source
+        == "manual-refresh-owner"
+    )
+    assert stage1_snapshot.diagnostics.produced_by_another_refresh is True
+
+
+@pytest.mark.anyio
+async def test_force_fresh_retries_once_after_owner_failure_without_snapshot(
+    monkeypatch,
+):
+    redis = FakeRedis()
+    broker_owner = _build_broker(monkeypatch, redis)
+    broker_retry = _build_broker(monkeypatch, redis)
+    artifact = _credential_artifact()
+    owner_started = asyncio.Event()
+    owner_release = asyncio.Event()
+    retry_calls = 0
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+    monkeypatch.setattr(runtime_broker_module, "_POLL_INTERVAL_SECONDS", 0.01)
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_POSITIONS_OWNER_RELEASE_GRACE_SECONDS",
+        0.02,
+    )
+
+    async def fake_ensure_auth_ready_under_lock(**kwargs):
+        return "2026-07-19T12:00:00+00:00"
+
+    async def owner_execute_raw_under_lock(*args, **kwargs):
+        owner_started.set()
+        await owner_release.wait()
+        raise BullpenRuntimeCommandError(
+            "owner refresh failed",
+            classification="runtime_error",
+        )
+
+    async def retry_execute_raw_under_lock(*args, **kwargs):
+        nonlocal retry_calls
+        retry_calls += 1
+        return _build_raw_result(
+            json.dumps({"positions": []}),
+            credential_artifact=artifact,
+        )
+
+    monkeypatch.setattr(
+        broker_owner,
+        "ensure_auth_ready_under_lock",
+        fake_ensure_auth_ready_under_lock,
+    )
+    monkeypatch.setattr(
+        broker_retry,
+        "ensure_auth_ready_under_lock",
+        fake_ensure_auth_ready_under_lock,
+    )
+    monkeypatch.setattr(
+        broker_owner,
+        "_execute_raw_under_lock",
+        owner_execute_raw_under_lock,
+    )
+    monkeypatch.setattr(
+        broker_retry,
+        "_execute_raw_under_lock",
+        retry_execute_raw_under_lock,
+    )
+
+    owner_task = asyncio.create_task(
+        broker_owner.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="owner-failure",
+        )
+    )
+    await owner_started.wait()
+    retry_task = asyncio.create_task(
+        broker_retry.get_positions_snapshot(
+            force_fresh=True,
+            caller_source="stage1-console-profile",
+        )
+    )
+    await asyncio.sleep(0.05)
+    owner_release.set()
+
+    with pytest.raises(BullpenRuntimeCommandError) as exc_info:
+        await owner_task
+    retry_snapshot = await retry_task
+
+    assert exc_info.value.classification == "runtime_error"
+    assert retry_calls == 1
+    assert retry_snapshot.source == "live-cli"
+    assert retry_snapshot.diagnostics.caller_source == "stage1-console-profile"
+    assert retry_snapshot.diagnostics.produced_by_another_refresh is False
 
 
 @pytest.mark.anyio

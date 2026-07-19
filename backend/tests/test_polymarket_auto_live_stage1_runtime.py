@@ -85,10 +85,12 @@ async def test_console_wallet_positions_use_fast_timeout_without_login_wait(
             self,
             *,
             force_fresh: bool,
+            caller_source: str,
             max_age_seconds: int,
             timeout_seconds: int,
         ):
             captured["force_fresh"] = force_fresh
+            captured["caller_source"] = caller_source
             captured["max_age_seconds"] = max_age_seconds
             captured["timeout_seconds"] = timeout_seconds
             return SimpleNamespace(
@@ -117,6 +119,7 @@ async def test_console_wallet_positions_use_fast_timeout_without_login_wait(
 
     assert captured == {
         "force_fresh": True,
+        "caller_source": "console-wallet",
         "max_age_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
         "timeout_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
     }
@@ -133,10 +136,12 @@ async def test_console_wallet_positions_allow_timeout_env_override(monkeypatch):
             self,
             *,
             force_fresh: bool,
+            caller_source: str,
             max_age_seconds: int,
             timeout_seconds: int,
         ):
             captured["force_fresh"] = force_fresh
+            captured["caller_source"] = caller_source
             captured["max_age_seconds"] = max_age_seconds
             captured["timeout_seconds"] = timeout_seconds
             return SimpleNamespace(
@@ -166,6 +171,7 @@ async def test_console_wallet_positions_allow_timeout_env_override(monkeypatch):
 
     assert captured == {
         "force_fresh": True,
+        "caller_source": "console-wallet",
         "max_age_seconds": CONSOLE_POSITIONS_TIMEOUT_SECONDS,
         "timeout_seconds": 27,
     }

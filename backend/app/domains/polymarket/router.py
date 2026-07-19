@@ -90,15 +90,24 @@ async def get_polymarket_state(current_user: User = Depends(get_current_user)):
 @router.get("/runtime/positions", response_model=BullpenRuntimePositionsResponse)
 async def get_bullpen_runtime_positions(
     force_fresh: bool = Query(default=False),
+    passive: bool = Query(default=False),
+    caller_source: str | None = Query(default=None, max_length=80),
     max_age_seconds: int = Query(default=20, ge=0, le=300),
     current_user: User = Depends(get_current_user),
 ):
     del current_user
+    if passive and force_fresh:
+        raise HTTPException(
+            status_code=400,
+            detail="Passive Bullpen positions requests cannot force a refresh.",
+        )
     broker = get_bullpen_runtime_broker()
     stale_snapshot = await broker.read_cached_positions_snapshot()
     try:
         snapshot = await broker.get_positions_snapshot(
             force_fresh=force_fresh,
+            allow_refresh=not passive,
+            caller_source=caller_source,
             max_age_seconds=max_age_seconds,
         )
         passive_health = await broker.read_passive_health()

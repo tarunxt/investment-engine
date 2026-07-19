@@ -5,6 +5,7 @@ import json
 import os
 import pwd
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from time import monotonic
 from typing import Any, Awaitable, Literal, TypeVar
@@ -33,15 +34,21 @@ _CLI_VERSION_TTL_SECONDS = 300
 _POSITIONS_SNAPSHOT_TTL_SECONDS = 300
 _POSITIONS_FRESH_SECONDS = 20
 _POSITIONS_LOCK_TTL_SECONDS = 120
-_POSITIONS_LOCK_TIMEOUT_SECONDS = 12
+_POSITIONS_LOCK_PROBE_TIMEOUT_SECONDS = 0.25
+_POSITIONS_LOCK_TIMEOUT_GRACE_SECONDS = 5
+_POSITIONS_LOCK_TTL_GRACE_SECONDS = 10
+_POSITIONS_LOCK_RETRY_ATTEMPTS = 1
+_POSITIONS_OWNER_RELEASE_GRACE_SECONDS = 0.3
 _AUTHENTICATED_CLI_LOCK_TTL_SECONDS = 120
 _AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS = 30
 _LOCK_RENEW_INTERVAL_SECONDS = 30
 _CLI_DEFAULT_TIMEOUT_SECONDS = 30
+_AUTH_REFRESH_TIMEOUT_SECONDS = 20
 _POLL_INTERVAL_SECONDS = 0.1
 _MAX_BUFFER_BYTES = 10 * 1024 * 1024
 _REDIS_PREFIX = "bullpen:runtime"
 _AUTHENTICATED_CLI_LOCK_KEY = f"{_REDIS_PREFIX}:authenticated-cli"
+_POSITIONS_REFRESH_LOCK_KEY = f"{_REDIS_PREFIX}:positions-refresh"
 _PRODUCTION_ENVIRONMENTS = {"production", "prod"}
 _STRICT_RUNTIME_OWNER = "investor"
 _READ_ONLY_FLAG = "--read-only"
@@ -135,6 +142,14 @@ class BullpenCommandDiagnostics(BaseModel):
     cache_status: Literal["hit", "miss", "stale", "bypass"] = "bypass"
     auth_refresh_attempted: bool = False
     error_classification: str | None = None
+    refresh_requested_at: str | None = None
+    caller_source: str | None = None
+    snapshot_producer_source: str | None = None
+    produced_by_another_refresh: bool = False
+    refresh_lock_key: str | None = None
+    refresh_lock_wait_ms: float | None = None
+    refresh_lock_ttl_seconds: int | None = None
+    refresh_lock_age_ms: float | None = None
 
 
 class BullpenPositionsSnapshot(BaseModel):
@@ -206,10 +221,63 @@ class BullpenRuntimePassiveHealth(BaseModel):
     command_path: str | None = None
 
 
+@dataclass(slots=True)
+class _PositionsRefreshLockState:
+    lock_key: str
+    token: str
+    ttl_seconds: int | None = None
+    age_ms: float | None = None
+    caller_source: str | None = None
+    refresh_requested_at: str | None = None
+
+
+@dataclass(slots=True)
+class _PositionsRefreshWaitOutcome:
+    snapshot: BullpenPositionsSnapshot | None
+    lock_state: _PositionsRefreshLockState | None
+    waited_ms: float
+
+
 def _utc_now_iso() -> str:
     from datetime import UTC, datetime
 
     return datetime.now(UTC).isoformat()
+
+
+def _parse_iso_datetime(value: str | None) -> Any | None:
+    from datetime import UTC, datetime
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _iso_age_ms(value: str | None) -> float | None:
+    from datetime import UTC, datetime
+
+    parsed = _parse_iso_datetime(value)
+    if parsed is None:
+        return None
+    return max(0.0, (datetime.now(UTC) - parsed).total_seconds() * 1000)
+
+
+def _normalize_caller_source(value: str | None) -> str:
+    raw = (value or "unknown").strip().lower()
+    if not raw:
+        return "unknown"
+    normalized = "".join(
+        character
+        if character.isalnum() or character in {"-", "_", ":", "/", "."}
+        else "-"
+        for character in raw
+    ).strip("-")
+    return (normalized or "unknown")[:80]
 
 
 def _running_loop_or_none() -> asyncio.AbstractEventLoop | None:
@@ -772,6 +840,194 @@ class BullpenRuntimeBroker:
             command_path=_runtime_config().bullpen_bin,
         )
 
+    def _positions_refresh_wait_budget_seconds(self, timeout_seconds: int) -> int:
+        command_timeout = max(1, timeout_seconds)
+        return (
+            _AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS
+            + _AUTH_REFRESH_TIMEOUT_SECONDS
+            + (command_timeout * 2)
+            + _POSITIONS_LOCK_TIMEOUT_GRACE_SECONDS
+        )
+
+    def _positions_refresh_lock_ttl_seconds(self, timeout_seconds: int) -> int:
+        return max(
+            _POSITIONS_LOCK_TTL_SECONDS,
+            self._positions_refresh_wait_budget_seconds(timeout_seconds)
+            + _POSITIONS_LOCK_TTL_GRACE_SECONDS,
+        )
+
+    def _positions_refresh_lock_metadata_key(self, token: str) -> str:
+        return f"lock:{_POSITIONS_REFRESH_LOCK_KEY}:meta:{token}"
+
+    async def _write_positions_refresh_lock_metadata(
+        self,
+        *,
+        token: str,
+        ttl_seconds: int,
+        caller_source: str,
+        refresh_requested_at: str,
+    ) -> str:
+        metadata_key = self._positions_refresh_lock_metadata_key(token)
+        await self._redis.set(
+            metadata_key,
+            json.dumps(
+                {
+                    "acquired_at": _utc_now_iso(),
+                    "caller_source": caller_source,
+                    "refresh_requested_at": refresh_requested_at,
+                }
+            ),
+            ex=ttl_seconds,
+        )
+        return metadata_key
+
+    async def _read_positions_refresh_lock_state(
+        self,
+    ) -> _PositionsRefreshLockState | None:
+        lock_key = f"lock:{_POSITIONS_REFRESH_LOCK_KEY}"
+        token = await self._redis.get(lock_key)
+        if not token:
+            return None
+
+        ttl_seconds: int | None = None
+        ttl_reader = getattr(self._redis, "ttl", None)
+        if callable(ttl_reader):
+            try:
+                ttl_value = await ttl_reader(lock_key)
+            except Exception:
+                ttl_value = None
+            if isinstance(ttl_value, int) and ttl_value >= 0:
+                ttl_seconds = ttl_value
+
+        caller_source: str | None = None
+        refresh_requested_at: str | None = None
+        metadata_raw = await self._redis.get(self._positions_refresh_lock_metadata_key(token))
+        if metadata_raw:
+            try:
+                metadata = json.loads(metadata_raw)
+            except json.JSONDecodeError:
+                metadata = None
+            if isinstance(metadata, dict):
+                caller_source = _normalize_caller_source(
+                    str(metadata.get("caller_source") or "")
+                )
+                refresh_requested_at = str(metadata.get("refresh_requested_at") or "") or None
+                acquired_at = str(metadata.get("acquired_at") or "") or None
+            else:
+                acquired_at = None
+        else:
+            acquired_at = None
+
+        return _PositionsRefreshLockState(
+            lock_key=lock_key,
+            token=token,
+            ttl_seconds=ttl_seconds,
+            age_ms=_iso_age_ms(acquired_at),
+            caller_source=caller_source,
+            refresh_requested_at=refresh_requested_at,
+        )
+
+    def _build_positions_request_diagnostics(
+        self,
+        *,
+        caller_source: str,
+        refresh_requested_at: str,
+        cache_status: Literal["hit", "miss", "stale", "bypass"],
+        produced_by_another_refresh: bool,
+        refresh_lock_key: str | None,
+        refresh_lock_wait_ms: float | None,
+        refresh_lock_ttl_seconds: int | None,
+        refresh_lock_age_ms: float | None,
+        snapshot_producer_source: str | None = None,
+    ) -> BullpenCommandDiagnostics:
+        config = _runtime_config()
+        return BullpenCommandDiagnostics(
+            command_category="positions",
+            pid=os.getpid(),
+            unix_user=config.effective_user,
+            effective_home=config.home,
+            bullpen_version=self._version_cache_value,
+            credential_artifact=_stat_credential_artifact(config),
+            cache_status=cache_status,
+            refresh_requested_at=refresh_requested_at,
+            caller_source=caller_source,
+            snapshot_producer_source=snapshot_producer_source,
+            produced_by_another_refresh=produced_by_another_refresh,
+            refresh_lock_key=refresh_lock_key,
+            refresh_lock_wait_ms=refresh_lock_wait_ms,
+            refresh_lock_ttl_seconds=refresh_lock_ttl_seconds,
+            refresh_lock_age_ms=refresh_lock_age_ms,
+        )
+
+    def _snapshot_published_after_request(
+        self,
+        snapshot: BullpenPositionsSnapshot,
+        refresh_requested_at: str,
+    ) -> bool:
+        snapshot_time = _parse_iso_datetime(snapshot.fetched_at)
+        request_time = _parse_iso_datetime(refresh_requested_at)
+        if snapshot_time is None or request_time is None:
+            return False
+        return snapshot_time >= request_time
+
+    def _snapshot_satisfies_wait_request(
+        self,
+        snapshot: BullpenPositionsSnapshot | None,
+        *,
+        force_fresh: bool,
+        max_age_seconds: int,
+        refresh_requested_at: str,
+    ) -> bool:
+        if snapshot is None:
+            return False
+        if self._snapshot_published_after_request(snapshot, refresh_requested_at):
+            return True
+        if force_fresh:
+            return False
+        return self._snapshot_is_fresh(snapshot, max_age_seconds)
+
+    def _prepare_positions_snapshot_for_caller(
+        self,
+        snapshot: BullpenPositionsSnapshot,
+        *,
+        caller_source: str,
+        refresh_requested_at: str,
+        cache_status: Literal["hit", "miss", "stale", "bypass"],
+        source: Literal["live-cli", "redis-cache"],
+        freshness_state: Literal["fresh", "cached", "stale"],
+        produced_by_another_refresh: bool,
+        refresh_lock_key: str | None,
+        refresh_lock_wait_ms: float | None,
+        refresh_lock_ttl_seconds: int | None,
+        refresh_lock_age_ms: float | None,
+    ) -> BullpenPositionsSnapshot:
+        producer_source = (
+            snapshot.diagnostics.snapshot_producer_source
+            or snapshot.diagnostics.caller_source
+            or caller_source
+        )
+        diagnostics = snapshot.diagnostics.model_copy(
+            update={
+                "cache_status": cache_status,
+                "refresh_requested_at": refresh_requested_at,
+                "caller_source": caller_source,
+                "snapshot_producer_source": producer_source,
+                "produced_by_another_refresh": produced_by_another_refresh
+                or producer_source != caller_source,
+                "refresh_lock_key": refresh_lock_key,
+                "refresh_lock_wait_ms": refresh_lock_wait_ms,
+                "refresh_lock_ttl_seconds": refresh_lock_ttl_seconds,
+                "refresh_lock_age_ms": refresh_lock_age_ms,
+            }
+        )
+        return snapshot.model_copy(
+            update={
+                "source": source,
+                "freshness_state": freshness_state,
+                "diagnostics": diagnostics,
+            }
+        )
+
     async def _read_auth_ready_cache(
         self,
         cache_key: str,
@@ -1061,29 +1317,112 @@ class BullpenRuntimeBroker:
         self,
         *,
         force_fresh: bool = False,
+        allow_refresh: bool = True,
+        caller_source: str | None = None,
         max_age_seconds: int = _POSITIONS_FRESH_SECONDS,
         timeout_seconds: int = _CLI_DEFAULT_TIMEOUT_SECONDS,
     ) -> BullpenPositionsSnapshot:
         cache_key = f"{_REDIS_PREFIX}:positions:snapshot"
+        refresh_requested_at = _utc_now_iso()
+        normalized_caller_source = _normalize_caller_source(caller_source)
         cached = await self._read_valid_positions_snapshot(cache_key)
         if cached and not force_fresh and self._snapshot_is_fresh(cached, max_age_seconds):
-            cached.source = "redis-cache"
-            cached.freshness_state = "cached"
-            cached.diagnostics.cache_status = "hit"
-            return cached
+            return self._prepare_positions_snapshot_for_caller(
+                cached,
+                caller_source=normalized_caller_source,
+                refresh_requested_at=refresh_requested_at,
+                cache_status="hit",
+                source="redis-cache",
+                freshness_state="cached",
+                produced_by_another_refresh=True,
+                refresh_lock_key=None,
+                refresh_lock_wait_ms=0.0,
+                refresh_lock_ttl_seconds=None,
+                refresh_lock_age_ms=None,
+            )
 
         loop = asyncio.get_running_loop()
         existing_future = self._positions_futures.get(loop)
         if existing_future and not existing_future.done():
-            return await asyncio.shield(existing_future)
+            waited_started_at = monotonic()
+            shared_snapshot = await asyncio.shield(existing_future)
+            waited_ms = max(0.0, (monotonic() - waited_started_at) * 1000)
+            shared_freshness = (
+                "fresh"
+                if self._snapshot_published_after_request(
+                    shared_snapshot,
+                    refresh_requested_at,
+                )
+                else shared_snapshot.freshness_state
+            )
+            return self._prepare_positions_snapshot_for_caller(
+                shared_snapshot,
+                caller_source=normalized_caller_source,
+                refresh_requested_at=refresh_requested_at,
+                cache_status=shared_snapshot.diagnostics.cache_status,
+                source=shared_snapshot.source,
+                freshness_state=shared_freshness,
+                produced_by_another_refresh=True,
+                refresh_lock_key=shared_snapshot.diagnostics.refresh_lock_key,
+                refresh_lock_wait_ms=waited_ms,
+                refresh_lock_ttl_seconds=shared_snapshot.diagnostics.refresh_lock_ttl_seconds,
+                refresh_lock_age_ms=shared_snapshot.diagnostics.refresh_lock_age_ms,
+            )
+
+        wait_budget_seconds = self._positions_refresh_wait_budget_seconds(timeout_seconds)
+        if not allow_refresh:
+            waited = await self._poll_for_positions_snapshot(
+                cache_key=cache_key,
+                force_fresh=force_fresh,
+                max_age_seconds=max_age_seconds,
+                timeout_seconds=wait_budget_seconds,
+                refresh_requested_at=refresh_requested_at,
+            )
+            if waited.snapshot is not None:
+                freshness_state: Literal["fresh", "cached", "stale"] = (
+                    "fresh"
+                    if self._snapshot_published_after_request(
+                        waited.snapshot,
+                        refresh_requested_at,
+                    )
+                    else "cached"
+                )
+                return self._prepare_positions_snapshot_for_caller(
+                    waited.snapshot,
+                    caller_source=normalized_caller_source,
+                    refresh_requested_at=refresh_requested_at,
+                    cache_status="hit",
+                    source="redis-cache",
+                    freshness_state=freshness_state,
+                    produced_by_another_refresh=True,
+                    refresh_lock_key=(
+                        waited.lock_state.lock_key if waited.lock_state is not None else None
+                    ),
+                    refresh_lock_wait_ms=waited.waited_ms,
+                    refresh_lock_ttl_seconds=(
+                        waited.lock_state.ttl_seconds
+                        if waited.lock_state is not None
+                        else None
+                    ),
+                    refresh_lock_age_ms=(
+                        waited.lock_state.age_ms if waited.lock_state is not None else None
+                    ),
+                )
+
+            raise BullpenRuntimeCommandError(
+                "No fresh shared Bullpen positions snapshot is cached for passive caller.",
+                classification="passive_cache_miss",
+            )
 
         creator = loop.create_future()
         self._positions_futures[loop] = creator
         try:
             snapshot = await self._refresh_positions_snapshot(
                 cache_key=cache_key,
+                caller_source=normalized_caller_source,
                 force_fresh=force_fresh,
                 max_age_seconds=max_age_seconds,
+                refresh_requested_at=refresh_requested_at,
                 timeout_seconds=timeout_seconds,
             )
             creator.set_result(snapshot)
@@ -1098,120 +1437,244 @@ class BullpenRuntimeBroker:
         self,
         *,
         cache_key: str,
+        caller_source: str,
         force_fresh: bool,
         max_age_seconds: int,
+        refresh_requested_at: str,
         timeout_seconds: int,
     ) -> BullpenPositionsSnapshot:
         cached = await self._read_valid_positions_snapshot(cache_key)
         if cached and not force_fresh and self._snapshot_is_fresh(cached, max_age_seconds):
-            cached.source = "redis-cache"
-            cached.freshness_state = "cached"
-            cached.diagnostics.cache_status = "hit"
-            return cached
+            return self._prepare_positions_snapshot_for_caller(
+                cached,
+                caller_source=caller_source,
+                refresh_requested_at=refresh_requested_at,
+                cache_status="hit",
+                source="redis-cache",
+                freshness_state="cached",
+                produced_by_another_refresh=True,
+                refresh_lock_key=None,
+                refresh_lock_wait_ms=0.0,
+                refresh_lock_ttl_seconds=None,
+                refresh_lock_age_ms=None,
+            )
 
-        try:
-            async with self._lock.acquire(
-                f"{_REDIS_PREFIX}:positions-refresh",
-                ttl=_POSITIONS_LOCK_TTL_SECONDS,
-                timeout=_POSITIONS_LOCK_TIMEOUT_SECONDS,
-            ) as lease:
-                cached = await self._read_valid_positions_snapshot(cache_key)
-                if cached and not force_fresh and self._snapshot_is_fresh(
-                    cached, max_age_seconds
-                ):
-                    cached.source = "redis-cache"
-                    cached.freshness_state = "cached"
-                    cached.diagnostics.cache_status = "hit"
-                    return cached
+        wait_budget_seconds = self._positions_refresh_wait_budget_seconds(timeout_seconds)
+        positions_lock_ttl_seconds = self._positions_refresh_lock_ttl_seconds(
+            timeout_seconds
+        )
 
+        for attempt in range(_POSITIONS_LOCK_RETRY_ATTEMPTS + 1):
+            try:
                 async with self._lock.acquire(
-                    _AUTHENTICATED_CLI_LOCK_KEY,
-                    ttl=_AUTHENTICATED_CLI_LOCK_TTL_SECONDS,
-                    timeout=_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS,
-                    renew_interval=_LOCK_RENEW_INTERVAL_SECONDS,
-                ) as auth_lease:
-                    auth_checked_at = await self.ensure_auth_ready_under_lock(
-                        force_refresh=False,
-                        cache_key=f"{_REDIS_PREFIX}:auth:ready",
-                        lock_key=auth_lease.lock_key,
-                        lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
+                    _POSITIONS_REFRESH_LOCK_KEY,
+                    ttl=positions_lock_ttl_seconds,
+                    timeout=_POSITIONS_LOCK_PROBE_TIMEOUT_SECONDS,
+                ) as lease:
+                    metadata_key = await self._write_positions_refresh_lock_metadata(
+                        token=lease.token,
+                        ttl_seconds=lease.ttl_seconds,
+                        caller_source=caller_source,
+                        refresh_requested_at=refresh_requested_at,
                     )
-                    result = await self._execute_raw_under_lock(
-                        ["polymarket", "positions", "--output", "json"],
-                        timeout_seconds=timeout_seconds,
-                        command_category="positions",
-                        is_write=False,
-                        requires_auth=True,
-                        extra_env=None,
-                        retry_auth_once=True,
-                        lock_key=auth_lease.lock_key,
-                        lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
-                    )
-                try:
-                    payload = json.loads(result.stdout)
-                except json.JSONDecodeError as exc:
-                    raise BullpenRuntimeCommandError(
-                        "Bullpen positions returned invalid JSON.",
-                        classification="json_parse_error",
-                        stdout=result.stdout,
-                        stderr=result.stderr,
-                        exit_code=result.exit_code,
-                        signal=result.signal,
-                    ) from exc
-                auth_cache = await self._read_auth_ready_cache(
-                    f"{_REDIS_PREFIX}:auth:ready"
-                )
-                snapshot = BullpenPositionsSnapshot(
-                    payload=payload,
-                    fetched_at=_utc_now_iso(),
-                    cli_version=result.diagnostics.bullpen_version
-                    or self._version_cache_value,
-                    credential_artifact=result.diagnostics.credential_artifact,
-                    account_identity=(
-                        _extract_account_identity(payload)
-                        or (
-                            auth_cache.account_identity
-                            if auth_cache is not None
-                            else None
+                    try:
+                        cached = await self._read_valid_positions_snapshot(cache_key)
+                        if cached and self._snapshot_satisfies_wait_request(
+                            cached,
+                            force_fresh=force_fresh,
+                            max_age_seconds=max_age_seconds,
+                            refresh_requested_at=refresh_requested_at,
+                        ):
+                            freshness_state: Literal["fresh", "cached", "stale"] = (
+                                "fresh"
+                                if self._snapshot_published_after_request(
+                                    cached,
+                                    refresh_requested_at,
+                                )
+                                else "cached"
+                            )
+                            return self._prepare_positions_snapshot_for_caller(
+                                cached,
+                                caller_source=caller_source,
+                                refresh_requested_at=refresh_requested_at,
+                                cache_status="hit",
+                                source="redis-cache",
+                                freshness_state=freshness_state,
+                                produced_by_another_refresh=True,
+                                refresh_lock_key=lease.lock_key,
+                                refresh_lock_wait_ms=lease.wait_duration_seconds * 1000,
+                                refresh_lock_ttl_seconds=lease.ttl_seconds,
+                                refresh_lock_age_ms=0.0,
+                            )
+
+                        async with self._lock.acquire(
+                            _AUTHENTICATED_CLI_LOCK_KEY,
+                            ttl=_AUTHENTICATED_CLI_LOCK_TTL_SECONDS,
+                            timeout=_AUTHENTICATED_CLI_LOCK_TIMEOUT_SECONDS,
+                            renew_interval=_LOCK_RENEW_INTERVAL_SECONDS,
+                        ) as auth_lease:
+                            auth_checked_at = await self.ensure_auth_ready_under_lock(
+                                force_refresh=False,
+                                cache_key=f"{_REDIS_PREFIX}:auth:ready",
+                                lock_key=auth_lease.lock_key,
+                                lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
+                            )
+                            result = await self._execute_raw_under_lock(
+                                ["polymarket", "positions", "--output", "json"],
+                                timeout_seconds=timeout_seconds,
+                                command_category="positions",
+                                is_write=False,
+                                requires_auth=True,
+                                extra_env=None,
+                                retry_auth_once=True,
+                                lock_key=auth_lease.lock_key,
+                                lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
+                            )
+                        try:
+                            payload = json.loads(result.stdout)
+                        except json.JSONDecodeError as exc:
+                            raise BullpenRuntimeCommandError(
+                                "Bullpen positions returned invalid JSON.",
+                                classification="json_parse_error",
+                                stdout=result.stdout,
+                                stderr=result.stderr,
+                                exit_code=result.exit_code,
+                                signal=result.signal,
+                            ) from exc
+                        auth_cache = await self._read_auth_ready_cache(
+                            f"{_REDIS_PREFIX}:auth:ready"
                         )
+                        snapshot = BullpenPositionsSnapshot(
+                            payload=payload,
+                            fetched_at=_utc_now_iso(),
+                            cli_version=result.diagnostics.bullpen_version
+                            or self._version_cache_value,
+                            credential_artifact=result.diagnostics.credential_artifact,
+                            account_identity=(
+                                _extract_account_identity(payload)
+                                or (
+                                    auth_cache.account_identity
+                                    if auth_cache is not None
+                                    else None
+                                )
+                            ),
+                            position_classifier_version=BULLPEN_POSITION_CLASSIFIER_VERSION,
+                            auth_checked_at=auth_checked_at,
+                            source="live-cli",
+                            freshness_state="fresh",
+                            diagnostics=result.diagnostics.model_copy(
+                                update={
+                                    "command_category": "positions",
+                                    "cache_status": "miss",
+                                    "refresh_requested_at": refresh_requested_at,
+                                    "caller_source": caller_source,
+                                    "snapshot_producer_source": caller_source,
+                                    "produced_by_another_refresh": False,
+                                    "refresh_lock_key": lease.lock_key,
+                                    "refresh_lock_wait_ms": (
+                                        lease.wait_duration_seconds * 1000
+                                    ),
+                                    "refresh_lock_ttl_seconds": lease.ttl_seconds,
+                                    "refresh_lock_age_ms": 0.0,
+                                }
+                            ),
+                        )
+                        await self._redis.set(
+                            cache_key,
+                            snapshot.model_dump_json(),
+                            ex=_POSITIONS_SNAPSHOT_TTL_SECONDS,
+                        )
+                    finally:
+                        await self._redis.delete(metadata_key)
+                snapshot.diagnostics.lock_hold_ms = (
+                    lease.hold_duration_seconds * 1000
+                    if lease.hold_duration_seconds is not None
+                    else snapshot.diagnostics.lock_hold_ms
+                )
+                snapshot.diagnostics.refresh_lock_age_ms = (
+                    lease.hold_duration_seconds * 1000
+                    if lease.hold_duration_seconds is not None
+                    else snapshot.diagnostics.refresh_lock_age_ms
+                )
+                return snapshot
+            except LockAcquisitionError as exc:
+                waited = await self._poll_for_positions_snapshot(
+                    cache_key=cache_key,
+                    force_fresh=force_fresh,
+                    max_age_seconds=max_age_seconds,
+                    timeout_seconds=wait_budget_seconds,
+                    refresh_requested_at=refresh_requested_at,
+                )
+                if waited.snapshot is not None:
+                    freshness_state = (
+                        "fresh"
+                        if self._snapshot_published_after_request(
+                            waited.snapshot,
+                            refresh_requested_at,
+                        )
+                        else "cached"
+                    )
+                    return self._prepare_positions_snapshot_for_caller(
+                        waited.snapshot,
+                        caller_source=caller_source,
+                        refresh_requested_at=refresh_requested_at,
+                        cache_status="hit",
+                        source="redis-cache",
+                        freshness_state=freshness_state,
+                        produced_by_another_refresh=True,
+                        refresh_lock_key=(
+                            waited.lock_state.lock_key
+                            if waited.lock_state is not None
+                            else f"lock:{_POSITIONS_REFRESH_LOCK_KEY}"
+                        ),
+                        refresh_lock_wait_ms=waited.waited_ms,
+                        refresh_lock_ttl_seconds=(
+                            waited.lock_state.ttl_seconds
+                            if waited.lock_state is not None
+                            else None
+                        ),
+                        refresh_lock_age_ms=(
+                            waited.lock_state.age_ms if waited.lock_state is not None else None
+                        ),
+                    )
+
+                if attempt < _POSITIONS_LOCK_RETRY_ATTEMPTS:
+                    continue
+
+                diagnostics = self._build_positions_request_diagnostics(
+                    caller_source=caller_source,
+                    refresh_requested_at=refresh_requested_at,
+                    cache_status="bypass",
+                    produced_by_another_refresh=waited.lock_state is not None,
+                    refresh_lock_key=(
+                        waited.lock_state.lock_key
+                        if waited.lock_state is not None
+                        else f"lock:{_POSITIONS_REFRESH_LOCK_KEY}"
                     ),
-                    position_classifier_version=BULLPEN_POSITION_CLASSIFIER_VERSION,
-                    auth_checked_at=auth_checked_at,
-                    source="live-cli",
-                    freshness_state="fresh",
-                    diagnostics=result.diagnostics.model_copy(
-                        update={
-                            "command_category": "positions",
-                            "cache_status": "miss",
-                        }
+                    refresh_lock_wait_ms=waited.waited_ms,
+                    refresh_lock_ttl_seconds=(
+                        waited.lock_state.ttl_seconds if waited.lock_state is not None else None
+                    ),
+                    refresh_lock_age_ms=(
+                        waited.lock_state.age_ms if waited.lock_state is not None else None
+                    ),
+                    snapshot_producer_source=(
+                        waited.lock_state.caller_source
+                        if waited.lock_state is not None
+                        else None
                     ),
                 )
-                await self._redis.set(
-                    cache_key,
-                    snapshot.model_dump_json(),
-                    ex=_POSITIONS_SNAPSHOT_TTL_SECONDS,
+                error = BullpenRuntimeCommandError(
+                    f"Timed out waiting for Bullpen positions refresh: {redact_secrets(str(exc))}",
+                    classification="lock_timeout",
                 )
-            snapshot.diagnostics.lock_hold_ms = (
-                lease.hold_duration_seconds * 1000
-                if lease.hold_duration_seconds is not None
-                else snapshot.diagnostics.lock_hold_ms
-            )
-            return snapshot
-        except LockAcquisitionError as exc:
-            waited = await self._poll_for_positions_snapshot(
-                cache_key=cache_key,
-                max_age_seconds=max_age_seconds,
-                timeout_seconds=_POSITIONS_LOCK_TIMEOUT_SECONDS,
-            )
-            if waited is not None and self._snapshot_is_fresh(waited, max_age_seconds):
-                waited.source = "redis-cache"
-                waited.freshness_state = "cached"
-                waited.diagnostics.cache_status = "hit"
-                return waited
-            raise BullpenRuntimeCommandError(
-                f"Timed out waiting for Bullpen positions refresh: {redact_secrets(str(exc))}",
-                classification="lock_timeout",
-            ) from exc
+                self._record_failure(
+                    command_category="positions",
+                    classification=error.classification,
+                    message=str(error),
+                    diagnostics=diagnostics,
+                )
+                raise error from exc
 
     async def _execute_process(
         self,
@@ -1462,16 +1925,61 @@ class BullpenRuntimeBroker:
         self,
         *,
         cache_key: str,
+        force_fresh: bool,
         max_age_seconds: int,
         timeout_seconds: int,
-    ) -> BullpenPositionsSnapshot | None:
+        refresh_requested_at: str,
+    ) -> _PositionsRefreshWaitOutcome:
         deadline = monotonic() + timeout_seconds
+        started_at = monotonic()
+        last_lock_state = await self._read_positions_refresh_lock_state()
+        owner_missing_since: float | None = None
+
         while monotonic() < deadline:
             snapshot = await self._read_valid_positions_snapshot(cache_key)
-            if snapshot and self._snapshot_is_fresh(snapshot, max_age_seconds):
-                return snapshot
+            if self._snapshot_satisfies_wait_request(
+                snapshot,
+                force_fresh=force_fresh,
+                max_age_seconds=max_age_seconds,
+                refresh_requested_at=refresh_requested_at,
+            ):
+                return _PositionsRefreshWaitOutcome(
+                    snapshot=snapshot,
+                    lock_state=last_lock_state,
+                    waited_ms=max(0.0, (monotonic() - started_at) * 1000),
+                )
+
+            current_lock_state = await self._read_positions_refresh_lock_state()
+            if current_lock_state is not None:
+                last_lock_state = current_lock_state
+                owner_missing_since = None
+            elif owner_missing_since is None:
+                owner_missing_since = monotonic()
+            elif (
+                monotonic() - owner_missing_since
+            ) >= _POSITIONS_OWNER_RELEASE_GRACE_SECONDS:
+                break
+
             await asyncio.sleep(_POLL_INTERVAL_SECONDS)
-        return await self._read_valid_positions_snapshot(cache_key)
+
+        final_snapshot = await self._read_valid_positions_snapshot(cache_key)
+        if self._snapshot_satisfies_wait_request(
+            final_snapshot,
+            force_fresh=force_fresh,
+            max_age_seconds=max_age_seconds,
+            refresh_requested_at=refresh_requested_at,
+        ):
+            return _PositionsRefreshWaitOutcome(
+                snapshot=final_snapshot,
+                lock_state=last_lock_state,
+                waited_ms=max(0.0, (monotonic() - started_at) * 1000),
+            )
+
+        return _PositionsRefreshWaitOutcome(
+            snapshot=None,
+            lock_state=last_lock_state,
+            waited_ms=max(0.0, (monotonic() - started_at) * 1000),
+        )
 
     def _log_runtime_event(
         self, diagnostics: BullpenCommandDiagnostics, *, success: bool

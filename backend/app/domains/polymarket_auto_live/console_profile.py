@@ -1160,12 +1160,14 @@ def parse_console_wallet_positions_payload(
 async def read_console_wallet_positions(
     *,
     force_fresh: bool = True,
+    caller_source: str = "console-wallet",
     snapshot_payload: object | None = None,
     max_age_seconds: int = CONSOLE_POSITIONS_TIMEOUT_SECONDS,
 ) -> list[ConsoleWalletPosition]:
     if snapshot_payload is None:
         snapshot = await get_bullpen_runtime_broker().get_positions_snapshot(
             force_fresh=force_fresh,
+            caller_source=caller_source,
             max_age_seconds=max_age_seconds,
             timeout_seconds=_console_positions_timeout_seconds(),
         )

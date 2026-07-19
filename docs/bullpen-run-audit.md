@@ -145,6 +145,17 @@ later stages instead of letting Stage 2, Stage 3, UI polling, health routes, or
 background monitors spawn their own Bullpen wallet refresh. Cached UI and health
 reads may reuse the shared Redis snapshot for roughly 15-30 seconds, but they
 must not become a second credential owner or a parallel auth refresh path.
+That Redis positions path now runs as a distributed single-flight keyed by the
+shared `bullpen:runtime:positions-refresh` lock. Every caller records its own
+refresh-request timestamp, and a waiting caller may accept a shared wallet
+snapshot only when the published snapshot is both runtime-valid and newer than
+that request timestamp. For `force_fresh` Stage 1 inputs, a post-request shared
+snapshot from another in-flight refresh still counts as the fresh Stage 1
+wallet snapshot; it must not be treated as a stale downgrade simply because a
+different caller produced it. Passive UI mount or interval polling is
+cache-only: it may wait for an already-running refresh to publish, but it must
+not acquire the refresh lock or start a new Bullpen CLI positions command on
+its own.
 When that forced fresh wallet snapshot fails, Stage 1 must record a failed
 workflow stage with the sanitized wallet-refresh error, and the persisted Stage 2
 and Stage 3 workflow results must remain explicitly blocked with
@@ -179,7 +190,11 @@ Audit consumers must treat a classifier-version bump, credential artifact
 change, or account-identity mismatch as a different runtime snapshot lineage.
 Only read-only UI fallback may surface stale Redis snapshots after a lock
 timeout; a Stage 1 `force_fresh` run snapshot must not silently downgrade to a
-stale wallet snapshot.
+stale wallet snapshot. Runtime diagnostics for that shared snapshot should also
+preserve the caller source, the producing caller source when another refresh
+won the single-flight, whether the result was produced by another refresh, and
+the observed shared refresh lock wait/TTL/age metadata needed to explain
+contention without exposing secrets.
 
 ### Stage 2
 
