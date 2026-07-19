@@ -22,6 +22,7 @@ from app.domains.polymarket.bullpen_llm_execution import (
 )
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
+    _state_has_due_scheduled_run,
     build_initial_run_summary,
     build_initial_scan_stage_result,
 )
@@ -100,6 +101,40 @@ from app.domains.trading_bots.service import (
 )
 
 
+
+
+def test_state_has_due_scheduled_run_allows_polling_failsafe():
+    settings = BullpenAutoLiveSettings(auto_live_enabled=True)
+    state = BullpenAutoLiveState(
+        running=True,
+        paused=False,
+        next_run_at="2026-07-19T11:56:00+00:00",
+    )
+
+    assert _state_has_due_scheduled_run(
+        settings,
+        state,
+        reference_time=datetime(2026, 7, 19, 11, 56, 10, tzinfo=UTC),
+    )
+
+
+def test_state_has_due_scheduled_run_respects_disabled_and_future_runs():
+    due_state = BullpenAutoLiveState(
+        running=True,
+        paused=False,
+        next_run_at="2026-07-19T11:57:00+00:00",
+    )
+
+    assert not _state_has_due_scheduled_run(
+        BullpenAutoLiveSettings(auto_live_enabled=True),
+        due_state,
+        reference_time=datetime(2026, 7, 19, 11, 56, 10, tzinfo=UTC),
+    )
+    assert not _state_has_due_scheduled_run(
+        BullpenAutoLiveSettings(auto_live_enabled=False),
+        due_state.model_copy(update={"next_run_at": "2026-07-19T11:56:00+00:00"}),
+        reference_time=datetime(2026, 7, 19, 11, 56, 10, tzinfo=UTC),
+    )
 
 def test_console_profile_next_cycle_uses_custom_auto_run_schedule():
     settings = BullpenAutoLiveSettings(
