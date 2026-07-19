@@ -6,11 +6,11 @@ function readSource(relativePath) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Bullpen x AI page exposes the Analyse Events button and route helper", () => {
+test("Bullpen x AI page exposes the Trade Analysis button and route helper", () => {
   const pageSource = readSource("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx");
   const urlsSource = readSource("../lib/urls.ts");
 
-  assert.match(pageSource, /Analyse Events/);
+  assert.match(pageSource, /Trade Analysis/);
   assert.match(
     pageSource,
     /href=\{URLs\.routes\.console\.bullpenAiAnalyseEvents\(\)\}/,

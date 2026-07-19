@@ -187,7 +187,7 @@ export function TradeAnalysisListClient() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
-            Bullpen x AI
+            Trade Analysis
           </p>
           <h1 className="text-3xl font-bold tracking-tight text-slate-950">
             Bullpen Trade Analysis
@@ -199,11 +199,11 @@ export function TradeAnalysisListClient() {
         </div>
         <div className="flex shrink-0 flex-col gap-2">
           <Button asChild className="bg-purple-700 text-white hover:bg-purple-800">
-            <Link href={URLs.routes.console.bullpenAi()}>Bullpen x AI</Link>
+            <Link href={URLs.routes.console.bullpenAi()}>Trade Analysis</Link>
           </Button>
           <Button asChild variant="outline">
             <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>
-              Runs Analysis
+              Trade Analysis
             </Link>
           </Button>
         </div>
@@ -428,7 +428,7 @@ export function TradeAnalysisListClient() {
                       </div>
                     </div>
                     <div className="text-right text-xs uppercase tracking-[0.18em] text-slate-500">
-                      <div>{item.strategy_name || "Bullpen x AI"}</div>
+                      <div>{item.strategy_name || "Trade Analysis"}</div>
                       <div className="mt-2">{item.strategy_version || "—"}</div>
                     </div>
                   </CardHeader>

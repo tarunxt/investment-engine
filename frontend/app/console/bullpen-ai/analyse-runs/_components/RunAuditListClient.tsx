@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 import type {
+  BullpenAutoLiveRun,
   BullpenRunAuditListResponse,
   BullpenRunAuditSummaryItem,
 } from "@/types/api";
@@ -54,9 +55,14 @@ const defaultFilters: RunAuditFilters = {
 
 function cardToneClassName(item: BullpenRunAuditSummaryItem) {
   if (item.run_status === "failed") return "border-rose-200 bg-rose-50/50";
-  if (item.lifecycle_status === "incomplete") return "border-amber-200 bg-amber-50/50";
-  if (item.run_status === "partial_success") return "border-amber-200 bg-amber-50/50";
-  if (item.feedback_status === "processing" || item.feedback_status === "queued") {
+  if (item.lifecycle_status === "incomplete")
+    return "border-amber-200 bg-amber-50/50";
+  if (item.run_status === "partial_success")
+    return "border-amber-200 bg-amber-50/50";
+  if (
+    item.feedback_status === "processing" ||
+    item.feedback_status === "queued"
+  ) {
     return "border-sky-200 bg-sky-50/50";
   }
   return "border-slate-200 bg-white";
@@ -91,10 +97,12 @@ function feedbackGeneratedValue(value: string) {
 
 export function RunAuditListClient() {
   const [filters, setFilters] = useState<RunAuditFilters>(defaultFilters);
-  const [draftFilters, setDraftFilters] = useState<RunAuditFilters>(defaultFilters);
+  const [draftFilters, setDraftFilters] =
+    useState<RunAuditFilters>(defaultFilters);
   const [data, setData] = useState<BullpenRunAuditListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [autoLiveRuns, setAutoLiveRuns] = useState<BullpenAutoLiveRun[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +125,14 @@ export function RunAuditListClient() {
           feedbackGenerated: feedbackGeneratedValue(filters.feedbackGenerated),
           runIdSearch: filters.runIdSearch || undefined,
         });
+        apiService
+          .getBullpenAutoLiveRuns()
+          .then((nextAutoLiveRuns) => {
+            if (!cancelled) setAutoLiveRuns(nextAutoLiveRuns);
+          })
+          .catch(() => {
+            if (!cancelled) setAutoLiveRuns([]);
+          });
         if (!cancelled) {
           setData(nextData);
         }
@@ -142,6 +158,10 @@ export function RunAuditListClient() {
   }, [filters]);
 
   const items = data?.items ?? [];
+  const auditedRunIds = new Set(items.map((item) => item.run_id));
+  const fallbackAutoLiveRuns = autoLiveRuns.filter(
+    (run) => !auditedRunIds.has(run.id),
+  );
   const total = data?.total ?? 0;
   const totalPages = data?.total_pages ?? 0;
   const from = total === 0 ? 0 : (filters.page - 1) * filters.limit + 1;
@@ -152,25 +172,30 @@ export function RunAuditListClient() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="space-y-2">
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
-            Bullpen x AI
+            Trade Analysis
           </p>
           <h1 className="text-3xl font-bold tracking-tight text-slate-950">
             Bullpen Runs Audit
           </h1>
           <p className="max-w-3xl text-sm leading-6 text-slate-600">
-            Review immutable Bullpen run snapshots, deterministic validation findings,
-            manual audit checks, and versioned LLM feedback without loading the full raw
-            bundle into the list view.
+            Review immutable Bullpen run snapshots, deterministic validation
+            findings, manual audit checks, and versioned LLM feedback without
+            loading the full raw bundle into the list view.
           </p>
         </div>
         <div className="flex shrink-0 flex-col gap-2">
           <Button asChild variant="outline">
             <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
-              Analyse Events
+              Trade Analysis
             </Link>
           </Button>
-          <Button asChild className="bg-purple-700 text-white hover:bg-purple-800">
-            <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>Runs Analysis</Link>
+          <Button
+            asChild
+            className="bg-purple-700 text-white hover:bg-purple-800"
+          >
+            <Link href={URLs.routes.console.bullpenAiAnalyseRuns()}>
+              Trade Analysis
+            </Link>
           </Button>
         </div>
       </div>
@@ -395,7 +420,9 @@ export function RunAuditListClient() {
 
       {error ? (
         <Card className="rounded-none border-rose-200 bg-rose-50 shadow-none">
-          <CardContent className="py-6 text-sm text-rose-700">{error}</CardContent>
+          <CardContent className="py-6 text-sm text-rose-700">
+            {error}
+          </CardContent>
         </Card>
       ) : null}
 
@@ -408,19 +435,99 @@ export function RunAuditListClient() {
           </Card>
         ) : null}
 
-        {!loading && items.length === 0 ? (
+        {!loading && items.length === 0 && fallbackAutoLiveRuns.length === 0 ? (
           <Card className="rounded-none border-slate-200 shadow-none">
             <CardContent className="py-10 text-sm text-slate-500">
-              No Bullpen run audits matched the current filters.
+              No Bullpen runs or persisted audit snapshots matched the current
+              filters.
             </CardContent>
           </Card>
+        ) : null}
+
+        {!loading && fallbackAutoLiveRuns.length > 0 ? (
+          <div className="space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Bullpen runs awaiting audit snapshots
+            </p>
+            {fallbackAutoLiveRuns.map((run) => (
+              <button
+                key={run.id}
+                type="button"
+                className="block w-full text-left"
+                onClick={async () => {
+                  setLoading(true);
+                  setError(null);
+                  try {
+                    await apiService.materializeBullpenRunAudit(run.id);
+                    window.location.href =
+                      URLs.routes.console.bullpenAiAnalyseRunDetail(run.id);
+                  } catch (nextError) {
+                    setError(
+                      nextError instanceof Error
+                        ? nextError.message
+                        : "Failed to load Bullpen run details.",
+                    );
+                    setLoading(false);
+                  }
+                }}
+              >
+                <Card className="rounded-none border-purple-200 bg-purple-50/40 shadow-none transition hover:border-purple-300">
+                  <CardContent className="space-y-4 p-5">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <AuditBadge label="Bullpen Run" tone="info" />
+                          <AuditBadge
+                            label={humanizeToken(run.status)}
+                            tone={
+                              run.status === "failed"
+                                ? "critical"
+                                : run.status === "completed"
+                                  ? "success"
+                                  : "warning"
+                            }
+                          />
+                          <AuditBadge
+                            label={run.dry_run ? "Dry Run" : "Live Requested"}
+                            tone={run.dry_run ? "info" : "warning"}
+                          />
+                        </div>
+                        <h2 className="text-xl font-semibold text-slate-950">
+                          {run.id}
+                        </h2>
+                        <p className="text-sm text-slate-600">
+                          Started {formatDateTime(run.started_at)} · Completed{" "}
+                          {formatDateTime(run.completed_at)}
+                        </p>
+                      </div>
+                      <p className="max-w-xl text-sm text-slate-600 lg:text-right">
+                        {run.summary || "Click to load this Bullpen run audit."}
+                      </p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+                      {metric("Decisions", String(run.decisions_count))}
+                      {metric(
+                        "Orders",
+                        `${run.orders_planned}/${run.orders_submitted}`,
+                      )}
+                      {metric("Trigger", humanizeToken(run.triggered_by))}
+                      {metric("Execution", run.execution_version || "—")}
+                      {metric("Audit", "Click to load details")}
+                    </div>
+                  </CardContent>
+                </Card>
+              </button>
+            ))}
+          </div>
         ) : null}
 
         {!loading
           ? items.map((item) => (
               <Link
                 key={item.snapshot_id}
-                href={URLs.routes.console.bullpenAiAnalyseRunDetail(item.run_id)}
+                href={URLs.routes.console.bullpenAiAnalyseRunDetail(
+                  item.run_id,
+                )}
                 className="block"
               >
                 <Card
@@ -432,11 +539,23 @@ export function RunAuditListClient() {
                         <div className="flex flex-wrap items-center gap-2">
                           <AuditBadge
                             label={humanizeToken(item.run_status)}
-                            tone={item.run_status === "failed" ? "critical" : item.run_status === "completed" ? "success" : "warning"}
+                            tone={
+                              item.run_status === "failed"
+                                ? "critical"
+                                : item.run_status === "completed"
+                                  ? "success"
+                                  : "warning"
+                            }
                           />
                           <AuditBadge
                             label={`Audit ${humanizeToken(item.audit_status)}`}
-                            tone={item.lifecycle_status === "incomplete" ? "warning" : item.source_kind === "native" ? "success" : "info"}
+                            tone={
+                              item.lifecycle_status === "incomplete"
+                                ? "warning"
+                                : item.source_kind === "native"
+                                  ? "success"
+                                  : "info"
+                            }
                           />
                           <AuditBadge
                             label={item.dry_run ? "Dry Run" : "Live Requested"}
@@ -445,16 +564,24 @@ export function RunAuditListClient() {
                           {item.feedback_status ? (
                             <AuditBadge
                               label={`Feedback ${humanizeToken(item.feedback_status)}`}
-                              tone={item.feedback_status === "completed" ? "success" : item.feedback_status === "failed" ? "critical" : "info"}
+                              tone={
+                                item.feedback_status === "completed"
+                                  ? "success"
+                                  : item.feedback_status === "failed"
+                                    ? "critical"
+                                    : "info"
+                              }
                             />
                           ) : null}
                         </div>
                         <div>
-                          <h2 className="text-xl font-semibold text-slate-950">{item.run_id}</h2>
+                          <h2 className="text-xl font-semibold text-slate-950">
+                            {item.run_id}
+                          </h2>
                           <p className="mt-1 text-sm text-slate-600">
-                            Started {formatDateTime(item.started_at)} · Completed{" "}
-                            {formatDateTime(item.completed_at)} · Duration{" "}
-                            {formatDuration(item.duration_seconds)}
+                            Started {formatDateTime(item.started_at)} ·
+                            Completed {formatDateTime(item.completed_at)} ·
+                            Duration {formatDuration(item.duration_seconds)}
                           </p>
                         </div>
                       </div>
@@ -467,10 +594,46 @@ export function RunAuditListClient() {
                     </div>
 
                     <div className="flex flex-wrap gap-2">
-                      <AuditBadge label={`Stage 1 ${humanizeToken(item.stage1_status)}`} tone={item.stage1_status === "fail" ? "critical" : item.stage1_status === "pass" ? "success" : "warning"} />
-                      <AuditBadge label={`Stage 2 ${humanizeToken(item.stage2_status)}`} tone={item.stage2_status === "fail" ? "critical" : item.stage2_status === "pass" ? "success" : "warning"} />
-                      <AuditBadge label={`Stage 3 ${humanizeToken(item.stage3_status)}`} tone={item.stage3_status === "fail" ? "critical" : item.stage3_status === "pass" ? "success" : "warning"} />
-                      <AuditBadge label={`${formatPercent(item.completeness_pct)} complete`} tone={item.completeness_pct >= 90 ? "success" : item.completeness_pct >= 70 ? "warning" : "critical"} />
+                      <AuditBadge
+                        label={`Stage 1 ${humanizeToken(item.stage1_status)}`}
+                        tone={
+                          item.stage1_status === "fail"
+                            ? "critical"
+                            : item.stage1_status === "pass"
+                              ? "success"
+                              : "warning"
+                        }
+                      />
+                      <AuditBadge
+                        label={`Stage 2 ${humanizeToken(item.stage2_status)}`}
+                        tone={
+                          item.stage2_status === "fail"
+                            ? "critical"
+                            : item.stage2_status === "pass"
+                              ? "success"
+                              : "warning"
+                        }
+                      />
+                      <AuditBadge
+                        label={`Stage 3 ${humanizeToken(item.stage3_status)}`}
+                        tone={
+                          item.stage3_status === "fail"
+                            ? "critical"
+                            : item.stage3_status === "pass"
+                              ? "success"
+                              : "warning"
+                        }
+                      />
+                      <AuditBadge
+                        label={`${formatPercent(item.completeness_pct)} complete`}
+                        tone={
+                          item.completeness_pct >= 90
+                            ? "success"
+                            : item.completeness_pct >= 70
+                              ? "warning"
+                              : "critical"
+                        }
+                      />
                       {item.feedback_model ? (
                         <AuditBadge
                           label={`${item.feedback_provider} / ${item.feedback_model}`}
@@ -482,20 +645,53 @@ export function RunAuditListClient() {
 
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                       {metric("Scanned", String(item.scanned_candidate_count))}
-                      {metric("Pre-LLM Rows", String(item.candidate_rows_before_llm))}
-                      {metric("LLM Candidates", String(item.llm_candidate_count))}
-                      {metric("LLM Calls", `${item.llm_succeeded_call_count}/${item.llm_attempted_call_count}`)}
-                      {metric("Qualified", String(item.qualified_candidate_count))}
+                      {metric(
+                        "Pre-LLM Rows",
+                        String(item.candidate_rows_before_llm),
+                      )}
+                      {metric(
+                        "LLM Candidates",
+                        String(item.llm_candidate_count),
+                      )}
+                      {metric(
+                        "LLM Calls",
+                        `${item.llm_succeeded_call_count}/${item.llm_attempted_call_count}`,
+                      )}
+                      {metric(
+                        "Qualified",
+                        String(item.qualified_candidate_count),
+                      )}
                       {metric("Ranked", String(item.ranked_count))}
-                      {metric("Final Selection", String(item.final_selection_count))}
+                      {metric(
+                        "Final Selection",
+                        String(item.final_selection_count),
+                      )}
                       {metric("Decisions", String(item.decisions_count))}
-                      {metric("Orders", `${item.orders_planned}/${item.orders_submitted}/${item.orders_filled}`)}
+                      {metric(
+                        "Orders",
+                        `${item.orders_planned}/${item.orders_submitted}/${item.orders_filled}`,
+                      )}
                       {metric("Findings", String(severityTotal(item)))}
-                      {metric("Critical / High", `${item.findings_critical} / ${item.findings_high}`)}
-                      {metric("Manual Deficiencies", String(item.manual_deficiency_count))}
-                      {metric("Provider Failures", String(item.provider_failure_count))}
-                      {metric("Incomplete Fields", String(item.incomplete_data_count))}
-                      {metric("Snapshot", `${item.snapshot_version} · ${humanizeToken(item.lifecycle_status)}`)}
+                      {metric(
+                        "Critical / High",
+                        `${item.findings_critical} / ${item.findings_high}`,
+                      )}
+                      {metric(
+                        "Manual Deficiencies",
+                        String(item.manual_deficiency_count),
+                      )}
+                      {metric(
+                        "Provider Failures",
+                        String(item.provider_failure_count),
+                      )}
+                      {metric(
+                        "Incomplete Fields",
+                        String(item.incomplete_data_count),
+                      )}
+                      {metric(
+                        "Snapshot",
+                        `${item.snapshot_version} · ${humanizeToken(item.lifecycle_status)}`,
+                      )}
                     </div>
                   </CardContent>
                 </Card>
