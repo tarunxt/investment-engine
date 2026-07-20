@@ -343,6 +343,42 @@ def test_build_deterministic_findings_flags_intents_lost_during_auth_recovery():
     }
 
 
+def test_build_deterministic_findings_flags_invalid_capacity_override_sizing_basis():
+    bundle = {
+        "metadata": {"run_id": "run-capacity-override"},
+        "overview": {
+            "run_status": "completed",
+            "started_at": "2026-07-20T12:00:00+00:00",
+            "completed_at": "2026-07-20T12:05:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {"candidate_reviews": []},
+        "stage_3": {
+            "decisions": [],
+            "order_intents": [],
+            "max_positions": 10,
+            "stage3_slot_diagnostics": {
+                "slot_limit": 10,
+                "economically_active_position_count": 3,
+                "operator_override_enabled": True,
+                "operator_override_audit": {"used": True},
+                "capacity_sizing_basis": "live-plus-all-history",
+                "capacity_sizing_occupied_market_count": 13,
+                "current_run_submitted_buy_market_count": 0,
+            },
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+
+    assert "STAGE3_CAPACITY_OVERRIDE_SIZING_BASIS_INVALID" in {
+        finding["code"] for finding in findings
+    }
+
+
 def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
     run_payload = {
         "id": "run-universe-details",

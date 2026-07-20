@@ -1645,6 +1645,27 @@ def _pending_submitted_buy_market_ids(
     return pending_market_ids
 
 
+def _stage3_capacity_sizing_market_ids(
+    *,
+    visible_active_market_ids: set[str],
+    pending_submitted_buy_market_ids: set[str],
+    current_run_submitted_buy_market_ids: set[str],
+    capacity_override_enabled: bool,
+) -> set[str]:
+    """Return the market IDs that consume slots for Stage 3 order sizing.
+
+    Pending accepted buys remain a duplicate-order denylist in every mode. The
+    explicit operator override changes only the sizing/capacity basis: it trusts
+    the forced live wallet snapshot plus accepted buys from the current run,
+    rather than letting stale historical accepted rows force the order size to
+    zero.
+    """
+
+    if capacity_override_enabled:
+        return visible_active_market_ids | current_run_submitted_buy_market_ids
+    return visible_active_market_ids | pending_submitted_buy_market_ids
+
+
 def _today_order_counts(
     decisions: list[BullpenAutoLiveDecision],
     *,
@@ -2001,6 +2022,7 @@ def _serialize_stage3_refresh_state(state: dict[str, object]) -> dict[str, objec
         "visible_active_market_ids",
         "pending_submitted_buy_market_ids",
         "occupied_market_ids",
+        "capacity_sizing_market_ids",
     ):
         value = serialized.get(key)
         if isinstance(value, set):
@@ -9057,7 +9079,17 @@ class BullpenAutoLiveEngine:
                 [*historical_decisions, *decisions],
                 visible_active_market_ids=visible_active_market_ids,
             )
+            current_run_submitted_buy_market_ids = _pending_submitted_buy_market_ids(
+                decisions,
+                visible_active_market_ids=visible_active_market_ids,
+            )
             occupied_market_ids = visible_active_market_ids | pending_submitted_buy_market_ids
+            capacity_sizing_market_ids = _stage3_capacity_sizing_market_ids(
+                visible_active_market_ids=visible_active_market_ids,
+                pending_submitted_buy_market_ids=pending_submitted_buy_market_ids,
+                current_run_submitted_buy_market_ids=current_run_submitted_buy_market_ids,
+                capacity_override_enabled=bool(settings.stage3_capacity_override),
+            )
             available_balance_usd: float | None = None
             if state.dry_run:
                 available_balance_usd = available_balance_before_step1
@@ -9074,19 +9106,37 @@ class BullpenAutoLiveEngine:
                     available_balance_usd = balance_state.available_balance_usd
             breakdown = build_console_trade_amount_breakdown(
                 available_balance_usd=available_balance_usd,
-                occupied_position_count=len(occupied_market_ids),
+                occupied_position_count=len(capacity_sizing_market_ids),
             )
             free_slots = int(breakdown["available_slots"] or 0)
             stage3_slot_diagnostics["free_slots_after_refresh"] = free_slots
             stage3_slot_diagnostics["available_cash_after_refresh_usd"] = breakdown[
                 "cash_in_hand_usd"
             ]
+            stage3_slot_diagnostics["capacity_gate_occupied_market_count"] = len(
+                occupied_market_ids
+            )
+            stage3_slot_diagnostics["capacity_sizing_occupied_market_count"] = len(
+                capacity_sizing_market_ids
+            )
+            stage3_slot_diagnostics["capacity_sizing_basis"] = (
+                "live-economic-plus-current-run-accepted-v1"
+                if settings.stage3_capacity_override
+                else "live-economic-plus-all-pending-accepted-v1"
+            )
+            stage3_slot_diagnostics["pending_submitted_buy_market_count"] = len(
+                pending_submitted_buy_market_ids
+            )
+            stage3_slot_diagnostics[
+                "current_run_submitted_buy_market_count"
+            ] = len(current_run_submitted_buy_market_ids)
             return {
                 "source": snapshot_source,
                 "snapshot_fetched_at": snapshot_fetched_at,
                 "visible_active_market_ids": visible_active_market_ids,
                 "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
                 "occupied_market_ids": occupied_market_ids,
+                "capacity_sizing_market_ids": capacity_sizing_market_ids,
                 "cash_in_hand_usd": breakdown["cash_in_hand_usd"],
                 "occupied_positions": int(breakdown["occupied_positions"] or 0),
                 "available_slots": int(breakdown["available_slots"] or 0),
@@ -9133,6 +9183,9 @@ class BullpenAutoLiveEngine:
             occupied_market_ids = set(
                 refreshed_state["occupied_market_ids"]  # type: ignore[arg-type]
             )
+            capacity_sizing_market_ids = set(
+                refreshed_state["capacity_sizing_market_ids"]  # type: ignore[arg-type]
+            )
             planned_buy_market_ids: set[str] = set()
             remaining_cash = (
                 float(refreshed_state["cash_in_hand_usd"])
@@ -9157,6 +9210,11 @@ class BullpenAutoLiveEngine:
                         "run_id": run.id,
                         "action": "stage3_capacity_override",
                         "reason": "Explicit operator setting bypassed only the slot-capacity gate for this buy.",
+                        "sizing_basis": "live-economic-plus-current-run-accepted-v1",
+                        "capacity_gate_occupied_market_count": len(occupied_market_ids),
+                        "capacity_sizing_occupied_market_count": len(
+                            capacity_sizing_market_ids
+                        ),
                         "recorded_at": utc_now_iso(),
                     }
                     stage3_slot_diagnostics["final_block_bypass_reason"] = (
@@ -9164,7 +9222,7 @@ class BullpenAutoLiveEngine:
                     )
                 current_breakdown = build_console_trade_amount_breakdown(
                     available_balance_usd=remaining_cash,
-                    occupied_position_count=len(occupied_market_ids),
+                    occupied_position_count=len(capacity_sizing_market_ids),
                 )
                 current_occupied_positions = int(
                     current_breakdown["occupied_positions"] or 0
@@ -9366,6 +9424,7 @@ class BullpenAutoLiveEngine:
                 )
                 stage3_slot_diagnostics["planned_buy_ids"].append(decision.order_plan.id)
                 occupied_market_ids.add(decision.market_id)
+                capacity_sizing_market_ids.add(decision.market_id)
                 planned_buy_market_ids.add(decision.market_id)
                 remaining_cash = round(max(0.0, remaining_cash - order_usd), 2)
                 if reservation is not None:
@@ -9701,6 +9760,28 @@ class BullpenAutoLiveEngine:
                 stage3_buy_refresh_snapshot = _serialize_stage3_refresh_state(
                     refreshed_buy_state
                 )
+                capacity_override_used = bool(
+                    order_plan.stage3_status == "CAPACITY_OVERRIDE_USED"
+                )
+                visible_active_market_ids = set(
+                    refreshed_buy_state["visible_active_market_ids"]  # type: ignore[arg-type]
+                )
+                current_run_submitted_buy_market_ids = (
+                    _pending_submitted_buy_market_ids(
+                        decisions,
+                        visible_active_market_ids=visible_active_market_ids,
+                    )
+                )
+                capacity_sizing_market_ids = _stage3_capacity_sizing_market_ids(
+                    visible_active_market_ids=visible_active_market_ids,
+                    pending_submitted_buy_market_ids=set(
+                        refreshed_buy_state[
+                            "pending_submitted_buy_market_ids"
+                        ]  # type: ignore[arg-type]
+                    ),
+                    current_run_submitted_buy_market_ids=current_run_submitted_buy_market_ids,
+                    capacity_override_enabled=capacity_override_used,
+                )
                 current_breakdown = build_console_trade_amount_breakdown(
                     available_balance_usd=(
                         float(refreshed_buy_state["cash_in_hand_usd"])
@@ -9710,9 +9791,7 @@ class BullpenAutoLiveEngine:
                         )
                         else None
                     ),
-                    occupied_position_count=int(
-                        refreshed_buy_state["occupied_positions"] or 0
-                    ),
+                    occupied_position_count=len(capacity_sizing_market_ids),
                 )
                 current_outputs = {
                     "order_usd_source": refreshed_buy_state["source"],
@@ -9731,9 +9810,6 @@ class BullpenAutoLiveEngine:
                 }
 
                 reservation = replacement_reservations.get(decision.market_id)
-                visible_active_market_ids = set(
-                    refreshed_buy_state["visible_active_market_ids"]  # type: ignore[arg-type]
-                )
                 pending_submitted_buy_market_ids = set(
                     refreshed_buy_state["pending_submitted_buy_market_ids"]  # type: ignore[arg-type]
                 )
@@ -9797,16 +9873,19 @@ class BullpenAutoLiveEngine:
                             ),
                             occupied_position_count=len(refreshed_occupied_market_ids),
                         )
-                if order_plan.status != "deferred" and (
+                if order_plan.status != "deferred" and not capacity_override_used and (
                     int(current_breakdown["available_slots"] or 0) <= 0
                 ):
                     order_plan.status = "deferred"
                     order_plan.detail = (
                         "Portfolio capacity is genuinely full after the forced live refresh: ten economically active or pending markets occupy the limit."
                     )
-                elif order_plan.status != "deferred" and int(
-                    current_breakdown["occupied_positions"] or 0
-                ) + 1 > CONSOLE_RANKED_EVENT_LIMIT:
+                elif (
+                    order_plan.status != "deferred"
+                    and not capacity_override_used
+                    and int(current_breakdown["occupied_positions"] or 0) + 1
+                    > CONSOLE_RANKED_EVENT_LIMIT
+                ):
                     order_plan.status = "deferred"
                     order_plan.detail = (
                         "Submitting this order would exceed the 10-position Bullpen limit, so the guardrail deferred it."

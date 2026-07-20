@@ -525,9 +525,9 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     detection_metadata={"occupied_slots_before_exit": occupied_before},
                 )
             )
-        if slot_diagnostics.get("operator_override_enabled") and not slot_diagnostics.get(
-            "operator_override_audit"
-        ):
+        override_enabled = bool(slot_diagnostics.get("operator_override_enabled"))
+        override_audit = slot_diagnostics.get("operator_override_audit")
+        if override_enabled and not override_audit:
             findings.append(
                 _finding(
                     code="STAGE3_CAPACITY_OVERRIDE_NOT_AUDITED",
@@ -540,6 +540,49 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     evidence_pointers=["/stage_3/stage3_slot_diagnostics/operator_override_audit"],
                 )
             )
+        sizing_basis = slot_diagnostics.get("capacity_sizing_basis")
+        if override_enabled and sizing_basis is not None:
+            expected_sizing_basis = "live-economic-plus-current-run-accepted-v1"
+            sizing_count = _int(
+                slot_diagnostics.get("capacity_sizing_occupied_market_count")
+            )
+            current_run_pending_count = _int(
+                slot_diagnostics.get("current_run_submitted_buy_market_count")
+            )
+            expected_sizing_count = (
+                int(economically_active) + int(current_run_pending_count)
+                if economically_active is not None
+                and current_run_pending_count is not None
+                else None
+            )
+            if sizing_basis != expected_sizing_basis or (
+                sizing_count is not None
+                and expected_sizing_count is not None
+                and sizing_count != expected_sizing_count
+            ):
+                findings.append(
+                    _finding(
+                        code="STAGE3_CAPACITY_OVERRIDE_SIZING_BASIS_INVALID",
+                        severity="high",
+                        stage="stage-3",
+                        category="slot-allocation",
+                        title="Stage 3 capacity override used an invalid sizing basis",
+                        explanation=(
+                            "The override must size from the forced live economic-position snapshot plus accepted buys from the current run; historical pending rows remain duplicate guards but cannot force sizing to zero."
+                        ),
+                        observed_value=(
+                            f"basis={sizing_basis}; occupied={sizing_count}"
+                        ),
+                        expected_value=(
+                            f"basis={expected_sizing_basis}; occupied={expected_sizing_count}"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            "/stage_3/stage3_slot_diagnostics/capacity_sizing_basis",
+                            "/stage_3/stage3_slot_diagnostics/capacity_sizing_occupied_market_count",
+                        ],
+                    )
+                )
 
     orders = stage_3.get("order_intents") if isinstance(stage_3.get("order_intents"), list) else []
     auth_recovery = (

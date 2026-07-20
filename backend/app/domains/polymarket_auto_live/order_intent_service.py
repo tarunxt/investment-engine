@@ -962,6 +962,7 @@ def _persist_capacity_override_audit(
         "intent_id": record.id,
         "action": "stage3_capacity_override",
         "reason": "Explicit operator setting bypassed only the slot-capacity gate.",
+        "sizing_basis": "live-economic-plus-current-run-accepted-v1",
         "recorded_at": utc_now_iso(),
     }
     run.payload = {
@@ -973,6 +974,18 @@ def _persist_capacity_override_audit(
             continue
         diagnostics = stage.outputs.get("stage3_slot_diagnostics")
         if isinstance(diagnostics, dict):
+            audit.update(
+                {
+                    key: diagnostics.get(key)
+                    for key in (
+                        "capacity_gate_occupied_market_count",
+                        "capacity_sizing_occupied_market_count",
+                        "pending_submitted_buy_market_count",
+                        "current_run_submitted_buy_market_count",
+                    )
+                    if diagnostics.get(key) is not None
+                }
+            )
             diagnostics["operator_override_enabled"] = True
             diagnostics["operator_override_audit"] = audit
             diagnostics["final_block_bypass_reason"] = (
@@ -1186,6 +1199,9 @@ def create_or_refresh_run_order_intents_sync(
                 },
                 execution_metadata_json={
                     "idempotency_key_format": STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
+                    "capacity_override_used": bool(
+                        order_plan.stage3_status == "CAPACITY_OVERRIDE_USED"
+                    ),
                     "reservation_state": None,
                     "run_status": run.status,
                     "stage3_status": (
@@ -1257,6 +1273,10 @@ def create_or_refresh_run_order_intents_sync(
             settings_snapshot = settings_snapshot if isinstance(settings_snapshot, dict) else {}
             intent.execution_metadata_json = {
                 **existing_metadata,
+                "capacity_override_used": bool(
+                    existing_metadata.get("capacity_override_used")
+                    or order_plan.stage3_status == "CAPACITY_OVERRIDE_USED"
+                ),
                 "stage3_status": (
                     "EXIT_NOT_SUBMITTED"
                     if order_plan.action in {"sell", "redeem"}
@@ -2006,11 +2026,19 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                 )
         override_enabled = bool(capacity_policy.get("capacity_override", False))
         slot_limit = int(capacity_policy.get("slot_limit", 10) or 10)
+        planned_capacity_override = bool(
+            intent.execution_metadata_json.get("capacity_override_used")
+            or intent.execution_metadata_json.get("stage3_status")
+            == "CAPACITY_OVERRIDE_USED"
+        )
         intent.execution_metadata_json = {
             **dict(intent.execution_metadata_json or {}),
             "capacity_override_used": bool(
                 override_enabled
-                and allocation.economically_active_position_count >= slot_limit
+                and (
+                    planned_capacity_override
+                    or allocation.economically_active_position_count >= slot_limit
+                )
                 and not replacement_confirmed
             ),
         }

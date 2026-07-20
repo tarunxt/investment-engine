@@ -48,6 +48,8 @@ from app.domains.polymarket_auto_live.engine import (
     _apply_next_cycle_schedule,
     _manual_console_market,
     _summarize_stage3_step2_buy_queue,
+    _stage3_capacity_sizing_market_ids,
+    build_console_trade_amount_breakdown,
     build_workflow_stage_result,
     reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
@@ -8469,6 +8471,34 @@ def test_summarize_stage3_step2_buy_queue_tracks_transferred_rows_separately_fro
     )
 
     assert counts == {"planned": 4, "processed": 2, "submitted": 1}
+
+
+def test_stage3_capacity_override_sizes_from_live_and_current_run_markets_only():
+    visible_market_ids = {"live-1", "live-2", "live-3"}
+    historical_pending_market_ids = {
+        f"historical-pending-{index}" for index in range(10)
+    }
+    current_run_submitted_market_ids = {"current-run-buy"}
+
+    regular_ids = _stage3_capacity_sizing_market_ids(
+        visible_active_market_ids=visible_market_ids,
+        pending_submitted_buy_market_ids=historical_pending_market_ids,
+        current_run_submitted_buy_market_ids=current_run_submitted_market_ids,
+        capacity_override_enabled=False,
+    )
+    override_ids = _stage3_capacity_sizing_market_ids(
+        visible_active_market_ids=visible_market_ids,
+        pending_submitted_buy_market_ids=historical_pending_market_ids,
+        current_run_submitted_buy_market_ids=current_run_submitted_market_ids,
+        capacity_override_enabled=True,
+    )
+
+    assert len(regular_ids) == 13
+    assert override_ids == visible_market_ids | current_run_submitted_market_ids
+    assert build_console_trade_amount_breakdown(
+        available_balance_usd=8.51,
+        occupied_position_count=len(override_ids),
+    )["order_usd"] == 1.42
 
 
 @pytest.mark.anyio

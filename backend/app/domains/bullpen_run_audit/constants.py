@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-dust-reconciliation-v7"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-capacity-sizing-v8"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage3-dust-reconciliation-v7"
+    "2026-07-20-stage3-capacity-sizing-v8"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -61,10 +61,18 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "console_trade_amount_per_opportunity",
         "stage": "stage-1",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.engine",
         "source_function": "build_console_trade_amount_breakdown",
         "label": "Cash per available Bullpen portfolio slot",
+    },
+    {
+        "algorithm_key": "stage3_capacity_override_sizing",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "_stage3_capacity_sizing_market_ids",
+        "label": "Audited Stage 3 capacity-override sizing basis",
     },
     {
         "algorithm_key": "llm_returns_per_day",
