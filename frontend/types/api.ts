@@ -2367,6 +2367,8 @@ export interface BullpenAutoLiveOrderPlan {
   remaining_shares?: number;
   average_fill_price_cents?: number | null;
   execution_response?: string | null;
+  current_blockage?: string | null;
+  how_to_resolve?: string | null;
   created_at: string;
   executed_at?: string | null;
   confirmed_at?: string | null;

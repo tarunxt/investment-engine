@@ -38,6 +38,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     persist_stage3_intent_diagnostics_sync,
     reconcile_order_intent_sync,
     sync_run_and_decisions_from_intents_sync,
+    watchdog_requeue_stale_order_intents_sync,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
     finalize_failed_run_progress,
@@ -105,7 +106,7 @@ def _queue_due_order_intents_for_run_sync(run_id: str, *, limit: int = 50) -> in
         due_ids = list_due_order_intent_ids_sync(
             session,
             limit=limit,
-            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
             now=_utc_now(),
         )
         if not due_ids:
@@ -588,10 +589,12 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
 )
 def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
     with SyncSessionLocal() as session:
+        watchdog_requeue_stale_order_intents_sync(session, limit=limit)
+        session.commit()
         executable_ids = list_due_order_intent_ids_sync(
             session,
             limit=limit,
-            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
         )
         reconcilable_ids = list_due_order_intent_ids_sync(
             session,
@@ -603,6 +606,30 @@ def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
         execute_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
     for intent_id in reconcilable_ids:
         reconcile_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+
+
+@celery.task(
+    name="app.domains.polymarket_auto_live.tasks.watchdog_requeue_stale_auto_live_order_intents",
+    queue="beat",
+)
+def watchdog_requeue_stale_auto_live_order_intents(limit: int = 100) -> None:
+    with SyncSessionLocal() as session:
+        touched_ids = watchdog_requeue_stale_order_intents_sync(session, limit=limit)
+        reconcile_ids = set(
+            session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord.id)
+                .where(PolymarketAutoLiveOrderIntentRecord.id.in_(touched_ids))
+                .where(PolymarketAutoLiveOrderIntentRecord.status.in_(("CONFIRMING", "SUBMITTING")))
+            )
+            .scalars()
+            .all()
+        )
+        session.commit()
+    for intent_id in touched_ids:
+        if intent_id in reconcile_ids:
+            reconcile_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+        else:
+            execute_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
 
 
 @celery.task(
