@@ -94,6 +94,25 @@ jobs:
             sudo test -d "$APP_ROOT/.git"
             id "$APP_USER" >/dev/null
 
+            MIN_FREE_KB=1048576
+            AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+            if (( AVAILABLE_KB < MIN_FREE_KB )); then
+              echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches"
+              sudo journalctl --vacuum-time=7d --vacuum-size=256M || true
+              sudo apt-get clean || true
+              if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
+                sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
+              fi
+              AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+              echo "==> Disk space after cache pruning: ${AVAILABLE_KB} KiB free"
+            fi
+            if (( AVAILABLE_KB < 524288 )); then
+              echo "Production deploy requires at least 512 MiB free after bounded cache cleanup." >&2
+              df -h "$APP_ROOT" >&2
+              exit 1
+            fi
+            sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
+
             echo "==> Sync GitHub main to EC2"
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
@@ -139,6 +158,25 @@ jobs:
             command -v git >/dev/null
             sudo test -d "$APP_ROOT/.git"
             id "$APP_USER" >/dev/null
+
+            MIN_FREE_KB=1048576
+            AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+            if (( AVAILABLE_KB < MIN_FREE_KB )); then
+              echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches"
+              sudo journalctl --vacuum-time=7d --vacuum-size=256M || true
+              sudo apt-get clean || true
+              if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
+                sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
+              fi
+              AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
+              echo "==> Disk space after cache pruning: ${AVAILABLE_KB} KiB free"
+            fi
+            if (( AVAILABLE_KB < 524288 )); then
+              echo "Production deploy requires at least 512 MiB free after bounded cache cleanup." >&2
+              df -h "$APP_ROOT" >&2
+              exit 1
+            fi
+            sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
 
             echo "==> Sync GitHub main to EC2"
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
