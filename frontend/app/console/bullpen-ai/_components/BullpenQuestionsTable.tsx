@@ -981,13 +981,6 @@ export function BullpenQuestionsTable({
       (question) => effectiveRowHighlightById[question.id] === section.kind,
     ),
   })).filter((section) => section.rows.length > 0);
-  const visibleColumnCount = visibleBaseColumnIds.length + extraColumns.length;
-  const selectableRowCount = selectionEnabled ? rows.length : 0;
-  const selectedVisibleCount = rows.filter((question) =>
-    selectedQuestionIds.has(question.id),
-  ).length;
-  const allVisibleSelected =
-    selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
   const normalizeRequestedColumnOrder = (current: BullpenTableColumnId[]) => {
     const retained = current.filter((columnId) =>
       requestedVisibleColumnIds.includes(columnId),
@@ -998,6 +991,13 @@ export function BullpenQuestionsTable({
     return [...retained, ...missing];
   };
   const visibleBaseColumnIds = normalizeRequestedColumnOrder(columnOrder);
+  const visibleColumnCount = visibleBaseColumnIds.length + extraColumns.length;
+  const selectableRowCount = selectionEnabled ? rows.length : 0;
+  const selectedVisibleCount = rows.filter((question) =>
+    selectedQuestionIds.has(question.id),
+  ).length;
+  const allVisibleSelected =
+    selectableRowCount > 0 && selectedVisibleCount === selectableRowCount;
   const tableWidth =
     getBullpenTableWidth(columnWidths, visibleBaseColumnIds) +
     extraColumns.reduce(
