@@ -9821,9 +9821,9 @@ export function BullpenAutoRunScheduleCard({
     });
   };
   const liveWorkflowSettled = isBullpenAutoRunWorkflowSettled(liveWorkflowView);
-  const hasActiveWorkflowStage = liveWorkflowView.stages.some(
-    (stage) => stage.isCurrent,
-  );
+  const hasActiveWorkflowStage =
+    isActivelyWorkingRunStatus(liveWorkflowView.runStatus) &&
+    liveWorkflowView.stages.some((stage) => stage.isCurrent);
   const runActionRequested = action === "invest-now";
   const startNowActionRequested = action === "start-now";
   const runIsActive =

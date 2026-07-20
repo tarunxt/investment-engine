@@ -528,6 +528,10 @@ test("Bullpen x AI keeps pause and kill controls available during an active run"
 
   assert.match(autoRunCardSource, /const startNowActionRequested = action === "start-now";/);
   assert.match(autoRunCardSource, /startNowActionRequested \|\|/);
+  assert.match(
+    autoRunCardSource,
+    /const hasActiveWorkflowStage =\s*isActivelyWorkingRunStatus\(liveWorkflowView\.runStatus\) &&\s*liveWorkflowView\.stages\.some/,
+  );
   assert.match(autoRunCardSource, /action === "start-now" \? "start-now-pending" : null/);
   assert.match(autoRunCardSource, /setAction\(null\);\s*\n\s*\}/);
   assert.doesNotMatch(autoRunCardSource, /Run Scans and Invest Now/);
