@@ -490,7 +490,11 @@ the existing decision rows in place and never replaces them, preserving linked
 durable intents and their attempt history for explicit reconciliation or retry.
 The audit captures `auth_recovery` and raises a critical blocking finding when a
 recovered run retains live order plans but has lost its durable intents. Remote
-writes re-read this recovery state immediately before submission.
+writes re-read this recovery state immediately before submission. The explicit
+same-run retry records `auth_recovery.operator_resume_at`; only that audited
+operator transition clears the stale-auth recovery block, while all current
+doctor, balance, capacity, quote, sizing, and duplicate-submission checks remain
+active.
 
 Stage 3 `orders_planned`, `orders_processed`, `orders_submitted`, both execution-step
 tiles, and the run-level order funnel are materialized from durable order-intent and

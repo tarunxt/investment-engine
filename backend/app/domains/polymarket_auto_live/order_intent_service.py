@@ -478,6 +478,12 @@ def _assert_intent_has_no_persisted_submission_reference(intent: object) -> None
     )
 
 
+def _auth_recovery_allows_operator_resume(auth_recovery: object) -> bool:
+    return isinstance(auth_recovery, dict) and bool(
+        auth_recovery.get("operator_resume_at")
+    )
+
+
 def _run_recovery_block_reason(
     session: Session,
     *,
@@ -502,6 +508,7 @@ def _run_recovery_block_reason(
         run.status == "failed"
         and isinstance(auth_recovery, dict)
         and auth_recovery.get("historical_error_stale")
+        and not _auth_recovery_allows_operator_resume(auth_recovery)
     ):
         return (
             "The historical authentication failure was recovered and this old "
@@ -730,8 +737,10 @@ def _preserve_unresolved_stage3_recovery(run: BullpenAutoLiveRun) -> None:
 
 def _preserve_recovered_auth_error(run: BullpenAutoLiveRun) -> None:
     recovery = run.audit_metadata.get("auth_recovery")
-    if not isinstance(recovery, dict) or not recovery.get(
-        "historical_error_stale"
+    if (
+        not isinstance(recovery, dict)
+        or not recovery.get("historical_error_stale")
+        or _auth_recovery_allows_operator_resume(recovery)
     ):
         return
     recovered_at = str(recovery.get("recovered_at") or utc_now_iso())
@@ -3355,6 +3364,10 @@ def retry_failed_exits_and_continue_buys_sync(
 
         recovery = run.audit_metadata.get("stage3_recovery")
         recovery = dict(recovery) if isinstance(recovery, dict) else {}
+        auth_recovery = run.audit_metadata.get("auth_recovery")
+        auth_recovery = (
+            dict(auth_recovery) if isinstance(auth_recovery, dict) else {}
+        )
         run.audit_metadata = {
             **run.audit_metadata,
             "stage3_recovery": {
@@ -3362,6 +3375,12 @@ def retry_failed_exits_and_continue_buys_sync(
                 "required": False,
                 "resolved_at": resumed_at,
                 "resolution": "operator_retry",
+            },
+            "auth_recovery": {
+                **auth_recovery,
+                "operator_resume_at": resumed_at,
+                "operator_resume_action": "Retry failed exits and continue buys",
+                "operator_resume_same_run": True,
             },
             "stage3_resume_action": {
                 "action": "Retry failed exits and continue buys",

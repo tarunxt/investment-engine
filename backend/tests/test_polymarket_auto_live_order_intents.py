@@ -10,6 +10,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
     _assert_intent_has_no_persisted_submission_reference,
+    _auth_recovery_allows_operator_resume,
     _persisted_stage3_counts,
     build_stage3_order_intent_idempotency_key,
     stage3_execution_market_reference,
@@ -107,6 +108,22 @@ def test_stage3_execution_market_reference_prefers_cli_slug():
     assert (
         stage3_execution_market_reference(slug=None, market_id="legacy-market-ref")
         == "legacy-market-ref"
+    )
+
+
+def test_auth_recovery_requires_explicit_operator_resume_timestamp():
+    assert (
+        _auth_recovery_allows_operator_resume({"historical_error_stale": True})
+        is False
+    )
+    assert (
+        _auth_recovery_allows_operator_resume(
+            {
+                "historical_error_stale": True,
+                "operator_resume_at": "2026-07-20T15:00:00+00:00",
+            }
+        )
+        is True
     )
 
 
