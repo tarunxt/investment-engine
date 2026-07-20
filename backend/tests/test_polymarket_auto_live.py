@@ -20,6 +20,7 @@ from app.domains.polymarket.bullpen_llm_execution import (
     BullpenLlmTargetExecutionResult,
     ParsedBullpenMarketRow,
 )
+from app.domains.polymarket.runtime_broker import BullpenRuntimeCommandError
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
     _state_has_due_scheduled_run,
@@ -1957,6 +1958,132 @@ async def test_console_profile_blocks_stage_2_and_stage_3_when_fresh_wallet_posi
     assert stage2.outputs["phase_status"] == "blocked"
     assert stage3.outputs["phase_status"] == "blocked"
     assert stage2.outputs["blocked_by_stage1_wallet_refresh"] is True
+    assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("wallet_failure", "expects_wallet_task_cancellation"),
+    [("hang", True), ("lock_timeout", False)],
+)
+async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_timeout(
+    monkeypatch,
+    wallet_failure,
+    expects_wallet_task_cancellation,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will a slow wallet refresh no longer block Stage 2?",
+        slug="stage-1-wallet-handoff-timeout",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    wallet_read_cancelled = asyncio.Event()
+
+    async def hang_wallet_refresh():
+        if wallet_failure == "lock_timeout":
+            raise BullpenRuntimeCommandError(
+                "Timed out waiting for the shared Bullpen wallet lock.",
+                classification="lock_timeout",
+            )
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            wallet_read_cancelled.set()
+            raise
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        hang_wallet_refresh,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.console_stage1_wallet_refresh_timeout_seconds",
+        lambda: 0.01,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.resolve_auto_live_llm_targets",
+        lambda _settings: [("openai", "gpt-4o-mini")],
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(provider="openai", model="gpt-4o-mini")
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    if expects_wallet_task_cancellation:
+        await asyncio.wait_for(wallet_read_cancelled.wait(), timeout=1)
+    stage1 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "scan"
+    )
+    stage2 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    stage3 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+
+    assert result.run.status == "partial_success"
+    assert result.decisions == []
+    assert stage1.outputs["phase_status"] == "completed"
+    assert stage1.outputs["wallet_snapshot_status"] == "unavailable"
+    assert stage1.outputs["stage2_candidate_only"] is True
+    assert stage2.outputs["phase_status"] == "completed"
+    assert stage2.outputs["stage2_candidate_only"] is True
+    assert stage3.outputs["phase_status"] == "blocked"
     assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
 
 

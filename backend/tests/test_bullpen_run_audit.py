@@ -438,6 +438,57 @@ def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
     }
 
 
+def test_candidate_only_stage2_wallet_timeout_is_audited_without_stage3_handoff_failure():
+    bundle = {
+        "metadata": {"run_id": "run-wallet-handoff-timeout"},
+        "overview": {
+            "run_status": "partial_success",
+            "started_at": "2026-07-21T00:00:00+00:00",
+            "completed_at": "2026-07-21T00:01:00+00:00",
+            "duration_seconds": 60,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_1": {
+            "scan_context": {
+                "stage2_candidate_only": True,
+                "wallet_refresh_error": "Fresh Bullpen wallet refresh did not finish within 30 seconds.",
+            }
+        },
+        "stage_2": {
+            "candidate_only": True,
+            "candidate_reviews": [
+                {
+                    "market_id": "candidate-1",
+                    "source_kind": "candidate",
+                    "qualified": True,
+                    "llm_outputs": [
+                        {"llm_yes_odds": 8, "llm_no_odds": 92}
+                    ],
+                }
+            ],
+            "stage3_handoff_candidate_market_ids": ["candidate-1"],
+        },
+        "stage_3": {
+            "blocked_by_stage1_wallet_refresh": True,
+            "decisions": [],
+            "order_intents": [],
+        },
+        "raw": {},
+    }
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(bundle)
+    }
+
+    assert "STAGE1_WALLET_TIMEOUT_CANDIDATE_ONLY_REVIEW" in codes
+    assert "QUALIFIED_STAGE2_CANDIDATE_MISSING_STAGE3_RESULT" not in codes
+    assert "STAGE2_TOP10_HANDOFF_MISSING_STAGE3_DECISION" not in codes
+    assert "STAGE1_WALLET_TIMEOUT_STAGE3_NOT_BLOCKED" not in codes
+    assert "STAGE1_WALLET_TIMEOUT_EXECUTION_OCCURRED" not in codes
+
+
 def test_build_bundle_preserves_stage2_rule_gate_provenance():
     run_payload = {
         "id": "run-rule-gate-provenance",
@@ -525,6 +576,7 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert keys >= {
         "stage2_consensus_statistics",
         "candidate_returns_per_day",
+        "stage1_wallet_handoff_circuit_breaker",
         "console_trade_amount_per_opportunity",
         "stage3_live_capacity_sizing",
         "llm_returns_per_day",

@@ -54,6 +54,13 @@ CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
 CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS = 45
 CONSOLE_POSITIONS_TIMEOUT_SECONDS = 20
 CONSOLE_POSITIONS_TIMEOUT_ENV_VAR = "BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS"
+# The broker may wait for a shared authenticated CLI refresh before it runs the
+# positions command.  Keep the overall Stage 1 wait independently bounded so
+# a lock owner or auth refresh can never hold the Stage 2 handoff indefinitely.
+CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS = 30
+CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_ENV_VAR = (
+    "BULLPEN_CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS"
+)
 
 _POSITIONS_COMMAND_VARIANTS = [
     ["polymarket", "positions", "--output", "json"],
@@ -213,6 +220,23 @@ def _console_positions_timeout_seconds() -> int:
         return max(1, int(configured))
     except ValueError:
         return CONSOLE_POSITIONS_TIMEOUT_SECONDS
+
+
+def console_stage1_wallet_refresh_timeout_seconds() -> int:
+    """Return the end-to-end Stage 1 wait budget for a fresh wallet snapshot.
+
+    This is deliberately distinct from the individual Bullpen positions-command
+    timeout.  A fresh request can also wait on the distributed positions and
+    authenticated-CLI locks, so the worker needs its own circuit breaker.
+    """
+
+    configured = os.getenv(CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_ENV_VAR)
+    if configured is None:
+        return CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS
+    try:
+        return max(1, int(configured))
+    except ValueError:
+        return CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS
 
 
 def _parse_console_start_at(value: str | None) -> datetime | None:

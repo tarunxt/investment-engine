@@ -60,6 +60,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     ConsoleScanResult,
     apply_scanned_market_to_position,
     candidate_returns_per_day,
+    console_stage1_wallet_refresh_timeout_seconds,
     llm_returns_per_day,
     console_market_filter_reasons,
     next_console_schedule_time,
@@ -194,6 +195,31 @@ _ORIGINAL_READ_CONSOLE_WALLET_POSITIONS = read_console_wallet_positions
 CONSOLE_RANKING_FIELD = "returns_per_day"
 CONSOLE_RANKING_TIE_BREAK = "market_id"
 CONSOLE_SIZING_FORMULA = "cash_in_hand / (max_positions - occupied_positions)"
+
+
+def _cancel_background_task(task: asyncio.Task[Any]) -> None:
+    """Cancel a best-effort background read without extending a workflow timeout."""
+
+    if not task.done():
+        task.cancel()
+
+    def consume_result(completed_task: asyncio.Task[Any]) -> None:
+        if completed_task.cancelled():
+            return
+        with suppress(Exception):
+            completed_task.result()
+
+    task.add_done_callback(consume_result)
+
+
+def _is_stage1_wallet_handoff_timeout(exc: Exception) -> bool:
+    """Whether a wallet-read failure is safe to degrade to candidate-only analysis."""
+
+    return isinstance(exc, TimeoutError) or getattr(exc, "classification", None) in {
+        "timeout",
+        "lock_timeout",
+    }
+
 
 ProgressCallback = Callable[[BullpenAutoLiveRun, BullpenAutoLiveState], None]
 
@@ -4884,6 +4910,9 @@ class BullpenAutoLiveEngine:
         durable_execution: bool = False,
     ) -> EngineResult:
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
+        stage1_wallet_refresh_timeout_seconds = (
+            console_stage1_wallet_refresh_timeout_seconds()
+        )
         manual_console_context = (
             run.request_context.console_profile
             if run.request_context and run.request_context.console_profile
@@ -5259,14 +5288,6 @@ class BullpenAutoLiveEngine:
                         reason=reason,
                     )
 
-        stage1_scan_status = "warning" if scan_warning else "pass"
-        stage1_scan_reason = (
-            "Bullpen console profile scan completed with an upstream warning: "
-            f"{scan_warning}"
-            if scan_warning
-            else "Bullpen console profile synced live wallet positions and prepared the candidate set."
-        )
-
         def fail_stage_one_wallet_refresh(reason: str) -> EngineResult:
             completed_at = utc_now_iso()
             set_run_stage_result(
@@ -5346,17 +5367,72 @@ class BullpenAutoLiveEngine:
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
 
         console_balance_task = asyncio.create_task(refresh_balance())
+        stage1_wallet_refresh_error: str | None = None
         try:
-            live_wallet_positions = await live_wallet_positions_task
-        except Exception as exc:
-            console_balance_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await console_balance_task
-            reason = (
-                "Stage 1 failed because Cred-X could not refresh fresh Bullpen wallet positions: "
-                f"{exc}"
+            completed_wallet_tasks, _ = await asyncio.wait(
+                {live_wallet_positions_task},
+                timeout=stage1_wallet_refresh_timeout_seconds,
             )
-            return fail_stage_one_wallet_refresh(reason)
+            if live_wallet_positions_task not in completed_wallet_tasks:
+                # Do not await task cancellation here.  The point of this
+                # circuit breaker is to release Stage 2 even when a lower
+                # level client is slow to unwind a shared lock or subprocess.
+                _cancel_background_task(live_wallet_positions_task)
+                stage1_wallet_refresh_error = (
+                    "Fresh Bullpen wallet refresh did not finish within "
+                    f"{stage1_wallet_refresh_timeout_seconds} seconds."
+                )
+                logger.warning(
+                    "Stage 1 wallet refresh exceeded its %s-second handoff budget; "
+                    "continuing with candidate-only Stage 2 for run %s.",
+                    stage1_wallet_refresh_timeout_seconds,
+                    run.id,
+                )
+                live_wallet_positions: list[ConsoleWalletPosition] = []
+            else:
+                live_wallet_positions = live_wallet_positions_task.result()
+        except Exception as exc:
+            if not _is_stage1_wallet_handoff_timeout(exc):
+                _cancel_background_task(console_balance_task)
+                reason = (
+                    "Stage 1 failed because Cred-X could not refresh fresh Bullpen wallet positions: "
+                    f"{exc}"
+                )
+                return fail_stage_one_wallet_refresh(reason)
+
+            # The runtime broker can enforce its own command or shared-lock
+            # timeout before this outer deadline elapses.  Those are the same
+            # availability condition as an unfinished wallet task: Stage 2 is
+            # safe to continue read-only, while all Stage 3 execution remains
+            # hard-blocked below.
+            stage1_wallet_refresh_error = (
+                "Fresh Bullpen wallet refresh timed out or could not acquire the "
+                "shared wallet lock before the Stage 1 handoff deadline."
+            )
+            logger.warning(
+                "Stage 1 wallet refresh returned a transient %s failure; "
+                "continuing with candidate-only Stage 2 for run %s.",
+                getattr(exc, "classification", "timeout"),
+                run.id,
+            )
+            live_wallet_positions = []
+
+        stage1_scan_status = (
+            "warning" if scan_warning or stage1_wallet_refresh_error else "pass"
+        )
+        stage1_scan_reason = (
+            "Bullpen console profile scan completed, but the fresh wallet snapshot "
+            "did not arrive within the Stage 1 handoff budget. Stage 2 will review "
+            "new candidates only; Stage 3 is blocked so no orders can be planned or submitted."
+            if stage1_wallet_refresh_error
+            else "Bullpen console profile scan completed with an upstream warning: "
+            f"{scan_warning}"
+            if scan_warning
+            else "Bullpen console profile synced live wallet positions and prepared the candidate set."
+        )
+        if stage1_wallet_refresh_error:
+            _cancel_background_task(console_balance_task)
+            console_balance_task = None
         unsupported_live_wallet_positions = [
             position
             for position in live_wallet_positions
@@ -5640,13 +5716,14 @@ class BullpenAutoLiveEngine:
             state.last_console_trade_amount_usd
         )
         console_balance_state = None
-        try:
-            console_balance_state = await console_balance_task
-        except Exception as exc:
-            logger.warning(
-                "Could not refresh Bullpen cash in hand for console sizing: %s",
-                exc,
-            )
+        if console_balance_task is not None:
+            try:
+                console_balance_state = await console_balance_task
+            except Exception as exc:
+                logger.warning(
+                    "Could not refresh Bullpen cash in hand for console sizing: %s",
+                    exc,
+                )
 
         console_trade_amount_breakdown = build_console_trade_amount_breakdown(
             available_balance_usd=(
@@ -5682,6 +5759,12 @@ class BullpenAutoLiveEngine:
             )
 
         stage1_wallet_position_outputs = {
+            "wallet_snapshot_status": (
+                "unavailable" if stage1_wallet_refresh_error else "fresh"
+            ),
+            "wallet_refresh_timeout_seconds": stage1_wallet_refresh_timeout_seconds,
+            "wallet_refresh_error": stage1_wallet_refresh_error,
+            "stage2_candidate_only": bool(stage1_wallet_refresh_error),
             "live_wallet_positions": len(enriched_wallet_positions),
             "active_wallet_positions": active_position_rows_before_llm,
             "active_positions_found": serialized_active_positions_found,
@@ -5833,6 +5916,11 @@ class BullpenAutoLiveEngine:
             stage_outputs: dict[str, object] = {
                 "scan_source_label": scan_source_label,
                 "scan_source_url": scan_source_url,
+                "stage1_wallet_snapshot_available": not bool(
+                    stage1_wallet_refresh_error
+                ),
+                "stage1_wallet_refresh_error": stage1_wallet_refresh_error,
+                "stage2_candidate_only": bool(stage1_wallet_refresh_error),
                 "used_manual_console_rows": manual_console_rows_used,
                 "active_position_rows_before_llm": active_position_rows_before_llm,
                 "candidate_rows_before_llm": candidate_rows_before_llm,
@@ -6954,6 +7042,11 @@ class BullpenAutoLiveEngine:
                 outputs={
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
+                    "stage1_wallet_snapshot_available": not bool(
+                        stage1_wallet_refresh_error
+                    ),
+                    "stage1_wallet_refresh_error": stage1_wallet_refresh_error,
+                    "stage2_candidate_only": bool(stage1_wallet_refresh_error),
                     "used_manual_console_rows": manual_console_rows_used,
                     "stage1_accepted_candidate_count": stage1_accepted_candidate_count,
                     "active_position_rows_before_llm": active_position_rows_before_llm,
@@ -6993,6 +7086,68 @@ class BullpenAutoLiveEngine:
             run.diagnostics.ranking_enabled = False
             run.diagnostics.ranking_exit_enabled = False
             run.diagnostics.new_buy_enabled = False
+            self._report_progress(progress_callback, run, state)
+            return EngineResult(run=run, decisions=[], state=state, positions=positions)
+
+        if stage1_wallet_refresh_error:
+            # Candidate analysis is read-only, so it can still be useful when
+            # the shared wallet refresh is contended or slow.  Do not turn that
+            # partial input into an investment decision: any Stage 3 ranking,
+            # exit, or buy could be wrong without a fresh authoritative wallet
+            # snapshot, so the workflow stops here with no decisions or orders.
+            completed_at = utc_now_iso()
+            stage3_block_reason = (
+                "Stage 2 completed candidate-only LLM review, but Stage 3 was blocked "
+                "because a fresh Bullpen wallet snapshot was unavailable. No orders "
+                "were planned or submitted."
+            )
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=3,
+                    workflow_stage_key="invest",
+                    phase_status="blocked",
+                    status="warning",
+                    reason=stage3_block_reason,
+                    completed_items=0,
+                    total_items=0,
+                    item_label="rows",
+                    outputs={
+                        "blocked_by_stage1_wallet_refresh": True,
+                        "stage1_wallet_refresh_error": stage1_wallet_refresh_error,
+                        "stage2_candidate_only": True,
+                        "stage2_completed_candidate_review_count": llm_candidate_count,
+                        "stage2_qualified_candidate_count": len(qualifying_candidates),
+                        **stage2_universe_status,
+                        **stage2_strategy_metadata,
+                    },
+                    guardrails_checked=global_guardrails,
+                    hard_block=True,
+                    started_at=completed_at,
+                    completed_at=completed_at,
+                ),
+            )
+            run.completed_at = completed_at
+            run.status = "partial_success"
+            run.error_message = stage3_block_reason
+            run.summary = stage3_block_reason
+            run.diagnostics.stage2_has_usable_reviews = usable_llm_review_count > 0
+            run.diagnostics.ranking_enabled = False
+            run.diagnostics.ranking_exit_enabled = False
+            run.diagnostics.new_buy_enabled = False
+            state.last_run_id = run.id
+            state.last_run_at = completed_at
+            state.last_scan_at = completed_at
+            state.last_llm_run_at = completed_at
+            state.last_error = run.summary
+            state.last_action = run.summary
+            state.latest_guardrail_checks = global_guardrails
+            state.live_execution_allowed = False
+            _apply_next_cycle_schedule(
+                settings=settings,
+                state=state,
+                reference_time=now,
+            )
             self._report_progress(progress_callback, run, state)
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
 

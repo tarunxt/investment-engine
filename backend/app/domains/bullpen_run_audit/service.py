@@ -838,6 +838,14 @@ def _build_bundle(
                 "selected_manual_candidate_ids": diagnostics.get("selected_manual_candidate_ids") or [],
                 "scanned_candidates": diagnostics.get("scanned_candidates"),
                 "candidate_rows_before_llm": diagnostics.get("candidate_rows_before_llm"),
+                "wallet_snapshot_status": stage1_outputs.get("wallet_snapshot_status"),
+                "wallet_refresh_timeout_seconds": stage1_outputs.get(
+                    "wallet_refresh_timeout_seconds"
+                ),
+                "wallet_refresh_error": stage1_outputs.get("wallet_refresh_error"),
+                "stage2_candidate_only": bool(
+                    stage1_outputs.get("stage2_candidate_only")
+                ),
             },
             "verified_portfolio_snapshot": verified_portfolio_snapshot,
             "active_positions": [
@@ -873,6 +881,13 @@ def _build_bundle(
                 }
             ),
             "llm_invocations": stage2_outputs.get("llm_target_runs") or [],
+            "candidate_only": bool(stage2_outputs.get("stage2_candidate_only")),
+            "stage1_wallet_snapshot_available": stage2_outputs.get(
+                "stage1_wallet_snapshot_available"
+            ),
+            "stage1_wallet_refresh_error": stage2_outputs.get(
+                "stage1_wallet_refresh_error"
+            ),
             "llm_runtime": {
                 key: value
                 for key, value in stage2_outputs.items()
@@ -912,6 +927,12 @@ def _build_bundle(
             "stage3_slot_diagnostics": stage3_outputs.get("stage3_slot_diagnostics") or {},
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),
             "stage2_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
+            "blocked_by_stage1_wallet_refresh": bool(
+                stage3_outputs.get("blocked_by_stage1_wallet_refresh")
+            ),
+            "stage1_wallet_refresh_error": stage3_outputs.get(
+                "stage1_wallet_refresh_error"
+            ),
         },
         "guardrails": {
             "run_guardrails": run_payload.get("guardrail_checks") or [],

@@ -135,14 +135,17 @@ For auto-live console-profile runs, Stage 1 background Bullpen CLI reads are
 expected to stay non-interactive: discover, positions, and balance refreshes
 must use short worker-safe timeouts and must not block on manual Bullpen login
 polling. The current worker contract is a 5 second discover timeout, a 45 second
-overall Gamma API fallback timeout, a 20 second default positions timeout with
-`BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS` available for bounded overrides, and
-the existing bounded balance timeout path. Timed-out Bullpen commands run in an
-isolated process group and have bounded cleanup so descendant processes cannot
-hold the worker's output pipes open indefinitely. If both scan sources fail, the
-run records a sanitized scan warning and continues with an explicit empty Stage
-1 candidate set; Stage 2 and Stage 3 then complete as a no-op instead of leaving
-the run parked in Stage 1.
+overall Gamma API fallback timeout, a 20 second default positions-command timeout
+with `BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS` available for bounded overrides,
+and a separate 30 second end-to-end Stage 1 wallet-handoff budget controlled by
+`BULLPEN_CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS`. The separate handoff
+budget covers waiting on shared Redis locks and auth refreshes, not just the
+positions command itself. Timed-out Bullpen commands run in an isolated process
+group and have bounded cleanup so descendant processes cannot hold the worker's
+output pipes open indefinitely. If both scan sources fail, the run records a
+sanitized scan warning and continues with an explicit empty Stage 1 candidate
+set; Stage 2 and Stage 3 then complete as a no-op instead of leaving the run
+parked in Stage 1.
 As of Sunday, July 19, 2026, authenticated Bullpen reads must flow through one
 centralized backend runtime broker backed by Redis locking and a canonical Redis
 positions snapshot. Stage 1 is the only stage allowed to request a forced fresh
@@ -162,11 +165,18 @@ different caller produced it. Passive UI mount or interval polling is
 cache-only: it may wait for an already-running refresh to publish, but it must
 not acquire the refresh lock or start a new Bullpen CLI positions command on
 its own.
-When that forced fresh wallet snapshot fails, Stage 1 must record a failed
-workflow stage with the sanitized wallet-refresh error, and the persisted Stage 2
-and Stage 3 workflow results must remain explicitly blocked with
+When that forced fresh wallet snapshot fails for a non-transient reason, Stage 1
+must record a failed workflow stage with the sanitized wallet-refresh error, and
+the persisted Stage 2 and Stage 3 workflow results must remain explicitly blocked with
 `blocked_by_stage1_wallet_refresh=true` instead of continuing with fallback
-wallet rereads.
+wallet rereads. A distinct Stage 1 handoff timeout or shared-lock timeout is handled differently: the
+worker records `wallet_snapshot_status="unavailable"`,
+`wallet_refresh_error`, and `stage2_candidate_only=true`, cancels the lingering
+wallet read, and proceeds with read-only Stage 2 candidate analysis. Its Stage 3
+result is explicitly blocked with `blocked_by_stage1_wallet_refresh=true`; it
+must plan or submit no orders and the run ends as `partial_success`. This keeps a
+slow shared wallet refresh from indefinitely preventing LLM review while
+preserving the fresh-wallet safety gate for execution.
 If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
 write revert the run back to an in-progress state. Cancellation takes a durable
@@ -441,6 +451,7 @@ Current deterministic checks include:
 * rationale-versus-odds mismatch
 * provider failure markers
 * incomplete Stage 2 universe missing a stored cause or remediation
+* candidate-only Stage 2 requiring Stage 3 to remain blocked with no decisions or orders
 * qualified Stage 2 candidate missing Stage 3 result
 * Stage 2 Top 10 handoff row missing from Stage 3 decisions
 * Stage 2 Top 10 handoff row missing a recorded planning blocker

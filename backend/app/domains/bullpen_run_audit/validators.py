@@ -365,35 +365,107 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         for market_id in (stage_2.get("stage3_handoff_candidate_market_ids") or [])
         if str(market_id or "").strip()
     }
+    scan_context = (
+        stage_1.get("scan_context")
+        if isinstance(stage_1.get("scan_context"), dict)
+        else {}
+    )
+    stage2_candidate_only = bool(
+        stage_2.get("candidate_only")
+        or scan_context.get("stage2_candidate_only")
+    )
+    stage3_wallet_blocked = bool(
+        stage_3.get("blocked_by_stage1_wallet_refresh")
+    )
 
-    for market_id in sorted(qualified_market_ids - stage3_market_ids):
-        findings.append(
-            _finding(
-                code="QUALIFIED_STAGE2_CANDIDATE_MISSING_STAGE3_RESULT",
-                severity="high",
-                stage="stage-3",
-                category="handoff",
-                title="Qualified Stage 2 candidate never received a Stage 3 result",
-                explanation="A candidate was qualified in Stage 2 but never appeared in Stage 3 decisions.",
-                evidence_pointers=[f"/stage_2/candidate_reviews/market:{market_id}"],
+    if stage2_candidate_only:
+        if not stage3_wallet_blocked:
+            findings.append(
+                _finding(
+                    code="STAGE1_WALLET_TIMEOUT_STAGE3_NOT_BLOCKED",
+                    severity="critical",
+                    stage="stage-3",
+                    category="wallet-safety",
+                    title="Candidate-only Stage 2 was allowed to continue into Stage 3",
+                    explanation=(
+                        "A Stage 1 wallet handoff timeout permits read-only candidate "
+                        "analysis, but Stage 3 must remain blocked without a fresh wallet snapshot."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/scan_context/stage2_candidate_only",
+                        "/stage_3/blocked_by_stage1_wallet_refresh",
+                    ],
+                )
             )
-        )
-
-    for market_id in sorted(handoff_market_ids - stage3_market_ids):
+        if decisions or stage_3.get("order_intents"):
+            findings.append(
+                _finding(
+                    code="STAGE1_WALLET_TIMEOUT_EXECUTION_OCCURRED",
+                    severity="critical",
+                    stage="stage-3",
+                    category="wallet-safety",
+                    title="Orders or decisions were created without a fresh wallet snapshot",
+                    explanation=(
+                        "Candidate-only Stage 2 must terminate before Stage 3 decision "
+                        "or order creation when the Stage 1 wallet handoff timed out."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/scan_context/stage2_candidate_only",
+                        "/stage_3/decisions",
+                        "/stage_3/order_intents",
+                    ],
+                )
+            )
         findings.append(
             _finding(
-                code="STAGE2_TOP10_HANDOFF_MISSING_STAGE3_DECISION",
-                severity="high",
-                stage="stage-3",
-                category="handoff",
-                title="Stage 2 Top 10 handoff row never reached Stage 3",
-                explanation="A persisted Stage 2 Top 10 handoff market never appeared in Stage 3 decisions.",
+                code="STAGE1_WALLET_TIMEOUT_CANDIDATE_ONLY_REVIEW",
+                severity="info",
+                stage="stage-2",
+                category="wallet-safety",
+                title="Stage 2 completed without a fresh wallet snapshot",
+                explanation=(
+                    "The run retained read-only candidate analysis after the Stage 1 "
+                    "wallet handoff timeout and correctly blocked Stage 3 execution."
+                ),
                 evidence_pointers=[
-                    f"/stage_2/stage3_handoff_candidate_market_ids/market:{market_id}",
-                    "/stage_3/decisions",
+                    "/stage_1/scan_context/wallet_refresh_error",
+                    "/stage_2/candidate_only",
+                    "/stage_3/blocked_by_stage1_wallet_refresh",
                 ],
             )
         )
+
+    if not stage2_candidate_only:
+        for market_id in sorted(qualified_market_ids - stage3_market_ids):
+            findings.append(
+                _finding(
+                    code="QUALIFIED_STAGE2_CANDIDATE_MISSING_STAGE3_RESULT",
+                    severity="high",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Qualified Stage 2 candidate never received a Stage 3 result",
+                    explanation="A candidate was qualified in Stage 2, but never appeared in Stage 3 decisions.",
+                    evidence_pointers=[f"/stage_2/candidate_reviews/market:{market_id}"],
+                )
+            )
+
+        for market_id in sorted(handoff_market_ids - stage3_market_ids):
+            findings.append(
+                _finding(
+                    code="STAGE2_TOP10_HANDOFF_MISSING_STAGE3_DECISION",
+                    severity="high",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 2 Top 10 handoff row never reached Stage 3",
+                    explanation="A persisted Stage 2 Top 10 handoff market never appeared in Stage 3 decisions.",
+                    evidence_pointers=[
+                        f"/stage_2/stage3_handoff_candidate_market_ids/market:{market_id}",
+                        "/stage_3/decisions",
+                    ],
+                )
+            )
 
     handoff_missing_reason = 0
     for market_id in sorted(handoff_market_ids & stage3_market_ids):

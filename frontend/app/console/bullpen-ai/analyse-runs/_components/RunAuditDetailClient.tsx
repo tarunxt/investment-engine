@@ -544,6 +544,7 @@ function renderSectionData(section: string, data: unknown) {
     const verifiedPositionRows = asArray(
       verifiedPortfolio?.active_positions_found,
     );
+    const scanContext = asRecord(stage.scan_context);
     return (
       <div className="space-y-4">
         <SectionShell title="Stage 1 Summary">
@@ -570,13 +571,25 @@ function renderSectionData(section: string, data: unknown) {
                     ? formatCurrency(verifiedPortfolio.trade_amount_usd)
                     : "—",
               },
-              { label: "Scan Source", value: stringValue(asRecord(stage.scan_context)?.scan_source_label) },
-              { label: "Scanned Candidates", value: String(asRecord(stage.scan_context)?.scanned_candidates ?? "—") },
-              { label: "Rows Before LLM", value: String(asRecord(stage.scan_context)?.candidate_rows_before_llm ?? "—") },
-              { label: "Manual Rows Reused", value: String(asRecord(stage.scan_context)?.used_manual_console_rows ?? "—") },
+              { label: "Scan Source", value: stringValue(scanContext?.scan_source_label) },
+              { label: "Scanned Candidates", value: String(scanContext?.scanned_candidates ?? "—") },
+              { label: "Rows Before LLM", value: String(scanContext?.candidate_rows_before_llm ?? "—") },
+              { label: "Manual Rows Reused", value: String(scanContext?.used_manual_console_rows ?? "—") },
+              { label: "Wallet Snapshot", value: stringValue(scanContext?.wallet_snapshot_status) },
+              { label: "Wallet Handoff Budget", value: scanContext?.wallet_refresh_timeout_seconds ? `${String(scanContext.wallet_refresh_timeout_seconds)} sec` : "—" },
             ]}
           />
         </SectionShell>
+        {scanContext?.stage2_candidate_only === true ? (
+          <SectionShell
+            title="Wallet Handoff Safety Gate"
+            subtitle="The fresh wallet read timed out or was contended. Stage 2 continued in read-only candidate mode; Stage 3 was blocked, so no orders could be planned or submitted."
+          >
+            <p className="text-sm text-slate-700">
+              {stringValue(scanContext.wallet_refresh_error) || "Fresh wallet state was unavailable for this run."}
+            </p>
+          </SectionShell>
+        ) : null}
         <JsonPanel title="Scan Context" value={stage.scan_context} defaultOpen />
         <JsonPanel
           title="Verified Stage 1 Portfolio Snapshot"
@@ -599,6 +612,7 @@ function renderSectionData(section: string, data: unknown) {
     const handoffIds = asArray(stage.stage3_handoff_candidate_market_ids);
     const runStages = asArray(stage.run_stages);
     const universeStatus = asRecord(stage.universe_status);
+    const candidateOnly = stage.candidate_only === true;
     return (
       <div className="space-y-4">
         <SectionShell title="Stage 2 Summary">
@@ -625,9 +639,20 @@ function renderSectionData(section: string, data: unknown) {
               },
               { label: "Selected Model Mix", value: stringValue(asRecord(stage.llm_runtime)?.llm_execution_mode) },
               { label: "Prompt Version", value: stringValue(asRecord(stage.llm_runtime)?.prompt_version) },
+              { label: "Candidate-only Review", value: candidateOnly ? "Yes" : "No" },
             ]}
           />
         </SectionShell>
+        {candidateOnly ? (
+          <SectionShell
+            title="Read-only Candidate Review"
+            subtitle="Stage 2 ran without a fresh wallet snapshot. Its output is analysis only; Stage 3 execution was deliberately blocked."
+          >
+            <p className="text-sm text-slate-700">
+              {stringValue(stage.stage1_wallet_refresh_error) || "Fresh wallet state was unavailable for this run."}
+            </p>
+          </SectionShell>
+        ) : null}
         {universeStatus?.is_complete === false &&
         (stringValue(universeStatus?.blocker_summary) ||
           stringValue(universeStatus?.blocker_fix)) ? (
@@ -671,6 +696,7 @@ function renderSectionData(section: string, data: unknown) {
     const runStages = asArray(stage.run_stages);
     const recovery = asRecord(stage.recovery);
     const persistedCounters = asRecord(stage.persisted_execution_counters);
+    const blockedByWalletRefresh = stage.blocked_by_stage1_wallet_refresh === true;
     return (
       <div className="space-y-4">
         <SectionShell title="Stage 3 Summary">
@@ -687,9 +713,20 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Selected Decisions", value: String(decisions.filter((item) => asRecord(item)?.stage3_result === "SELECTED").length) },
               { label: "Recovery Required", value: recovery?.required ? "Yes" : "No" },
               { label: "Counter Source", value: String(persistedCounters?.source ?? "legacy") },
+              { label: "Blocked by Wallet Refresh", value: blockedByWalletRefresh ? "Yes" : "No" },
             ]}
           />
         </SectionShell>
+        {blockedByWalletRefresh ? (
+          <SectionShell
+            title="Execution Safely Blocked"
+            subtitle="Stage 3 did not create decisions or order intents because Stage 1 could not obtain a fresh wallet snapshot."
+          >
+            <p className="text-sm text-slate-700">
+              {stringValue(stage.stage1_wallet_refresh_error) || "Fresh wallet state was unavailable for this run."}
+            </p>
+          </SectionShell>
+        ) : null}
         <JsonPanel title="Order Metrics" value={stage.order_metrics} defaultOpen />
         <JsonPanel title="Execution Steps" value={stage.execution_steps} />
         <JsonPanel title="Persisted Execution Counters" value={stage.persisted_execution_counters} defaultOpen />

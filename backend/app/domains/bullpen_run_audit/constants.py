@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-21-stage3-live-capacity-sizing-v14"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-21-stage1-wallet-handoff-v15"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-21-stage3-live-capacity-sizing-v14"
+    "2026-07-21-stage1-wallet-handoff-v15"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -57,6 +57,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "candidate_returns_per_day",
         "label": "Candidate returns per day",
+    },
+    {
+        "algorithm_key": "stage1_wallet_handoff_circuit_breaker",
+        "stage": "stage-1",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "BullpenAutoLiveEngine._execute_console_top10",
+        "label": "Stage 1 wallet handoff timeout and candidate-only safety gate",
     },
     {
         "algorithm_key": "console_trade_amount_per_opportunity",
