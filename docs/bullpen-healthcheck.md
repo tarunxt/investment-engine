@@ -23,9 +23,9 @@ credential store:
 
 ```env
 BULLPEN_BIN=/usr/local/bin/bullpen
-BULLPEN_HOME=/var/lib/credx/bullpen
-BULLPEN_CREDENTIALS_HOME=/var/lib/credx/bullpen
-BULLPEN_HEALTH_STATE_DIR=/var/lib/credx/bullpen-health
+BULLPEN_HOME=/home/investor/.bullpen
+BULLPEN_CREDENTIALS_HOME=/home/investor/.bullpen
+BULLPEN_HEALTH_STATE_DIR=/home/investor/.bullpen-health
 BULLPEN_HEALTH_WEBHOOK_URL=
 BULLPEN_AUTO_CLAIM_RESOLVED=false
 BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS=60000
@@ -71,8 +71,8 @@ Type=oneshot
 WorkingDirectory=/srv/investment-engine
 EnvironmentFile=/etc/investor/frontend.env
 ExecStart=/usr/bin/node /srv/investment-engine/scripts/bullpen-healthcheck.ts
-User=investment-engine
-Group=investment-engine
+User=investor
+Group=investor
 ```
 
 Create `/etc/systemd/system/credx-bullpen-healthcheck.timer`:
@@ -127,8 +127,8 @@ If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOM
 from `/etc/investor/frontend.env` and `/etc/investor/backend.env`:
 
 ```bash
-sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login
-sudo -u investor env HOME=/var/lib/credx/bullpen bullpen polymarket positions --output json
+sudo -u investor -H /usr/local/bin/bullpen login --no-browser
+sudo -u investor -H /usr/local/bin/bullpen polymarket positions --output json
 sudo systemctl restart investor-backend investor-celery-worker
 ```
 

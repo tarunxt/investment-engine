@@ -11,6 +11,7 @@ from app.domains.polymarket.runtime_broker import (
     BullpenPositionsSnapshot,
     BullpenPositionsSnapshotMetadata,
     BullpenRuntimeCachedHealth,
+    BullpenRuntimeActiveAuthResult,
     BullpenRuntimeFailure,
     get_bullpen_runtime_broker,
 )
@@ -38,6 +39,7 @@ class BullpenRuntimePositionsResponse(BaseModel):
     auth_checked_at: str | None = None
     latest_snapshot: BullpenPositionsSnapshotMetadata | None = None
     last_failure: BullpenRuntimeFailure | None = None
+    active_auth: BullpenRuntimeActiveAuthResult | None = None
     cli_version: str | None = None
     error: str | None = None
 
@@ -52,6 +54,7 @@ class BullpenRuntimeHealthResponse(BaseModel):
     auth_checked_at: str | None = None
     latest_snapshot: BullpenPositionsSnapshotMetadata | None = None
     last_failure: BullpenRuntimeFailure | None = None
+    active_auth: BullpenRuntimeActiveAuthResult | None = None
     cli_version: str | None = None
     command_path: str | None = None
     error: str | None = None
@@ -118,6 +121,7 @@ async def get_bullpen_runtime_positions(
             auth_checked_at=passive_health.auth_checked_at,
             latest_snapshot=passive_health.latest_snapshot,
             last_failure=passive_health.last_failure,
+            active_auth=passive_health.active_auth,
             cli_version=passive_health.cli_version,
         )
     except Exception as exc:
@@ -129,6 +133,7 @@ async def get_bullpen_runtime_positions(
             auth_checked_at=passive_health.auth_checked_at,
             latest_snapshot=passive_health.latest_snapshot,
             last_failure=passive_health.last_failure,
+            active_auth=passive_health.active_auth,
             cli_version=passive_health.cli_version,
             error=_http_error_detail(exc),
         )
@@ -151,6 +156,7 @@ async def get_bullpen_runtime_health(
         auth_checked_at=passive_health.auth_checked_at,
         latest_snapshot=passive_health.latest_snapshot,
         last_failure=passive_health.last_failure,
+        active_auth=passive_health.active_auth,
         cli_version=passive_health.cli_version,
         command_path=passive_health.command_path,
         error=passive_health.last_failure.message if not passive_health.ok and passive_health.last_failure else None,

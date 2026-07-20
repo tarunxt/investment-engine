@@ -334,6 +334,149 @@ def finalize_failed_run_progress(
     return f"Auto-Live run failed during {_workflow_stage_label(active_stage)}: {failure_message}"
 
 
+def run_contains_historical_auth_error(run: BullpenAutoLiveRun | None) -> bool:
+    if run is None:
+        return False
+    searchable = "\n".join(
+        [
+            run.summary,
+            run.error_message or "",
+            *[
+                f"{stage.reason}\n{stage.outputs}"
+                for stage in run.stage_results
+            ],
+        ]
+    ).lower()
+    return any(
+        marker in searchable
+        for marker in (
+            "auth_refresh_rejected_login_required",
+            "bullpen login",
+            "login required",
+            "requires_login",
+            "auth_required",
+            "session expired",
+            "invalid refresh token",
+            "could not resolve your polymarket address",
+        )
+    )
+
+
+def mark_historical_auth_error_recovered(
+    run: BullpenAutoLiveRun,
+    *,
+    recovered_at: str,
+) -> BullpenAutoLiveRun:
+    """Close an inconsistent run after active doctor auth proves recovery."""
+
+    summary = (
+        "Earlier Bullpen authentication error recovered; the latest active "
+        "doctor auth refresh is healthy. The interrupted run was closed and "
+        "does not block a new run."
+    )
+    run.audit_metadata = {
+        **run.audit_metadata,
+        "auth_recovery": {
+            "historical_error_stale": True,
+            "active_auth_healthy": True,
+            "recovered_at": recovered_at,
+        },
+    }
+    for stage in reversed(run.stage_results):
+        if _stage_terminal(stage):
+            continue
+        stage.status = "fail"
+        stage.completed_at = recovered_at
+        stage.reason = summary
+        stage.outputs = {
+            **stage.outputs,
+            "phase_status": "aborted",
+            "historical_auth_error_stale": True,
+            "auth_recovered_at": recovered_at,
+        }
+        break
+    run.status = "failed"
+    run.completed_at = recovered_at
+    run.error_message = None
+    run.summary = summary
+    return run
+
+
+def mark_interrupted_run_for_restart(
+    run: BullpenAutoLiveRun,
+    *,
+    interrupted_at: str | None = None,
+) -> BullpenAutoLiveRun:
+    """Abort persisted in-progress work without inferring or resubmitting orders."""
+
+    if run.status not in {"running", "confirming"}:
+        return run
+    completed_at = interrupted_at or _utc_now_iso()
+    invest_stage = next(
+        (
+            stage
+            for stage in reversed(run.stage_results)
+            if _stage_workflow_key(stage) == "invest" or stage.stage_number == 3
+        ),
+        None,
+    )
+    if invest_stage is not None:
+        summary = (
+            "Stage 3 was interrupted by a worker/service restart. Recovery is "
+            "required; persisted submissions will be reconciled and no order was "
+            "automatically resubmitted."
+        )
+        recovery = run.audit_metadata.get("stage3_recovery")
+        recovery = dict(recovery) if isinstance(recovery, dict) else {}
+        run.audit_metadata = {
+            **run.audit_metadata,
+            "stage3_recovery": {
+                **recovery,
+                "required": True,
+                "status": "aborted_recovery_required",
+                "interrupted_at": completed_at,
+                "automatic_resubmission": False,
+            },
+        }
+        invest_stage.status = "fail"
+        invest_stage.completed_at = completed_at
+        invest_stage.reason = summary
+        invest_stage.outputs = {
+            **invest_stage.outputs,
+            "phase_status": "aborted",
+            "recovery_required": True,
+            "automatic_resubmission": False,
+            "interrupted_at": completed_at,
+        }
+    else:
+        summary = (
+            "Auto-Live run was interrupted by a worker/service restart before "
+            "Stage 3. Start a new run to continue."
+        )
+        active_stage = next(
+            (
+                stage
+                for stage in reversed(run.stage_results)
+                if not _stage_terminal(stage)
+            ),
+            None,
+        )
+        if active_stage is not None:
+            active_stage.status = "fail"
+            active_stage.completed_at = completed_at
+            active_stage.reason = summary
+            active_stage.outputs = {
+                **active_stage.outputs,
+                "phase_status": "aborted",
+                "interrupted_at": completed_at,
+            }
+    run.status = "failed"
+    run.completed_at = completed_at
+    run.error_message = summary
+    run.summary = summary
+    return run
+
+
 def inspect_auto_live_run_task_sync(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
     """Read one run's Celery state without multiplying broker inspections.
 
@@ -579,6 +722,34 @@ def reconcile_running_auto_live_run(
         revoke_auto_live_run_task_sync(runtime_snapshot.task_id)
 
     completed_at = reference_now.isoformat()
+    active_invest_stage = next(
+        (
+            stage
+            for stage in reversed(run.stage_results)
+            if (_stage_workflow_key(stage) == "invest" or stage.stage_number == 3)
+            and not _stage_terminal(stage)
+        ),
+        None,
+    )
+    if active_invest_stage is not None:
+        mark_interrupted_run_for_restart(run, interrupted_at=completed_at)
+        active_invest_stage.outputs = {
+            **active_invest_stage.outputs,
+            "failure_message": failure_message,
+            "error_message": failure_message,
+        }
+        active_invest_stage.reason = _append_failure_reason(
+            active_invest_stage.reason,
+            failure_message,
+        )
+        run.error_message = failure_message
+        run.summary = (
+            f"Auto-Live run failed during {_workflow_stage_label(active_invest_stage)}: "
+            f"{failure_message} Recovery is required; no order was automatically "
+            "resubmitted."
+        )
+        return run
+
     run.status = "failed"
     run.completed_at = completed_at
     run.error_message = failure_message

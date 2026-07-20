@@ -48,6 +48,13 @@ def _float(value: Any) -> float | None:
     return None
 
 
+def _int(value: Any) -> int | None:
+    numeric = _float(value)
+    if numeric is None or not numeric.is_integer():
+        return None
+    return int(numeric)
+
+
 def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, object]]:
     findings: list[dict[str, object]] = []
     metadata = bundle.get("metadata") if isinstance(bundle.get("metadata"), dict) else {}
@@ -615,6 +622,124 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     evidence_pointers=["/raw/run_order_funnel"],
                 )
             )
+
+    persisted_counters = (
+        stage_3.get("persisted_execution_counters")
+        if isinstance(stage_3.get("persisted_execution_counters"), dict)
+        else {}
+    )
+    for counter_key in ("total", "sell", "redeem", "buy"):
+        counters = persisted_counters.get(counter_key)
+        if not isinstance(counters, dict):
+            continue
+        planned = _int(counters.get("planned"))
+        processed = _int(counters.get("processed"))
+        submitted = _int(counters.get("submitted"))
+        if planned is None or processed is None or submitted is None:
+            continue
+        if not (0 <= submitted <= processed <= planned):
+            findings.append(
+                _finding(
+                    code="STAGE3_PERSISTED_COUNTERS_CONTRADICT",
+                    severity="high",
+                    stage="stage-3",
+                    category="execution-aggregation",
+                    title="Stage 3 persisted counters contradict each other",
+                    explanation=(
+                        "Persisted Stage 3 counters must satisfy submitted <= "
+                        "processed <= planned."
+                    ),
+                    observed_value=(
+                        f"{counter_key}: planned={planned}, processed={processed}, "
+                        f"submitted={submitted}"
+                    ),
+                    expected_value="submitted <= processed <= planned",
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/persisted_execution_counters/{counter_key}"
+                    ],
+                )
+            )
+
+    recovery = (
+        stage_3.get("recovery")
+        if isinstance(stage_3.get("recovery"), dict)
+        else {}
+    )
+    if recovery.get("required"):
+        if overview.get("run_status") in {"running", "confirming"}:
+            findings.append(
+                _finding(
+                    code="STAGE3_RECOVERY_RUN_LEFT_IN_PROGRESS",
+                    severity="critical",
+                    stage="stage-3",
+                    category="restart-recovery",
+                    title="Interrupted Stage 3 run was left in progress",
+                    explanation=(
+                        "A restart-recovery marker requires the run to be aborted "
+                        "instead of remaining working or confirming."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_3/recovery",
+                        "/overview/run_status",
+                    ],
+                )
+            )
+        if recovery.get("automatic_resubmission") is not False:
+            findings.append(
+                _finding(
+                    code="STAGE3_RECOVERY_AUTO_RESUBMISSION_NOT_DISABLED",
+                    severity="critical",
+                    stage="stage-3",
+                    category="duplicate-prevention",
+                    title="Restart recovery did not disable automatic resubmission",
+                    explanation=(
+                        "Interrupted Stage 3 work must require an explicit operator "
+                        "retry after persisted submission IDs are reconciled."
+                    ),
+                    blocking=True,
+                    evidence_pointers=["/stage_3/recovery"],
+                )
+            )
+
+    executable_statuses = {
+        "PLANNED",
+        "READY",
+        "RETRY_WAIT",
+        "WAITING_FOR_COLLATERAL",
+        "WAITING_FOR_EXIT",
+    }
+    retryable_with_submission_reference = sum(
+        1
+        for order in orders
+        if isinstance(order, dict)
+        and order.get("status") in executable_statuses
+        and (
+            order.get("remote_order_id")
+            or order.get("remote_transaction_hash")
+            or order.get("first_submitted_at")
+            or order.get("last_submitted_at")
+        )
+    )
+    if retryable_with_submission_reference:
+        findings.append(
+            _finding(
+                code="STAGE3_RETRYABLE_ORDER_HAS_SUBMISSION_REFERENCE",
+                severity="critical",
+                stage="stage-3",
+                category="duplicate-prevention",
+                title="Retryable Stage 3 order already has a submission reference",
+                explanation=(
+                    "An intent with persisted remote submission evidence must be "
+                    "reconciled, not sent through the write path again."
+                ),
+                observed_value=str(retryable_with_submission_reference),
+                expected_value="0",
+                blocking=True,
+                evidence_pointers=["/stage_3/order_intents"],
+            )
+        )
 
     stage_statuses = overview.get("stage_statuses")
     if isinstance(stage_statuses, dict):

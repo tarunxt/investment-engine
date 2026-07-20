@@ -31,6 +31,7 @@ from app.domains.polymarket.runtime_broker import (
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 
 AUTH_READY_CACHE_KEY = "bullpen:runtime:auth:ready"
+ACTIVE_AUTH_RESULT_KEY = "bullpen:runtime:auth:latest-active"
 POSITIONS_SNAPSHOT_CACHE_KEY = "bullpen:runtime:positions:snapshot"
 
 
@@ -413,6 +414,78 @@ async def test_execute_raw_retries_once_after_auth_rejection_and_refresh(monkeyp
     assert len(execute_calls) == 2
     assert execute_calls[0][1] is False
     assert execute_calls[1][1] is True
+
+
+@pytest.mark.anyio
+async def test_historical_auth_rejection_is_stale_after_healthy_active_doctor_refresh(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    artifact = _credential_artifact()
+    payloads = iter(
+        [
+            {
+                "credentials_valid": False,
+                "refresh_succeeded": False,
+                "token_valid": False,
+                "trade_auth_blocked": True,
+                "requires_login": True,
+                "wallet_ready": False,
+            },
+            {
+                "credentials_valid": True,
+                "refresh_succeeded": True,
+                "token_valid": True,
+                "trade_auth_blocked": False,
+                "requires_login": False,
+                "wallet_ready": True,
+            },
+        ]
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: artifact,
+    )
+
+    async def fake_execute_process(_args, **_kwargs):
+        return _build_raw_result(
+            json.dumps(next(payloads)),
+            command_category="doctor-auth-refresh",
+            auth_refresh_attempted=True,
+            credential_artifact=artifact,
+        )
+
+    monkeypatch.setattr(broker, "_execute_process", fake_execute_process)
+
+    with pytest.raises(BullpenRuntimeCommandError):
+        await broker.ensure_auth_ready(force_refresh=True)
+
+    rejected = await broker.read_latest_active_auth_result()
+    assert rejected is not None
+    assert rejected.login_required is True
+    assert rejected.healthy is False
+
+    await broker.ensure_auth_ready(force_refresh=True)
+    recovered = await broker.read_latest_active_auth_result()
+
+    assert recovered is not None
+    assert recovered.healthy is True
+    assert recovered.login_required is False
+    assert recovered.credentials_valid is True
+    assert recovered.refresh_succeeded is True
+    assert recovered.token_valid is True
+    assert recovered.trade_auth_blocked is False
+    assert recovered.wallet_ready is True
+    assert recovered.recovered_failure_at == rejected.checked_at
+    assert recovered.historical_error_stale is True
+    assert await broker._redis.get(ACTIVE_AUTH_RESULT_KEY) is not None
+    passive_health = await broker.read_passive_health()
+    assert passive_health.ok is True
+    assert passive_health.last_failure is not None
+    assert passive_health.last_failure.stale is True
+    assert passive_health.last_failure.recovered_at == recovered.checked_at
 
 
 @pytest.mark.anyio

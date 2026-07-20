@@ -669,6 +669,8 @@ function renderSectionData(section: string, data: unknown) {
     const orderIntents = asArray(stage.order_intents);
     const handoffIds = asArray(stage.stage2_handoff_candidate_market_ids);
     const runStages = asArray(stage.run_stages);
+    const recovery = asRecord(stage.recovery);
+    const persistedCounters = asRecord(stage.persisted_execution_counters);
     return (
       <div className="space-y-4">
         <SectionShell title="Stage 3 Summary">
@@ -683,11 +685,15 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Stage 2 Handoff Rows", value: String(handoffIds.length) },
               { label: "Order Metrics", value: String(Object.keys(asRecord(stage.order_metrics) ?? {}).length) },
               { label: "Selected Decisions", value: String(decisions.filter((item) => asRecord(item)?.stage3_result === "SELECTED").length) },
+              { label: "Recovery Required", value: recovery?.required ? "Yes" : "No" },
+              { label: "Counter Source", value: String(persistedCounters?.source ?? "legacy") },
             ]}
           />
         </SectionShell>
         <JsonPanel title="Order Metrics" value={stage.order_metrics} defaultOpen />
         <JsonPanel title="Execution Steps" value={stage.execution_steps} />
+        <JsonPanel title="Persisted Execution Counters" value={stage.persisted_execution_counters} defaultOpen />
+        <JsonPanel title="Restart Recovery" value={stage.recovery} />
         <JsonPanel title="Stage 2 Handoff Candidate IDs" value={handoffIds} />
         <JsonPanel title="Run Stage Records" value={runStages} />
         <JsonPanel title="Decision Rows" value={decisionRows} />

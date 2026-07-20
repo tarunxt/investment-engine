@@ -429,7 +429,11 @@ def build_order_funnel(intents: Iterable[BullpenAutoLiveOrderIntent]) -> Bullpen
 
         if intent.attempt_count > 0:
             counts.attempted += 1
-        if intent.first_submitted_at:
+        if (
+            intent.first_submitted_at
+            or intent.remote_order_id
+            or intent.remote_transaction_hash
+        ):
             counts.remotely_accepted += 1
         if status in {"SUBMITTED", "CONFIRMING"}:
             counts.submitted += 1

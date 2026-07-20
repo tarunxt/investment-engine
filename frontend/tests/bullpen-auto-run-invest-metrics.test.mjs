@@ -250,6 +250,27 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
   assert.match(source, /value: step\.redeemSubmittedOrders/);
 });
 
+test("persisted Stage 3 counters override historical decision-row maxima", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /usesPersistedStage3ExecutionCounters/);
+  assert.match(source, /persisted_order_intents/);
+  assert.match(
+    source,
+    /const plannedOrders = usePersistedCounters\s*\?\s*\(readStageOutputNumber\(step\.planned_orders\) \?\? 0\)/,
+  );
+  assert.match(
+    source,
+    /submittedOrders: usePersistedCounters\s*\?\s*\(readStageOutputNumber\(step\.submitted_orders\) \?\? 0\)/,
+  );
+});
+
 test("schedule card hides removed Stage 3 Step 1 exit shortlist copy", () => {
   const source = readFileSync(
     new URL(

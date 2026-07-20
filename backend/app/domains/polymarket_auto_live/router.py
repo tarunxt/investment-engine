@@ -5,6 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveRun,
@@ -16,6 +17,9 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSummary,
 )
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
+from app.domains.polymarket_auto_live.run_recovery import (
+    run_contains_historical_auth_error,
+)
 
 router = APIRouter(prefix="/polymarket/auto-live", tags=["polymarket"])
 
@@ -40,6 +44,25 @@ def _database_not_ready_error(exc: SQLAlchemyError) -> HTTPException:
             f"{_http_error_detail(exc)}"
         ),
     )
+
+
+async def _attach_latest_active_auth(
+    summary: BullpenAutoLiveSummary,
+) -> BullpenAutoLiveSummary:
+    broker = get_bullpen_runtime_broker()
+    historical_auth_error = any(
+        run_contains_historical_auth_error(run)
+        for run in [summary.latest_run, *summary.recent_runs]
+    )
+    try:
+        active_auth = await broker.resolve_latest_active_auth_result(
+            refresh_if_stale=historical_auth_error,
+        )
+    except Exception:
+        # Unknown live auth state must not turn a historical command error into
+        # a login banner. Only a persisted active doctor verdict can do that.
+        active_auth = None
+    return summary.model_copy(update={"runtime_auth": active_auth})
 
 
 @router.get("/settings", response_model=BullpenAutoLiveSettings)
@@ -82,7 +105,7 @@ async def get_auto_live_state(current_user: User = Depends(get_current_user)):
 async def get_auto_live_summary(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
     try:
-        return await bot.get_summary()
+        return await _attach_latest_active_auth(await bot.get_summary())
     except SQLAlchemyError as exc:
         raise _database_not_ready_error(exc) from exc
 

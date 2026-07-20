@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.domains.polymarket.runtime_broker import BullpenRuntimeActiveAuthResult
+
 AutoLiveEvidenceStatus = Literal["Low", "Moderate", "Strong"]
 AutoLiveConfidence = Literal["Low", "Medium", "High"]
 AutoLiveGuardrailStatus = Literal["pass", "watch", "fail"]
@@ -963,3 +965,4 @@ class BullpenAutoLiveSummary(BaseModel):
     latest_guardrail_checks: list[BullpenAutoLiveGuardrailCheck] = Field(
         default_factory=list
     )
+    runtime_auth: BullpenRuntimeActiveAuthResult | None = None

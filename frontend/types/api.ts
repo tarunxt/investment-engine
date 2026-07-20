@@ -2664,6 +2664,25 @@ export interface BullpenAutoLiveSummaryResponse {
   recent_runs: BullpenAutoLiveRun[];
   recent_decisions: BullpenAutoLiveDecision[];
   latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
+  runtime_auth?: BullpenRuntimeActiveAuthResult | null;
+}
+
+export interface BullpenRuntimeActiveAuthResult {
+  checked_at: string;
+  auth_checked_at?: string | null;
+  healthy: boolean;
+  login_required: boolean;
+  doctor_refresh_succeeded: boolean;
+  credentials_valid?: boolean | null;
+  refresh_succeeded?: boolean | null;
+  token_valid?: boolean | null;
+  trade_auth_blocked?: boolean | null;
+  requires_login?: boolean | null;
+  wallet_ready?: boolean | null;
+  failure_reason?: string | null;
+  error_classification?: string | null;
+  recovered_failure_at?: string | null;
+  historical_error_stale?: boolean;
 }
 
 export interface BullpenTradeAnalysisSnapshot {

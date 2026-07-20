@@ -141,7 +141,7 @@ import {
 } from "./bullpenStage2To3Strategy";
 
 const BULLPEN_LOGIN_COMMAND =
-  "sudo -u investor env HOME=/var/lib/credx/bullpen BULLPEN_BIN=/usr/local/bin/bullpen /usr/local/bin/bullpen login --no-browser";
+  "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 
@@ -2407,6 +2407,17 @@ function getInvestStageMetric(
   return readStageOutputNumber(stage.outputs[key]) ?? fallback;
 }
 
+function usesPersistedStage3ExecutionCounters(
+  outputs: Record<string, unknown> | null | undefined,
+) {
+  if (!outputs) return false;
+  const counters = outputs.persisted_execution_counters;
+  return (
+    isRecord(counters) &&
+    readStageOutputString(counters.source) === "persisted_order_intents"
+  );
+}
+
 type InvestExecutionStepView = {
   key: "sell" | "buy";
   stepNumber: number;
@@ -2469,6 +2480,9 @@ function getInvestStageExecutionSteps(
     "buy",
     decisions,
   );
+  const usePersistedCounters = usesPersistedStage3ExecutionCounters(
+    stage.outputs,
+  );
 
   const rawSteps = stage.outputs.execution_steps;
   if (!Array.isArray(rawSteps)) return [];
@@ -2492,14 +2506,18 @@ function getInvestStageExecutionSteps(
       }
 
       const decisionCounts = key === "sell" ? sellDecisionCounts : buyDecisionCounts;
-      const plannedOrders = Math.max(
-        readStageOutputNumber(step.planned_orders) ?? 0,
-        decisionCounts.plannedOrders,
-      );
-      const processedOrders = Math.max(
-        readStageOutputNumber(step.processed_orders) ?? 0,
-        decisionCounts.processedOrders,
-      );
+      const plannedOrders = usePersistedCounters
+        ? (readStageOutputNumber(step.planned_orders) ?? 0)
+        : Math.max(
+            readStageOutputNumber(step.planned_orders) ?? 0,
+            decisionCounts.plannedOrders,
+          );
+      const processedOrders = usePersistedCounters
+        ? (readStageOutputNumber(step.processed_orders) ?? 0)
+        : Math.max(
+            readStageOutputNumber(step.processed_orders) ?? 0,
+            decisionCounts.processedOrders,
+          );
 
       return {
         key,
@@ -2515,61 +2533,63 @@ function getInvestStageExecutionSteps(
         detail: readStageOutputString(step.detail),
         plannedOrders,
         processedOrders,
-        submittedOrders: Math.max(
-          readStageOutputNumber(step.submitted_orders) ?? 0,
-          decisionCounts.submittedOrders,
-        ),
+        submittedOrders: usePersistedCounters
+          ? (readStageOutputNumber(step.submitted_orders) ?? 0)
+          : Math.max(
+              readStageOutputNumber(step.submitted_orders) ?? 0,
+              decisionCounts.submittedOrders,
+            ),
         eventExitRows:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.event_exit_rows) ?? 0,
                 sellDecisionCounts.eventExitRows ?? 0,
               )
             : readStageOutputNumber(step.event_exit_rows),
         rankingLlmPlannedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.ranking_llm_planned_orders) ?? 0,
                 sellDecisionCounts.rankingLlmPlannedOrders ?? 0,
               )
             : readStageOutputNumber(step.ranking_llm_planned_orders),
         forcedExitPlannedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.forced_exit_planned_orders) ?? 0,
                 sellDecisionCounts.forcedExitPlannedOrders ?? 0,
               )
             : readStageOutputNumber(step.forced_exit_planned_orders),
         redeemPlannedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.redeem_planned_orders) ?? 0,
                 sellDecisionCounts.redeemPlannedOrders ?? 0,
               )
             : readStageOutputNumber(step.redeem_planned_orders),
         redeemProcessedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.redeem_processed_orders) ?? 0,
                 sellDecisionCounts.redeemProcessedOrders ?? 0,
               )
             : readStageOutputNumber(step.redeem_processed_orders),
         redeemSubmittedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.redeem_submitted_orders) ?? 0,
                 submittedSellSubpartCounts.redeem,
               )
             : readStageOutputNumber(step.redeem_submitted_orders),
         rankingLlmSubmittedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.ranking_llm_submitted_orders) ?? 0,
                 submittedSellSubpartCounts.rankingOrLlm,
               )
             : readStageOutputNumber(step.ranking_llm_submitted_orders),
         forcedExitSubmittedOrders:
-          key === "sell"
+          key === "sell" && !usePersistedCounters
             ? Math.max(
                 readStageOutputNumber(step.forced_exit_submitted_orders) ?? 0,
                 submittedSellSubpartCounts.forced,
@@ -2590,8 +2610,11 @@ function getLastInvestExecutionStep(
   );
   const rawSteps = investStage?.outputs.execution_steps;
   if (!Array.isArray(rawSteps)) return null;
+  const usePersistedCounters = usesPersistedStage3ExecutionCounters(
+    investStage?.outputs,
+  );
   const decisionCounts =
-    decisions.length > 0
+    !usePersistedCounters && decisions.length > 0
       ? summarizeInvestStepCountsFromDecisions(key, decisions)
       : null;
 
@@ -2904,6 +2927,9 @@ function getInvestStageCounters(
   const buyCounts = summarizeInvestStepCountsFromDecisions("buy", decisions);
   const rawPlanned = readStageOutputNumber(stage.outputs.orders_planned);
   const rawSubmitted = readStageOutputNumber(stage.outputs.orders_submitted);
+  const usePersistedCounters = usesPersistedStage3ExecutionCounters(
+    stage.outputs,
+  );
   const derivedPlanned = sellCounts.plannedOrders + buyCounts.plannedOrders;
   const derivedSubmitted = sellCounts.submittedOrders + buyCounts.submittedOrders;
   if (
@@ -2914,14 +2940,12 @@ function getInvestStageCounters(
   ) {
     return [];
   }
-  const planned = Math.max(
-    rawPlanned ?? 0,
-    derivedPlanned,
-  );
-  const submitted = Math.max(
-    rawSubmitted ?? 0,
-    derivedSubmitted,
-  );
+  const planned = usePersistedCounters
+    ? (rawPlanned ?? 0)
+    : Math.max(rawPlanned ?? 0, derivedPlanned);
+  const submitted = usePersistedCounters
+    ? (rawSubmitted ?? 0)
+    : Math.max(rawSubmitted ?? 0, derivedSubmitted);
 
   return [
     { label: "Planned", value: planned ?? 0 },
@@ -9921,7 +9945,22 @@ export function BullpenAutoRunScheduleCard({
   const monitorRunStatusLabel = workflowRunForMonitor
     ? formatRunStatusLabel(workflowRunForMonitor.status)
     : null;
-  const workflowRunNeedsLogin = runNeedsBullpenLogin(workflowRunForMonitor);
+  const workflowRunHasHistoricalAuthError =
+    runNeedsBullpenLogin(workflowRunForMonitor);
+  const latestActiveAuthRequiresLogin = Boolean(
+    summary?.runtime_auth &&
+      (summary.runtime_auth.credentials_valid === false ||
+        summary.runtime_auth.requires_login === true ||
+        summary.runtime_auth.trade_auth_blocked === true ||
+        summary.runtime_auth.doctor_refresh_succeeded === false),
+  );
+  const workflowRunNeedsLogin = Boolean(
+    workflowRunHasHistoricalAuthError &&
+      latestActiveAuthRequiresLogin,
+  );
+  const workflowRunAuthRecovered = Boolean(
+    workflowRunHasHistoricalAuthError && summary?.runtime_auth?.healthy === true,
+  );
   const investWorkflowStage =
     workflowView.stages.find((stage) => stage.key === "invest") ?? null;
   const investStageImmediateSuccess =
@@ -10550,7 +10589,7 @@ export function BullpenAutoRunScheduleCard({
             {runIsActive && workflowRunNeedsLogin ? (
               <div className="mt-2 space-y-2">
                 <p className="text-sm font-bold text-rose-700">
-                  Failed : Login Needed
+                  Failed · Login Needed
                 </p>
                 <div className="flex items-start gap-2 rounded-xl border border-rose-100 bg-rose-50 px-3 py-2">
                   <code className="min-w-0 flex-1 break-words text-xs font-semibold leading-5 text-rose-950">
@@ -10572,6 +10611,11 @@ export function BullpenAutoRunScheduleCard({
                   </button>
                 </div>
               </div>
+            ) : runIsActive && workflowRunAuthRecovered ? (
+              <p className="mt-2 text-xs font-semibold leading-5 text-emerald-800">
+                Earlier Bullpen authentication error recovered; the latest
+                active doctor auth refresh is healthy.
+              </p>
             ) : (
               <p className="mt-1 text-xs text-slate-600">
                 {latestTerminalRunOverview || "No auto-run result yet."}

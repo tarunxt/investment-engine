@@ -45,6 +45,7 @@ from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveOrderAttemptRecord,
     PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLiveRunRecord,
+    PolymarketAutoLiveStateRecord,
 )
 from app.domains.polymarket_auto_live.order_intents import (
     AutoLiveExecutorError,
@@ -77,8 +78,13 @@ from app.domains.polymarket_auto_live.stage3_slots import classify_economic_slot
 from app.domains.polymarket_auto_live.repository import (
     apply_decision_to_record,
     apply_run_to_record,
+    apply_state_to_record,
     record_to_decision,
     record_to_run,
+    record_to_state,
+)
+from app.domains.polymarket_auto_live.run_recovery import (
+    mark_interrupted_run_for_restart,
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
@@ -91,6 +97,9 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveRunOrdersResponse,
 )
 from app.infrastructure.database.sync_session import SyncSessionLocal
+from app.infrastructure.messaging.task_registry import (
+    get_registered_auto_live_run_task_id_sync,
+)
 
 logger = get_logger("app.domains.polymarket_auto_live.order_intent_service")
 
@@ -413,6 +422,149 @@ def _condition_id_for_decision(decision: BullpenAutoLiveDecision) -> str | None:
     return None
 
 
+def _intent_has_persisted_submission_reference(intent: object) -> bool:
+    """Return true when a retry could duplicate an already accepted write."""
+
+    return any(
+        bool(getattr(intent, field_name, None))
+        for field_name in (
+            "remote_order_id",
+            "remote_transaction_hash",
+            "first_submitted_at",
+            "last_submitted_at",
+        )
+    )
+
+
+def _assert_intent_has_no_persisted_submission_reference(intent: object) -> None:
+    if not _intent_has_persisted_submission_reference(intent):
+        return
+    raise ValueError(
+        "This order has a persisted order/submission reference and must be "
+        "reconciled instead of retried; retrying could create a duplicate order."
+    )
+
+
+def _run_recovery_block_reason(
+    session: Session,
+    *,
+    run_id: str,
+) -> str | None:
+    run_record = session.get(PolymarketAutoLiveRunRecord, run_id)
+    if run_record is None:
+        return "The saved Auto-Live run no longer exists."
+    run = record_to_run(run_record)
+    stage3_recovery = run.audit_metadata.get("stage3_recovery")
+    if (
+        isinstance(stage3_recovery, dict)
+        and stage3_recovery.get("required")
+        and not stage3_recovery.get("resolved_at")
+    ):
+        return (
+            "Stage 3 restart recovery requires an explicit operator retry; "
+            "automatic submission is disabled."
+        )
+    auth_recovery = run.audit_metadata.get("auth_recovery")
+    if (
+        run.status == "failed"
+        and isinstance(auth_recovery, dict)
+        and auth_recovery.get("historical_error_stale")
+    ):
+        return (
+            "The historical authentication failure was recovered and this old "
+            "run was closed; start a new run instead of submitting its orders."
+        )
+    return None
+
+
+def _persisted_stage3_counts(
+    intents: Sequence[BullpenAutoLiveOrderIntent],
+) -> dict[str, object]:
+    def counts_for(actions: set[str]) -> dict[str, int]:
+        selected = [intent for intent in intents if intent.action in actions]
+        planned = len(selected)
+        submitted = sum(
+            1 for intent in selected if _intent_has_persisted_submission_reference(intent)
+        )
+        processed = sum(
+            1
+            for intent in selected
+            if (
+                intent.attempt_count > 0
+                or (
+                    intent.status
+                    not in {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_EXIT"}
+                    and not (
+                        intent.status == "DEFERRED"
+                        and intent.execution_metadata_json.get("recovery_required")
+                    )
+                )
+                or _intent_has_persisted_submission_reference(intent)
+            )
+        )
+        processed = min(planned, max(processed, submitted))
+        submitted = min(processed, submitted)
+        return {
+            "planned": planned,
+            "processed": processed,
+            "submitted": submitted,
+        }
+
+    sell = counts_for({"sell", "redeem"})
+    redeem = counts_for({"redeem"})
+    buy = counts_for({"buy"})
+    total = {
+        key: int(sell[key]) + int(buy[key])
+        for key in ("planned", "processed", "submitted")
+    }
+    return {
+        "source": "persisted_order_intents",
+        "total": total,
+        "sell": sell,
+        "redeem": redeem,
+        "buy": buy,
+    }
+
+
+def _persisted_execution_step(
+    *,
+    key: str,
+    label: str,
+    step_number: int,
+    counts: dict[str, int],
+    recovery_required: bool,
+) -> dict[str, object]:
+    planned = counts["planned"]
+    processed = counts["processed"]
+    if recovery_required:
+        status = "blocked"
+        detail = (
+            "Worker/service restart interrupted Stage 3. Operator recovery is "
+            "required; no order was automatically resubmitted."
+        )
+    elif planned == 0 or processed >= planned:
+        status = "completed"
+        detail = (
+            "No persisted orders were planned for this step."
+            if planned == 0
+            else "Persisted execution records confirm this step finished processing."
+        )
+    else:
+        status = "running"
+        detail = "Persisted execution records show this step is still processing."
+    return {
+        "key": key,
+        "step_number": step_number,
+        "step_total": 2,
+        "label": label,
+        "status": status,
+        "detail": detail,
+        "planned_orders": planned,
+        "processed_orders": processed,
+        "submitted_orders": counts["submitted"],
+    }
+
+
 def _dependency_exit_market_id(dependency_group: str | None) -> str | None:
     if not dependency_group or ":" not in dependency_group:
         return None
@@ -421,6 +573,21 @@ def _dependency_exit_market_id(dependency_group: str | None) -> str | None:
 
 
 def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoLiveRunOrdersResponse) -> None:
+    persisted_counts = _persisted_stage3_counts(response.orders)
+    total_counts = persisted_counts["total"]
+    sell_counts = persisted_counts["sell"]
+    redeem_counts = persisted_counts["redeem"]
+    buy_counts = persisted_counts["buy"]
+    assert isinstance(total_counts, dict)
+    assert isinstance(sell_counts, dict)
+    assert isinstance(redeem_counts, dict)
+    assert isinstance(buy_counts, dict)
+    recovery = run.audit_metadata.get("stage3_recovery")
+    recovery_required = bool(
+        isinstance(recovery, dict)
+        and recovery.get("required")
+        and not recovery.get("resolved_at")
+    )
     for stage in run.stage_results:
         if (
             stage.stage_number == 3
@@ -435,6 +602,41 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 else stage.outputs.get("phase_status"),
                 "orders_planned": response.order_funnel.planned,
                 "orders_submitted": response.order_funnel.remotely_accepted,
+                "orders_processed": total_counts["processed"],
+                "sell_orders_planned": sell_counts["planned"],
+                "sell_orders_processed": sell_counts["processed"],
+                "sell_orders_submitted": sell_counts["submitted"],
+                "redeem_planned": redeem_counts["planned"],
+                "redeem_processed": redeem_counts["processed"],
+                "redeem_submitted": redeem_counts["submitted"],
+                "buy_orders_planned": buy_counts["planned"],
+                "buy_orders_processed": buy_counts["processed"],
+                "buy_orders_submitted": buy_counts["submitted"],
+                "buy_queue_planned": buy_counts["planned"],
+                "buy_queue_processed": buy_counts["processed"],
+                "buy_queue_submitted": buy_counts["submitted"],
+                "persisted_execution_counters": persisted_counts,
+                "execution_steps": [
+                    {
+                        **_persisted_execution_step(
+                            key="sell",
+                            label="Event Exits",
+                            step_number=1,
+                            counts=sell_counts,
+                            recovery_required=recovery_required,
+                        ),
+                        "redeem_planned_orders": redeem_counts["planned"],
+                        "redeem_processed_orders": redeem_counts["processed"],
+                        "redeem_submitted_orders": redeem_counts["submitted"],
+                    },
+                    _persisted_execution_step(
+                        key="buy",
+                        label="Invest planned orders",
+                        step_number=2,
+                        counts=buy_counts,
+                        recovery_required=recovery_required,
+                    ),
+                ],
                 "order_funnel": response.order_funnel.model_dump(mode="json"),
                 "action_funnels": {
                     key: value.model_dump(mode="json")
@@ -459,6 +661,69 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 else "pass"
             )
             break
+
+
+def _preserve_unresolved_stage3_recovery(run: BullpenAutoLiveRun) -> None:
+    recovery = run.audit_metadata.get("stage3_recovery")
+    if not isinstance(recovery, dict):
+        return
+    if not recovery.get("required") or recovery.get("resolved_at"):
+        return
+    interrupted_at = str(recovery.get("interrupted_at") or utc_now_iso())
+    summary = (
+        "Stage 3 was interrupted by a worker/service restart. Recovery is "
+        "required; persisted submissions will be reconciled and no order was "
+        "automatically resubmitted."
+    )
+    run.status = "failed"
+    run.completed_at = interrupted_at
+    run.error_message = summary
+    run.summary = summary
+    for stage in run.stage_results:
+        if stage.stage_number != 3 and stage.outputs.get("workflow_stage_key") != "invest":
+            continue
+        stage.status = "fail"
+        stage.completed_at = interrupted_at
+        stage.reason = summary
+        stage.outputs = {
+            **stage.outputs,
+            "phase_status": "aborted",
+            "recovery_required": True,
+            "automatic_resubmission": False,
+            "interrupted_at": interrupted_at,
+        }
+        break
+
+
+def _preserve_recovered_auth_error(run: BullpenAutoLiveRun) -> None:
+    recovery = run.audit_metadata.get("auth_recovery")
+    if not isinstance(recovery, dict) or not recovery.get(
+        "historical_error_stale"
+    ):
+        return
+    recovered_at = str(recovery.get("recovered_at") or utc_now_iso())
+    summary = (
+        "Earlier Bullpen authentication error recovered; the latest active "
+        "doctor auth refresh is healthy. The interrupted run was closed and "
+        "does not block a new run."
+    )
+    run.status = "failed"
+    run.completed_at = recovered_at
+    run.error_message = None
+    run.summary = summary
+    for stage in run.stage_results:
+        if stage.stage_number != 3 and stage.outputs.get("workflow_stage_key") != "invest":
+            continue
+        stage.status = "fail"
+        stage.completed_at = recovered_at
+        stage.reason = summary
+        stage.outputs = {
+            **stage.outputs,
+            "phase_status": "aborted",
+            "historical_auth_error_stale": True,
+            "auth_recovered_at": recovered_at,
+        }
+        break
 
 
 def _persist_stage3_reconciliation_diagnostics(
@@ -782,6 +1047,8 @@ def sync_run_and_decisions_from_intents_sync(
         run.completed_at = None
     run.summary = _summary_text(run.status, response.order_funnel)
     _update_invest_stage_outputs(run, response)
+    _preserve_unresolved_stage3_recovery(run)
+    _preserve_recovered_auth_error(run)
     for stage in run.stage_results:
         if (
             stage.stage_number == 3
@@ -1221,6 +1488,178 @@ def recover_stale_planned_order_intents_sync(
     return recovered
 
 
+def reconcile_interrupted_runs_on_startup_sync(
+    session: Session,
+    *,
+    limit: int = 100,
+    interrupted_at: datetime | None = None,
+    stale_before: datetime | None = None,
+) -> list[str]:
+    """Abort abandoned runs and freeze unsubmitted Stage 3 writes on restart."""
+
+    current = interrupted_at or utc_now()
+    interrupted_at_iso = _isoformat(current) or utc_now_iso()
+    active_task_ids = _active_celery_task_ids_sync()
+    run_query = select(PolymarketAutoLiveRunRecord).where(
+        PolymarketAutoLiveRunRecord.status.in_(("running", "confirming"))
+    )
+    if stale_before is not None:
+        run_query = run_query.where(
+            PolymarketAutoLiveRunRecord.updated_at <= stale_before
+        )
+    run_records = (
+        session.execute(
+            run_query.order_by(PolymarketAutoLiveRunRecord.started_at.asc())
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        .scalars()
+        .all()
+    )
+    recovered_ids: list[str] = []
+    for run_record in run_records:
+        run = record_to_run(run_record)
+        interrupted_run = mark_interrupted_run_for_restart(
+            run,
+            interrupted_at=interrupted_at_iso,
+        )
+        stage3_recovery = interrupted_run.audit_metadata.get("stage3_recovery")
+        has_stage3_recovery = isinstance(stage3_recovery, dict) and bool(
+            stage3_recovery.get("required")
+        )
+        intent_records: list[PolymarketAutoLiveOrderIntentRecord] = []
+        if has_stage3_recovery:
+            intent_records = (
+                session.execute(
+                    select(PolymarketAutoLiveOrderIntentRecord)
+                    .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_record.id)
+                    .with_for_update(skip_locked=True)
+                )
+                .scalars()
+                .all()
+            )
+
+        registered_run_task_id = get_registered_auto_live_run_task_id_sync(
+            run_record.id
+        )
+        dispatched_intent_task_ids = {
+            str(task_id)
+            for intent in intent_records
+            for task_id in [
+                dict(intent.execution_metadata_json or {}).get(
+                    "last_dispatch_task_id"
+                )
+            ]
+            if isinstance(task_id, str) and task_id.strip()
+        }
+        if (
+            registered_run_task_id in active_task_ids
+            or active_task_ids.intersection(dispatched_intent_task_ids)
+        ):
+            logger.info(
+                "Leaving Auto-Live run %s active because Celery still confirms "
+                "its run/order task is executing on another worker.",
+                run_record.id,
+            )
+            continue
+
+        apply_run_to_record(run_record, interrupted_run, user_id=run_record.user_id)
+
+        if has_stage3_recovery:
+            for intent in intent_records:
+                if intent.status in INTENT_TERMINAL_SUCCESS_STATUSES:
+                    continue
+                metadata = dict(intent.execution_metadata_json or {})
+                metadata.update(
+                    {
+                        "recovery_required": True,
+                        "automatic_resubmission": False,
+                        "interrupted_at": interrupted_at_iso,
+                        "current_blockage": (
+                            "Stage 3 was interrupted by worker/service restart; "
+                            "operator recovery is required."
+                        ),
+                        "how_to_resolve": (
+                            "Reconcile persisted submissions first, then use the "
+                            "explicit Stage 3 retry action for unsubmitted intents."
+                        ),
+                    }
+                )
+                if intent.status in _RECONCILABLE_STATUSES or (
+                    _intent_has_persisted_submission_reference(intent)
+                ):
+                    intent.status = "CONFIRMING"
+                    intent.retryable = True
+                    intent.next_attempt_at = current
+                    intent.last_error_code = (
+                        "INTERRUPTED_SUBMISSION_RECONCILE_REQUIRED"
+                    )
+                    intent.last_error_message = (
+                        "Restart interrupted an ambiguous or persisted submission; "
+                        "reconciliation is required before any retry."
+                    )
+                else:
+                    intent.status = "DEFERRED"
+                    intent.retryable = True
+                    intent.next_attempt_at = None
+                    intent.last_error_code = "RESTART_RECOVERY_REQUIRED"
+                    intent.last_error_message = (
+                        "Restart interrupted this unsubmitted Stage 3 intent; it "
+                        "was deferred and will not be automatically resubmitted."
+                    )
+                intent.execution_metadata_json = metadata
+                intent.version += 1
+
+            session.flush()
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=run_record.user_id,
+                run_id=run_record.id,
+            )
+
+        state_record = session.get(PolymarketAutoLiveStateRecord, run_record.user_id)
+        if state_record is not None:
+            state = record_to_state(state_record)
+            state.last_run_id = interrupted_run.id
+            state.last_run_at = interrupted_at_iso
+            state.last_action = interrupted_run.summary
+            state.last_error = interrupted_run.summary
+            apply_state_to_record(state_record, state)
+        recovered_ids.append(run_record.id)
+
+    session.flush()
+    return recovered_ids
+
+
+def _active_celery_task_ids_sync() -> set[str]:
+    """Return task IDs actively executing across workers, if inspect responds."""
+
+    try:
+        payload = current_app.control.inspect(timeout=1.0).active() or {}
+    except Exception:
+        logger.warning(
+            "Could not inspect active Celery tasks during Auto-Live restart recovery.",
+            exc_info=True,
+        )
+        return set()
+
+    task_ids: set[str] = set()
+
+    def collect(value: object) -> None:
+        if isinstance(value, dict):
+            task_id = value.get("id")
+            if isinstance(task_id, str) and task_id.strip():
+                task_ids.add(task_id.strip())
+            for nested in value.values():
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+
+    collect(payload)
+    return task_ids
+
+
 def annotate_intent_dispatch_sync(
     session: Session,
     *,
@@ -1283,6 +1722,7 @@ def retry_order_intent_sync(session: Session, *, user_id: int, intent_id: str) -
         raise ValueError("Order intent not found.")
     if record.status not in INTENT_RETRYABLE_STATUSES and record.status not in INTENT_TERMINAL_FAILURE_STATUSES:
         raise ValueError("This order is not in a retryable state.")
+    _assert_intent_has_no_persisted_submission_reference(record)
     record.status = "READY"
     record.retryable = True
     record.next_attempt_at = utc_now()
@@ -1915,6 +2355,51 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             return None
         if record.status not in _EXECUTABLE_STATUSES:
             return record.status
+        recovery_block_reason = _run_recovery_block_reason(
+            session,
+            run_id=record.run_id,
+        )
+        if recovery_block_reason is not None:
+            record.status = "DEFERRED"
+            record.retryable = True
+            record.next_attempt_at = None
+            record.last_error_code = "RUN_RECOVERY_REQUIRED"
+            record.last_error_message = recovery_block_reason
+            record.execution_metadata_json = {
+                **dict(record.execution_metadata_json or {}),
+                "recovery_required": True,
+                "automatic_resubmission": False,
+                "current_blockage": recovery_block_reason,
+            }
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
+            session.commit()
+            return record.status
+        if _intent_has_persisted_submission_reference(record):
+            record.status = "CONFIRMING"
+            record.retryable = True
+            record.next_attempt_at = utc_now()
+            record.last_error_code = "PERSISTED_SUBMISSION_RECONCILE_REQUIRED"
+            record.last_error_message = (
+                "Persisted order/submission reference found before retry; remote "
+                "state must be reconciled and no duplicate write was issued."
+            )
+            record.execution_metadata_json = {
+                **dict(record.execution_metadata_json or {}),
+                "current_blockage": record.last_error_message,
+                "how_to_resolve": "Reconcile the persisted remote order before any operator retry.",
+                "duplicate_order_prevented_at": utc_now_iso(),
+            }
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
+            session.commit()
+            return record.status
         now = utc_now()
         if record.next_attempt_at and record.next_attempt_at > now:
             return record.status
@@ -2038,6 +2523,60 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
                 )
                 session.commit()
                 return record.status
+
+    # A restart or auth-recovery close can land while preflight is running.
+    # Re-read the durable intent immediately before the remote write so a task
+    # that was already in flight cannot ignore the recovery marker.
+    with SyncSessionLocal() as session:
+        record = _lock_intent_for_execution(session, intent_id)
+        if record is None:
+            return None
+        recovery_block_reason = _run_recovery_block_reason(
+            session,
+            run_id=record.run_id,
+        )
+        if record.status != "SUBMITTING" or recovery_block_reason is not None:
+            attempt = session.execute(
+                select(PolymarketAutoLiveOrderAttemptRecord)
+                .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
+                .where(
+                    PolymarketAutoLiveOrderAttemptRecord.attempt_number
+                    == record.attempt_count
+                )
+            ).scalar_one_or_none()
+            if recovery_block_reason is not None and record.status in (
+                _EXECUTABLE_STATUSES | {"SUBMITTING"}
+            ):
+                record.status = "DEFERRED"
+                record.retryable = True
+                record.next_attempt_at = None
+                record.last_error_code = "RUN_RECOVERY_REQUIRED"
+                record.last_error_message = recovery_block_reason
+                record.execution_metadata_json = {
+                    **dict(record.execution_metadata_json or {}),
+                    "recovery_required": True,
+                    "automatic_resubmission": False,
+                    "current_blockage": recovery_block_reason,
+                    "remote_write_prevented_at": utc_now_iso(),
+                }
+            if prepared.action == "buy" and record.status in {
+                "DEFERRED",
+                "CANCELLED",
+                "FAILED_PERMANENT",
+            }:
+                _release_reservation(session, record)
+            if attempt is not None and attempt.completed_at is None:
+                attempt.completed_at = utc_now()
+                attempt.result_status = record.status
+                attempt.error_code = record.last_error_code
+                attempt.error_message = record.last_error_message
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
+            session.commit()
+            return record.status
 
     try:
         result = run_with_bullpen_runtime_cleanup(
@@ -2640,7 +3179,6 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
 
 def get_run_orders_for_user_sync(*, user_id: int, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
     with SyncSessionLocal() as session:
-        recover_stale_planned_order_intents_sync(session, run_id=run_id)
         sync_run_and_decisions_from_intents_sync(session, user_id=user_id, run_id=run_id)
         session.commit()
         return summarize_run_orders_sync(session, user_id=user_id, run_id=run_id)
@@ -2662,6 +3200,7 @@ def retry_failed_exits_and_continue_buys_sync(
         run_record = session.get(PolymarketAutoLiveRunRecord, run_id)
         if run_record is None or run_record.user_id != user_id:
             raise ValueError("Saved Auto-Live run not found.")
+        run = record_to_run(run_record)
 
         # Older runs may have been persisted by the legacy synchronous path.
         # Backfill only the already persisted order plans; never infer a new
@@ -2671,7 +3210,6 @@ def retry_failed_exits_and_continue_buys_sync(
             .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
         ).scalars().all()
         if not existing:
-            run = record_to_run(run_record)
             decision_records = session.execute(
                 select(PolymarketAutoLiveDecisionRecord)
                 .where(PolymarketAutoLiveDecisionRecord.user_id == user_id)
@@ -2719,7 +3257,21 @@ def retry_failed_exits_and_continue_buys_sync(
 
         resumed_at = utc_now_iso()
         for intent in existing:
-            if intent.remote_order_id or intent.remote_transaction_hash:
+            if _intent_has_persisted_submission_reference(intent):
+                intent.status = "CONFIRMING"
+                intent.retryable = True
+                intent.next_attempt_at = utc_now()
+                intent.last_error_code = "PERSISTED_SUBMISSION_RECONCILE_REQUIRED"
+                intent.last_error_message = (
+                    "Persisted order/submission reference found during Stage 3 "
+                    "retry; reconciliation was scheduled instead of a duplicate write."
+                )
+                intent.execution_metadata_json = {
+                    **dict(intent.execution_metadata_json or {}),
+                    "operator_resume_action": "Reconcile persisted submission",
+                    "operator_resume_at": resumed_at,
+                    "duplicate_order_prevented_at": resumed_at,
+                }
                 continue
             if intent.action in {"sell", "redeem"} and intent.status in {
                 "READY",
@@ -2757,8 +3309,16 @@ def retry_failed_exits_and_continue_buys_sync(
                     "operator_resume_at": resumed_at,
                 }
 
-        run_record.payload = {
-            **dict(run_record.payload or {}),
+        recovery = run.audit_metadata.get("stage3_recovery")
+        recovery = dict(recovery) if isinstance(recovery, dict) else {}
+        run.audit_metadata = {
+            **run.audit_metadata,
+            "stage3_recovery": {
+                **recovery,
+                "required": False,
+                "resolved_at": resumed_at,
+                "resolution": "operator_retry",
+            },
             "stage3_resume_action": {
                 "action": "Retry failed exits and continue buys",
                 "at": resumed_at,
@@ -2766,6 +3326,7 @@ def retry_failed_exits_and_continue_buys_sync(
                 "llm_analysis_rerun": False,
             },
         }
+        apply_run_to_record(run_record, run, user_id=user_id)
         session.flush()
         sync_run_and_decisions_from_intents_sync(session, user_id=user_id, run_id=run_id)
         session.commit()

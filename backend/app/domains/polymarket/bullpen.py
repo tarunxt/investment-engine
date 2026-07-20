@@ -1213,7 +1213,10 @@ def _format_balance_error_message(message: str) -> str:
     if _is_missing_balance_command(message):
         return "Balance unavailable: Bullpen CLI balance command not found"
     if _is_auth_required_error(message):
-        return "Balance unavailable: Bullpen login required. Run: bullpen login"
+        return (
+            "Balance unavailable: Bullpen login required. Run: "
+            "sudo -u investor -H /usr/local/bin/bullpen login --no-browser"
+        )
     return f"Balance unavailable: {message}"
 
 

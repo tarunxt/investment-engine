@@ -301,15 +301,11 @@ as an explicit operator bypass of only the slot-capacity gate; live cash,
 duplicate-market, market-validity, order-size, exposure, slippage, pricing, and
 cooldown guardrails remain active.
 
-The Step 2 `planned`, `processed`, and `submitted` tiles are expected to track
-the transferred Stage 2 Top 10 queue independently from whether a concrete
-Stage 3 buy `order_plan` was later created. Concrete buy-order counts remain
-separately persisted through the Stage 3 order funnel fields so audits can
-distinguish queue handoff, blocker handling, and actual Bullpen write attempts.
-When persisted Step 2 queue counters are stale or incomplete, the rendered
-Stage 3 UI may reconcile them upward against persisted buy decision rows so a
-submitted Bullpen buy cannot still display `planned=0 / processed=0 /
-submitted=0`.
+The Stage 2 transfer queue remains a separate handoff diagnostic. Stage 3 Step 2
+`planned`, `processed`, and `submitted` execution tiles count concrete persisted
+buy intents only. The backend reconciles those tiles, the Stage 3 totals, and the
+order funnel from the same durable records; the UI must not combine stale queue
+counters with a different decision-row source.
 An exit that is merely submitted or still open never releases a slot. A partial
 exit releases one only when the remaining economic exposure is at or below the
 configured dust threshold. A ranked replacement is reserved for its specific
@@ -347,6 +343,8 @@ Current required keys:
 * `position_returns_per_day`
 * `stage3_rank_and_selection`
 * `order_funnel_aggregation`
+* `stage3_persisted_counter_reconciliation`
+* `stage3_restart_recovery`
 
 If Bullpen logic adds or replaces critical formulas, the registry and tests must be
 updated in the same change.
@@ -374,6 +372,10 @@ Current deterministic checks include:
 * rank duplicates or gaps
 * selection count exceeding max positions
 * orphaned order intents and submitted orders without attempts
+* persisted Stage 3 counters that violate `submitted <= processed <= planned`
+* interrupted Stage 3 runs incorrectly left working/confirming
+* restart recovery that does not disable automatic resubmission
+* retryable intents that already contain persisted order/submission references
 
 ## Code Provenance Fields
 
@@ -441,3 +443,37 @@ must preserve these fields when materializing runs so reviewers can distinguish:
 
 Historical snapshots remain backward-compatible: missing watchdog fields mean the run
 predates the durable-intent watchdog and should be rendered as legacy diagnostics.
+
+## Active Auth Recovery and Restart-Safe Stage 3
+
+Snapshot schema version 2 adds the current Stage 3 recovery and durable-counter
+representation without rewriting frozen version 1 snapshots.
+
+The centralized Bullpen runtime broker persists the latest active
+`doctor auth --refresh` verdict in Redis. Historical command text is not an active
+auth verdict. Console login remediation is valid only when that latest active result
+reports invalid credentials, required login, blocked trade auth, or a failed doctor
+refresh. A later healthy result marks the earlier auth rejection stale/recovered.
+Because this is mutable runtime state, the latest verdict is returned with the
+Auto-Live summary; frozen run snapshots continue to record only the auth and
+guardrail evidence observed during that run.
+
+On Celery worker startup, persisted `running`/`confirming` work is reconciled;
+backend startup applies the same recovery to records with no progress for 15
+minutes. Runs with tasks confirmed active on another worker are left alone.
+Interrupted Stage 3 runs record `stage3_recovery` with
+`status=aborted_recovery_required`, `required=true`, and
+`automatic_resubmission=false`. Unsubmitted intents are deferred. Ambiguous or
+persisted submissions move only to reconciliation. The explicit operator retry path
+first checks remote order IDs, transaction hashes, and persisted submission
+timestamps so it cannot issue a duplicate order.
+
+When a running record contains a historical auth rejection but active doctor
+auth is now healthy, the old error is recorded as stale in `auth_recovery`, the
+interrupted record is closed, and it no longer blocks a new run. Remote writes
+re-read this recovery state immediately before submission.
+
+Stage 3 `orders_planned`, `orders_processed`, `orders_submitted`, both execution-step
+tiles, and the run-level order funnel are materialized from durable order-intent and
+attempt records. `persisted_execution_counters.source` is
+`persisted_order_intents`; validators reject contradictory counter orderings.

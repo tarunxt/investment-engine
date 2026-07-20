@@ -1,8 +1,13 @@
+import logging
+
 from celery import Celery
+from celery.signals import worker_ready
 from kombu import Queue
 from celery.schedules import crontab, schedule
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 _broker = settings.celery_broker_url or settings.redis_url
 _backend = settings.celery_result_backend or settings.redis_url
@@ -86,3 +91,20 @@ celery.autodiscover_tasks([
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",
 ])
+
+
+@worker_ready.connect
+def reconcile_interrupted_auto_live_runs_after_worker_restart(**_kwargs) -> None:
+    """Freeze abandoned Stage 3 writes before a restarted worker consumes them."""
+
+    from app.domains.polymarket_auto_live.tasks import (
+        reconcile_interrupted_auto_live_runs_on_startup_sync,
+    )
+
+    try:
+        reconcile_interrupted_auto_live_runs_on_startup_sync()
+    except Exception:
+        logger.exception(
+            "Worker startup interrupted-run reconciliation failed; no automatic "
+            "Stage 3 retry was requested."
+        )

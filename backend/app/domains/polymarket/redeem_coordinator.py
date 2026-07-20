@@ -253,7 +253,7 @@ def _format_resolution_steps(
         "1. Run `bullpen status` and `bullpen polymarket positions --output json` in the same Bullpen HOME used by Cred-X.",
         f"2. Retry `{retry_command}`.",
         "3. If the payout is stranded on a non-selected wallet, run `bullpen polymarket wallet-audit` and then `bullpen polymarket consolidate --yes` before retrying.",
-        "4. If Bullpen reports auth, approval, or first-trade setup errors, run `bullpen login` or `bullpen polymarket activate` in that same HOME and retry.",
+        "4. If Bullpen reports an auth error, run `sudo -u investor -H /usr/local/bin/bullpen login --no-browser`. For approval or first-trade setup errors, run `bullpen polymarket activate` and retry.",
     ]
     if on_chain_fallback_used:
         steps.insert(

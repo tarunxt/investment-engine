@@ -40,7 +40,8 @@ def test_format_balance_error_message_summarizes_auth_required_json():
 
     assert (
         bullpen._format_balance_error_message(message)
-        == "Balance unavailable: Bullpen login required. Run: bullpen login"
+        == "Balance unavailable: Bullpen login required. Run: sudo -u investor -H "
+        "/usr/local/bin/bullpen login --no-browser"
     )
 
 

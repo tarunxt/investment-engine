@@ -826,6 +826,21 @@ def _build_bundle(
             "order_intents": order_intents,
             "order_metrics": stage3_outputs.get("order_metrics") or {},
             "execution_steps": stage3_outputs.get("execution_steps") or [],
+            "persisted_execution_counters": stage3_outputs.get(
+                "persisted_execution_counters"
+            )
+            or {},
+            "recovery": (
+                audit_metadata.get("stage3_recovery")
+                if isinstance(audit_metadata.get("stage3_recovery"), dict)
+                else {
+                    "required": stage3_outputs.get("recovery_required"),
+                    "automatic_resubmission": stage3_outputs.get(
+                        "automatic_resubmission"
+                    ),
+                    "interrupted_at": stage3_outputs.get("interrupted_at"),
+                }
+            ),
             "post_exit_buy_refresh": stage3_outputs.get("post_exit_buy_refresh") or {},
             "stage3_slot_diagnostics": stage3_outputs.get("stage3_slot_diagnostics") or {},
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),

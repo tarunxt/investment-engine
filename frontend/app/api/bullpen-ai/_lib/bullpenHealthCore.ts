@@ -233,17 +233,13 @@ function buildFailureMessage({
       return {
         message: `Bullpen CLI auth is required for HOME=${credentialHome || "unknown"}.${credentialDetail} Re-login on server.`,
         actionNeeded:
-          credentialHome && credentialHome !== "unknown"
-            ? `Re-run Bullpen login on the server using the same HOME. Example: env HOME=${credentialHome} bullpen login.`
-            : "Re-run Bullpen login on the server using the same HOME as the running app.",
+          "sudo -u investor -H /usr/local/bin/bullpen login --no-browser",
       };
     case "AUTH_EXPIRED":
       return {
         message: `Bullpen CLI auth appears expired for HOME=${credentialHome || "unknown"}.${credentialDetail} Re-login on server.`,
         actionNeeded:
-          credentialHome && credentialHome !== "unknown"
-            ? `Re-login Bullpen on the server using the same HOME. Example: env HOME=${credentialHome} bullpen login. Logging into a different home directory will not refresh this runtime.`
-            : "Re-login Bullpen on the server using the same HOME as the running app.",
+          "sudo -u investor -H /usr/local/bin/bullpen login --no-browser",
       };
     case "NETWORK_ERROR":
       return {

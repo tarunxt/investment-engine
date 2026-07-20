@@ -14,6 +14,8 @@ from app.domains.polymarket_auto_live.bot import BullpenAutoLiveBot
 from app.domains.polymarket_auto_live.run_recovery import (
     AutoLiveTaskRuntimeSnapshot,
     inspect_auto_live_run_task_sync,
+    mark_historical_auth_error_recovered,
+    mark_interrupted_run_for_restart,
     reconcile_running_auto_live_run,
 )
 from app.domains.polymarket_auto_live.schemas import (
@@ -547,6 +549,173 @@ def test_reconcile_running_auto_live_run_surfaces_terminal_celery_failure_detail
     assert "Failure detail: Future attached to a different loop" in recovered.error_message
     assert "No persisted Celery exception detail" not in recovered.error_message
     assert recovered.stage_results[-1].outputs["failure_message"] == recovered.error_message
+    assert recovered.stage_results[-1].outputs["phase_status"] == "aborted"
+    assert recovered.stage_results[-1].outputs["recovery_required"] is True
+    assert recovered.audit_metadata["stage3_recovery"]["automatic_resubmission"] is False
+
+
+def test_service_restart_aborts_stage3_without_resubmitting_orders():
+    run = BullpenAutoLiveRun(
+        id="run-stage3-restart",
+        triggered_by="scheduler",
+        status="confirming",
+        dry_run=False,
+        started_at="2026-07-20T12:00:00+00:00",
+        summary="Stage 3 submitted 1 of 3 planned orders.",
+        orders_planned=3,
+        orders_submitted=1,
+        stage_results=[
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                reason="Stage 3 submitted 1 of 3 planned orders.",
+                outputs={
+                    "orders_planned": 3,
+                    "orders_processed": 1,
+                    "orders_submitted": 1,
+                },
+                completed_at=None,
+            )
+        ],
+    )
+
+    recovered = mark_interrupted_run_for_restart(
+        run,
+        interrupted_at="2026-07-20T12:05:00+00:00",
+    )
+
+    assert recovered is run
+    assert recovered.status == "failed"
+    assert recovered.completed_at == "2026-07-20T12:05:00+00:00"
+    assert recovered.orders_planned == 3
+    assert recovered.orders_submitted == 1
+    assert recovered.stage_results[-1].outputs["phase_status"] == "aborted"
+    assert recovered.stage_results[-1].outputs["recovery_required"] is True
+    assert recovered.stage_results[-1].outputs["automatic_resubmission"] is False
+    assert recovered.audit_metadata["stage3_recovery"] == {
+        "required": True,
+        "status": "aborted_recovery_required",
+        "interrupted_at": "2026-07-20T12:05:00+00:00",
+        "automatic_resubmission": False,
+    }
+    assert "no order was automatically resubmitted" in recovered.summary
+
+
+def test_healthy_active_auth_marks_historical_run_error_stale():
+    run = BullpenAutoLiveRun(
+        id="run-auth-recovered",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-20T12:00:00+00:00",
+        summary="Failed: AUTH_REFRESH_REJECTED_LOGIN_REQUIRED",
+        error_message="Session expired. Run: bullpen login",
+        stage_results=[
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                reason="Bullpen login required.",
+                completed_at=None,
+            )
+        ],
+    )
+
+    recovered = mark_historical_auth_error_recovered(
+        run,
+        recovered_at="2026-07-20T12:06:00+00:00",
+    )
+
+    assert recovered.status == "failed"
+    assert recovered.error_message is None
+    assert recovered.stage_results[-1].outputs["phase_status"] == "aborted"
+    assert recovered.stage_results[-1].outputs["historical_auth_error_stale"] is True
+    assert recovered.audit_metadata["auth_recovery"] == {
+        "historical_error_stale": True,
+        "active_auth_healthy": True,
+        "recovered_at": "2026-07-20T12:06:00+00:00",
+    }
+    assert "does not block a new run" in recovered.summary
+
+
+@pytest.mark.anyio
+async def test_healthy_active_auth_recovery_removes_running_run_block(monkeypatch):
+    settings = BullpenAutoLiveSettings(auto_live_enabled=True, dry_run=True)
+    state = BullpenAutoLiveState(running=False, paused=False, status="stopped")
+    historical_run = BullpenAutoLiveRun(
+        id="run-auth-block",
+        triggered_by="manual",
+        status="running",
+        dry_run=True,
+        started_at="2026-07-20T12:00:00+00:00",
+        summary="Failed: AUTH_REFRESH_REJECTED_LOGIN_REQUIRED",
+    )
+    running_record = SimpleNamespace(
+        started_at=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 20, 12, 5, tzinfo=UTC),
+    )
+    saved_runs: list[BullpenAutoLiveRun] = []
+    saved_states: list[BullpenAutoLiveState] = []
+    revoked_runs: list[str] = []
+
+    class _FakeRepo:
+        async def get_running_run_record(self, user_id: int):
+            assert user_id == 7
+            return running_record
+
+        async def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
+            assert user_id == 7
+            saved_runs.append(run.model_copy(deep=True))
+
+        async def replace_run_decisions_from_stage3_payload(
+            self, user_id: int, run: BullpenAutoLiveRun
+        ) -> int:
+            assert user_id == 7
+            return 0
+
+        async def save_state(self, user_id: int, next_state: BullpenAutoLiveState) -> None:
+            assert user_id == 7
+            saved_states.append(next_state.model_copy(deep=True))
+
+    class _HealthyBroker:
+        async def resolve_latest_active_auth_result(self, *, refresh_if_stale: bool):
+            assert refresh_if_stale is True
+            return SimpleNamespace(
+                healthy=True,
+                checked_at="2026-07-20T12:06:00+00:00",
+            )
+
+    async def _fake_revoke(run_id: str) -> None:
+        revoked_runs.append(run_id)
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.record_to_run",
+        lambda _record: historical_run,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket.runtime_broker.get_bullpen_runtime_broker",
+        lambda: _HealthyBroker(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.revoke_registered_auto_live_run_task",
+        _fake_revoke,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.reconcile_running_auto_live_run",
+        lambda *args, **kwargs: pytest.fail("stale worker recovery should not run"),
+    )
+
+    active_run, recovered_state = await BullpenAutoLiveBot(
+        user_id=7
+    )._get_active_run_or_recover(_FakeRepo(), settings, state)  # type: ignore[arg-type]
+
+    assert active_run is None
+    assert revoked_runs == [historical_run.id]
+    assert saved_runs[0].status == "failed"
+    assert saved_runs[0].audit_metadata["auth_recovery"]["historical_error_stale"] is True
+    assert recovered_state.last_error is None
+    assert saved_states[-1].last_run_id == historical_run.id
 
 
 @pytest.mark.anyio

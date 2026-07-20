@@ -260,6 +260,49 @@ def test_build_deterministic_findings_flags_incomplete_stage2_universe_without_r
     assert "INCOMPLETE_STAGE2_UNIVERSE_MISSING_REMEDIATION" in codes
 
 
+def test_build_deterministic_findings_flags_restart_and_duplicate_order_risks():
+    bundle = {
+        "metadata": {"run_id": "run-stage3-restart"},
+        "overview": {
+            "run_status": "confirming",
+            "started_at": "2026-07-20T12:00:00+00:00",
+            "completed_at": None,
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {"candidate_reviews": []},
+        "stage_3": {
+            "decisions": [],
+            "max_positions": 10,
+            "persisted_execution_counters": {
+                "total": {"planned": 2, "processed": 0, "submitted": 1}
+            },
+            "recovery": {
+                "required": True,
+                "automatic_resubmission": True,
+            },
+            "order_intents": [
+                {
+                    "id": "intent-1",
+                    "status": "READY",
+                    "remote_order_id": "remote-order-1",
+                    "attempts": [],
+                }
+            ],
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+    codes = {finding["code"] for finding in findings}
+
+    assert "STAGE3_PERSISTED_COUNTERS_CONTRADICT" in codes
+    assert "STAGE3_RECOVERY_RUN_LEFT_IN_PROGRESS" in codes
+    assert "STAGE3_RECOVERY_AUTO_RESUBMISSION_NOT_DISABLED" in codes
+    assert "STAGE3_RETRYABLE_ORDER_HAS_SUBMISSION_REFERENCE" in codes
+
+
 def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
     run_payload = {
         "id": "run-universe-details",

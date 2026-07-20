@@ -1,5 +1,5 @@
 from __future__ import annotations
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from celery.exceptions import SoftTimeLimitExceeded
@@ -35,6 +35,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     execute_order_intent_sync,
     annotate_intent_dispatch_sync,
     recover_stale_planned_order_intents_sync,
+    reconcile_interrupted_runs_on_startup_sync,
     get_intent_user_id_sync,
     list_due_order_intent_ids_sync,
     persist_stage3_intent_diagnostics_sync,
@@ -176,11 +177,42 @@ def recover_and_enqueue_stale_order_intents_for_run_sync(run_id: str, *, limit: 
     return _enqueue_execute_order_intents(due_ids)
 
 
-def recover_and_enqueue_stale_order_intents_on_startup_sync(*, limit: int = 100) -> int:
+def recover_and_enqueue_stale_order_intents_on_startup_sync(
+    *,
+    limit: int = 100,
+    stale_after_seconds: int = 0,
+) -> int:
+    """Backward-compatible wrapper for restart-safe run recovery.
+
+    Startup recovery intentionally does not enqueue or resubmit order intents.
+    """
+    interrupted_at = _utc_now()
+    stale_before = (
+        interrupted_at - timedelta(seconds=max(0, stale_after_seconds))
+        if stale_after_seconds > 0
+        else None
+    )
     with SyncSessionLocal() as session:
-        recovered_ids = recover_stale_planned_order_intents_sync(session, limit=limit)
+        recovered_ids = reconcile_interrupted_runs_on_startup_sync(
+            session,
+            limit=limit,
+            interrupted_at=interrupted_at,
+            stale_before=stale_before,
+        )
         session.commit()
-    return _enqueue_execute_order_intents(recovered_ids)
+    return len(recovered_ids)
+
+
+def reconcile_interrupted_auto_live_runs_on_startup_sync(
+    *,
+    limit: int = 100,
+    stale_after_seconds: int = 0,
+) -> int:
+    return recover_and_enqueue_stale_order_intents_on_startup_sync(
+        limit=limit,
+        stale_after_seconds=stale_after_seconds,
+    )
+
 
 def _position_snapshot_from_record(record) -> PositionSnapshot:
     payload = record.payload or {}
@@ -252,10 +284,20 @@ def _run_was_cancelled_by_user(
     if get_run is None:
         return False
     current_run = get_run(run_id)
+    if current_run is None or current_run.status != "failed":
+        return False
+    if current_run.error_message == "Cancelled by user":
+        return True
+    auth_recovery = current_run.audit_metadata.get("auth_recovery")
+    if isinstance(auth_recovery, dict) and auth_recovery.get(
+        "historical_error_stale"
+    ):
+        return True
+    stage3_recovery = current_run.audit_metadata.get("stage3_recovery")
     return bool(
-        current_run is not None
-        and current_run.status == "failed"
-        and current_run.error_message == "Cancelled by user"
+        isinstance(stage3_recovery, dict)
+        and stage3_recovery.get("required")
+        and not stage3_recovery.get("resolved_at")
     )
 
 

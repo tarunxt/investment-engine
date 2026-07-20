@@ -31,7 +31,7 @@ function buildBaseOptions(execFileImpl) {
   return {
     commandCandidates: ["/usr/local/bin/bullpen"],
     env: {
-      HOME: "/var/lib/credx/bullpen",
+      HOME: "/home/investor",
     },
     execFileImpl,
     parseJsonOutput: JSON.parse,
@@ -55,10 +55,10 @@ test("Bullpen CLI health classifies login-required stderr and redacts token-like
 
   assert.equal(result.ok, false);
   assert.equal(result.health.classification, "AUTH_REQUIRED");
-  assert.match(result.health.message, /HOME=\/var\/lib\/credx\/bullpen/);
+  assert.match(result.health.message, /HOME=\/home\/investor/);
   assert.match(
     result.health.actionNeeded || "",
-    /env HOME=\/var\/lib\/credx\/bullpen bullpen login/i,
+    /sudo -u investor -H \/usr\/local\/bin\/bullpen login --no-browser/i,
   );
   assert.doesNotMatch(result.health.stderr || "", new RegExp(fakeJwt.replace(/\./g, "\\.")));
   assert.match(result.health.stderr || "", /\[REDACTED/i);

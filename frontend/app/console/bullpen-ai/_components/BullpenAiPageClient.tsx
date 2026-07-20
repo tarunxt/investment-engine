@@ -197,9 +197,9 @@ const EMPTY_SELECTED_IDS = new Set<string>();
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
 const DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND =
-  "sudo -u investor env HOME=/var/lib/credx/bullpen bullpen login";
+  "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
 const DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND =
-  "sudo -u investor env HOME=/var/lib/credx/bullpen bullpen polymarket positions --output json";
+  "sudo -u investor -H /usr/local/bin/bullpen polymarket positions --output json";
 const DEFAULT_EC2_COMMANDS = [
   DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND,
   DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND,

@@ -1,8 +1,14 @@
+import pytest
+
 from app.domains.polymarket_auto_live.order_intents import (
     build_order_funnel,
     build_order_plan_from_intent,
     classify_executor_error,
     derive_run_status_from_intents,
+)
+from app.domains.polymarket_auto_live.order_intent_service import (
+    _assert_intent_has_no_persisted_submission_reference,
+    _persisted_stage3_counts,
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveOrderIntent,
@@ -174,3 +180,48 @@ def test_build_order_plan_from_intent_carries_retry_and_fill_metadata():
     assert updated.latest_error_code == "QUOTE_STALE"
     assert updated.filled_shares == 2.5
     assert updated.remaining_shares == 3.75
+
+
+def test_stage3_counters_are_reconciled_from_persisted_order_intents():
+    intents = [
+        _intent(intent_id="exit-submitted", status="CONFIRMING", action="sell").model_copy(
+            update={
+                "attempt_count": 1,
+                "remote_order_id": "remote-exit-1",
+                "first_submitted_at": "2026-07-20T12:00:05+00:00",
+            }
+        ),
+        _intent(intent_id="exit-deferred", status="DEFERRED", action="redeem"),
+        _intent(intent_id="buy-ready", status="READY", action="buy"),
+        _intent(intent_id="buy-failed", status="FAILED_PERMANENT", action="buy").model_copy(
+            update={"attempt_count": 1, "retryable": False}
+        ),
+    ]
+
+    counters = _persisted_stage3_counts(intents)
+
+    assert counters["source"] == "persisted_order_intents"
+    assert counters["total"] == {"planned": 4, "processed": 3, "submitted": 1}
+    assert counters["sell"] == {"planned": 2, "processed": 2, "submitted": 1}
+    assert counters["redeem"] == {"planned": 1, "processed": 1, "submitted": 0}
+    assert counters["buy"] == {"planned": 2, "processed": 1, "submitted": 0}
+    for key in ("total", "sell", "redeem", "buy"):
+        group = counters[key]
+        assert group["submitted"] <= group["processed"] <= group["planned"]
+
+
+@pytest.mark.parametrize(
+    "submission_update",
+    [
+        {"remote_order_id": "remote-order-1"},
+        {"remote_transaction_hash": "0xabc123"},
+        {"first_submitted_at": "2026-07-20T12:00:05+00:00"},
+    ],
+)
+def test_retry_rejects_intent_with_persisted_submission_reference(submission_update):
+    intent = _intent(intent_id="duplicate-guard", status="READY").model_copy(
+        update=submission_update
+    )
+
+    with pytest.raises(ValueError, match="reconciled instead of retried"):
+        _assert_intent_has_no_persisted_submission_reference(intent)

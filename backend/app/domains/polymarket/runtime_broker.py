@@ -30,6 +30,9 @@ _DEFAULT_BULLPEN_HOME = "/home/investor/.bullpen"
 _DEFAULT_BULLPEN_CONFIG = "/home/investor/.bullpen/config.toml"
 _DEFAULT_BULLPEN_ENV = "production"
 _AUTH_READY_TTL_SECONDS = 60
+_ACTIVE_AUTH_RESULT_TTL_SECONDS = 24 * 60 * 60
+_ACTIVE_AUTH_HEALTHY_REFRESH_SECONDS = 60
+_ACTIVE_AUTH_FAILED_REFRESH_SECONDS = 30
 _CLI_VERSION_TTL_SECONDS = 300
 _POSITIONS_SNAPSHOT_TTL_SECONDS = 300
 _POSITIONS_FRESH_SECONDS = 20
@@ -47,6 +50,7 @@ _AUTH_REFRESH_TIMEOUT_SECONDS = 20
 _POLL_INTERVAL_SECONDS = 0.1
 _MAX_BUFFER_BYTES = 10 * 1024 * 1024
 _REDIS_PREFIX = "bullpen:runtime"
+_ACTIVE_AUTH_RESULT_KEY = f"{_REDIS_PREFIX}:auth:latest-active"
 _AUTHENTICATED_CLI_LOCK_KEY = f"{_REDIS_PREFIX}:authenticated-cli"
 _POSITIONS_REFRESH_LOCK_KEY = f"{_REDIS_PREFIX}:positions-refresh"
 _PRODUCTION_ENVIRONMENTS = {"production", "prod"}
@@ -181,6 +185,31 @@ class BullpenRuntimeFailure(BaseModel):
     command_category: str | None = None
     classification: str | None = None
     message: str
+    stale: bool = False
+    recovered_at: str | None = None
+
+
+class BullpenRuntimeActiveAuthResult(BaseModel):
+    """Latest centralized result of an active ``doctor auth --refresh`` call."""
+
+    checked_at: str
+    auth_checked_at: str | None = None
+    healthy: bool
+    login_required: bool
+    doctor_refresh_succeeded: bool
+    credentials_valid: bool | None = None
+    refresh_succeeded: bool | None = None
+    token_valid: bool | None = None
+    trade_auth_blocked: bool | None = None
+    requires_login: bool | None = None
+    wallet_ready: bool | None = None
+    failure_reason: str | None = None
+    error_classification: str | None = None
+    recovered_failure_at: str | None = None
+    historical_error_stale: bool = False
+    credential_artifact: BullpenCredentialArtifact = Field(
+        default_factory=BullpenCredentialArtifact
+    )
 
 
 class BullpenRuntimeCachedHealth(BaseModel):
@@ -218,6 +247,7 @@ class BullpenRuntimePassiveHealth(BaseModel):
     auth_checked_at: str | None = None
     latest_snapshot: BullpenPositionsSnapshotMetadata | None = None
     last_failure: BullpenRuntimeFailure | None = None
+    active_auth: BullpenRuntimeActiveAuthResult | None = None
     cli_version: str | None = None
     command_path: str | None = None
 
@@ -813,6 +843,27 @@ class BullpenRuntimeBroker:
                 or _credential_artifact_matches(observed_credential, current_credential)
             ):
                 self._last_auth_checked_at = cached.checked_at
+                active_auth = await self.read_latest_active_auth_result()
+                if active_auth is None or not active_auth.healthy:
+                    await self._write_active_auth_result(
+                        BullpenRuntimeActiveAuthResult(
+                            checked_at=_utc_now_iso(),
+                            auth_checked_at=cached.checked_at,
+                            healthy=True,
+                            login_required=False,
+                            doctor_refresh_succeeded=True,
+                            credentials_valid=True,
+                            refresh_succeeded=True,
+                            token_valid=True,
+                            trade_auth_blocked=False,
+                            requires_login=False,
+                            credential_artifact=current_credential,
+                            recovered_failure_at=(
+                                active_auth.checked_at if active_auth is not None else None
+                            ),
+                            historical_error_stale=active_auth is not None,
+                        )
+                    )
                 return cached.checked_at
 
         return await self._refresh_auth_under_lock(
@@ -825,21 +876,81 @@ class BullpenRuntimeBroker:
     async def read_passive_health(self) -> BullpenRuntimePassiveHealth:
         snapshot = await self.read_cached_positions_snapshot()
         auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
+        active_auth = await self.read_latest_active_auth_result()
+        broker_health = self._last_health
+        if (
+            active_auth is not None
+            and active_auth.healthy
+            and broker_health.error_classification == "auth_rejected"
+        ):
+            broker_health = broker_health.model_copy(
+                update={
+                    "ok": True,
+                    "checked_at": active_auth.checked_at,
+                    "message": (
+                        "Earlier Bullpen authentication failure recovered; the "
+                        "latest active doctor auth refresh is healthy."
+                    ),
+                    "error_classification": None,
+                }
+            )
         latest_auth_checked_at = (
             auth_cache.checked_at
             if auth_cache is not None
             else snapshot.auth_checked_at if snapshot is not None else self._last_auth_checked_at
         )
         return BullpenRuntimePassiveHealth(
-            ok=self._last_health.ok,
+            ok=broker_health.ok,
             checked_at=_utc_now_iso(),
-            broker_health=self._last_health,
+            broker_health=broker_health,
             auth_checked_at=latest_auth_checked_at,
             latest_snapshot=self._snapshot_metadata(snapshot),
-            last_failure=self._last_failure,
+            last_failure=self._passive_last_failure(active_auth),
+            active_auth=active_auth,
             cli_version=self._version_cache_value,
             command_path=_runtime_config().bullpen_bin,
         )
+
+    async def read_latest_active_auth_result(
+        self,
+    ) -> BullpenRuntimeActiveAuthResult | None:
+        raw = await self._redis.get(_ACTIVE_AUTH_RESULT_KEY)
+        if not raw:
+            return None
+        try:
+            return BullpenRuntimeActiveAuthResult.model_validate_json(raw)
+        except Exception:
+            return None
+
+    async def resolve_latest_active_auth_result(
+        self,
+        *,
+        refresh_if_stale: bool = False,
+    ) -> BullpenRuntimeActiveAuthResult | None:
+        """Read the shared active-auth verdict and optionally refresh stale data.
+
+        Failed checks use a short retry window so a manual login is recognized
+        promptly without making every UI poll spawn a Bullpen subprocess.
+        """
+
+        latest = await self.read_latest_active_auth_result()
+        if not refresh_if_stale:
+            return latest
+        max_age_seconds = (
+            _ACTIVE_AUTH_HEALTHY_REFRESH_SECONDS
+            if latest is not None and latest.healthy
+            else _ACTIVE_AUTH_FAILED_REFRESH_SECONDS
+        )
+        latest_age_ms = _iso_age_ms(latest.checked_at) if latest is not None else None
+        if latest_age_ms is not None and latest_age_ms <= max_age_seconds * 1000:
+            return latest
+        try:
+            await self.ensure_auth_ready(force_refresh=True)
+        except Exception:
+            # _refresh_auth_under_lock persists the failed active verdict.  The
+            # summary caller needs that verdict, not a second historical error.
+            pass
+        return await self.read_latest_active_auth_result()
 
     def _positions_refresh_wait_budget_seconds(self, timeout_seconds: int) -> int:
         command_timeout = max(1, timeout_seconds)
@@ -1067,6 +1178,57 @@ class BullpenRuntimeBroker:
 
     async def _delete_auth_ready_cache(self, cache_key: str) -> None:
         await self._redis.delete(cache_key)
+
+    async def _write_active_auth_result(
+        self,
+        result: BullpenRuntimeActiveAuthResult,
+    ) -> None:
+        await self._redis.set(
+            _ACTIVE_AUTH_RESULT_KEY,
+            result.model_dump_json(),
+            ex=_ACTIVE_AUTH_RESULT_TTL_SECONDS,
+        )
+
+    def _passive_last_failure(
+        self,
+        active_auth: BullpenRuntimeActiveAuthResult | None,
+    ) -> BullpenRuntimeFailure | None:
+        failure = self._last_failure
+        if failure is None:
+            return None
+        if (
+            active_auth is not None
+            and active_auth.healthy
+            and failure.classification == "auth_rejected"
+        ):
+            return failure.model_copy(
+                update={
+                    "stale": True,
+                    "recovered_at": active_auth.checked_at,
+                }
+            )
+        return failure
+
+    def _mark_local_auth_failure_recovered(self, *, recovered_at: str) -> None:
+        if self._last_failure is None:
+            return
+        if self._last_failure.classification != "auth_rejected":
+            return
+        self._last_failure = self._last_failure.model_copy(
+            update={"stale": True, "recovered_at": recovered_at}
+        )
+        if self._last_health.error_classification == "auth_rejected":
+            self._last_health = self._last_health.model_copy(
+                update={
+                    "ok": True,
+                    "checked_at": recovered_at,
+                    "message": (
+                        "Earlier Bullpen authentication failure recovered; the "
+                        "latest active doctor auth refresh is healthy."
+                    ),
+                    "error_classification": None,
+                }
+            )
 
     def _snapshot_metadata(
         self,
@@ -1821,19 +1983,77 @@ class BullpenRuntimeBroker:
         lease_lock_key: str | None,
         lease_wait_ms: float | None,
     ) -> str:
-        result = await self._execute_process(
-            ["doctor", "auth", "--refresh", "--output", "json"],
-            timeout_seconds=20,
-            command_category="doctor-auth-refresh",
-            is_write=False,
-            requires_auth=True,
-            auth_refresh_attempted=True,
-            lock_key=lease_lock_key,
-            lock_wait_ms=lease_wait_ms,
-        )
+        previous_active_auth = await self.read_latest_active_auth_result()
+        try:
+            result = await self._execute_process(
+                ["doctor", "auth", "--refresh", "--output", "json"],
+                timeout_seconds=_AUTH_REFRESH_TIMEOUT_SECONDS,
+                command_category="doctor-auth-refresh",
+                is_write=False,
+                requires_auth=True,
+                auth_refresh_attempted=True,
+                lock_key=lease_lock_key,
+                lock_wait_ms=lease_wait_ms,
+            )
+        except BullpenRuntimeCommandError as exc:
+            await self._delete_auth_ready_cache(cache_key)
+            payload: dict[str, Any] = {}
+            for candidate in (exc.stdout, exc.stderr):
+                if not candidate:
+                    continue
+                try:
+                    parsed = json.loads(candidate)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(parsed, dict):
+                    payload = parsed
+                    break
+            await self._write_active_auth_result(
+                BullpenRuntimeActiveAuthResult(
+                    checked_at=_utc_now_iso(),
+                    healthy=False,
+                    login_required=True,
+                    doctor_refresh_succeeded=False,
+                    credentials_valid=(
+                        payload.get("credentials_valid")
+                        if isinstance(payload.get("credentials_valid"), bool)
+                        else None
+                    ),
+                    refresh_succeeded=(
+                        payload.get("refresh_succeeded")
+                        if isinstance(payload.get("refresh_succeeded"), bool)
+                        else False
+                    ),
+                    token_valid=(
+                        payload.get("token_valid")
+                        if isinstance(payload.get("token_valid"), bool)
+                        else None
+                    ),
+                    trade_auth_blocked=(
+                        payload.get("trade_auth_blocked")
+                        if isinstance(payload.get("trade_auth_blocked"), bool)
+                        else None
+                    ),
+                    requires_login=(
+                        payload.get("requires_login")
+                        if isinstance(payload.get("requires_login"), bool)
+                        else None
+                    ),
+                    wallet_ready=(
+                        payload.get("wallet_ready")
+                        if isinstance(payload.get("wallet_ready"), bool)
+                        else None
+                    ),
+                    failure_reason=redact_secrets(str(exc)),
+                    error_classification=exc.classification,
+                    credential_artifact=current_credential,
+                )
+            )
+            raise
         try:
             payload = json.loads(result.stdout or "{}")
         except json.JSONDecodeError as exc:
+            await self._delete_auth_ready_cache(cache_key)
             error = BullpenRuntimeCommandError(
                 "Bullpen auth refresh returned invalid JSON.",
                 classification="json_parse_error",
@@ -1848,16 +2068,70 @@ class BullpenRuntimeBroker:
                 message=str(error),
                 diagnostics=result.diagnostics,
             )
+            await self._write_active_auth_result(
+                BullpenRuntimeActiveAuthResult(
+                    checked_at=_utc_now_iso(),
+                    healthy=False,
+                    login_required=True,
+                    doctor_refresh_succeeded=False,
+                    refresh_succeeded=False,
+                    failure_reason=str(error),
+                    error_classification=error.classification,
+                    credential_artifact=current_credential,
+                )
+            )
             raise error from exc
 
         try:
             checked_at = _validate_auth_refresh_payload(payload)
         except BullpenRuntimeCommandError as exc:
+            await self._delete_auth_ready_cache(cache_key)
             self._record_failure(
                 command_category="doctor-auth-refresh",
                 classification=exc.classification,
                 message=str(exc),
                 diagnostics=result.diagnostics,
+            )
+            await self._write_active_auth_result(
+                BullpenRuntimeActiveAuthResult(
+                    checked_at=_utc_now_iso(),
+                    healthy=False,
+                    login_required=True,
+                    doctor_refresh_succeeded=False,
+                    credentials_valid=(
+                        payload.get("credentials_valid")
+                        if isinstance(payload.get("credentials_valid"), bool)
+                        else None
+                    ),
+                    refresh_succeeded=(
+                        payload.get("refresh_succeeded")
+                        if isinstance(payload.get("refresh_succeeded"), bool)
+                        else None
+                    ),
+                    token_valid=(
+                        payload.get("token_valid")
+                        if isinstance(payload.get("token_valid"), bool)
+                        else None
+                    ),
+                    trade_auth_blocked=(
+                        payload.get("trade_auth_blocked")
+                        if isinstance(payload.get("trade_auth_blocked"), bool)
+                        else None
+                    ),
+                    requires_login=(
+                        payload.get("requires_login")
+                        if isinstance(payload.get("requires_login"), bool)
+                        else None
+                    ),
+                    wallet_ready=(
+                        payload.get("wallet_ready")
+                        if isinstance(payload.get("wallet_ready"), bool)
+                        else None
+                    ),
+                    failure_reason=str(exc),
+                    error_classification=exc.classification,
+                    credential_artifact=current_credential,
+                )
             )
             raise
 
@@ -1874,6 +2148,39 @@ class BullpenRuntimeBroker:
             account_identity=account_identity,
         )
         self._last_auth_checked_at = checked_at
+        active_checked_at = _utc_now_iso()
+        previous_failure_at = (
+            previous_active_auth.checked_at
+            if previous_active_auth is not None and not previous_active_auth.healthy
+            else None
+        )
+        await self._write_active_auth_result(
+            BullpenRuntimeActiveAuthResult(
+                checked_at=active_checked_at,
+                auth_checked_at=checked_at,
+                healthy=True,
+                login_required=False,
+                doctor_refresh_succeeded=True,
+                credentials_valid=True,
+                refresh_succeeded=payload.get("refresh_succeeded") is not False,
+                token_valid=True,
+                trade_auth_blocked=False,
+                requires_login=False,
+                wallet_ready=(
+                    payload.get("wallet_ready")
+                    if isinstance(payload.get("wallet_ready"), bool)
+                    else None
+                ),
+                recovered_failure_at=previous_failure_at,
+                historical_error_stale=previous_failure_at is not None,
+                credential_artifact=(
+                    final_credential
+                    if final_credential.path is not None
+                    else current_credential
+                ),
+            )
+        )
+        self._mark_local_auth_failure_recovered(recovered_at=active_checked_at)
         return checked_at
 
     async def _read_positions_snapshot(

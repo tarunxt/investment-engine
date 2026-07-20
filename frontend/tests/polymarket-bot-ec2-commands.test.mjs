@@ -11,11 +11,11 @@ test("Polymarket bot EC2 commands persist edited and deleted defaults", () => {
   assert.match(source, /const EC2_COMMANDS_STORAGE_KEY = "polymarketBot\.ec2Commands"/);
   assert.match(
     source,
-    /const DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND =\s*"sudo -u investor env HOME=\/var\/lib\/credx\/bullpen bullpen login"/,
+    /const DEFAULT_SYSTEMD_BULLPEN_LOGIN_COMMAND =\s*"sudo -u investor -H \/usr\/local\/bin\/bullpen login --no-browser"/,
   );
   assert.match(
     source,
-    /const DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND =\s*"sudo -u investor env HOME=\/var\/lib\/credx\/bullpen bullpen polymarket positions --output json"/,
+    /const DEFAULT_SYSTEMD_BULLPEN_VERIFY_COMMAND =\s*"sudo -u investor -H \/usr\/local\/bin\/bullpen polymarket positions --output json"/,
   );
   assert.match(
     source,

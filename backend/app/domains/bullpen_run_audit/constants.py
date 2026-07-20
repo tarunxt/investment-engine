@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Final
 
-BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 1
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage1-verified-portfolio"
+BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
+    "2026-07-20-stage1-verified-portfolio-stage3-recovery-v2"
+)
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage1-verified-portfolio"
+    "2026-07-20-stage1-verified-portfolio-stage3-recovery-v2"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -106,6 +108,22 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_function": "summarize_run_orders_sync",
         "label": "Order funnel aggregation",
     },
+    {
+        "algorithm_key": "stage3_persisted_counter_reconciliation",
+        "stage": "stage-3",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_persisted_stage3_counts",
+        "label": "Stage 3 persisted execution counter reconciliation",
+    },
+    {
+        "algorithm_key": "stage3_restart_recovery",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.run_recovery",
+        "source_function": "mark_interrupted_run_for_restart",
+        "label": "Stage 3 restart abort and operator recovery",
+    },
 )
 
 DEFAULT_MANUAL_CHECKS: Final[tuple[dict[str, str], ...]] = (
@@ -180,6 +198,8 @@ BULLPEN_AUDIT_CRITICAL_SOURCE_FILES: Final[tuple[str, ...]] = (
     "backend/app/domains/polymarket_auto_live/engine.py",
     "backend/app/domains/polymarket_auto_live/tasks.py",
     "backend/app/domains/polymarket_auto_live/order_intent_service.py",
+    "backend/app/domains/polymarket_auto_live/run_recovery.py",
+    "backend/app/domains/polymarket/runtime_broker.py",
     "backend/app/domains/polymarket/bullpen_llm_execution.py",
     "backend/app/domains/bullpen_run_audit/service.py",
     "backend/app/domains/bullpen_run_audit/validators.py",

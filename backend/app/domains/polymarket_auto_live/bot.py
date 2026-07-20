@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     next_console_schedule_time,
@@ -22,7 +23,9 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     retry_order_intent_for_user_sync,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
+    mark_historical_auth_error_recovered,
     reconcile_running_auto_live_run,
+    run_contains_historical_auth_error,
 )
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
@@ -51,6 +54,8 @@ from app.infrastructure.messaging.task_registry import (
     register_auto_live_run_task,
     revoke_registered_auto_live_run_task,
 )
+
+logger = get_logger(__name__)
 
 AUTO_LIVE_STRATEGY_SUMMARY = (
     "Fully automated AI + evidence + market-rules based Bullpen trading engine. "
@@ -263,12 +268,37 @@ class BullpenAutoLiveBot:
             return None, state
 
         running_run = record_to_run(running_record)
-        recovered_run = await asyncio.to_thread(
-            reconcile_running_auto_live_run,
-            running_run,
-            started_at=running_record.started_at,
-            updated_at=running_record.updated_at,
-        )
+        recovered_run: BullpenAutoLiveRun | None = None
+        recovered_auth_error = False
+        if run_contains_historical_auth_error(running_run):
+            from app.domains.polymarket.runtime_broker import (
+                get_bullpen_runtime_broker,
+            )
+
+            try:
+                active_auth = await get_bullpen_runtime_broker().resolve_latest_active_auth_result(
+                    refresh_if_stale=True,
+                )
+            except Exception:
+                logger.exception(
+                    "Could not resolve active Bullpen auth while recovering run %s.",
+                    running_run.id,
+                )
+                active_auth = None
+            if active_auth is not None and active_auth.healthy:
+                recovered_run = mark_historical_auth_error_recovered(
+                    running_run,
+                    recovered_at=active_auth.checked_at,
+                )
+                recovered_auth_error = True
+                await revoke_registered_auto_live_run_task(recovered_run.id)
+        if recovered_run is None:
+            recovered_run = await asyncio.to_thread(
+                reconcile_running_auto_live_run,
+                running_run,
+                started_at=running_record.started_at,
+                updated_at=running_record.updated_at,
+            )
         if recovered_run is None:
             return running_run, state
 
@@ -278,7 +308,9 @@ class BullpenAutoLiveBot:
                 "last_run_at": recovered_run.completed_at,
                 "last_action": recovered_run.summary,
                 "last_error": (
-                    None if recovered_run.status == "completed" else recovered_run.summary
+                    None
+                    if recovered_run.status == "completed" or recovered_auth_error
+                    else recovered_run.summary
                 ),
             }
         )
@@ -394,8 +426,8 @@ class BullpenAutoLiveBot:
             )
             if should_enqueue_due_run:
                 state.last_action = "Queued scheduled Auto-Live run from summary poll."
-                await repo.save_state(self.user_id, state)
-                await session.commit()
+            await repo.save_state(self.user_id, state)
+            await session.commit()
 
         if should_enqueue_due_run:
             await self.run_once(triggered_by="scheduler")
@@ -441,20 +473,11 @@ class BullpenAutoLiveBot:
             return await repo.list_decisions(self.user_id)
 
     async def get_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
-        from app.domains.polymarket_auto_live.tasks import (
-            recover_and_enqueue_stale_order_intents_for_run_sync,
-        )
-
-        response = await asyncio.to_thread(
+        return await asyncio.to_thread(
             get_run_orders_for_user_sync,
             user_id=self.user_id,
             run_id=run_id,
         )
-        await asyncio.to_thread(
-            recover_and_enqueue_stale_order_intents_for_run_sync,
-            run_id,
-        )
-        return response
 
     async def reconcile_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
         from app.domains.polymarket_auto_live.tasks import reconcile_auto_live_run_orders
