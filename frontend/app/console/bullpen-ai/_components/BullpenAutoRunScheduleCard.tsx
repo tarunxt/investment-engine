@@ -8743,6 +8743,7 @@ export function BullpenAutoRunScheduleCard({
   const startNowProgressTimeoutRef = useRef<number | null>(null);
   const startNowCancelledRef = useRef(false);
   const summaryLoadInFlightRef = useRef(false);
+  const [killedRunIds, setKilledRunIds] = useState<Set<string>>(() => new Set());
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
@@ -9599,6 +9600,72 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
+  function resetActiveAutoRunUi() {
+    if (startNowProgressTimeoutRef.current !== null) {
+      window.clearTimeout(startNowProgressTimeoutRef.current);
+      startNowProgressTimeoutRef.current = null;
+    }
+    setPendingRunId(null);
+    setRunNowStartedAt(null);
+    setStartNowProgress(null);
+    setSelectedRunSummaryTile("last");
+    const activeRunIds = [summary?.latest_run, ...(summary?.recent_runs ?? [])]
+      .filter((run): run is BullpenAutoLiveRun =>
+        Boolean(run && isActivelyWorkingRunStatus(run.status)),
+      )
+      .map((run) => run.id);
+    if (activeRunIds.length > 0) {
+      setKilledRunIds((currentIds) => {
+        const nextIds = new Set(currentIds);
+        activeRunIds.forEach((runId) => nextIds.add(runId));
+        return nextIds;
+      });
+    }
+    setSummary((currentSummary) => {
+      if (!currentSummary) return currentSummary;
+      const stoppedAt = new Date().toISOString();
+      const killRun = (run: BullpenAutoLiveRun | null) => {
+        if (!run || !isActivelyWorkingRunStatus(run.status)) return run;
+        return {
+          ...run,
+          status: "failed" as const,
+          completed_at: run.completed_at ?? stoppedAt,
+          error_message: run.error_message ?? "Cancelled by user",
+          summary: "Auto-Live run cancelled by user.",
+          stage_results: run.stage_results.map((stage) =>
+            stage.completed_at
+              ? stage
+              : {
+                  ...stage,
+                  completed_at: stoppedAt,
+                  reason: "Cancelled by user.",
+                  outputs: {
+                    ...stage.outputs,
+                    phase_status: "cancelled",
+                  },
+                },
+          ),
+        };
+      };
+      return {
+        ...currentSummary,
+        state: {
+          ...currentSummary.state,
+          running: false,
+          paused: false,
+          stopped_at: stoppedAt,
+          next_run_at: null,
+          next_scan_at: null,
+          next_llm_run_at: null,
+          next_rebalance_at: null,
+          last_action: "Auto-Live scheduler stopped and the active run was cancelled.",
+        },
+        latest_run: killRun(currentSummary.latest_run),
+        recent_runs: currentSummary.recent_runs.map((run) => killRun(run) ?? run),
+      };
+    });
+  }
+
   async function handlePauseRun() {
     const shouldResume = Boolean(summary?.state.paused);
     setAction(shouldResume ? "resume-run" : "pause-run");
@@ -9629,10 +9696,21 @@ export function BullpenAutoRunScheduleCard({
     setAction("kill-run");
     setNotice(null);
     setError(null);
+    resetActiveAutoRunUi();
 
     try {
       await apiService.stopBullpenAutoLive();
-      await loadSummary({ preserveLoading: true });
+      const nextSummary = await loadSummary({
+        preserveLoading: true,
+        nextPendingRunId: null,
+      });
+      if (nextSummary) {
+        const stillActiveRun = getVisibleRun(nextSummary, null);
+        if (stillActiveRun && isActivelyWorkingRunStatus(stillActiveRun.status)) {
+          setKilledRunIds((currentIds) => new Set(currentIds).add(stillActiveRun.id));
+          resetActiveAutoRunUi();
+        }
+      }
       setNotice(
         "Auto-Live stopped. Active backend work was cancelled immediately.",
       );
@@ -9646,7 +9724,11 @@ export function BullpenAutoRunScheduleCard({
   const autoRunActive = isAutoRunActive(summary);
   const consoleProfileSelected = isConsoleProfileSelected(summary);
   const mode = modeLabel(summary);
-  const visibleRun = getVisibleRun(summary, pendingRunId);
+  const visibleRunCandidate = getVisibleRun(summary, pendingRunId);
+  const visibleRun =
+    visibleRunCandidate && killedRunIds.has(visibleRunCandidate.id)
+      ? null
+      : visibleRunCandidate;
   const latestRun = summary?.latest_run ?? null;
   const workflowRun =
     visibleRun ??
