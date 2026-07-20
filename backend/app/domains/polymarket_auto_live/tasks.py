@@ -91,6 +91,43 @@ def _refresh_order_intent_audit_sync(intent_id: str) -> None:
             )
 
 
+def _queue_due_order_intents_for_run_sync(run_id: str, *, limit: int = 50) -> int:
+    """Immediately enqueue due durable Stage 3 intents for one run.
+
+    The beat dispatcher remains the periodic safety net, but Stage 3 must not
+    leave freshly persisted Event Exit plans in READY until the next beat tick.
+    Queueing the saved run's due intents here turns the run handoff into:
+    plan -> persist durable intent -> submit sell/redeem via Celery worker ->
+    reconcile -> release dependent replacement buys.
+    """
+
+    with SyncSessionLocal() as session:
+        due_ids = list_due_order_intent_ids_sync(
+            session,
+            limit=limit,
+            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            now=_utc_now(),
+        )
+        if not due_ids:
+            return 0
+        run_due_ids = list(
+            session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord.id)
+                .where(PolymarketAutoLiveOrderIntentRecord.id.in_(due_ids))
+                .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+                .order_by(
+                    PolymarketAutoLiveOrderIntentRecord.priority.asc(),
+                    PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for due_id in run_due_ids:
+        execute_auto_live_order_intent.delay(str(due_id))  # type: ignore[attr-defined]
+    return len(run_due_ids)
+
+
 def _position_snapshot_from_record(record) -> PositionSnapshot:
     payload = record.payload or {}
     return PositionSnapshot(
@@ -157,7 +194,10 @@ def _run_was_cancelled_by_user(
     repo: SyncPolymarketAutoLiveRepository,
     run_id: str,
 ) -> bool:
-    current_run = repo.get_run(run_id)
+    get_run = getattr(repo, "get_run", None)
+    if get_run is None:
+        return False
+    current_run = get_run(run_id)
     return bool(
         current_run is not None
         and current_run.status == "failed"
@@ -416,6 +456,13 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                 engine_result.state.last_run_at = synced_run.completed_at or _utc_now().isoformat()
                 repo.save_state(user_id, engine_result.state)
                 session.commit()
+            queued_count = _queue_due_order_intents_for_run_sync(run_id)
+            if queued_count:
+                logger.info(
+                    "Queued %s due durable Stage 3 order intents for run %s immediately after planning.",
+                    queued_count,
+                    run_id,
+                )
         try:
             materialize_run_audit_snapshot_sync(
                 session,
