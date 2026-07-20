@@ -13,6 +13,7 @@ import pytest
 from app.domains.polymarket_auto_live.bot import (
     BullpenAutoLiveBot,
     _auth_recovery_operator_resume_active,
+    _stage3_intent_operator_resume_active,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
     AutoLiveTaskRuntimeSnapshot,
@@ -659,6 +660,91 @@ def test_operator_resumed_auth_recovery_is_not_treated_as_historical_block():
     )
 
     assert _auth_recovery_operator_resume_active(run) is True
+
+
+def test_operator_resumed_stage3_intents_own_the_running_lifecycle():
+    run = BullpenAutoLiveRun(
+        id="run-stage3-operator-resume",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-20T12:00:00+00:00",
+        summary="Seven durable intents are ready.",
+        order_intent_ids=["intent-1", "intent-2"],
+        audit_metadata={
+            "stage3_recovery": {
+                "required": False,
+                "resolved_at": "2026-07-20T12:06:00+00:00",
+                "resolution": "operator_retry",
+            },
+            "stage3_resume_action": {
+                "action": "Retry failed exits and continue buys",
+                "at": "2026-07-20T12:06:00+00:00",
+                "same_run": True,
+                "llm_analysis_rerun": False,
+            },
+        },
+    )
+
+    assert _stage3_intent_operator_resume_active(run) is True
+
+
+@pytest.mark.anyio
+async def test_active_stage3_intent_resume_skips_stale_parent_task_recovery(monkeypatch):
+    settings = BullpenAutoLiveSettings(auto_live_enabled=True, dry_run=False)
+    state = BullpenAutoLiveState(
+        running=True,
+        status="error",
+        last_error="Stale parent task verdict",
+    )
+    resumed_run = BullpenAutoLiveRun(
+        id="run-stage3-intent-resume",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-20T12:00:00+00:00",
+        summary="Stage 3 has 7 durable intents in progress.",
+        order_intent_ids=["intent-1"],
+        audit_metadata={
+            "stage3_recovery": {
+                "required": False,
+                "resolved_at": "2026-07-20T12:06:00+00:00",
+                "resolution": "operator_retry",
+            },
+            "stage3_resume_action": {
+                "same_run": True,
+                "llm_analysis_rerun": False,
+            },
+        },
+    )
+    running_record = SimpleNamespace(
+        started_at=datetime(2026, 7, 20, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 20, 12, 6, tzinfo=UTC),
+    )
+
+    class _FakeRepo:
+        async def get_running_run_record(self, user_id: int):
+            assert user_id == 7
+            return running_record
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.record_to_run",
+        lambda _record: resumed_run,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.reconcile_running_auto_live_run",
+        lambda *args, **kwargs: pytest.fail(
+            "the stale parent task must not recover an intent-resumed run"
+        ),
+    )
+
+    active_run, resumed_state = await BullpenAutoLiveBot(
+        user_id=7
+    )._get_active_run_or_recover(_FakeRepo(), settings, state)  # type: ignore[arg-type]
+
+    assert active_run is resumed_run
+    assert resumed_state.last_error is None
+    assert resumed_state.last_action == resumed_run.summary
 
 
 @pytest.mark.anyio

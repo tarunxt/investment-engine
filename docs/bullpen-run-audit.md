@@ -336,6 +336,12 @@ The Stage 2 transfer queue remains a separate handoff diagnostic. Stage 3 Step 2
 buy intents only. The backend reconciles those tiles, the Stage 3 totals, and the
 order funnel from the same durable records; the UI must not combine stale queue
 counters with a different decision-row source.
+After an explicit same-run operator retry backfills durable intent IDs, state and
+summary polling treat those intent tasks as the execution authority. A terminal
+result from the original parent analysis task cannot reclassify the resumed run
+as interrupted, replace its decision rows, or cascade-delete the backfilled
+intents. The stored `stage3_recovery` and `stage3_resume_action` fields make that
+handoff deterministic and auditable.
 An exit that is merely submitted or still open never releases a slot. A partial
 exit releases one only when the remaining economic exposure is at or below the
 configured dust threshold. A ranked replacement is reserved for its specific

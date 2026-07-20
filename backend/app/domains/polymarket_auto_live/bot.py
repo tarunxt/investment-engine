@@ -81,6 +81,21 @@ def _auth_recovery_operator_resume_active(run: BullpenAutoLiveRun) -> bool:
     return isinstance(recovery, dict) and bool(recovery.get("operator_resume_at"))
 
 
+def _stage3_intent_operator_resume_active(run: BullpenAutoLiveRun) -> bool:
+    recovery = run.audit_metadata.get("stage3_recovery")
+    resume = run.audit_metadata.get("stage3_resume_action")
+    return bool(
+        run.status == "running"
+        and run.order_intent_ids
+        and isinstance(recovery, dict)
+        and recovery.get("required") is False
+        and recovery.get("resolution") == "operator_retry"
+        and isinstance(resume, dict)
+        and resume.get("same_run") is True
+        and resume.get("llm_analysis_rerun") is False
+    )
+
+
 CONSOLE_AUTO_LIVE_RISK_SUMMARY = (
     "The console profile still depends on Bullpen live session health, doctor "
     "checks, balance availability, and limit-order guardrails before any live "
@@ -302,6 +317,18 @@ class BullpenAutoLiveBot:
                 recovered_auth_error = True
                 await revoke_registered_auto_live_run_task(recovered_run.id)
         if recovered_run is None:
+            if _stage3_intent_operator_resume_active(running_run):
+                resumed_state = self._synchronize_state(
+                    settings,
+                    state.model_copy(
+                        update={
+                            "last_run_id": running_run.id,
+                            "last_action": running_run.summary,
+                            "last_error": None,
+                        }
+                    ),
+                )
+                return running_run, resumed_state
             recovered_run = await asyncio.to_thread(
                 reconcile_running_auto_live_run,
                 running_run,

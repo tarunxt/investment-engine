@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-capacity-sizing-v8"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-intent-resume-v9"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage3-capacity-sizing-v8"
+    "2026-07-20-stage3-intent-resume-v9"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -149,10 +149,10 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "stage3_restart_recovery",
         "stage": "stage-3",
-        "algorithm_version": "v1",
-        "source_module": "app.domains.polymarket_auto_live.run_recovery",
-        "source_function": "mark_interrupted_run_for_restart",
-        "label": "Stage 3 restart abort and operator recovery",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.bot",
+        "source_function": "_get_active_run_or_recover",
+        "label": "Stage 3 restart abort and durable-intent operator recovery",
     },
     {
         "algorithm_key": "stage3_exit_dust_reconciliation",
