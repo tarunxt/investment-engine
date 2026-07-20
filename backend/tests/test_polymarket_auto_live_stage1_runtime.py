@@ -296,9 +296,12 @@ def test_persist_auto_live_progress_sync_rejects_user_cancelled_run():
     saved_calls: list[str] = []
 
     class FakeRepo:
-        def get_run(self, run_id: str):
+        def get_run_for_update(self, run_id: str):
             assert run_id == worker_run.id
             return cancelled_run
+
+        def get_run(self, run_id: str):
+            raise AssertionError("worker cancellation checks must refresh and lock the run")
 
         def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
             saved_calls.append(f"save_run:{user_id}:{run.id}")

@@ -8095,6 +8095,13 @@ function isActivelyWorkingRunStatus(
   return status === "running" || status === "confirming";
 }
 
+function isUserCancelledRun(run: BullpenAutoLiveRun | null | undefined) {
+  if (run?.status !== "failed") return false;
+  return /cancelled by user/i.test(
+    `${run.error_message ?? ""}\n${run.summary ?? ""}`,
+  );
+}
+
 function formatLatestRunSummaryTileLabel(run: BullpenAutoLiveRun | null) {
   if (!run) return "Last run";
   if (run.status === "failed") return "Last failed run";
@@ -9707,7 +9714,7 @@ export function BullpenAutoRunScheduleCard({
     setPendingRunId(null);
     setRunNowStartedAt(null);
     setStartNowProgress(null);
-    setSelectedRunSummaryTile("last");
+    setSelectedRunSummaryTile("next");
     const activeRunIds = [summary?.latest_run, ...(summary?.recent_runs ?? [])]
       .filter((run): run is BullpenAutoLiveRun =>
         Boolean(run && isActivelyWorkingRunStatus(run.status)),
@@ -9920,7 +9927,8 @@ export function BullpenAutoRunScheduleCard({
   };
   const liveWorkflowSettled = isBullpenAutoRunWorkflowSettled(liveWorkflowView);
   const hasActiveWorkflowStage = liveWorkflowView.stages.some(
-    (stage) => stage.isCurrent,
+    (stage) =>
+      isActivelyWorkingRunStatus(workflowRun?.status) && stage.isCurrent,
   );
   const runActionRequested = action === "invest-now";
   const startNowActionRequested = action === "start-now";
@@ -9946,9 +9954,13 @@ export function BullpenAutoRunScheduleCard({
     latestTerminalRun?.error_message?.trim() ??
     null;
   const workflowRunForSummaryTile =
-    selectedRunSummaryTile === "last" && !runIsActive
+    selectedRunSummaryTile === "last" &&
+    !runIsActive &&
+    !isUserCancelledRun(latestTerminalRun)
       ? latestTerminalRun ?? workflowRun
-      : workflowRun;
+      : !runIsActive && isUserCancelledRun(latestTerminalRun)
+        ? null
+        : workflowRun;
   const workflowRunForMonitor =
     selectedRunSummaryTile === "next" && !runIsActive
       ? null

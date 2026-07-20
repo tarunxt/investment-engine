@@ -78,13 +78,21 @@ def _refresh_order_intent_audit_sync(intent_id: str) -> None:
         if record is None:
             return
         persist_stage3_intent_diagnostics_sync(session, record=record)
+        run_record = session.get(PolymarketAutoLiveRunRecord, record.run_id)
+        freeze_cancelled_run = bool(
+            run_record is not None
+            and run_record.status == "failed"
+            and run_record.error_message == "Cancelled by user"
+        )
         try:
             materialize_run_audit_snapshot_sync(
                 session,
                 user_id=record.user_id,
                 run_id=record.run_id,
                 force=True,
-                freeze=False,
+                # A queued order-intent task can wake after Kill.  Its
+                # terminal cancellation update must not reopen the run audit.
+                freeze=True if freeze_cancelled_run else False,
             )
             session.commit()
         except Exception:
@@ -279,8 +287,22 @@ _finalize_failed_run_progress = finalize_failed_run_progress
 def _run_was_cancelled_by_user(
     repo: SyncPolymarketAutoLiveRepository,
     run_id: str,
+    *,
+    lock: bool = False,
 ) -> bool:
-    get_run = getattr(repo, "get_run", None)
+    # A worker's session can retain the run object it loaded at task start.
+    # Always refresh from the database; when the worker is about to write,
+    # retain a row lock through that write so cancellation wins either side of
+    # the race.
+    get_run = (
+        getattr(repo, "get_run_for_update", None)
+        if lock
+        else getattr(repo, "get_run_fresh", None)
+    )
+    if get_run is None:
+        # Keeps the helper compatible with the small repository doubles used
+        # by focused unit tests.
+        get_run = getattr(repo, "get_run", None)
     if get_run is None:
         return False
     current_run = get_run(run_id)
@@ -323,7 +345,7 @@ def persist_auto_live_progress_sync(
     run: BullpenAutoLiveRun,
     state,
 ) -> None:
-    if _run_was_cancelled_by_user(repo, run.id):
+    if _run_was_cancelled_by_user(repo, run.id, lock=True):
         raise AutoLiveRunCancelled(f"Auto-Live run {run.id} was cancelled by user.")
     repo.save_run(user_id, run)
     repo.replace_run_decisions_from_stage3_payload(user_id, run)
@@ -419,6 +441,9 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             current_retries = int(getattr(self.request, "retries", 0) or 0)
             max_retries = int(getattr(self, "max_retries", 0) or 0)
             if current_retries < max_retries and not isinstance(exc, SoftTimeLimitExceeded):
+                if _run_was_cancelled_by_user(repo, run_id, lock=True):
+                    logger.info("Skipping retry for cancelled Auto-Live run %s", run_id)
+                    return
                 retry_number = current_retries + 1
                 run.status = "running"
                 run.completed_at = None
@@ -471,7 +496,7 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
             logger.exception("Auto-Live run %s exhausted retries", run_id)
             return
 
-        if _run_was_cancelled_by_user(repo, run_id):
+        if _run_was_cancelled_by_user(repo, run_id, lock=True):
             logger.info("Skipping final Auto-Live persistence for cancelled run %s", run_id)
             try:
                 materialize_run_audit_snapshot_sync(

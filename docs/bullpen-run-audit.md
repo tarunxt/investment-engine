@@ -169,7 +169,11 @@ and Stage 3 workflow results must remain explicitly blocked with
 wallet rereads.
 If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
-write revert the run back to an in-progress state.
+write revert the run back to an in-progress state. Cancellation takes a durable
+row lock before terminalizing any unfinished stage as `fail` with
+`phase_status=cancelled`; the run audit is then force-materialized and frozen.
+This makes the cancellation snapshot authoritative even when the Celery task is
+terminated before it can run its normal cleanup path.
 
 Stage 1 wallet outputs are partitioned explicitly and the audit snapshot must
 preserve those partitions without re-deriving them on read:

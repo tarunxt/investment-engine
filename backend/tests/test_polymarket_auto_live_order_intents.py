@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from app.domains.polymarket.bullpen import (
@@ -13,6 +15,7 @@ from app.domains.polymarket_auto_live.order_intents import (
 from app.domains.polymarket_auto_live.order_intent_service import (
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
+    _cancel_unsubmitted_intent_for_user,
     _assert_intent_has_no_persisted_submission_reference,
     _assert_intent_retry_allowed,
     _auth_recovery_allows_operator_resume,
@@ -25,6 +28,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     build_stage3_order_intent_idempotency_key,
     stage3_execution_market_reference,
 )
+import app.domains.polymarket_auto_live.order_intent_service as order_intent_service
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveOrderIntent,
     BullpenAutoLiveOrderPlan,
@@ -105,6 +109,39 @@ def test_stage3_order_intent_idempotency_key_is_bounded_and_deterministic():
     assert first != changed
     assert first.startswith(f"{STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT}:")
     assert len(first) <= STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH
+
+
+def test_user_cancel_only_cancels_an_intent_before_remote_submission(monkeypatch):
+    released_intent_ids: list[str] = []
+    monkeypatch.setattr(
+        order_intent_service,
+        "_release_reservation",
+        lambda _session, intent: released_intent_ids.append(intent.id),
+    )
+    record = SimpleNamespace(
+        id="intent-ready",
+        status="READY",
+        action="buy",
+        retryable=True,
+        next_attempt_at="later",
+        terminal_at=None,
+        last_error_code=None,
+        last_error_message=None,
+        execution_metadata_json={},
+    )
+
+    assert _cancel_unsubmitted_intent_for_user(
+        object(),
+        record=record,
+    )
+    assert record.status == "CANCELLED"
+    assert record.retryable is False
+    assert record.next_attempt_at is None
+    assert record.last_error_code == "RUN_CANCELLED_BY_USER"
+    assert released_intent_ids == ["intent-ready"]
+
+    record.status = "SUBMITTED"
+    assert not _cancel_unsubmitted_intent_for_user(object(), record=record)
 
 
 def test_stage3_execution_market_reference_prefers_cli_slug():

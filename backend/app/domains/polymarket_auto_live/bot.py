@@ -15,7 +15,9 @@ from app.domains.polymarket_auto_live.config import (
     auto_live_backend_execution_env_detail,
 )
 from app.domains.bullpen_run_audit.provenance import build_native_run_audit_metadata
+from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
 from app.domains.polymarket_auto_live.order_intent_service import (
+    cancel_unsubmitted_run_order_intents_for_user_sync,
     cancel_order_intent_for_user_sync,
     get_run_orders_for_user_sync,
     refresh_run_order_state_for_user_sync,
@@ -50,12 +52,26 @@ from app.domains.polymarket_auto_live.schemas import (
     TradingBotGuardrail,
 )
 from app.infrastructure.database.session import AsyncSessionLocal
+from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.task_registry import (
     register_auto_live_run_task,
     revoke_registered_auto_live_run_task,
 )
 
 logger = get_logger(__name__)
+
+
+def _freeze_cancelled_run_audit_sync(*, user_id: int, run_id: str) -> None:
+    """Freeze the cancellation snapshot even when Celery is terminated first."""
+    with SyncSessionLocal() as session:
+        materialize_run_audit_snapshot_sync(
+            session,
+            user_id=user_id,
+            run_id=run_id,
+            force=True,
+            freeze=True,
+        )
+        session.commit()
 
 AUTO_LIVE_STRATEGY_SUMMARY = (
     "Fully automated AI + evidence + market-rules based Bullpen trading engine. "
@@ -365,7 +381,13 @@ class BullpenAutoLiveBot:
         self,
         repo: AsyncPolymarketAutoLiveRepository,
     ) -> BullpenAutoLiveRun | None:
-        active_run_record = await repo.get_running_run_record(self.user_id)
+        # Serialize cancellation with a worker progress write.  Without this
+        # row lock, a worker holding an old in-memory run payload can write
+        # ``running`` back after the stop endpoint has committed.
+        active_run_record = await repo.get_running_run_record(
+            self.user_id,
+            for_update=True,
+        )
         if active_run_record is None:
             return None
 
@@ -375,8 +397,17 @@ class BullpenAutoLiveBot:
         active_run.completed_at = cancelled_at
         active_run.error_message = "Cancelled by user"
         active_run.summary = "Auto-Live run cancelled by user."
+        active_run.audit_metadata = {
+            **active_run.audit_metadata,
+            "cancellation": {
+                "requested_by": "user",
+                "cancelled_at": cancelled_at,
+                "terminalized_stages": True,
+            },
+        }
         for stage_result in active_run.stage_results:
             if stage_result.completed_at is None:
+                stage_result.status = "fail"
                 stage_result.completed_at = cancelled_at
                 stage_result.reason = "Cancelled by user."
                 stage_result.outputs = {
@@ -705,7 +736,32 @@ class BullpenAutoLiveBot:
             await repo.save_state(self.user_id, state)
             await session.commit()
             if cancelled_run is not None:
+                try:
+                    await asyncio.to_thread(
+                        cancel_unsubmitted_run_order_intents_for_user_sync,
+                        user_id=self.user_id,
+                        run_id=cancelled_run.id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to cancel unsubmitted Stage 3 intents for run %s",
+                        cancelled_run.id,
+                    )
                 await revoke_registered_auto_live_run_task(cancelled_run.id)
+                try:
+                    await asyncio.to_thread(
+                        _freeze_cancelled_run_audit_sync,
+                        user_id=self.user_id,
+                        run_id=cancelled_run.id,
+                    )
+                except Exception:
+                    # The terminal run record is already durable.  Keep the
+                    # cancellation successful if a later audit materialization
+                    # problem needs operational follow-up.
+                    logger.exception(
+                        "Failed to freeze Bullpen audit after cancelling run %s",
+                        cancelled_run.id,
+                    )
             return state
 
     async def pause(self) -> BullpenAutoLiveState:

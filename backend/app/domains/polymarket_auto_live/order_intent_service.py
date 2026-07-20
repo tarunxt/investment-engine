@@ -115,6 +115,10 @@ _EXECUTABLE_STATUSES = frozenset(
 _RECONCILABLE_STATUSES = frozenset(
     {"SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING"}
 )
+_USER_CANCELLABLE_INTENT_STATUSES = frozenset(
+    {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT", "DEFERRED"}
+)
+_USER_CANCELLED_RUN_ERROR = "Cancelled by user"
 
 
 @dataclass(frozen=True)
@@ -629,6 +633,59 @@ def _run_recovery_block_reason(
     return None
 
 
+def _run_was_cancelled_by_user(
+    session: Session,
+    *,
+    run_id: str,
+) -> bool:
+    """Read the durable terminal cancellation marker, never a cached run."""
+    run_record = session.execute(
+        select(PolymarketAutoLiveRunRecord)
+        .where(PolymarketAutoLiveRunRecord.id == run_id)
+        .execution_options(populate_existing=True)
+    ).scalar_one_or_none()
+    if run_record is None:
+        return False
+    return (
+        run_record.status == "failed"
+        and run_record.error_message == _USER_CANCELLED_RUN_ERROR
+    )
+
+
+def _cancel_unsubmitted_intent_for_user(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+    remote_write_prevented: bool = False,
+) -> bool:
+    """Cancel an intent only while no remote write could have happened."""
+    cancellable_statuses = _USER_CANCELLABLE_INTENT_STATUSES | (
+        {"SUBMITTING"} if remote_write_prevented else set()
+    )
+    if record.status not in cancellable_statuses:
+        return False
+    cancelled_at = utc_now()
+    record.status = "CANCELLED"
+    record.retryable = False
+    record.next_attempt_at = None
+    record.terminal_at = cancelled_at
+    record.last_error_code = "RUN_CANCELLED_BY_USER"
+    record.last_error_message = (
+        "Order cancelled because its Auto-Live run was terminated by the user before "
+        "a remote submission was attempted."
+    )
+    record.execution_metadata_json = {
+        **dict(record.execution_metadata_json or {}),
+        "stage3_status": "EXIT_NOT_SUBMITTED"
+        if record.action in {"sell", "redeem"}
+        else "BUY_FAILED",
+        "run_cancelled_by_user_at": utc_now_iso(),
+        "remote_write_prevented_at": utc_now_iso() if remote_write_prevented else None,
+    }
+    _release_reservation(session, record)
+    return True
+
+
 def _persisted_stage3_counts(
     intents: Sequence[BullpenAutoLiveOrderIntent],
 ) -> dict[str, object]:
@@ -740,6 +797,9 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
         and recovery.get("required")
         and not recovery.get("resolved_at")
     )
+    cancelled_by_user = (
+        run.status == "failed" and run.error_message == _USER_CANCELLED_RUN_ERROR
+    )
     for stage in run.stage_results:
         if (
             stage.stage_number == 3
@@ -747,7 +807,9 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
         ):
             stage.outputs = {
                 **stage.outputs,
-                "phase_status": "confirming"
+                "phase_status": "cancelled"
+                if cancelled_by_user
+                else "confirming"
                 if run.status == "confirming"
                 else "completed"
                 if run.status in {"completed", "partial_success", "failed"}
@@ -1207,12 +1269,21 @@ def sync_run_and_decisions_from_intents_sync(
     run.order_intent_ids = [intent.id for intent in response.orders]
     run.orders_planned = response.order_funnel.planned
     run.orders_submitted = response.order_funnel.remotely_accepted
-    run.status = derive_run_status_from_intents(response.orders)  # type: ignore[assignment]
-    if run.status in {"completed", "partial_success", "failed"}:
-        run.completed_at = run.completed_at or utc_now_iso()
+    cancelled_by_user = (
+        run.status == "failed" and run.error_message == _USER_CANCELLED_RUN_ERROR
+    )
+    if not cancelled_by_user:
+        run.status = derive_run_status_from_intents(response.orders)  # type: ignore[assignment]
+        if run.status in {"completed", "partial_success", "failed"}:
+            run.completed_at = run.completed_at or utc_now_iso()
+        else:
+            run.completed_at = None
+        run.summary = _summary_text(run.status, response.order_funnel)
     else:
-        run.completed_at = None
-    run.summary = _summary_text(run.status, response.order_funnel)
+        # Order reconciliations can continue to report the factual outcome of
+        # a write that was already submitted, but they must never resurrect a
+        # user-killed run into confirming/running.
+        run.completed_at = run.completed_at or utc_now_iso()
     _update_invest_stage_outputs(run, response)
     _preserve_unresolved_stage3_recovery(run)
     _preserve_recovered_auth_error(run)
@@ -1957,6 +2028,62 @@ def cancel_order_intent_sync(session: Session, *, user_id: int, intent_id: str) 
     return summarize_run_orders_sync(session, user_id=user_id, run_id=record.run_id)
 
 
+def cancel_unsubmitted_run_order_intents_for_user_sync(
+    *,
+    user_id: int,
+    run_id: str,
+) -> list[str]:
+    """Cancel every safe-to-stop intent for a user-cancelled Auto-Live run.
+
+    Submitted or reconciling intents are deliberately left alone: their remote
+    state is ambiguous and must be reconciled instead of being represented as a
+    local cancellation.  The execution worker checks the same run marker again
+    immediately before its remote write.
+    """
+    with SyncSessionLocal() as session:
+        run_record = session.execute(
+            select(PolymarketAutoLiveRunRecord)
+            .where(PolymarketAutoLiveRunRecord.id == run_id)
+            .where(PolymarketAutoLiveRunRecord.user_id == user_id)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        if (
+            run_record is None
+            or run_record.status != "failed"
+            or run_record.error_message != _USER_CANCELLED_RUN_ERROR
+        ):
+            return []
+
+        records = (
+            session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord)
+                .where(PolymarketAutoLiveOrderIntentRecord.user_id == user_id)
+                .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+                .where(
+                    PolymarketAutoLiveOrderIntentRecord.status.in_(
+                        _USER_CANCELLABLE_INTENT_STATUSES
+                    )
+                )
+                .with_for_update(skip_locked=True)
+            )
+            .scalars()
+            .all()
+        )
+        cancelled_ids = [
+            record.id
+            for record in records
+            if _cancel_unsubmitted_intent_for_user(session, record=record)
+        ]
+        if cancelled_ids:
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=user_id,
+                run_id=run_id,
+            )
+        session.commit()
+        return cancelled_ids
+
+
 def _lock_intent_for_execution(session: Session, intent_id: str) -> PolymarketAutoLiveOrderIntentRecord | None:
     query = (
         select(PolymarketAutoLiveOrderIntentRecord)
@@ -2577,6 +2704,10 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             return None
         if record.status not in _EXECUTABLE_STATUSES:
             return record.status
+        if _run_was_cancelled_by_user(session, run_id=record.run_id):
+            _cancel_unsubmitted_intent_for_user(session, record=record)
+            session.commit()
+            return record.status
         recovery_block_reason = _run_recovery_block_reason(
             session,
             run_id=record.run_id,
@@ -2753,11 +2884,19 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
         record = _lock_intent_for_execution(session, intent_id)
         if record is None:
             return None
+        run_cancelled_by_user = _run_was_cancelled_by_user(
+            session,
+            run_id=record.run_id,
+        )
         recovery_block_reason = _run_recovery_block_reason(
             session,
             run_id=record.run_id,
         )
-        if record.status != "SUBMITTING" or recovery_block_reason is not None:
+        if (
+            record.status != "SUBMITTING"
+            or recovery_block_reason is not None
+            or run_cancelled_by_user
+        ):
             attempt = session.execute(
                 select(PolymarketAutoLiveOrderAttemptRecord)
                 .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
@@ -2781,6 +2920,12 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
                     "current_blockage": recovery_block_reason,
                     "remote_write_prevented_at": utc_now_iso(),
                 }
+            if run_cancelled_by_user:
+                _cancel_unsubmitted_intent_for_user(
+                    session,
+                    record=record,
+                    remote_write_prevented=True,
+                )
             if prepared.action == "buy" and record.status in {
                 "DEFERRED",
                 "CANCELLED",

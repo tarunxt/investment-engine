@@ -124,3 +124,39 @@ test("failed auto-run uses persisted stage error output when available", async (
 
   assert.match(view.stages[2].detail, /Worker error: Future attached to a different loop/);
 });
+
+test("a user-cancelled auto-run does not leave a worker stage in progress", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-cancelled-by-user",
+    triggered_by: "manual",
+    status: "failed",
+    dry_run: false,
+    started_at: "2026-07-01T08:00:00Z",
+    completed_at: "2026-07-01T08:04:23Z",
+    summary: "Auto-Live run cancelled by user.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 7,
+    orders_planned: 3,
+    orders_submitted: 0,
+    error_message: "Cancelled by user",
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      {
+        ...createStage(3, "Cancelled by user.", {
+          workflow_stage_key: "invest",
+          phase_status: "cancelled",
+        }),
+        status: "fail",
+        completed_at: "2026-07-01T08:04:23Z",
+      },
+    ],
+  });
+
+  assert.equal(view.stages[2].isCurrent, false);
+  assert.equal(view.stages[2].state, "finished");
+  assert.equal(view.stages[2].progressLabel, "Cancelled");
+});

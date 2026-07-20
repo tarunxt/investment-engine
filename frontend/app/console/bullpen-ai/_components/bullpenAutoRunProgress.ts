@@ -555,6 +555,7 @@ export function buildBullpenAutoRunWorkflowView(
       explicitPhase === "completed" ||
       explicitPhase === "partial" ||
       explicitPhase === "failed" ||
+      explicitPhase === "cancelled" ||
       runStatus === "completed" ||
       investStageEffectivelyCompleted
     ) {
@@ -605,6 +606,8 @@ export function buildBullpenAutoRunWorkflowView(
         : null;
     const progressLabel = !shouldShowStageData
       ? "Queued"
+      : explicitPhase === "cancelled"
+        ? "Cancelled"
       : explicitPhase === "failed"
         ? "Failed"
         : definition.key === "llm" && llmExecutionMode === "single_combined"

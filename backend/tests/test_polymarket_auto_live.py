@@ -612,6 +612,7 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
     )
     saved: dict[str, object] = {}
     revoked_run_ids: list[str] = []
+    cancelled_intent_runs: list[tuple[int, str]] = []
 
     class _FakeSession:
         def __init__(self) -> None:
@@ -640,8 +641,9 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
             assert user_id == 7
             return state
 
-        async def get_running_run_record(self, user_id: int):
+        async def get_running_run_record(self, user_id: int, *, for_update: bool = False):
             assert user_id == 7
+            assert for_update is True
             return object()
 
         async def save_run(self, user_id: int, next_run: BullpenAutoLiveRun) -> None:
@@ -672,6 +674,14 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
         "app.domains.polymarket_auto_live.bot.revoke_registered_auto_live_run_task",
         _fake_revoke,
     )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.cancel_unsubmitted_run_order_intents_for_user_sync",
+        lambda *, user_id, run_id: cancelled_intent_runs.append((user_id, run_id)),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot._freeze_cancelled_run_audit_sync",
+        lambda **_kwargs: None,
+    )
 
     result = await BullpenAutoLiveBot(user_id=7).stop()
 
@@ -684,12 +694,15 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
     assert saved_run.completed_at is not None
     assert saved_run.error_message == "Cancelled by user"
     assert saved_run.summary == "Auto-Live run cancelled by user."
+    assert saved_run.audit_metadata["cancellation"]["requested_by"] == "user"
+    assert saved_run.stage_results[0].status == "fail"
     assert saved_run.stage_results[0].outputs["phase_status"] == "cancelled"
     assert saved_run.stage_results[0].reason == "Cancelled by user."
     assert saved_state.running is False
     assert saved_state.paused is False
     assert saved_state.status == "stopped"
     assert "cancelled" in saved_state.last_action.lower()
+    assert cancelled_intent_runs == [(7, "run-stop-test")]
     assert revoked_run_ids == ["run-stop-test"]
     assert result.status == "stopped"
 

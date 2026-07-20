@@ -359,7 +359,10 @@ class AsyncPolymarketAutoLiveRepository:
         await self.session.flush()
 
     async def get_running_run_record(
-        self, user_id: int
+        self,
+        user_id: int,
+        *,
+        for_update: bool = False,
     ) -> PolymarketAutoLiveRunRecord | None:
         query = (
             select(PolymarketAutoLiveRunRecord)
@@ -371,6 +374,12 @@ class AsyncPolymarketAutoLiveRepository:
             )
             .limit(1)
         )
+        if for_update:
+            # A stop request and a worker progress write can arrive at nearly
+            # the same time.  Refresh while holding the row lock so the stop
+            # always applies to the latest persisted run rather than a stale
+            # identity-map copy.
+            query = query.with_for_update().execution_options(populate_existing=True)
         return (await self.session.execute(query)).scalar_one_or_none()
 
     async def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
@@ -547,6 +556,30 @@ class SyncPolymarketAutoLiveRepository:
 
     def get_run(self, run_id: str) -> BullpenAutoLiveRun | None:
         record = self.session.get(PolymarketAutoLiveRunRecord, run_id)
+        return record_to_run(record) if record is not None else None
+
+    def get_run_fresh(self, run_id: str) -> BullpenAutoLiveRun | None:
+        """Load a run outside the worker identity map.
+
+        A long-running worker keeps one SQLAlchemy session open.  A normal
+        ``Session.get`` can therefore return its original running copy after a
+        separate API request has already cancelled the run.
+        """
+        record = self.session.execute(
+            select(PolymarketAutoLiveRunRecord)
+            .where(PolymarketAutoLiveRunRecord.id == run_id)
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
+        return record_to_run(record) if record is not None else None
+
+    def get_run_for_update(self, run_id: str) -> BullpenAutoLiveRun | None:
+        """Refresh and lock a run before a worker writes new progress."""
+        record = self.session.execute(
+            select(PolymarketAutoLiveRunRecord)
+            .where(PolymarketAutoLiveRunRecord.id == run_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).scalar_one_or_none()
         return record_to_run(record) if record is not None else None
 
     def count_decisions_by_run(self, run_ids: Sequence[str]) -> dict[str, int]:
