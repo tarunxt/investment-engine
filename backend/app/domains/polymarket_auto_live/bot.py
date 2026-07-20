@@ -531,13 +531,19 @@ class BullpenAutoLiveBot:
         reconcile_auto_live_run_orders.delay(run_id)  # type: ignore[attr-defined]
         return summary
 
-    async def retry_order_intent(self, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
+    async def retry_order_intent(
+        self,
+        intent_id: str,
+        *,
+        remote_absence_verified: bool = False,
+    ) -> BullpenAutoLiveRunOrdersResponse:
         from app.domains.polymarket_auto_live.tasks import retry_auto_live_order_intent
 
         summary = await asyncio.to_thread(
             retry_order_intent_for_user_sync,
             user_id=self.user_id,
             intent_id=intent_id,
+            remote_absence_verified=remote_absence_verified,
         )
         retry_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
         return summary

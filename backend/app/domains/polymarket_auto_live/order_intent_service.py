@@ -547,6 +547,28 @@ def _assert_intent_has_no_persisted_submission_reference(intent: object) -> None
     )
 
 
+def _assert_intent_retry_allowed(
+    intent: object,
+    *,
+    remote_absence_verified: bool = False,
+) -> None:
+    status = str(getattr(intent, "status", "") or "")
+    if status == "CONFIRMING":
+        if not remote_absence_verified:
+            raise ValueError(
+                "This order is awaiting confirmation. Verify that Bullpen has no "
+                "matching trade or open order before requesting an operator retry."
+            )
+        _assert_intent_has_no_persisted_submission_reference(intent)
+        return
+    if (
+        status not in INTENT_RETRYABLE_STATUSES
+        and status not in INTENT_TERMINAL_FAILURE_STATUSES
+    ):
+        raise ValueError("This order is not in a retryable state.")
+    _assert_intent_has_no_persisted_submission_reference(intent)
+
+
 def _auth_recovery_allows_operator_resume(auth_recovery: object) -> bool:
     return isinstance(auth_recovery, dict) and bool(
         auth_recovery.get("operator_resume_at")
@@ -1852,20 +1874,34 @@ def get_intent_user_id_sync(session: Session, intent_id: str) -> int | None:
     return record.user_id if record is not None else None
 
 
-def retry_order_intent_sync(session: Session, *, user_id: int, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
+def retry_order_intent_sync(
+    session: Session,
+    *,
+    user_id: int,
+    intent_id: str,
+    remote_absence_verified: bool = False,
+) -> BullpenAutoLiveRunOrdersResponse:
     record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
     if record is None or record.user_id != user_id:
         raise ValueError("Order intent not found.")
-    if record.status not in INTENT_RETRYABLE_STATUSES and record.status not in INTENT_TERMINAL_FAILURE_STATUSES:
-        raise ValueError("This order is not in a retryable state.")
-    _assert_intent_has_no_persisted_submission_reference(record)
+    previous_status = record.status
+    _assert_intent_retry_allowed(
+        record,
+        remote_absence_verified=remote_absence_verified,
+    )
+    retried_at = utc_now_iso()
     record.status = "READY"
     record.retryable = True
     record.next_attempt_at = utc_now()
     record.last_error_message = None
     record.execution_metadata_json = {
         **dict(record.execution_metadata_json or {}),
-        "manual_retry_requested_at": utc_now_iso(),
+        "manual_retry_requested_at": retried_at,
+        "manual_retry_previous_status": previous_status,
+        "remote_absence_verified": bool(remote_absence_verified),
+        "remote_absence_verified_at": (
+            retried_at if remote_absence_verified else None
+        ),
     }
     session.flush()
     run = sync_run_and_decisions_from_intents_sync(
@@ -3444,9 +3480,19 @@ def get_run_orders_for_user_sync(*, user_id: int, run_id: str) -> BullpenAutoLiv
         return summarize_run_orders_sync(session, user_id=user_id, run_id=run_id)
 
 
-def retry_order_intent_for_user_sync(*, user_id: int, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
+def retry_order_intent_for_user_sync(
+    *,
+    user_id: int,
+    intent_id: str,
+    remote_absence_verified: bool = False,
+) -> BullpenAutoLiveRunOrdersResponse:
     with SyncSessionLocal() as session:
-        return retry_order_intent_sync(session, user_id=user_id, intent_id=intent_id)
+        return retry_order_intent_sync(
+            session,
+            user_id=user_id,
+            intent_id=intent_id,
+            remote_absence_verified=remote_absence_verified,
+        )
 
 
 def retry_failed_exits_and_continue_buys_sync(

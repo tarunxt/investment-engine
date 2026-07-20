@@ -382,12 +382,20 @@ Current required keys:
 * `stage3_persisted_counter_reconciliation`
 * `stage3_restart_recovery`
 * `stage3_bullpen_response_normalization`
+* `stage3_verified_remote_absence_retry`
 
 Stage 3 response normalization recursively preserves Bullpen order and transaction
 references and treats a successful nested `result.status=matched` buy response as a
 terminal fill. Reconciliation also backfills this evidence from persisted attempts,
 so older frozen snapshots remain unchanged while active runs can converge without a
 duplicate exchange write.
+
+An authenticated operator may retry a `CONFIRMING` intent only by explicitly
+asserting that Bullpen order history and open orders were checked and contain no
+matching remote write. The intent must also have no persisted order ID, transaction
+hash, or submission timestamp. The previous status and verification timestamp are
+stored in execution metadata for auditability; ordinary confirmation retries remain
+blocked.
 
 If Bullpen logic adds or replaces critical formulas, the registry and tests must be
 updated in the same change.

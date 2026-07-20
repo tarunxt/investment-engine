@@ -14,6 +14,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
     _assert_intent_has_no_persisted_submission_reference,
+    _assert_intent_retry_allowed,
     _auth_recovery_allows_operator_resume,
     _extract_remote_refs,
     _matched_buy_submission_fill,
@@ -338,3 +339,21 @@ def test_retry_rejects_intent_with_persisted_submission_reference(submission_upd
 
     with pytest.raises(ValueError, match="reconciled instead of retried"):
         _assert_intent_has_no_persisted_submission_reference(intent)
+
+
+def test_confirming_retry_requires_verified_remote_absence():
+    intent = _intent(intent_id="ambiguous", status="CONFIRMING", attempt_count=1)
+
+    with pytest.raises(ValueError, match="Verify that Bullpen has no matching trade"):
+        _assert_intent_retry_allowed(intent)
+
+    _assert_intent_retry_allowed(intent, remote_absence_verified=True)
+
+
+def test_verified_remote_absence_retry_still_rejects_persisted_reference():
+    intent = _intent(intent_id="persisted", status="CONFIRMING", attempt_count=1).model_copy(
+        update={"remote_order_id": "0xorder"}
+    )
+
+    with pytest.raises(ValueError, match="reconciled instead of retried"):
+        _assert_intent_retry_allowed(intent, remote_absence_verified=True)

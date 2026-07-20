@@ -164,11 +164,15 @@ async def list_auto_live_decisions(current_user: User = Depends(get_current_user
 @router.post("/orders/{intent_id}/retry", response_model=BullpenAutoLiveRunOrdersResponse)
 async def retry_auto_live_order(
     intent_id: str,
+    remote_absence_verified: bool = False,
     current_user: User = Depends(get_current_user),
 ):
     bot = await _get_bot(current_user)
     try:
-        return await bot.retry_order_intent(intent_id)
+        return await bot.retry_order_intent(
+            intent_id,
+            remote_absence_verified=remote_absence_verified,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=_http_error_detail(exc)) from exc
 
