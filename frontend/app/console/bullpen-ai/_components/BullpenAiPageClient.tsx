@@ -124,6 +124,7 @@ import {
   type BullpenPositionsFallback,
   type BullpenPositionsResponse,
   type BullpenPositionsSource,
+  type BullpenPositionsSummary,
   isActiveBullpenPosition,
 } from "@/lib/bullpenPositions";
 
@@ -1478,6 +1479,8 @@ function BullpenAiPageContent() {
   const [activePositions, setActivePositions] = useState<
     BullpenActivePositionView[]
   >([]);
+  const [activePositionsSummary, setActivePositionsSummary] =
+    useState<BullpenPositionsSummary | null>(null);
   const [activePositionAnalysesByKey, setActivePositionAnalysesByKey] =
     useState<Record<string, BullpenActivePositionLlmAnalysis>>({});
   const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
@@ -2468,6 +2471,7 @@ function BullpenAiPageContent() {
       );
 
       setActivePositions(livePositions);
+      setActivePositionsSummary(livePositionsPayload.summary || null);
       setHasLoadedPositions(true);
       setPositionsFallback(livePositionsPayload.fallback || null);
       setPositionsDiagnostics(livePositionsPayload.diagnostics || null);
@@ -3750,6 +3754,7 @@ function BullpenAiPageContent() {
       <BullpenAutoRunScheduleCard
         buildRunNowRequest={buildRunNowRequest}
         activePositions={openActivePositions}
+        activePositionsSummary={activePositionsSummary}
         activePositionQuestions={activePositionQuestionsForLlm}
         hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
         recentDecisions={recentAutoRunDecisions}

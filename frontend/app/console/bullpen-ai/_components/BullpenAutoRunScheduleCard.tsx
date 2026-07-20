@@ -52,6 +52,7 @@ import {
 import {
   isActiveBullpenPosition,
   type BullpenActivePositionView,
+  type BullpenPositionsSummary,
 } from "@/lib/bullpenPositions";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, apiService } from "@/services/api";
@@ -150,6 +151,7 @@ type BullpenAutoRunScheduleCardProps = {
     | BullpenAutoLiveRunOnceRequest
     | null;
   activePositions?: BullpenActivePositionView[];
+  activePositionsSummary?: BullpenPositionsSummary | null;
   activePositionQuestions?: BullpenQuestionRow[];
   hasActivePositionsSnapshot?: boolean;
   recentDecisions?: BullpenAutoLiveDecision[];
@@ -8153,6 +8155,7 @@ function BullpenPortfolioSnapshot({
   state,
   lastUsableBalance,
   activePositions,
+  activePositionsSummary,
   activePositionQuestions,
   hasActivePositionsSnapshot,
   refreshing,
@@ -8165,6 +8168,7 @@ function BullpenPortfolioSnapshot({
     | (PolymarketBotState["live"]["balance"] & { status: "ready" })
     | null;
   activePositions: BullpenActivePositionView[];
+  activePositionsSummary: BullpenPositionsSummary | null;
   activePositionQuestions: BullpenQuestionRow[];
   hasActivePositionsSnapshot: boolean;
   refreshing: boolean;
@@ -8183,15 +8187,20 @@ function BullpenPortfolioSnapshot({
     ? liveBalance
     : lastUsableBalance;
   const usableBalance = isUsableBullpenBalance(balance);
-  const accountValue = usableBalance
-    ? (balance.account_value_usd ?? null)
-    : null;
-  const cash = usableBalance ? (balance.available_balance_usd ?? null) : null;
+  const accountValue =
+    activePositionsSummary?.walletValue ??
+    activePositionsSummary?.totalValue ??
+    (usableBalance ? (balance.account_value_usd ?? null) : null);
+  const cash =
+    activePositionsSummary?.cashBalance ??
+    (usableBalance ? (balance.available_balance_usd ?? null) : null);
   const pnl = usableBalance ? (balance.pnl_usd ?? null) : null;
-  const upnl = usableBalance ? (balance.upnl_usd ?? null) : null;
+  const upnl =
+    activePositionsSummary?.unrealizedPnl ??
+    (usableBalance ? (balance.upnl_usd ?? null) : null);
   const openPositions = state?.open_positions ?? [];
   const activePositionCount = hasActivePositionsSnapshot
-    ? activePositions.length
+    ? (activePositionsSummary?.activeCount ?? activePositions.length)
     : openPositions.filter((position) => position.shares > 0).length;
   const activeInvested = hasActivePositionsSnapshot
     ? activePositions.reduce((total, position) => {
@@ -8229,9 +8238,11 @@ function BullpenPortfolioSnapshot({
       }, 0)
     : accountValue;
   const displayedTotalPortfolioValue =
-    cash !== null || currentInvestmentsValue !== null
+    activePositionsSummary?.totalValue ??
+    accountValue ??
+    (cash !== null || currentInvestmentsValue !== null
       ? (cash ?? 0) + (currentInvestmentsValue ?? 0)
-      : accountValue;
+      : null);
   const {
     activePositionQuestionByKey,
     activePositionsNeedingAttention,
@@ -8725,6 +8736,7 @@ export function BullpenAutoRunScheduleCard({
   onRunCompleted,
   buildRunNowRequest,
   activePositions = [],
+  activePositionsSummary = null,
   activePositionQuestions = [],
   hasActivePositionsSnapshot = false,
   recentDecisions = [],
@@ -9624,7 +9636,7 @@ export function BullpenAutoRunScheduleCard({
     setSummary((currentSummary) => {
       if (!currentSummary) return currentSummary;
       const stoppedAt = new Date().toISOString();
-      const killRun = (run: BullpenAutoLiveRun | null) => {
+      const killRun = (run: BullpenAutoLiveRun | null | undefined) => {
         if (!run || !isActivelyWorkingRunStatus(run.status)) return run;
         return {
           ...run,
@@ -10112,6 +10124,7 @@ export function BullpenAutoRunScheduleCard({
           state={portfolioState}
           lastUsableBalance={lastUsablePortfolioBalance}
           activePositions={activePositions}
+          activePositionsSummary={activePositionsSummary}
           activePositionQuestions={activePositionQuestions}
           hasActivePositionsSnapshot={hasActivePositionsSnapshot}
           refreshing={action === "balance"}
