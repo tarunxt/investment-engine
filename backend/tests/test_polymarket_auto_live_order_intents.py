@@ -12,6 +12,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     _assert_intent_has_no_persisted_submission_reference,
     _persisted_stage3_counts,
     build_stage3_order_intent_idempotency_key,
+    stage3_execution_market_reference,
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveOrderIntent,
@@ -93,6 +94,20 @@ def test_stage3_order_intent_idempotency_key_is_bounded_and_deterministic():
     assert first != changed
     assert first.startswith(f"{STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT}:")
     assert len(first) <= STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH
+
+
+def test_stage3_execution_market_reference_prefers_cli_slug():
+    assert (
+        stage3_execution_market_reference(
+            slug="will-this-market-resolve-yes",
+            market_id="2952467",
+        )
+        == "will-this-market-resolve-yes"
+    )
+    assert (
+        stage3_execution_market_reference(slug=None, market_id="legacy-market-ref")
+        == "legacy-market-ref"
+    )
 
 
 def test_classify_executor_error_marks_write_timeout_as_ambiguous_submission():

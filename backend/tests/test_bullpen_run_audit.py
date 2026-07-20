@@ -305,6 +305,44 @@ def test_build_deterministic_findings_flags_restart_and_duplicate_order_risks():
     assert "ORDER_INTENT_IDEMPOTENCY_KEY_EXCEEDS_STORAGE_LIMIT" in codes
 
 
+def test_build_deterministic_findings_flags_intents_lost_during_auth_recovery():
+    bundle = {
+        "metadata": {"run_id": "run-auth-recovery-intents"},
+        "overview": {
+            "run_status": "failed",
+            "started_at": "2026-07-20T12:00:00+00:00",
+            "completed_at": "2026-07-20T12:05:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {"candidate_reviews": []},
+        "stage_3": {
+            "decisions": [
+                {
+                    "id": "decision-exit-1",
+                    "market_id": "market-1",
+                    "order_plan": {
+                        "id": "order-exit-1",
+                        "action": "sell",
+                        "dry_run": False,
+                    },
+                }
+            ],
+            "auth_recovery": {"historical_error_stale": True},
+            "order_intents": [],
+            "max_positions": 10,
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+
+    assert "STAGE3_AUTH_RECOVERY_LOST_DURABLE_INTENTS" in {
+        finding["code"] for finding in findings
+    }
+
+
 def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
     run_payload = {
         "id": "run-universe-details",
@@ -336,6 +374,7 @@ def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
         "audit_metadata": {
             "code_provenance": {"backend_commit_sha": "abc123"},
             "settings_snapshot": {},
+            "auth_recovery": {"historical_error_stale": True},
         },
         "diagnostics": {},
     }
@@ -357,6 +396,9 @@ def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
         "blocker_summary": "Saved LLM reuse missed live active positions.",
         "blocker_fix": "Rerun Stage 2 without reuse.",
         "blocker_rows": [{"position_key": "market-1::NO", "market_id": "market-1"}],
+    }
+    assert bundle["stage_3"]["auth_recovery"] == {
+        "historical_error_stale": True
     }
 
 

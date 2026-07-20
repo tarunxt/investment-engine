@@ -841,6 +841,11 @@ def _build_bundle(
                     "interrupted_at": stage3_outputs.get("interrupted_at"),
                 }
             ),
+            "auth_recovery": (
+                audit_metadata.get("auth_recovery")
+                if isinstance(audit_metadata.get("auth_recovery"), dict)
+                else {}
+            ),
             "post_exit_buy_refresh": stage3_outputs.get("post_exit_buy_refresh") or {},
             "stage3_slot_diagnostics": stage3_outputs.get("stage3_slot_diagnostics") or {},
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),

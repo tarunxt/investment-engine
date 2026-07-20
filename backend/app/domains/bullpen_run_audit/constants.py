@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-idempotency-v3"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-cli-identity-v4"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage3-idempotency-v3"
+    "2026-07-20-stage3-cli-identity-v4"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -113,6 +113,22 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.order_intent_service",
         "source_function": "build_stage3_order_intent_idempotency_key",
         "label": "Bounded Stage 3 order-intent idempotency identity",
+    },
+    {
+        "algorithm_key": "stage3_cli_market_reference",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "stage3_execution_market_reference",
+        "label": "Bullpen CLI Stage 3 market-reference selection",
+    },
+    {
+        "algorithm_key": "stage3_auth_recovery_intent_preservation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.bot",
+        "source_function": "_get_active_run_or_recover",
+        "label": "Durable Stage 3 intent preservation during auth recovery",
     },
     {
         "algorithm_key": "stage3_persisted_counter_reconciliation",

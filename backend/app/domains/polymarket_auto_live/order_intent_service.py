@@ -421,6 +421,13 @@ def build_stage3_order_intent_idempotency_key(
     return key
 
 
+def stage3_execution_market_reference(*, slug: str | None, market_id: str) -> str:
+    """Prefer the Bullpen CLI slug while retaining legacy market references."""
+
+    normalized_slug = (slug or "").strip()
+    return normalized_slug or market_id
+
+
 def _stage3_rpc_policy(run: BullpenAutoLiveRun) -> dict[str, float | int]:
     snapshot = run.audit_metadata.get("settings_snapshot")
     snapshot = snapshot if isinstance(snapshot, dict) else {}
@@ -2116,7 +2123,10 @@ async def _submit_prepared_intent(
         try:
             if prepared.action == "buy":
                 response = await executor.buy_limit(
-                    market_id=prepared.market_id,
+                    market_id=stage3_execution_market_reference(
+                        slug=prepared.slug,
+                        market_id=prepared.market_id,
+                    ),
                     outcome="Yes" if prepared.side == "YES" else "No",
                     amount_usd=prepared.order_usd or 0.0,
                     max_price=max(0.01, (prepared.limit_price_cents or 1) / 100),
@@ -2139,7 +2149,10 @@ async def _submit_prepared_intent(
                 )
             if prepared.action == "sell":
                 response = await executor.sell_limit(
-                    market_id=prepared.market_id,
+                    market_id=stage3_execution_market_reference(
+                        slug=prepared.slug,
+                        market_id=prepared.market_id,
+                    ),
                     outcome="Yes" if prepared.side == "YES" else "No",
                     shares=prepared.shares or 0.0,
                     min_price=max(0.01, (prepared.limit_price_cents or 1) / 100),

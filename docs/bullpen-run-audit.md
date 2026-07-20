@@ -296,6 +296,13 @@ format, and the algorithm registry plus deterministic validator audit the key an
 block any oversized value. Existing frozen snapshots and already-persisted legacy
 keys remain valid and are not rewritten.
 
+Bullpen CLI buy and sell writes use the persisted market slug as their execution
+reference because the CLI resolves slugs, while the numeric Gamma market ID
+remains the canonical audit and portfolio identity. Legacy intents without a slug
+fall back to their stored market reference. The algorithm registry records this
+selection rule so audit readers can distinguish provider execution identity from
+internal market identity.
+
 Decision rows expose the explicit execution states `EXIT_RPC_RETRYING`,
 `EXIT_NOT_SUBMITTED`, `EXIT_SUBMITTED`, `EXIT_OPEN_UNFILLED`,
 `EXIT_PARTIALLY_FILLED`, `EXIT_FAILED_PERMANENTLY`,
@@ -478,8 +485,12 @@ timestamps so it cannot issue a duplicate order.
 
 When a running record contains a historical auth rejection but active doctor
 auth is now healthy, the old error is recorded as stale in `auth_recovery`, the
-interrupted record is closed, and it no longer blocks a new run. Remote writes
-re-read this recovery state immediately before submission.
+interrupted record is closed, and it no longer blocks a new run. That close keeps
+the existing decision rows in place and never replaces them, preserving linked
+durable intents and their attempt history for explicit reconciliation or retry.
+The audit captures `auth_recovery` and raises a critical blocking finding when a
+recovered run retains live order plans but has lost its durable intents. Remote
+writes re-read this recovery state immediately before submission.
 
 Stage 3 `orders_planned`, `orders_processed`, `orders_submitted`, both execution-step
 tiles, and the run-level order funnel are materialized from durable order-intent and

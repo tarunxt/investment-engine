@@ -658,6 +658,7 @@ async def test_healthy_active_auth_recovery_removes_running_run_block(monkeypatc
     saved_runs: list[BullpenAutoLiveRun] = []
     saved_states: list[BullpenAutoLiveState] = []
     revoked_runs: list[str] = []
+    replaced_decision_runs: list[str] = []
 
     class _FakeRepo:
         async def get_running_run_record(self, user_id: int):
@@ -672,6 +673,7 @@ async def test_healthy_active_auth_recovery_removes_running_run_block(monkeypatc
             self, user_id: int, run: BullpenAutoLiveRun
         ) -> int:
             assert user_id == 7
+            replaced_decision_runs.append(run.id)
             return 0
 
         async def save_state(self, user_id: int, next_state: BullpenAutoLiveState) -> None:
@@ -716,6 +718,7 @@ async def test_healthy_active_auth_recovery_removes_running_run_block(monkeypatc
     assert saved_runs[0].audit_metadata["auth_recovery"]["historical_error_stale"] is True
     assert recovered_state.last_error is None
     assert saved_states[-1].last_run_id == historical_run.id
+    assert replaced_decision_runs == []
 
 
 @pytest.mark.anyio

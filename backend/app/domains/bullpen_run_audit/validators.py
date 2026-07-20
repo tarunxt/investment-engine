@@ -542,6 +542,43 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
             )
 
     orders = stage_3.get("order_intents") if isinstance(stage_3.get("order_intents"), list) else []
+    auth_recovery = (
+        stage_3.get("auth_recovery")
+        if isinstance(stage_3.get("auth_recovery"), dict)
+        else {}
+    )
+    planned_live_decisions = [
+        decision
+        for decision in decisions
+        if isinstance(decision, dict)
+        and isinstance(decision.get("order_plan"), dict)
+        and not bool(decision["order_plan"].get("dry_run", True))
+        and decision["order_plan"].get("action") in {"buy", "sell", "redeem"}
+    ]
+    if (
+        auth_recovery.get("historical_error_stale")
+        and planned_live_decisions
+        and not orders
+    ):
+        findings.append(
+            _finding(
+                code="STAGE3_AUTH_RECOVERY_LOST_DURABLE_INTENTS",
+                severity="critical",
+                stage="stage-3",
+                category="execution-recovery",
+                title="Auth recovery lost planned durable order intents",
+                explanation="The recovered run still contains live Stage 3 order plans but no corresponding durable intents, so recovery cannot safely reconcile or resume them.",
+                observed_value=f"{len(planned_live_decisions)} live plan(s), 0 intents",
+                expected_value="One durable intent per live order plan",
+                blocking=True,
+                evidence_pointers=[
+                    "/stage_3/auth_recovery",
+                    "/stage_3/decisions",
+                    "/stage_3/order_intents",
+                ],
+                suggested_remediation="Preserve decision rows and their linked durable intents when closing a run after active auth recovery.",
+            )
+        )
     decisions_by_id = {
         str(decision.get("id")): decision for decision in decisions if isinstance(decision, dict)
     }

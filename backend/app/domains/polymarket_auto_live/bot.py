@@ -316,7 +316,12 @@ class BullpenAutoLiveBot:
         )
         recovered_state = self._synchronize_state(settings, recovered_state)
         await repo.save_run(self.user_id, recovered_run)
-        await repo.replace_run_decisions_from_stage3_payload(self.user_id, recovered_run)
+        # Auth recovery closes the current execution snapshot in place. Replacing
+        # its decisions would cascade-delete their durable order intents.
+        if not recovered_auth_error:
+            await repo.replace_run_decisions_from_stage3_payload(
+                self.user_id, recovered_run
+            )
         await repo.save_state(self.user_id, recovered_state)
         return None, recovered_state
 
