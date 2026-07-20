@@ -580,6 +580,7 @@ function renderBullpenTableCell({
   setBreakdownQuestion,
   setShortlistReasonQuestion,
   setReturnsPerDayQuestion,
+  rowHighlight,
 }: {
   columnId: BullpenTableColumnId;
   question: BullpenQuestionRow;
@@ -592,6 +593,7 @@ function renderBullpenTableCell({
   setBreakdownQuestion: (question: BullpenQuestionRow) => void;
   setShortlistReasonQuestion: (question: BullpenQuestionRow) => void;
   setReturnsPerDayQuestion: (question: BullpenQuestionRow) => void;
+  rowHighlight?: BullpenEventSummarySectionKind;
 }) {
   const isCompact = displayDensity === "compact";
   const cellPaddingClass = isCompact ? "px-4 py-2" : "px-4 py-3";
@@ -601,6 +603,14 @@ function renderBullpenTableCell({
     isCompact ? "line-clamp-2 leading-5" : "leading-5",
   );
   const stackedValueSpacingClass = isCompact ? "mt-0.5" : "mt-1";
+  const amountHighlightClass =
+    rowHighlight === "active-retained"
+      ? "bg-emerald-500 text-slate-950"
+      : rowHighlight === "event-exit"
+        ? "bg-red-500 text-white"
+        : rowHighlight === "new-opportunity"
+          ? "bg-fuchsia-500 text-slate-950"
+          : "bg-fuchsia-500 text-slate-950";
 
   switch (columnId) {
     case "select":
@@ -800,9 +810,7 @@ function renderBullpenTableCell({
           className={cn(
             cellPaddingClass,
             "whitespace-nowrap text-right font-semibold text-slate-700",
-            question.isAmountToBeInvestedHighlighted
-              ? "bg-fuchsia-500 text-slate-950"
-              : "",
+            question.isAmountToBeInvestedHighlighted ? amountHighlightClass : "",
           )}
         >
           {formatMoney(question.amountToBeInvested)}
@@ -954,12 +962,7 @@ export function BullpenQuestionsTable({
           configuredHighlight === "new-opportunity";
 
         if (isActivePosition) {
-          return [
-            question.id,
-            topTenStrongestLlmOddsIds.has(question.id)
-              ? "active-retained"
-              : "event-exit",
-          ];
+          return [question.id, configuredHighlight];
         }
 
         if (
@@ -1444,6 +1447,7 @@ export function BullpenQuestionsTable({
                             setBreakdownQuestion,
                             setShortlistReasonQuestion,
                             setReturnsPerDayQuestion,
+                            rowHighlight,
                           }),
                         )}
                         {extraColumns.map((column) => (

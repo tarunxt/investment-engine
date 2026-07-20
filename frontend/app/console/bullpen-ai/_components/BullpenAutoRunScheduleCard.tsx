@@ -1592,6 +1592,16 @@ function Stage2TopTenEventsSummaryTable({
         persistColumnPreferences={false}
         showPresetFilters={false}
         displayDensity={displayDensity}
+        rowHighlightById={Object.fromEntries(
+          rows.map((row) => [
+            row.question.id,
+            row.displayDecision.decision === "HOLD"
+              ? "active-retained"
+              : row.displayDecision.decision === "EXIT"
+                ? "event-exit"
+                : "new-opportunity",
+          ] as const),
+        )}
         extraColumns={extraColumns}
         onSortChange={(key) =>
           setSortState((current) => ({
