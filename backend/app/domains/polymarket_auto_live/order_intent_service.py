@@ -569,6 +569,17 @@ def _assert_intent_retry_allowed(
     _assert_intent_has_no_persisted_submission_reference(intent)
 
 
+def _reconciliation_snapshot_is_current(
+    record: object,
+    snapshot: BullpenAutoLiveOrderIntent,
+) -> bool:
+    return (
+        str(getattr(record, "status", "") or "")
+        in INTENT_PENDING_CONFIRMATION_STATUSES
+        and int(getattr(record, "version", 0) or 0) == snapshot.version
+    )
+
+
 def _auth_recovery_allows_operator_resume(auth_recovery: object) -> bool:
     return isinstance(auth_recovery, dict) and bool(
         auth_recovery.get("operator_resume_at")
@@ -1894,6 +1905,7 @@ def retry_order_intent_sync(
     record.retryable = True
     record.next_attempt_at = utc_now()
     record.last_error_message = None
+    record.version += 1
     record.execution_metadata_json = {
         **dict(record.execution_metadata_json or {}),
         "manual_retry_requested_at": retried_at,
@@ -1902,6 +1914,8 @@ def retry_order_intent_sync(
         "remote_absence_verified_at": (
             retried_at if remote_absence_verified else None
         ),
+        "recovery_required": False,
+        "current_blockage": None,
     }
     session.flush()
     run = sync_run_and_decisions_from_intents_sync(
@@ -3350,12 +3364,16 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
             session.commit()
             return record.status
         session.commit()
+        if record.status not in INTENT_PENDING_CONFIRMATION_STATUSES:
+            return record.status
         intent = _intent_to_schema(record)
     result = run_with_bullpen_runtime_cleanup(_reconcile_intent_async(intent))
     with SyncSessionLocal() as session:
         record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
         if record is None:
             return None
+        if not _reconciliation_snapshot_is_current(record, intent):
+            return record.status
         record.status = result.status
         record.retryable = result.retryable
         record.last_error_message = result.detail

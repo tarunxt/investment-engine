@@ -383,6 +383,7 @@ Current required keys:
 * `stage3_restart_recovery`
 * `stage3_bullpen_response_normalization`
 * `stage3_verified_remote_absence_retry`
+* `stage3_reconciliation_generation_guard`
 
 Stage 3 response normalization recursively preserves Bullpen order and transaction
 references and treats a successful nested `result.status=matched` buy response as a
@@ -396,6 +397,12 @@ matching remote write. The intent must also have no persisted order ID, transact
 hash, or submission timestamp. The previous status and verification timestamp are
 stored in execution metadata for auditability; ordinary confirmation retries remain
 blocked.
+
+Manual retries increment the durable intent generation. Reconciliation may update an
+intent only while it is still in a pending-confirmation status and its generation
+matches the snapshot that was remotely checked. Queued stale reconciliation tasks
+return without network work for ready/terminal intents and cannot overwrite a newer
+operator retry transition.
 
 If Bullpen logic adds or replaces critical formulas, the registry and tests must be
 updated in the same change.
