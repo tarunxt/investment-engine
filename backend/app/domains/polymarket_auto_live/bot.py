@@ -441,11 +441,20 @@ class BullpenAutoLiveBot:
             return await repo.list_decisions(self.user_id)
 
     async def get_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
-        return await asyncio.to_thread(
+        from app.domains.polymarket_auto_live.tasks import (
+            recover_and_enqueue_stale_order_intents_for_run_sync,
+        )
+
+        response = await asyncio.to_thread(
             get_run_orders_for_user_sync,
             user_id=self.user_id,
             run_id=run_id,
         )
+        await asyncio.to_thread(
+            recover_and_enqueue_stale_order_intents_for_run_sync,
+            run_id,
+        )
+        return response
 
     async def reconcile_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
         from app.domains.polymarket_auto_live.tasks import reconcile_auto_live_run_orders

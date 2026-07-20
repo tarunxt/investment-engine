@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Iterable, Sequence
 
 from sqlalchemy import and_, func, or_, select
+from celery import current_app
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.logging import get_logger
@@ -248,6 +249,13 @@ def _intent_to_schema(record: PolymarketAutoLiveOrderIntentRecord) -> BullpenAut
         last_error_code=record.last_error_code,
         last_error_message=record.last_error_message,
         retryable=record.retryable,
+        task_id=record.execution_metadata_json.get("last_dispatch_task_id"),
+        queue=record.execution_metadata_json.get("last_dispatch_queue") or record.execution_metadata_json.get("required_queue"),
+        worker=record.execution_metadata_json.get("last_dispatch_worker"),
+        last_dispatch_at=record.execution_metadata_json.get("last_dispatch_at"),
+        current_blockage=record.execution_metadata_json.get("current_blockage") or record.last_error_message,
+        actionable_resolution=record.execution_metadata_json.get("how_to_resolve"),
+        deployed_commit_sha=os.getenv("GIT_SHA") or os.getenv("COMMIT_SHA") or os.getenv("RENDER_GIT_COMMIT"),
         attempt_count=record.attempt_count,
         max_attempts=record.max_attempts,
         next_attempt_at=_isoformat(record.next_attempt_at),
@@ -1145,6 +1153,119 @@ def watchdog_requeue_stale_order_intents_sync(
     session.flush()
     return touched
 
+
+
+def recover_stale_planned_order_intents_sync(
+    session: Session,
+    *,
+    run_id: str | None = None,
+    limit: int = 50,
+    stale_after_seconds: int = 10,
+    now: datetime | None = None,
+) -> list[str]:
+    """Atomically promote due PLANNED Stage 3 intents for self-healing dispatch.
+
+    This intentionally only moves not-yet-submitted rows to READY.  Rows that may
+    have reached Bullpen (SUBMITTING/SUBMITTED/CONFIRMING) are left to the
+    reconciliation path so a sell/redeem write is never duplicated.
+    """
+
+    current = now or utc_now()
+    stale_before = current - timedelta(seconds=max(1, stale_after_seconds))
+    query = (
+        select(PolymarketAutoLiveOrderIntentRecord)
+        .where(PolymarketAutoLiveOrderIntentRecord.status == "PLANNED")
+        .where(PolymarketAutoLiveOrderIntentRecord.created_at <= stale_before)
+        .order_by(
+            PolymarketAutoLiveOrderIntentRecord.priority.asc(),
+            PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
+        )
+        .limit(limit)
+        .with_for_update(skip_locked=True)
+    )
+    if run_id is not None:
+        query = query.where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+    records = session.execute(query).scalars().all()
+    recovered: list[str] = []
+    for record in records:
+        metadata = dict(record.execution_metadata_json or {})
+        events = list(metadata.get("dispatch_recovery_events") or [])
+        event = {
+            "at": _isoformat(current),
+            "from_status": record.status,
+            "queue": "ai",
+            "reason": f"PLANNED intent older than {max(1, stale_after_seconds)} seconds recovered during backend poll/startup.",
+            "resolution": "promoted_to_READY_for_execute_auto_live_order_intent",
+        }
+        events.append(event)
+        metadata.update({
+            "dispatch_recovery_events": events[-20:],
+            "current_blockage": "Recovered from PLANNED: Celery Beat did not dispatch this intent before backend self-healing scanned it.",
+            "how_to_resolve": "Ensure investor-celery-worker consumes the ai queue; backend polling/startup now re-enqueues READY intents automatically.",
+            "required_queue": "ai",
+            "last_dispatch_queue": "ai",
+            "last_dispatch_task": "execute_auto_live_order_intent",
+            "last_dispatch_at": _isoformat(current),
+        })
+        if record.action in {"sell", "redeem"}:
+            metadata["stage3_status"] = "EXIT_NOT_SUBMITTED"
+        record.status = "READY"
+        record.retryable = True
+        record.next_attempt_at = current
+        record.last_error_code = "PLANNED_RECOVERED_AFTER_POLL"
+        record.last_error_message = str(metadata["current_blockage"])
+        record.execution_metadata_json = metadata
+        record.version += 1
+        recovered.append(record.id)
+    session.flush()
+    return recovered
+
+
+def annotate_intent_dispatch_sync(
+    session: Session,
+    *,
+    intent_id: str,
+    task_id: str | None,
+    queue: str = "ai",
+    worker: str | None = None,
+) -> None:
+    record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
+    if record is None:
+        return
+    metadata = dict(record.execution_metadata_json or {})
+    metadata.update({
+        "last_dispatch_at": utc_now_iso(),
+        "last_dispatch_task_id": task_id,
+        "last_dispatch_queue": queue,
+        "last_dispatch_task": "execute_auto_live_order_intent",
+        "required_queue": queue,
+        "last_dispatch_worker": worker,
+    })
+    if record.status in {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}:
+        metadata["current_blockage"] = "Dispatched to Celery; waiting for an ai worker to receive execute_auto_live_order_intent."
+        metadata["how_to_resolve"] = "If this stays unchanged, restart investor-celery-worker with CELERY_WORKER_QUEUES including ai."
+    record.execution_metadata_json = metadata
+    session.flush()
+
+
+def celery_ai_queue_consumer_diagnostics(timeout: float = 1.0) -> dict[str, object]:
+    try:
+        inspect = current_app.control.inspect(timeout=timeout)
+        active_queues = inspect.active_queues() or {}
+    except Exception as exc:
+        return {"ok": False, "error": sanitize_message(str(exc)), "required_queue": "ai"}
+    consumers = []
+    for worker, queues in active_queues.items():
+        names = [item.get("name") for item in queues if isinstance(item, dict)]
+        if "ai" in names:
+            consumers.append(worker)
+    return {
+        "ok": bool(consumers),
+        "required_queue": "ai",
+        "consuming_workers": consumers,
+        "active_queues": active_queues,
+        "error": None if consumers else "No Celery worker currently reports consuming the ai queue required by Stage 3 order intents.",
+    }
 
 def get_run_user_id_sync(session: Session, run_id: str) -> int | None:
     record = session.get(PolymarketAutoLiveRunRecord, run_id)
@@ -2519,6 +2640,7 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
 
 def get_run_orders_for_user_sync(*, user_id: int, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
     with SyncSessionLocal() as session:
+        recover_stale_planned_order_intents_sync(session, run_id=run_id)
         sync_run_and_decisions_from_intents_sync(session, user_id=user_id, run_id=run_id)
         session.commit()
         return summarize_run_orders_sync(session, user_id=user_id, run_id=run_id)

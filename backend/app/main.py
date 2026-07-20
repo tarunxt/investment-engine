@@ -139,6 +139,21 @@ async def lifespan(app: FastAPI):
     logger.info("Redis: %s", settings.redis_url)
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
+    try:
+        from app.domains.polymarket_auto_live.tasks import (
+            recover_and_enqueue_stale_order_intents_on_startup_sync,
+        )
+
+        recovered = await __import__("asyncio").to_thread(
+            recover_and_enqueue_stale_order_intents_on_startup_sync
+        )
+        if recovered:
+            logger.warning(
+                "Recovered and enqueued %s stale Stage 3 order intents during backend startup.",
+                recovered,
+            )
+    except Exception:
+        logger.exception("Backend startup Stage 3 order-intent recovery failed.")
 
     # Seed default prompts (idempotent — only inserts if missing)
     async with AsyncSessionLocal() as db:

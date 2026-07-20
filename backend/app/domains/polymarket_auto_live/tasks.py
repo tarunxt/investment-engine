@@ -33,6 +33,8 @@ from app.domains.polymarket_auto_live.models import (
 from app.domains.polymarket_auto_live.order_intent_service import (
     create_or_refresh_run_order_intents_sync,
     execute_order_intent_sync,
+    annotate_intent_dispatch_sync,
+    recover_stale_planned_order_intents_sync,
     get_intent_user_id_sync,
     list_due_order_intent_ids_sync,
     persist_stage3_intent_diagnostics_sync,
@@ -124,10 +126,61 @@ def _queue_due_order_intents_for_run_sync(run_id: str, *, limit: int = 50) -> in
             .scalars()
             .all()
         )
-    for due_id in run_due_ids:
-        execute_auto_live_order_intent.delay(str(due_id))  # type: ignore[attr-defined]
+    _enqueue_execute_order_intents(run_due_ids)
     return len(run_due_ids)
 
+
+
+def _enqueue_execute_order_intents(intent_ids) -> int:
+    queued = 0
+    for intent_id in intent_ids:
+        task = execute_auto_live_order_intent.apply_async(args=(str(intent_id),), queue="ai")  # type: ignore[attr-defined]
+        queued += 1
+        try:
+            with SyncSessionLocal() as session:
+                annotate_intent_dispatch_sync(
+                    session,
+                    intent_id=str(intent_id),
+                    task_id=getattr(task, "id", None),
+                    queue="ai",
+                )
+                session.commit()
+        except Exception:
+            logger.warning("Failed to annotate Stage 3 intent dispatch for %s", intent_id, exc_info=True)
+    return queued
+
+
+def recover_and_enqueue_stale_order_intents_for_run_sync(run_id: str, *, limit: int = 50) -> int:
+    with SyncSessionLocal() as session:
+        recovered_ids = recover_stale_planned_order_intents_sync(session, run_id=run_id, limit=limit)
+        due_ids = list_due_order_intent_ids_sync(
+            session,
+            limit=limit,
+            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            now=_utc_now(),
+        )
+        due_ids = list(
+            session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord.id)
+                .where(PolymarketAutoLiveOrderIntentRecord.id.in_(set(recovered_ids) | set(due_ids)))
+                .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+                .order_by(
+                    PolymarketAutoLiveOrderIntentRecord.priority.asc(),
+                    PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
+                )
+            )
+            .scalars()
+            .all()
+        )
+        session.commit()
+    return _enqueue_execute_order_intents(due_ids)
+
+
+def recover_and_enqueue_stale_order_intents_on_startup_sync(*, limit: int = 100) -> int:
+    with SyncSessionLocal() as session:
+        recovered_ids = recover_stale_planned_order_intents_sync(session, limit=limit)
+        session.commit()
+    return _enqueue_execute_order_intents(recovered_ids)
 
 def _position_snapshot_from_record(record) -> PositionSnapshot:
     payload = record.payload or {}
@@ -602,8 +655,7 @@ def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
             statuses=("SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING"),
         )
 
-    for intent_id in executable_ids:
-        execute_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+    _enqueue_execute_order_intents(executable_ids)
     for intent_id in reconcilable_ids:
         reconcile_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
 
@@ -629,7 +681,7 @@ def watchdog_requeue_stale_auto_live_order_intents(limit: int = 100) -> None:
         if intent_id in reconcile_ids:
             reconcile_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
         else:
-            execute_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+            _enqueue_execute_order_intents([intent_id])
 
 
 @celery.task(
@@ -639,6 +691,18 @@ def watchdog_requeue_stale_auto_live_order_intents(limit: int = 100) -> None:
     queue="ai",
 )
 def execute_auto_live_order_intent(self, intent_id: str) -> None:
+    try:
+        with SyncSessionLocal() as session:
+            annotate_intent_dispatch_sync(
+                session,
+                intent_id=intent_id,
+                task_id=self.request.id,
+                queue="ai",
+                worker=getattr(self.request, "hostname", None),
+            )
+            session.commit()
+    except Exception:
+        logger.warning("Failed to annotate Stage 3 worker receipt for %s", intent_id, exc_info=True)
     execute_order_intent_sync(intent_id, worker_task_id=self.request.id)
     _refresh_order_intent_audit_sync(intent_id)
 
@@ -677,7 +741,7 @@ def reconcile_auto_live_order_intent(self, intent_id: str) -> None:
                 .all()
             )
     for due_id in due_ids:
-        execute_auto_live_order_intent.delay(due_id)  # type: ignore[attr-defined]
+        _enqueue_execute_order_intents([due_id])
 
 
 @celery.task(
@@ -710,6 +774,18 @@ def reconcile_auto_live_run_orders(run_id: str) -> None:
     queue="ai",
 )
 def retry_auto_live_order_intent(self, intent_id: str) -> None:
+    try:
+        with SyncSessionLocal() as session:
+            annotate_intent_dispatch_sync(
+                session,
+                intent_id=intent_id,
+                task_id=self.request.id,
+                queue="ai",
+                worker=getattr(self.request, "hostname", None),
+            )
+            session.commit()
+    except Exception:
+        logger.warning("Failed to annotate Stage 3 retry worker receipt for %s", intent_id, exc_info=True)
     execute_order_intent_sync(intent_id, worker_task_id=self.request.id)
     _refresh_order_intent_audit_sync(intent_id)
 
