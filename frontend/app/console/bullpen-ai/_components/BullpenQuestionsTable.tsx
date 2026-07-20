@@ -7,6 +7,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  Fragment,
   type ReactNode,
 } from "react";
 import {
@@ -110,6 +111,44 @@ const DEFAULT_VISIBLE_BULLPEN_TABLE_COLUMN_IDS: BullpenTableColumnId[] =
     (columnId) => columnId !== "noOdds" && columnId !== "llmNoOdds",
   );
 const DEFAULT_EXTRA_COLUMN_WIDTH = 240;
+
+type BullpenEventSummarySectionKind =
+  | "event-exit"
+  | "active-retained"
+  | "new-opportunity";
+
+const BULLPEN_EVENT_SUMMARY_SECTIONS: Array<{
+  kind: BullpenEventSummarySectionKind;
+  title: string;
+  description: string;
+  headerClassName: string;
+  countClassName: string;
+}> = [
+  {
+    kind: "event-exit",
+    title: "Event Exits",
+    description:
+      "Sell — active positions that moved outside the top-10 returns/day table after Event Exit evaluation.",
+    headerClassName: "border-rose-200 bg-rose-100 text-rose-950",
+    countClassName: "bg-rose-600 text-white",
+  },
+  {
+    kind: "active-retained",
+    title: "Active Bullpen Positions",
+    description:
+      "Hold — active positions that remain inside the top-10 returns/day table after Event Exit evaluation.",
+    headerClassName: "border-emerald-200 bg-emerald-100 text-emerald-950",
+    countClassName: "bg-emerald-600 text-white",
+  },
+  {
+    kind: "new-opportunity",
+    title: "New Scanned Opportunities",
+    description:
+      "Buy New — fresh scanned events highlighted for new Bullpen buys.",
+    headerClassName: "border-fuchsia-200 bg-fuchsia-100 text-fuchsia-950",
+    countClassName: "bg-fuchsia-600 text-white",
+  },
+];
 
 function formatDate(value: string | null) {
   return formatApiTimestamp(value, {
@@ -679,7 +718,10 @@ function renderBullpenTableCell({
       return (
         <td
           key={columnId}
-          className={cn(cellPaddingClass, "whitespace-nowrap text-xs font-semibold")}
+          className={cn(
+            cellPaddingClass,
+            "whitespace-nowrap text-xs font-semibold",
+          )}
         >
           <div className="text-emerald-700">
             Yes: {formatOdds(question.yesOdds)}
@@ -855,8 +897,10 @@ export function BullpenQuestionsTable({
     useState<BullpenQuestionRow | null>(null);
   const [isAmountHighlightDialogOpen, setIsAmountHighlightDialogOpen] =
     useState(false);
-  const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
-    useState(false);
+  const [
+    isReturnsPerDayFormulaDialogOpen,
+    setIsReturnsPerDayFormulaDialogOpen,
+  ] = useState(false);
   const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
     useState<BullpenQuestionRow | null>(null);
   const requestedVisibleColumnIds =
@@ -896,41 +940,48 @@ export function BullpenQuestionsTable({
   const rows = isTopTenFilterActive
     ? rowsToDisplay
     : sortQuestions(rowsToDisplay, sortState);
-  const effectiveRowHighlightById = Object.fromEntries(
-    allRows.map((question) => {
-      const configuredHighlight = rowHighlightById?.[question.id];
-      const isActivePosition =
-        configuredHighlight === "active-retained" ||
-        configuredHighlight === "event-exit";
-      const isSelectedFreshOpportunity =
-        configuredHighlight === "new-opportunity";
+  const effectiveRowHighlightById: Record<
+    string,
+    BullpenEventSummarySectionKind
+  > = Object.fromEntries(
+    allRows
+      .map((question) => {
+        const configuredHighlight = rowHighlightById?.[question.id];
+        const isActivePosition =
+          configuredHighlight === "active-retained" ||
+          configuredHighlight === "event-exit";
+        const isSelectedFreshOpportunity =
+          configuredHighlight === "new-opportunity";
 
-      if (isActivePosition) {
-        return [
-          question.id,
+        if (isActivePosition) {
+          return [
+            question.id,
+            topTenStrongestLlmOddsIds.has(question.id)
+              ? "active-retained"
+              : "event-exit",
+          ];
+        }
+
+        if (
+          isSelectedFreshOpportunity &&
           topTenStrongestLlmOddsIds.has(question.id)
-            ? "active-retained"
-            : "event-exit",
-        ];
-      }
+        ) {
+          return [question.id, "new-opportunity"];
+        }
 
-      if (
-        isSelectedFreshOpportunity &&
-        topTenStrongestLlmOddsIds.has(question.id)
-      ) {
-        return [question.id, "new-opportunity"];
-      }
-
-      return [question.id, configuredHighlight];
-    }).filter(
-      (
-        entry,
-      ): entry is [
-        string,
-        "active-retained" | "event-exit" | "new-opportunity",
-      ] => Boolean(entry[1]),
-    ),
+        return [question.id, configuredHighlight ?? "new-opportunity"];
+      })
+      .filter((entry): entry is [string, BullpenEventSummarySectionKind] =>
+        Boolean(entry[1]),
+      ),
   );
+  const sectionedRows = BULLPEN_EVENT_SUMMARY_SECTIONS.map((section) => ({
+    ...section,
+    rows: rows.filter(
+      (question) => effectiveRowHighlightById[question.id] === section.kind,
+    ),
+  })).filter((section) => section.rows.length > 0);
+  const visibleColumnCount = visibleBaseColumnIds.length + extraColumns.length;
   const selectableRowCount = selectionEnabled ? rows.length : 0;
   const selectedVisibleCount = rows.filter((question) =>
     selectedQuestionIds.has(question.id),
@@ -953,7 +1004,9 @@ export function BullpenQuestionsTable({
       (total, column) => total + (column.width ?? DEFAULT_EXTRA_COLUMN_WIDTH),
       0,
     );
-  const updatedAtLabel = formatUpdatedAt(updatedAt ?? snapshot?.scannedAt ?? null);
+  const updatedAtLabel = formatUpdatedAt(
+    updatedAt ?? snapshot?.scannedAt ?? null,
+  );
   const showUpdateUnavailableReason =
     updatedAtLabel === "—" && Boolean(updateUnavailableReason);
 
@@ -1339,63 +1392,87 @@ export function BullpenQuestionsTable({
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {rows.length > 0 ? (
-              rows.map((question, rowIndex) => {
-                const hasLlmAnalysis = hasBullpenLlmAnalysis(question);
+              sectionedRows.map((section) => (
+                <Fragment key={section.kind}>
+                  <tr className={cn("border-y", section.headerClassName)}>
+                    <td colSpan={visibleColumnCount} className="px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span className="text-sm font-semibold">
+                          {section.title}
+                        </span>
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-0.5 text-xs font-bold",
+                            section.countClassName,
+                          )}
+                        >
+                          {section.rows.length}
+                        </span>
+                        <span className="text-xs font-medium opacity-80">
+                          {section.description}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  {section.rows.map((question, rowIndex) => {
+                    const hasLlmAnalysis = hasBullpenLlmAnalysis(question);
+                    const rowHighlight = effectiveRowHighlightById[question.id];
 
-                const rowHighlight = effectiveRowHighlightById[question.id] ?? null;
-                return (
-                  <tr
-                    key={question.id}
-                    className={cn(
-                      "align-top hover:bg-slate-50",
-                      rowHighlight === "active-retained" &&
-                        "bg-emerald-50 hover:bg-emerald-100/70",
-                      rowHighlight === "event-exit" &&
-                        "bg-rose-50 hover:bg-rose-100/70",
-                      rowHighlight === "new-opportunity" &&
-                        "bg-fuchsia-50 hover:bg-fuchsia-100/70",
-                    )}
-                  >
-                    {visibleBaseColumnIds.map((columnId) =>
-                      renderBullpenTableCell({
-                        columnId,
-                        question,
-                        rowIndex,
-                        hasLlmAnalysis,
-                        displayDensity,
-                        selectedQuestionIds,
-                        selectionEnabled,
-                        onToggleQuestion,
-                        setBreakdownQuestion,
-                        setShortlistReasonQuestion,
-                        setReturnsPerDayQuestion,
-                      }),
-                    )}
-                    {extraColumns.map((column) => (
-                      <td
-                        key={column.id}
+                    return (
+                      <tr
+                        key={question.id}
                         className={cn(
-                          displayDensity === "compact"
-                            ? "px-4 py-2 align-top text-slate-700"
-                            : "px-4 py-3 align-top text-slate-700",
-                          column.align === "center"
-                            ? "text-center"
-                            : column.align === "right"
-                              ? "text-right"
-                              : "text-left",
-                          column.cellClassName,
+                          "align-top hover:bg-slate-50",
+                          rowHighlight === "active-retained" &&
+                            "bg-emerald-50 hover:bg-emerald-100/70",
+                          rowHighlight === "event-exit" &&
+                            "bg-rose-50 hover:bg-rose-100/70",
+                          rowHighlight === "new-opportunity" &&
+                            "bg-fuchsia-50 hover:bg-fuchsia-100/70",
                         )}
                       >
-                        {column.renderCell(question)}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })
+                        {visibleBaseColumnIds.map((columnId) =>
+                          renderBullpenTableCell({
+                            columnId,
+                            question,
+                            rowIndex,
+                            hasLlmAnalysis,
+                            displayDensity,
+                            selectedQuestionIds,
+                            selectionEnabled,
+                            onToggleQuestion,
+                            setBreakdownQuestion,
+                            setShortlistReasonQuestion,
+                            setReturnsPerDayQuestion,
+                          }),
+                        )}
+                        {extraColumns.map((column) => (
+                          <td
+                            key={column.id}
+                            className={cn(
+                              displayDensity === "compact"
+                                ? "px-4 py-2 align-top text-slate-700"
+                                : "px-4 py-3 align-top text-slate-700",
+                              column.align === "center"
+                                ? "text-center"
+                                : column.align === "right"
+                                  ? "text-right"
+                                  : "text-left",
+                              column.cellClassName,
+                            )}
+                          >
+                            {column.renderCell(question)}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))
             ) : (
               <tr>
                 <td
-                  colSpan={visibleBaseColumnIds.length + extraColumns.length}
+                  colSpan={visibleColumnCount}
                   className="px-4 py-12 text-center text-slate-500"
                 >
                   {isLoading ? "Scanning Bullpen..." : emptyMessage}
