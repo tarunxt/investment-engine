@@ -526,6 +526,7 @@ def test_algorithm_registry_contains_required_audit_keys():
         "stage2_consensus_statistics",
         "candidate_returns_per_day",
         "console_trade_amount_per_opportunity",
+        "stage3_live_capacity_sizing",
         "llm_returns_per_day",
         "position_returns_per_day",
         "stage3_rank_and_selection",

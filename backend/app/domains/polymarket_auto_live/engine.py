@@ -1654,16 +1654,15 @@ def _stage3_capacity_sizing_market_ids(
 ) -> set[str]:
     """Return the market IDs that consume slots for Stage 3 order sizing.
 
-    Pending accepted buys remain a duplicate-order denylist in every mode. The
-    explicit operator override changes only the sizing/capacity basis: it trusts
-    the forced live wallet snapshot plus accepted buys from the current run,
-    rather than letting stale historical accepted rows force the order size to
-    zero.
+    The live economic wallet snapshot is authoritative for occupied positions.
+    Accepted buys from this run remain in the sizing basis until the wallet
+    reflects them, preventing duplicate capacity use during a single run.
+    Historical accepted rows absent from the fresh wallet remain a
+    duplicate-order denylist, but cannot silently consume every sizing slot or
+    reduce a verified positive cash balance to a zero-dollar buy.
     """
-
-    if capacity_override_enabled:
-        return visible_active_market_ids | current_run_submitted_buy_market_ids
-    return visible_active_market_ids | pending_submitted_buy_market_ids
+    del pending_submitted_buy_market_ids, capacity_override_enabled
+    return visible_active_market_ids | current_run_submitted_buy_market_ids
 
 
 def _today_order_counts(
@@ -7651,6 +7650,12 @@ class BullpenAutoLiveEngine:
             exit_state: str = "ACTIVE",
             include_order_plan: bool = True,
         ) -> BullpenAutoLiveDecision:
+            close_at = _parse_iso_datetime(market.close_time)
+            hours_remaining = (
+                max(0.0, (close_at - now).total_seconds() / 3600)
+                if close_at is not None
+                else None
+            )
             fair_no = llm_consensus.fair_no_probability_pct if llm_consensus else None
             fair_yes = llm_consensus.fair_yes_probability_pct if llm_consensus else None
             confidence = normalize_auto_live_confidence(
@@ -7761,7 +7766,7 @@ class BullpenAutoLiveEngine:
                 current_exposure_usd=round(current_exposure_usd, 2),
                 target_exposure_usd=round(target_exposure_usd, 2),
                 realized_pnl_usd=None,
-                hours_remaining=None,
+                hours_remaining=hours_remaining,
                 key_evidence=[
                     item
                     for output in (llm_outputs or [])
@@ -9138,9 +9143,7 @@ class BullpenAutoLiveEngine:
                 capacity_sizing_market_ids
             )
             stage3_slot_diagnostics["capacity_sizing_basis"] = (
-                "live-economic-plus-current-run-accepted-v1"
-                if settings.stage3_capacity_override
-                else "live-economic-plus-all-pending-accepted-v1"
+                "live-economic-plus-current-run-accepted-v2"
             )
             stage3_slot_diagnostics["pending_submitted_buy_market_count"] = len(
                 pending_submitted_buy_market_ids
@@ -9228,7 +9231,7 @@ class BullpenAutoLiveEngine:
                         "run_id": run.id,
                         "action": "stage3_capacity_override",
                         "reason": "Explicit operator setting bypassed only the slot-capacity gate for this buy.",
-                        "sizing_basis": "live-economic-plus-current-run-accepted-v1",
+                        "sizing_basis": "live-economic-plus-current-run-accepted-v2",
                         "capacity_gate_occupied_market_count": len(occupied_market_ids),
                         "capacity_sizing_occupied_market_count": len(
                             capacity_sizing_market_ids
@@ -9414,7 +9417,7 @@ class BullpenAutoLiveEngine:
                     continue
 
                 if (
-                    len(occupied_market_ids) + 1 > CONSOLE_RANKED_EVENT_LIMIT
+                    len(capacity_sizing_market_ids) + 1 > CONSOLE_RANKED_EVENT_LIMIT
                     and not reserved_for_async_exit
                     and not capacity_override_used
                 ):

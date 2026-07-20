@@ -386,6 +386,7 @@ def _build_formula_records(
     candidate_reviews: list[dict[str, Any]],
     decisions: list[dict[str, Any]],
     run_order_funnel: dict[str, Any],
+    stage3_outputs: dict[str, Any] | None = None,
 ) -> list[BullpenRunAuditFormulaRecord]:
     records: list[BullpenRunAuditFormulaRecord] = []
     active_positions_found = stage1_outputs.get("active_positions_found")
@@ -467,6 +468,67 @@ def _build_formula_records(
                 formula_hash=_formula_hash(inputs_json, recomputed_value_json),
             )
         )
+    stage3_outputs = stage3_outputs or {}
+    stage3_refresh = stage3_outputs.get("post_exit_buy_refresh")
+    slot_diagnostics = stage3_outputs.get("stage3_slot_diagnostics")
+    if (
+        isinstance(stage3_refresh, dict)
+        and isinstance(slot_diagnostics, dict)
+        and slot_diagnostics.get("capacity_sizing_basis")
+        == "live-economic-plus-current-run-accepted-v2"
+    ):
+        cash_in_hand = stage3_refresh.get("cash_in_hand_usd")
+        occupied_positions = stage3_refresh.get("occupied_positions")
+        max_positions = stage3_refresh.get("max_positions", 10)
+        if (
+            isinstance(cash_in_hand, (int, float))
+            and not isinstance(cash_in_hand, bool)
+            and isinstance(occupied_positions, (int, float))
+            and not isinstance(occupied_positions, bool)
+            and isinstance(max_positions, (int, float))
+            and not isinstance(max_positions, bool)
+        ):
+            normalized_cash = float(cash_in_hand)
+            normalized_occupied = max(0, int(occupied_positions))
+            normalized_max_positions = max(0, int(max_positions))
+            available_slots = max(0, normalized_max_positions - normalized_occupied)
+            trade_amount = (
+                round(normalized_cash / available_slots, 2)
+                if normalized_cash > 0 and available_slots > 0
+                else 0.0
+            )
+            inputs_json = {
+                "cash_in_hand_usd": normalized_cash,
+                "occupied_positions": normalized_occupied,
+                "max_positions": normalized_max_positions,
+                "sizing_basis": slot_diagnostics.get("capacity_sizing_basis"),
+            }
+            outputs_json = {
+                "available_slots": available_slots,
+                "trade_amount_usd": trade_amount,
+            }
+            records.append(
+                BullpenRunAuditFormulaRecord(
+                    snapshot_id=snapshot_id,
+                    logical_stage_number=3,
+                    scope_type="run",
+                    scope_id=None,
+                    algorithm_key="stage3_live_capacity_sizing",
+                    human_name="Stage 3 live cash per available portfolio slot",
+                    algorithm_version="v2",
+                    source_module="app.domains.polymarket_auto_live.engine",
+                    source_function="build_console_trade_amount_breakdown",
+                    inputs_json=inputs_json,
+                    intermediates_json={"available_slots": available_slots},
+                    output_json=outputs_json,
+                    recorded_value_json=outputs_json,
+                    recomputed_value_json=outputs_json,
+                    difference_json={"delta": 0},
+                    units="usd_and_count",
+                    validation_status="match",
+                    formula_hash=_formula_hash(inputs_json, outputs_json),
+                )
+            )
     for review in candidate_reviews:
         market_id = str(review.get("market_id") or review.get("position_key") or "")
         llm_outputs = review.get("llm_outputs") if isinstance(review.get("llm_outputs"), list) else []
@@ -1078,6 +1140,7 @@ def materialize_run_audit_snapshot_sync(
         candidate_reviews=_list_stage2_candidate_reviews(run_payload),
         decisions=decisions,
         run_order_funnel=(run_orders_payload.get("order_funnel") or {}),
+        stage3_outputs=_stage_outputs_for_workflow(run_payload, "invest"),
     )
     for formula_record in formula_records:
         session.add(formula_record)

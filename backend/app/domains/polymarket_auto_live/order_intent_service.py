@@ -1074,7 +1074,7 @@ def _persist_capacity_override_audit(
         "intent_id": record.id,
         "action": "stage3_capacity_override",
         "reason": "Explicit operator setting bypassed only the slot-capacity gate.",
-        "sizing_basis": "live-economic-plus-current-run-accepted-v1",
+        "sizing_basis": "live-economic-plus-current-run-accepted-v2",
         "recorded_at": utc_now_iso(),
     }
     run.payload = {

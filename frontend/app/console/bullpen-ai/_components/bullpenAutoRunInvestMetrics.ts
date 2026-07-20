@@ -163,7 +163,14 @@ export function isSubmittedOrSuccessfulInvestOrderPlan(
   orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
 ) {
   if (!orderPlan) return false;
-  if (orderPlan.status === "submitted" || orderPlan.status === "confirmed") {
+  if (
+    orderPlan.status === "submitted" ||
+    orderPlan.status === "confirmed" ||
+    orderPlan.status === "filled" ||
+    orderPlan.status === "settlement_pending" ||
+    orderPlan.status === "already_redeemed" ||
+    orderPlan.status === "resolved_zero_payout"
+  ) {
     return true;
   }
 

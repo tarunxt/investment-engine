@@ -511,10 +511,15 @@ function AmountHighlightConditionsDialog({ onClose }: { onClose: () => void }) {
           </div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Amount formula
+              Trade amount formula
             </div>
             <p className="mt-3 font-semibold text-slate-950">
-              5 × (strongest LLM odds - 80) × Returns/day / 100
+              Cash in Hand / (10 - Occupied Positions)
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Stage 3 recalculates this from the latest verified Bullpen cash
+              balance and occupied positions immediately before it plans or
+              submits a buy.
             </p>
           </div>
         </div>
@@ -1222,7 +1227,7 @@ export function BullpenQuestionsTable({
     },
     amountToBeInvested: {
       columnId: "amountToBeInvested",
-      label: "Amount to be invested",
+      label: "Trade amount formula Cash in Hand / (10 - Occupied Positions)",
       sortKey: "amountToBeInvested",
       afterLabel: amountHighlightInfo,
     },

@@ -541,8 +541,14 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                 )
             )
         sizing_basis = slot_diagnostics.get("capacity_sizing_basis")
-        if override_enabled and sizing_basis is not None:
-            expected_sizing_basis = "live-economic-plus-current-run-accepted-v1"
+        if sizing_basis == "live-economic-plus-current-run-accepted-v2" or (
+            override_enabled and sizing_basis is not None
+        ):
+            expected_sizing_basis = (
+                "live-economic-plus-current-run-accepted-v2"
+                if sizing_basis == "live-economic-plus-current-run-accepted-v2"
+                else "live-economic-plus-current-run-accepted-v1"
+            )
             sizing_count = _int(
                 slot_diagnostics.get("capacity_sizing_occupied_market_count")
             )
@@ -566,9 +572,9 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                         severity="high",
                         stage="stage-3",
                         category="slot-allocation",
-                        title="Stage 3 capacity override used an invalid sizing basis",
+                        title="Stage 3 used an invalid capacity sizing basis",
                         explanation=(
-                            "The override must size from the forced live economic-position snapshot plus accepted buys from the current run; historical pending rows remain duplicate guards but cannot force sizing to zero."
+                            "Stage 3 must size from the forced live economic-position snapshot plus accepted buys from the current run; historical pending rows remain duplicate guards but cannot force sizing to zero."
                         ),
                         observed_value=(
                             f"basis={sizing_basis}; occupied={sizing_count}"

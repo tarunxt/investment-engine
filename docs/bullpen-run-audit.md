@@ -329,12 +329,13 @@ as an explicit operator bypass of only the slot-capacity gate; live cash,
 duplicate-market, market-validity, order-size, exposure, slippage, pricing, and
 cooldown guardrails remain active.
 
-When that explicit override is used, order sizing trusts the forced live
-economic-position snapshot plus accepted buys from the current run. Historical
-accepted rows that are absent from the live wallet remain duplicate-market
-denylist entries, but they cannot reduce available sizing slots to zero. The
-snapshot records both the unoverridden capacity-gate count and the effective
-override sizing count, and deterministic validation rejects a mismatched sizing
+Stage 3 order sizing always uses the forced live economic-position snapshot plus
+accepted buys from the current run: `cash in hand / (10 - occupied positions)`.
+Historical accepted rows that are absent from the live wallet remain
+duplicate-market denylist entries, but they cannot reduce available sizing slots
+to zero. An explicit capacity override still bypasses only the slot gate; it does
+not change this sizing formula. The snapshot records the capacity-gate count and
+the v2 sizing count, and deterministic validation rejects a mismatched sizing
 basis. Existing frozen snapshots without these additive fields remain readable.
 
 The Stage 2 transfer queue remains a separate handoff diagnostic. Stage 3 Step 2

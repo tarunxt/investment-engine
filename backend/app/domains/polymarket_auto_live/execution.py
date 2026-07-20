@@ -117,7 +117,6 @@ async def refresh_live_controls(*, user_id: int) -> RefreshedLiveControls:
         and not state.live.emergency_stopped
         and not state.live.manually_locked
         and state.live.doctor.ok
-        and state.live.balance.status == "ready"
     )
     normalized_locked_reason = _normalize_locked_reason(locked_reason)
     if normalized_locked_reason in AUTO_LIVE_UNLOCK_BYPASS_REASONS:

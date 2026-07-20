@@ -79,6 +79,16 @@ test("stale running execution steps flip to completed when processed catches pla
   );
 });
 
+test("filled Stage 3 orders count as submitted", async () => {
+  const { isSubmittedOrSuccessfulInvestOrderPlan } =
+    await loadInvestMetricsModule();
+
+  assert.equal(
+    isSubmittedOrSuccessfulInvestOrderPlan({ status: "filled" }),
+    true,
+  );
+});
+
 test("Stage 3 metric filters break out sell, processed, and forced-exit rows", async () => {
   const {
     getInvestMetricRows,

@@ -323,7 +323,7 @@ async def test_refresh_live_controls_allows_auto_live_stage3_when_copy_bot_is_pa
 
 
 @pytest.mark.anyio
-async def test_refresh_live_controls_allows_auto_live_stage3_without_dashboard_unlock_when_armed(
+async def test_refresh_live_controls_allows_auto_live_stage3_without_dashboard_unlock_when_armed_even_if_balance_is_unavailable(
     monkeypatch,
 ):
     from app.domains.polymarket_auto_live.execution import refresh_live_controls
@@ -349,7 +349,7 @@ async def test_refresh_live_controls_allows_auto_live_stage3_without_dashboard_u
                     emergency_stopped=False,
                     manually_locked=False,
                     doctor=SimpleNamespace(ok=True),
-                    balance=SimpleNamespace(status="ready"),
+                    balance=SimpleNamespace(status="unavailable"),
                 ),
             )
 
@@ -8473,7 +8473,7 @@ def test_summarize_stage3_step2_buy_queue_tracks_transferred_rows_separately_fro
     assert counts == {"planned": 4, "processed": 2, "submitted": 1}
 
 
-def test_stage3_capacity_override_sizes_from_live_and_current_run_markets_only():
+def test_stage3_capacity_sizing_uses_live_and_current_run_markets_only():
     visible_market_ids = {"live-1", "live-2", "live-3"}
     historical_pending_market_ids = {
         f"historical-pending-{index}" for index in range(10)
@@ -8493,7 +8493,7 @@ def test_stage3_capacity_override_sizes_from_live_and_current_run_markets_only()
         capacity_override_enabled=True,
     )
 
-    assert len(regular_ids) == 13
+    assert regular_ids == visible_market_ids | current_run_submitted_market_ids
     assert override_ids == visible_market_ids | current_run_submitted_market_ids
     assert build_console_trade_amount_breakdown(
         available_balance_usd=8.51,

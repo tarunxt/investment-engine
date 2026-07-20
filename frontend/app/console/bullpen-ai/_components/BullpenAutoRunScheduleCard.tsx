@@ -2236,7 +2236,16 @@ function isSubmittedOrSuccessfulOrderPlan(
 ) {
   if (!orderPlan) return false;
   const status = orderPlan.status?.trim().toLowerCase();
-  if (status === "submitted" || status === "confirmed") return true;
+  if (
+    status === "submitted" ||
+    status === "confirmed" ||
+    status === "filled" ||
+    status === "settlement_pending" ||
+    status === "already_redeemed" ||
+    status === "resolved_zero_payout"
+  ) {
+    return true;
+  }
 
   const detail = orderPlan.detail?.trim() ?? "";
   const response = orderPlan.execution_response?.trim() ?? "";
@@ -2582,14 +2591,14 @@ function getInvestStageExecutionSteps(
               )
             : readStageOutputNumber(step.redeem_submitted_orders),
         rankingLlmSubmittedOrders:
-          key === "sell" && !usePersistedCounters
+          key === "sell"
             ? Math.max(
                 readStageOutputNumber(step.ranking_llm_submitted_orders) ?? 0,
                 submittedSellSubpartCounts.rankingOrLlm,
               )
             : readStageOutputNumber(step.ranking_llm_submitted_orders),
         forcedExitSubmittedOrders:
-          key === "sell" && !usePersistedCounters
+          key === "sell"
             ? Math.max(
                 readStageOutputNumber(step.forced_exit_submitted_orders) ?? 0,
                 submittedSellSubpartCounts.forced,
@@ -3560,7 +3569,9 @@ function StageOneOutputDialog({
                             onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
                           />
                         </th>
-                        <th className="px-4 py-3">Amount to be invested</th>
+                        <th className="px-4 py-3">
+                          Trade amount formula Cash in Hand / (10 - Occupied Positions)
+                        </th>
                         <th className="px-4 py-3">Volume</th>
                         <th className="px-4 py-3">Liquidity</th>
                       </tr>
@@ -4389,17 +4400,35 @@ function PlannedOrderDetailDialog({
   );
 }
 
+function getDecisionDaysUntilClose(decision: BullpenAutoLiveDecision) {
+  if (decision.hours_remaining && decision.hours_remaining > 0) {
+    return decision.hours_remaining / 24;
+  }
+  if (decision.close_time) {
+    const closeMs = Date.parse(decision.close_time);
+    if (Number.isFinite(closeMs)) {
+      const days = (closeMs - Date.now()) / (24 * 60 * 60 * 1000);
+      if (days > 0) return days;
+    }
+  }
+  return null;
+}
+
 function getDecisionDaysLeft(decision: BullpenAutoLiveDecision) {
-  if (!decision.close_time) return "—";
-  const closeMs = Date.parse(decision.close_time);
-  if (!Number.isFinite(closeMs)) return "—";
-  const days = (closeMs - Date.now()) / (24 * 60 * 60 * 1000);
-  return days.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+  const days = getDecisionDaysUntilClose(decision);
+  return days === null
+    ? "—"
+    : days.toLocaleString("en-IN", { maximumFractionDigits: 1 });
 }
 
 function getDecisionReturnsPerDay(decision: BullpenAutoLiveDecision) {
-  if (!decision.hours_remaining || decision.hours_remaining <= 0) return null;
-  return (decision.edge_pp / decision.hours_remaining) * 24;
+  return getBullpenReturnsPerDayBreakdown({
+    yesOdds: decision.current_yes_odds ?? null,
+    noOdds: decision.current_no_odds ?? null,
+    llmYesOdds: decision.fair_yes_probability_pct ?? null,
+    llmNoOdds: decision.fair_no_probability_pct ?? null,
+    daysUntilClose: getDecisionDaysUntilClose(decision),
+  }).result;
 }
 
 function buildDecisionReturnsPerDayQuestion(
@@ -4411,10 +4440,7 @@ function buildDecisionReturnsPerDayQuestion(
     noOdds: decision.current_no_odds ?? null,
     llmYesOdds: decision.fair_yes_probability_pct ?? null,
     llmNoOdds: decision.fair_no_probability_pct ?? null,
-    daysUntilClose:
-      decision.hours_remaining && decision.hours_remaining > 0
-        ? decision.hours_remaining / 24
-        : null,
+    daysUntilClose: getDecisionDaysUntilClose(decision),
     returnsPerDay: getDecisionReturnsPerDay(decision),
   } as BullpenQuestionRow;
 }
@@ -7337,6 +7363,8 @@ function InvestMetricDetailsDialog({
 }) {
   const [transferQueueMetricInfoKind, setTransferQueueMetricInfoKind] =
     useState<Stage2TransferQueueMetricInfoKind | null>(null);
+  const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
+    useState<BullpenQuestionRow | null>(null);
   const metricDefinition = getInvestMetricDialogDefinition(state.kind);
   const rows = getInvestMetricRows(state.kind, state.decisions);
   const stage2TopTenHandoffRows = buildBullpenStage2TopTenHandoffRows({
@@ -7425,7 +7453,6 @@ function InvestMetricDetailsDialog({
   const filteredPendingRows = filteredUnsubmittedRows.filter(
     (decision) => decision.order_plan?.status === "planned",
   );
-  const hasPendingOrders = filteredPlannedCount > filteredSubmittedCount;
   const concreteBuyPlanCount = stage2TopTenHandoffRows.filter(
     (row) => !row.missingFromBuyPlan,
   ).length;
@@ -7567,13 +7594,6 @@ function InvestMetricDetailsDialog({
                 detail={runError}
                 detailClassName="text-rose-800"
               />
-            </div>
-          ) : null}
-
-          {hasPendingOrders ? (
-            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-950 dark:text-sky-50">
-              Stage 3 submits Bullpen orders one at a time, so multiple planned
-              orders can take a few minutes when Bullpen is slow or retrying.
             </div>
           ) : null}
 
@@ -7781,9 +7801,19 @@ function InvestMetricDetailsDialog({
                             )}
                           </td>
                           <td className="px-4 py-3 align-top tabular-nums text-slate-700">
-                            {formatReturnsPerDay(
-                              getDecisionReturnsPerDay(decision),
-                            )}
+                            <BullpenReturnsPerDayValueButton
+                              disabled={getDecisionReturnsPerDay(decision) === null}
+                              onOpen={() =>
+                                setReturnsPerDayQuestion(
+                                  buildDecisionReturnsPerDayQuestion(decision),
+                                )
+                              }
+                              ariaLabel={`Show Returns/day calculation for ${decision.market_title}`}
+                            >
+                              {formatReturnsPerDay(
+                                getDecisionReturnsPerDay(decision),
+                              )}
+                            </BullpenReturnsPerDayValueButton>
                           </td>
                           <td className="px-4 py-3 align-top text-slate-700">
                             {(() => {
@@ -7850,6 +7880,13 @@ function InvestMetricDetailsDialog({
         <Stage2TransferQueueMetricInfoDialog
           kind={transferQueueMetricInfoKind}
           onClose={() => setTransferQueueMetricInfoKind(null)}
+        />
+      ) : null}
+      {returnsPerDayQuestion ? (
+        <BullpenInvestmentMathDialog
+          focus="returnsPerDay"
+          question={returnsPerDayQuestion}
+          onClose={() => setReturnsPerDayQuestion(null)}
         />
       ) : null}
     </div>

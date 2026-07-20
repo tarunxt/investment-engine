@@ -41,7 +41,10 @@ async function runViewportCheck(browser, viewport) {
     assert.match(await mainSummary.textContent(), /Events Summary/);
     assert.match(await mainSummary.textContent(), /LLM Odds/);
     assert.match(await mainSummary.textContent(), /Returns\/day/);
-    assert.match(await mainSummary.textContent(), /Amount to be invested/);
+    assert.match(
+      await mainSummary.textContent(),
+      /Trade amount formula Cash in Hand \/ \(10 - Occupied Positions\)/,
+    );
 
     await mainSummary.screenshot({
       path: path.join(
@@ -59,7 +62,9 @@ async function runViewportCheck(browser, viewport) {
     const eventsSummary = page.getByTestId("stage-two-events-summary");
     const scrollContainer = eventsSummary.locator(".overflow-x-auto").first();
     const questionHeader = eventsSummary.getByText("Question", { exact: true });
-    const amountHeader = eventsSummary.getByText("Amount to be invested");
+    const amountHeader = eventsSummary.getByText(
+      "Trade amount formula Cash in Hand / (10 - Occupied Positions)",
+    );
 
     const dialogBounds = await dialog.boundingBox();
     assert.ok(dialogBounds, "Expected Stage 2 dialog bounds.");
