@@ -638,6 +638,13 @@ class BullpenAutoLiveOrderIntent(BaseModel):
     last_error_code: AutoLiveExecutorErrorCode | str | None = None
     last_error_message: str | None = None
     retryable: bool = False
+    task_id: str | None = None
+    queue: str | None = None
+    worker: str | None = None
+    last_dispatch_at: str | None = None
+    current_blockage: str | None = None
+    actionable_resolution: str | None = None
+    deployed_commit_sha: str | None = None
     attempt_count: int = Field(default=0, ge=0)
     max_attempts: int = Field(default=0, ge=0)
     next_attempt_at: str | None = None
@@ -697,6 +704,13 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     dry_run: bool = True
     detail: str
     retryable: bool = False
+    task_id: str | None = None
+    queue: str | None = None
+    worker: str | None = None
+    last_dispatch_at: str | None = None
+    current_blockage: str | None = None
+    actionable_resolution: str | None = None
+    deployed_commit_sha: str | None = None
     attempt_count: int = Field(default=0, ge=0)
     next_retry_at: str | None = None
     remote_order_id: str | None = None

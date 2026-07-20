@@ -2310,6 +2310,13 @@ export interface BullpenAutoLiveOrderIntent {
   last_error_code?: BullpenAutoLiveExecutorErrorCode | string | null;
   last_error_message?: string | null;
   retryable: boolean;
+  task_id?: string | null;
+  queue?: string | null;
+  worker?: string | null;
+  last_dispatch_at?: string | null;
+  current_blockage?: string | null;
+  actionable_resolution?: string | null;
+  deployed_commit_sha?: string | null;
   attempt_count: number;
   max_attempts: number;
   next_attempt_at?: string | null;
