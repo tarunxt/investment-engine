@@ -2,6 +2,12 @@ name: Inspect Production Disk
 
 on:
   workflow_dispatch:
+    inputs:
+      confirm_cleanup:
+        description: Type TRUNCATE_ROTATED_SYSLOG to clear the identified rotated syslog file.
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +38,18 @@ jobs:
 
             echo "==> Filesystem"
             df -h /
+
+            if [[ "${{ inputs.confirm_cleanup }}" == "TRUNCATE_ROTATED_SYSLOG" ]]; then
+              echo "==> Truncating identified rotated syslog file"
+              sudo test -f /var/log/syslog.1
+              sudo stat -c 'before_bytes=%s path=%n' /var/log/syslog.1
+              sudo truncate -s 0 /var/log/syslog.1
+              sudo stat -c 'after_bytes=%s path=%n' /var/log/syslog.1
+              sync
+              df -h /
+            else
+              echo "==> Read-only inspection mode"
+            fi
 
             echo "==> Top-level disk usage"
             sudo du -xhd1 / 2>/dev/null | sort -h | tail -30
