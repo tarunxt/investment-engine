@@ -382,11 +382,91 @@ def _formula_hash(inputs_json: dict[str, Any], outputs_json: dict[str, Any]) -> 
 def _build_formula_records(
     *,
     snapshot_id: int,
+    stage1_outputs: dict[str, Any],
     candidate_reviews: list[dict[str, Any]],
     decisions: list[dict[str, Any]],
     run_order_funnel: dict[str, Any],
 ) -> list[BullpenRunAuditFormulaRecord]:
     records: list[BullpenRunAuditFormulaRecord] = []
+    active_positions_found = stage1_outputs.get("active_positions_found")
+    if isinstance(active_positions_found, list):
+        cash_in_hand = stage1_outputs.get("console_trade_cash_in_hand_usd")
+        max_positions = stage1_outputs.get("console_trade_max_positions")
+        normalized_cash = (
+            float(cash_in_hand)
+            if isinstance(cash_in_hand, (int, float)) and not isinstance(cash_in_hand, bool)
+            else None
+        )
+        normalized_max_positions = (
+            max(0, int(max_positions))
+            if isinstance(max_positions, (int, float)) and not isinstance(max_positions, bool)
+            else 10
+        )
+        verified_occupied_positions = len(active_positions_found)
+        recomputed_available_slots = max(
+            0, normalized_max_positions - verified_occupied_positions
+        )
+        recomputed_trade_amount = (
+            round(normalized_cash / recomputed_available_slots, 2)
+            if normalized_cash is not None
+            and normalized_cash > 0
+            and recomputed_available_slots > 0
+            else 0.0
+        )
+        inputs_json = {
+            "cash_in_hand_usd": normalized_cash,
+            "verified_active_positions": verified_occupied_positions,
+            "max_positions": normalized_max_positions,
+        }
+        recorded_value_json = {
+            "occupied_positions": stage1_outputs.get(
+                "console_trade_occupied_positions",
+                stage1_outputs.get("console_trade_active_positions"),
+            ),
+            "available_slots": stage1_outputs.get("console_trade_available_slots"),
+            "trade_amount_usd": stage1_outputs.get("console_trade_amount_usd"),
+        }
+        recomputed_value_json = {
+            "occupied_positions": verified_occupied_positions,
+            "available_slots": recomputed_available_slots,
+            "trade_amount_usd": recomputed_trade_amount,
+        }
+        difference_json = {
+            key: (
+                round(float(recorded_value_json[key]) - float(recomputed_value_json[key]), 6)
+                if isinstance(recorded_value_json[key], (int, float))
+                and not isinstance(recorded_value_json[key], bool)
+                else None
+            )
+            for key in recomputed_value_json
+        }
+        validation_status = (
+            "match"
+            if all(delta in {None, 0, 0.0} for delta in difference_json.values())
+            else "mismatch"
+        )
+        records.append(
+            BullpenRunAuditFormulaRecord(
+                snapshot_id=snapshot_id,
+                logical_stage_number=1,
+                scope_type="run",
+                scope_id=None,
+                algorithm_key="console_trade_amount_per_opportunity",
+                human_name="Cash per available Bullpen portfolio slot",
+                algorithm_version="v1",
+                source_module="app.domains.polymarket_auto_live.engine",
+                source_function="build_console_trade_amount_breakdown",
+                inputs_json=inputs_json,
+                intermediates_json={"available_slots": recomputed_available_slots},
+                output_json=recomputed_value_json,
+                recorded_value_json=recorded_value_json,
+                recomputed_value_json=recomputed_value_json,
+                difference_json=difference_json,
+                units="usd_and_count",
+                validation_status=validation_status,
+                formula_hash=_formula_hash(inputs_json, recomputed_value_json),
+            )
+        )
     for review in candidate_reviews:
         market_id = str(review.get("market_id") or review.get("position_key") or "")
         llm_outputs = review.get("llm_outputs") if isinstance(review.get("llm_outputs"), list) else []
@@ -580,8 +660,29 @@ def _build_bundle(
     decision_stage_results = _flatten_decision_stage_results(decisions)
     candidate_reviews = _list_stage2_candidate_reviews(run_payload)
     order_intents = run_orders_payload.get("orders") if isinstance(run_orders_payload.get("orders"), list) else []
+    stage1_outputs = _stage_outputs_for_workflow(run_payload, "scan")
     stage2_outputs = _stage_outputs_for_workflow(run_payload, "llm")
     stage3_outputs = _stage_outputs_for_workflow(run_payload, "invest")
+    stage1_active_positions_found = stage1_outputs.get("active_positions_found")
+    verified_portfolio_snapshot = (
+        {
+            "source": "stage1_active_positions_found",
+            "active_positions_found": stage1_active_positions_found,
+            "active_position_count": len(stage1_active_positions_found),
+            "recorded_occupied_positions": stage1_outputs.get(
+                "console_trade_occupied_positions",
+                stage1_outputs.get("console_trade_active_positions"),
+            ),
+            "cash_in_hand_usd": stage1_outputs.get(
+                "console_trade_cash_in_hand_usd"
+            ),
+            "available_slots": stage1_outputs.get("console_trade_available_slots"),
+            "max_positions": stage1_outputs.get("console_trade_max_positions"),
+            "trade_amount_usd": stage1_outputs.get("console_trade_amount_usd"),
+        }
+        if isinstance(stage1_active_positions_found, list)
+        else {}
+    )
     stage2_to_stage3_handoff_market_ids = _stage2_to_stage3_handoff_market_ids(run_payload)
     audit_metadata = (
         run_payload.get("audit_metadata")
@@ -676,6 +777,7 @@ def _build_bundle(
                 "scanned_candidates": diagnostics.get("scanned_candidates"),
                 "candidate_rows_before_llm": diagnostics.get("candidate_rows_before_llm"),
             },
+            "verified_portfolio_snapshot": verified_portfolio_snapshot,
             "active_positions": [
                 review
                 for review in candidate_reviews
@@ -952,6 +1054,7 @@ def materialize_run_audit_snapshot_sync(
         session.add(event_record)
     formula_records = _build_formula_records(
         snapshot_id=current_snapshot.id,
+        stage1_outputs=_stage_outputs_for_workflow(run_payload, "scan"),
         candidate_reviews=_list_stage2_candidate_reviews(run_payload),
         decisions=decisions,
         run_order_funnel=(run_orders_payload.get("order_funnel") or {}),

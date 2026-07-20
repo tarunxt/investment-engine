@@ -540,6 +540,10 @@ function renderSectionData(section: string, data: unknown) {
     const candidateReviews = asArray(stage.candidate_reviews);
     const activePositions = asArray(stage.active_positions);
     const runStages = asArray(stage.run_stages);
+    const verifiedPortfolio = asRecord(stage.verified_portfolio_snapshot);
+    const verifiedPositionRows = asArray(
+      verifiedPortfolio?.active_positions_found,
+    );
     return (
       <div className="space-y-4">
         <SectionShell title="Stage 1 Summary">
@@ -549,6 +553,23 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Raw Candidate Inputs", value: String(candidateInputs.length) },
               { label: "Candidate Reviews", value: String(candidateReviews.length) },
               { label: "Active Positions", value: String(activePositions.length) },
+              {
+                label: "Verified Portfolio Positions",
+                value: verifiedPortfolio
+                  ? String(verifiedPositionRows.length)
+                  : "—",
+              },
+              {
+                label: "Verified Available Slots",
+                value: String(verifiedPortfolio?.available_slots ?? "—"),
+              },
+              {
+                label: "Verified Trade Amount",
+                value:
+                  typeof verifiedPortfolio?.trade_amount_usd === "number"
+                    ? formatCurrency(verifiedPortfolio.trade_amount_usd)
+                    : "—",
+              },
               { label: "Scan Source", value: stringValue(asRecord(stage.scan_context)?.scan_source_label) },
               { label: "Scanned Candidates", value: String(asRecord(stage.scan_context)?.scanned_candidates ?? "—") },
               { label: "Rows Before LLM", value: String(asRecord(stage.scan_context)?.candidate_rows_before_llm ?? "—") },
@@ -557,6 +578,11 @@ function renderSectionData(section: string, data: unknown) {
           />
         </SectionShell>
         <JsonPanel title="Scan Context" value={stage.scan_context} defaultOpen />
+        <JsonPanel
+          title="Verified Stage 1 Portfolio Snapshot"
+          value={verifiedPortfolio}
+          defaultOpen
+        />
         <JsonPanel title="Run Stage Records" value={runStages} />
         <JsonPanel title="Candidate Inputs" value={candidateInputs} />
         <JsonPanel title="Candidate Reviews" value={candidateReviews} />

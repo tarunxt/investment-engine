@@ -179,6 +179,22 @@ preserve those partitions without re-deriving them on read:
 rows are diagnostic-only for new runs after Sunday, July 19, 2026. Historical
 completed runs may still display their persisted legacy payloads unchanged.
 
+The Bullpen portfolio panel and its trade-amount preview reconcile to the newest
+completed Stage 1 `active_positions_found` snapshot. This is intentional: the
+page-level portfolio refresh is a separate cache/read path and may temporarily
+return zero or stale tracked positions even though the worker has already
+verified live economic exposure. When a completed Stage 1 snapshot exists, its
+serialized active rows are authoritative for the displayed active count,
+investment/current value, uPnL, and occupied slots. Cash in hand still comes
+from the latest usable balance. The preview is then `cash in hand / (10 -
+verified active positions)`, matching the worker formula.
+
+New audit bundles expose this evidence as
+`stage_1.verified_portfolio_snapshot`; legacy frozen snapshots without that
+optional projection remain valid. Deterministic checks compare the serialized
+row count with the recorded occupied count, available slots, and trade amount
+so a divergent zero-position flow is visible as a blocking audit finding.
+
 The Stage 1 frozen wallet snapshot now also carries cache-safety provenance:
 
 * Bullpen credential artifact inode, `mtime_ns`, and file size from
@@ -310,8 +326,9 @@ Run-level guardrails plus decision-specific guardrail payloads.
 
 ### Formulas
 
-Immutable ledger rows for Stage 2 consensus statistics, returns-per-day metrics, Stage
-3 ranking data, and order funnel aggregates.
+Immutable ledger rows for Stage 1 portfolio-slot sizing, Stage 2 consensus
+statistics, returns-per-day metrics, Stage 3 ranking data, and order funnel
+aggregates.
 
 ### Raw
 
@@ -325,6 +342,7 @@ Current required keys:
 
 * `stage2_consensus_statistics`
 * `candidate_returns_per_day`
+* `console_trade_amount_per_opportunity`
 * `llm_returns_per_day`
 * `position_returns_per_day`
 * `stage3_rank_and_selection`
@@ -342,6 +360,8 @@ Current deterministic checks include:
 * missing run start or invalid duration
 * missing code provenance
 * explicit audit capture gaps
+* Stage 1 verified row count contradicting its recorded occupied count
+* Stage 1 available slots or trade amount contradicting verified active rows
 * Stage 2 candidate without LLM outputs
 * invalid YES/NO sum
 * rationale-versus-odds mismatch

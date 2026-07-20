@@ -3,9 +3,11 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 1
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-economic-slots"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage1-verified-portfolio"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
-BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = "2026-07-20-stage3-economic-slots"
+BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
+    "2026-07-20-stage1-verified-portfolio"
+)
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
 SNAPSHOT_SOURCE_RECONSTRUCTED: Final[str] = "reconstructed"
@@ -55,6 +57,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "candidate_returns_per_day",
         "label": "Candidate returns per day",
+    },
+    {
+        "algorithm_key": "console_trade_amount_per_opportunity",
+        "stage": "stage-1",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "build_console_trade_amount_breakdown",
+        "label": "Cash per available Bullpen portfolio slot",
     },
     {
         "algorithm_key": "llm_returns_per_day",

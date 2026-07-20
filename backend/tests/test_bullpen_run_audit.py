@@ -16,7 +16,7 @@ from app.domains.bullpen_run_audit.prompt_builder import (
     plan_feedback_chunks,
 )
 from app.domains.bullpen_run_audit.router import router as run_audit_router
-from app.domains.bullpen_run_audit.service import _build_bundle
+from app.domains.bullpen_run_audit.service import _build_bundle, _build_formula_records
 from app.domains.bullpen_run_audit.sanitizer import sanitize_secret_value
 from app.domains.bullpen_run_audit.schemas import BullpenRunAuditFeedbackSummary
 from app.domains.bullpen_run_audit.validators import build_deterministic_findings
@@ -402,11 +402,126 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert keys >= {
         "stage2_consensus_statistics",
         "candidate_returns_per_day",
+        "console_trade_amount_per_opportunity",
         "llm_returns_per_day",
         "position_returns_per_day",
         "stage3_rank_and_selection",
         "order_funnel_aggregation",
     }
+
+
+def test_stage1_verified_portfolio_capture_and_formula_use_serialized_rows():
+    import app.infrastructure.database.all_models  # noqa: F401
+
+    active_positions = [
+        {
+            "position_key": f"market-{index}::NO",
+            "market_id": f"market-{index}",
+            "market_title": f"Market {index}",
+            "side": "NO",
+            "classification": "active",
+        }
+        for index in range(6)
+    ]
+    outputs = {
+        "workflow_stage_key": "scan",
+        "phase_status": "completed",
+        "active_positions_found": active_positions,
+        "console_trade_cash_in_hand_usd": 1.85,
+        "console_trade_occupied_positions": 6,
+        "console_trade_active_positions": 6,
+        "console_trade_available_slots": 4,
+        "console_trade_max_positions": 10,
+        "console_trade_amount_usd": 0.46,
+    }
+    run_payload = {
+        "id": "run-verified-portfolio",
+        "status": "completed",
+        "triggered_by": "scheduled",
+        "started_at": "2026-07-20T13:20:00+00:00",
+        "completed_at": "2026-07-20T13:25:00+00:00",
+        "summary": "Stage 1 verified six active positions.",
+        "stage_results": [
+            {
+                "stage_number": 1,
+                "status": "pass",
+                "reason": "Stage 1 finished.",
+                "outputs": outputs,
+            }
+        ],
+        "audit_metadata": {
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "settings_snapshot": {},
+        },
+        "diagnostics": {},
+    }
+
+    bundle = _build_bundle(
+        run_payload=run_payload,
+        decisions=[],
+        run_orders_payload={},
+        source_kind="native",
+        lifecycle_status="frozen",
+    )
+    verified = bundle["stage_1"]["verified_portfolio_snapshot"]
+    assert verified["active_position_count"] == 6
+    assert verified["available_slots"] == 4
+    assert verified["trade_amount_usd"] == 0.46
+
+    records = _build_formula_records(
+        snapshot_id=1,
+        stage1_outputs=outputs,
+        candidate_reviews=[],
+        decisions=[],
+        run_order_funnel={},
+    )
+    sizing_record = next(
+        record
+        for record in records
+        if record.algorithm_key == "console_trade_amount_per_opportunity"
+    )
+    assert sizing_record.validation_status == "match"
+    assert sizing_record.recomputed_value_json == {
+        "occupied_positions": 6,
+        "available_slots": 4,
+        "trade_amount_usd": 0.46,
+    }
+
+
+def test_stage1_verified_portfolio_validator_rejects_zero_count_and_bad_sizing():
+    bundle = {
+        "metadata": {"run_id": "run-bad-portfolio"},
+        "overview": {
+            "started_at": "2026-07-20T13:20:00+00:00",
+            "completed_at": "2026-07-20T13:25:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_1": {
+            "verified_portfolio_snapshot": {
+                "source": "stage1_active_positions_found",
+                "active_positions_found": [
+                    {"market_id": f"market-{index}"} for index in range(6)
+                ],
+                "recorded_occupied_positions": 0,
+                "cash_in_hand_usd": 1.85,
+                "available_slots": 10,
+                "max_positions": 10,
+                "trade_amount_usd": 0.19,
+            }
+        },
+        "stage_2": {"candidate_reviews": []},
+        "stage_3": {"decisions": [], "order_intents": []},
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+    codes = {finding["code"] for finding in findings}
+
+    assert "STAGE1_VERIFIED_POSITION_COUNT_MISMATCH" in codes
+    assert "STAGE1_VERIFIED_AVAILABLE_SLOTS_MISMATCH" in codes
+    assert "STAGE1_VERIFIED_TRADE_AMOUNT_MISMATCH" in codes
 
 
 @pytest.mark.anyio
