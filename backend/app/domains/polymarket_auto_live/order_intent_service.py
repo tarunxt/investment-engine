@@ -3338,12 +3338,15 @@ def retry_failed_exits_and_continue_buys_sync(
                 intent.retryable = True
                 intent.terminal_at = None
                 intent.next_attempt_at = utc_now()
+                intent.last_error_code = None
                 intent.last_error_message = None
                 intent.execution_metadata_json = {
                     **dict(intent.execution_metadata_json or {}),
                     "stage3_status": "EXIT_NOT_SUBMITTED",
                     "operator_resume_action": "Retry failed exits and continue buys",
                     "operator_resume_at": resumed_at,
+                    "recovery_required": False,
+                    "current_blockage": None,
                 }
             elif intent.action == "buy" and intent.status in {
                 "READY",
@@ -3355,11 +3358,15 @@ def retry_failed_exits_and_continue_buys_sync(
                 intent.status = "READY"
                 intent.retryable = True
                 intent.next_attempt_at = utc_now()
+                intent.last_error_code = None
+                intent.last_error_message = None
                 intent.execution_metadata_json = {
                     **dict(intent.execution_metadata_json or {}),
                     "stage3_status": "BUY_READY",
                     "operator_resume_action": "Retry failed exits and continue buys",
                     "operator_resume_at": resumed_at,
+                    "recovery_required": False,
+                    "current_blockage": None,
                 }
 
         recovery = run.audit_metadata.get("stage3_recovery")

@@ -10,7 +10,10 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 import pytest
 
-from app.domains.polymarket_auto_live.bot import BullpenAutoLiveBot
+from app.domains.polymarket_auto_live.bot import (
+    BullpenAutoLiveBot,
+    _auth_recovery_operator_resume_active,
+)
 from app.domains.polymarket_auto_live.run_recovery import (
     AutoLiveTaskRuntimeSnapshot,
     inspect_auto_live_run_task_sync,
@@ -637,6 +640,25 @@ def test_healthy_active_auth_marks_historical_run_error_stale():
         "recovered_at": "2026-07-20T12:06:00+00:00",
     }
     assert "does not block a new run" in recovered.summary
+
+
+def test_operator_resumed_auth_recovery_is_not_treated_as_historical_block():
+    run = BullpenAutoLiveRun(
+        id="run-auth-operator-resume",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-20T12:00:00+00:00",
+        summary="Earlier session expired before the explicit retry.",
+        audit_metadata={
+            "auth_recovery": {
+                "historical_error_stale": True,
+                "operator_resume_at": "2026-07-20T12:06:00+00:00",
+            }
+        },
+    )
+
+    assert _auth_recovery_operator_resume_active(run) is True
 
 
 @pytest.mark.anyio

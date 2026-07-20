@@ -494,7 +494,9 @@ writes re-read this recovery state immediately before submission. The explicit
 same-run retry records `auth_recovery.operator_resume_at`; only that audited
 operator transition clears the stale-auth recovery block, while all current
 doctor, balance, capacity, quote, sizing, and duplicate-submission checks remain
-active.
+active. Active-run discovery honors the same marker and must not close an
+operator-resumed run again merely because its immutable history still contains
+the original auth error.
 
 Stage 3 `orders_planned`, `orders_processed`, `orders_submitted`, both execution-step
 tiles, and the run-level order funnel are materialized from durable order-intent and

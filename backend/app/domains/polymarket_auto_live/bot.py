@@ -74,6 +74,13 @@ CONSOLE_AUTO_LIVE_STRATEGY_SUMMARY = (
     "qualified ranked opportunities on their stronger LLM side, and exits active "
     "positions that fall outside that top 10."
 )
+
+
+def _auth_recovery_operator_resume_active(run: BullpenAutoLiveRun) -> bool:
+    recovery = run.audit_metadata.get("auth_recovery")
+    return isinstance(recovery, dict) and bool(recovery.get("operator_resume_at"))
+
+
 CONSOLE_AUTO_LIVE_RISK_SUMMARY = (
     "The console profile still depends on Bullpen live session health, doctor "
     "checks, balance availability, and limit-order guardrails before any live "
@@ -270,7 +277,9 @@ class BullpenAutoLiveBot:
         running_run = record_to_run(running_record)
         recovered_run: BullpenAutoLiveRun | None = None
         recovered_auth_error = False
-        if run_contains_historical_auth_error(running_run):
+        if run_contains_historical_auth_error(
+            running_run
+        ) and not _auth_recovery_operator_resume_active(running_run):
             from app.domains.polymarket.runtime_broker import (
                 get_bullpen_runtime_broker,
             )
