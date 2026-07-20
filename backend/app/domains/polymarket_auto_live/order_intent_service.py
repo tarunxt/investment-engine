@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import hashlib
 import json
 import os
 import traceback
@@ -100,6 +102,10 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.task_registry import (
     get_registered_auto_live_run_task_id_sync,
 )
+
+
+STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT = "auto-live:v2"
+STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH = 128
 
 logger = get_logger("app.domains.polymarket_auto_live.order_intent_service")
 
@@ -393,6 +399,26 @@ def _retry_counts(intents: Sequence[BullpenAutoLiveOrderIntent]) -> dict[str, in
 
 def _base_order_plan_for(decision: BullpenAutoLiveDecision) -> BullpenAutoLiveOrderPlan | None:
     return decision.order_plan
+
+
+def build_stage3_order_intent_idempotency_key(
+    *,
+    run_id: str,
+    decision_id: str,
+    order_plan_id: str,
+) -> str:
+    """Build a stable Stage 3 identity that fits the persisted 128-char column."""
+
+    identity = json.dumps(
+        [str(run_id), str(decision_id), str(order_plan_id)],
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256(identity).hexdigest()
+    key = f"{STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT}:{digest}"
+    if len(key) > STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH:
+        raise ValueError("Stage 3 order-intent idempotency key exceeds storage limit")
+    return key
 
 
 def _stage3_rpc_policy(run: BullpenAutoLiveRun) -> dict[str, float | int]:
@@ -1127,7 +1153,11 @@ def create_or_refresh_run_order_intents_sync(
                 ),
                 next_attempt_at=utc_now() if not persisted_submission else None,
                 priority=_intent_priority(order_plan.action),
-                idempotency_key=f"auto-live:{run.id}:{decision.id}:{order_plan.id}",
+                idempotency_key=build_stage3_order_intent_idempotency_key(
+                    run_id=run.id,
+                    decision_id=decision.id,
+                    order_plan_id=order_plan.id,
+                ),
                 reserved_cash_usd=0,
                 expected_release_usd=_expected_release_usd(order_plan),
                 confirmed_release_usd=0,
@@ -1139,6 +1169,7 @@ def create_or_refresh_run_order_intents_sync(
                     "source": "stage3_planning",
                 },
                 execution_metadata_json={
+                    "idempotency_key_format": STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
                     "reservation_state": None,
                     "run_status": run.status,
                     "stage3_status": (

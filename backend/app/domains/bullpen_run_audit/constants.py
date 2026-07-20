@@ -3,12 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
-    "2026-07-20-stage1-verified-portfolio-stage3-recovery-v2"
-)
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-idempotency-v3"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage1-verified-portfolio-stage3-recovery-v2"
+    "2026-07-20-stage3-idempotency-v3"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -107,6 +105,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.order_intent_service",
         "source_function": "summarize_run_orders_sync",
         "label": "Order funnel aggregation",
+    },
+    {
+        "algorithm_key": "stage3_order_intent_idempotency",
+        "stage": "stage-3",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "build_stage3_order_intent_idempotency_key",
+        "label": "Bounded Stage 3 order-intent idempotency identity",
     },
     {
         "algorithm_key": "stage3_persisted_counter_reconciliation",

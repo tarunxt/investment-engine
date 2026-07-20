@@ -7,8 +7,11 @@ from app.domains.polymarket_auto_live.order_intents import (
     derive_run_status_from_intents,
 )
 from app.domains.polymarket_auto_live.order_intent_service import (
+    STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
+    STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
     _assert_intent_has_no_persisted_submission_reference,
     _persisted_stage3_counts,
+    build_stage3_order_intent_idempotency_key,
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveOrderIntent,
@@ -66,6 +69,30 @@ def _intent(
         reservations=[],
         last_error_code=last_error_code,
     )
+
+
+def test_stage3_order_intent_idempotency_key_is_bounded_and_deterministic():
+    identity = {
+        "run_id": "110e5c01-9a27-45de-b91d-cabc563a1aec",
+        "decision_id": f"decision-exit-{'d' * 96}",
+        "order_plan_id": f"order-exit-{'o' * 96}",
+    }
+    legacy_key = (
+        f"auto-live:{identity['run_id']}:{identity['decision_id']}:"
+        f"{identity['order_plan_id']}"
+    )
+
+    first = build_stage3_order_intent_idempotency_key(**identity)
+    second = build_stage3_order_intent_idempotency_key(**identity)
+    changed = build_stage3_order_intent_idempotency_key(
+        **{**identity, "order_plan_id": f"order-exit-{'x' * 96}"}
+    )
+
+    assert len(legacy_key) > STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH
+    assert first == second
+    assert first != changed
+    assert first.startswith(f"{STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT}:")
+    assert len(first) <= STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH
 
 
 def test_classify_executor_error_marks_write_timeout_as_ambiguous_submission():

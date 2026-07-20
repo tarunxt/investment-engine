@@ -286,6 +286,7 @@ def test_build_deterministic_findings_flags_restart_and_duplicate_order_risks():
                 {
                     "id": "intent-1",
                     "status": "READY",
+                    "idempotency_key": "x" * 129,
                     "remote_order_id": "remote-order-1",
                     "attempts": [],
                 }
@@ -301,6 +302,7 @@ def test_build_deterministic_findings_flags_restart_and_duplicate_order_risks():
     assert "STAGE3_RECOVERY_RUN_LEFT_IN_PROGRESS" in codes
     assert "STAGE3_RECOVERY_AUTO_RESUBMISSION_NOT_DISABLED" in codes
     assert "STAGE3_RETRYABLE_ORDER_HAS_SUBMISSION_REFERENCE" in codes
+    assert "ORDER_INTENT_IDEMPOTENCY_KEY_EXCEEDS_STORAGE_LIMIT" in codes
 
 
 def test_build_bundle_captures_stage2_universe_status_and_blocker_details():

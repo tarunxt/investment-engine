@@ -288,6 +288,14 @@ partial exit continues to occupy its economic slot. A confirmed exit wakes only
 its one-for-one replacement intent after a fresh live-cli wallet and cash
 refresh.
 
+New Stage 3 intents use the `auto-live:v2` idempotency-key format: a SHA-256
+digest over the exact run, decision, and order-plan identity with a stable prefix.
+This preserves deterministic retry identity while keeping the stored value below
+the existing 128-character database limit. The execution metadata records the
+format, and the algorithm registry plus deterministic validator audit the key and
+block any oversized value. Existing frozen snapshots and already-persisted legacy
+keys remain valid and are not rewritten.
+
 Decision rows expose the explicit execution states `EXIT_RPC_RETRYING`,
 `EXIT_NOT_SUBMITTED`, `EXIT_SUBMITTED`, `EXIT_OPEN_UNFILLED`,
 `EXIT_PARTIALLY_FILLED`, `EXIT_FAILED_PERMANENTLY`,

@@ -548,6 +548,7 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     statuses = Counter()
     submitted_without_attempt = 0
     orphan_intents = 0
+    oversized_idempotency_keys: list[tuple[int, int]] = []
     for index, order in enumerate(orders):
         if not isinstance(order, dict):
             continue
@@ -559,6 +560,9 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         attempts = order.get("attempts") if isinstance(order.get("attempts"), list) else []
         if status in {"SUBMITTED", "CONFIRMING", "CONFIRMED", "FILLED"} and not attempts:
             submitted_without_attempt += 1
+        idempotency_key = order.get("idempotency_key")
+        if isinstance(idempotency_key, str) and len(idempotency_key) > 128:
+            oversized_idempotency_keys.append((index, len(idempotency_key)))
 
     if orphan_intents > 0:
         findings.append(
@@ -587,6 +591,26 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                 observed_value=str(submitted_without_attempt),
                 expected_value="0",
                 evidence_pointers=["/stage_3/order_intents"],
+            )
+        )
+
+    if oversized_idempotency_keys:
+        first_index, first_length = oversized_idempotency_keys[0]
+        findings.append(
+            _finding(
+                code="ORDER_INTENT_IDEMPOTENCY_KEY_EXCEEDS_STORAGE_LIMIT",
+                severity="high",
+                stage="stage-3",
+                category="execution-idempotency",
+                title="Order-intent idempotency key exceeds its storage limit",
+                explanation="A Stage 3 order intent cannot be persisted safely because its deterministic identity exceeds the 128-character database field.",
+                observed_value=f"{len(oversized_idempotency_keys)} key(s); first length {first_length}",
+                expected_value="<= 128 characters",
+                blocking=True,
+                evidence_pointers=[
+                    f"/stage_3/order_intents/{first_index}/idempotency_key"
+                ],
+                suggested_remediation="Regenerate the identity with the bounded deterministic Stage 3 idempotency-key helper.",
             )
         )
 
