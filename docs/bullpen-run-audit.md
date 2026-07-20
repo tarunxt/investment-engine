@@ -384,6 +384,7 @@ Current required keys:
 * `stage3_bullpen_response_normalization`
 * `stage3_verified_remote_absence_retry`
 * `stage3_reconciliation_generation_guard`
+* `stage3_terminal_resume_preservation`
 
 Stage 3 response normalization recursively preserves Bullpen order and transaction
 references and treats a successful nested `result.status=matched` buy response as a
@@ -403,6 +404,12 @@ intent only while it is still in a pending-confirmation status and its generatio
 matches the snapshot that was remotely checked. Queued stale reconciliation tasks
 return without network work for ready/terminal intents and cannot overwrite a newer
 operator retry transition.
+
+Run-level operator resume preserves terminal `CONFIRMED` and `FILLED` intents even
+when they retain their required remote submission references. Only nonterminal
+intents with persisted order, transaction, or submission evidence are moved into
+reconciliation, preventing a completed exchange write from regressing to
+`CONFIRMING` while retaining backward-compatible frozen snapshots.
 
 If Bullpen logic adds or replaces critical formulas, the registry and tests must be
 updated in the same change.

@@ -17,6 +17,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     _assert_intent_retry_allowed,
     _auth_recovery_allows_operator_resume,
     _extract_remote_refs,
+    _intent_requires_operator_resume_reconciliation,
     _matched_buy_submission_fill,
     _persisted_stage3_counts,
     _remaining_position_is_economic_dust,
@@ -358,6 +359,16 @@ def test_verified_remote_absence_retry_still_rejects_persisted_reference():
 
     with pytest.raises(ValueError, match="reconciled instead of retried"):
         _assert_intent_retry_allowed(intent, remote_absence_verified=True)
+
+
+def test_operator_resume_preserves_terminal_success_with_persisted_reference():
+    filled = _intent(intent_id="filled", status="FILLED").model_copy(
+        update={"remote_order_id": "0xorder"}
+    )
+    confirming = filled.model_copy(update={"status": "CONFIRMING"})
+
+    assert not _intent_requires_operator_resume_reconciliation(filled)
+    assert _intent_requires_operator_resume_reconciliation(confirming)
 
 
 def test_reconciliation_snapshot_must_match_pending_intent_generation():

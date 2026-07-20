@@ -538,6 +538,16 @@ def _intent_has_persisted_submission_reference(intent: object) -> bool:
     )
 
 
+def _intent_requires_operator_resume_reconciliation(intent: object) -> bool:
+    """Reconcile persisted writes unless the intent already succeeded terminally."""
+
+    status = str(getattr(intent, "status", "") or "")
+    return (
+        status not in INTENT_TERMINAL_SUCCESS_STATUSES
+        and _intent_has_persisted_submission_reference(intent)
+    )
+
+
 def _assert_intent_has_no_persisted_submission_reference(intent: object) -> None:
     if not _intent_has_persisted_submission_reference(intent):
         return
@@ -3581,7 +3591,7 @@ def retry_failed_exits_and_continue_buys_sync(
 
         resumed_at = utc_now_iso()
         for intent in existing:
-            if _intent_has_persisted_submission_reference(intent):
+            if _intent_requires_operator_resume_reconciliation(intent):
                 intent.status = "CONFIRMING"
                 intent.retryable = True
                 intent.next_attempt_at = utc_now()

@@ -533,6 +533,7 @@ def test_algorithm_registry_contains_required_audit_keys():
         "stage3_bullpen_response_normalization",
         "stage3_verified_remote_absence_retry",
         "stage3_reconciliation_generation_guard",
+        "stage3_terminal_resume_preservation",
     }
 
 
