@@ -751,6 +751,58 @@ async def test_poll_for_positions_snapshot_rejects_stale_snapshot_for_force_fres
 
 
 @pytest.mark.anyio
+async def test_cli_timeout_does_not_wait_forever_for_descendant_pipes(monkeypatch):
+    broker = _build_broker(monkeypatch)
+
+    class HangingProcess:
+        pid = 987654
+        stdout = None
+        stderr = None
+
+        def __init__(self):
+            self.killed = False
+
+        async def communicate(self):
+            await asyncio.Event().wait()
+
+        async def wait(self):
+            return -9
+
+        def kill(self):
+            self.killed = True
+
+    process = HangingProcess()
+
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr(
+        runtime_broker_module.asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        runtime_broker_module.os,
+        "killpg",
+        lambda *_args: (_ for _ in ()).throw(ProcessLookupError()),
+    )
+
+    with pytest.raises(BullpenRuntimeCommandError, match="timed out"):
+        await asyncio.wait_for(
+            broker._execute_process(
+                ["polymarket", "discover"],
+                timeout_seconds=0.01,
+                command_category="discover",
+                is_write=False,
+                requires_auth=True,
+            ),
+            timeout=1,
+        )
+
+    assert process.killed is True
+
+
+@pytest.mark.anyio
 async def test_passive_ui_poll_waits_for_stage1_refresh_without_starting_second_cli(
     monkeypatch,
 ):

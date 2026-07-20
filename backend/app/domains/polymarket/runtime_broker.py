@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import pwd
+import signal
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,7 @@ _CLI_DEFAULT_TIMEOUT_SECONDS = 30
 _AUTH_REFRESH_TIMEOUT_SECONDS = 20
 _POLL_INTERVAL_SECONDS = 0.1
 _MAX_BUFFER_BYTES = 10 * 1024 * 1024
+_PROCESS_CLEANUP_TIMEOUT_SECONDS = 2
 _REDIS_PREFIX = "bullpen:runtime"
 _ACTIVE_AUTH_RESULT_KEY = f"{_REDIS_PREFIX}:auth:latest-active"
 _AUTHENTICATED_CLI_LOCK_KEY = f"{_REDIS_PREFIX}:authenticated-cli"
@@ -1886,6 +1888,10 @@ class BullpenRuntimeBroker:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 limit=_MAX_BUFFER_BYTES,
+                # Bullpen may spawn a helper process.  Put the command in its
+                # own process group so a timeout cannot leave a descendant
+                # holding the stdout/stderr pipes open forever.
+                start_new_session=os.name == "posix",
             )
         except FileNotFoundError as exc:
             diagnostics.error_classification = "missing_runtime"
@@ -1906,8 +1912,29 @@ class BullpenRuntimeBroker:
                 process.communicate(), timeout=timeout_seconds
             )
         except asyncio.TimeoutError as exc:
-            process.kill()
-            await process.communicate()
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    process.kill()
+            else:
+                process.kill()
+            try:
+                await asyncio.wait_for(
+                    process.wait(),
+                    timeout=_PROCESS_CLEANUP_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Bullpen command process did not exit during timeout cleanup "
+                    "(category=%s pid=%s).",
+                    command_category,
+                    process.pid,
+                )
+            for stream in (process.stdout, process.stderr):
+                transport = getattr(stream, "_transport", None)
+                if transport is not None:
+                    transport.close()
             diagnostics.error_classification = "timeout"
             diagnostics.lock_hold_ms = (monotonic() - started_at) * 1000
             self._record_failure(

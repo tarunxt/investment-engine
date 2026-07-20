@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -72,6 +73,41 @@ async def test_console_profile_scan_uses_fast_timeout_without_login_wait(
     assert result.source_label == "Bullpen CLI"
     assert result.total_candidates == 1
     assert len(result.accepted) == 1
+
+
+@pytest.mark.anyio
+async def test_console_profile_scan_falls_back_to_empty_set_after_bounded_scan_failure(
+    monkeypatch,
+):
+    async def fail_cli(*_args, **_kwargs):
+        raise RuntimeError("Bullpen CLI unavailable")
+
+    async def hang_gamma(*_args, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fail_cli,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        hang_gamma,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS",
+        0.01,
+    )
+
+    result = await scan_console_profile_markets(
+        now=datetime(2026, 7, 18, 12, 0, tzinfo=UTC),
+    )
+
+    assert result.accepted == []
+    assert result.rejected == []
+    assert result.total_candidates == 0
+    assert result.warning == (
+        "Bullpen CLI and Gamma scan failed; continuing with no Stage 1 candidates."
+    )
 
 
 @pytest.mark.anyio

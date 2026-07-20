@@ -4937,6 +4937,8 @@ class BullpenAutoLiveEngine:
             if manual_console_context and manual_console_context.source_url
             else None
         )
+        scan_warning: str | None = None
+        scan_details: str | None = None
         stage1_accepted_candidates: list[dict[str, object]] = []
         stage1_rejected_candidates: list[dict[str, object]] = []
         accepted_manual_rows: list[BullpenAutoLiveConsoleCandidateInput] = []
@@ -5218,6 +5220,8 @@ class BullpenAutoLiveEngine:
             scanned = await scan_console_profile_markets(now=now)
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
+            scan_warning = getattr(scanned, "warning", None)
+            scan_details = getattr(scanned, "details", None)
             scanned_total_candidates = scanned.total_candidates
             stage1_accepted_candidates = [
                 _serialize_scan_candidate(market) for market in scanned.accepted
@@ -5256,6 +5260,14 @@ class BullpenAutoLiveEngine:
                         reason=reason,
                     )
 
+        stage1_scan_status = "warning" if scan_warning else "pass"
+        stage1_scan_reason = (
+            "Bullpen console profile scan completed with an upstream warning: "
+            f"{scan_warning}"
+            if scan_warning
+            else "Bullpen console profile synced live wallet positions and prepared the candidate set."
+        )
+
         def fail_stage_one_wallet_refresh(reason: str) -> EngineResult:
             completed_at = utc_now_iso()
             set_run_stage_result(
@@ -5274,6 +5286,8 @@ class BullpenAutoLiveEngine:
                         "source_url": scan_source_url,
                         "accepted_candidates": stage1_accepted_candidates,
                         "rejected_candidates": stage1_rejected_candidates,
+                        "scan_warning": scan_warning,
+                        "scan_details": scan_details,
                         "wallet_refresh_error": reason,
                     },
                     guardrails_checked=global_guardrails,
@@ -5693,8 +5707,8 @@ class BullpenAutoLiveEngine:
                 stage_number=1,
                 workflow_stage_key="scan",
                 phase_status="completed",
-                status="pass",
-                reason="Bullpen console profile synced live wallet positions and prepared the candidate set.",
+                status=stage1_scan_status,
+                reason=stage1_scan_reason,
                 completed_items=scanned_total_candidates,
                 total_items=scanned_total_candidates,
                 item_label="events",
@@ -5742,6 +5756,8 @@ class BullpenAutoLiveEngine:
                     "rejected_candidates_count": len(stage1_rejected_candidates),
                     "scan_source_label": scan_source_label,
                     "scan_source_url": scan_source_url,
+                    "scan_warning": scan_warning,
+                    "scan_details": scan_details,
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                     "used_manual_console_rows": manual_console_rows_used,
@@ -6042,8 +6058,8 @@ class BullpenAutoLiveEngine:
                     stage_number=1,
                     workflow_stage_key="scan",
                     phase_status="completed",
-                    status="pass",
-                    reason="Bullpen console profile synced live wallet positions and prepared the candidate set.",
+                    status=stage1_scan_status,
+                    reason=stage1_scan_reason,
                     completed_items=scanned_total_candidates,
                     total_items=scanned_total_candidates,
                     item_label="events",
@@ -6077,6 +6093,8 @@ class BullpenAutoLiveEngine:
                         "rejected_candidates_count": len(stage1_rejected_candidates),
                         "scan_source_label": scan_source_label,
                         "scan_source_url": scan_source_url,
+                        "scan_warning": scan_warning,
+                        "scan_details": scan_details,
                         "used_manual_console_rows": manual_console_rows_used,
                         "selected_manual_candidate_ids": selected_manual_candidate_ids,
                         "selected_manual_candidate_count": len(selected_manual_candidate_ids),

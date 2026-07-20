@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -7,7 +8,9 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from app.core.logging import get_logger
 from app.domains.polymarket.bullpen import run_first_bullpen_json
+from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket.position_classification import (
     classify_bullpen_position,
@@ -26,6 +29,7 @@ from app.domains.polymarket_auto_live.scanner import (
     FILTER_TEXT_KEYS,
     MARKET_PREDICTION_KEYWORDS,
     MARKET_PREDICTION_PATTERNS,
+    POLYMARKET_GAMMA_MARKETS_URL,
     TWEET_COUNT_KEYWORDS,
     TWEET_COUNT_PATTERNS,
     WEATHER_KEYWORDS,
@@ -47,6 +51,7 @@ DEFAULT_CONSOLE_ORDER_USD = 5.0
 CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
 CONSOLE_MIN_MARKET_ODDS = 5.0
 CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
+CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS = 45
 CONSOLE_POSITIONS_TIMEOUT_SECONDS = 20
 CONSOLE_POSITIONS_TIMEOUT_ENV_VAR = "BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS"
 
@@ -83,6 +88,7 @@ CONSOLE_CLI_SOURCE_URL = (
 )
 CONSOLE_GAMMA_SOURCE_LABEL = "Polymarket Gamma API"
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
+logger = get_logger("app.domains.polymarket_auto_live.console_profile")
 _OUTCOME_LABEL_KEYS = ("name", "label", "outcome", "title", "side")
 _QUESTION_KEYS = ("question", "title", "name", "eventTitle", "marketQuestion")
 _MARKET_SLUG_KEYS = ("slug", "marketSlug", "questionSlug")
@@ -812,10 +818,40 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
             scanned_at=scanned_at,
         )
     except Exception as cli_exc:
-        gamma_scan = await scan_candidate_markets(
-            min_liquidity_usd=0,
-            existing_position_slugs=set(),
-        )
+        try:
+            gamma_scan = await asyncio.wait_for(
+                scan_candidate_markets(
+                    min_liquidity_usd=0,
+                    existing_position_slugs=set(),
+                ),
+                timeout=CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+            )
+        except Exception as gamma_exc:
+            # A scan failure is safe to degrade to an empty candidate set: no
+            # Stage 2 rows means no LLM calls or orders.  Most importantly,
+            # do not leave the shared Auto-Live worker parked in Stage 1 while
+            # an upstream API or subprocess is unavailable.
+            logger.warning(
+                "Bullpen console scan failed through both CLI and Gamma fallback; "
+                "continuing with an empty candidate set. cli_error=%s gamma_error=%s",
+                cli_exc,
+                gamma_exc,
+                exc_info=True,
+            )
+            return ConsoleScanResult(
+                source_label=CONSOLE_GAMMA_SOURCE_LABEL,
+                source_url=POLYMARKET_GAMMA_MARKETS_URL,
+                scanned_at=scanned_at,
+                accepted=[],
+                rejected=[],
+                total_candidates=0,
+                warning=(
+                    "Bullpen CLI and Gamma scan failed; continuing with no Stage 1 candidates."
+                ),
+                details=redact_secrets(
+                    f"CLI error: {cli_exc}; Gamma error: {gamma_exc}"
+                ),
+            )
         accepted: list[ScannedMarket] = []
         rejected = list(gamma_scan.rejected)
         for market in gamma_scan.accepted:
@@ -843,7 +879,7 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
             warning=(
                 "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
             ),
-            details=str(cli_exc),
+            details=redact_secrets(str(cli_exc)),
         )
 
 

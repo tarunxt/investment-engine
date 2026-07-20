@@ -134,9 +134,15 @@ pre-LLM review rows.
 For auto-live console-profile runs, Stage 1 background Bullpen CLI reads are
 expected to stay non-interactive: discover, positions, and balance refreshes
 must use short worker-safe timeouts and must not block on manual Bullpen login
-polling. The current worker contract is a 5 second discover timeout, a 20 second
-default positions timeout with `BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS`
-available for bounded overrides, and the existing bounded balance timeout path.
+polling. The current worker contract is a 5 second discover timeout, a 45 second
+overall Gamma API fallback timeout, a 20 second default positions timeout with
+`BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS` available for bounded overrides, and
+the existing bounded balance timeout path. Timed-out Bullpen commands run in an
+isolated process group and have bounded cleanup so descendant processes cannot
+hold the worker's output pipes open indefinitely. If both scan sources fail, the
+run records a sanitized scan warning and continues with an explicit empty Stage
+1 candidate set; Stage 2 and Stage 3 then complete as a no-op instead of leaving
+the run parked in Stage 1.
 As of Sunday, July 19, 2026, authenticated Bullpen reads must flow through one
 centralized backend runtime broker backed by Redis locking and a canonical Redis
 positions snapshot. Stage 1 is the only stage allowed to request a forced fresh
