@@ -1,5 +1,9 @@
 import pytest
 
+from app.domains.polymarket.bullpen import (
+    BULLPEN_REDEEMED_HISTORY_COMMAND_VARIANTS,
+    BULLPEN_TRADE_HISTORY_COMMAND_VARIANTS,
+)
 from app.domains.polymarket_auto_live.order_intents import (
     build_order_funnel,
     build_order_plan_from_intent,
@@ -12,6 +16,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     _assert_intent_has_no_persisted_submission_reference,
     _auth_recovery_allows_operator_resume,
     _persisted_stage3_counts,
+    _remaining_position_is_economic_dust,
     build_stage3_order_intent_idempotency_key,
     stage3_execution_market_reference,
 )
@@ -125,6 +130,21 @@ def test_auth_recovery_requires_explicit_operator_resume_timestamp():
         )
         is True
     )
+
+
+def test_stage3_history_readers_prefer_current_bullpen_orders_command():
+    expected_prefix = ["polymarket", "orders", "--history"]
+
+    assert BULLPEN_TRADE_HISTORY_COMMAND_VARIANTS[0][:3] == expected_prefix
+    assert BULLPEN_REDEEMED_HISTORY_COMMAND_VARIANTS[0][:3] == expected_prefix
+
+
+def test_remaining_exit_precision_dust_is_economically_inactive():
+    intent = _intent(intent_id="dust-exit", status="CONFIRMING", action="sell")
+    intent.current_limit_price_cents = 80
+
+    assert _remaining_position_is_economic_dust(intent, remaining_shares=0.005)
+    assert not _remaining_position_is_economic_dust(intent, remaining_shares=0.02)
 
 
 def test_classify_executor_error_marks_write_timeout_as_ambiguous_submission():

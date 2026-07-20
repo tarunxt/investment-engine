@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-resume-lifecycle-v6"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-dust-reconciliation-v7"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage3-resume-lifecycle-v6"
+    "2026-07-20-stage3-dust-reconciliation-v7"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -145,6 +145,22 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.run_recovery",
         "source_function": "mark_interrupted_run_for_restart",
         "label": "Stage 3 restart abort and operator recovery",
+    },
+    {
+        "algorithm_key": "stage3_exit_dust_reconciliation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_remaining_position_is_economic_dust",
+        "label": "Economically inactive exit precision-dust reconciliation",
+    },
+    {
+        "algorithm_key": "stage3_cli_history_reconciliation",
+        "stage": "stage-3",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket.bullpen",
+        "source_function": "BullpenTradeHistoryReader.refresh",
+        "label": "Bullpen CLI order-history reconciliation source",
     },
 )
 

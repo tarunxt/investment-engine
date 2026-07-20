@@ -2755,6 +2755,22 @@ def _matching_trade(history: Sequence[object], *, market_id: str, side: str) -> 
     return None
 
 
+def _remaining_position_is_economic_dust(
+    intent: BullpenAutoLiveOrderIntent,
+    *,
+    remaining_shares: float,
+) -> bool:
+    capacity_policy = intent.execution_metadata_json.get("stage3_capacity_policy")
+    capacity_policy = capacity_policy if isinstance(capacity_policy, dict) else {}
+    dust_threshold = float(capacity_policy.get("dust_threshold_usd", 0.01) or 0.01)
+    price_cents = float(
+        intent.current_limit_price_cents
+        or intent.requested_limit_price_cents
+        or 0.0
+    )
+    return max(0.0, remaining_shares) * price_cents / 100 <= dust_threshold
+
+
 async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentSubmissionResult:
     if intent.action == "sell" and intent.remote_order_id:
         try:
@@ -3043,6 +3059,18 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
                     retryable=False,
                     filled_shares=baseline_shares,
                     remaining_shares=0.0,
+                    raw_response={"post_exit_snapshot": fallback_snapshot_metadata},
+                )
+            if _remaining_position_is_economic_dust(
+                intent,
+                remaining_shares=current_shares,
+            ):
+                return IntentSubmissionResult(
+                    status="CONFIRMED",
+                    detail="Wallet reconciliation confirmed the sell left only economically inactive precision dust.",
+                    retryable=False,
+                    filled_shares=max(0.0, baseline_shares - current_shares),
+                    remaining_shares=max(0.0, current_shares),
                     raw_response={"post_exit_snapshot": fallback_snapshot_metadata},
                 )
             return IntentSubmissionResult(

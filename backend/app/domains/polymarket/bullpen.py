@@ -955,6 +955,17 @@ def _normalized_trade_history_item(
 
 BULLPEN_TRADE_HISTORY_COMMAND_VARIANTS = [
     [
+        "polymarket",
+        "orders",
+        "--history",
+        "--limit",
+        "100",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
+    [
         "wallet",
         "predictions",
         "--history",
@@ -1005,6 +1016,17 @@ class BullpenTradeHistoryReader:
 
 
 BULLPEN_REDEEMED_HISTORY_COMMAND_VARIANTS = [
+    [
+        "polymarket",
+        "orders",
+        "--history",
+        "--limit",
+        "100",
+        "--read-only",
+        "--non-interactive",
+        "--output",
+        "json",
+    ],
     [
         "wallet",
         "predictions",

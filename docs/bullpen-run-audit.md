@@ -288,6 +288,13 @@ partial exit continues to occupy its economic slot. A confirmed exit wakes only
 its one-for-one replacement intent after a fresh live-cli wallet and cash
 refresh.
 
+Exit reconciliation reads current Bullpen trade history through `polymarket
+orders --history` before legacy command fallbacks. When the fresh wallet snapshot
+shows a successful sell left only two-decimal CLOB precision dust whose marked
+value is at or below the configured economic dust threshold, the exit is
+confirmed and its slot is released while the exact residual shares remain in the
+snapshot.
+
 New Stage 3 intents use the `auto-live:v2` idempotency-key format: a SHA-256
 digest over the exact run, decision, and order-plan identity with a stable prefix.
 This preserves deterministic retry identity while keeping the stored value below
