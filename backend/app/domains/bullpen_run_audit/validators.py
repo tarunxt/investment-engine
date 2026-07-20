@@ -52,6 +52,7 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     findings: list[dict[str, object]] = []
     metadata = bundle.get("metadata") if isinstance(bundle.get("metadata"), dict) else {}
     overview = bundle.get("overview") if isinstance(bundle.get("overview"), dict) else {}
+    stage_1 = bundle.get("stage_1") if isinstance(bundle.get("stage_1"), dict) else {}
     stage_2 = bundle.get("stage_2") if isinstance(bundle.get("stage_2"), dict) else {}
     stage_3 = bundle.get("stage_3") if isinstance(bundle.get("stage_3"), dict) else {}
     raw = bundle.get("raw") if isinstance(bundle.get("raw"), dict) else {}
@@ -121,6 +122,114 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                 detection_metadata={"missing_fields": missing_fields[:50]},
             )
         )
+
+    verified_portfolio = (
+        stage_1.get("verified_portfolio_snapshot")
+        if isinstance(stage_1.get("verified_portfolio_snapshot"), dict)
+        else {}
+    )
+    verified_positions = (
+        verified_portfolio.get("active_positions_found")
+        if isinstance(verified_portfolio.get("active_positions_found"), list)
+        else []
+    )
+    if verified_portfolio:
+        verified_count = len(verified_positions)
+        recorded_count = _float(
+            verified_portfolio.get("recorded_occupied_positions")
+        )
+        max_positions = _float(verified_portfolio.get("max_positions"))
+        recorded_available_slots = _float(
+            verified_portfolio.get("available_slots")
+        )
+        expected_available_slots = (
+            max(0, int(max_positions) - verified_count)
+            if max_positions is not None
+            else None
+        )
+        if recorded_count is not None and int(recorded_count) != verified_count:
+            findings.append(
+                _finding(
+                    code="STAGE1_VERIFIED_POSITION_COUNT_MISMATCH",
+                    severity="high",
+                    stage="stage-1",
+                    category="portfolio-capacity",
+                    title="Stage 1 occupied-position count contradicts its verified rows",
+                    explanation=(
+                        "The serialized active_positions_found rows are the verified "
+                        "Stage 1 portfolio evidence, but the recorded sizing count differs."
+                    ),
+                    observed_value=str(int(recorded_count)),
+                    expected_value=str(verified_count),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/verified_portfolio_snapshot/active_positions_found",
+                        "/stage_1/verified_portfolio_snapshot/recorded_occupied_positions",
+                    ],
+                )
+            )
+        if (
+            expected_available_slots is not None
+            and recorded_available_slots is not None
+            and int(recorded_available_slots) != expected_available_slots
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE1_VERIFIED_AVAILABLE_SLOTS_MISMATCH",
+                    severity="high",
+                    stage="stage-1",
+                    category="portfolio-capacity",
+                    title="Stage 1 available slots contradict verified active positions",
+                    explanation=(
+                        "Available slots must equal max positions minus the verified "
+                        "active-position row count."
+                    ),
+                    observed_value=str(int(recorded_available_slots)),
+                    expected_value=str(expected_available_slots),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/verified_portfolio_snapshot/active_positions_found",
+                        "/stage_1/verified_portfolio_snapshot/available_slots",
+                        "/stage_1/verified_portfolio_snapshot/max_positions",
+                    ],
+                )
+            )
+        cash_in_hand = _float(verified_portfolio.get("cash_in_hand_usd"))
+        recorded_trade_amount = _float(
+            verified_portfolio.get("trade_amount_usd")
+        )
+        if (
+            cash_in_hand is not None
+            and expected_available_slots is not None
+            and recorded_trade_amount is not None
+        ):
+            expected_trade_amount = (
+                round(cash_in_hand / expected_available_slots, 2)
+                if cash_in_hand > 0 and expected_available_slots > 0
+                else 0.0
+            )
+            if abs(recorded_trade_amount - expected_trade_amount) > 0.001:
+                findings.append(
+                    _finding(
+                        code="STAGE1_VERIFIED_TRADE_AMOUNT_MISMATCH",
+                        severity="high",
+                        stage="stage-1",
+                        category="capital-sizing",
+                        title="Stage 1 trade amount contradicts verified portfolio capacity",
+                        explanation=(
+                            "Trade amount per new opportunity must equal cash in hand "
+                            "divided by the slots left after verified active positions."
+                        ),
+                        observed_value=f"{recorded_trade_amount:.2f}",
+                        expected_value=f"{expected_trade_amount:.2f}",
+                        blocking=True,
+                        evidence_pointers=[
+                            "/stage_1/verified_portfolio_snapshot/cash_in_hand_usd",
+                            "/stage_1/verified_portfolio_snapshot/active_positions_found",
+                            "/stage_1/verified_portfolio_snapshot/trade_amount_usd",
+                        ],
+                    )
+                )
 
     candidate_reviews = (
         stage_2.get("candidate_reviews")

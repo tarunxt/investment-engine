@@ -54,6 +54,7 @@ import {
   type BullpenActivePositionView,
   type BullpenPositionsSummary,
 } from "@/lib/bullpenPositions";
+import { resolveLatestVerifiedStage1Portfolio } from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, apiService } from "@/services/api";
 import type {
@@ -8158,6 +8159,9 @@ function BullpenPortfolioSnapshot({
   activePositionsSummary,
   activePositionQuestions,
   hasActivePositionsSnapshot,
+  positionsVerifiedByStage1,
+  positionsVerifiedAt,
+  verifiedCashInHandUsd,
   refreshing,
   historicalRuns,
   recentDecisions,
@@ -8171,6 +8175,9 @@ function BullpenPortfolioSnapshot({
   activePositionsSummary: BullpenPositionsSummary | null;
   activePositionQuestions: BullpenQuestionRow[];
   hasActivePositionsSnapshot: boolean;
+  positionsVerifiedByStage1: boolean;
+  positionsVerifiedAt: string | null;
+  verifiedCashInHandUsd: number | null;
   refreshing: boolean;
   historicalRuns: BullpenAutoLiveRun[];
   recentDecisions: BullpenAutoLiveDecision[];
@@ -8193,13 +8200,21 @@ function BullpenPortfolioSnapshot({
     (usableBalance ? (balance.account_value_usd ?? null) : null);
   const cash =
     activePositionsSummary?.cashBalance ??
-    (usableBalance ? (balance.available_balance_usd ?? null) : null);
+    (usableBalance ? (balance.available_balance_usd ?? null) : null) ??
+    verifiedCashInHandUsd;
   const pnl = usableBalance ? (balance.pnl_usd ?? null) : null;
-  const upnl =
-    activePositionsSummary?.unrealizedPnl ??
-    (usableBalance ? (balance.upnl_usd ?? null) : null);
+  const verifiedPositionsUpnl = activePositions.reduce(
+    (total, position) => total + (position.unrealizedPnl ?? 0),
+    0,
+  );
+  const upnl = positionsVerifiedByStage1
+    ? verifiedPositionsUpnl
+    : activePositionsSummary?.unrealizedPnl ??
+      (usableBalance ? (balance.upnl_usd ?? null) : null);
   const openPositions = state?.open_positions ?? [];
-  const activePositionCount = hasActivePositionsSnapshot
+  const activePositionCount = positionsVerifiedByStage1
+    ? activePositions.length
+    : hasActivePositionsSnapshot
     ? (activePositionsSummary?.activeCount ?? activePositions.length)
     : openPositions.filter((position) => position.shares > 0).length;
   const activeInvested = hasActivePositionsSnapshot
@@ -8227,6 +8242,9 @@ function BullpenPortfolioSnapshot({
   const lastRefresh = balance?.checked_at
     ? formatIstDateTime(balance.checked_at)
     : "—";
+  const positionVerification = positionsVerifiedByStage1
+    ? `Positions verified by Stage 1: ${formatIstDateTime(positionsVerifiedAt)}`
+    : null;
   const pendingConfirmationsCount =
     state?.live.pending_confirmations.length ?? 0;
   const balanceStatus = liveBalance?.status ?? balance?.status ?? "not loaded";
@@ -8237,12 +8255,15 @@ function BullpenPortfolioSnapshot({
         return total + value;
       }, 0)
     : accountValue;
-  const displayedTotalPortfolioValue =
-    activePositionsSummary?.totalValue ??
-    accountValue ??
-    (cash !== null || currentInvestmentsValue !== null
+  const displayedTotalPortfolioValue = positionsVerifiedByStage1
+    ? cash !== null || currentInvestmentsValue !== null
       ? (cash ?? 0) + (currentInvestmentsValue ?? 0)
-      : null);
+      : null
+    : activePositionsSummary?.totalValue ??
+      accountValue ??
+      (cash !== null || currentInvestmentsValue !== null
+        ? (cash ?? 0) + (currentInvestmentsValue ?? 0)
+        : null);
   const {
     activePositionQuestionByKey,
     activePositionsNeedingAttention,
@@ -8425,6 +8446,11 @@ function BullpenPortfolioSnapshot({
           <span className="text-right text-[11px] text-slate-400">
             Last successful refresh: {lastRefresh}
           </span>
+          {positionVerification ? (
+            <span className="text-right text-[11px] font-semibold text-emerald-300">
+              {positionVerification}
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -9747,6 +9773,17 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
+  const verifiedStage1Portfolio = resolveLatestVerifiedStage1Portfolio(
+    summary
+      ? [summary.latest_run, ...summary.recent_runs]
+      : workflowRun
+        ? [workflowRun]
+        : [],
+  );
+  const portfolioActivePositions =
+    verifiedStage1Portfolio?.activePositions ?? activePositions;
+  const portfolioHasActivePositionsSnapshot =
+    verifiedStage1Portfolio !== null || hasActivePositionsSnapshot;
   const {
     activePositionQuestionByKey: stage3PreviewQuestionByKey,
     activePositionsNeedingAttention: stage3PreviewAttentionEntries,
@@ -9821,9 +9858,9 @@ export function BullpenAutoRunScheduleCard({
     });
   };
   const liveWorkflowSettled = isBullpenAutoRunWorkflowSettled(liveWorkflowView);
-  const hasActiveWorkflowStage =
-    isActivelyWorkingRunStatus(liveWorkflowView.runStatus) &&
-    liveWorkflowView.stages.some((stage) => stage.isCurrent);
+  const hasActiveWorkflowStage = liveWorkflowView.stages.some(
+    (stage) => stage.isCurrent,
+  );
   const runActionRequested = action === "invest-now";
   const startNowActionRequested = action === "start-now";
   const runIsActive =
@@ -10056,14 +10093,19 @@ export function BullpenAutoRunScheduleCard({
   const liveTradeAmountBalance = isUsableBullpenBalance(liveTradeAmountSource)
     ? liveTradeAmountSource
     : lastUsablePortfolioBalance;
-  const liveTradeAmountActivePositions = hasActivePositionsSnapshot
-    ? activePositions.length
+  const liveTradeAmountActivePositions = verifiedStage1Portfolio
+    ? verifiedStage1Portfolio.occupiedPositions
+    : hasActivePositionsSnapshot
+      ? activePositions.length
     : portfolioState
       ? portfolioState.open_positions.filter((position) => position.shares > 0)
           .length
       : (summary?.state.active_positions ?? null);
   const tradeAmountView = buildConsoleTradeAmountView({
-    cashInHandUsd: liveTradeAmountBalance?.available_balance_usd ?? null,
+    cashInHandUsd:
+      liveTradeAmountBalance?.available_balance_usd ??
+      verifiedStage1Portfolio?.cashInHandUsd ??
+      null,
     activePositions: liveTradeAmountActivePositions,
     lastCalculatedTradeAmountUsd:
       summary?.state.last_console_trade_amount_usd ?? null,
@@ -10079,7 +10121,9 @@ export function BullpenAutoRunScheduleCard({
   const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
   const tradeAmountSummaryLabel =
     tradeAmountView.source === "live"
-      ? "Preview from current portfolio"
+      ? verifiedStage1Portfolio
+        ? "Verified from latest Stage 1 scan"
+        : "Preview from current portfolio"
       : tradeAmountView.source === "last-calculated"
         ? "Showing last diagnostic amount"
         : "Waiting for live portfolio data";
@@ -10125,10 +10169,15 @@ export function BullpenAutoRunScheduleCard({
         <BullpenPortfolioSnapshot
           state={portfolioState}
           lastUsableBalance={lastUsablePortfolioBalance}
-          activePositions={activePositions}
+          activePositions={portfolioActivePositions}
           activePositionsSummary={activePositionsSummary}
           activePositionQuestions={activePositionQuestions}
-          hasActivePositionsSnapshot={hasActivePositionsSnapshot}
+          hasActivePositionsSnapshot={portfolioHasActivePositionsSnapshot}
+          positionsVerifiedByStage1={verifiedStage1Portfolio !== null}
+          positionsVerifiedAt={verifiedStage1Portfolio?.verifiedAt ?? null}
+          verifiedCashInHandUsd={
+            verifiedStage1Portfolio?.cashInHandUsd ?? null
+          }
           refreshing={action === "balance"}
           historicalRuns={summary?.recent_runs ?? []}
           recentDecisions={recentDecisions}
@@ -11507,7 +11556,9 @@ export function BullpenAutoRunScheduleCard({
                   </p>
                   <p className="mt-2 text-sm text-slate-600">
                     {tradeAmountView.source === "live"
-                      ? "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
+                      ? verifiedStage1Portfolio
+                        ? "Calculated with cash in hand and the occupied positions verified by the latest completed Stage 1 Bullpen scan. The worker rechecks both before any live buy."
+                        : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
                       : tradeAmountView.source === "last-calculated"
                         ? "Showing the last successful diagnostic calculation until a fresh balance sync completes. That cached amount is never used as a live-buy fallback."
                         : "Waiting for Bullpen cash in hand and occupied-slot data."}
