@@ -9636,7 +9636,9 @@ export function BullpenAutoRunScheduleCard({
     setSummary((currentSummary) => {
       if (!currentSummary) return currentSummary;
       const stoppedAt = new Date().toISOString();
-      const killRun = (run: BullpenAutoLiveRun | null | undefined) => {
+      const killRun = (
+        run: BullpenAutoLiveRun | null | undefined,
+      ): BullpenAutoLiveRun | null | undefined => {
         if (!run || !isActivelyWorkingRunStatus(run.status)) return run;
         return {
           ...run,
