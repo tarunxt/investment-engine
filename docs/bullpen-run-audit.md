@@ -258,11 +258,19 @@ The Stage 3 slot-allocation diagnostics also persist `exit_intent_ids`,
 and the final blocker or bypass reason. Every saved Event Exit intent carries its
 run and decision identity, condition/market identity, side, size, limit price,
 idempotency key, retry count, last error, next retry time, and partial-fill
-amounts. Rate-limit retries use the persisted Stage 3 retry policy and history;
-they become terminal only after the configured attempt and total-wait budgets are
-exhausted. A submitted-but-unfilled or meaningfully partial exit continues to
-occupy its economic slot. A confirmed exit wakes only its one-for-one replacement
-intent after a fresh live-cli wallet and cash refresh.
+amounts. After a live run persists these durable intents and synchronizes the
+run/order funnel, the worker immediately queues the same run's due `READY` exit,
+redeem, and buy intents; the periodic beat dispatcher remains only a safety-net
+retry path. That handoff is the required planned-exit sell algorithm: persist
+the idempotent order intent first, enqueue Event Exits before replacement buys by
+priority, submit each sell/redeem in a Celery worker, reconcile until the remote
+order or wallet snapshot proves terminal fill/removal, then wake only the
+dependent replacement buy. Rate-limit retries use the persisted Stage 3 retry
+policy and history; they become terminal only after the configured attempt and
+total-wait budgets are exhausted. A submitted-but-unfilled or meaningfully
+partial exit continues to occupy its economic slot. A confirmed exit wakes only
+its one-for-one replacement intent after a fresh live-cli wallet and cash
+refresh.
 
 Decision rows expose the explicit execution states `EXIT_RPC_RETRYING`,
 `EXIT_NOT_SUBMITTED`, `EXIT_SUBMITTED`, `EXIT_OPEN_UNFILLED`,
