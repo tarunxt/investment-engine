@@ -15,6 +15,8 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
     _assert_intent_has_no_persisted_submission_reference,
     _auth_recovery_allows_operator_resume,
+    _extract_remote_refs,
+    _matched_buy_submission_fill,
     _persisted_stage3_counts,
     _remaining_position_is_economic_dust,
     build_stage3_order_intent_idempotency_key,
@@ -110,6 +112,38 @@ def test_stage3_execution_market_reference_prefers_cli_slug():
         )
         == "will-this-market-resolve-yes"
     )
+
+
+def test_nested_bullpen_matched_buy_response_is_normalized():
+    payload = {
+        "status": "ok",
+        "result": {
+            "success": True,
+            "status": "matched",
+            "order_id": "0xorder",
+            "transaction_hash": "0xtx",
+            "filled_size": 1.820893,
+            "avg_price": 0.67,
+        },
+    }
+
+    assert _extract_remote_refs(payload) == ("0xorder", "0xtx")
+    assert _matched_buy_submission_fill(payload) == (1.820893, 67.0)
+
+
+def test_nonterminal_bullpen_buy_response_stays_unconfirmed():
+    payload = {
+        "status": "ok",
+        "result": {
+            "success": True,
+            "status": "open",
+            "order_id": "0xorder",
+            "transaction_hashes": ["0xtx"],
+        },
+    }
+
+    assert _extract_remote_refs(payload) == ("0xorder", "0xtx")
+    assert _matched_buy_submission_fill(payload) is None
     assert (
         stage3_execution_market_reference(slug=None, market_id="legacy-market-ref")
         == "legacy-market-ref"

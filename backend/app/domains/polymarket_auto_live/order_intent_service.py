@@ -175,20 +175,89 @@ def _safe_float(value: object) -> float | None:
     return None
 
 
+def _walk_response_payload(value: object):
+    if isinstance(value, dict):
+        yield value
+        for nested in value.values():
+            yield from _walk_response_payload(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            yield from _walk_response_payload(nested)
+
+
 def _extract_remote_refs(payload: dict[str, object]) -> tuple[str | None, str | None]:
     remote_order_id = None
     remote_transaction_hash = None
-    for key in ("orderId", "order_id", "id", "remote_order_id"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            remote_order_id = value.strip()
-            break
-    for key in ("transactionHash", "txHash", "hash", "remote_transaction_hash"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            remote_transaction_hash = value.strip()
-            break
+    order_keys = {"orderid", "order_id", "remoteorderid", "remote_order_id"}
+    transaction_keys = {
+        "transactionhash",
+        "transaction_hash",
+        "txhash",
+        "tx_hash",
+        "remote_transaction_hash",
+    }
+    for row in _walk_response_payload(payload):
+        for key, value in row.items():
+            normalized_key = str(key).lower()
+            if (
+                remote_order_id is None
+                and normalized_key in order_keys
+                and isinstance(value, (str, int))
+                and str(value).strip()
+            ):
+                remote_order_id = str(value).strip()
+            if (
+                remote_transaction_hash is None
+                and normalized_key in transaction_keys
+                and isinstance(value, (str, int))
+                and str(value).strip()
+            ):
+                remote_transaction_hash = str(value).strip()
+            if (
+                remote_transaction_hash is None
+                and normalized_key == "transaction_hashes"
+                and isinstance(value, list)
+            ):
+                remote_transaction_hash = next(
+                    (
+                        str(item).strip()
+                        for item in value
+                        if isinstance(item, (str, int)) and str(item).strip()
+                    ),
+                    None,
+                )
     return remote_order_id, remote_transaction_hash
+
+
+def _matched_buy_submission_fill(
+    payload: dict[str, object],
+) -> tuple[float, float | None] | None:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None
+    status = str(result.get("status") or "").strip().lower().replace("-", "_")
+    if status not in {"matched", "filled", "complete", "completed", "executed"}:
+        return None
+    if result.get("success") is False:
+        return None
+    filled_shares = _safe_float(
+        result.get("filled_size")
+        or result.get("filledSize")
+        or result.get("shares")
+        or result.get("taking_amount")
+    )
+    if filled_shares is None or filled_shares <= 0:
+        return None
+    average_price = _safe_float(
+        result.get("avg_price")
+        or result.get("avgPrice")
+        or result.get("average_fill_price")
+    )
+    average_price_cents = None
+    if average_price is not None:
+        average_price_cents = average_price * 100 if average_price <= 1 else average_price
+        average_price_cents = max(0.0, min(100.0, average_price_cents))
+    return filled_shares, average_price_cents
 
 
 def _parse_response_payload(raw_response: str | None) -> dict[str, object]:
@@ -2171,10 +2240,15 @@ async def _submit_prepared_intent(
                 )
                 payload = _parse_response_payload(response)
                 remote_order_id, remote_transaction_hash = _extract_remote_refs(payload)
+                matched_fill = _matched_buy_submission_fill(payload)
                 return IntentSubmissionResult(
-                    status="SUBMITTED",
-                    detail="Bullpen buy order submitted successfully.",
-                    retryable=True,
+                    status="FILLED" if matched_fill is not None else "SUBMITTED",
+                    detail=(
+                        "Bullpen buy response confirmed the order matched."
+                        if matched_fill is not None
+                        else "Bullpen buy order submitted successfully."
+                    ),
+                    retryable=matched_fill is None,
                     current_order_usd=prepared.order_usd,
                     current_shares=prepared.shares,
                     current_limit_price_cents=prepared.limit_price_cents,
@@ -2182,7 +2256,14 @@ async def _submit_prepared_intent(
                     remote_transaction_hash=remote_transaction_hash,
                     provider_alias=alias,
                     raw_response=payload,
-                    next_attempt_at=utc_now() + timedelta(seconds=3),
+                    next_attempt_at=(
+                        None if matched_fill is not None else utc_now() + timedelta(seconds=3)
+                    ),
+                    filled_shares=matched_fill[0] if matched_fill is not None else None,
+                    remaining_shares=0.0 if matched_fill is not None else None,
+                    average_fill_price_cents=(
+                        matched_fill[1] if matched_fill is not None else None
+                    ),
                 )
             if prepared.action == "sell":
                 response = await executor.sell_limit(
@@ -3163,6 +3244,76 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
         record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
         if record is None:
             return None
+        latest_attempt = session.execute(
+            select(PolymarketAutoLiveOrderAttemptRecord)
+            .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
+            .order_by(PolymarketAutoLiveOrderAttemptRecord.attempt_number.desc())
+        ).scalars().first()
+        persisted_response = (
+            dict(latest_attempt.sanitized_response_json or {})
+            if latest_attempt is not None
+            else {}
+        )
+        remote_order_id, remote_transaction_hash = _extract_remote_refs(
+            persisted_response
+        )
+        if remote_order_id:
+            record.remote_order_id = record.remote_order_id or remote_order_id
+            if latest_attempt is not None:
+                latest_attempt.remote_order_id = (
+                    latest_attempt.remote_order_id or remote_order_id
+                )
+        if remote_transaction_hash:
+            record.remote_transaction_hash = (
+                record.remote_transaction_hash or remote_transaction_hash
+            )
+            if latest_attempt is not None:
+                latest_attempt.remote_transaction_hash = (
+                    latest_attempt.remote_transaction_hash or remote_transaction_hash
+                )
+        matched_fill = (
+            _matched_buy_submission_fill(persisted_response)
+            if record.action == "buy"
+            else None
+        )
+        if matched_fill is not None:
+            now = utc_now()
+            record.status = "FILLED"
+            record.retryable = False
+            record.last_error_code = None
+            record.last_error_message = (
+                "Persisted Bullpen buy response confirmed the order matched."
+            )
+            record.next_attempt_at = None
+            record.filled_shares = matched_fill[0]
+            record.remaining_shares = 0.0
+            record.average_fill_price_cents = matched_fill[1]
+            record.first_submitted_at = record.first_submitted_at or now
+            record.last_submitted_at = record.last_submitted_at or now
+            record.confirmed_at = record.confirmed_at or now
+            record.terminal_at = record.terminal_at or now
+            record.execution_metadata_json = {
+                **dict(record.execution_metadata_json or {}),
+                "stage3_status": "BUY_SUBMITTED",
+                "confirmation_source": "persisted_bullpen_matched_response",
+            }
+            if latest_attempt is not None:
+                latest_attempt.completed_at = latest_attempt.completed_at or now
+                latest_attempt.result_status = "FILLED"
+            _upsert_reservation(
+                session,
+                intent=record,
+                amount_usd=float(record.current_order_usd or 0.0),
+                status="consumed",
+            )
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
+            session.commit()
+            return record.status
+        session.commit()
         intent = _intent_to_schema(record)
     result = run_with_bullpen_runtime_cleanup(_reconcile_intent_async(intent))
     with SyncSessionLocal() as session:

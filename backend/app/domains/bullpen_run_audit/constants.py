@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-intent-resume-v9"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-20-stage3-response-normalization-v10"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-20-stage3-intent-resume-v9"
+    "2026-07-20-stage3-response-normalization-v10"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -169,6 +169,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket.bullpen",
         "source_function": "BullpenTradeHistoryReader.refresh",
         "label": "Bullpen CLI order-history reconciliation source",
+    },
+    {
+        "algorithm_key": "stage3_bullpen_response_normalization",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_matched_buy_submission_fill",
+        "label": "Nested Bullpen order reference and matched-fill normalization",
     },
 )
 

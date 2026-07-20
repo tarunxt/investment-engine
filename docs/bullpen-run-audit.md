@@ -381,6 +381,13 @@ Current required keys:
 * `order_funnel_aggregation`
 * `stage3_persisted_counter_reconciliation`
 * `stage3_restart_recovery`
+* `stage3_bullpen_response_normalization`
+
+Stage 3 response normalization recursively preserves Bullpen order and transaction
+references and treats a successful nested `result.status=matched` buy response as a
+terminal fill. Reconciliation also backfills this evidence from persisted attempts,
+so older frozen snapshots remain unchanged while active runs can converge without a
+duplicate exchange write.
 
 If Bullpen logic adds or replaces critical formulas, the registry and tests must be
 updated in the same change.

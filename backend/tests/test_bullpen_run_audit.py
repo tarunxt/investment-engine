@@ -530,6 +530,7 @@ def test_algorithm_registry_contains_required_audit_keys():
         "position_returns_per_day",
         "stage3_rank_and_selection",
         "order_funnel_aggregation",
+        "stage3_bullpen_response_normalization",
     }
 
 
