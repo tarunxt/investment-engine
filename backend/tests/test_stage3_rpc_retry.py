@@ -13,7 +13,10 @@ from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveOrderAttemptRecord,
     PolymarketAutoLiveOrderIntentRecord,
 )
-from app.domains.polymarket_auto_live.order_intent_service import _apply_executor_error
+from app.domains.polymarket_auto_live.order_intent_service import (
+    _EXECUTABLE_STATUSES,
+    _apply_executor_error,
+)
 from app.domains.polymarket_auto_live.order_intents import AutoLiveExecutorError
 from app.domains.polymarket.runtime_broker import _parse_command_category
 import app.infrastructure.database.all_models  # noqa: F401
@@ -79,6 +82,21 @@ def test_bullpen_write_commands_are_marked_for_the_shared_authenticated_lock() -
     )
 
 
+def test_stage3_planned_intents_are_executable_for_watchdog_promotion() -> None:
+    assert "PLANNED" in _EXECUTABLE_STATUSES
+
+
+def test_celery_registers_stage3_watchdog_and_routes_to_beat_queue() -> None:
+    from app.infrastructure.messaging.celery_app import celery
+
+    task_name = (
+        "app.domains.polymarket_auto_live.tasks."
+        "watchdog_requeue_stale_auto_live_order_intents"
+    )
+    assert celery.conf.task_routes[task_name]["queue"] == "beat"
+    assert any(entry["task"] == task_name for entry in celery.conf.beat_schedule.values())
+
+
 def _rate_limited_intent() -> tuple[
     PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLiveOrderAttemptRecord,
@@ -136,6 +154,8 @@ def test_intent_rate_limit_retries_then_exhausts_without_being_terminal_on_first
     assert intent.retryable is True
     assert intent.execution_metadata_json["stage3_status"] == "EXIT_RPC_RETRYING"
     assert intent.next_attempt_at is not None
+    assert attempt.reconciliation_json["retryable"] is True
+    assert attempt.reconciliation_json["next_step"] == "retry_with_backoff"
 
     intent.status = "SUBMITTING"
     intent.attempt_count = 2

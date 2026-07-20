@@ -710,6 +710,8 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     remaining_shares: float = Field(default=0, ge=0)
     average_fill_price_cents: float | None = Field(default=None, ge=0, le=100)
     execution_response: str | None = None
+    current_blockage: str | None = None
+    how_to_resolve: str | None = None
     created_at: str
     executed_at: str | None = None
     confirmed_at: str | None = None

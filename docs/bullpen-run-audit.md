@@ -407,3 +407,17 @@ Recommended verification for audit changes:
 * frontend typecheck plus route and source smoke tests
 * Alembic migration review
 * containerized migration apply when Docker is available locally
+
+## Stage 3 Durable Sell-Intent Watchdog
+
+Stage 3 durable order snapshots now include watchdog and retry diagnostics from
+`execution_metadata_json`, order attempts, and order-plan blockage fields. The audit
+must preserve these fields when materializing runs so reviewers can distinguish:
+
+* `PLANNED` intents promoted to `READY` because Beat/worker dispatch never saw them.
+* due `READY`/`RETRY_WAIT`/`WAITING_FOR_COLLATERAL`/`WAITING_FOR_EXIT` intents requeued by the watchdog.
+* stale `SUBMITTING` intents moved to confirmation/reconciliation before any retry, preventing duplicate sells after ambiguous worker or network failures.
+* per-attempt retryability, root cause, worker task ID, sanitized request/response, next retry time, remote order references, and operator resolution guidance.
+
+Historical snapshots remain backward-compatible: missing watchdog fields mean the run
+predates the durable-intent watchdog and should be rendered as legacy diagnostics.

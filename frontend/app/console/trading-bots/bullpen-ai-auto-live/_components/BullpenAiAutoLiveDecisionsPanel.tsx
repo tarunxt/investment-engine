@@ -132,6 +132,8 @@ function orderBlockerLabel(decision: BullpenAutoLiveDecision) {
   if (plan?.dependency_group) parts.push(`dependency ${plan.dependency_group}`);
   if (plan?.attempt_count) parts.push(`retry count ${plan.attempt_count}`);
   if (plan?.next_retry_at) parts.push(`next retry ${formatDateTime(plan.next_retry_at)}`);
+  if (plan?.current_blockage) parts.push(`blockage ${plan.current_blockage}`);
+  if (plan?.how_to_resolve) parts.push(`resolve ${plan.how_to_resolve}`);
   if (blocker?.related_exit_market) parts.push(`related exit ${String(blocker.related_exit_market)}`);
   if (blocker?.occupied_slots !== undefined) parts.push(`occupied ${String(blocker.occupied_slots)}`);
   if (blocker?.reserved_replacement_slots !== undefined) {

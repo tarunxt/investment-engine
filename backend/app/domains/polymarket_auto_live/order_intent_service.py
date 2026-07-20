@@ -1,6 +1,7 @@
 from __future__ import annotations
 import json
 import os
+import traceback
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Iterable, Sequence
@@ -93,7 +94,7 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 logger = get_logger("app.domains.polymarket_auto_live.order_intent_service")
 
 _EXECUTABLE_STATUSES = frozenset(
-    {"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}
+    {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}
 )
 _RECONCILABLE_STATUSES = frozenset(
     {"SUBMITTED", "CONFIRMING", "PARTIALLY_FILLED", "SETTLEMENT_PENDING", "SUBMITTING"}
@@ -1048,6 +1049,103 @@ def list_due_order_intent_ids_sync(
     return [str(item) for item in records]
 
 
+def watchdog_requeue_stale_order_intents_sync(
+    session: Session,
+    *,
+    limit: int = 100,
+    now: datetime | None = None,
+) -> list[str]:
+    """Promote or requeue stalled durable Stage 3 intents without duplicating writes.
+
+    The root failure this protects is old/new Stage 3 plans persisted as
+    ``PLANNED`` even though the beat dispatcher only scanned ``READY`` states.
+    ``SUBMITTING`` is treated as ambiguous: if the worker did not finish within
+    the stale window, reconciliation is dispatched instead of another write.
+    """
+
+    current = now or utc_now()
+    submitting_stale_before = current - timedelta(
+        seconds=max(60, int(os.getenv("AUTO_LIVE_SUBMITTING_STALE_SECONDS", "600")))
+    )
+    records = (
+        session.execute(
+            select(PolymarketAutoLiveOrderIntentRecord)
+            .where(
+                or_(
+                    PolymarketAutoLiveOrderIntentRecord.status == "PLANNED",
+                    and_(
+                        PolymarketAutoLiveOrderIntentRecord.status.in_(
+                            ("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT")
+                        ),
+                        or_(
+                            PolymarketAutoLiveOrderIntentRecord.next_attempt_at.is_(None),
+                            PolymarketAutoLiveOrderIntentRecord.next_attempt_at <= current,
+                        ),
+                    ),
+                    and_(
+                        PolymarketAutoLiveOrderIntentRecord.status == "SUBMITTING",
+                        PolymarketAutoLiveOrderIntentRecord.updated_at <= submitting_stale_before,
+                    ),
+                )
+            )
+            .order_by(
+                PolymarketAutoLiveOrderIntentRecord.priority.asc(),
+                PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
+            )
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        .scalars()
+        .all()
+    )
+    touched: list[str] = []
+    for record in records:
+        metadata = dict(record.execution_metadata_json or {})
+        watchdog_events = list(metadata.get("watchdog_events") or [])
+        event: dict[str, object] = {
+            "at": _isoformat(current),
+            "from_status": record.status,
+            "next_attempt_at": _isoformat(record.next_attempt_at),
+            "remote_order_id_present": bool(record.remote_order_id),
+            "remote_transaction_hash_present": bool(record.remote_transaction_hash),
+        }
+        if record.status == "PLANNED":
+            record.status = "READY"
+            record.retryable = True
+            record.next_attempt_at = current
+            record.last_error_code = "PLANNED_NOT_PROMOTED"
+            record.last_error_message = (
+                "Durable Stage 3 intent was still PLANNED; watchdog atomically promoted it to READY for Celery dispatch."
+            )
+            event["resolution"] = "promoted_to_READY"
+        elif record.status == "SUBMITTING":
+            record.status = "CONFIRMING"
+            record.retryable = True
+            record.next_attempt_at = current
+            record.last_error_code = "STALE_SUBMITTING_RECONCILE_REQUIRED"
+            record.last_error_message = (
+                "Worker submission timed out or was lost after entering SUBMITTING; reconciling remote state before any retry."
+            )
+            event["resolution"] = "moved_to_CONFIRMING_for_reconciliation"
+        else:
+            record.next_attempt_at = current
+            record.retryable = True
+            event["resolution"] = "requeued_due_intent"
+        watchdog_events.append(event)
+        metadata["watchdog_events"] = watchdog_events[-20:]
+        metadata["current_blockage"] = record.last_error_message
+        metadata["how_to_resolve"] = (
+            "Use Reconcile for ambiguous submitted orders; otherwise Retry now after fixing auth, shares, quote, or RPC health."
+        )
+        if record.action in {"sell", "redeem"} and record.status in {"READY", "RETRY_WAIT"}:
+            metadata["stage3_status"] = "EXIT_NOT_SUBMITTED"
+        record.execution_metadata_json = metadata
+        record.version += 1
+        touched.append(record.id)
+    session.flush()
+    return touched
+
+
 def get_run_user_id_sync(session: Session, run_id: str) -> int | None:
     record = session.get(PolymarketAutoLiveRunRecord, run_id)
     return record.user_id if record is not None else None
@@ -1086,7 +1184,7 @@ def cancel_order_intent_sync(session: Session, *, user_id: int, intent_id: str) 
     record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
     if record is None or record.user_id != user_id:
         raise ValueError("Order intent not found.")
-    if record.status not in {"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "DEFERRED"}:
+    if record.status not in {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "DEFERRED"}:
         raise ValueError("Only not-yet-submitted durable intents can be cancelled safely.")
     record.status = "CANCELLED"
     record.retryable = False
@@ -1554,6 +1652,19 @@ def _apply_executor_error(
     attempt.completed_at = now
     attempt.error_code = exc.code
     attempt.error_message = sanitize_message(exc.message)
+    attempt.reconciliation_json = {
+        **dict(attempt.reconciliation_json or {}),
+        "retryable": exc.retryable,
+        "ambiguous_submission": exc.ambiguous_submission,
+        "root_cause": sanitize_message("".join(traceback.format_exception_only(type(exc), exc))),
+        "next_step": (
+            "reconcile_remote_state_before_retry"
+            if exc.ambiguous_submission
+            else "retry_with_backoff"
+            if exc.retryable
+            else "operator_fix_required"
+        ),
+    }
     if exc.retry_after_seconds is not None:
         attempt.retry_after_seconds = exc.retry_after_seconds
 

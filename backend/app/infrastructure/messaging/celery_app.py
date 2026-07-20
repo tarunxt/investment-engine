@@ -28,6 +28,7 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent": {"queue": "ai"},
     "app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents": {"queue": "beat"},
+    "app.domains.polymarket_auto_live.tasks.watchdog_requeue_stale_auto_live_order_intents": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders": {"queue": "beat"},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
@@ -59,6 +60,10 @@ celery.conf.beat_schedule = {
     "polymarket-auto-live-order-intent-dispatch": {
         "task": "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents",
         "schedule": crontab(minute="*"),
+    },
+    "polymarket-auto-live-order-intent-watchdog": {
+        "task": "app.domains.polymarket_auto_live.tasks.watchdog_requeue_stale_auto_live_order_intents",
+        "schedule": schedule(run_every=30.0),
     },
     "polymarket-auto-live-order-intent-reconcile": {
         "task": "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders",

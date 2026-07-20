@@ -380,6 +380,23 @@ def build_order_plan_from_intent(
             "filled_shares": intent.filled_shares,
             "remaining_shares": intent.remaining_shares,
             "average_fill_price_cents": intent.average_fill_price_cents,
+            "execution_response": intent.remote_order_id
+            or intent.remote_transaction_hash
+            or existing.execution_response,
+            "current_blockage": (
+                str(intent.execution_metadata_json.get("current_blockage"))
+                if intent.execution_metadata_json.get("current_blockage")
+                else intent.last_error_message
+            ),
+            "how_to_resolve": (
+                str(intent.execution_metadata_json.get("how_to_resolve"))
+                if intent.execution_metadata_json.get("how_to_resolve")
+                else (
+                    "Retry now after resolving the reported auth, quote, RPC, or share-availability issue."
+                    if intent.retryable
+                    else "Reconcile first if a remote write may have happened; otherwise cancel unsubmitted intents or fix the permanent validation error."
+                )
+            ),
             "executed_at": intent.last_submitted_at or existing.executed_at,
             "confirmed_at": intent.confirmed_at,
             "terminal_at": intent.terminal_at,

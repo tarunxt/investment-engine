@@ -608,6 +608,14 @@ export function buildAutoLiveDecisionRows({
             value: decision.order_plan?.detail ?? stage7?.reason ?? null,
           },
           {
+            label: "Current blockage",
+            value: decision.order_plan?.current_blockage ?? null,
+          },
+          {
+            label: "How to resolve",
+            value: decision.order_plan?.how_to_resolve ?? null,
+          },
+          {
             label: "Transaction / order reference",
             value: decision.order_plan?.execution_response ?? null,
           },
