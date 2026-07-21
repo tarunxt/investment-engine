@@ -12,6 +12,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
+  ChevronDown,
+  ChevronRight,
   Copy,
   Edit3,
   ExternalLink,
@@ -1550,6 +1552,7 @@ function BullpenAiPageContent() {
   ] = useState(false);
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
   const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
+  const [isScanSectionExpanded, setIsScanSectionExpanded] = useState(false);
   const [openFilterDetailsId, setOpenFilterDetailsId] =
     useState<BullpenScanFilterDetailId | null>(null);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
@@ -3803,13 +3806,8 @@ function BullpenAiPageContent() {
           );
         }}
         onOpenScanFilters={() => {
+          setIsScanSectionExpanded(true);
           setIsScanFiltersOpen(true);
-          window.requestAnimationFrame(() => {
-            scanFiltersMenuRef.current?.scrollIntoView({
-              block: "center",
-              behavior: "smooth",
-            });
-          });
         }}
         onRunCompleted={() => {
           void refreshBullpenPositions({
@@ -3834,11 +3832,35 @@ function BullpenAiPageContent() {
 
       <Card className="border-slate-200 shadow-sm">
         <CardHeader className="gap-2">
-          <CardTitle>{activeTab.label} Bullpen Scan</CardTitle>
-          <CardDescription>
-            {getModeDescription(activeMode, activeFilters)}
-          </CardDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-2">
+              <CardTitle>{activeTab.label} Bullpen Scan</CardTitle>
+              <CardDescription>
+                {getModeDescription(activeMode, activeFilters)}
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsScanSectionExpanded((current) => !current)}
+              aria-label={
+                isScanSectionExpanded
+                  ? `Collapse ${activeTab.label} Bullpen Scan`
+                  : `Expand ${activeTab.label} Bullpen Scan`
+              }
+              aria-expanded={isScanSectionExpanded}
+              className="shrink-0"
+            >
+              {isScanSectionExpanded ? (
+                <ChevronDown className="h-5 w-5" />
+              ) : (
+                <ChevronRight className="h-5 w-5" />
+              )}
+            </Button>
+          </div>
         </CardHeader>
+        {isScanSectionExpanded ? (
         <CardContent className="space-y-5">
           <div className="rounded-2xl border border-slate-200 bg-white p-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -3886,7 +3908,7 @@ function BullpenAiPageContent() {
                     </Button>
                   </div>
                   {isScanFiltersOpen ? (
-                    <div className="absolute right-0 top-full z-20 mt-2 w-[min(34rem,calc(100vw-3rem))] rounded-2xl border border-slate-200 bg-white p-4 shadow-xl">
+                    <div className="fixed left-1/2 top-1/2 z-50 max-h-[min(42rem,calc(100vh-3rem))] w-[min(34rem,calc(100vw-3rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
                       <div className="flex flex-wrap items-center justify-between gap-3">
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -4400,12 +4422,10 @@ function BullpenAiPageContent() {
             />
           ) : null}
 
-          {visibleCurrentSnapshot ? (
+          {visibleCurrentSnapshot && selectionEnabled ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
               <span>
-                {selectionEnabled
-                  ? `${formatCountLabel(openActivePositions.length, "active position")} auto-included and ${formatCountLabel(selectedQuestionCount, "scan question")} selected for LLM analysis.`
-                  : "Run Bullpen Scan first to select questions for LLM analysis."}
+                {`${formatCountLabel(openActivePositions.length, "active position")} auto-included and ${formatCountLabel(selectedQuestionCount, "scan question")} selected for LLM analysis.`}
               </span>
               {isManualScanView && lastLlmTargets.length > 0 ? (
                 <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-500">
@@ -4414,8 +4434,11 @@ function BullpenAiPageContent() {
               ) : null}
             </div>
           ) : null}
+        </CardContent>
+        ) : null}
+      </Card>
 
-          <BullpenQuestionsTable
+      <BullpenQuestionsTable
             snapshot={activeVisibleSnapshot}
             rowsOverride={orderedVisibleTableRows}
             rowHighlightById={tableRowHighlightById}
@@ -4490,8 +4513,6 @@ function BullpenAiPageContent() {
             onToggleQuestion={toggleQuestionSelection}
             onToggleSelectAll={toggleSelectAllQuestions}
           />
-        </CardContent>
-      </Card>
 
       {isPromptEditorOpen ? (
         <BullpenPromptEditorDialog

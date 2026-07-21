@@ -4,6 +4,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ExternalLink,
   XCircle,
   Info,
@@ -573,6 +575,7 @@ export function BullpenInvestmentsSection({
   const [detailsQuestion, setDetailsQuestion] =
     useState<BullpenQuestionRow | null>(null);
   const [isGroupingInfoOpen, setIsGroupingInfoOpen] = useState(false);
+  const [isEventsTableExpanded, setIsEventsTableExpanded] = useState(false);
   const [isEventExitStrategiesDialogOpen, setIsEventExitStrategiesDialogOpen] =
     useState(false);
   const openActivePositions = activePositions.filter(isActiveBullpenPosition);
@@ -648,7 +651,26 @@ export function BullpenInvestmentsSection({
               </div>
             </div>
           </div>
-          {!isReadOnly && hasRows ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsEventsTableExpanded((current) => !current)}
+            aria-label={
+              isEventsTableExpanded
+                ? "Collapse grouped Bullpen events by action"
+                : "Expand grouped Bullpen events by action"
+            }
+            aria-expanded={isEventsTableExpanded}
+            className="ml-auto shrink-0"
+          >
+            {isEventsTableExpanded ? (
+              <ChevronDown className="h-5 w-5" />
+            ) : (
+              <ChevronRight className="h-5 w-5" />
+            )}
+          </Button>
+          {isEventsTableExpanded && !isReadOnly && hasRows ? (
             <div className="flex w-full flex-col items-start gap-2">
               <div className="flex w-full flex-wrap items-center gap-2">
                 <div className="flex flex-wrap items-center gap-2">
@@ -731,11 +753,13 @@ export function BullpenInvestmentsSection({
           </div>
         ) : null}
 
-        {!hasRows ? (
+        {isEventsTableExpanded && !hasRows ? (
           <div className="mt-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
             {emptyMessage}
           </div>
-        ) : (
+        ) : null}
+
+        {isEventsTableExpanded && hasRows ? (
           <>
             <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 rounded-2xl border border-fuchsia-100 bg-fuchsia-50/60 px-4 py-3 text-sm text-slate-700">
               <span>
@@ -1059,7 +1083,7 @@ export function BullpenInvestmentsSection({
               ) : null}
             </div>
           </>
-        )}
+        ) : null}
       </div>
 
       {isGroupingInfoOpen ? (
