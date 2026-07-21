@@ -3,7 +3,7 @@ import type {
   BullpenAutoLiveStageResult,
 } from "@/types/api";
 
-type WorkflowTone = "yellow" | "green" | "blue";
+type WorkflowTone = "yellow" | "green" | "blue" | "red";
 type WorkflowState = "current" | "finished" | "queued";
 type WorkflowStageKey = "scan" | "llm" | "invest";
 
@@ -556,6 +556,7 @@ export function buildBullpenAutoRunWorkflowView(
       explicitPhase === "partial" ||
       explicitPhase === "failed" ||
       explicitPhase === "cancelled" ||
+      explicitPhase === "aborted" ||
       runStatus === "completed" ||
       investStageEffectivelyCompleted
     ) {
@@ -575,13 +576,18 @@ export function buildBullpenAutoRunWorkflowView(
     }
 
     const tone: WorkflowTone =
-      state === "finished" &&
-      stage?.status !== "fail" &&
-      !(runStatus === "partial_success" && definition.key === "invest")
-        ? "green"
-        : state === "current"
-          ? "yellow"
-          : "blue";
+      explicitPhase === "aborted" ||
+      (definition.key === "invest" &&
+        runStatus === "failed" &&
+        readBoolean(stage?.outputs?.recovery_required))
+        ? "red"
+        : state === "finished" &&
+            stage?.status !== "fail" &&
+            !(runStatus === "partial_success" && definition.key === "invest")
+          ? "green"
+          : state === "current"
+            ? "yellow"
+            : "blue";
     const shouldShowStageData = state !== "queued";
     const stageInputs = readWorkflowInputs(definition, stage, previousStage);
     const completedItems = shouldShowStageData
@@ -608,6 +614,8 @@ export function buildBullpenAutoRunWorkflowView(
       ? "Queued"
       : explicitPhase === "cancelled"
         ? "Cancelled"
+      : explicitPhase === "aborted"
+        ? "Interrupted"
       : explicitPhase === "failed"
         ? "Failed"
         : definition.key === "llm" && llmExecutionMode === "single_combined"

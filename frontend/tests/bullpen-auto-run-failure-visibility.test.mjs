@@ -160,3 +160,79 @@ test("a user-cancelled auto-run does not leave a worker stage in progress", asyn
   assert.equal(view.stages[2].state, "finished");
   assert.equal(view.stages[2].progressLabel, "Cancelled");
 });
+
+test("interrupted Stage 3 remains visible with persisted counters and interrupted status", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage3-interrupted",
+    triggered_by: "manual",
+    status: "failed",
+    dry_run: false,
+    started_at: "2026-07-01T08:00:00Z",
+    completed_at: "2026-07-01T08:04:23Z",
+    summary:
+      "Stage 3 was interrupted by a worker/service restart. Recovery is required; persisted submissions will be reconciled and no order was automatically resubmitted.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 25,
+    orders_planned: 6,
+    orders_submitted: 5,
+    error_message:
+      "Stage 3 was interrupted by a worker/service restart. Recovery is required; persisted submissions will be reconciled and no order was automatically resubmitted.",
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Bullpen Scan finished.", {
+        workflow_stage_key: "scan",
+        phase_status: "completed",
+      }),
+      createStage(2, "Stage 2 reviewed candidates.", {
+        workflow_stage_key: "llm",
+        phase_status: "completed",
+      }),
+      {
+        ...createStage(3, "Stage 3 was interrupted by a worker/service restart.", {
+          workflow_stage_key: "invest",
+          phase_status: "aborted",
+          recovery_required: true,
+          orders_planned: 6,
+          orders_submitted: 5,
+          execution_steps: [
+            {
+              key: "sell",
+              label: "Event Exits",
+              status: "completed",
+              step_number: 1,
+              step_total: 2,
+              planned_orders: 5,
+              processed_orders: 5,
+              submitted_orders: 4,
+            },
+            {
+              key: "buy",
+              label: "Prepare investment queue",
+              status: "running",
+              step_number: 2,
+              step_total: 2,
+              planned_orders: 1,
+              processed_orders: 1,
+              submitted_orders: 1,
+            },
+          ],
+        }),
+        status: "fail",
+        completed_at: "2026-07-01T08:04:23Z",
+      },
+    ],
+  });
+
+  const stage3 = view.stages[2];
+  assert.equal(stage3.state, "finished");
+  assert.equal(stage3.tone, "red");
+  assert.equal(stage3.progressLabel, "Interrupted");
+  assert.equal(stage3.timerCompletedAt, "2026-07-01T08:04:23Z");
+  assert.equal(stage3.outputs.orders_planned, 6);
+  assert.equal(stage3.outputs.orders_submitted, 5);
+  assert.equal(stage3.outputs.execution_steps.length, 2);
+});

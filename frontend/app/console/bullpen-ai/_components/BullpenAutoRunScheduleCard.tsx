@@ -1986,6 +1986,16 @@ function readStageOutputString(value: unknown) {
     : null;
 }
 
+function readStageOutputBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return false;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -4013,11 +4023,13 @@ function RunDetailWorkerStages({
           );
           const stageStatusLabel = immediateSuccess
             ? "Finished"
-            : stage.state === "current"
-              ? "Working"
-              : stage.state === "finished"
-                ? "Finished"
-                : "In Queue";
+            : stage.progressLabel === "Interrupted"
+              ? "Interrupted"
+              : stage.state === "current"
+                ? "Working"
+                : stage.state === "finished"
+                  ? "Finished"
+                  : "In Queue";
           const progressPercent = immediateSuccess
             ? 100
             : stage.progressPercent;
@@ -8259,7 +8271,7 @@ function getVisibleRun(
   return summary.recent_runs.find((run) => run.status === "completed") ?? null;
 }
 
-function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {
+function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "red" | "slate") {
   if (tone === "slate") {
     return {
       container:
@@ -8270,6 +8282,18 @@ function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "slate") {
       muted: "text-slate-600 dark:text-slate-300",
       progress: "bg-slate-300",
       progressTrack: "bg-slate-100 dark:bg-slate-800",
+    };
+  }
+  if (tone === "red") {
+    return {
+      container:
+        "border-rose-300 bg-rose-50/90 dark:border-rose-400/35 dark:bg-rose-950/45",
+      badge:
+        "border-rose-300 bg-rose-100 text-rose-900 dark:border-rose-400/35 dark:bg-rose-500/10 dark:text-rose-100",
+      text: "text-rose-950 dark:text-rose-50",
+      muted: "text-rose-900/80 dark:text-rose-100/75",
+      progress: "bg-rose-500",
+      progressTrack: "bg-rose-200/80 dark:bg-rose-500/20",
     };
   }
   if (tone === "yellow") {
@@ -10274,6 +10298,12 @@ export function BullpenAutoRunScheduleCard({
       }),
     });
   };
+  const stage3InterruptedWithoutResume = Boolean(
+    workflowRunForMonitor?.status === "failed" &&
+      investWorkflowStage?.key === "invest" &&
+      readStageOutputString(investWorkflowStage.outputs.phase_status) === "aborted" &&
+      readStageOutputBoolean(investWorkflowStage.outputs.recovery_required),
+  );
   const investOnlyDisabledReason = runIsActive
     ? "Wait for the active Auto-Live run to finish before starting another Invest pass."
     : effectiveInvestOnlyRequest
@@ -11329,22 +11359,28 @@ export function BullpenAutoRunScheduleCard({
                         <p
                           className={`text-[11px] leading-5 ${toneClasses.muted}`}
                         >
-                          {stage3PreviewDialogState.plannedOrders} queued candidate{" "}
-                          {stage3PreviewDialogState.plannedOrders === 1
-                            ? "row is"
-                            : "rows are"}{" "}
-                          ready for this invest-only pass. No concrete order is
-                          planned until the worker completes Stage 3 checks.
-                          {" "}
-                          {stage3PreviewDialogState.sellPlannedOrders > 0
-                            ? `${stage3PreviewDialogState.sellPlannedOrders} sell${stage3PreviewDialogState.sellPlannedOrders === 1 ? "" : "s"} first`
-                            : "No sell rows are queued"}
-                          {" · "}
-                          {stage3PreviewDialogState.buyPlannedOrders} buy
-                          {stage3PreviewDialogState.buyPlannedOrders === 1
-                            ? ""
-                            : "s"}{" "}
-                          after the post-exit refresh.
+                          {stage3InterruptedWithoutResume
+                            ? "Stage 3 was interrupted before the worker finished all exit and invest checks. The counts above show the planned, processed, and submitted values persisted before interruption; use recovery/retry to reconcile before starting a fresh pass."
+                            : (
+                              <>
+                                {stage3PreviewDialogState.plannedOrders} queued candidate{" "}
+                                {stage3PreviewDialogState.plannedOrders === 1
+                                  ? "row is"
+                                  : "rows are"}{" "}
+                                ready for this invest-only pass. No concrete order is
+                                planned until the worker completes Stage 3 checks.
+                                {" "}
+                                {stage3PreviewDialogState.sellPlannedOrders > 0
+                                  ? `${stage3PreviewDialogState.sellPlannedOrders} sell${stage3PreviewDialogState.sellPlannedOrders === 1 ? "" : "s"} first`
+                                  : "No sell rows are queued"}
+                                {" · "}
+                                {stage3PreviewDialogState.buyPlannedOrders} buy
+                                {stage3PreviewDialogState.buyPlannedOrders === 1
+                                  ? ""
+                                  : "s"}{" "}
+                                after the post-exit refresh.
+                              </>
+                            )}
                         </p>
                       ) : null}
                     </div>
