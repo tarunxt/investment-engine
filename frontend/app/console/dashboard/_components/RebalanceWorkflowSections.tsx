@@ -246,8 +246,6 @@ const AUTO_REBALANCE_MIX_ALIASES = [
 ];
 const GPT_4O_MINI_MODEL = "gpt-4o-mini";
 const POLL_INTERVAL_MS = 3000;
-const MAX_RUN_POLLS = 160;
-const MAX_JOB_POLLS = 120;
 const MAX_ZERODHA_SYNC_POLLS = 30;
 const WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:v1";
@@ -699,7 +697,7 @@ async function waitForRunCompletion(
   onProgress?: (run: RunResponse) => void,
   shouldStop?: () => boolean,
 ) {
-  for (let attempt = 0; attempt < MAX_RUN_POLLS; attempt += 1) {
+  while (true) {
     if (shouldStop?.()) throw new Error(`Run #${runId} was cancelled by user.`);
     const run = await apiService.getRun(runId);
     onProgress?.(run);
@@ -707,9 +705,6 @@ async function waitForRunCompletion(
     if (status === "completed" || status === "partial" || status === "failed") return run;
     await sleep(POLL_INTERVAL_MS);
   }
-  const lastRun = await apiService.getRun(runId);
-  onProgress?.(lastRun);
-  return lastRun;
 }
 
 
@@ -736,7 +731,7 @@ async function waitForThreatCompletion(
   jobId: number,
   shouldStop?: () => boolean,
 ): Promise<ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis> {
-  for (let attempt = 0; attempt < MAX_JOB_POLLS; attempt += 1) {
+  while (true) {
     if (shouldStop?.()) {
       throw new Error(`Threat job #${jobId} was cancelled by user.`);
     }
@@ -745,12 +740,9 @@ async function waitForThreatCompletion(
         ? await apiService.zerodhaThreatJob(jobId)
         : await apiService.indmoneyUsThreatJob(jobId);
     const status = (analysis.status || "").toLowerCase();
-    if (status === "completed" || status === "failed") return analysis;
+    if (["completed", "partial", "failed"].includes(status)) return analysis;
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error(
-    `Threat job #${jobId} did not finish before the dashboard timeout.`,
-  );
 }
 
 function getLatestMatchingRebalanceRuns(
@@ -5513,6 +5505,7 @@ export function RebalanceWorkflowSections({
   const activeExecutionRefsRef = useRef<Array<{ kind: "run" | "job"; id: number }>>([]);
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
+  const isWorkflowExecutingRef = useRef(false);
 
   useEffect(() => {
     persistWorkflow({
@@ -6418,6 +6411,11 @@ ${zerodhaExecutionMode === "direct_market"
 
   useEffect(() => {
     if (!runningPortfolio) return;
+    // The visible workflow is driven by runWorkflow while this tab is open.
+    // Its stages briefly hand off from a completed job to the next queued job;
+    // treating that normal gap as a restored/abandoned session clears the run
+    // controls and strands the remaining stages.
+    if (isWorkflowExecutingRef.current) return;
     const runningEntries = STAGE_ORDER.flatMap((stage) => {
       const info = states[runningPortfolio][stage];
       return info.state === "running" && info.activeRunId
@@ -6837,53 +6835,37 @@ ${zerodhaExecutionMode === "direct_market"
       ];
       updateStage(portfolio, stage, { activeRunId: runId });
 
-      while (true) {
-        let run: RunResponse;
-        try {
-          run = await waitForRunCompletion(
-            runId,
-            (progressRun) =>
-              updateStage(portfolio, stage, getRunProgress(progressRun)),
-            () => cancelRequestedRef.current,
-          );
-        } catch (error) {
-          if (error instanceof APIError && error.status === 401) {
-            updateStage(portfolio, stage, {
-              state: "failed",
-              endedAt: new Date().toISOString(),
-              runStatus: "auth expired",
-              error:
-                "Dashboard authentication expired while polling. The worker job may still have completed and saved output in the background; refresh/sign in again before verifying the result.",
-            });
-            throw new Error(
-              "Dashboard authentication expired while polling. The worker job may still complete in the background; refresh/sign in again and open View Output or the stage screen to verify saved results.",
-            );
-          }
-          throw error;
-        }
-        const status = (run.status || "").toLowerCase();
-        if (status === "completed" || status === "partial") return run;
-
-        const progress = getRunProgress(run);
-        const error = summarizeRun(run).error;
-        const timeoutLike = status !== "failed";
-        const detail = timeoutLike
-          ? `Run #${runId} is still processing after the dashboard polling window. Heavy prompts can take longer. Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs.`
-          : `Run #${runId} ended with status "${run.status}". Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs. ${error ? `Error: ${error}` : ""}`;
-
-        if (progress.completedLlms > 0) {
-          const waitLonger = window.confirm(
-            `${detail}\n\nPress OK to keep waiting. Press Cancel to continue with completed LLMs and kill pending/processing LLM jobs.`,
-          );
-          if (waitLonger) continue;
-          await apiService.cancelRun(runId);
-          return apiService.getRun(runId);
-        }
-
-        throw new Error(
-          `${detail}\n\nNo LLM output is available yet, so this stage cannot safely continue without user approval.`,
+      let run: RunResponse;
+      try {
+        run = await waitForRunCompletion(
+          runId,
+          (progressRun) =>
+            updateStage(portfolio, stage, getRunProgress(progressRun)),
+          () => cancelRequestedRef.current,
         );
+      } catch (error) {
+        if (error instanceof APIError && error.status === 401) {
+          updateStage(portfolio, stage, {
+            state: "failed",
+            endedAt: new Date().toISOString(),
+            runStatus: "auth expired",
+            error:
+              "Dashboard authentication expired while polling. The worker job may still have completed and saved output in the background; refresh/sign in again before verifying the result.",
+          });
+          throw new Error(
+            "Dashboard authentication expired while polling. The worker job may still complete in the background; refresh/sign in again and open View Output or the stage screen to verify saved results.",
+          );
+        }
+        throw error;
       }
+      const status = (run.status || "").toLowerCase();
+      if (status === "completed" || status === "partial") return run;
+
+      const progress = getRunProgress(run);
+      const error = summarizeRun(run).error;
+      throw new Error(
+        `Run #${runId} ended with status "${run.status}". Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs.${error ? ` Error: ${error}` : ""}`,
+      );
     },
     [updateStage],
   );
@@ -7272,6 +7254,27 @@ ${zerodhaExecutionMode === "direct_market"
         pauseRequestedRef.current = false;
         return true;
       };
+      const continueAfterStageFailure = (
+        stage: WorkflowStageKey,
+        error: unknown,
+      ) => {
+        if (cancelRequestedRef.current) throw error;
+        const message = normalizeError(error);
+        updateStage(portfolio, stage, {
+          state: "failed",
+          endedAt: new Date().toISOString(),
+          activeRunId: null,
+          error: message,
+          runStatus: "failed",
+        });
+        if (!promptToContinueAfterProblem(stage, message)) throw error;
+        completeSkippedStage(
+          portfolio,
+          stage,
+          "Using latest saved output after failed stage",
+        );
+      };
+      isWorkflowExecutingRef.current = true;
       setRunningPortfolio(portfolio);
       resetPortfolio(portfolio);
       activeExecutionRefsRef.current = [];
@@ -7323,13 +7326,28 @@ ${zerodhaExecutionMode === "direct_market"
               runStatus: overview.latest?.parse_status ?? "last snapshot",
             });
           }
-          await onDashboardRefresh();
         } else {
           completeSkippedStage(
             portfolio,
             "sync",
             "Using last synced portfolio",
           );
+        }
+
+        const nextStageAfterSync = STAGE_ORDER.find(
+          (stage) => stage !== "sync" && shouldRunCurrentStage(stage),
+        );
+        if (nextStageAfterSync) {
+          // Show the upcoming stage before any ancillary refresh or provider
+          // lookup. These requests can be slow, but the user should never be
+          // left guessing whether the sequence will continue.
+          currentStage = nextStageAfterSync;
+          markRunning(portfolio, nextStageAfterSync);
+        }
+        if (shouldRunCurrentStage("sync")) {
+          void onDashboardRefresh().catch((error) => {
+            console.error("Failed to refresh dashboard after portfolio sync", error);
+          });
         }
 
         if (stopIfPaused()) return;
@@ -7412,7 +7430,10 @@ ${zerodhaExecutionMode === "direct_market"
               queuedThreat.job_id,
               () => cancelRequestedRef.current,
             );
-            if ((completedThreat.status || "").toLowerCase() !== "completed")
+            if (![
+              "completed",
+              "partial",
+            ].includes((completedThreat.status || "").toLowerCase()))
               throw new Error(
                 `Threats scan failed: ${completedThreat.error_message ?? "Job failed."}`,
               );
@@ -7423,21 +7444,7 @@ ${zerodhaExecutionMode === "direct_market"
               totalLlms: 1,
             });
           } catch (error) {
-            if (cancelRequestedRef.current) throw error;
-            const message = normalizeError(error);
-            updateStage(portfolio, "threats", {
-              state: "failed",
-              endedAt: new Date().toISOString(),
-              activeRunId: null,
-              error: message,
-              runStatus: "failed",
-            });
-            if (!promptToContinueAfterProblem("threats", message)) throw error;
-            completeSkippedStage(
-              portfolio,
-              "threats",
-              "Using latest threats scan after failed run",
-            );
+            continueAfterStageFailure("threats", error);
           }
         } else {
           completeSkippedStage(
@@ -7451,6 +7458,7 @@ ${zerodhaExecutionMode === "direct_market"
 
         currentStage = "swing";
         if (shouldRunCurrentStage("swing")) {
+          try {
           markRunning(portfolio, "swing", {
             totalLlms: swingTargets.length,
             completedLlms: 0,
@@ -7506,6 +7514,9 @@ ${zerodhaExecutionMode === "direct_market"
             lastRunId: completedSwingRun.id,
             recommendedStocks: countUniqueStocksFromRun(completedSwingRun),
           });
+          } catch (error) {
+            continueAfterStageFailure("swing", error);
+          }
         } else {
           completeSkippedStage(
             portfolio,
@@ -7518,6 +7529,7 @@ ${zerodhaExecutionMode === "direct_market"
 
         currentStage = "rebalance";
         if (shouldRunCurrentStage("rebalance")) {
+          try {
           markRunning(portfolio, "rebalance", {
             totalLlms: rebalanceTargets.length,
             completedLlms: 0,
@@ -7601,6 +7613,9 @@ ${zerodhaExecutionMode === "direct_market"
                 market,
               ).length || null,
           });
+          } catch (error) {
+            continueAfterStageFailure("rebalance", error);
+          }
         } else {
           completeSkippedStage(
             portfolio,
@@ -7613,6 +7628,7 @@ ${zerodhaExecutionMode === "direct_market"
 
         currentStage = "technical";
         if (shouldRunCurrentStage("technical")) {
+          try {
           markRunning(portfolio, "technical", {
             totalLlms: 1,
             completedLlms: 0,
@@ -7662,6 +7678,9 @@ ${zerodhaExecutionMode === "direct_market"
             lastRunId: completedTechnicalRun.id,
             recommendedStocks: countUniqueStocksFromRun(completedTechnicalRun),
           });
+          } catch (error) {
+            continueAfterStageFailure("technical", error);
+          }
         } else {
           completeSkippedStage(
             portfolio,
@@ -7674,6 +7693,7 @@ ${zerodhaExecutionMode === "direct_market"
 
         currentStage = "actionables";
         if (shouldRunCurrentStage("actionables")) {
+          try {
           const rebalanceInputCount = generatedRebalanceRun
             ? 1
             : selectedInputs[portfolio].actionables.size;
@@ -7710,6 +7730,9 @@ ${zerodhaExecutionMode === "direct_market"
             });
           } catch (emailError) {
             console.error("Failed to queue auto-rebalance success email", emailError);
+          }
+          } catch (error) {
+            continueAfterStageFailure("actionables", error);
           }
         } else {
           completeSkippedStage(
@@ -7792,6 +7815,7 @@ ${zerodhaExecutionMode === "direct_market"
       } finally {
         const wasCancelled = cancelRequestedRef.current;
         activeExecutionRefsRef.current = [];
+        isWorkflowExecutingRef.current = false;
         setRunningPortfolio(null);
         if (wasCancelled) {
           const timestamp = new Date().toISOString();
