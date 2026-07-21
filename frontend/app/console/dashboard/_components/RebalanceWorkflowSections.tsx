@@ -161,6 +161,14 @@ type StageLlmHistoryEntry = {
   rawStatus: string;
 };
 type HistoricalLlmCostMapInr = Record<string, number>;
+type StageErrorDetail = {
+  provider: string | null;
+  model: string | null;
+  message: string;
+  status?: string | null;
+  jobId?: number | null;
+};
+
 type StageInfo = {
   state: StageState;
   startedAt?: string | null;
@@ -173,6 +181,7 @@ type StageInfo = {
   costUsd?: number | null;
   costInr?: number | null;
   error?: string | null;
+  errorDetails?: StageErrorDetail[];
   activeRunId?: number | null;
   lastRunId?: number | null;
   completedLlms?: number | null;
@@ -555,9 +564,28 @@ function summarizeRun(run: RunResponse) {
     (total, job) => total + (job.estimated_cost ?? 0),
     0,
   );
-  const failedJob = jobs.find(
-    (job) => (job.status || "").toLowerCase() === "failed" || job.error_message,
+  const failedJobs = jobs.filter(
+    (job) => (job.status || "").toLowerCase() === "failed" || Boolean(job.error_message),
   );
+  const failedJob = failedJobs[0];
+  const errorDetails: StageErrorDetail[] = failedJobs
+    .map((job): StageErrorDetail => ({
+      provider: job.provider ?? null,
+      model: job.model ?? null,
+      message: job.error_message?.trim() || `LLM job #${job.id} ended with status "${job.status || "failed"}".`,
+      status: job.status ?? null,
+      jobId: job.id ?? null,
+    }))
+    .filter((detail) => detail.message.trim());
+  if (run.export_error?.trim()) {
+    errorDetails.unshift({
+      provider: null,
+      model: null,
+      message: run.export_error.trim(),
+      status: run.export_status ?? null,
+      jobId: null,
+    });
+  }
   return {
     completedAt: run.updated_at ?? firstJob?.updated_at ?? run.created_at,
     provider: jobs.length > 1 ? `${jobs.length} LLMs` : firstJob?.provider,
@@ -566,12 +594,14 @@ function summarizeRun(run: RunResponse) {
     exportStatus: run.export_status ?? firstJob?.export_status,
     costUsd: costUsd || null,
     error: run.export_error ?? failedJob?.error_message ?? null,
+    errorDetails,
   };
 }
 
 function summarizeThreat(
   analysis: ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis,
 ) {
+  const errorMessage = analysis.error_message?.trim() ?? null;
   return {
     completedAt: analysis.updated_at ?? analysis.created_at,
     provider: analysis.provider,
@@ -580,6 +610,17 @@ function summarizeThreat(
     exportStatus: null,
     costUsd: analysis.estimated_cost ?? null,
     error: analysis.error_message ?? null,
+    errorDetails: errorMessage
+      ? [
+          {
+            provider: analysis.provider ?? null,
+            model: analysis.model ?? null,
+            message: errorMessage,
+            status: analysis.status ?? null,
+            jobId: analysis.job_id ?? null,
+          },
+        ]
+      : [],
   };
 }
 
@@ -1918,11 +1959,11 @@ function formatBriefTileError(error?: string | null) {
 }
 
 function getTileErrorDetail(error?: string | null) {
-  if (!error?.trim() || isSheetExportError(error) || !isInsufficientBalanceError(error)) return null;
+  if (!error?.trim() || isSheetExportError(error)) return null;
   return error.trim();
 }
 
-type StageTileRow = { label: string; value: string; detail?: string | null };
+type StageTileRow = { label: string; value: string; detail?: string | null; errorDetails?: StageErrorDetail[] };
 
 function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
   return [
@@ -1931,7 +1972,7 @@ function getLlmStageTileRows(info: StageInfo, now: number): StageTileRow[] {
     { label: "Stocks recommended", value: formatRecommendedStockProgress(info) },
     { label: "Duration", value: formatDuration(info.startedAt, info.endedAt, now) ?? "n/a" },
     { label: "Cost incurred", value: formatInrCost(info.costInr) },
-    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error) },
+    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error), errorDetails: info.errorDetails },
   ];
 }
 
@@ -1940,7 +1981,7 @@ function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
     { label: "Last update", value: formatTimestamp(info.completedAt ?? info.startedAt) },
     { label: "Rebalance inputs", value: info.rebalanceInputs?.toString() ?? "n/a" },
     { label: "Stocks recommended", value: info.recommendedStocks?.toString() ?? "n/a" },
-    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error) },
+    { label: "Error", value: formatBriefTileError(info.error), detail: getTileErrorDetail(info.error), errorDetails: info.errorDetails },
   ];
 }
 
@@ -2926,9 +2967,8 @@ function WorkflowStageTile({
               <span className="font-semibold text-slate-600">
                 {row.label}:
               </span>{" "}
-              <span>{row.value}</span>
               {row.label === "Error" && row.detail ? (
-                <span className="relative ml-1 inline-flex align-middle">
+                <span className="relative inline-flex align-middle">
                   <span
                     role="button"
                     tabIndex={0}
@@ -2948,20 +2988,41 @@ function WorkflowStageTile({
                         );
                       }
                     }}
-                    className="inline-flex size-4 items-center justify-center rounded-full border border-red-200 bg-white text-red-600 shadow-sm transition hover:border-red-300 hover:bg-red-50"
-                    aria-label="Show detailed error"
-                    title="Show detailed error"
+                    className="cursor-pointer rounded text-red-700 underline decoration-red-300 underline-offset-2 transition hover:text-red-800 hover:decoration-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+                    aria-label="Show detailed LLM error"
+                    title="Show detailed LLM error"
                   >
-                    <Info className="size-3" />
+                    {row.value}
                   </span>
                   {openErrorDetail === row.detail ? (
-                    <span className="absolute left-0 top-6 z-30 w-72 max-w-[calc(100vw-4rem)] rounded-2xl border border-red-100 bg-white p-3 text-xs leading-5 text-slate-700 shadow-xl shadow-slate-900/10">
-                      <span className="block font-bold text-red-700">Detailed error</span>
-                      <span className="mt-1 block whitespace-pre-wrap break-words">{row.detail}</span>
+                    <span className="absolute left-0 top-6 z-30 w-96 max-w-[calc(100vw-4rem)] rounded-2xl border border-red-100 bg-white p-4 text-xs leading-5 text-slate-700 shadow-xl shadow-slate-900/10">
+                      <span className="block font-bold text-red-700">Detailed LLM error</span>
+                      {row.errorDetails?.length ? (
+                        <span className="mt-2 block space-y-3">
+                          {row.errorDetails.map((detail, index) => (
+                            <span key={`${detail.provider ?? "unknown"}-${detail.model ?? "unknown"}-${detail.jobId ?? index}`} className="block rounded-xl border border-red-100 bg-red-50/50 p-3">
+                              <span className="block font-semibold text-slate-900">
+                                LLM: {[detail.provider || "Unknown provider", detail.model || "Unknown model"].join(" / ")}
+                              </span>
+                              {detail.jobId || detail.status ? (
+                                <span className="mt-0.5 block text-[11px] uppercase tracking-wide text-slate-500">
+                                  {detail.jobId ? `Job #${detail.jobId}` : "Workflow error"}
+                                  {detail.status ? ` · Status: ${detail.status}` : ""}
+                                </span>
+                              ) : null}
+                              <span className="mt-2 block whitespace-pre-wrap break-words">{detail.message}</span>
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="mt-1 block whitespace-pre-wrap break-words">{row.detail}</span>
+                      )}
                     </span>
                   ) : null}
                 </span>
-              ) : null}
+              ) : (
+                <span>{row.value}</span>
+              )}
             </p>
           ))
         )}
