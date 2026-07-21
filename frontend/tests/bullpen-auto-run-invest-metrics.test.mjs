@@ -235,6 +235,16 @@ test("planned Event Exit strategy filters exclude submitted rows", async () => {
   );
 });
 
+test("Stage 3 exit metric descriptions distinguish in-flight submitting rows", async () => {
+  const { getInvestMetricDialogDefinition } = await loadInvestMetricsModule();
+
+  const plannedDefinition = getInvestMetricDialogDefinition("sell-planned");
+  const submittedDefinition = getInvestMetricDialogDefinition("sell-submitted");
+
+  assert.match(plannedDefinition.description, /submitting/);
+  assert.match(submittedDefinition.description, /In-flight submitting rows stay in planned\/processed details/);
+});
+
 test("schedule card wires step metric tiles into the shared popup flow", () => {
   const source = readFileSync(
     new URL(
