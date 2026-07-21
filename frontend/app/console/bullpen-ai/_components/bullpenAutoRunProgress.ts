@@ -626,11 +626,9 @@ export function buildBullpenAutoRunWorkflowView(
     const stageTimerStartedAt = !shouldShowStageData
       ? null
       : (stage?.started_at ??
-        (index === 0 && runStatus === "running"
+        (index === 0
           ? (pendingRunStartedAt ?? normalizedRun?.started_at ?? null)
-          : state === "finished"
-            ? (normalizedRun?.started_at ?? null)
-            : null));
+          : null));
     const stageTimerCompletedAt = !shouldShowStageData
       ? null
       : explicitPhase === "running" && runStatus === "running"

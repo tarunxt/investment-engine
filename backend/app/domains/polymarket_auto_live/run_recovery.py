@@ -629,6 +629,60 @@ def _finalize_settled_running_run(run: BullpenAutoLiveRun) -> None:
     run.summary = _build_completed_summary(run, invest_stage)
 
 
+def _finalize_successful_worker_after_stage3_handoff(
+    run: BullpenAutoLiveRun,
+    *,
+    completed_at: str,
+) -> bool:
+    """Mark a successful task handoff as confirming instead of a false failure.
+
+    Durable Stage 3 can legitimately finish the Celery planning task after it
+    has persisted/queued order intents, while the run remains non-terminal so
+    follow-up dispatch/reconciliation can complete asynchronously.
+    """
+
+    invest_stage = next(
+        (
+            stage
+            for stage in reversed(run.stage_results)
+            if _stage_workflow_key(stage) == "invest" or stage.stage_number == 3
+        ),
+        None,
+    )
+    if invest_stage is None or _stage_terminal(invest_stage):
+        return False
+
+    phase_status = _stage_phase_status(invest_stage)
+    if phase_status not in {"queued", "running", "confirming"}:
+        return False
+
+    queued_orders = _read_output_int(invest_stage.outputs.get("orders_queued")) or 0
+    planned_orders = _read_output_int(invest_stage.outputs.get("orders_planned")) or 0
+    decision_rows = invest_stage.outputs.get("decision_rows")
+    decision_row_count = len(decision_rows) if isinstance(decision_rows, list) else 0
+    if max(queued_orders, planned_orders, decision_row_count) <= 0:
+        return False
+
+    run.status = "confirming"
+    run.completed_at = None
+    run.error_message = None
+    run.summary = (
+        "Stage 3 queued durable order intents and is awaiting asynchronous "
+        "execution reconciliation."
+    )
+    invest_stage.outputs = {
+        **invest_stage.outputs,
+        "phase_status": "confirming",
+        "worker_handoff_completed_at": completed_at,
+    }
+    invest_stage.reason = (
+        "Stage 3 queued durable order intents; asynchronous execution "
+        "reconciliation is in progress."
+    )
+    invest_stage.completed_at = None
+    return True
+
+
 def _build_stalled_run_failure_message(
     *,
     heartbeat_age: timedelta,
@@ -702,6 +756,14 @@ def reconcile_running_auto_live_run(
     normalized_started_at = _normalize_datetime(started_at) or reference_now
     normalized_updated_at = _normalize_datetime(updated_at) or normalized_started_at
     runtime_snapshot = task_snapshot or inspect_auto_live_run_task_sync(run.id)
+    if (
+        (runtime_snapshot.state or "").strip().upper() == "SUCCESS"
+        and _finalize_successful_worker_after_stage3_handoff(
+            run,
+            completed_at=reference_now.isoformat(),
+        )
+    ):
+        return run
     failure_message = _build_stalled_run_failure_message(
         heartbeat_age=max(reference_now - normalized_updated_at, timedelta()),
         absolute_age=max(reference_now - normalized_started_at, timedelta()),
