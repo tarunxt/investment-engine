@@ -140,6 +140,11 @@ import {
   type BullpenStage2UniverseStatus,
 } from "./bullpenStage2To3Strategy";
 
+type BullpenEventSummaryHighlight =
+  | "active-retained"
+  | "event-exit"
+  | "new-opportunity";
+
 const BULLPEN_LOGIN_COMMAND =
   "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
@@ -214,6 +219,8 @@ type RunDetailDialogState = {
 
 type StageTwoInvestEventsDialogState = {
   rows: BullpenQuestionRow[];
+  stage: WorkflowStageView | null;
+  decisions: BullpenAutoLiveDecision[];
   updatedAt: string | null;
   updateUnavailableReason?: string;
 };
@@ -1157,6 +1164,8 @@ function buildStageTwoInvestEventsDialogState({
   if (!llmWorkflowStage) {
     return {
       rows: [],
+      stage: null,
+      decisions,
       updatedAt: null,
       updateUnavailableReason:
         "Timestamp unavailable because this run did not save a Stage 2 Events Summary.",
@@ -1194,6 +1203,8 @@ function buildStageTwoInvestEventsDialogState({
   });
 
   return {
+    stage: llmWorkflowStage,
+    decisions,
     rows: getBullpenTopTenStrongestLlmOddsRows(
       eventsSummaryRows,
       DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
@@ -1985,6 +1996,77 @@ function normalizeMatchKey(value: string | null | undefined) {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function getStageTwoSummaryRowMatchKeys(row: BullpenQuestionRow) {
+  return [row.marketId, row.slug, row.marketUrl, row.question]
+    .map((key) => normalizeMatchKey(key))
+    .filter((key): key is string => Boolean(key));
+}
+
+function getStageTwoActivePositionMatchKeys(
+  position: WorkflowStageView["activePositionsFound"][number],
+) {
+  return [position.marketId, position.slug, position.marketUrl, position.marketTitle]
+    .map((key) => normalizeMatchKey(key))
+    .filter((key): key is string => Boolean(key));
+}
+
+function buildStageTwoActivePositionKeySet(stage: WorkflowStageView) {
+  return new Set(
+    stage.activePositionsFound.flatMap((position) =>
+      getStageTwoActivePositionMatchKeys(position),
+    ),
+  );
+}
+
+function getStageTwoDecisionForSummaryRow(
+  row: BullpenQuestionRow,
+  decisions: BullpenAutoLiveDecision[],
+) {
+  const rowKeys = new Set(getStageTwoSummaryRowMatchKeys(row));
+  return (
+    decisions.find((decision) =>
+      [decision.market_id, decision.slug ?? null]
+        .map((key) => normalizeMatchKey(key))
+        .some((key) => Boolean(key && rowKeys.has(key))),
+    ) ?? null
+  );
+}
+
+function buildStageTwoEventsSummaryHighlightById({
+  rows,
+  stage,
+  decisions,
+  includeEventExits,
+}: {
+  rows: BullpenQuestionRow[];
+  stage: WorkflowStageView | null;
+  decisions: BullpenAutoLiveDecision[];
+  includeEventExits: boolean;
+}) {
+  const activePositionKeys = stage
+    ? buildStageTwoActivePositionKeySet(stage)
+    : new Set<string>();
+
+  return Object.fromEntries(
+    rows.map((row) => {
+      const rowKeys = getStageTwoSummaryRowMatchKeys(row);
+      const isActivePosition = rowKeys.some((key) => activePositionKeys.has(key));
+      const decision = isActivePosition
+        ? getStageTwoDecisionForSummaryRow(row, decisions)
+        : null;
+      let highlight: BullpenEventSummaryHighlight = "new-opportunity";
+
+      if (isActivePosition) {
+        highlight =
+          includeEventExits && decision?.decision === "EXIT"
+            ? "event-exit"
+            : "active-retained";
+      }
+
+      return [row.id, highlight] as const;
+    }),
+  );
+}
 function findRunStage(
   run: BullpenAutoLiveRun | null,
   workflowStageKey: "scan" | "llm" | "invest",
@@ -6097,6 +6179,12 @@ export function StageTwoLlmRunDetailsDialog({
                 sortState={eventsSummarySortState}
                 onToggleQuestion={() => undefined}
                 onToggleSelectAll={() => undefined}
+                rowHighlightById={buildStageTwoEventsSummaryHighlightById({
+                  rows: eventsSummaryRows,
+                  stage: state.stage,
+                  decisions: state.decisions,
+                  includeEventExits: true,
+                })}
               />
             </div>
           </section>
@@ -7341,6 +7429,12 @@ function StageTwoInvestEventsDialog({
             persistColumnPreferences={false}
             showPresetFilters={false}
             displayDensity={isCompactRows ? "compact" : "default"}
+            rowHighlightById={buildStageTwoEventsSummaryHighlightById({
+              rows: state.rows,
+              stage: state.stage,
+              decisions: state.decisions,
+              includeEventExits: false,
+            })}
           />
         </div>
       </div>
