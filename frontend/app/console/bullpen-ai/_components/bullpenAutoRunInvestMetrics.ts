@@ -326,7 +326,7 @@ export function getInvestMetricDialogDefinition(
       return {
         title: "Stage 3 Step 1 planned exits",
         description:
-          "Event Exit rows where Stage 3 created a sell order plan.",
+          "Event Exit rows where Stage 3 created a sell order plan. This includes every sell plan state, such as ready, submitting, submitted, filled, skipped, or failed.",
         includes: (decision) => hasOrderAction(decision, "sell"),
       };
     case "sell-processed":
@@ -342,7 +342,7 @@ export function getInvestMetricDialogDefinition(
       return {
         title: "Stage 3 Step 1 submitted exits",
         description:
-          "Event Exit sell rows whose order reached submitted status.",
+          "Event Exit sell rows whose order reached submitted or successful execution status. In-flight submitting rows stay in planned/processed details until Bullpen confirms submission.",
         includes: (decision) =>
           hasOrderAction(decision, "sell") &&
           isSubmittedOrSuccessfulDecision(decision),
