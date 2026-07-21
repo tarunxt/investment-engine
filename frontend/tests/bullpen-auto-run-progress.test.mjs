@@ -1037,3 +1037,42 @@ test("Bullpen auto-run workflow view explains the saved Stage 2 execution mode",
     /Execution mode: Batched parallel with up to 20 events per prompt\./,
   );
 });
+
+
+test("Bullpen auto-run workflow view exposes detailed Stage 1 progress commentary", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-stage1-commentary",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: true,
+    started_at: "2026-06-25T05:00:00Z",
+    summary: "Stage 1 is fetching live Bullpen candidate markets.",
+    live_execution_requested: false,
+    live_execution_attempted: false,
+    decisions_count: 0,
+    orders_planned: 0,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      createStage(1, "Stage 1 is fetching live Bullpen candidate markets.", {
+        workflow_stage_key: "scan",
+        phase_status: "running",
+        completed_items: 0,
+        item_label: "events",
+        progress_commentary: [
+          "Requesting the live console profile candidate feed.",
+          "Applying Stage 1 filters.",
+        ],
+      }),
+    ],
+  });
+
+  assert.deepEqual(view.stages[0].progressCommentary, [
+    "Requesting the live console profile candidate feed.",
+    "Applying Stage 1 filters.",
+  ]);
+});

@@ -5002,9 +5002,70 @@ class BullpenAutoLiveEngine:
             max_llm_candidates_per_run=max(1, settings.max_llm_candidates_per_run),
         )
 
+        def report_stage1_progress(
+            reason: str,
+            *,
+            completed_items: int = 0,
+            total_items: int | None = None,
+            commentary: list[str] | None = None,
+            outputs: dict[str, object] | None = None,
+        ) -> None:
+            progress_outputs: dict[str, object] = {
+                "progress_commentary": commentary or [reason],
+            }
+            if outputs:
+                progress_outputs.update(outputs)
+            set_run_stage_result(
+                run,
+                build_workflow_stage_result(
+                    stage_number=1,
+                    workflow_stage_key="scan",
+                    phase_status="running",
+                    status="pass",
+                    reason=reason,
+                    completed_items=completed_items,
+                    total_items=total_items,
+                    item_label="events",
+                    outputs=progress_outputs,
+                    guardrails_checked=global_guardrails,
+                    started_at=stage1_stage_started_at,
+                    completed_at=None,
+                ),
+            )
+            self._report_progress(progress_callback, run, state)
+
+        report_stage1_progress(
+            "Stage 1 is starting the Bullpen scan and wallet refresh in parallel.",
+            commentary=[
+                "Started the live Bullpen wallet refresh in the background.",
+                "Preparing candidate inputs for the Stage 1 market scan.",
+                "Stage 2 and Stage 3 remain queued until Stage 1 publishes its candidate and wallet snapshot.",
+            ],
+            outputs={
+                "wallet_snapshot_status": "refreshing",
+                "wallet_refresh_timeout_seconds": stage1_wallet_refresh_timeout_seconds,
+                "used_manual_console_rows": manual_console_rows_used,
+            },
+        )
+
         if manual_console_rows_used:
             scan_source_label = scan_source_label or "Bullpen x AI manual table"
             scan_source_url = scan_source_url or CONSOLE_PROFILE_ID
+            report_stage1_progress(
+                "Stage 1 is reading the current Bullpen x AI table.",
+                commentary=[
+                    "Using the visible Bullpen x AI table as the candidate source.",
+                    "Checking each row against Stage 1 filters before handing candidates to Stage 2.",
+                    "Wallet refresh is still running in parallel so active positions and claimable rows can be reconciled.",
+                ],
+                total_items=len(manual_console_rows) or None,
+                outputs={
+                    "scan_source_label": scan_source_label,
+                    "scan_source_url": scan_source_url,
+                    "wallet_snapshot_status": "refreshing",
+                    "used_manual_console_rows": True,
+                },
+            )
             scanned_total_candidates = max(
                 manual_console_context.total_candidates,
                 len(manual_console_rows),
@@ -5246,6 +5307,20 @@ class BullpenAutoLiveEngine:
             else:
                 scan_seed_markets = manual_markets
         else:
+            report_stage1_progress(
+                "Stage 1 is fetching live Bullpen candidate markets.",
+                commentary=[
+                    "Requesting the live console profile candidate feed.",
+                    "Applying Stage 1 market filters for close time, liquidity, volume, pricing, and eligibility.",
+                    "Wallet refresh is still running in parallel so the run can merge active positions after candidate filtering.",
+                ],
+                outputs={
+                    "scan_source_label": scan_source_label,
+                    "scan_source_url": scan_source_url,
+                    "wallet_snapshot_status": "refreshing",
+                    "used_manual_console_rows": False,
+                },
+            )
             scanned = await scan_console_profile_markets(now=now)
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
@@ -5367,6 +5442,28 @@ class BullpenAutoLiveEngine:
             run.diagnostics.new_buy_enabled = False
             self._report_progress(progress_callback, run, state)
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
+
+        report_stage1_progress(
+            "Stage 1 candidate scan finished; waiting for the live wallet snapshot.",
+            completed_items=len(stage1_accepted_candidates),
+            total_items=scanned_total_candidates,
+            commentary=[
+                f"Candidate source returned {scanned_total_candidates} total row(s).",
+                f"{len(stage1_accepted_candidates)} candidate row(s) passed Stage 1 filters.",
+                f"{len(stage1_rejected_candidates)} candidate row(s) were rejected before LLM review.",
+                "Waiting for the parallel Bullpen wallet refresh to reconcile active, claimable, and settlement-pending positions.",
+            ],
+            outputs={
+                "scan_source_label": scan_source_label,
+                "scan_source_url": scan_source_url,
+                "scanned_candidates": scanned_total_candidates,
+                "accepted_candidates_count": len(stage1_accepted_candidates),
+                "rejected_candidates_count": len(stage1_rejected_candidates),
+                "wallet_snapshot_status": "refreshing",
+                "scan_warning": scan_warning,
+                "scan_details": scan_details,
+            },
+        )
 
         console_balance_task = asyncio.create_task(refresh_balance())
         stage1_wallet_refresh_error: str | None = None

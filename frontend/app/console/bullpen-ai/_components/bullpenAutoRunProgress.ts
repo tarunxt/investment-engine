@@ -48,6 +48,7 @@ export type BullpenAutoRunWorkflowStageView = {
   tone: WorkflowTone;
   state: WorkflowState;
   detail: string;
+  progressCommentary: string[];
   progressLabel: string;
   progressPercent: number;
   isCurrent: boolean;
@@ -175,6 +176,13 @@ function readLlmExecutionMode(value: unknown) {
   return value === "single_combined" || value === "chunked_parallel"
     ? value
     : null;
+}
+
+function readStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => readString(item))
+    .filter((item): item is string => item !== null);
 }
 
 function readBoolean(value: unknown) {
@@ -666,6 +674,9 @@ export function buildBullpenAutoRunWorkflowView(
       );
     }
     detail = buildStageDetail(stage, detail, definition, normalizedRun);
+    const progressCommentary = shouldShowStageData
+      ? readStringList(stage?.outputs?.progress_commentary)
+      : [];
 
     return {
       key: definition.key,
@@ -674,6 +685,7 @@ export function buildBullpenAutoRunWorkflowView(
       tone,
       state,
       detail,
+      progressCommentary,
       progressLabel,
       progressPercent,
       isCurrent: state === "current",
