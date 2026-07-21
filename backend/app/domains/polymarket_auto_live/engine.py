@@ -4909,6 +4909,7 @@ class BullpenAutoLiveEngine:
         progress_callback: ProgressCallback | None = None,
         durable_execution: bool = False,
     ) -> EngineResult:
+        stage1_stage_started_at = run.started_at or utc_now_iso()
         live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
         stage1_wallet_refresh_timeout_seconds = (
             console_stage1_wallet_refresh_timeout_seconds()
@@ -5311,6 +5312,7 @@ class BullpenAutoLiveEngine:
                         "wallet_refresh_error": reason,
                     },
                     guardrails_checked=global_guardrails,
+                    started_at=stage1_stage_started_at,
                     completed_at=completed_at,
                 ),
             )
@@ -5858,6 +5860,7 @@ class BullpenAutoLiveEngine:
                     "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                 },
                 guardrails_checked=global_guardrails,
+                started_at=stage1_stage_started_at,
             ),
         )
         self._report_progress(progress_callback, run, state)

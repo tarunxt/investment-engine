@@ -514,6 +514,69 @@ def test_reconcile_running_auto_live_run_terminates_active_worker_at_maximum_run
     assert recovered.stage_results[-1].outputs["phase_status"] == "failed"
 
 
+def test_reconcile_running_auto_live_run_keeps_successful_stage3_handoff_confirming():
+    run = BullpenAutoLiveRun(
+        id="run-stage3-handoff",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 3 queued candidate rows for execution.",
+        stage_results=[
+            _stage_result(
+                stage_number=1,
+                workflow_stage_key="scan",
+                phase_status="completed",
+                reason="Stage 1 finished.",
+                completed_at="2026-07-05T12:05:00+00:00",
+            ),
+            _stage_result(
+                stage_number=2,
+                workflow_stage_key="llm",
+                phase_status="completed",
+                reason="Stage 2 finished.",
+                completed_at="2026-07-05T12:15:00+00:00",
+            ),
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="queued",
+                reason="Stage 3 queued 2 durable rows.",
+                outputs={
+                    "orders_queued": 2,
+                    "orders_planned": 0,
+                    "decision_rows": [_stage3_decision_row(), _stage3_decision_row()],
+                },
+                completed_at=None,
+            ),
+        ],
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 20, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 21, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-task-success",
+            state="SUCCESS",
+            inspect_succeeded=True,
+        ),
+    )
+
+    assert recovered is run
+    assert recovered.status == "confirming"
+    assert recovered.completed_at is None
+    assert recovered.error_message is None
+    assert "awaiting asynchronous execution reconciliation" in recovered.summary
+    assert recovered.stage_results[-1].completed_at is None
+    assert recovered.stage_results[-1].outputs["phase_status"] == "confirming"
+    assert (
+        recovered.stage_results[-1].outputs["worker_handoff_completed_at"]
+        == "2026-07-05T12:21:00+00:00"
+    )
+
+
 def test_reconcile_running_auto_live_run_surfaces_terminal_celery_failure_detail():
     run = BullpenAutoLiveRun(
         id="run-terminal-failure",
