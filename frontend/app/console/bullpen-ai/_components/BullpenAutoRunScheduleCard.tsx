@@ -4150,9 +4150,28 @@ function RunDetailWorkerStages({
                 {immediateSuccess ? "Finished" : stage.progressLabel}
               </p>
               {stage.key === "invest" ? null : (
-                <p className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
-                  {stage.detail}
-                </p>
+                <div className={`mt-3 text-xs leading-5 ${toneClasses.muted}`}>
+                  <p>{stage.detail}</p>
+                  {stage.state === "current" &&
+                  stage.progressCommentary.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-white/70 bg-white/45 px-3 py-2">
+                      <p className={`font-semibold ${toneClasses.text}`}>
+                        Progress commentary
+                      </p>
+                      <ul className="mt-2 space-y-1.5">
+                        {stage.progressCommentary.map((item, index) => (
+                          <li
+                            key={`${stage.key}-commentary-${index}`}
+                            className="flex gap-2"
+                          >
+                            <span aria-hidden="true">•</span>
+                            <span>{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                </div>
               )}
             </div>
           );
