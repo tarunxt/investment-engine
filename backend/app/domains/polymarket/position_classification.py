@@ -15,7 +15,7 @@ BullpenPositionClassificationState = Literal[
     "closed",
 ]
 
-BULLPEN_POSITION_CLASSIFIER_VERSION = 2
+BULLPEN_POSITION_CLASSIFIER_VERSION = 3
 
 _VALUE_EPSILON = 0.000001
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
@@ -290,16 +290,21 @@ def classify_bullpen_position(
     past_close_time = (
         parsed_close_time <= current_time if parsed_close_time is not None else None
     )
-    positive_payout_verified = (
+    current_market_is_open = authoritative_market_is_open is True
+    # A fresh Gamma market snapshot is stronger evidence than a stale wallet
+    # flag or an old payout field.  In particular, Bullpen has returned
+    # `redeemable` for still-open child markets; those rows are holdings, not
+    # claimable payouts.  Do not let any wallet claim evidence promote an
+    # authoritatively open market into the Stage 1 claim queue.
+    positive_payout_verified = not current_market_is_open and (
         _is_positive_value(parsed_expected_payout_usdc)
         or _is_positive_value(parsed_claimable_value_usd)
         or (
-            (past_close_time is True or resolved_by_status or normalized_claimable_flag or parsed_upstream_redeemable_flag)
+            (past_close_time is True or resolved_by_status)
             and _is_positive_value(parsed_current_value)
         )
     )
     redeemability_exists = normalized_claimable_flag or parsed_upstream_redeemable_flag
-    current_market_is_open = authoritative_market_is_open is True
     close_time_is_past = past_close_time is True and not current_market_is_open
 
     if parsed_shares <= _VALUE_EPSILON and not positive_payout_verified:

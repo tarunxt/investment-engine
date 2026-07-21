@@ -695,6 +695,8 @@ function renderSectionData(section: string, data: unknown) {
     const handoffIds = asArray(stage.stage2_handoff_candidate_market_ids);
     const runStages = asArray(stage.run_stages);
     const recovery = asRecord(stage.recovery);
+    const handoffCheckpoint = asRecord(stage.handoff_checkpoint);
+    const checkpointCandidateIds = asArray(handoffCheckpoint?.candidate_market_ids);
     const persistedCounters = asRecord(stage.persisted_execution_counters);
     const blockedByWalletRefresh = stage.blocked_by_stage1_wallet_refresh === true;
     return (
@@ -709,6 +711,16 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Execution Steps", value: String(asArray(stage.execution_steps).length) },
               { label: "Max Positions", value: String(stage.max_positions ?? "—") },
               { label: "Stage 2 Handoff Rows", value: String(handoffIds.length) },
+              {
+                label: "Handoff Checkpoint",
+                value: handoffCheckpoint
+                  ? humanizeToken(stringValue(handoffCheckpoint.status, "unknown"))
+                  : "Legacy / not captured",
+              },
+              {
+                label: "Checkpoint Candidates",
+                value: handoffCheckpoint ? String(checkpointCandidateIds.length) : "—",
+              },
               { label: "Order Metrics", value: String(Object.keys(asRecord(stage.order_metrics) ?? {}).length) },
               { label: "Selected Decisions", value: String(decisions.filter((item) => asRecord(item)?.stage3_result === "SELECTED").length) },
               { label: "Recovery Required", value: recovery?.required ? "Yes" : "No" },
@@ -717,6 +729,28 @@ function renderSectionData(section: string, data: unknown) {
             ]}
           />
         </SectionShell>
+        {handoffCheckpoint ? (
+          <SectionShell
+            title="Stage 2 to Stage 3 Handoff Checkpoint"
+            subtitle={
+              decisions.length === 0 && orderIntents.length === 0
+                ? "Stage 3 received the saved transfer queue but did not persist concrete decisions or orders before this snapshot."
+                : "The saved Stage 2 transfer queue was durably received before Stage 3 planning."
+            }
+          >
+            <DetailGrid
+              items={[
+                { label: "Status", value: stringValue(handoffCheckpoint.status) },
+                { label: "Received At", value: stringValue(handoffCheckpoint.received_at) },
+                { label: "Candidate IDs", value: String(checkpointCandidateIds.length) },
+                {
+                  label: "Decision Rows at Receipt",
+                  value: String(handoffCheckpoint.decision_rows_persisted ?? "—"),
+                },
+              ]}
+            />
+          </SectionShell>
+        ) : null}
         {blockedByWalletRefresh ? (
           <SectionShell
             title="Execution Safely Blocked"
@@ -732,6 +766,7 @@ function renderSectionData(section: string, data: unknown) {
         <JsonPanel title="Persisted Execution Counters" value={stage.persisted_execution_counters} defaultOpen />
         <JsonPanel title="Restart Recovery" value={stage.recovery} />
         <JsonPanel title="Stage 2 Handoff Candidate IDs" value={handoffIds} />
+        <JsonPanel title="Stage 2 to Stage 3 Handoff Checkpoint" value={handoffCheckpoint} />
         <JsonPanel title="Run Stage Records" value={runStages} />
         <JsonPanel title="Decision Rows" value={decisionRows} />
         <JsonPanel title="Decisions" value={decisions} />

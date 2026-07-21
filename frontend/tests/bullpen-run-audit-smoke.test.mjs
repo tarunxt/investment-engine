@@ -38,6 +38,8 @@ test("detail client keeps the shared single-select model picker and three sectio
   assert.match(source, /Section II/);
   assert.match(source, /Section III/);
   assert.match(source, /Run Audit Feedback/);
+  assert.match(source, /Stage 2 to Stage 3 Handoff Checkpoint/);
+  assert.match(source, /handoff_checkpoint/);
 });
 
 test("list client loads paginated summaries instead of raw detail bundles", async () => {

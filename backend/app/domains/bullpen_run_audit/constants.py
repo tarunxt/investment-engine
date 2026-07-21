@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-21-stage1-wallet-handoff-v15"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-21-stage3-handoff-checkpoint-v16"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-21-stage1-wallet-handoff-v15"
+    "2026-07-21-stage3-handoff-checkpoint-v16"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -65,6 +65,22 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.engine",
         "source_function": "BullpenAutoLiveEngine._execute_console_top10",
         "label": "Stage 1 wallet handoff timeout and candidate-only safety gate",
+    },
+    {
+        "algorithm_key": "bullpen_position_claimability",
+        "stage": "stage-1",
+        "algorithm_version": "v3",
+        "source_module": "app.domains.polymarket.position_classification",
+        "source_function": "classify_bullpen_position",
+        "label": "Authoritative Bullpen position claimability classification",
+    },
+    {
+        "algorithm_key": "stage2_to_stage3_handoff_checkpoint",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "BullpenAutoLiveEngine._execute_console_top10",
+        "label": "Durable Stage 2 Top 10 to Stage 3 handoff checkpoint",
     },
     {
         "algorithm_key": "console_trade_amount_per_opportunity",

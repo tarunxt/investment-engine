@@ -50,6 +50,28 @@ def test_positive_claimable_value_stays_claimable():
     assert classification.claimable_value_usd == 3
 
 
+def test_authoritative_open_market_overrides_stale_redeemable_evidence():
+    classification = classify_bullpen_position(
+        {
+            "market": "Still-open NO position",
+            "outcome": "No",
+            "shares": 8.769,
+            "current_price": 0.74,
+            "current_value": 6.49,
+            "redeemable": True,
+            "claimableValue": 6.49,
+            "resolution_status": "open",
+            "end_date": "2026-07-22",
+        },
+        authoritative_market_is_open=True,
+        now=datetime(2026, 7, 21, 0, 0, tzinfo=UTC),
+    )
+
+    assert classification.state == "active"
+    assert classification.is_claimable is False
+    assert classification.claimable_value_usd is None
+
+
 def test_unresolved_missing_price_stays_stale_unknown():
     classification = classify_bullpen_position(
         {

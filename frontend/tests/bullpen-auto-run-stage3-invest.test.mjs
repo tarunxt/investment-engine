@@ -1119,7 +1119,7 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.doesNotMatch(source, /stage\.key === "llm" && investOnlyPlan\.alreadyInvestedCandidateCount > 0/);
   assert.doesNotMatch(source, /already invested and will be skipped/);
   assert.match(source, /CheckCircle2/);
-  assert.match(source, /Open Stage 3 planned details/);
+  assert.match(source, /Open Stage 3 \$\{counter\.label\.toLowerCase\(\)\} details/);
   assert.match(source, /Explain Stage 2 to Stage 3 planned strategy/);
   assert.match(source, /formatOddsPercent\(candidate\.llmYesOdds\)/);
   assert.match(source, /formatOddsPercent\(candidate\.llmNoOdds\)/);
@@ -1137,7 +1137,7 @@ test("Stage 3 schedule card keeps Invest controls in Stage 3 and skipped investm
   assert.match(source, /Steps to rectify/);
 });
 
-test("Stage 3 schedule card exposes a planned preview queue for current buys and sells", () => {
+test("Stage 3 schedule card distinguishes its transfer queue from persisted plans", () => {
   const source = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -1146,10 +1146,10 @@ test("Stage 3 schedule card exposes a planned preview queue for current buys and
     "utf8",
   );
 
-  assert.match(source, /Stage 3 Planned Preview/);
+  assert.match(source, /Stage 3 Queue Preview/);
   assert.match(source, /Current Stage 3 buy and sell queue/);
-  assert.match(source, /current Event Exits list with the saved\s+Stage 2 top-10 buy rows/);
-  assert.match(source, /Submit Planned Buys and Sells/);
+  assert.match(source, /current Event Exits list with the saved\s+Stage 2 top-10 transfer queue/);
+  assert.match(source, /Queue Stage 3 Exit and Invest/);
   assert.match(source, /NO_STAGE2_QUALIFIED_EVENTS_REASON/);
 });
 
@@ -1190,14 +1190,15 @@ test("Stage 3 preview steps summarize the sell-first then invest flow before exe
     })),
     [
       { key: "sell", status: "pending", label: "Event Exits" },
-      { key: "buy", status: "pending", label: "Invest planned orders" },
+      { key: "buy", status: "pending", label: "Prepare investment queue" },
     ],
   );
   assert.equal(previewSteps[0].plannedOrders, null);
-  assert.equal(previewSteps[1].plannedOrders, 2);
+  assert.equal(previewSteps[1].plannedOrders, 0);
   assert.match(previewSteps[0].detail, /Event Exits, waits for settlement/i);
   assert.match(previewSteps[0].detail, /refreshes live cash plus occupied slots/i);
   assert.match(previewSteps[1].detail, /Stage 2-qualified/);
+  assert.match(previewSteps[1].detail, /transfer queue/i);
   assert.match(previewSteps[1].detail, /post-exit sizing/i);
 });
 

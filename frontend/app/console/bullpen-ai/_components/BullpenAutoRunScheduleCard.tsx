@@ -7919,16 +7919,17 @@ function Stage3PreviewDialog({
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Stage 3 Planned Preview
+              Stage 3 Queue Preview
             </p>
             <h2 className="text-xl font-semibold text-slate-950">
               Current Stage 3 buy and sell queue
             </h2>
             <p className="max-w-4xl text-sm leading-6 text-slate-600">
               This preview combines the current Event Exits list with the saved
-              Stage 2 top-10 buy rows. Stage 3 submits the exits first, waits
-              for settlement, refreshes live cash plus occupied slots, and only
-              then sizes and submits the buys.
+              Stage 2 top-10 transfer queue. It is not a persisted order plan.
+              Stage 3 submits the exits first, waits for settlement, refreshes
+              live cash plus occupied slots, and only then creates, sizes, and
+              submits concrete buys.
             </p>
             <p className="text-xs text-slate-500">
               Source run{" "}
@@ -7947,7 +7948,7 @@ function Stage3PreviewDialog({
             type="button"
             onClick={onClose}
             className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close Stage 3 planned preview"
+            aria-label="Close Stage 3 queue preview"
           >
             <X className="h-4 w-4" />
           </button>
@@ -7955,21 +7956,21 @@ function Stage3PreviewDialog({
 
         <div className="flex-1 overflow-auto px-6 py-5">
           <div className="grid gap-3 md:grid-cols-3">
-            <InvestMetricSummaryCard label="Planned" value={state.plannedOrders} />
+            <InvestMetricSummaryCard label="Queued" value={state.plannedOrders} />
             <InvestMetricSummaryCard
-              label="Step 1 Exits"
+              label="Step 1 exit queue"
               value={state.sellPlannedOrders}
             />
             <InvestMetricSummaryCard
-              label="Step 2 Buys"
+              label="Step 2 candidates"
               value={state.buyPlannedOrders}
             />
           </div>
 
           <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-950">
-            Stage 3 will use these rows as the planned queue. Sell orders go
-            first, and buy sizes can still change at submission time because
-            Step 2 rechecks fresh wallet cash and open slots.
+            These are transfer-queue rows, not saved orders. Stage 3 evaluates
+            exits first, then creates concrete buy plans only after it refreshes
+            live wallet cash and open slots.
           </div>
 
           <div className="mt-5 space-y-4">
@@ -7979,18 +7980,17 @@ function Stage3PreviewDialog({
               emptyMessage="No executable Event Exit sell rows are waiting right now."
             />
             <Stage3DecisionTable
-              title="Step 2 Planned Buys"
+              title="Step 2 Candidate Queue"
               rows={buyDecisions}
-              emptyMessage="No saved Stage 2 top-10 buy rows are waiting right now."
+              emptyMessage="No saved Stage 2 top-10 candidate rows are waiting right now."
             />
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-6 py-4">
           <p className="text-xs leading-5 text-slate-500">
-            Preview only until the run is queued. Once submitted, the worker
-            persists the live planned and submitted results in the Stage 3
-            history.
+            Preview only until the run is queued. Once started, the worker
+            persists concrete Stage 3 plans and submissions in the history.
           </p>
           {onSubmit ? (
             <button
@@ -8011,7 +8011,7 @@ function Stage3PreviewDialog({
               ) : (
                 <>
                   <Zap className="mr-2 h-4 w-4" />
-                  Submit Planned Buys and Sells
+                  Queue Stage 3 Exit and Invest
                 </>
               )}
             </button>
@@ -10831,7 +10831,7 @@ export function BullpenAutoRunScheduleCard({
                 stage3PreviewDialogState
                   ? [
                       {
-                        label: "Planned",
+                        label: "Queued",
                         value: stage3PreviewDialogState.plannedOrders,
                       },
                       { label: "Submitted", value: 0 },
@@ -10862,9 +10862,14 @@ export function BullpenAutoRunScheduleCard({
                       : step.key === "buy"
                         ? {
                             ...step,
-                            plannedOrders:
-                              stage3PreviewDialogState?.buyPlannedOrders ??
-                              step.plannedOrders,
+                            plannedOrders: 0,
+                            detail:
+                              stage3PreviewDialogState?.buyPlannedOrders
+                                ? [
+                                    `${stage3PreviewDialogState.buyPlannedOrders} Stage 2-qualified row${stage3PreviewDialogState.buyPlannedOrders === 1 ? " is" : "s are"} in the transfer queue.`,
+                                    "Concrete buy plans are created only after Step 1 settles and the worker refreshes live cash plus occupied slots.",
+                                  ].join(" ")
+                                : step.detail,
                           }
                         : step,
                   )
@@ -11060,10 +11065,13 @@ export function BullpenAutoRunScheduleCard({
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       {investStageCounters.map((counter) => {
                         const counterKind =
-                          counter.label.toLowerCase() as InvestMetricDialogKind;
+                          (counter.label === "Queued"
+                            ? "planned"
+                            : counter.label.toLowerCase()) as InvestMetricDialogKind;
                         const plannedStrategySourceKey = `workflow-stage-${stage.key}-planned`;
                         const isPlannedCounter =
-                          stage.key === "invest" && counter.label === "Planned";
+                          stage.key === "invest" &&
+                          (counter.label === "Planned" || counter.label === "Queued");
 
                         if (!isPlannedCounter) {
                           return (
@@ -11101,14 +11109,14 @@ export function BullpenAutoRunScheduleCard({
                                   : openInvestMetricDialog(counterKind)
                               }
                               className="absolute inset-0 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-300"
-                              aria-label="Open Stage 3 planned details"
+                              aria-label={`Open Stage 3 ${counter.label.toLowerCase()} details`}
                             />
                             <div className="pointer-events-none relative z-10">
                               <div className="flex items-center gap-1.5">
                                 <p
                                   className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
                                 >
-                                  Planned
+                                  {counter.label}
                                 </p>
                                 <button
                                   type="button"
@@ -11219,11 +11227,12 @@ export function BullpenAutoRunScheduleCard({
                         <p
                           className={`text-[11px] leading-5 ${toneClasses.muted}`}
                         >
-                          {stage3PreviewDialogState.plannedOrders} planned{" "}
+                          {stage3PreviewDialogState.plannedOrders} queued candidate{" "}
                           {stage3PreviewDialogState.plannedOrders === 1
                             ? "row is"
                             : "rows are"}{" "}
-                          ready for this invest-only pass.
+                          ready for this invest-only pass. No concrete order is
+                          planned until the worker completes Stage 3 checks.
                           {" "}
                           {stage3PreviewDialogState.sellPlannedOrders > 0
                             ? `${stage3PreviewDialogState.sellPlannedOrders} sell${stage3PreviewDialogState.sellPlannedOrders === 1 ? "" : "s"} first`

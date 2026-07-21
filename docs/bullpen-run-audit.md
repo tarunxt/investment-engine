@@ -199,6 +199,14 @@ preserve those partitions without re-deriving them on read:
 rows are diagnostic-only for new runs after Sunday, July 19, 2026. Historical
 completed runs may still display their persisted legacy payloads unchanged.
 
+Position classifier v3 treats a fresh authoritative open-market lookup as
+stronger evidence than any Bullpen `redeemable`/`claimable` flag or stale payout
+field. An open market remains an active holding and cannot enter
+`available_for_claim`; positive claimability requires the market not to be
+authoritatively open plus positive settlement evidence. This prevents an open
+wallet position from being excluded from the Stage 2/Stage 3 active portfolio
+because of stale claim metadata.
+
 The Bullpen portfolio panel and its trade-amount preview reconcile to the newest
 completed Stage 1 `active_positions_found` snapshot. This is intentional: the
 page-level portfolio refresh is a separate cache/read path and may temporarily
@@ -308,6 +316,14 @@ partial exit continues to occupy its economic slot. A confirmed exit wakes only
 its one-for-one replacement intent after a fresh live-cli wallet and cash
 refresh.
 
+Before Stage 3 performs slot allocation, Event Exit evaluation, or buy planning,
+it persists `stage2_handoff_checkpoint` with `status=received`, the exact saved
+Stage 2 Top 10 candidate IDs, count, and receipt time. This durable boundary
+distinguishes a transfer queue from concrete Stage 3 plans. If a worker stops
+after receipt but before decision rows are written, the audit reports the
+interruption explicitly and recovery does not invent or submit an order. The
+field is additive; frozen snapshots without it remain legacy-compatible.
+
 Exit reconciliation reads current Bullpen trade history through `polymarket
 orders --history` before legacy command fallbacks. When the fresh wallet snapshot
 shows a successful sell left only two-decimal CLOB precision dust whose marked
@@ -395,6 +411,8 @@ Current required keys:
 
 * `stage2_consensus_statistics`
 * `candidate_returns_per_day`
+* `bullpen_position_claimability`
+* `stage2_to_stage3_handoff_checkpoint`
 * `console_trade_amount_per_opportunity`
 * `llm_returns_per_day`
 * `position_returns_per_day`
@@ -454,6 +472,9 @@ Current deterministic checks include:
 * candidate-only Stage 2 requiring Stage 3 to remain blocked with no decisions or orders
 * qualified Stage 2 candidate missing Stage 3 result
 * Stage 2 Top 10 handoff row missing from Stage 3 decisions
+* Stage 2 -> Stage 3 handoff checkpoint invalid or inconsistent with the saved
+  transfer queue when the additive checkpoint is present
+* Stage 3 interruption after a received handoff checkpoint but before decision rows
 * Stage 2 Top 10 handoff row missing a recorded planning blocker
 * blocked Stage 3 decision without reason
 * rank duplicates or gaps

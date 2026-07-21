@@ -814,7 +814,10 @@ export function buildBullpenStage3InvestPreviewSteps(
       ? "All Stage 2-qualified events were already invested, so no new planned orders were needed."
       : plan.blockedReason ??
         (plan.readyCandidateCount > 0
-          ? `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} ready for post-exit sizing once Step 1 settles and the worker refreshes live cash plus occupied slots.`
+          ? [
+              `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} in the transfer queue.`,
+              "Concrete buy plans are created only after post-exit sizing, when Step 1 settles and the worker refreshes live cash plus occupied slots.",
+            ].join(" ")
           : "Stage 3 will invest the planned orders after Step 1 settles and live state refreshes.");
 
   return [
@@ -834,10 +837,10 @@ export function buildBullpenStage3InvestPreviewSteps(
       key: "buy",
       stepNumber: 2,
       stepTotal: 2,
-      label: "Invest planned orders",
+      label: "Prepare investment queue",
       status: buyStatus,
       detail: buyDetail,
-      plannedOrders: plan.readyCandidateCount,
+      plannedOrders: 0,
       processedOrders: 0,
       submittedOrders: 0,
     },

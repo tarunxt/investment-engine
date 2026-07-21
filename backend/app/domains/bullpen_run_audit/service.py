@@ -925,6 +925,11 @@ def _build_bundle(
             ),
             "post_exit_buy_refresh": stage3_outputs.get("post_exit_buy_refresh") or {},
             "stage3_slot_diagnostics": stage3_outputs.get("stage3_slot_diagnostics") or {},
+            "handoff_checkpoint": (
+                stage3_outputs.get("stage2_handoff_checkpoint")
+                if isinstance(stage3_outputs.get("stage2_handoff_checkpoint"), dict)
+                else {}
+            ),
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),
             "stage2_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
             "blocked_by_stage1_wallet_refresh": bool(

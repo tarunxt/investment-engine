@@ -417,6 +417,17 @@ def execute_polymarket_auto_live_run(self, user_id: int, run_id: str) -> None:
                     durable_execution=auto_live_execution_v2_enabled(),
                 )
             )
+            if engine_result.run.status not in {
+                "completed",
+                "partial_success",
+                "failed",
+                "skipped",
+                "confirming",
+            }:
+                raise RuntimeError(
+                    "Bullpen Auto-Live engine returned without finalizing the run "
+                    f"status (received {engine_result.run.status!r})."
+                )
         except AutoLiveRunCancelled:
             logger.info("Stopping Auto-Live worker for user-cancelled run %s", run_id)
             try:

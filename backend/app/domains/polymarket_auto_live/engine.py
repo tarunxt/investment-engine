@@ -7355,6 +7355,64 @@ class BullpenAutoLiveEngine:
         execution_pause_reason: str | None = None
         simulation_reason = _simulation_reason(settings)
         stage3_buy_refresh_snapshot: dict[str, object] = {}
+        # Persist the Stage 2 -> Stage 3 contract before any slot allocation,
+        # wallet evaluation, or order planning.  That makes an interruption in
+        # this transition observable and recoverable without inventing a
+        # decision or submitting a buy that was never durably planned.
+        stage2_handoff_checkpoint: dict[str, object] = {
+            "status": "received",
+            "received_at": invest_stage_started_at,
+            "candidate_market_ids": list(ranking_top_candidate_market_id_order),
+            "candidate_count": len(ranking_top_candidate_market_id_order),
+            "decision_rows_persisted": 0,
+        }
+        set_run_stage_result(
+            run,
+            build_workflow_stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                status="pass" if total_decision_rows > 0 else "warning",
+                reason=(
+                    "Stage 3 received the saved Stage 2 Top 10 handoff and is "
+                    "preparing Event Exits before concrete buy planning."
+                    if total_decision_rows > 0
+                    else "Stage 3 received an empty Stage 2 handoff."
+                ),
+                completed_items=0,
+                total_items=total_decision_rows,
+                item_label="rows",
+                outputs={
+                    "top_table_size": len(ranking_top_rows),
+                    "active_rows_ranked": len(active_rank_rows),
+                    "qualified_candidate_rows": len(candidate_rank_rows),
+                    "top_candidate_market_ids": list(ranking_top_candidate_market_id_order),
+                    "ranked_top_candidate_market_ids": list(
+                        ranking_top_candidate_market_id_order
+                    ),
+                    "ranking_top_candidate_market_id_order": list(
+                        ranking_top_candidate_market_id_order
+                    ),
+                    "top_active_keys": sorted(ranking_top_active_keys),
+                    **stage2_universe_status,
+                    **stage2_strategy_metadata,
+                    "active_position_rows": len(position_snapshots),
+                    "candidate_decision_rows": len(candidate_contexts),
+                    "decisions_count": 0,
+                    "orders_planned": 0,
+                    "orders_processed": 0,
+                    "orders_submitted": 0,
+                    "execution_steps": [],
+                    "order_metrics": {},
+                    "decision_rows": [],
+                    "stage2_handoff_checkpoint": stage2_handoff_checkpoint,
+                },
+                guardrails_checked=global_guardrails,
+                started_at=invest_stage_started_at,
+                completed_at=None,
+            ),
+        )
+        self._report_progress(progress_callback, run, state)
         initial_slot_allocation = classify_economic_slots(
             active_bullpen_wallet_positions,
             dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
@@ -7707,6 +7765,7 @@ class BullpenAutoLiveEngine:
                 "decision_rows": [
                     _serialize_stage3_decision_row(decision) for decision in decisions
                 ],
+                "stage2_handoff_checkpoint": stage2_handoff_checkpoint,
             }
             if execution_gate_reason:
                 stage_outputs["execution_gate_reason"] = execution_gate_reason

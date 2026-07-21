@@ -365,6 +365,99 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         for market_id in (stage_2.get("stage3_handoff_candidate_market_ids") or [])
         if str(market_id or "").strip()
     }
+    raw_handoff_checkpoint = stage_3.get("handoff_checkpoint")
+    handoff_checkpoint = (
+        raw_handoff_checkpoint
+        if isinstance(raw_handoff_checkpoint, dict) and raw_handoff_checkpoint
+        else None
+    )
+    if handoff_checkpoint is not None:
+        checkpoint_status = str(handoff_checkpoint.get("status") or "").strip()
+        checkpoint_market_ids = {
+            str(market_id)
+            for market_id in (handoff_checkpoint.get("candidate_market_ids") or [])
+            if str(market_id or "").strip()
+        }
+        checkpoint_count = _int(handoff_checkpoint.get("candidate_count"))
+        if checkpoint_status != "received":
+            findings.append(
+                _finding(
+                    code="STAGE2_TO_STAGE3_HANDOFF_CHECKPOINT_INVALID",
+                    severity="high",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 3 handoff checkpoint is not marked received",
+                    explanation=(
+                        "The persisted Stage 3 checkpoint did not confirm receipt of "
+                        "the saved Stage 2 Top 10 handoff."
+                    ),
+                    observed_value=checkpoint_status or "missing",
+                    expected_value="received",
+                    evidence_pointers=["/stage_3/handoff_checkpoint"],
+                )
+            )
+        if checkpoint_market_ids != handoff_market_ids:
+            findings.append(
+                _finding(
+                    code="STAGE2_TO_STAGE3_HANDOFF_CHECKPOINT_MISMATCH",
+                    severity="high",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 3 checkpoint does not match the saved Stage 2 handoff",
+                    explanation=(
+                        "The checkpoint candidate IDs differ from the persisted Stage 2 "
+                        "Top 10 transfer queue."
+                    ),
+                    observed_value=str(sorted(checkpoint_market_ids)),
+                    expected_value=str(sorted(handoff_market_ids)),
+                    evidence_pointers=[
+                        "/stage_2/stage3_handoff_candidate_market_ids",
+                        "/stage_3/handoff_checkpoint/candidate_market_ids",
+                    ],
+                )
+            )
+        elif checkpoint_count != len(checkpoint_market_ids):
+            findings.append(
+                _finding(
+                    code="STAGE2_TO_STAGE3_HANDOFF_CHECKPOINT_COUNT_MISMATCH",
+                    severity="medium",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 3 checkpoint candidate count is inconsistent",
+                    explanation=(
+                        "The checkpoint count does not equal its saved candidate ID "
+                        "count."
+                    ),
+                    observed_value=str(checkpoint_count),
+                    expected_value=str(len(checkpoint_market_ids)),
+                    evidence_pointers=["/stage_3/handoff_checkpoint"],
+                )
+            )
+        if (
+            checkpoint_status == "received"
+            and handoff_market_ids
+            and not decisions
+            and overview.get("run_status") == "failed"
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_INTERRUPTED_AFTER_HANDOFF_CHECKPOINT",
+                    severity="high",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 3 stopped after receiving the Top 10 handoff",
+                    explanation=(
+                        "Stage 3 durably received the saved Stage 2 queue but ended "
+                        "before it persisted concrete decision rows. No order was "
+                        "planned or submitted."
+                    ),
+                    evidence_pointers=[
+                        "/overview/run_status",
+                        "/stage_3/handoff_checkpoint",
+                        "/stage_3/decisions",
+                    ],
+                )
+            )
     scan_context = (
         stage_1.get("scan_context")
         if isinstance(stage_1.get("scan_context"), dict)

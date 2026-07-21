@@ -189,6 +189,41 @@ def test_build_deterministic_findings_flags_missing_stage2_top10_handoff_decisio
     assert "STAGE2_TOP10_HANDOFF_MISSING_STAGE3_DECISION" in codes
 
 
+def test_build_deterministic_findings_identifies_interrupted_stage3_handoff_checkpoint():
+    bundle = {
+        "metadata": {"run_id": "run-stage3-checkpoint"},
+        "overview": {
+            "run_status": "failed",
+            "started_at": "2026-07-21T00:00:00+00:00",
+            "completed_at": "2026-07-21T00:05:00+00:00",
+            "duration_seconds": 300,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {
+            "candidate_reviews": [],
+            "stage3_handoff_candidate_market_ids": ["market-top-1"],
+        },
+        "stage_3": {
+            "decisions": [],
+            "order_intents": [],
+            "handoff_checkpoint": {
+                "status": "received",
+                "candidate_market_ids": ["market-top-1"],
+                "candidate_count": 1,
+            },
+            "max_positions": 10,
+        },
+        "raw": {},
+    }
+
+    findings = build_deterministic_findings(bundle)
+    codes = {finding["code"] for finding in findings}
+
+    assert "STAGE3_INTERRUPTED_AFTER_HANDOFF_CHECKPOINT" in codes
+    assert "STAGE2_TO_STAGE3_HANDOFF_CHECKPOINT_MISMATCH" not in codes
+
+
 def test_build_deterministic_findings_flags_missing_stage2_top10_planning_reason():
     bundle = {
         "metadata": {"run_id": "run-3"},
@@ -571,12 +606,70 @@ def test_build_bundle_preserves_stage2_rule_gate_provenance():
     assert "Fix:" in decision_row["stage3_result_reason"]
 
 
+def test_build_bundle_projects_stage3_handoff_checkpoint_without_rewriting_legacy_shape():
+    run_payload = {
+        "id": "run-stage3-handoff-checkpoint",
+        "status": "running",
+        "triggered_by": "manual",
+        "started_at": "2026-07-21T00:00:00+00:00",
+        "completed_at": None,
+        "summary": "Stage 3 received the saved handoff.",
+        "stage_results": [
+            {
+                "stage_number": 6,
+                "status": "pass",
+                "reason": "Ranked Stage 2 candidates.",
+                "outputs": {
+                    "ranking_top_candidate_market_id_order": ["market-1"],
+                },
+            },
+            {
+                "stage_number": 3,
+                "status": "pass",
+                "reason": "Stage 3 received the saved handoff.",
+                "outputs": {
+                    "workflow_stage_key": "invest",
+                    "phase_status": "running",
+                    "decision_rows": [],
+                    "stage2_handoff_checkpoint": {
+                        "status": "received",
+                        "candidate_market_ids": ["market-1"],
+                        "candidate_count": 1,
+                    },
+                },
+            },
+        ],
+        "audit_metadata": {
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "settings_snapshot": {},
+        },
+        "diagnostics": {},
+    }
+
+    bundle = _build_bundle(
+        run_payload=run_payload,
+        decisions=[],
+        run_orders_payload={},
+        source_kind="native",
+        lifecycle_status="working",
+    )
+
+    assert bundle["stage_3"]["handoff_checkpoint"] == {
+        "status": "received",
+        "candidate_market_ids": ["market-1"],
+        "candidate_count": 1,
+    }
+    assert bundle["stage_3"]["stage2_handoff_candidate_market_ids"] == ["market-1"]
+
+
 def test_algorithm_registry_contains_required_audit_keys():
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert keys >= {
         "stage2_consensus_statistics",
         "candidate_returns_per_day",
         "stage1_wallet_handoff_circuit_breaker",
+        "bullpen_position_claimability",
+        "stage2_to_stage3_handoff_checkpoint",
         "console_trade_amount_per_opportunity",
         "stage3_live_capacity_sizing",
         "llm_returns_per_day",

@@ -3175,6 +3175,20 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
 
     assert executor_calls == ["sell_limit", "buy_limit"]
 
+    handoff_stage = next(
+        stage
+        for snapshot in progress_runs
+        for stage in snapshot.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+        and isinstance(stage.outputs.get("stage2_handoff_checkpoint"), dict)
+    )
+    checkpoint = handoff_stage.outputs["stage2_handoff_checkpoint"]
+    assert checkpoint["status"] == "received"
+    assert checkpoint["candidate_market_ids"] == [candidate_market.market_id]
+    assert checkpoint["candidate_count"] == 1
+    assert checkpoint["decision_rows_persisted"] == 0
+    assert handoff_stage.outputs["decision_rows"] == []
+
     running_invest_stages = [
         stage
         for snapshot in progress_runs
