@@ -8934,6 +8934,9 @@ export function BullpenAutoRunScheduleCard({
     (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null
   >(null);
   const [, setPortfolioLoading] = useState(true);
+  const postCompletionPortfolioRefreshRunIdsRef = useRef<Set<string>>(
+    new Set(),
+  );
 
   const persistedConsoleOrderUsd =
     summary?.state.last_console_trade_amount_usd ??
@@ -9307,6 +9310,11 @@ export function BullpenAutoRunScheduleCard({
       matchingRun.status === "confirming"
     ) {
       return;
+    }
+
+    if (!postCompletionPortfolioRefreshRunIdsRef.current.has(runId)) {
+      postCompletionPortfolioRefreshRunIdsRef.current.add(runId);
+      await refreshPortfolioSnapshot(true);
     }
 
     if (pendingRunId === runId) {
