@@ -13,6 +13,7 @@ PYTHON_BIN="$(python_bin_for_app "$APP_ROOT")"
 
 BACKEND_SERVICE_NAME="$(resolve_role_service_name backend "$APP_ROOT" "$APP_USER")"
 WORKER_SERVICE_NAME="$(resolve_role_service_name celery-worker "$APP_ROOT" "$APP_USER")"
+AUTO_LIVE_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-auto-live-worker "$APP_ROOT" "$APP_USER")"
 BEAT_SERVICE_NAME="$(resolve_role_service_name celery-beat "$APP_ROOT" "$APP_USER")"
 BEAT_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-beat-worker "$APP_ROOT" "$APP_USER")"
 FRONTEND_SERVICE_NAME="$(resolve_role_service_name frontend "$APP_ROOT" "$APP_USER")"
@@ -51,6 +52,7 @@ print_section "Systemd Services"
 for service_name in \
   "$BACKEND_SERVICE_NAME" \
   "$WORKER_SERVICE_NAME" \
+  "$AUTO_LIVE_WORKER_SERVICE_NAME" \
   "$BEAT_SERVICE_NAME" \
   "$BEAT_WORKER_SERVICE_NAME" \
   "$FRONTEND_SERVICE_NAME"; do

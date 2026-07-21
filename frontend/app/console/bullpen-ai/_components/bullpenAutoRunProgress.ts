@@ -67,6 +67,39 @@ export type BullpenAutoRunWorkflowView = {
   runStatus: BullpenAutoLiveRun["status"] | "idle";
 };
 
+/**
+ * Celery acceptance and actual workflow execution are intentionally shown as
+ * separate states.  In particular, a QUEUED run has not begun Stage 1 yet.
+ */
+export function getBullpenAutoLiveTaskLifecycleLabel(
+  run: BullpenAutoLiveRun | null | undefined,
+): string | null {
+  const lifecycle = run?.task_lifecycle;
+  if (!lifecycle) return null;
+
+  const detail = lifecycle.detail?.trim().toLowerCase() ?? "";
+  if (detail.includes("absolute timeout")) return "Absolute timeout";
+
+  switch (lifecycle.state) {
+    case "QUEUED":
+      return "Queued — waiting for Auto-Live worker";
+    case "RESERVED":
+      return "Received — waiting for pool slot";
+    case "STARTED":
+      return "Running — heartbeat healthy";
+    case "RETRYING":
+      return "Retrying — waiting for Auto-Live worker";
+    case "WORKER_LOST":
+      return "Worker heartbeat lost";
+    case "FAILURE":
+      return "Worker returned failure";
+    case "REVOKED":
+      return "Task revoked";
+    default:
+      return null;
+  }
+}
+
 export function isBullpenAutoRunWorkflowSettled(
   workflowView: BullpenAutoRunWorkflowView,
 ) {
@@ -526,6 +559,7 @@ export function buildBullpenAutoRunWorkflowView(
   pendingRunStartedAt?: string | null,
 ): BullpenAutoRunWorkflowView {
   const normalizedRun = run ?? null;
+  const taskLifecycleLabel = getBullpenAutoLiveTaskLifecycleLabel(normalizedRun);
   const runStatus =
     normalizedRun?.status ?? (pendingRunId ? "running" : "idle");
   const stageResults = WORKFLOW_DEFINITIONS.map((definition, index) =>
@@ -706,7 +740,7 @@ export function buildBullpenAutoRunWorkflowView(
 
   const currentStage = stages.find((stage) => stage.isCurrent) ?? null;
   const allStagesFinished = stages.every((stage) => stage.state === "finished");
-  const currentStageLabel = currentStage
+  const currentStageLabel = taskLifecycleLabel ?? (currentStage
     ? currentStage.title
     : runStatus === "partial_success"
       ? "Stage 3 finished with partial success"
@@ -720,9 +754,10 @@ export function buildBullpenAutoRunWorkflowView(
             ? "Last run failed"
             : runStatus === "skipped"
               ? "Last run was skipped"
-              : "Queued for the next auto-run";
+              : "Queued for the next auto-run");
   const statusCopy =
-    runStatus === "failed"
+    taskLifecycleLabel ??
+    (runStatus === "failed"
       ? formatBullpenRunSummaryForMonitor(
           normalizedRun?.summary,
           normalizedRun?.error_message ||
@@ -747,7 +782,7 @@ export function buildBullpenAutoRunWorkflowView(
                 normalizedRun?.summary,
                 "The latest Bullpen Scan + LLM + Exit and Invest run was skipped.",
               )
-            : "The next Bullpen Scan + LLM + Exit and Invest run is waiting in queue.";
+            : "The next Bullpen Scan + LLM + Exit and Invest run is waiting in queue.");
 
   return {
     stages,

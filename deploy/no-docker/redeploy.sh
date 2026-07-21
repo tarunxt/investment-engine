@@ -99,6 +99,9 @@ service_name_for_role() {
     celery-worker)
       printf '%s-celery-worker\n' "$prefix"
       ;;
+    celery-auto-live-worker)
+      printf '%s-celery-auto-live-worker\n' "$prefix"
+      ;;
     celery-beat)
       printf '%s-celery-beat\n' "$prefix"
       ;;
@@ -163,7 +166,7 @@ service_family_has_active_backend_member() {
   local prefix="$1"
   local role service_name
 
-  for role in backend celery-worker celery-beat celery-beat-worker; do
+  for role in backend celery-worker celery-auto-live-worker celery-beat celery-beat-worker; do
     service_name="$(service_name_for_role "$prefix" "$role")"
     if service_is_active "$service_name"; then
       return 0
@@ -491,11 +494,7 @@ backup_target() {
 
 restart_services_after_restore() {
   sudo systemctl daemon-reload || true
-  sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" || true
-
-  if [[ "$BEAT_WORKER_MANAGED" == "true" ]]; then
-    sudo systemctl restart "$BEAT_WORKER_SERVICE_NAME" || true
-  fi
+  sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME" || true
 
   if [[ "$SCOPE" == "full" ]]; then
     sudo systemctl restart "$FRONTEND_SERVICE_NAME" || true
@@ -780,22 +779,24 @@ validate_no_duplicate_backend_service_families
 
 BACKEND_SERVICE_NAME="$(resolve_role_service_name backend)"
 WORKER_SERVICE_NAME="$(resolve_role_service_name celery-worker)"
+AUTO_LIVE_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-auto-live-worker)"
 BEAT_SERVICE_NAME="$(resolve_role_service_name celery-beat)"
 BEAT_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-beat-worker)"
 FRONTEND_SERVICE_NAME="$(resolve_role_service_name frontend)"
 
-BEAT_WORKER_MANAGED=false
-if systemctl is-active --quiet "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1 || systemctl is-enabled --quiet "$BEAT_WORKER_SERVICE_NAME" >/dev/null 2>&1; then
-  BEAT_WORKER_MANAGED=true
-fi
+# The primary worker intentionally consumes only ai,email.  The beat queue
+# worker is therefore required; leaving it optional strands every periodic
+# Auto-Live dispatcher on fresh host deployments.
+BEAT_WORKER_MANAGED=true
 
 echo "==> Deploy scope: $SCOPE"
 echo "==> App root: $APP_ROOT"
 echo "==> App user: $APP_USER"
 echo "==> Backend service: $BACKEND_SERVICE_NAME"
 echo "==> Worker service: $WORKER_SERVICE_NAME"
+echo "==> Auto-Live planning worker service: $AUTO_LIVE_WORKER_SERVICE_NAME"
 echo "==> Beat service: $BEAT_SERVICE_NAME"
-echo "==> Beat worker service: $BEAT_WORKER_SERVICE_NAME (managed=$BEAT_WORKER_MANAGED)"
+echo "==> Beat queue worker service: $BEAT_WORKER_SERVICE_NAME"
 echo "==> Frontend service: $FRONTEND_SERVICE_NAME"
 
 validate_backend_env_file
@@ -817,6 +818,7 @@ fi
 echo "==> Install/update systemd templates"
 install_systemd_unit "$BACKEND_SERVICE_NAME"
 install_systemd_unit "$WORKER_SERVICE_NAME"
+install_systemd_unit "$AUTO_LIVE_WORKER_SERVICE_NAME"
 install_systemd_unit "$BEAT_SERVICE_NAME"
 install_systemd_unit "$BEAT_WORKER_SERVICE_NAME"
 if [[ "$SCOPE" == "full" ]]; then
@@ -863,12 +865,8 @@ if [[ "$SCOPE" == "full" ]]; then
 fi
 
 echo "==> Restart services"
-sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME"
-if [[ "$BEAT_WORKER_MANAGED" == "true" ]]; then
-  sudo systemctl restart "$BEAT_WORKER_SERVICE_NAME"
-else
-  echo "==> Optional beat queue worker is not active or enabled; template updated without starting it"
-fi
+sudo systemctl enable "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
+sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
 
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl restart "$FRONTEND_SERVICE_NAME"
@@ -880,10 +878,9 @@ fi
 echo "==> Verify service startup"
 verify_service_active "$BACKEND_SERVICE_NAME"
 verify_service_active "$WORKER_SERVICE_NAME"
+verify_service_active "$AUTO_LIVE_WORKER_SERVICE_NAME"
 verify_service_active "$BEAT_SERVICE_NAME"
-if [[ "$BEAT_WORKER_MANAGED" == "true" ]]; then
-  verify_service_active "$BEAT_WORKER_SERVICE_NAME"
-fi
+verify_service_active "$BEAT_WORKER_SERVICE_NAME"
 if [[ "$SCOPE" == "full" ]]; then
   verify_service_active "$FRONTEND_SERVICE_NAME"
 fi
@@ -891,10 +888,9 @@ fi
 echo "==> Service status"
 sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager
 sudo systemctl status "$WORKER_SERVICE_NAME" --no-pager
+sudo systemctl status "$AUTO_LIVE_WORKER_SERVICE_NAME" --no-pager
 sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
-if [[ "$BEAT_WORKER_MANAGED" == "true" ]]; then
-  sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager
-fi
+sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
 fi

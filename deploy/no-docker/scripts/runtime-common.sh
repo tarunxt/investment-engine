@@ -77,6 +77,9 @@ service_name_for_role() {
     celery-worker)
       printf '%s-celery-worker\n' "$prefix"
       ;;
+    celery-auto-live-worker)
+      printf '%s-celery-auto-live-worker\n' "$prefix"
+      ;;
     celery-beat)
       printf '%s-celery-beat\n' "$prefix"
       ;;
@@ -143,7 +146,7 @@ service_family_has_active_backend_member() {
   local prefix="$1"
   local role service_name
 
-  for role in backend celery-worker celery-beat celery-beat-worker; do
+  for role in backend celery-worker celery-auto-live-worker celery-beat celery-beat-worker; do
     service_name="$(service_name_for_role "$prefix" "$role")"
     if service_is_active "$service_name"; then
       return 0

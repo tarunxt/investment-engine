@@ -40,7 +40,25 @@ services:
 
   celery_worker:
     build: ./backend
-    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email --loglevel=info --concurrency=4
+    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=info --concurrency=4 --prefetch-multiplier=1
+    volumes:
+      - ./backend:/backend
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+
+  # Keep Auto-Live planning separate from long-running Stage 3 order-intent
+  # reconciliation.  This mirrors the no-Docker systemd topology.
+  celery_auto_live_worker:
+    build: ./backend
+    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=info --concurrency=1 --prefetch-multiplier=1
     volumes:
       - ./backend:/backend
     env_file:

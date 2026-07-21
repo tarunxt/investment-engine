@@ -17,7 +17,8 @@ cd "$BACKEND_ROOT"
 exec "$BACKEND_ROOT/.venv/bin/celery" \
   -A app.infrastructure.messaging.celery_app \
   worker \
-  -Q "${CELERY_WORKER_QUEUES:-ai,email,beat}" \
+  -Q "${CELERY_WORKER_QUEUES:-ai,email}" \
   --loglevel="${CELERY_LOG_LEVEL:-info}" \
   --concurrency="${CELERY_WORKER_CONCURRENCY:-2}" \
+  --prefetch-multiplier="${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}" \
   --max-tasks-per-child="${CELERY_MAX_TASKS_PER_CHILD:-1000}"

@@ -6,6 +6,8 @@ import json
 from typing import Any
 
 from sqlalchemy import Select, and_, desc, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, selectinload
 
 from app.domains.bullpen_run_audit.models import (
@@ -100,6 +102,35 @@ class BullpenRunAuditRepository:
                 )
             )
         ).scalar_one_or_none()
+
+    def lock_run_record_for_audit_materialization(
+        self,
+        *,
+        user_id: int,
+        run_id: str,
+    ) -> PolymarketAutoLiveRunRecord | None:
+        """Load a run under the materialization serialization lock.
+
+        The run is the stable, already-existing parent for every audit
+        snapshot.  Locking it rather than a snapshot row also serializes the
+        first snapshot creation, when there is no snapshot row to lock yet.
+
+        PostgreSQL holds ``FOR UPDATE`` until the caller commits or rolls back
+        its transaction.  SQLite deliberately accepts this query as a no-op
+        for local/unit-test compatibility; production uses PostgreSQL.
+        """
+
+        query = (
+            select(PolymarketAutoLiveRunRecord)
+            .where(
+                and_(
+                    PolymarketAutoLiveRunRecord.user_id == user_id,
+                    PolymarketAutoLiveRunRecord.id == run_id,
+                )
+            )
+            .with_for_update()
+        )
+        return self.session.execute(query).scalar_one_or_none()
 
     def get_run_decision_records(
         self,
@@ -210,14 +241,44 @@ class BullpenRunAuditRepository:
             size_bytes = len(
                 json.dumps(payload_json, ensure_ascii=False, sort_keys=True).encode("utf-8")
             )
-        record = BullpenRunAuditBlobRecord(
-            id=blob_id,
-            content_type=content_type,
-            sanitized=sanitized,
-            size_bytes=size_bytes,
-            payload_json=payload_json,
-            payload_text=payload_text,
-        )
+        values = {
+            "id": blob_id,
+            "content_type": content_type,
+            "sanitized": sanitized,
+            "size_bytes": size_bytes,
+            "payload_json": payload_json,
+            "payload_text": payload_text,
+        }
+        dialect_name = self.session.get_bind().dialect.name
+        if dialect_name == "postgresql":
+            # Content-addressed blobs can be shared by independent run audit
+            # transactions.  Let the stable content hash be the idempotency
+            # key instead of turning a harmless concurrent insert into an
+            # IntegrityError that rolls back the snapshot rebuild.
+            self.session.execute(
+                postgresql_insert(BullpenRunAuditBlobRecord)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[BullpenRunAuditBlobRecord.id])
+            )
+            self.session.flush()
+            record = self.session.get(BullpenRunAuditBlobRecord, blob_id)
+            if record is None:  # pragma: no cover - defensive database invariant
+                raise RuntimeError(f"Failed to materialize audit blob {blob_id}")
+            return record
+        if dialect_name == "sqlite":
+            self.session.execute(
+                sqlite_insert(BullpenRunAuditBlobRecord)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[BullpenRunAuditBlobRecord.id])
+            )
+            self.session.flush()
+            record = self.session.get(BullpenRunAuditBlobRecord, blob_id)
+            if record is None:  # pragma: no cover - defensive database invariant
+                raise RuntimeError(f"Failed to materialize audit blob {blob_id}")
+            return record
+
+        # Non-production dialect fallback used by lightweight test doubles.
+        record = BullpenRunAuditBlobRecord(**values)
         self.session.add(record)
         self.session.flush()
         return record
@@ -235,6 +296,11 @@ class BullpenRunAuditRepository:
         self.session.query(BullpenRunAuditFindingRecord).filter(
             BullpenRunAuditFindingRecord.snapshot_id == snapshot_id
         ).delete(synchronize_session=False)
+        # A force rebuild inserts deterministic child keys (notably events)
+        # immediately afterwards.  Flush the deletes while the owning run row
+        # remains locked, so a retry cannot observe a half-cleared snapshot or
+        # collide with a still-pending unique event key.
+        self.session.flush()
 
     def latest_snapshot_version_for_run(self, *, user_id: int, run_id: str) -> int:
         value = self.session.execute(

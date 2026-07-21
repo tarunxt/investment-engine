@@ -1968,6 +1968,26 @@ export type BullpenAutoLiveRunStatus =
   | "partial_success"
   | "failed"
   | "skipped";
+export type BullpenAutoLiveTaskLifecycleState =
+  | "QUEUED"
+  | "RESERVED"
+  | "STARTED"
+  | "RETRYING"
+  | "SUCCESS"
+  | "FAILURE"
+  | "REVOKED"
+  | "WORKER_LOST";
+export interface BullpenAutoLiveTaskLifecycle {
+  state: BullpenAutoLiveTaskLifecycleState;
+  task_id?: string | null;
+  queue?: string | null;
+  enqueued_at?: string | null;
+  worker_hostname?: string | null;
+  worker_started_at?: string | null;
+  last_heartbeat_at?: string | null;
+  detail?: string | null;
+  redelivery_count?: number;
+}
 export type BullpenAutoLiveStageStatus =
   | "pass"
   | "fail"
@@ -2540,6 +2560,7 @@ export interface BullpenAutoLiveRun {
   guardrail_checks: BullpenAutoLiveGuardrailCheck[];
   decision_ids: string[];
   order_intent_ids?: string[];
+  task_lifecycle?: BullpenAutoLiveTaskLifecycle | null;
 }
 
 export interface BullpenAutoLiveRunOrdersResponse {

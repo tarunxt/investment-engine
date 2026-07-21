@@ -139,22 +139,13 @@ async def lifespan(app: FastAPI):
     logger.info("Redis: %s", settings.redis_url)
     logger.info("CORS allowed origins: %s", cors_allowed_origins)
     get_bullpen_runtime_broker().validate_startup()
-    try:
-        from app.domains.polymarket_auto_live.tasks import (
-            reconcile_interrupted_auto_live_runs_on_startup_sync,
-        )
-
-        recovered = await __import__("asyncio").to_thread(
-            reconcile_interrupted_auto_live_runs_on_startup_sync,
-            stale_after_seconds=15 * 60,
-        )
-        if recovered:
-            logger.warning(
-                "Marked %s interrupted Auto-Live runs recovery-required during backend startup; no orders were resubmitted.",
-                recovered,
-            )
-    except Exception:
-        logger.exception("Backend startup interrupted-run reconciliation failed.")
+    # Do not terminalize persisted Auto-Live runs during FastAPI startup.
+    # Late-acknowledged Celery work may still be queued/reserved while systemd
+    # restarts services. The dedicated Auto-Live worker schedules lifecycle-
+    # aware recovery after a redelivery/heartbeat grace period instead.
+    logger.info(
+        "Auto-Live restart recovery is deferred to the dedicated worker grace period."
+    )
 
     # Seed default prompts (idempotent — only inserts if missing)
     async with AsyncSessionLocal() as db:

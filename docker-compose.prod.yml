@@ -92,7 +92,7 @@ services:
     build: ./backend
     restart: always
 
-    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=info --concurrency=8 --max-tasks-per-child=1000
+    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=info --concurrency=8 --prefetch-multiplier=1 --max-tasks-per-child=1000
 
     environment:
       ENVIRONMENT: production
@@ -116,6 +116,45 @@ services:
         reservations:
           cpus: '4'
           memory: 4G
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+    networks:
+      - app_network
+
+  # Isolated Auto-Live Stage 1/2 planning worker. Stage 3 execution and
+  # reconciliation remain on the general ai worker above.
+  celery_auto_live_worker:
+    build: ./backend
+    restart: always
+
+    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=1000
+
+    environment:
+      ENVIRONMENT: production
+      CELERY_POOL: prefork
+
+    env_file:
+      - .env.prod
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
 
     logging:
       driver: "json-file"
@@ -211,7 +250,10 @@ services:
     image: redis:trixie
     restart: always
 
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    # Auto-Live uses expiring Redis leases for queue ownership. Evicting a
+    # live lease can create avoidable recovery churn, so fail writes under
+    # memory pressure rather than evicting arbitrary keys.
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy noeviction
 
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]

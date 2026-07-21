@@ -58,7 +58,20 @@ services:
     environment:
       ENVIRONMENT: development
 
-    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=debug
+    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=debug --prefetch-multiplier=1
+
+    healthcheck:
+      disable: true
+
+  celery_auto_live_worker:
+    build: ./backend
+    volumes:
+      - ./backend:/backend
+
+    environment:
+      ENVIRONMENT: development
+
+    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=debug --concurrency=1 --prefetch-multiplier=1
 
     healthcheck:
       disable: true

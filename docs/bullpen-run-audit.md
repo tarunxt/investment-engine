@@ -31,6 +31,38 @@ Current implementation notes:
 * Large sections are loaded lazily through section endpoints instead of bloating the
   list response.
 
+### Concurrent materialization and Stage 3 refreshes
+
+The current snapshot for a run is rebuilt in one transaction under a PostgreSQL
+`FOR UPDATE` lock on its persisted Auto-Live run row. The parent run is used as
+the lock target even before a snapshot exists, so concurrent first-time and
+`force=True` materializations cannot create competing current snapshots. While
+that lock is held, child stages, deterministic events, formulas, and findings
+are deleted, flushed, and rebuilt before the snapshot metadata is committed.
+In particular, a deterministic event key such as `run-started` remains unique
+within `(snapshot_id, event_key)` instead of relying on an ignored integrity
+error. Non-current historical frozen snapshots are neither rewritten nor
+reinterpreted.
+Content-addressed audit blobs use PostgreSQL `ON CONFLICT DO NOTHING` on their
+stable hash, so independent serialized run rebuilds can safely share identical
+sanitized payloads.
+
+Stage 3 reconciliation does not rebuild an audit synchronously for every
+intent poll. It calls `request_bullpen_run_audit_refresh_sync`, which uses a
+per-run Redis pending marker and short debounce (default 5 seconds) to enqueue
+at most one `refresh_bullpen_run_audit_snapshot` Celery task. That task takes a
+token-owned per-run refresh lease (default 300 seconds), renews both that lease
+and its pending marker while a serialized rebuild is still running, then
+materializes one view from the latest durable state. Duplicate or redelivered
+refresh tasks exit without rebuilding. Redis failure is logged and does not
+fall back to direct materialization: order reconciliation and submission safety
+are intentionally independent of audit rendering.
+
+The relevant operational environment variables are:
+
+* `BULLPEN_RUN_AUDIT_REFRESH_DEBOUNCE_SECONDS` (default `5`)
+* `BULLPEN_RUN_AUDIT_REFRESH_LEASE_SECONDS` (default `300`)
+
 ## Domain Layout
 
 `backend/app/domains/bullpen_run_audit/`
@@ -43,7 +75,7 @@ Current implementation notes:
 * `prompt_builder.py`: chunk planning, prompt generation, strict JSON parsing
 * `validators.py`: deterministic findings
 * `service.py`: materialization, exports, manual checks, remarks, feedback enqueue
-* `tasks.py`: Celery feedback execution
+* `tasks.py`: Celery feedback execution and coalesced run-audit refreshes
 * `router.py`: authenticated API endpoints
 
 ## API Surface
@@ -549,6 +581,18 @@ must preserve these fields when materializing runs so reviewers can distinguish:
 * stale `SUBMITTING` intents moved to confirmation/reconciliation before any retry, preventing duplicate sells after ambiguous worker or network failures.
 * per-attempt retryability, root cause, worker task ID, sanitized request/response, next retry time, remote order references, and operator resolution guidance.
 
+Only the canonical reconciliation scheduler queues reconcilable
+`SUBMITTED`/`CONFIRMING`-style intents; the due-intent dispatcher handles
+executable work. Every execution, retry, operator action, watchdog action, and
+reconciliation task first takes the same token-owned per-intent Redis operation
+lease and refreshes it while it owns remote Bullpen work. It also holds a
+PostgreSQL session advisory fence across that remote operation, so a Redis
+eviction cannot admit a second worker for the same intent. A duplicate or stale
+Celery delivery therefore exits before any remote read or write. The durable
+intent state, idempotency key, remote-order evidence, and recovery-required
+guards remain the final Stage 3 safety boundary; audit materialization is never a
+precondition for order reconciliation.
+
 Historical snapshots remain backward-compatible: missing watchdog fields mean the run
 predates the durable-intent watchdog and should be rendered as legacy diagnostics.
 
@@ -566,9 +610,24 @@ Because this is mutable runtime state, the latest verdict is returned with the
 Auto-Live summary; frozen run snapshots continue to record only the auth and
 guardrail evidence observed during that run.
 
-On Celery worker startup, persisted `running`/`confirming` work is reconciled;
-backend startup applies the same recovery to records with no progress for 15
-minutes. Runs with tasks confirmed active on another worker are left alone.
+Auto-Live planning is isolated on the `auto_live` queue and records a task
+lifecycle before publishing: `QUEUED`, `RESERVED` (received but waiting for a
+pool slot), `STARTED`, `RETRYING`, then a terminal lifecycle state. The dedicated
+planning worker defers destructive restart recovery for the configured startup
+grace period. A queued/reserved lifecycle, an ambiguous Celery `PENDING` result,
+or a partial `inspect` response is not evidence of a dead worker. A started run
+can be marked worker-lost only after its explicit heartbeat expires, the
+worker-loss grace period passes, no redelivery, Redis execution lease, or
+PostgreSQL run advisory fence is present, the inspection evidence is complete
+and negative, and Celery has no terminal result. `WorkerLostError` is treated as
+potentially redeliverable during that grace period rather than an immediate
+terminal workflow failure. The two-hour workflow circuit breaker remains an
+independent absolute limit. Backend startup does not perform an immediate
+destructive stale-run sweep.
+
+On worker recovery, persisted `running`/`confirming` work is reconciled only
+through those lifecycle and lease checks. Runs with a healthy worker heartbeat or
+queued/redelivered task are left alone.
 Interrupted Stage 3 runs record `stage3_recovery` with
 `status=aborted_recovery_required`, `required=true`, and
 `automatic_resubmission=false`. Unsubmitted intents are deferred. Ambiguous or

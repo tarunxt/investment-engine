@@ -11,6 +11,17 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveRun,
     BullpenAutoLiveStageResult,
 )
+from app.domains.polymarket_auto_live.run_lifecycle import (
+    AUTO_LIVE_RUN_WORKER_LOSS_GRACE_SECONDS,
+    auto_live_run_execution_lease_is_live_sync,
+    lifecycle_detail_for_state,
+    task_lifecycle_has_redelivery_evidence,
+    task_lifecycle_heartbeat_at,
+    task_lifecycle_is_queue_waiting,
+)
+from app.domains.polymarket_auto_live.advisory_lock import (
+    auto_live_run_execution_advisory_lock_is_live_sync,
+)
 from app.infrastructure.messaging.celery_app import celery
 from app.infrastructure.messaging.task_registry import (
     get_registered_auto_live_run_task_id_sync,
@@ -35,6 +46,11 @@ _PENDING_STAGE3_ORDER_DETAIL = "Order planned but not executed yet."
 _TERMINAL_CELERY_STATES = frozenset({"SUCCESS", "FAILURE", "REVOKED"})
 _LIVE_CELERY_STATES = frozenset({"STARTED"})
 _TERMINAL_STAGE_PHASES = frozenset({"completed", "failed", "cancelled"})
+_WORKER_LOST_RESULT_MARKERS = (
+    "workerlosterror",
+    "worker lost",
+    "worker exited prematurely",
+)
 _WORKFLOW_STAGE_LABELS = {
     "scan": "Stage 1 · Bullpen Scan",
     "llm": "Stage 2 · Run LLM",
@@ -52,6 +68,11 @@ class AutoLiveTaskRuntimeSnapshot:
     is_reserved: bool = False
     is_scheduled: bool = False
     inspect_succeeded: bool = False
+    # Celery inspect is broadcast best-effort.  ``False`` means at least one
+    # expected worker did not reply, so absence from its response is not proof
+    # that a task is absent globally.  ``None`` preserves compatibility with
+    # existing focused callers that only supplied ``inspect_succeeded``.
+    inspect_complete: bool | None = None
 
     @property
     def is_live(self) -> bool:
@@ -64,7 +85,13 @@ class AutoLiveTaskRuntimeSnapshot:
         )
 
 
-_task_inspection_cache: dict[str, tuple[float, AutoLiveTaskRuntimeSnapshot]] = {}
+# A lifecycle task ID can outlive the Redis task-registry entry (for example
+# after a Redis restart).  Include the requested fallback in the cache key so
+# a dashboard lookup without a task ID can never poison recovery's richer
+# inspection of the persisted delivery.
+_task_inspection_cache: dict[
+    tuple[str, str | None], tuple[float, AutoLiveTaskRuntimeSnapshot]
+] = {}
 _task_inspection_cache_lock = threading.Lock()
 
 
@@ -82,6 +109,31 @@ def _normalize_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return _normalize_datetime(parsed)
+
+
+def _inspect_has_complete_negative_evidence(
+    snapshot: AutoLiveTaskRuntimeSnapshot,
+) -> bool:
+    """Whether a missing task was observed by a complete inspect response.
+
+    A historic test double only has ``inspect_succeeded``; preserve that
+    behavior for callers which did not yet provide the richer field.  Actual
+    broker inspection always sets ``inspect_complete`` explicitly.
+    """
+
+    if snapshot.inspect_complete is not None:
+        return snapshot.inspect_complete
+    return snapshot.inspect_succeeded
 
 
 def _read_output_int(value: object) -> int | None:
@@ -477,21 +529,32 @@ def mark_interrupted_run_for_restart(
     return run
 
 
-def inspect_auto_live_run_task_sync(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
+def inspect_auto_live_run_task_sync(
+    run_id: str,
+    *,
+    lifecycle_task_id: str | None = None,
+) -> AutoLiveTaskRuntimeSnapshot:
     """Read one run's Celery state without multiplying broker inspections.
 
     The Auto-Live console polls while a run is executing. Celery inspect uses
     broadcast RPCs, so duplicate polling requests can otherwise accumulate
     faster than workers reply and make the API unavailable behind nginx.
     """
+    normalized_lifecycle_task_id = (
+        lifecycle_task_id.strip() if isinstance(lifecycle_task_id, str) else None
+    ) or None
+    cache_key = (run_id, normalized_lifecycle_task_id)
     now = time.monotonic()
     with _task_inspection_cache_lock:
-        cached = _task_inspection_cache.get(run_id)
+        cached = _task_inspection_cache.get(cache_key)
         if cached is not None and now - cached[0] < TASK_INSPECTION_CACHE_TTL_SECONDS:
             return cached[1]
 
-        snapshot = _inspect_auto_live_run_task_uncached(run_id)
-        _task_inspection_cache[run_id] = (now, snapshot)
+        snapshot = _inspect_auto_live_run_task_uncached(
+            run_id,
+            lifecycle_task_id=normalized_lifecycle_task_id,
+        )
+        _task_inspection_cache[cache_key] = (now, snapshot)
         # Keep the process-local cache bounded when many historical runs have
         # been inspected. Expired entries are never needed for recovery.
         expired_before = now - TASK_INSPECTION_CACHE_TTL_SECONDS
@@ -501,12 +564,21 @@ def inspect_auto_live_run_task_sync(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
         return snapshot
 
 
-def _inspect_auto_live_run_task_uncached(run_id: str) -> AutoLiveTaskRuntimeSnapshot:
-    task_id = get_registered_auto_live_run_task_id_sync(run_id)
+def _inspect_auto_live_run_task_uncached(
+    run_id: str,
+    *,
+    lifecycle_task_id: str | None = None,
+) -> AutoLiveTaskRuntimeSnapshot:
+    task_id = get_registered_auto_live_run_task_id_sync(run_id) or lifecycle_task_id
     if not task_id:
+        # An evicted/unavailable registry key is not evidence that the task is
+        # absent globally.  In particular, a STARTED lifecycle must never be
+        # terminalized merely because the convenience registry no longer has
+        # its task ID.  Recovery can still apply the absolute circuit breaker.
         return AutoLiveTaskRuntimeSnapshot(
             task_id=None,
-            inspect_succeeded=True,
+            inspect_succeeded=False,
+            inspect_complete=False,
         )
 
     state: str | None = None
@@ -527,21 +599,64 @@ def _inspect_auto_live_run_task_uncached(run_id: str) -> AutoLiveTaskRuntimeSnap
         logger.exception("Failed to read Celery result state for Auto-Live task %s", task_id)
 
     inspect_succeeded = False
+    inspect_complete: bool | None = None
     is_active = False
     is_reserved = False
     is_scheduled = False
 
     try:
         inspector = celery.control.inspect(timeout=TASK_INSPECT_TIMEOUT_SECONDS)
-        active_reply = inspector.query_task(task_id)
+        active = getattr(inspector, "active", None)
+        active_reply = active() if callable(active) else None
+        query_task = getattr(inspector, "query_task", None)
+        query_task_reply = query_task(task_id) if callable(query_task) else None
         reserved_reply = inspector.reserved()
         scheduled_reply = inspector.scheduled()
+        ping = getattr(inspector, "ping", None)
+        ping_reply = ping() if callable(ping) else None
         inspect_succeeded = any(
-            reply is not None for reply in (active_reply, reserved_reply, scheduled_reply)
+            reply is not None
+            for reply in (
+                active_reply,
+                query_task_reply,
+                reserved_reply,
+                scheduled_reply,
+                ping_reply,
+            )
         )
-        is_active = _payload_contains_task_id(active_reply, task_id)
+        is_active = _payload_contains_task_id(active_reply, task_id) or _payload_contains_task_id(
+            query_task_reply,
+            task_id,
+        )
         is_reserved = _payload_contains_task_id(reserved_reply, task_id)
         is_scheduled = _payload_contains_task_id(scheduled_reply, task_id)
+        # ``active``/``reserved``/``scheduled`` list tasks per worker.  When
+        # ping gives the expected worker set, absence is only meaningful if
+        # all three replies cover every responder. Do not infer global absence
+        # from a partial broadcast response.
+        if isinstance(ping_reply, dict):
+            workers = {str(worker) for worker in ping_reply}
+            active_workers = (
+                {str(worker) for worker in active_reply}
+                if isinstance(active_reply, dict)
+                else set()
+            )
+            reserved_workers = (
+                {str(worker) for worker in reserved_reply}
+                if isinstance(reserved_reply, dict)
+                else set()
+            )
+            scheduled_workers = (
+                {str(worker) for worker in scheduled_reply}
+                if isinstance(scheduled_reply, dict)
+                else set()
+            )
+            inspect_complete = (
+                bool(workers)
+                and workers.issubset(active_workers)
+                and workers.issubset(reserved_workers)
+                and workers.issubset(scheduled_workers)
+            )
     except Exception:
         logger.warning(
             "Failed to inspect live Celery worker state for Auto-Live task %s.",
@@ -558,6 +673,7 @@ def _inspect_auto_live_run_task_uncached(run_id: str) -> AutoLiveTaskRuntimeSnap
         is_reserved=is_reserved,
         is_scheduled=is_scheduled,
         inspect_succeeded=inspect_succeeded,
+        inspect_complete=inspect_complete,
     )
 
 
@@ -583,6 +699,24 @@ def _format_terminal_task_result_detail(task_snapshot: AutoLiveTaskRuntimeSnapsh
         if traceback_head and traceback_head not in (task_snapshot.result_error or ""):
             details.append(f"Traceback tail: {traceback_head}")
     return " ".join(details) if details else "No persisted Celery exception detail was available."
+
+
+def _is_worker_lost_terminal_result(task_snapshot: AutoLiveTaskRuntimeSnapshot) -> bool:
+    """Whether Celery's FAILURE represents a potentially redeliverable loss.
+
+    With late acknowledgement, Celery can write ``WorkerLostError`` before a
+    replacement receives the same task ID. That is not a definitive workflow
+    failure; it must travel through the heartbeat/lease/redelivery grace path.
+    """
+
+    if (task_snapshot.state or "").strip().upper() != "FAILURE":
+        return False
+    details = " ".join(
+        value
+        for value in (task_snapshot.result_error, task_snapshot.result_traceback)
+        if isinstance(value, str)
+    ).lower()
+    return any(marker in details for marker in _WORKER_LOST_RESULT_MARKERS)
 
 
 def _should_finalize_settled_running_run(run: BullpenAutoLiveRun) -> bool:
@@ -627,6 +761,22 @@ def _finalize_settled_running_run(run: BullpenAutoLiveRun) -> None:
     run.status = "completed"
     run.error_message = None
     run.summary = _build_completed_summary(run, invest_stage)
+
+
+def _set_task_lifecycle_terminal(
+    run: BullpenAutoLiveRun,
+    *,
+    state: str,
+    detail: str | None = None,
+) -> None:
+    if run.task_lifecycle is None:
+        return
+    run.task_lifecycle = run.task_lifecycle.model_copy(
+        update={
+            "state": state,
+            "detail": detail or lifecycle_detail_for_state(state),
+        }
+    )
 
 
 def _finalize_successful_worker_after_stage3_handoff(
@@ -688,6 +838,7 @@ def _build_stalled_run_failure_message(
     heartbeat_age: timedelta,
     absolute_age: timedelta,
     task_snapshot: AutoLiveTaskRuntimeSnapshot,
+    run: BullpenAutoLiveRun,
 ) -> str | None:
     normalized_state = (task_snapshot.state or "").strip().upper()
     if absolute_age >= AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT:
@@ -702,10 +853,25 @@ def _build_stalled_run_failure_message(
             f"maximum runtime ({elapsed_minutes} minutes)."
             f"{task_detail} Please rerun."
         )
-    if task_snapshot.is_live:
+
+    lifecycle = run.task_lifecycle
+    lifecycle_task_id = lifecycle.task_id if lifecycle is not None else None
+    # The task registry/result backend can briefly retain a completed old
+    # delivery after a late-ack redelivery has already been persisted.  Never
+    # let that old result terminalize the newer lifecycle delivery.
+    if (
+        lifecycle_task_id
+        and task_snapshot.task_id
+        and lifecycle_task_id != task_snapshot.task_id
+    ):
         return None
 
-    if normalized_state in _TERMINAL_CELERY_STATES and task_snapshot.task_id:
+    worker_lost_result = _is_worker_lost_terminal_result(task_snapshot)
+    if (
+        normalized_state in _TERMINAL_CELERY_STATES
+        and task_snapshot.task_id
+        and not worker_lost_result
+    ):
         result_detail = _format_terminal_task_result_detail(task_snapshot)
         return (
             f"Worker task {task_snapshot.task_id} ended with {normalized_state.lower()} "
@@ -714,15 +880,91 @@ def _build_stalled_run_failure_message(
             " Please rerun."
         )
 
-    if not task_snapshot.inspect_succeeded:
-        if absolute_age < AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT:
+    # A broker-received task can sit in a Celery prefork reserved list for a
+    # long time.  Its lack of workflow-stage progress is expected; neither a
+    # PENDING result nor a partial inspect reply proves it has died. A
+    # matching terminal Celery result above remains authoritative.
+    if task_lifecycle_is_queue_waiting(run):
+        return None
+
+    if task_snapshot.is_live:
+        return None
+
+    explicit_heartbeat_at = _parse_iso_datetime(task_lifecycle_heartbeat_at(run))
+    if explicit_heartbeat_at is not None:
+        # ``heartbeat_age`` is calculated with the caller's test/reference
+        # clock below, so retain that clock when it is supplied.
+        if heartbeat_age < AUTO_LIVE_RUN_HEARTBEAT_TIMEOUT:
             return None
-        return (
-            "Auto-Live stopped reporting progress and no worker could be confirmed "
-            "before the safety timeout elapsed. Please rerun."
-        )
+        if heartbeat_age < (
+            AUTO_LIVE_RUN_HEARTBEAT_TIMEOUT
+            + timedelta(seconds=AUTO_LIVE_RUN_WORKER_LOSS_GRACE_SECONDS)
+        ):
+            return None
+        # A newer registered delivery is concrete redelivery evidence even if
+        # inspect has not yet observed it.  Never terminalize the old delivery.
+        if task_lifecycle_has_redelivery_evidence(run, task_snapshot.task_id):
+            return None
+
+        # A PENDING result is intentionally ambiguous.  It can accompany a
+        # redelivery, result-backend loss, or an unobserved queue wait.  Only a
+        # stale explicit STARTED heartbeat *plus* complete negative inspect
+        # evidence can declare this worker lost.
+        if not _inspect_has_complete_negative_evidence(task_snapshot):
+            return None
+        if lifecycle is not None and lifecycle.state == "STARTED":
+            # The execution lease is renewed independently of the database
+            # heartbeat.  In particular, an audit snapshot may momentarily
+            # lock the run row and defer a heartbeat write.  A live (or
+            # unreadable) Redis lease is liveness/unknown evidence, never
+            # proof that this worker was lost.
+            execution_lease_is_live = auto_live_run_execution_lease_is_live_sync(
+                run.id
+            )
+            if execution_lease_is_live is not False:
+                return None
+            # Redis can evict a lease key while a healthy planner is inside a
+            # remote Bullpen call. The PostgreSQL session-level advisory lock
+            # remains the split-brain fence in that interval; its presence (or
+            # an unreadable database probe) is liveness/unknown evidence, not
+            # proof that the worker died.
+            advisory_lock_is_live = auto_live_run_execution_advisory_lock_is_live_sync(
+                run.id
+            )
+            if advisory_lock_is_live is not False:
+                return None
+            stalled_minutes = max(1, int(heartbeat_age.total_seconds() // 60))
+            return (
+                f"Worker heartbeat lost for task {task_snapshot.task_id or lifecycle.task_id or 'unknown'} "
+                f"after {stalled_minutes} minutes without progress. Please rerun."
+            )
+
+    # A WorkerLostError on an old late-acked delivery may be followed by a
+    # broker redelivery carrying that same task ID. Historical runs without
+    # lifecycle evidence remain recoverable until the absolute breaker; new
+    # lifecycle-bearing runs only reach WorkerLost above after heartbeat
+    # expiry, grace, complete negative inspect, and an absent execution lease.
+    if worker_lost_result:
+        return None
+
+    if not task_snapshot.inspect_succeeded:
+        return None
+
+    # A result-backend PENDING state is not evidence that a legacy task is
+    # absent.  Legacy runs without an explicit STARTED heartbeat stay
+    # recoverable until a terminal Celery result or the absolute circuit
+    # breaker; they must not be failed from ``updated_at`` alone.
+    if normalized_state == "PENDING":
+        return None
 
     if heartbeat_age < AUTO_LIVE_RUN_HEARTBEAT_TIMEOUT:
+        return None
+
+    # Legacy runs created before the lifecycle field existed retain the prior
+    # stale-progress fallback, but only with a complete negative inspection.
+    # This avoids turning a partial inspect response into an irreversible run
+    # failure during a deployment or broker partition.
+    if not _inspect_has_complete_negative_evidence(task_snapshot):
         return None
 
     stalled_minutes = max(1, int(heartbeat_age.total_seconds() // 60))
@@ -734,6 +976,27 @@ def _build_stalled_run_failure_message(
     return (
         f"The run has not reported progress for {stalled_minutes} minutes and no worker "
         "task id is registered. Please rerun."
+    )
+
+
+def _task_snapshot_matches_current_lifecycle(
+    run: BullpenAutoLiveRun,
+    task_snapshot: AutoLiveTaskRuntimeSnapshot,
+) -> bool:
+    """Fence a retained result from an older Celery delivery.
+
+    Celery result rows are keyed by task ID and may outlive a redelivery.  A
+    terminal result can only finalize this persisted run when it belongs to
+    the lifecycle's current delivery (or when this is a legacy run with no
+    lifecycle task ID).
+    """
+
+    lifecycle = run.task_lifecycle
+    return not bool(
+        lifecycle
+        and lifecycle.task_id
+        and task_snapshot.task_id
+        and lifecycle.task_id != task_snapshot.task_id
     )
 
 
@@ -750,24 +1013,38 @@ def reconcile_running_auto_live_run(
 
     if _should_finalize_settled_running_run(run):
         _finalize_settled_running_run(run)
+        _set_task_lifecycle_terminal(
+            run,
+            state="SUCCESS" if run.status == "completed" else "FAILURE",
+        )
         return run
 
     reference_now = _normalize_datetime(now) or _utc_now()
     normalized_started_at = _normalize_datetime(started_at) or reference_now
     normalized_updated_at = _normalize_datetime(updated_at) or normalized_started_at
-    runtime_snapshot = task_snapshot or inspect_auto_live_run_task_sync(run.id)
+    runtime_snapshot = task_snapshot or inspect_auto_live_run_task_sync(
+        run.id,
+        lifecycle_task_id=(
+            run.task_lifecycle.task_id if run.task_lifecycle is not None else None
+        ),
+    )
     if (
         (runtime_snapshot.state or "").strip().upper() == "SUCCESS"
+        and _task_snapshot_matches_current_lifecycle(run, runtime_snapshot)
         and _finalize_successful_worker_after_stage3_handoff(
             run,
             completed_at=reference_now.isoformat(),
         )
     ):
+        _set_task_lifecycle_terminal(run, state="SUCCESS")
         return run
+    lifecycle_heartbeat_at = _parse_iso_datetime(task_lifecycle_heartbeat_at(run))
+    heartbeat_reference = lifecycle_heartbeat_at or normalized_updated_at
     failure_message = _build_stalled_run_failure_message(
-        heartbeat_age=max(reference_now - normalized_updated_at, timedelta()),
+        heartbeat_age=max(reference_now - heartbeat_reference, timedelta()),
         absolute_age=max(reference_now - normalized_started_at, timedelta()),
         task_snapshot=runtime_snapshot,
+        run=run,
     )
     if failure_message is None:
         return None
@@ -810,6 +1087,22 @@ def reconcile_running_auto_live_run(
             f"{failure_message} Recovery is required; no order was automatically "
             "resubmitted."
         )
+        lifecycle_state = (
+            "WORKER_LOST"
+            if failure_message.startswith("Worker heartbeat lost")
+            else "REVOKED"
+            if (runtime_snapshot.state or "").strip().upper() == "REVOKED"
+            else "FAILURE"
+        )
+        _set_task_lifecycle_terminal(
+            run,
+            state=lifecycle_state,
+            detail=(
+                "Absolute timeout"
+                if absolute_age >= AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT
+                else failure_message
+            ),
+        )
         return run
 
     run.status = "failed"
@@ -819,5 +1112,21 @@ def reconcile_running_auto_live_run(
         run,
         failure_message=failure_message,
         completed_at=completed_at,
+    )
+    lifecycle_state = (
+        "WORKER_LOST"
+        if failure_message.startswith("Worker heartbeat lost")
+        else "REVOKED"
+        if (runtime_snapshot.state or "").strip().upper() == "REVOKED"
+        else "FAILURE"
+    )
+    _set_task_lifecycle_terminal(
+        run,
+        state=lifecycle_state,
+        detail=(
+            "Absolute timeout"
+            if absolute_age >= AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT
+            else failure_message
+        ),
     )
     return run

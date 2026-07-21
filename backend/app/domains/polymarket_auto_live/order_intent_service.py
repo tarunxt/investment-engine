@@ -86,7 +86,7 @@ from app.domains.polymarket_auto_live.repository import (
     record_to_state,
 )
 from app.domains.polymarket_auto_live.run_recovery import (
-    mark_interrupted_run_for_restart,
+    reconcile_running_auto_live_run,
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
@@ -1745,7 +1745,16 @@ def reconcile_interrupted_runs_on_startup_sync(
     interrupted_at: datetime | None = None,
     stale_before: datetime | None = None,
 ) -> list[str]:
-    """Abort abandoned runs and freeze unsubmitted Stage 3 writes on restart."""
+    """Recover proven-lost runs after restart without racing redelivery.
+
+    This function used to call ``mark_interrupted_run_for_restart`` before it
+    had established that a planning task was actually lost.  A systemd restart
+    can legitimately leave a late-acknowledged task queued/reserved until a
+    new worker receives it.  Reuse normal lifecycle-aware recovery so queued,
+    reserved, fresh-heartbeat, PENDING, and partial-inspect cases remain
+    recoverable.  ``confirming`` runs already handed Stage 3 to durable intents
+    and are intentionally left for reconciliation rather than terminalized.
+    """
 
     current = interrupted_at or utc_now()
     interrupted_at_iso = _isoformat(current) or utc_now_iso()
@@ -1769,10 +1778,52 @@ def reconcile_interrupted_runs_on_startup_sync(
     recovered_ids: list[str] = []
     for run_record in run_records:
         run = record_to_run(run_record)
-        interrupted_run = mark_interrupted_run_for_restart(
-            run,
-            interrupted_at=interrupted_at_iso,
+        if run.status == "confirming":
+            logger.info(
+                "Leaving confirming Auto-Live run %s for durable order-intent reconciliation.",
+                run_record.id,
+            )
+            continue
+
+        registered_run_task_id = get_registered_auto_live_run_task_id_sync(
+            run_record.id
         )
+        if registered_run_task_id in active_task_ids:
+            logger.info(
+                "Leaving Auto-Live run %s active because Celery confirms its planning task.",
+                run_record.id,
+            )
+            continue
+
+        interrupted_run = reconcile_running_auto_live_run(
+            run,
+            started_at=run_record.started_at,
+            updated_at=run_record.updated_at,
+            now=current,
+        )
+        if interrupted_run is None:
+            # This includes QUEUED/RESERVED, fresh heartbeat, ambiguous
+            # PENDING, redelivery, and incomplete Celery inspect responses.
+            continue
+
+        # Persisted terminal workflow stages can be finalized by recovery but
+        # must not be treated as a restart interruption or mutate order intents.
+        if interrupted_run.status in {"completed", "partial_success", "skipped"}:
+            apply_run_to_record(run_record, interrupted_run, user_id=run_record.user_id)
+            state_record = session.get(PolymarketAutoLiveStateRecord, run_record.user_id)
+            if state_record is not None:
+                state = record_to_state(state_record)
+                state.last_run_id = interrupted_run.id
+                state.last_run_at = interrupted_run.completed_at
+                state.last_action = interrupted_run.summary
+                state.last_error = None
+                apply_state_to_record(state_record, state)
+            recovered_ids.append(run_record.id)
+            continue
+
+        if interrupted_run.status != "failed":
+            continue
+
         stage3_recovery = interrupted_run.audit_metadata.get("stage3_recovery")
         has_stage3_recovery = isinstance(stage3_recovery, dict) and bool(
             stage3_recovery.get("required")
@@ -1789,9 +1840,6 @@ def reconcile_interrupted_runs_on_startup_sync(
                 .all()
             )
 
-        registered_run_task_id = get_registered_auto_live_run_task_id_sync(
-            run_record.id
-        )
         dispatched_intent_task_ids = {
             str(task_id)
             for intent in intent_records
@@ -1802,13 +1850,10 @@ def reconcile_interrupted_runs_on_startup_sync(
             ]
             if isinstance(task_id, str) and task_id.strip()
         }
-        if (
-            registered_run_task_id in active_task_ids
-            or active_task_ids.intersection(dispatched_intent_task_ids)
-        ):
+        if active_task_ids.intersection(dispatched_intent_task_ids):
             logger.info(
                 "Leaving Auto-Live run %s active because Celery still confirms "
-                "its run/order task is executing on another worker.",
+                "its order task is executing on another worker.",
                 run_record.id,
             )
             continue
@@ -1917,6 +1962,8 @@ def annotate_intent_dispatch_sync(
     task_id: str | None,
     queue: str = "ai",
     worker: str | None = None,
+    task_name: str = "execute_auto_live_order_intent",
+    operation: str = "execute",
 ) -> None:
     record = session.get(PolymarketAutoLiveOrderIntentRecord, intent_id)
     if record is None:
@@ -1926,12 +1973,16 @@ def annotate_intent_dispatch_sync(
         "last_dispatch_at": utc_now_iso(),
         "last_dispatch_task_id": task_id,
         "last_dispatch_queue": queue,
-        "last_dispatch_task": "execute_auto_live_order_intent",
+        "last_dispatch_task": task_name,
+        "last_dispatch_operation": operation,
         "required_queue": queue,
         "last_dispatch_worker": worker,
     })
     if record.status in {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}:
-        metadata["current_blockage"] = "Dispatched to Celery; waiting for an ai worker to receive execute_auto_live_order_intent."
+        metadata["current_blockage"] = (
+            "Dispatched to Celery; waiting for an ai worker to receive "
+            f"{task_name}."
+        )
         metadata["how_to_resolve"] = "If this stays unchanged, restart investor-celery-worker with CELERY_WORKER_QUEUES including ai."
     record.execution_metadata_json = metadata
     session.flush()

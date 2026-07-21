@@ -840,6 +840,54 @@ class BullpenAutoLiveDecision(BaseModel):
     guardrail_checks: list[BullpenAutoLiveGuardrailCheck] = Field(default_factory=list)
 
 
+AutoLiveTaskLifecycleState = Literal[
+    "QUEUED",
+    "RESERVED",
+    "STARTED",
+    "RETRYING",
+    "SUCCESS",
+    "FAILURE",
+    "REVOKED",
+    "WORKER_LOST",
+]
+
+AUTO_LIVE_TASK_LIFECYCLE_DETAILS: dict[AutoLiveTaskLifecycleState, str] = {
+    "QUEUED": "Queued — waiting for Auto-Live worker",
+    "RESERVED": "Received — waiting for pool slot",
+    "STARTED": "Running — heartbeat healthy",
+    "RETRYING": "Worker retry is queued",
+    "SUCCESS": "Worker completed successfully",
+    "FAILURE": "Worker returned failure",
+    "REVOKED": "Worker task was revoked",
+    "WORKER_LOST": "Worker heartbeat lost",
+}
+
+
+class BullpenAutoLiveTaskLifecycle(BaseModel):
+    """Durable Celery lifecycle evidence for one Auto-Live planning run.
+
+    ``task_id`` is intentionally retained after completion so operational
+    investigation can correlate the persisted run with Celery logs/results.
+    Lease tokens are never included here; they remain private Redis state.
+    """
+
+    state: AutoLiveTaskLifecycleState = "QUEUED"
+    task_id: str | None = None
+    queue: str | None = None
+    enqueued_at: str | None = None
+    worker_hostname: str | None = None
+    worker_started_at: str | None = None
+    last_heartbeat_at: str | None = None
+    detail: str | None = None
+    redelivery_count: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def populate_state_detail(self) -> "BullpenAutoLiveTaskLifecycle":
+        if self.detail is None:
+            self.detail = AUTO_LIVE_TASK_LIFECYCLE_DETAILS[self.state]
+        return self
+
+
 class BullpenAutoLiveRun(BaseModel):
     id: str
     triggered_by: AutoLiveTriggeredBy
@@ -873,6 +921,11 @@ class BullpenAutoLiveRun(BaseModel):
     stage2_llm_targets_snapshot: list[BullpenAutoLiveLlmTarget] | None = None
     request_context: BullpenAutoLiveRunOnceRequest | None = None
     audit_metadata: dict[str, object] = Field(default_factory=dict)
+    # Task lifecycle is deliberately stored in the existing run payload instead
+    # of a new relational table.  A run must remain observable while it is
+    # waiting in Celery before any workflow stage has written progress, and
+    # this additive field keeps historical payloads/API clients compatible.
+    task_lifecycle: BullpenAutoLiveTaskLifecycle | None = None
 
     @field_validator("stage2_llm_targets_snapshot")
     @classmethod

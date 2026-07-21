@@ -9,11 +9,41 @@ Flow:
 1. Stage 3 planning still produces decisions and `order_plan` payloads.
 2. When `AUTO_LIVE_EXECUTION_V2_ENABLED=true`, the engine stops after planning and marks the run as `confirming`.
 3. The backend persists `polymarket_auto_live_order_intents`, `polymarket_auto_live_order_attempts`, and `polymarket_auto_live_capital_reservations`.
-4. Celery beat dispatches due order intents.
-5. One Celery task owns one intent at a time, submits the external write, stores a sanitized attempt record, and schedules follow-up reconciliation.
+4. Celery beat dispatches due executable order intents; one canonical periodic scheduler handles pending/reconcilable intents.
+5. One Celery task owns one intent at a time through a token-owned operation lease, submits the external write, stores a sanitized attempt record, and schedules follow-up reconciliation.
 6. Reconciliation updates the intent, the Stage 3 decision rows, and the run-level execution funnel until every intent reaches a terminal state.
 
 The database is the source of truth for durable execution state. Celery only advances work that the database already describes.
+
+## Queue Topology and Ownership
+
+`execute_polymarket_auto_live_run` is routed to the dedicated `auto_live`
+queue, consumed by `investor-celery-auto-live-worker`. Stage 3 intent execution,
+retry, reconciliation, and coalesced audit refresh work remain on `ai`, while
+beat schedules and dispatches run on `beat`. The production systemd topology is:
+
+```text
+auto_live -> investor-celery-auto-live-worker (planning; default concurrency 1)
+ai,email  -> investor-celery-worker           (Stage 3 and general work)
+beat      -> investor-celery-beat-worker      (periodic dispatch/recovery)
+```
+
+Keep worker prefetch at one (`CELERY_WORKER_PREFETCH_MULTIPLIER=1`) so a
+prefork child cannot reserve a hidden backlog of long reconciliation tasks.
+Isolation is intentional: adding Auto-Live planning back to the `ai` consumer
+would reintroduce queue starvation.
+
+At publish time a planning run records `QUEUED` and its Celery task ID. Broker
+receipt records `RESERVED`; task execution records `STARTED` with a renewable
+heartbeat and run-level execution lease. `QUEUED` and `RESERVED` are healthy
+waiting states, not stale workflow failures. A redelivery is fenced by the
+run-level lease and a PostgreSQL session advisory fence. Each Stage 3 intent
+uses the same advisory-fence backstop while it submits or reconciles a remote
+order. Redis must run with `maxmemory-policy noeviction`; the database fence
+prevents split-brain work if a Redis lease is nevertheless lost. A worker-loss
+decision requires expired heartbeat plus grace, complete negative worker and
+advisory-fence evidence, no redelivery, and no terminal Celery result.
+The two-hour workflow timeout remains a separate circuit breaker.
 
 ## State Machine
 
@@ -81,7 +111,14 @@ Backoff:
 - Every durable intent stores a stable `idempotency_key`.
 - The intent is persisted before any Bullpen write is attempted.
 - Submission tasks lock the intent row with `FOR UPDATE SKIP LOCKED`.
-- Duplicate Celery dispatch is safe because only one worker can move an intent from an executable state into `SUBMITTING`.
+- A token-owned Redis operation lease is acquired before enqueue and before task work,
+  refreshed for long reconciliation, and released only by its owner. A dedicated
+  PostgreSQL session advisory fence is held through the remote operation, covering
+  an unexpected Redis eviction or failover. Together they cover periodic,
+  immediate, operator, watchdog, restart, and redelivery paths.
+- Duplicate Celery dispatch is safe because only one lease holder can reach the
+  durable transition into `SUBMITTING`; the row lock and deterministic idempotency
+  key remain a second, durable guard.
 
 ## Reservations
 
@@ -147,6 +184,18 @@ Execution attempts:
 - `AUTO_LIVE_RETRY_BASE_DELAY_SECONDS`
 - `AUTO_LIVE_RETRY_MAX_DELAY_SECONDS`
 - `AUTO_LIVE_BUY_BALANCE_BUFFER_USD`
+- `CELERY_WORKER_PREFETCH_MULTIPLIER`
+- `CELERY_AUTO_LIVE_WORKER_QUEUE`
+- `CELERY_AUTO_LIVE_WORKER_CONCURRENCY`
+- `CELERY_AUTO_LIVE_WORKER_PREFETCH_MULTIPLIER`
+- `AUTO_LIVE_RUN_EXECUTION_LEASE_TTL_SECONDS`
+- `AUTO_LIVE_RUN_HEARTBEAT_INTERVAL_SECONDS`
+- `AUTO_LIVE_RUN_WORKER_LOSS_GRACE_SECONDS`
+- `AUTO_LIVE_RUN_STARTUP_RECOVERY_GRACE_SECONDS`
+- `AUTO_LIVE_ORDER_INTENT_OPERATION_LEASE_SECONDS`
+- `AUTO_LIVE_ORDER_INTENT_OPERATION_ACTIVE_LEASE_SECONDS`
+- `BULLPEN_RUN_AUDIT_REFRESH_DEBOUNCE_SECONDS`
+- `BULLPEN_RUN_AUDIT_REFRESH_LEASE_SECONDS`
 - `POLYGON_RPC_URLS`
 - `POLYMARKET_POLYGON_RPC_URLS`
 
@@ -203,9 +252,17 @@ docker exec -it investor-backend-1 alembic upgrade head
 Useful commands on the production host:
 
 ```bash
-sudo systemctl status investor-backend investor-celery-worker investor-celery-beat investor-frontend
+sudo systemctl status \
+  investor-backend \
+  investor-celery-worker \
+  investor-celery-auto-live-worker \
+  investor-celery-beat \
+  investor-celery-beat-worker \
+  investor-frontend
 sudo journalctl -u investor-celery-worker -n 200 --no-pager
+sudo journalctl -u investor-celery-auto-live-worker -n 200 --no-pager
 sudo journalctl -u investor-celery-beat -n 200 --no-pager
+sudo journalctl -u investor-celery-beat-worker -n 200 --no-pager
 ```
 
 If you change backend env flags:
@@ -213,7 +270,9 @@ If you change backend env flags:
 ```bash
 sudo systemctl restart investor-backend
 sudo systemctl restart investor-celery-worker
+sudo systemctl restart investor-celery-auto-live-worker
 sudo systemctl restart investor-celery-beat
+sudo systemctl restart investor-celery-beat-worker
 ```
 
 If you change frontend env or deploy frontend code:

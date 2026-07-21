@@ -68,9 +68,9 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/srv/investment-engine
+WorkingDirectory=/srv/investor
 EnvironmentFile=/etc/investor/frontend.env
-ExecStart=/usr/bin/node /srv/investment-engine/scripts/bullpen-healthcheck.ts
+ExecStart=/usr/bin/node /srv/investor/scripts/bullpen-healthcheck.ts
 User=investor
 Group=investor
 ```
@@ -109,7 +109,7 @@ journalctl -u credx-bullpen-healthcheck.service -n 50 --no-pager
 If you prefer cron, add:
 
 ```cron
-*/5 * * * * cd /srv/investment-engine && set -a && . /etc/investor/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
+*/5 * * * * cd /srv/investor && set -a && . /etc/investor/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
 ```
 
 ## Operator action
@@ -129,7 +129,11 @@ from `/etc/investor/frontend.env` and `/etc/investor/backend.env`:
 ```bash
 sudo -u investor -H /usr/local/bin/bullpen login --no-browser
 sudo -u investor -H /usr/local/bin/bullpen polymarket positions --output json
-sudo systemctl restart investor-backend investor-celery-worker
+sudo systemctl restart \
+  investor-backend \
+  investor-celery-worker \
+  investor-celery-auto-live-worker \
+  investor-celery-beat-worker
 ```
 
 Do not trade or auto-claim based on tracked fallback data or a stale cached live snapshot.

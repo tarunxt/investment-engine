@@ -21,4 +21,5 @@ exec "$BACKEND_ROOT/.venv/bin/celery" \
   -Q "${CELERY_BEAT_WORKER_QUEUE:-beat}" \
   --loglevel="${CELERY_LOG_LEVEL:-info}" \
   --concurrency=1 \
+  --prefetch-multiplier="${CELERY_BEAT_WORKER_PREFETCH_MULTIPLIER:-1}" \
   --max-tasks-per-child="${CELERY_MAX_TASKS_PER_CHILD:-1000}"

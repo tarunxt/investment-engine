@@ -28,6 +28,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSettings,
     BullpenAutoLiveStageResult,
     BullpenAutoLiveState,
+    BullpenAutoLiveTaskLifecycle,
 )
 
 
@@ -218,12 +219,10 @@ def test_reconcile_running_auto_live_run_does_not_complete_from_completed_at_alo
         ),
     )
 
-    assert recovered is run
-    assert recovered.status == "failed"
-    assert recovered.completed_at == "2026-07-05T12:25:00+00:00"
-    assert recovered.error_message is not None
-    assert "no longer active" in recovered.error_message
-    assert recovered.summary.startswith("Auto-Live run failed:")
+    # PENDING is ambiguous. A run with no explicit STARTED heartbeat must not
+    # be terminalized merely because its stored workflow timestamp is old.
+    assert recovered is None
+    assert run.status == "running"
 
 
 @pytest.mark.anyio
@@ -383,7 +382,132 @@ def test_task_inspection_reuses_a_recent_snapshot(monkeypatch):
     assert calls == {"query_task": 1}
 
 
-def test_reconcile_running_auto_live_run_marks_stalled_worker_failed():
+def test_task_inspection_uses_persisted_lifecycle_id_when_registry_is_missing(monkeypatch):
+    """An evicted task-registry key is never absence evidence for recovery."""
+
+    class _FakeAsyncResult:
+        state = "STARTED"
+
+    class _FakeInspector:
+        def active(self):
+            return {"auto-live-worker@example": [{"id": "persisted-task-id"}]}
+
+        def query_task(self, task_id: str):
+            assert task_id == "persisted-task-id"
+            return {"auto-live-worker@example": {"id": task_id}}
+
+        def reserved(self):
+            return {"auto-live-worker@example": []}
+
+        def scheduled(self):
+            return {"auto-live-worker@example": []}
+
+        def ping(self):
+            return {"auto-live-worker@example": {"ok": "pong"}}
+
+    class _FakeControl:
+        @staticmethod
+        def inspect(*, timeout: float):
+            assert timeout == 1.0
+            return _FakeInspector()
+
+    class _FakeCelery:
+        control = _FakeControl()
+
+        @staticmethod
+        def AsyncResult(task_id: str):
+            assert task_id == "persisted-task-id"
+            return _FakeAsyncResult()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.get_registered_auto_live_run_task_id_sync",
+        lambda _run_id: None,
+    )
+    monkeypatch.setattr("app.domains.polymarket_auto_live.run_recovery.celery", _FakeCelery())
+
+    snapshot = inspect_auto_live_run_task_sync(
+        "run-registry-evicted",
+        lifecycle_task_id="persisted-task-id",
+    )
+
+    assert snapshot.task_id == "persisted-task-id"
+    assert snapshot.is_active is True
+    assert snapshot.inspect_complete is True
+
+
+def test_registry_eviction_does_not_mark_active_lifecycle_delivery_worker_lost(monkeypatch):
+    """Recovery must inspect the persisted delivery when the Redis registry expires."""
+
+    inspected_task_ids: list[str] = []
+
+    class _FakeAsyncResult:
+        state = "STARTED"
+
+    class _FakeInspector:
+        def active(self):
+            return {"auto-live-worker@example": [{"id": "persisted-active-task"}]}
+
+        def query_task(self, task_id: str):
+            inspected_task_ids.append(task_id)
+            return {"auto-live-worker@example": {"id": task_id}}
+
+        def reserved(self):
+            return {"auto-live-worker@example": []}
+
+        def scheduled(self):
+            return {"auto-live-worker@example": []}
+
+        def ping(self):
+            return {"auto-live-worker@example": {"ok": "pong"}}
+
+    class _FakeControl:
+        @staticmethod
+        def inspect(*, timeout: float):
+            assert timeout == 1.0
+            return _FakeInspector()
+
+    class _FakeCelery:
+        control = _FakeControl()
+
+        @staticmethod
+        def AsyncResult(task_id: str):
+            assert task_id == "persisted-active-task"
+            return _FakeAsyncResult()
+
+    run = BullpenAutoLiveRun(
+        id="run-registry-evicted-active",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 1 is running.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="persisted-active-task",
+            queue="auto_live",
+            worker_started_at="2026-07-05T12:00:00+00:00",
+            last_heartbeat_at="2026-07-05T12:00:00+00:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.get_registered_auto_live_run_task_id_sync",
+        lambda _run_id: None,
+    )
+    monkeypatch.setattr("app.domains.polymarket_auto_live.run_recovery.celery", _FakeCelery())
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 40, tzinfo=UTC),
+    )
+
+    assert recovered is None
+    assert run.status == "running"
+    assert inspected_task_ids == ["persisted-active-task"]
+
+
+def test_reconcile_running_auto_live_run_marks_stalled_worker_failed(monkeypatch):
     run = BullpenAutoLiveRun(
         id="run-stalled",
         triggered_by="manual",
@@ -391,6 +515,13 @@ def test_reconcile_running_auto_live_run_marks_stalled_worker_failed():
         dry_run=False,
         started_at="2026-07-05T12:00:00+00:00",
         summary="Stage 2 started.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="celery-task-2",
+            queue="auto_live",
+            worker_started_at="2026-07-05T12:00:00+00:00",
+            last_heartbeat_at="2026-07-05T12:20:00+00:00",
+        ),
         stage_results=[
             _stage_result(
                 stage_number=1,
@@ -408,6 +539,17 @@ def test_reconcile_running_auto_live_run_marks_stalled_worker_failed():
             ),
         ],
     )
+    # A WorkerLost verdict requires positive absence evidence.  In production
+    # an unreadable Redis lease is intentionally treated as unknown/liveness
+    # evidence, so model the confirmed missing lease explicitly here.
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.auto_live_run_execution_lease_is_live_sync",
+        lambda _run_id: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.auto_live_run_execution_advisory_lock_is_live_sync",
+        lambda _run_id: False,
+    )
 
     recovered = reconcile_running_auto_live_run(
         run,
@@ -418,6 +560,7 @@ def test_reconcile_running_auto_live_run_marks_stalled_worker_failed():
             task_id="celery-task-2",
             state="PENDING",
             inspect_succeeded=True,
+            inspect_complete=True,
         ),
     )
 
@@ -425,9 +568,11 @@ def test_reconcile_running_auto_live_run_marks_stalled_worker_failed():
     assert recovered.status == "failed"
     assert recovered.completed_at == "2026-07-05T12:40:00+00:00"
     assert recovered.error_message is not None
-    assert "no longer active" in recovered.error_message
+    assert "Worker heartbeat lost" in recovered.error_message
     assert recovered.summary.startswith("Auto-Live run failed during Stage 2 · Run LLM:")
     assert recovered.stage_results[-1].outputs["phase_status"] == "failed"
+    assert recovered.task_lifecycle is not None
+    assert recovered.task_lifecycle.state == "WORKER_LOST"
 
 
 def test_reconcile_running_auto_live_run_keeps_healthy_worker_running():
@@ -459,6 +604,152 @@ def test_reconcile_running_auto_live_run_keeps_healthy_worker_running():
             state="STARTED",
             is_active=True,
             inspect_succeeded=True,
+        ),
+    )
+
+    assert recovered is None
+    assert run.status == "running"
+
+
+def test_reconcile_keeps_queued_task_waiting_past_progress_timeout():
+    run = BullpenAutoLiveRun(
+        id="run-queued-pool-wait",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 1 started.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="QUEUED",
+            task_id="celery-queued",
+            queue="auto_live",
+            enqueued_at="2026-07-05T12:00:00+00:00",
+        ),
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 23, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-queued",
+            state="PENDING",
+            inspect_succeeded=True,
+            inspect_complete=True,
+        ),
+    )
+
+    assert recovered is None
+    assert run.status == "running"
+    assert run.task_lifecycle is not None
+    assert run.task_lifecycle.detail == "Queued — waiting for Auto-Live worker"
+
+
+def test_worker_lost_failure_waits_for_redelivery_grace_before_terminalizing():
+    """Late-ack WorkerLostError is not final before a same-ID redelivery."""
+
+    run = BullpenAutoLiveRun(
+        id="run-worker-lost-redelivery-grace",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 1 is running.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="celery-worker-lost",
+            queue="auto_live",
+            worker_started_at="2026-07-05T12:00:00+00:00",
+            last_heartbeat_at="2026-07-05T12:05:00+00:00",
+        ),
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 5, tzinfo=UTC),
+        # Nineteen minutes is beyond the normal heartbeat timeout but still
+        # inside the five-minute worker-loss/redelivery grace window.
+        now=datetime(2026, 7, 5, 12, 24, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-worker-lost",
+            state="FAILURE",
+            result_error="billiard.exceptions.WorkerLostError: Worker exited prematurely",
+            inspect_succeeded=True,
+            inspect_complete=True,
+        ),
+    )
+
+    assert recovered is None
+    assert run.status == "running"
+    assert run.task_lifecycle is not None
+    assert run.task_lifecycle.state == "STARTED"
+
+
+def test_reconcile_keeps_fresh_started_heartbeat_when_inspect_misses_task():
+    run = BullpenAutoLiveRun(
+        id="run-heartbeat-inspect-miss",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 2 started.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="celery-heartbeat",
+            queue="auto_live",
+            worker_started_at="2026-07-05T12:00:00+00:00",
+            last_heartbeat_at="2026-07-05T12:39:00+00:00",
+        ),
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 40, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-heartbeat",
+            state="PENDING",
+            inspect_succeeded=True,
+            inspect_complete=False,
+        ),
+    )
+
+    assert recovered is None
+    assert run.status == "running"
+
+
+def test_reconcile_keeps_stale_heartbeat_within_worker_loss_grace():
+    run = BullpenAutoLiveRun(
+        id="run-heartbeat-grace",
+        triggered_by="manual",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 2 started.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="celery-grace",
+            queue="auto_live",
+            worker_started_at="2026-07-05T12:00:00+00:00",
+            last_heartbeat_at="2026-07-05T12:20:00+00:00",
+        ),
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        # 19 minutes is beyond the normal 15 minute heartbeat timeout but
+        # within its five minute worker-loss/redelivery grace.
+        now=datetime(2026, 7, 5, 12, 39, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-grace",
+            state="PENDING",
+            inspect_succeeded=True,
+            inspect_complete=True,
         ),
     )
 
@@ -918,7 +1209,7 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
 
     saved_runs: list[BullpenAutoLiveRun] = []
     saved_states: list[BullpenAutoLiveState] = []
-    delayed_runs: list[tuple[int, str]] = []
+    queued_runs: list[tuple[tuple[int, str], str, str]] = []
     registered_tasks: list[tuple[str, str]] = []
 
     class _FakeSession:
@@ -975,9 +1266,9 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
 
     class _FakeExecuteTask:
         @staticmethod
-        def delay(user_id: int, run_id: str):
-            delayed_runs.append((user_id, run_id))
-            return SimpleNamespace(id="celery-task-new")
+        def apply_async(*, args, task_id: str, queue: str):
+            queued_runs.append((args, task_id, queue))
+            return SimpleNamespace(id=task_id)
 
     async def _fake_register_auto_live_run_task(run_id: str, task_id: str) -> None:
         registered_tasks.append((run_id, task_id))
@@ -1012,8 +1303,9 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
     assert result.status == "running"
     assert result.id != stale_run.id
     assert fake_session.committed is True
-    assert delayed_runs == [(7, result.id)]
-    assert registered_tasks == [(result.id, "celery-task-new")]
+    assert result.task_lifecycle is not None
+    assert queued_runs == [((7, result.id), result.task_lifecycle.task_id, "auto_live")]
+    assert registered_tasks == [(result.id, result.task_lifecycle.task_id)]
     assert saved_runs == [recovered_run]
     assert saved_states[0].last_run_id == recovered_run.id
     assert saved_states[-1].last_run_id == result.id
@@ -1021,3 +1313,5 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
     added_record = fake_session.added[0]
     assert added_record.id == result.id
     assert added_record.status == "running"
+    assert result.task_lifecycle.state == "QUEUED"
+    assert result.task_lifecycle.queue == "auto_live"

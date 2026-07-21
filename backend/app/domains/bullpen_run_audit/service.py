@@ -1061,7 +1061,15 @@ def materialize_run_audit_snapshot_sync(
     freeze: bool | None = None,
 ) -> MaterializedSnapshot:
     repo = BullpenRunAuditRepository(session)
-    run_record = repo.get_run_record(user_id=user_id, run_id=run_id)
+    # Every audit rebuild (including force=True calls issued by Stage 3 order
+    # reconciliation) shares this parent-row lock.  A snapshot row cannot be
+    # used as the lock target because concurrent first materializations do not
+    # have one yet.  Keep the lock for the caller's transaction so clear +
+    # rebuild + snapshot metadata are committed atomically.
+    run_record = repo.lock_run_record_for_audit_materialization(
+        user_id=user_id,
+        run_id=run_id,
+    )
     if run_record is None:
         raise ValueError("Run not found")
     current_snapshot = repo.get_current_snapshot(user_id=user_id, run_id=run_id)

@@ -83,8 +83,14 @@ jobs:
             WORKER_SERVICE_NAME="$(
               resolve_systemd_service_name "investor-celery-worker" "investment-engine-celery-worker"
             )"
+            AUTO_LIVE_WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-auto-live-worker" "investment-engine-celery-auto-live-worker"
+            )"
             BEAT_SERVICE_NAME="$(
               resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
+            )"
+            BEAT_WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-beat-worker" "investment-engine-celery-beat-worker"
             )"
 
             echo "==> App root: $APP_ROOT"
@@ -197,7 +203,9 @@ jobs:
 
             restart_service_if_present "$BACKEND_SERVICE_NAME"
             restart_service_if_present "$WORKER_SERVICE_NAME"
+            restart_service_if_present "$AUTO_LIVE_WORKER_SERVICE_NAME"
             restart_service_if_present "$BEAT_SERVICE_NAME"
+            restart_service_if_present "$BEAT_WORKER_SERVICE_NAME"
 
             echo "==> Effective Polymarket guard flags"
             sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash -lc '

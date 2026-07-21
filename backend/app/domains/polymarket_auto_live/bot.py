@@ -29,6 +29,10 @@ from app.domains.polymarket_auto_live.run_recovery import (
     reconcile_running_auto_live_run,
     run_contains_historical_auth_error,
 )
+from app.domains.polymarket_auto_live.run_lifecycle import (
+    AUTO_LIVE_QUEUE,
+    queued_auto_live_task_lifecycle,
+)
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
     apply_run_to_record,
@@ -552,14 +556,20 @@ class BullpenAutoLiveBot:
         )
 
     async def reconcile_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
-        from app.domains.polymarket_auto_live.tasks import reconcile_auto_live_run_orders
+        from app.domains.polymarket_auto_live.tasks import (
+            enqueue_auto_live_run_order_reconciliations_sync,
+        )
 
         summary = await asyncio.to_thread(
             refresh_run_order_state_for_user_sync,
             user_id=self.user_id,
             run_id=run_id,
         )
-        reconcile_auto_live_run_orders.delay(run_id)  # type: ignore[attr-defined]
+        await asyncio.to_thread(
+            enqueue_auto_live_run_order_reconciliations_sync,
+            run_id,
+            source="operator-run-reconciliation",
+        )
         return summary
 
     async def retry_order_intent(
@@ -568,7 +578,9 @@ class BullpenAutoLiveBot:
         *,
         remote_absence_verified: bool = False,
     ) -> BullpenAutoLiveRunOrdersResponse:
-        from app.domains.polymarket_auto_live.tasks import retry_auto_live_order_intent
+        from app.domains.polymarket_auto_live.tasks import (
+            enqueue_auto_live_order_intent_retry_sync,
+        )
 
         summary = await asyncio.to_thread(
             retry_order_intent_for_user_sync,
@@ -576,7 +588,11 @@ class BullpenAutoLiveBot:
             intent_id=intent_id,
             remote_absence_verified=remote_absence_verified,
         )
-        retry_auto_live_order_intent.delay(intent_id)  # type: ignore[attr-defined]
+        await asyncio.to_thread(
+            enqueue_auto_live_order_intent_retry_sync,
+            intent_id,
+            source="operator-intent-retry",
+        )
         return summary
 
     async def retry_failed_exits_and_continue_buys(
@@ -585,8 +601,8 @@ class BullpenAutoLiveBot:
         """Resume the existing run's persisted intents without new analysis."""
 
         from app.domains.polymarket_auto_live.tasks import (
-            execute_auto_live_order_intent,
-            reconcile_auto_live_run_orders,
+            enqueue_auto_live_order_intent_execution_sync,
+            enqueue_auto_live_run_order_reconciliations_sync,
         )
 
         summary = await asyncio.to_thread(
@@ -594,10 +610,18 @@ class BullpenAutoLiveBot:
             user_id=self.user_id,
             run_id=run_id,
         )
-        reconcile_auto_live_run_orders.delay(run_id)  # type: ignore[attr-defined]
+        await asyncio.to_thread(
+            enqueue_auto_live_run_order_reconciliations_sync,
+            run_id,
+            source="operator-resume-reconciliation",
+        )
         for order in summary.orders:
             if order.status == "READY" and order.action in {"sell", "redeem", "buy"}:
-                execute_auto_live_order_intent.delay(order.id)  # type: ignore[attr-defined]
+                await asyncio.to_thread(
+                    enqueue_auto_live_order_intent_execution_sync,
+                    order.id,
+                    source="operator-resume-execution",
+                )
         return summary
 
     async def cancel_order_intent(self, intent_id: str) -> BullpenAutoLiveRunOrdersResponse:
@@ -666,6 +690,10 @@ class BullpenAutoLiveBot:
                 return run
 
             started_at = utc_now()
+            # Persist an explicit Celery task id before publishing.  This
+            # distinguishes queue wait from workflow execution even if the
+            # broker delivers before the API response returns.
+            task_id = str(uuid4())
             run = BullpenAutoLiveRun(
                 id=str(uuid4()),
                 triggered_by=triggered_by,  # type: ignore[arg-type]
@@ -684,6 +712,10 @@ class BullpenAutoLiveBot:
                 stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                 request_context=request,
                 audit_metadata=_native_audit_metadata(settings),
+                task_lifecycle=queued_auto_live_task_lifecycle(
+                    task_id=task_id,
+                    enqueued_at=started_at,
+                ),
             )
             session.add(self._new_run_record(run))
             state.last_action = run.summary
@@ -694,8 +726,31 @@ class BullpenAutoLiveBot:
                 self._schedule_next_cycles(settings, state, reference_time=datetime.now(UTC))
             await repo.save_state(self.user_id, state)
             await session.commit()
-            task = execute_polymarket_auto_live_run.delay(self.user_id, run.id)  # type: ignore[attr-defined]
-            await register_auto_live_run_task(run.id, task.id)
+            try:
+                task = execute_polymarket_auto_live_run.apply_async(  # type: ignore[attr-defined]
+                    args=(self.user_id, run.id),
+                    task_id=task_id,
+                    queue=AUTO_LIVE_QUEUE,
+                )
+            except Exception:
+                # Do not leave a run looking merely queued if the broker could
+                # not accept it. This is a publish failure, not a stale-worker
+                # verdict, so callers get an immediate actionable error.
+                if run.task_lifecycle is not None:
+                    run.task_lifecycle = run.task_lifecycle.model_copy(
+                        update={
+                            "state": "FAILURE",
+                            "detail": "Could not enqueue Auto-Live worker task",
+                        }
+                    )
+                run.status = "failed"
+                run.completed_at = utc_now()
+                run.error_message = "Could not enqueue Auto-Live worker task"
+                run.summary = run.error_message
+                await repo.save_run(self.user_id, run)
+                await session.commit()
+                raise
+            await register_auto_live_run_task(run.id, str(task.id))
             return run
 
     async def start(self) -> BullpenAutoLiveState:

@@ -265,7 +265,21 @@ def apply_run_to_record(
     record.orders_submitted = run.orders_submitted
     record.summary = run.summary
     record.error_message = run.error_message
-    record.payload = run_to_record_payload(run)
+    payload = run_to_record_payload(run)
+    # A worker heartbeat is persisted from a short independent session while
+    # the long-running planner retains its own SQLAlchemy session.  Preserve a
+    # newer heartbeat when a normal workflow progress save writes the complete
+    # run payload from that older session.
+    from app.domains.polymarket_auto_live.run_lifecycle import (
+        merge_task_lifecycle_payload,
+    )
+
+    existing_payload = record.payload if isinstance(record.payload, dict) else {}
+    payload["task_lifecycle"] = merge_task_lifecycle_payload(
+        existing_payload.get("task_lifecycle"),
+        payload.get("task_lifecycle"),
+    )
+    record.payload = payload
 
 
 def apply_decision_to_record(
@@ -383,7 +397,28 @@ class AsyncPolymarketAutoLiveRepository:
         return (await self.session.execute(query)).scalar_one_or_none()
 
     async def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
-        record = await self.session.get(PolymarketAutoLiveRunRecord, run.id)
+        # A planning worker keeps a session open while its independent
+        # heartbeat transaction updates the same JSON payload.  Refresh and
+        # lock just before a full-payload write so this save cannot overwrite
+        # a heartbeat that committed after the worker originally loaded the
+        # record.  The lock is held only for the short persistence section.
+        execute = getattr(self.session, "execute", None)
+        if callable(execute):
+            record = (
+                await execute(
+                    select(PolymarketAutoLiveRunRecord)
+                    .where(PolymarketAutoLiveRunRecord.id == run.id)
+                    .with_for_update()
+                    # Do not let ORM autoflush write a stale identity-map payload
+                    # before this locking refresh has observed the heartbeat.
+                    .execution_options(populate_existing=True, autoflush=False)
+                )
+            ).scalar_one_or_none()
+        else:
+            # Lightweight repository doubles used by API unit tests expose the
+            # original ``get``/``add`` protocol only. Real AsyncSession always
+            # takes the locked path above.
+            record = await self.session.get(PolymarketAutoLiveRunRecord, run.id)
         if record is None:
             record = PolymarketAutoLiveRunRecord(
                 id=run.id,
@@ -539,7 +574,24 @@ class SyncPolymarketAutoLiveRepository:
         return self.session.execute(query).scalar_one_or_none()
 
     def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
-        record = self.session.get(PolymarketAutoLiveRunRecord, run.id)
+        # See the async counterpart: workers retain a long-lived session while
+        # heartbeats use short independent transactions.  A fresh row lock
+        # serializes the complete JSON write with heartbeat persistence.
+        execute = getattr(self.session, "execute", None)
+        if callable(execute):
+            record = (
+                execute(
+                    select(PolymarketAutoLiveRunRecord)
+                    .where(PolymarketAutoLiveRunRecord.id == run.id)
+                    .with_for_update()
+                    .execution_options(populate_existing=True, autoflush=False)
+                )
+                .scalar_one_or_none()
+            )
+        else:
+            # See the async fallback above. Production SyncSession always
+            # supports ``execute`` and therefore always obtains the row lock.
+            record = self.session.get(PolymarketAutoLiveRunRecord, run.id)
         if record is None:
             record = PolymarketAutoLiveRunRecord(
                 id=run.id,
