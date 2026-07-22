@@ -753,11 +753,7 @@ def _persisted_execution_step(
         )
     elif planned == 0 or processed >= planned:
         status = "completed"
-        detail = (
-            "No persisted orders were planned for this step."
-            if planned == 0
-            else "Persisted execution records confirm this step finished processing."
-        )
+        detail = "" if planned > 0 else "No persisted orders were planned for this step."
     else:
         status = "running"
         detail = ""
