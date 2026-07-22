@@ -3671,12 +3671,14 @@ function IndMoneySnapshotDialog({
   open,
   saving,
   error,
+  latestSyncAt,
   onClose,
   onContinue,
 }: {
   open: boolean;
   saving: boolean;
   error: string | null;
+  latestSyncAt: string | null | undefined;
   onClose: () => void;
   onContinue: (
     mode: IndMoneySyncMode,
@@ -3758,13 +3760,20 @@ function IndMoneySnapshotDialog({
                 : "border-slate-200 text-slate-800",
             )}
           >
-            <input
-              className="mr-2"
-              type="radio"
-              checked={mode === "reuse"}
-              onChange={() => setMode("reuse")}
-            />
-            Continue with last snapshot
+            <span className="flex items-start gap-2">
+              <input
+                className="mt-0.5"
+                type="radio"
+                checked={mode === "reuse"}
+                onChange={() => setMode("reuse")}
+              />
+              <span>
+                Continue with latest snapshot
+                <span className="mt-1 block text-xs font-medium text-slate-500">
+                  Latest Sync: {formatTimestamp(latestSyncAt)}
+                </span>
+              </span>
+            </span>
           </label>
         </div>
 
@@ -8521,6 +8530,7 @@ ${zerodhaExecutionMode === "direct_market"
           open={dialogOpen}
           saving={runningPortfolio === "indmoneyUs"}
           error={dialogError}
+          latestSyncAt={states.indmoneyUs.sync.completedAt}
           onClose={() => {
             if (runningPortfolio === "indmoneyUs") return;
             setDialogOpen(false);
