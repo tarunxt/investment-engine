@@ -31,7 +31,7 @@ jobs:
             set -euo pipefail
 
             RUN_ID="${{ inputs.run_id }}"
-            if [[ ! "$RUN_ID" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+            if ! printf '%s\n' "$RUN_ID" | grep -Eq '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'; then
               echo "run_id must be a UUID." >&2
               exit 1
             fi
