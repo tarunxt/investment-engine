@@ -31,10 +31,6 @@ jobs:
             set -euo pipefail
 
             RUN_ID="${{ inputs.run_id }}"
-            if ! printf '%s\n' "$RUN_ID" | grep -Eq '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'; then
-              echo "run_id must be a UUID." >&2
-              exit 1
-            fi
 
             APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
             LEGACY_APP_ROOT="/srv/investment-engine"
