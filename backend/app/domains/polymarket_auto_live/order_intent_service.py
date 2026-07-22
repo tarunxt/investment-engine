@@ -760,7 +760,7 @@ def _persisted_execution_step(
         )
     else:
         status = "running"
-        detail = "Persisted execution records show this step is still processing."
+        detail = ""
     return {
         "key": key,
         "step_number": step_number,

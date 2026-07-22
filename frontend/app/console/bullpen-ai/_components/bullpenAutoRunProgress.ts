@@ -587,6 +587,7 @@ export function buildBullpenAutoRunWorkflowView(
   const stages = WORKFLOW_DEFINITIONS.map((definition, index) => {
     const stage = stageResults[index];
     const previousStage = index > 0 ? stageResults[index - 1] : null;
+    const nextStage = stageResults[index + 1] ?? null;
     const explicitPhase = getPhaseStatus(stage);
     const investStageEffectivelyCompleted = isInvestStageEffectivelyCompleted(
       definition,
@@ -678,7 +679,7 @@ export function buildBullpenAutoRunWorkflowView(
       : (stage?.started_at ??
         (index === 0
           ? (pendingRunStartedAt ?? normalizedRun?.started_at ?? null)
-          : null));
+          : (previousStage?.completed_at ?? previousStage?.started_at ?? null)));
     const stageTimerCompletedAt = !shouldShowStageData
       ? null
       : explicitPhase === "running" && runStatus === "running"
@@ -687,7 +688,10 @@ export function buildBullpenAutoRunWorkflowView(
           ? null
         : (stage?.completed_at ??
           (state === "finished"
-            ? (normalizedRun?.completed_at ?? null)
+            ? (nextStage?.started_at ??
+              (index === WORKFLOW_DEFINITIONS.length - 1
+                ? (normalizedRun?.completed_at ?? null)
+                : null))
             : null));
     let detail =
       (shouldShowStageData ? stage?.reason : null) ||
