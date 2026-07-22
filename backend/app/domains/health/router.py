@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +17,8 @@ async def health_live():
 
 
 @router.get("/ready")
-async def health_ready():
-    """Readiness: DB and Redis are reachable."""
+async def health_ready(response: Response):
+    """Readiness: dependencies and required Stage 3 workers are available."""
     checks: dict[str, str] = {}
 
     # Postgres
@@ -29,7 +29,17 @@ async def health_ready():
                 await db.scalar(
                     select(func.count())
                     .select_from(PolymarketAutoLiveOrderIntentRecord)
-                    .where(PolymarketAutoLiveOrderIntentRecord.status.in_(("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT")))
+                    .where(
+                        PolymarketAutoLiveOrderIntentRecord.status.in_(
+                            (
+                                "PLANNED",
+                                "READY",
+                                "RETRY_WAIT",
+                                "WAITING_FOR_COLLATERAL",
+                                "WAITING_FOR_EXIT",
+                            )
+                        )
+                    )
                 )
                 or 0
             )
@@ -40,6 +50,7 @@ async def health_ready():
     # Redis
     try:
         import redis.asyncio as aioredis
+
         r = aioredis.from_url(settings.redis_url)
         await r.ping()
         await r.aclose()
@@ -59,11 +70,18 @@ async def health_ready():
         else:
             checks["stage3_order_worker"] = "ok"
 
-    all_ok = all(v == "ok" for v in checks.values())
+    all_ok = all(value == "ok" for value in checks.values())
+    if not all_ok:
+        # ``curl --fail`` and load-balancer readiness checks must reject a
+        # deployment that is alive but cannot advance queued Stage 3 orders.
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
     return {
         "status": "ok" if all_ok else "degraded",
         "checks": checks,
-        "pending_stage3_intents": pending_stage3_intents if checks.get("postgres") == "ok" else None,
+        "pending_stage3_intents": (
+            pending_stage3_intents if checks.get("postgres") == "ok" else None
+        ),
     }
 
 
