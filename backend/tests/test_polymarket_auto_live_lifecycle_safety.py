@@ -148,6 +148,19 @@ def test_four_long_ai_reconciliations_cannot_reserve_the_auto_live_planning_queu
     assert queued_by_broker_queue[planning_queue] == ["plan"]
 
 
+def test_all_stage3_order_intent_operations_stay_on_ai_not_the_planning_queue():
+    stage3_task_names = (
+        "app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent",
+        "app.domains.polymarket_auto_live.tasks.retry_auto_live_order_intent",
+        "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_order_intent",
+    )
+
+    assert {_task_queue(task_name) for task_name in stage3_task_names} == {"ai"}
+    assert _task_queue(
+        "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run"
+    ) == AUTO_LIVE_QUEUE
+
+
 def test_worker_lost_redelivery_gets_one_new_run_lease_and_old_owner_is_fenced(
     monkeypatch: pytest.MonkeyPatch,
 ):

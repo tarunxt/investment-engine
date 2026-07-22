@@ -237,6 +237,56 @@ def test_duplicate_scheduler_requests_publish_only_one_reconciliation_task(monke
     assert queued_tasks[0][1]["args"][0] == "intent-3"
 
 
+def test_unattempted_ready_intent_is_safely_redispatched_after_worker_restart(monkeypatch):
+    """A stranded queued delivery has not entered SUBMITTING or touched Bullpen."""
+
+    fake_redis = _install_fake_redis(monkeypatch)
+    queued_tasks: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(tasks, "SyncSessionLocal", _NoopSession)
+    monkeypatch.setattr(tasks, "annotate_intent_dispatch_sync", lambda *_args, **_kwargs: None)
+
+    def publish(*args: object, **kwargs: object):
+        queued_tasks.append((args, kwargs))
+        return SimpleNamespace(id=kwargs["task_id"])
+
+    # This models an intent still READY with attempt_count=0: the original
+    # worker never consumed the message, so no task began remote submission.
+    stranded_delivery = acquire_order_intent_operation_lease_sync(
+        intent_id="intent-ready-attempt-zero",
+        task_id="stranded-worker-task",
+        operation="execute",
+        source="initial-stage3-dispatch",
+        ttl_seconds=5,
+    )
+    assert stranded_delivery is not None
+
+    # After the worker restart and lease expiry, canonical dispatch can issue
+    # one fresh execute delivery. A still-live fresh lease fences duplicates.
+    fake_redis.advance(6)
+    monkeypatch.setattr(tasks.execute_auto_live_order_intent, "apply_async", publish)
+
+    assert tasks._enqueue_execute_order_intents(
+        ["intent-ready-attempt-zero"], source="worker-restart-recovery"
+    ) == 1
+    assert len(queued_tasks) == 1
+    assert queued_tasks[0][1]["queue"] == "ai"
+    assert queued_tasks[0][1]["args"][0] == "intent-ready-attempt-zero"
+
+    fresh_delivery = tasks._begin_order_intent_operation(
+        SimpleNamespace(request=SimpleNamespace(id=queued_tasks[0][1]["task_id"])),
+        intent_id="intent-ready-attempt-zero",
+        operation="execute",
+        lease_token=queued_tasks[0][1]["args"][1],
+        source="execute-auto-live-order-intent",
+    )
+    assert fresh_delivery is not None
+    assert not tasks._enqueue_execute_order_intents(
+        ["intent-ready-attempt-zero"], source="duplicate-restart-dispatch"
+    )
+    assert len(queued_tasks) == 1
+    assert release_order_intent_operation_lease_sync(fresh_delivery)
+
+
 def test_periodic_execution_and_reconciliation_scanners_have_disjoint_status_sets(monkeypatch):
     """Beat may run both tasks in one minute without overlapping one intent."""
 

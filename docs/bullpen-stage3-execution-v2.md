@@ -33,6 +33,24 @@ prefork child cannot reserve a hidden backlog of long reconciliation tasks.
 Isolation is intentional: adding Auto-Live planning back to the `ai` consumer
 would reintroduce queue starvation.
 
+`ai` is mandatory for `investor-celery-worker`. The no-Docker launch script
+trims whitespace around `CELERY_WORKER_QUEUES`, retains every configured extra
+queue, and appends `ai` with a prominent startup warning if it was omitted. It
+logs the final effective list. The dedicated `auto_live` worker remains planning
+only and must not be used as a Stage 3 fallback.
+
+When durable pending Stage 3 intents exist, `/health/ready` queries Celery
+active queues. It returns HTTP `503` unless at least one worker reports
+consuming `ai`; this intentionally makes the deployment `curl --fail` smoke
+check fail instead of accepting an unavailable order-intent consumer.
+
+After an `ai`-consumer outage, run the **Verify Bullpen Stage 3 Queue Recovery**
+workflow with the affected run ID. It reports the primary worker status and
+journal, executes `celery inspect active_queues`, checks readiness, and reads
+the durable intent/attempt records without issuing another order. The verifier
+rejects a still-unstarted intent and more than one persisted remote reference
+for one intent.
+
 At publish time a planning run records `QUEUED` and its Celery task ID. Broker
 receipt records `RESERVED`; task execution records `STARTED` with a renewable
 heartbeat and run-level execution lease. `QUEUED` and `RESERVED` are healthy

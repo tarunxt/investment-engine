@@ -1,0 +1,176 @@
+name: Verify Bullpen Stage 3 Queue Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Durable Auto-Live run ID to verify after an ai-worker recovery
+        required: true
+        default: e6d7d4d-6f7b-43db-8b6d-486795512c17
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify ai consumer and durable Stage 3 intents
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Inspect queue consumer and affected Stage 3 intents over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 900s
+          command_timeout: 900s
+          script: |
+            set -euo pipefail
+
+            RUN_ID="${{ inputs.run_id }}"
+            if [[ ! "$RUN_ID" =~ ^[[:xdigit:]]{8}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{4}-[[:xdigit:]]{12}$ ]]; then
+              echo "run_id must be a UUID." >&2
+              exit 1
+            fi
+
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
+            LEGACY_APP_ROOT="/srv/investment-engine"
+            APP_USER="${{ vars.EC2_APP_USER || 'investor' }}"
+            LEGACY_APP_USER="investment-engine"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+            echo "==> Primary worker status"
+            sudo systemctl status investor-celery-worker --no-pager --full
+
+            echo "==> Primary worker journal"
+            sudo journalctl -u investor-celery-worker -n 200 --no-pager
+
+            echo "==> Celery active queues"
+            ACTIVE_QUEUES="$(
+              sudo -u "$APP_USER" -H bash -lc "
+                set -euo pipefail
+                cd '$APP_ROOT/backend'
+                set -a
+                source '$BACKEND_ENV_FILE'
+                set +a
+                .venv/bin/celery -A app.infrastructure.messaging.celery_app inspect active_queues --timeout=10
+              "
+            )"
+            printf '%s\n' "$ACTIVE_QUEUES"
+            if ! grep -Eq "['\"]name['\"]:[[:space:]]*['\"]ai['\"]" <<<"$ACTIVE_QUEUES"; then
+              echo "No worker reported consuming queue ai." >&2
+              exit 1
+            fi
+
+            echo "==> Backend readiness"
+            curl --fail --silent --show-error --location --max-time 20 http://127.0.0.1:8000/health/ready
+            echo
+
+            echo "==> Durable Stage 3 intent verification"
+            sudo -u "$APP_USER" -H bash -s -- "$APP_ROOT" "$BACKEND_ENV_FILE" "$RUN_ID" <<'VERIFY_STAGE3'
+            set -euo pipefail
+            app_root="$1"
+            backend_env_file="$2"
+            run_id="$3"
+            cd "$app_root/backend"
+            set -a
+            source "$backend_env_file"
+            set +a
+            .venv/bin/python - "$run_id" <<'PYTHON'
+            from __future__ import annotations
+
+            import json
+            import sys
+
+            from sqlalchemy import select
+
+            from app.domains.polymarket_auto_live.models import (
+                PolymarketAutoLiveOrderAttemptRecord,
+                PolymarketAutoLiveOrderIntentRecord,
+            )
+            from app.infrastructure.database.sync_session import SyncSessionLocal
+
+
+            run_id = sys.argv[1]
+            acceptable_statuses = {
+                "SUBMITTING",
+                "SUBMITTED",
+                "CONFIRMING",
+                "PARTIALLY_FILLED",
+                "SETTLEMENT_PENDING",
+                "CONFIRMED",
+                "FILLED",
+                "RETRY_WAIT",
+                "WAITING_FOR_COLLATERAL",
+                "WAITING_FOR_EXIT",
+                "DEFERRED",
+                "FAILED_PERMANENT",
+                "REJECTED",
+                "CANCELLED",
+                "TIMED_OUT",
+            }
+
+            with SyncSessionLocal() as session:
+                intents = session.execute(
+                    select(PolymarketAutoLiveOrderIntentRecord)
+                    .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+                    .order_by(PolymarketAutoLiveOrderIntentRecord.created_at.asc())
+                ).scalars().all()
+                if not intents:
+                    raise SystemExit(f"No durable Stage 3 intents found for run {run_id}.")
+
+                failures: list[str] = []
+                for intent in intents:
+                    attempts = session.execute(
+                        select(PolymarketAutoLiveOrderAttemptRecord)
+                        .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent.id)
+                        .order_by(PolymarketAutoLiveOrderAttemptRecord.attempt_number.asc())
+                    ).scalars().all()
+                    remote_order_ids = {
+                        attempt.remote_order_id
+                        for attempt in attempts
+                        if attempt.remote_order_id
+                    }
+                    remote_transaction_hashes = {
+                        attempt.remote_transaction_hash
+                        for attempt in attempts
+                        if attempt.remote_transaction_hash
+                    }
+                    result = {
+                        "intent_id": intent.id,
+                        "action": intent.action,
+                        "status": intent.status,
+                        "attempt_count": intent.attempt_count,
+                        "first_submitted_at": intent.first_submitted_at.isoformat() if intent.first_submitted_at else None,
+                        "remote_order_id_present": bool(intent.remote_order_id),
+                        "remote_transaction_hash_present": bool(intent.remote_transaction_hash),
+                        "attempt_rows": len(attempts),
+                        "distinct_persisted_remote_order_ids": len(remote_order_ids),
+                        "distinct_persisted_transaction_hashes": len(remote_transaction_hashes),
+                    }
+                    print(json.dumps(result, sort_keys=True))
+
+                    if intent.status not in acceptable_statuses or intent.attempt_count < 1:
+                        failures.append(
+                            f"{intent.id} remains unstarted or in an unexpected state "
+                            f"({intent.status}, attempts={intent.attempt_count})."
+                        )
+                    if len(remote_order_ids) > 1 or len(remote_transaction_hashes) > 1:
+                        failures.append(
+                            f"{intent.id} has conflicting persisted remote order/transaction references."
+                        )
+
+            if failures:
+                raise SystemExit("\n".join(failures))
+            PYTHON
+            VERIFY_STAGE3

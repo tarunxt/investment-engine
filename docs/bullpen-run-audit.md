@@ -58,6 +58,14 @@ refresh tasks exit without rebuilding. Redis failure is logged and does not
 fall back to direct materialization: order reconciliation and submission safety
 are intentionally independent of audit rendering.
 
+Durable Stage 3 intent state remains the audit source of truth across worker
+restarts: queue-dispatch metadata, attempt counters, and any remote order or
+transaction references are captured before a refreshed snapshot is built. A
+pending intent without an `ai` consumer is an operational readiness failure
+(HTTP `503` from `/health/ready`), not an external order rejection. This keeps
+the historical audit distinction between an unstarted `READY` intent and an
+ambiguous or submitted remote order intact.
+
 The relevant operational environment variables are:
 
 * `BULLPEN_RUN_AUDIT_REFRESH_DEBOUNCE_SECONDS` (default `5`)

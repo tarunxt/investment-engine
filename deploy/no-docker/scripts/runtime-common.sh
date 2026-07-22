@@ -33,6 +33,60 @@ resolve_app_root() {
   printf '%s\n' "$app_root"
 }
 
+primary_celery_worker_effective_queues() {
+  # Normalize the primary worker queue list while retaining its Stage 3
+  # consumer. The dedicated Auto-Live worker owns only auto_live planning;
+  # execution, retry, and reconciliation are routed to ai and must always
+  # have a primary-worker consumer.
+
+  local configured_queues="$1"
+  local raw_queue queue existing
+  local has_ai=false
+  local duplicate=false
+  local effective_queues=()
+  local configured_queue_items=()
+  local effective_queue_list=""
+
+  IFS=',' read -r -a configured_queue_items <<<"$configured_queues"
+  for raw_queue in "${configured_queue_items[@]-}"; do
+    # Queue names cannot contain leading or trailing whitespace. Trim it here
+    # so values such as " email, auto_live " preserve both extra consumers.
+    queue="${raw_queue#"${raw_queue%%[![:space:]]*}"}"
+    queue="${queue%"${queue##*[![:space:]]}"}"
+    [[ -n "$queue" ]] || continue
+
+    duplicate=false
+    for existing in "${effective_queues[@]-}"; do
+      if [[ "$existing" == "$queue" ]]; then
+        duplicate=true
+        break
+      fi
+    done
+    [[ "$duplicate" == "false" ]] || continue
+
+    effective_queues+=("$queue")
+    if [[ "$queue" == "ai" ]]; then
+      has_ai=true
+    fi
+  done
+
+  if [[ "$has_ai" != "true" ]]; then
+    printf '%s\n' \
+      'WARNING: CELERY_WORKER_QUEUES omitted mandatory queue ai; adding ai so Stage 3 order intents can execute, retry, and reconcile.' \
+      >&2
+    effective_queues+=("ai")
+  fi
+
+  for queue in "${effective_queues[@]}"; do
+    if [[ -n "$effective_queue_list" ]]; then
+      effective_queue_list+=","
+    fi
+    effective_queue_list+="$queue"
+  done
+
+  printf '%s\n' "$effective_queue_list"
+}
+
 resolve_app_user() {
   local app_user="${APP_USER:-$DEFAULT_APP_USER}"
 
