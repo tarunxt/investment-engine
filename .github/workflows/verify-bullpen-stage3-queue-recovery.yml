@@ -90,6 +90,7 @@ jobs:
 
             from sqlalchemy import select
 
+            import app.infrastructure.database.all_models  # noqa: F401
             from app.domains.polymarket_auto_live.models import (
                 PolymarketAutoLiveOrderAttemptRecord,
                 PolymarketAutoLiveOrderIntentRecord,
