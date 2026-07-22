@@ -22,6 +22,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     _extract_remote_refs,
     _intent_requires_operator_resume_reconciliation,
     _matched_buy_submission_fill,
+    _persisted_execution_step,
     _persisted_stage3_counts,
     _remaining_position_is_economic_dust,
     _reconciliation_snapshot_is_current,
@@ -422,3 +423,16 @@ def test_reconciliation_snapshot_must_match_pending_intent_generation():
         snapshot.model_copy(update={"version": 4}),
         snapshot,
     )
+
+
+def test_persisted_execution_step_completed_detail_omits_persisted_records_copy():
+    step = _persisted_execution_step(
+        key="buy",
+        label="Invest planned orders",
+        step_number=2,
+        counts={"planned": 1, "processed": 1, "submitted": 0},
+        recovery_required=False,
+    )
+
+    assert step["status"] == "completed"
+    assert step["detail"] == ""

@@ -141,6 +141,61 @@ test("Bullpen auto-run workflow view freezes completed stage timers at the next 
   assert.equal(view.stages[2].timerCompletedAt, null);
 });
 
+test("Bullpen auto-run workflow view clamps stale overlapping stage timestamps to sequential boundaries", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-overlapping-stage-timers",
+    triggered_by: "manual",
+    status: "running",
+    dry_run: false,
+    started_at: "2026-07-22T10:32:32Z",
+    completed_at: null,
+    summary: "Stage 3 is executing durable order intents.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 33,
+    orders_planned: 7,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [
+      {
+        ...createStage(1, "Bullpen Scan finished.", {
+          workflow_stage_key: "scan",
+          phase_status: "completed",
+        }),
+        started_at: "2026-07-22T10:32:32Z",
+        completed_at: "2026-07-22T10:40:00Z",
+      },
+      {
+        ...createStage(2, "Stage 2 reviewed candidates.", {
+          workflow_stage_key: "llm",
+          phase_status: "completed",
+        }),
+        started_at: "2026-07-22T10:32:32Z",
+        completed_at: "2026-07-22T10:50:00Z",
+      },
+      {
+        ...createStage(3, "Stage 3 is executing durable order intents.", {
+          workflow_stage_key: "invest",
+          phase_status: "running",
+        }),
+        started_at: "2026-07-22T10:42:30Z",
+        completed_at: null,
+      },
+    ],
+  });
+
+  assert.equal(view.stages[0].timerStartedAt, "2026-07-22T10:32:32Z");
+  assert.equal(view.stages[0].timerCompletedAt, "2026-07-22T10:40:00Z");
+  assert.equal(view.stages[1].timerStartedAt, "2026-07-22T10:40:00Z");
+  assert.equal(view.stages[1].timerCompletedAt, "2026-07-22T10:42:30Z");
+  assert.equal(view.stages[2].timerStartedAt, "2026-07-22T10:42:30Z");
+  assert.equal(view.stages[2].timerCompletedAt, null);
+});
+
 test("Bullpen auto-run workflow view exposes Stage 2 and Stage 3 inputs", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

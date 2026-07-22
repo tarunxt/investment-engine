@@ -306,6 +306,34 @@ function readNumber(value: unknown) {
   return null;
 }
 
+function readTimestampMs(value: string | null | undefined) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function latestTimestamp(
+  first: string | null | undefined,
+  second: string | null | undefined,
+) {
+  const firstMs = readTimestampMs(first);
+  const secondMs = readTimestampMs(second);
+  if (firstMs === null) return second ?? null;
+  if (secondMs === null) return first ?? null;
+  return secondMs > firstMs ? (second ?? null) : (first ?? null);
+}
+
+function earliestTimestamp(
+  first: string | null | undefined,
+  second: string | null | undefined,
+) {
+  const firstMs = readTimestampMs(first);
+  const secondMs = readTimestampMs(second);
+  if (firstMs === null) return second ?? null;
+  if (secondMs === null) return first ?? null;
+  return secondMs < firstMs ? (second ?? null) : (first ?? null);
+}
+
 function findWorkflowStageResult(
   run: BullpenAutoLiveRun | null | undefined,
   workflowDefinition: WorkflowDefinition,
@@ -676,23 +704,39 @@ export function buildBullpenAutoRunWorkflowView(
               : "Queued";
     const stageTimerStartedAt = !shouldShowStageData
       ? null
-      : (stage?.started_at ??
-        (index === 0
-          ? (pendingRunStartedAt ?? normalizedRun?.started_at ?? null)
-          : (previousStage?.completed_at ?? previousStage?.started_at ?? null)));
+      : latestTimestamp(
+          stage?.started_at ??
+            (index === 0
+              ? (pendingRunStartedAt ?? normalizedRun?.started_at ?? null)
+              : (previousStage?.completed_at ?? previousStage?.started_at ?? null)),
+          index === 0 || explicitPhase === "running" || explicitPhase === "confirming"
+            ? null
+            : previousStage?.completed_at,
+        );
+    const nextStageStartedAt = nextStage?.started_at ?? null;
+    const nextStageStartedMs = readTimestampMs(nextStageStartedAt);
+    const stageTimerStartedMs = readTimestampMs(stageTimerStartedAt);
+    const nextStageStartBoundary =
+      nextStageStartedMs !== null &&
+      stageTimerStartedMs !== null &&
+      nextStageStartedMs > stageTimerStartedMs
+        ? nextStageStartedAt
+        : null;
     const stageTimerCompletedAt = !shouldShowStageData
       ? null
       : explicitPhase === "running" && runStatus === "running"
         ? null
         : explicitPhase === "confirming" || runStatus === "confirming"
           ? null
-        : (stage?.completed_at ??
-          (state === "finished"
-            ? (nextStage?.started_at ??
-              (index === WORKFLOW_DEFINITIONS.length - 1
-                ? (normalizedRun?.completed_at ?? null)
-                : null))
-            : null));
+        : state === "finished"
+          ? earliestTimestamp(
+              stage?.completed_at ??
+                (index === WORKFLOW_DEFINITIONS.length - 1
+                  ? (normalizedRun?.completed_at ?? null)
+                  : null),
+              nextStageStartBoundary,
+            )
+          : null;
     let detail =
       (shouldShowStageData ? stage?.reason : null) ||
       (state === "current" && index === 0 && runStatus === "running"
