@@ -775,6 +775,32 @@ install_bullpen_cli_if_needed() {
   ensure_bullpen_runtime_links "$bullpen_bin"
 }
 
+
+ensure_swap_file() {
+  local swapfile="${PROD_SWAP_FILE:-/swapfile}"
+  local swap_size="${PROD_SWAP_SIZE:-2G}"
+
+  if swapon --show=NAME --noheadings 2>/dev/null | awk '{print $1}' | grep -Fxq "$swapfile"; then
+    echo "==> Swap already active at $swapfile"
+    return
+  fi
+
+  if swapon --show --noheadings 2>/dev/null | grep -q .; then
+    echo "==> Swap already active; leaving existing swap configuration unchanged"
+    return
+  fi
+
+  echo "==> No active swap detected; creating $swap_size swapfile for memory-safe frontend installs"
+  if [[ ! -f "$swapfile" ]]; then
+    sudo fallocate -l "$swap_size" "$swapfile" || sudo dd if=/dev/zero of="$swapfile" bs=1M count=2048 status=none
+  fi
+  sudo chmod 600 "$swapfile"
+  if ! sudo file "$swapfile" | grep -q 'swap file'; then
+    sudo mkswap "$swapfile" >/dev/null
+  fi
+  sudo swapon "$swapfile"
+}
+
 validate_no_duplicate_backend_service_families
 
 BACKEND_SERVICE_NAME="$(resolve_role_service_name backend)"
@@ -849,11 +875,12 @@ run_as_app_user "
 "
 
 if [[ "$SCOPE" == "full" ]]; then
+  ensure_swap_file
   echo "==> Update frontend dependencies and build"
   run_as_app_user "
     cd '$APP_ROOT/frontend'
     rm -rf node_modules .next
-    npm ci
+    npm ci --prefer-offline --no-audit --fund=false
     test -f node_modules/next/dist/compiled/cookie/index.js
     test -f node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js
     set -a
