@@ -95,19 +95,21 @@ jobs:
             id "$APP_USER" >/dev/null
 
             MIN_FREE_KB=1048576
+            REQUIRED_FREE_KB=262144
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
             if (( AVAILABLE_KB < MIN_FREE_KB )); then
               echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches"
-              sudo journalctl --vacuum-time=7d --vacuum-size=256M || true
+              sudo journalctl --vacuum-time=3d --vacuum-size=64M || true
               sudo apt-get clean || true
+              sudo rm -rf /var/cache/apt/archives/*.deb /tmp/* /var/tmp/* || true
               if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
                 sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
               fi
               AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
               echo "==> Disk space after cache pruning: ${AVAILABLE_KB} KiB free"
             fi
-            if (( AVAILABLE_KB < 524288 )); then
-              echo "Production deploy requires at least 512 MiB free after bounded cache cleanup." >&2
+            if (( AVAILABLE_KB < REQUIRED_FREE_KB )); then
+              echo "Production backend deploy requires at least 256 MiB free after bounded cache cleanup." >&2
               df -h "$APP_ROOT" >&2
               exit 1
             fi
@@ -176,19 +178,29 @@ jobs:
             id "$APP_USER" >/dev/null
 
             MIN_FREE_KB=1048576
+            REQUIRED_FREE_KB=524288
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
             if (( AVAILABLE_KB < MIN_FREE_KB )); then
-              echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches"
-              sudo journalctl --vacuum-time=7d --vacuum-size=256M || true
+              echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches and rebuildable frontend artifacts"
+              sudo journalctl --vacuum-time=3d --vacuum-size=64M || true
               sudo apt-get clean || true
+              sudo rm -rf /var/cache/apt/archives/*.deb /tmp/* /var/tmp/* || true
               if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
                 sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
               fi
+              if [[ -d "$APP_ROOT/frontend" ]]; then
+                sudo -u "$APP_USER" -H rm -rf \
+                  "$APP_ROOT/frontend/.next" \
+                  "$APP_ROOT/frontend/node_modules" \
+                  "$APP_ROOT/frontend/.npm" \
+                  "$APP_ROOT/frontend/out"
+                sudo -u "$APP_USER" -H npm cache clean --force || true
+              fi
               AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
-              echo "==> Disk space after cache pruning: ${AVAILABLE_KB} KiB free"
+              echo "==> Disk space after cache/artifact pruning: ${AVAILABLE_KB} KiB free"
             fi
-            if (( AVAILABLE_KB < 524288 )); then
-              echo "Production deploy requires at least 512 MiB free after bounded cache cleanup." >&2
+            if (( AVAILABLE_KB < REQUIRED_FREE_KB )); then
+              echo "Production full-stack deploy requires at least 512 MiB free after bounded cache and rebuildable artifact cleanup." >&2
               df -h "$APP_ROOT" >&2
               exit 1
             fi
