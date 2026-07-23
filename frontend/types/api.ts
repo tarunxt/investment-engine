@@ -785,6 +785,103 @@ export interface AutoRebalanceCompletionEmailRequest {
   stages_completed?: string[];
 }
 
+export type AutoRebalanceStageKey =
+  | 'sync'
+  | 'threats'
+  | 'swing'
+  | 'rebalance'
+  | 'technical'
+  | 'actionables';
+
+export type AutoRebalanceStageStatus =
+  | 'queued'
+  | 'processing'
+  | 'completed'
+  | 'partial'
+  | 'failed'
+  | 'skipped'
+  | 'paused'
+  | 'cancelled'
+  | 'interrupted';
+
+export interface AutoRebalanceStageUpdateRequest {
+  status: AutoRebalanceStageStatus;
+  run_id?: number | null;
+  job_id?: number | null;
+  summary?: Record<string, unknown>;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface AutoRebalanceStageResponse {
+  stage: AutoRebalanceStageKey;
+  status: string;
+  run_id?: number | null;
+  job_id?: number | null;
+  summary: Record<string, unknown>;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  provider_count: number;
+  completed_provider_count: number;
+  failed_provider_count: number;
+  estimated_cost: number;
+}
+
+export interface AutoRebalanceJobDetailResponse {
+  id: number;
+  provider: string;
+  model: string;
+  status: string;
+  prompt: string;
+  response?: string | null;
+  error_message?: string | null;
+  tokens_in?: number | null;
+  tokens_out?: number | null;
+  estimated_cost?: number | null;
+  web_search_used?: boolean | null;
+  web_search_queries?: string[] | null;
+  web_sources?: string[] | null;
+  runtime_metadata_json?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutoRebalanceRunDetailResponse {
+  id: number;
+  status: string;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+  jobs: AutoRebalanceJobDetailResponse[];
+}
+
+export interface AutoRebalanceHistoryItemResponse {
+  portfolio: AutoRebalancePortfolioKey;
+  sequence: number;
+  label: string;
+  status: string;
+  current_stage?: AutoRebalanceStageKey | null;
+  error_message?: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at?: string | null;
+  total_estimated_cost: number;
+  stages: AutoRebalanceStageResponse[];
+}
+
+export interface AutoRebalanceHistoryListResponse {
+  items: AutoRebalanceHistoryItemResponse[];
+  total: number;
+}
+
+export interface AutoRebalanceHistoryDetailResponse
+  extends AutoRebalanceHistoryItemResponse {
+  runs: AutoRebalanceRunDetailResponse[];
+  standalone_jobs: AutoRebalanceJobDetailResponse[];
+}
+
 export interface RunCreate {
   prompt: string;
   targets: RunModelTarget[];

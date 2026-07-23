@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -69,3 +69,73 @@ class RunJob(Base, TimestampMixin):
 
     run: Mapped[Run] = relationship(back_populates="run_jobs")
     job: Mapped[Job] = relationship()
+
+
+class AutoRebalanceWorkflow(Base, TimestampMixin):
+    """Durable, user-visible parent record for a multi-stage auto-rebalance.
+
+    Individual AI stages still use the established ``runs``/``jobs`` tables.
+    This record owns the cross-stage lifecycle so a dashboard timeout can never
+    erase where the sequence stopped or why.
+    """
+
+    __tablename__ = "auto_rebalance_workflows"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "portfolio",
+            "sequence",
+            name="uq_auto_rebalance_workflow_user_portfolio_sequence",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    portfolio: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    current_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="sync")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship()
+    stages: Mapped[list[AutoRebalanceWorkflowStage]] = relationship(
+        back_populates="workflow", cascade="all, delete-orphan"
+    )
+
+
+class AutoRebalanceWorkflowStage(Base, TimestampMixin):
+    """One immutable-in-meaning lifecycle slot per auto-rebalance stage."""
+
+    __tablename__ = "auto_rebalance_workflow_stages"
+    __table_args__ = (
+        UniqueConstraint(
+            "workflow_id",
+            "stage",
+            name="uq_auto_rebalance_workflow_stage",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    workflow_id: Mapped[int] = mapped_column(
+        ForeignKey("auto_rebalance_workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    stage: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", index=True)
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("jobs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    workflow: Mapped[AutoRebalanceWorkflow] = relationship(back_populates="stages")

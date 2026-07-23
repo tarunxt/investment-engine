@@ -293,6 +293,15 @@ export const URLs = {
     cancel: (id: number) => `${resolveApiBaseUrl()}/runs/${id}/cancel`,
     autoRebalanceLabel: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-label`,
     autoRebalanceCompletionEmail: () => `${resolveApiBaseUrl()}/runs/auto-rebalance-completion-email`,
+    autoRebalanceHistory: (portfolio: 'india' | 'indmoney_us') =>
+      `${resolveApiBaseUrl()}/runs/auto-rebalance-history?portfolio=${portfolio}`,
+    autoRebalanceHistoryDetail: (portfolio: 'india' | 'indmoney_us', sequence: number) =>
+      `${resolveApiBaseUrl()}/runs/auto-rebalance-history/${portfolio}/${sequence}`,
+    autoRebalanceStage: (
+      portfolio: 'india' | 'indmoney_us',
+      sequence: number,
+      stage: string,
+    ) => `${resolveApiBaseUrl()}/runs/auto-rebalance-history/${portfolio}/${sequence}/stages/${stage}`,
     ws: () => `${resolveWebSocketBaseUrl()}/ws/runs`,
     wsRun: (id: number) => `${resolveWebSocketBaseUrl()}/ws/runs/${id}`,
   },
@@ -476,6 +485,12 @@ export const URLs = {
       indmoneyUsEvents: () => "/console/indmoney-us/events",
       indmoneyUsRebalance: () => "/console/indmoney-us/rebalance",
       indmoneyUsFinalActionables: () => "/console/indmoney-us/final-actionables",
+      autoRebalanceRuns: (portfolio: 'zerodha' | 'indmoneyUs') =>
+        `/console/auto-rebalance-runs/${portfolio}`,
+      autoRebalanceRunDetail: (
+        portfolio: 'zerodha' | 'indmoneyUs',
+        sequence: number,
+      ) => `/console/auto-rebalance-runs/${portfolio}/${sequence}`,
       zerodhaThreats: () => "/console/zerodha/threats",
       indmoneyUsThreats: () => "/console/indmoney-us/threats",
       tradingBots: () => "/console/trading-bots",

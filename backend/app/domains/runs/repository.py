@@ -22,16 +22,26 @@ class PostgresRunRepository:
         await self._session.refresh(run)
         return run
 
-    async def get(self, run_id: int) -> Run | None:
+    async def get(self, run_id: int, *, user_id: int | None = None) -> Run | None:
+        stmt = select(Run).where(Run.id == run_id)
+        if user_id is not None:
+            stmt = stmt.where(Run.user_id == user_id)
         result = await self._session.execute(
-            select(Run)
-            .where(Run.id == run_id)
+            stmt
             .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
         )
         return result.scalar_one_or_none()
 
-    async def list(self, query: PagedQuery, *, summary: bool = False) -> PagedResult[Run]:
+    async def list(
+        self,
+        query: PagedQuery,
+        *,
+        user_id: int | None = None,
+        summary: bool = False,
+    ) -> PagedResult[Run]:
         stmt = select(Run)
+        if user_id is not None:
+            stmt = stmt.where(Run.user_id == user_id)
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total: int = (await self._session.execute(count_stmt)).scalar_one()
         if summary:

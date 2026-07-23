@@ -34,7 +34,12 @@ from app.domains.polymarket_auto_live.models import (  # noqa: F401
     PolymarketAutoLiveSettingsRecord,
     PolymarketAutoLiveStateRecord,
 )
-from app.domains.runs.models import Run, RunJob  # noqa: F401
+from app.domains.runs.models import (  # noqa: F401
+    AutoRebalanceWorkflow,
+    AutoRebalanceWorkflowStage,
+    Run,
+    RunJob,
+)
 from app.domains.prompts.models import Prompt  # noqa: F401
 from app.infrastructure.database.outbox.models import OutboxMessage  # noqa: F401
 from app.domains.zerodha.audit import ZerodhaAuditLog  # noqa: F401

@@ -161,6 +161,100 @@ class AutoRebalanceCompletionEmailRequest(BaseModel):
         return normalized[:128]
 
 
+AutoRebalanceStageKey = Literal[
+    "sync", "threats", "swing", "rebalance", "technical", "actionables"
+]
+
+
+class AutoRebalanceStageUpdateRequest(BaseModel):
+    status: Literal[
+        "queued",
+        "processing",
+        "completed",
+        "partial",
+        "failed",
+        "skipped",
+        "paused",
+        "cancelled",
+        "interrupted",
+    ]
+    run_id: int | None = Field(default=None, ge=1)
+    job_id: int | None = Field(default=None, ge=1)
+    summary: dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = Field(default=None, max_length=10_000)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+
+
+class AutoRebalanceStageResponse(BaseModel):
+    stage: AutoRebalanceStageKey
+    status: str
+    run_id: int | None = None
+    job_id: int | None = None
+    summary: dict[str, Any] = Field(default_factory=dict)
+    error_message: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    provider_count: int = 0
+    completed_provider_count: int = 0
+    failed_provider_count: int = 0
+    estimated_cost: float = 0
+
+
+class AutoRebalanceJobDetailResponse(BaseModel):
+    id: int
+    provider: str
+    model: str
+    status: str
+    prompt: str
+    response: str | None = None
+    error_message: str | None = None
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    estimated_cost: float | None = None
+    web_search_used: bool | None = None
+    web_search_queries: list[str] | None = None
+    web_sources: list[str] | None = None
+    runtime_metadata_json: dict[str, Any] | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AutoRebalanceRunDetailResponse(BaseModel):
+    id: int
+    status: str
+    prompt: str
+    created_at: datetime
+    updated_at: datetime
+    jobs: list[AutoRebalanceJobDetailResponse] = Field(default_factory=list)
+
+
+class AutoRebalanceHistoryItemResponse(BaseModel):
+    portfolio: str
+    sequence: int
+    label: str
+    status: str
+    current_stage: AutoRebalanceStageKey | None = None
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
+    total_estimated_cost: float = 0
+    stages: list[AutoRebalanceStageResponse] = Field(default_factory=list)
+
+
+class AutoRebalanceHistoryListResponse(BaseModel):
+    items: list[AutoRebalanceHistoryItemResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class AutoRebalanceHistoryDetailResponse(AutoRebalanceHistoryItemResponse):
+    runs: list[AutoRebalanceRunDetailResponse] = Field(default_factory=list)
+    standalone_jobs: list[AutoRebalanceJobDetailResponse] = Field(default_factory=list)
+
+
 class RunCreate(BaseModel):
     prompt: str
     targets: list[RunModelTarget]

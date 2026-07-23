@@ -81,7 +81,12 @@ import {
   RunListItem,
   AutoRebalanceRunReservationResponse,
   AutoRebalanceCompletionEmailRequest,
+  AutoRebalanceHistoryDetailResponse,
+  AutoRebalanceHistoryListResponse,
   AutoRebalancePortfolioKey,
+  AutoRebalanceStageKey,
+  AutoRebalanceStageResponse,
+  AutoRebalanceStageUpdateRequest,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -116,8 +121,12 @@ const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
 const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
-const DEFAULT_API_REQUEST_TIMEOUT_MS = 8_000;
+// Dashboard reads fan out to several independent services. Eight seconds was
+// short enough to turn a healthy-but-slow proxy response into a false workflow
+// failure, leaving the next auto-rebalance stage stranded in the browser.
+const DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000;
 const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
+const READ_RETRY_DELAYS_MS = [500, 1_500, 3_000] as const;
 
 export class APIError extends Error {
   constructor(
@@ -217,6 +226,33 @@ function waitForRequestAbort<T>(promise: Promise<T>, signal: AbortSignal) {
         reject(error);
       },
     );
+  });
+}
+
+function isRetryableReadError(error: unknown) {
+  if (error instanceof RequestTimeoutError || error instanceof NetworkError) {
+    return true;
+  }
+  return error instanceof APIError && (error.status === 429 || error.status >= 500);
+}
+
+function waitForReadRetry(delayMs: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = globalThis.setTimeout(finish, delayMs);
+    const abort = () => {
+      globalThis.clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new DOMException("Request aborted", "AbortError"));
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
   });
 }
 
@@ -431,8 +467,21 @@ class apiServiceClass implements IApiService {
   }
 
   // HTTP methods
-  get<T>(url: string, options?: ApiRequestOptions): Promise<T> {
-    return this.fetch<T>(url, { method: "GET", ...options });
+  async get<T>(url: string, options?: ApiRequestOptions): Promise<T> {
+    let attempt = 0;
+    while (true) {
+      try {
+        return await this.fetch<T>(url, { method: "GET", ...options });
+      } catch (error) {
+        const delay = READ_RETRY_DELAYS_MS[attempt];
+        if (!delay || options?.signal?.aborted || !isRetryableReadError(error)) {
+          throw error;
+        }
+        attempt += 1;
+        this.warn("Retrying transient GET request.", { url, attempt });
+        await waitForReadRetry(delay, options?.signal);
+      }
+    }
   }
 
   post<T>(
@@ -775,6 +824,37 @@ class apiServiceClass implements IApiService {
 
   queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
     return this.post<{ status: string }>(URLs.runs.autoRebalanceCompletionEmail(), data);
+  }
+
+  getAutoRebalanceHistory(
+    portfolio: AutoRebalancePortfolioKey,
+    params?: { limit?: number },
+  ): Promise<AutoRebalanceHistoryListResponse> {
+    const suffix = params?.limit ? `&limit=${params.limit}` : "";
+    return this.get<AutoRebalanceHistoryListResponse>(
+      `${URLs.runs.autoRebalanceHistory(portfolio)}${suffix}`,
+    );
+  }
+
+  getAutoRebalanceHistoryDetail(
+    portfolio: AutoRebalancePortfolioKey,
+    sequence: number,
+  ): Promise<AutoRebalanceHistoryDetailResponse> {
+    return this.get<AutoRebalanceHistoryDetailResponse>(
+      URLs.runs.autoRebalanceHistoryDetail(portfolio, sequence),
+    );
+  }
+
+  updateAutoRebalanceStage(
+    portfolio: AutoRebalancePortfolioKey,
+    sequence: number,
+    stage: AutoRebalanceStageKey,
+    data: AutoRebalanceStageUpdateRequest,
+  ): Promise<AutoRebalanceStageResponse> {
+    return this.patch<AutoRebalanceStageResponse>(
+      URLs.runs.autoRebalanceStage(portfolio, sequence, stage),
+      data,
+    );
   }
 
   getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>> {

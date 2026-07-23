@@ -94,6 +94,12 @@ import {
     ZerodhaStatusResponse,
     RunListItem,
     RunResponse,
+    AutoRebalanceHistoryDetailResponse,
+    AutoRebalanceHistoryListResponse,
+    AutoRebalancePortfolioKey,
+    AutoRebalanceStageKey,
+    AutoRebalanceStageResponse,
+    AutoRebalanceStageUpdateRequest,
 } from '@/types/api';
 
 export type ApiRequestControl = {
@@ -130,6 +136,20 @@ export interface IApiService {
         params?: { page?: number; limit?: number },
         options?: ApiRequestControl,
     ): Promise<PaginatedResponse<RunResponse>>;
+    getAutoRebalanceHistory(
+        portfolio: AutoRebalancePortfolioKey,
+        params?: { limit?: number },
+    ): Promise<AutoRebalanceHistoryListResponse>;
+    getAutoRebalanceHistoryDetail(
+        portfolio: AutoRebalancePortfolioKey,
+        sequence: number,
+    ): Promise<AutoRebalanceHistoryDetailResponse>;
+    updateAutoRebalanceStage(
+        portfolio: AutoRebalancePortfolioKey,
+        sequence: number,
+        stage: AutoRebalanceStageKey,
+        data: AutoRebalanceStageUpdateRequest,
+    ): Promise<AutoRebalanceStageResponse>;
 
     // Provider endpoints
     getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
