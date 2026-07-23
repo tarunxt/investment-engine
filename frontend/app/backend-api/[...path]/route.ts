@@ -47,8 +47,8 @@ function resolveConfiguredBackendApiBaseUrls() {
   return [
     process.env.BACKEND_API_URL,
     process.env.API_URL,
-    ...LOCAL_SERVER_API_BASE_URLS,
     process.env.NEXT_PUBLIC_API_URL,
+    ...LOCAL_SERVER_API_BASE_URLS,
   ]
     .map(parseConfiguredUrl)
     .filter((parsed): parsed is URL => Boolean(parsed))
