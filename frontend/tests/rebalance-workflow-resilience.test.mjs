@@ -51,3 +51,14 @@ test("approved downstream continuation is handled at every LLM stage", () => {
     );
   }
 });
+
+test("auto-rebalance idle tiles include active run progress", () => {
+  assert.match(source, /function summarizeRunForIdleTile/);
+  assert.match(source, /const progressStatus = \(progress\.runStatus \|\| ""\)\.toLowerCase\(\);/);
+  assert.match(
+    source,
+    /progressStatus === "pending" \|\| progressStatus === "processing"/,
+  );
+  assert.match(source, /completedAt: isActiveRun \? null : getLatestRunTimestamp\(run\)/);
+  assert.match(source, /activeLlms > 0/);
+});

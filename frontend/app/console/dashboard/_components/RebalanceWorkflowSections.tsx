@@ -1552,11 +1552,22 @@ function getRunProgress(run: RunResponse) {
     (state) => state === "completed" || state === "partial",
   ).length;
   const failedLlms = classifications.filter((state) => state === "failed").length;
+  const activeLlms = jobs.filter((job) => {
+    const status = (job.status || "").toLowerCase();
+    return status === "pending" || status === "processing";
+  }).length;
+  const runStatus = (run.status || "").toLowerCase();
+  const isActiveRun =
+    runStatus === "pending" ||
+    runStatus === "processing" ||
+    activeLlms > 0;
   return {
     completedLlms: passedLlms + failedLlms,
     passedLlms,
     failedLlms,
     totalLlms: jobs.length,
+    runStatus: isActiveRun ? run.status || "processing" : run.status,
+    endedAt: isActiveRun ? null : getLatestRunTimestamp(run),
   };
 }
 
@@ -1795,17 +1806,22 @@ function countUniqueStocksFromRun(run: RunResponse) {
   return symbols.size || null;
 }
 
-function summarizeCompletedRunForIdle(
+function summarizeRunForIdleTile(
   run: RunResponse | undefined,
   usdInrRate: number,
   recommendedStocks?: number | null,
 ): Partial<StageInfo> {
   if (!run) return {};
+  const progress = getRunProgress(run);
+  const progressStatus = (progress.runStatus || "").toLowerCase();
+  const isActiveRun =
+    progressStatus === "pending" || progressStatus === "processing";
   return withInrCost(
     {
       ...summarizeRun(run),
-      ...getRunProgress(run),
-      completedAt: getLatestRunTimestamp(run),
+      ...progress,
+      startedAt: run.created_at,
+      completedAt: isActiveRun ? null : getLatestRunTimestamp(run),
       lastRunId: run.id,
       recommendedStocks: recommendedStocks ?? null,
     },
@@ -6235,7 +6251,7 @@ ${zerodhaExecutionMode === "direct_market"
             completedAt: overview?.latest?.captured_at ?? null,
             runStatus: overview?.latest ? syncStatus : null,
           },
-          swing: summarizeCompletedRunForIdle(
+          swing: summarizeRunForIdleTile(
             latestSwingRun,
             usdInrRate,
             latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
@@ -6255,14 +6271,14 @@ ${zerodhaExecutionMode === "direct_market"
                 usdInrRate,
               )
             : {},
-          rebalance: summarizeCompletedRunForIdle(
+          rebalance: summarizeRunForIdleTile(
             latestRebalanceRun,
             usdInrRate,
             latestRebalanceRuns.length
               ? buildConsensusRows(latestRebalanceRuns, market).length
               : null,
           ),
-          technical: summarizeCompletedRunForIdle(
+          technical: summarizeRunForIdleTile(
             latestTechnicalRun,
             usdInrRate,
             latestTechnicalRun ? countUniqueStocksFromRun(latestTechnicalRun) : null,
