@@ -109,6 +109,10 @@ function shouldUseBrowserApiProxy() {
     return false;
   }
 
+  if (resolveConfiguredClientApiBaseUrl()) {
+    return false;
+  }
+
   return !LOCAL_HOSTNAMES.has(window.location.hostname);
 }
 
