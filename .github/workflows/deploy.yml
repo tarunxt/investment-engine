@@ -177,14 +177,24 @@ jobs:
             sudo test -d "$APP_ROOT/.git"
             id "$APP_USER" >/dev/null
 
-            MIN_FREE_KB=1048576
-            REQUIRED_FREE_KB=524288
+            # A frontend dependency install and Next build need significantly
+            # more working space than the 512 MiB final-artifact footprint.
+            # Trigger safe cache cleanup early, before npm starts extracting.
+            MIN_FREE_KB=3145728
+            REQUIRED_FREE_KB=1572864
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
             if (( AVAILABLE_KB < MIN_FREE_KB )); then
               echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches and rebuildable frontend artifacts"
               sudo journalctl --vacuum-time=3d --vacuum-size=64M || true
               sudo apt-get clean || true
-              sudo rm -rf /var/cache/apt/archives/*.deb /tmp/* /var/tmp/* || true
+              sudo rm -rf \
+                /var/cache/apt/archives/*.deb \
+                /var/lib/apt/lists/* \
+                /var/cache/man/* \
+                /var/crash/* \
+                /var/lib/systemd/coredump/* \
+                /tmp/* \
+                /var/tmp/* || true
               if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
                 sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
               fi
@@ -194,13 +204,14 @@ jobs:
                   "$APP_ROOT/frontend/node_modules" \
                   "$APP_ROOT/frontend/.npm" \
                   "$APP_ROOT/frontend/out"
-                sudo -u "$APP_USER" -H npm cache clean --force || true
+                sudo -u "$APP_USER" -H sh -c 'rm -rf "$HOME/.npm" "$HOME/.cache"' || true
               fi
+              sudo -u "$APP_USER" -H git -C "$APP_ROOT" gc --prune=now || true
               AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
               echo "==> Disk space after cache/artifact pruning: ${AVAILABLE_KB} KiB free"
             fi
             if (( AVAILABLE_KB < REQUIRED_FREE_KB )); then
-              echo "Production full-stack deploy requires at least 512 MiB free after bounded cache and rebuildable artifact cleanup." >&2
+              echo "Production full-stack deploy requires at least 1.5 GiB free after bounded cache and rebuildable artifact cleanup." >&2
               df -h "$APP_ROOT" >&2
               exit 1
             fi
