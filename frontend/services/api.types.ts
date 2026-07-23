@@ -57,6 +57,7 @@ import {
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveDecision,
+    BullpenAutoLivePersistedStatus,
     BullpenAutoLiveState,
     BullpenAutoLiveSummaryResponse,
     BullpenRunAuditDetailResponse,
@@ -95,13 +96,18 @@ import {
     RunResponse,
 } from '@/types/api';
 
+export type ApiRequestControl = {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+};
+
 // Define the API service interface with proper types
 export interface IApiService {
     // Auth endpoints
     login(data: { email?: string; username?: string; password: string }): Promise<LoginResponse>;
     register(data: { email: string; username: string; password: string; full_name?: string }): Promise<RegisterResponse>;
     logout(token?: string): Promise<void>;
-    refreshToken(refreshToken: string): Promise<RefreshTokenResponse>;
+    refreshToken(options?: ApiRequestControl): Promise<RefreshTokenResponse>;
     getCurrentUser(token?: string): Promise<UserResponse>;
     updatePassword(data: UpdatePasswordRequest, token?: string): Promise<void>;
     getProfile(token?: string): Promise<UpdateProfileRequest>;
@@ -120,7 +126,10 @@ export interface IApiService {
     getJobs(params?: { page?: number; limit?: number; status?: string; q?: string }): Promise<PaginatedResponse<JobResponse>>;
     getJob(id: number): Promise<JobResponse>;
     getRuns(params?: { page?: number; limit?: number; summary?: boolean }): Promise<PaginatedResponse<RunListItem>>;
-    getFullRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>>;
+    getFullRuns(
+        params?: { page?: number; limit?: number },
+        options?: ApiRequestControl,
+    ): Promise<PaginatedResponse<RunResponse>>;
 
     // Provider endpoints
     getProviders({ signal, prompt }: { signal?: AbortSignal; prompt?: string }): Promise<ProviderInfo[]>;
@@ -184,7 +193,7 @@ export interface IApiService {
     indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse>;
 
     // Polymarket endpoints
-    polymarketState(): Promise<PolymarketBotState>;
+    polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState>;
     polymarketStart(): Promise<PolymarketBotState>;
     polymarketStop(): Promise<PolymarketBotState>;
     polymarketPause(): Promise<PolymarketBotState>;
@@ -192,7 +201,7 @@ export interface IApiService {
     polymarketLiveUnlock(): Promise<PolymarketBotState>;
     polymarketLiveLock(): Promise<PolymarketBotState>;
     polymarketLiveDoctor(): Promise<PolymarketBotState>;
-    polymarketLiveBalanceRefresh(): Promise<PolymarketBotState>;
+    polymarketLiveBalanceRefresh(options?: ApiRequestControl): Promise<PolymarketBotState>;
     polymarketLiveRedeem(data?: { conditionIds?: string[] }): Promise<PolymarketBotState>;
     polymarketLiveEmergencyStop(): Promise<PolymarketBotState>;
     polymarketLiveResetEmergencyStop(): Promise<PolymarketBotState>;
@@ -200,12 +209,16 @@ export interface IApiService {
     polymarketLiveTradeConfirm(tradeId: string): Promise<PolymarketBotState>;
     polymarketLiveTradeReject(tradeId: string): Promise<PolymarketBotState>;
     polymarketLiveRejectAll(): Promise<PolymarketBotState>;
-    polymarketManualInvest(data: { orders: PolymarketManualInvestOrderRequest[] }): Promise<PolymarketManualInvestResponse>;
+    polymarketManualInvest(
+        data: { orders: PolymarketManualInvestOrderRequest[] },
+        options?: ApiRequestControl,
+    ): Promise<PolymarketManualInvestResponse>;
     polymarketAddTrackedAccount(data: PolymarketTrackedAccountCreate): Promise<PolymarketBotState>;
     polymarketUpdateTrackedAccount(accountId: string, data: PolymarketTrackedAccountUpdate): Promise<PolymarketBotState>;
     polymarketDeleteTrackedAccount(accountId: string): Promise<PolymarketBotState>;
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
-    getBullpenAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse>;
+    getBullpenAutoLiveStatus(options?: ApiRequestControl): Promise<BullpenAutoLivePersistedStatus>;
+    getBullpenAutoLiveSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveState(): Promise<BullpenAutoLiveState>;
     getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;

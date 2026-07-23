@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -87,7 +88,7 @@ import {
 } from "@/lib/bullpenEventIdentityResolver";
 import { cn } from "@/lib/utils";
 import { URLs } from "@/lib/urls";
-import { APIError, apiService } from "@/services/api";
+import { APIError, RequestTimeoutError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveRun,
@@ -102,15 +103,11 @@ import type {
 } from "@/types/api";
 
 import { shouldReplaceCategory } from "@/lib/polymarketCategory";
-import {
-  BullpenQuestionsTable,
-  type BullpenTableSortKey,
-  type BullpenTableSortState,
+import type {
+  BullpenTableSortKey,
+  BullpenTableSortState,
 } from "./BullpenQuestionsTable";
 import { BullpenAutoRunScheduleCard } from "./BullpenAutoRunScheduleCard";
-import { BullpenInvestmentsSection } from "./BullpenInvestmentsSection";
-import { BullpenScanFilterDetailsDialog } from "./BullpenScanFilterDetailsDialog";
-import { BullpenPromptEditorDialog } from "./BullpenPromptEditorDialog";
 import {
   syncBullpenAutoRunActivePositionAnalyses,
   syncBullpenAutoRunSummarySnapshots,
@@ -129,6 +126,39 @@ import {
   type BullpenPositionsSummary,
   isActiveBullpenPosition,
 } from "@/lib/bullpenPositions";
+
+const BullpenQuestionsTable = dynamic(
+  () =>
+    import("./BullpenQuestionsTable").then((module) => module.BullpenQuestionsTable),
+  {
+    ssr: false,
+    loading: () => <div className="h-48 animate-pulse rounded-2xl bg-slate-100" />,
+  },
+);
+const BullpenInvestmentsSection = dynamic(
+  () =>
+    import("./BullpenInvestmentsSection").then(
+      (module) => module.BullpenInvestmentsSection,
+    ),
+  {
+    ssr: false,
+    loading: () => <div className="h-36 animate-pulse rounded-2xl bg-slate-100" />,
+  },
+);
+const BullpenScanFilterDetailsDialog = dynamic(
+  () =>
+    import("./BullpenScanFilterDetailsDialog").then(
+      (module) => module.BullpenScanFilterDetailsDialog,
+    ),
+  { ssr: false },
+);
+const BullpenPromptEditorDialog = dynamic(
+  () =>
+    import("./BullpenPromptEditorDialog").then(
+      (module) => module.BullpenPromptEditorDialog,
+    ),
+  { ssr: false },
+);
 
 const TABS: {
   mode: ScanMode;
@@ -195,6 +225,7 @@ const DEFAULT_SORT_STATE: BullpenTableSortState = {
 };
 const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
+const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
 
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
@@ -208,6 +239,47 @@ const DEFAULT_EC2_COMMANDS = [
   "sudo systemctl status investor-celery-worker --no-pager",
 ];
 const EC2_COMMANDS_STORAGE_KEY = "bullpenAi.ec2Commands";
+
+async function fetchBullpenUiJson<T>(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = BULLPEN_UI_REQUEST_TIMEOUT_MS,
+): Promise<{ response: Response; payload: T }> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const callerSignal = init.signal;
+  const abortForCaller = () => controller.abort();
+  if (callerSignal?.aborted) {
+    abortForCaller();
+  } else {
+    callerSignal?.addEventListener("abort", abortForCaller, { once: true });
+  }
+  const timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    // Keep the deadline alive through body consumption. A response that sends
+    // headers then stalls its JSON must fail just like a connection that never
+    // opens, rather than leaving a page section in a loading state forever.
+    const payload = (await response.json()) as T;
+    return { response, payload };
+  } catch (error) {
+    if (timedOut) {
+      throw new RequestTimeoutError(init.method ?? "GET", input, timeoutMs);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeoutId);
+    callerSignal?.removeEventListener("abort", abortForCaller);
+  }
+}
+
+function isBullpenRequestAbort(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
 
 function normalizeEc2Commands(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
@@ -1314,17 +1386,73 @@ function formatTargetSummary(
     : visible.join(", ");
 }
 
-async function waitForBullpenRunCompletion(runId: number) {
+function waitForBullpenPageVisibility(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Request aborted", "AbortError"));
+  }
+  if (typeof document === "undefined" || document.visibilityState === "visible") {
+    return Promise.resolve();
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("Request aborted", "AbortError"));
+    };
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function waitForBullpenPollDelay(delayMs: number, signal?: AbortSignal) {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Request aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    function cleanup() {
+      signal?.removeEventListener("abort", onAbort);
+    }
+    function cleanupAndResolve() {
+      cleanup();
+      resolve();
+    }
+    function onAbort() {
+      window.clearTimeout(timeoutId);
+      cleanup();
+      reject(new DOMException("Request aborted", "AbortError"));
+    }
+    const timeoutId = window.setTimeout(cleanupAndResolve, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+async function waitForBullpenRunCompletion(
+  runId: number,
+  signal?: AbortSignal,
+) {
   for (let attempt = 0; attempt < MAX_RUN_POLLS; attempt += 1) {
-    const run = await apiService.getRun(runId);
+    await waitForBullpenPageVisibility(signal);
+    const run = await apiService.getRun(runId, {
+      signal,
+      timeoutMs: 8_000,
+    });
     const status = (run.status || "").toLowerCase();
     if (status === "completed" || status === "partial" || status === "failed") {
       return run;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, RUN_POLL_INTERVAL_MS));
+    await waitForBullpenPollDelay(RUN_POLL_INTERVAL_MS, signal);
   }
 
-  return apiService.getRun(runId);
+  return apiService.getRun(runId, { signal, timeoutMs: 8_000 });
 }
 
 function FilterToggle({
@@ -1394,8 +1522,23 @@ function FilterToggle({
 
 function BullpenAiPageFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600" />
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6" aria-busy="true">
+      <div className="space-y-3">
+        <div className="h-4 w-36 animate-pulse rounded bg-purple-100" />
+        <div className="h-9 w-64 animate-pulse rounded bg-slate-200" />
+      </div>
+      <section className="rounded-3xl border border-fuchsia-100 bg-white p-5 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          <span className="h-7 w-36 animate-pulse rounded-full bg-fuchsia-100" />
+          <span className="h-7 w-28 animate-pulse rounded-full bg-slate-100" />
+          <span className="h-7 w-28 animate-pulse rounded-full bg-slate-100" />
+        </div>
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+        </div>
+      </section>
     </div>
   );
 }
@@ -1527,6 +1670,7 @@ function BullpenAiPageContent() {
   });
   const [llmElapsedSeconds, setLlmElapsedSeconds] = useState(0);
   const [investingMode, setInvestingMode] = useState<ScanMode | null>(null);
+  const investingRef = useRef(false);
   const [refreshingCurrentOddsMode, setRefreshingCurrentOddsMode] = useState<
     ScanMode | null
   >(null);
@@ -1557,6 +1701,11 @@ function BullpenAiPageContent() {
     useState<BullpenScanFilterDetailId | null>(null);
   const [hasLoadedStorage, setHasLoadedStorage] = useState(false);
   const claimPositionsTaskRef = useRef<Promise<void> | null>(null);
+  const positionsRequestInFlightRef = useRef(false);
+  const queuedManualPositionsRefreshRef =
+    useRef<RefreshBullpenPositionsOptions | null>(null);
+  const positionsAbortControllerRef = useRef<AbortController | null>(null);
+  const pageRequestAbortControllerRef = useRef<AbortController | null>(null);
   const lastAutoClaimAttemptRef = useRef<BullpenAutoClaimAttempt | null>(null);
   const scanFiltersMenuRef = useRef<HTMLDivElement | null>(null);
   const canonicalizedSnapshotIdsRef = useRef<
@@ -1572,6 +1721,18 @@ function BullpenAiPageContent() {
     },
   });
   const activeSnapshotSource = snapshotSourceByMode[activeMode];
+
+  useEffect(() => {
+    const controller = new AbortController();
+    pageRequestAbortControllerRef.current = controller;
+    return () => {
+      controller.abort();
+      queuedManualPositionsRefreshRef.current = null;
+      if (pageRequestAbortControllerRef.current === controller) {
+        pageRequestAbortControllerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const storedSnapshots = readBullpenSnapshotsFromStorage();
@@ -1681,10 +1842,18 @@ function BullpenAiPageContent() {
   });
 
   useEffect(() => {
+    const controller = new AbortController();
+    positionsAbortControllerRef.current = controller;
     void refreshBullpenPositions({
       refreshMode: "passive",
       callerSource: "ui-mount",
     });
+    return () => {
+      controller.abort();
+      if (positionsAbortControllerRef.current === controller) {
+        positionsAbortControllerRef.current = null;
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1694,18 +1863,25 @@ function BullpenAiPageContent() {
     const intervalId = window.setInterval(() => {
       pollBullpenPositions();
     }, 60_000);
+    document.addEventListener("visibilitychange", pollBullpenPositions);
 
     return () => {
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", pollBullpenPositions);
     };
   }, []);
 
   useEffect(() => {
+    if (!isScanSectionExpanded) return;
     let cancelled = false;
+    const controller = new AbortController();
 
     const loadHistoricalCosts = async () => {
       try {
-        const firstPage = await apiService.getFullRuns({ page: 1, limit: 100 });
+        const firstPage = await apiService.getFullRuns(
+          { page: 1, limit: 100 },
+          { signal: controller.signal, timeoutMs: 8_000 },
+        );
         const maxPages = Math.min(firstPage.pages, 3);
         const remainingPages = Array.from(
           { length: Math.max(0, maxPages - 1) },
@@ -1713,7 +1889,10 @@ function BullpenAiPageContent() {
         );
         const remainingResults = await Promise.all(
           remainingPages.map((page) =>
-            apiService.getFullRuns({ page, limit: 100 }),
+            apiService.getFullRuns(
+              { page, limit: 100 },
+              { signal: controller.signal, timeoutMs: 8_000 },
+            ),
           ),
         );
         const runs = [
@@ -1725,7 +1904,7 @@ function BullpenAiPageContent() {
           buildBullpenHistoricalCostMapInr(runs, usdInrRate),
         );
       } catch (error) {
-        if (!cancelled) {
+        if (!cancelled && !isBullpenRequestAbort(error)) {
           console.warn("Failed to load Bullpen LLM cost history:", error);
         }
       }
@@ -1734,8 +1913,9 @@ function BullpenAiPageContent() {
     void loadHistoricalCosts();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [usdInrRate]);
+  }, [isScanSectionExpanded, usdInrRate]);
 
   const activeFilters = filtersByMode[activeMode];
   const activeSnapshots = snapshotsByMode[activeMode];
@@ -2076,21 +2256,21 @@ function BullpenAiPageContent() {
 
     async function refreshMarketUrls() {
       try {
-        const response = await fetch("/api/bullpen-ai/market-urls", {
+        const { response, payload } = await fetchBullpenUiJson<{
+          marketUrls?: Record<string, string | null>;
+          marketSlugs?: Record<string, string | null>;
+          marketCategories?: Record<string, string | null>;
+        }>("/api/bullpen-ai/market-urls", {
           method: "POST",
           headers: {
             "content-type": "application/json",
           },
           cache: "no-store",
+          signal: pageRequestAbortControllerRef.current?.signal,
           body: JSON.stringify({ questions }),
         });
         if (!response.ok) return;
 
-        const payload = (await response.json()) as {
-          marketUrls?: Record<string, string | null>;
-          marketSlugs?: Record<string, string | null>;
-          marketCategories?: Record<string, string | null>;
-        };
         if (
           cancelled ||
           (!payload.marketUrls &&
@@ -2440,6 +2620,20 @@ function BullpenAiPageContent() {
   async function refreshBullpenPositions(
     options?: RefreshBullpenPositionsOptions,
   ): Promise<RefreshBullpenPositionsResult> {
+    if (positionsRequestInFlightRef.current) {
+      // A user explicitly asking for a fresh wallet view must not be dropped
+      // behind a passive mount/interval poll. Queue one forced refresh after
+      // the in-flight request instead of creating a concurrent Bullpen read.
+      if (options?.refreshMode === "manual") {
+        queuedManualPositionsRefreshRef.current = options;
+      }
+      return { positions: activePositions, error: null };
+    }
+    const requestSignal = positionsAbortControllerRef.current?.signal;
+    if (requestSignal?.aborted) {
+      return { positions: activePositions, error: null };
+    }
+    positionsRequestInFlightRef.current = true;
     setIsLoadingPositions(true);
     setPositionsError(null);
 
@@ -2458,14 +2652,19 @@ function BullpenAiPageContent() {
         params.set("passive", "true");
       }
 
-      const livePositionsResponse = await fetch(
+      const {
+        response: livePositionsResponse,
+        payload: livePositionsPayload,
+      } = await fetchBullpenUiJson<BullpenPositionsResponse>(
         `/api/bullpen-ai/positions?${params.toString()}`,
         {
-        cache: "no-store",
+          cache: "no-store",
+          signal: requestSignal,
         },
       );
-      const livePositionsPayload =
-        (await livePositionsResponse.json()) as BullpenPositionsResponse;
+      if (requestSignal?.aborted) {
+        return { positions: activePositions, error: null };
+      }
       const normalizedLiveSnapshot = normalizeLiveSnapshot(
         livePositionsPayload.lastSuccessfulLiveSnapshot,
       );
@@ -2531,6 +2730,9 @@ function BullpenAiPageContent() {
         error: livePositionsPayload.error || null,
       };
     } catch (error) {
+      if (requestSignal?.aborted || isBullpenRequestAbort(error)) {
+        return { positions: activePositions, error: null };
+      }
       const normalizedError = `Failed to load Bullpen wallet positions: ${normalizeError(error)}.`;
       setHasLoadedPositions(true);
       setPositionsError(normalizedError);
@@ -2539,7 +2741,17 @@ function BullpenAiPageContent() {
         error: normalizedError,
       };
     } finally {
-      setIsLoadingPositions(false);
+      positionsRequestInFlightRef.current = false;
+      if (!requestSignal?.aborted) {
+        setIsLoadingPositions(false);
+        const queuedManualRefresh = queuedManualPositionsRefreshRef.current;
+        queuedManualPositionsRefreshRef.current = null;
+        if (queuedManualRefresh) {
+          window.queueMicrotask(() => {
+            void refreshBullpenPositions(queuedManualRefresh);
+          });
+        }
+      }
     }
   }
 
@@ -2591,10 +2803,10 @@ function BullpenAiPageContent() {
     }));
 
     try {
-      const response = await fetch(`/api/bullpen-ai?${params.toString()}`, {
+      const { response, payload } = await fetchBullpenUiJson<ScanResult>(`/api/bullpen-ai?${params.toString()}`, {
         cache: "no-store",
+        signal: pageRequestAbortControllerRef.current?.signal,
       });
-      const payload = (await response.json()) as ScanResult;
       const isSuccessfulScan = response.ok && !payload.error;
 
       void positionsRefreshTask;
@@ -2774,7 +2986,10 @@ function BullpenAiPageContent() {
         polymarket_event_context: polymarketEventContext,
       });
       setCurrentInProgressLlmRunId(run.id);
-      const completedRun = await waitForBullpenRunCompletion(run.id);
+      const completedRun = await waitForBullpenRunCompletion(
+        run.id,
+        pageRequestAbortControllerRef.current?.signal,
+      );
       setLatestCompletedLlmRunId(completedRun.id);
       const targetOrder = new Map(
         savedTargets.map((target, index) => [
@@ -3182,12 +3397,13 @@ function BullpenAiPageContent() {
     }
 
     try {
-      const response = await fetch("/api/bullpen-ai/current-odds", {
+      const { response, payload } = await fetchBullpenUiJson<BullpenCurrentOddsRefreshResponse>("/api/bullpen-ai/current-odds", {
         method: "POST",
         headers: {
           "content-type": "application/json",
         },
         cache: "no-store",
+        signal: pageRequestAbortControllerRef.current?.signal,
         body: JSON.stringify({
           questions: questionsToRefresh.map((question) => ({
             id: question.id,
@@ -3198,7 +3414,6 @@ function BullpenAiPageContent() {
           })),
         }),
       });
-      const payload = (await response.json()) as BullpenCurrentOddsRefreshResponse;
       if (!response.ok) {
         throw new Error(
           payload.error || "Failed to refresh current Polymarket odds.",
@@ -3274,10 +3489,16 @@ function BullpenAiPageContent() {
   async function pollBullpenInvestmentProgress(
     isStopped: () => boolean,
     fallbackMessage: string,
+    signal?: AbortSignal,
   ) {
     while (!isStopped()) {
       try {
-        const state = await apiService.polymarketState();
+        await waitForBullpenPageVisibility(signal);
+        if (isStopped()) return;
+        const state = await apiService.polymarketState({
+          signal,
+          timeoutMs: 8_000,
+        });
         if (isStopped()) return;
 
         const latestActivity = state.recent_activity[0]?.message?.trim();
@@ -3292,13 +3513,15 @@ function BullpenAiPageContent() {
             [activeMode]: nextMessage,
           }));
         }
-      } catch {
-        if (isStopped()) return;
+      } catch (error) {
+        if (isStopped() || isBullpenRequestAbort(error)) return;
       }
 
-      await new Promise((resolve) =>
-        window.setTimeout(resolve, INVESTMENT_PROGRESS_POLL_MS),
-      );
+      try {
+        await waitForBullpenPollDelay(INVESTMENT_PROGRESS_POLL_MS, signal);
+      } catch (error) {
+        if (isStopped() || isBullpenRequestAbort(error)) return;
+      }
     }
   }
 
@@ -3309,6 +3532,21 @@ function BullpenAiPageContent() {
         [activeMode]: "Switch back to the current snapshot before placing Bullpen orders.",
       }));
       return;
+    }
+    // State updates are asynchronous, so a ref is the authoritative immediate
+    // submission fence for this live trading mutation.
+    if (investingRef.current) return;
+    investingRef.current = true;
+
+    const progressAbortController = new AbortController();
+    const pageSignal = pageRequestAbortControllerRef.current?.signal;
+    const abortProgressForPageExit = () => progressAbortController.abort();
+    if (pageSignal?.aborted) {
+      abortProgressForPageExit();
+    } else {
+      pageSignal?.addEventListener("abort", abortProgressForPageExit, {
+        once: true,
+      });
     }
 
     setInvestingMode(activeMode);
@@ -3360,11 +3598,15 @@ function BullpenAiPageContent() {
       progressPollingTask = pollBullpenInvestmentProgress(
         () => stopProgressPolling,
         "Bullpen is still working through the selected orders...",
+        progressAbortController.signal,
       );
 
       const response: PolymarketManualInvestResponse =
         await apiService.polymarketManualInvest({
           orders: selectedOrders,
+        }, {
+          signal: progressAbortController.signal,
+          timeoutMs: 8_000,
         });
       void refreshBullpenPositions({
         refreshMode: "passive",
@@ -3423,9 +3665,12 @@ function BullpenAiPageContent() {
       }));
     } finally {
       stopProgressPolling = true;
+      progressAbortController.abort();
+      pageSignal?.removeEventListener("abort", abortProgressForPageExit);
       if (progressPollingTask) {
-        await progressPollingTask;
+        await progressPollingTask.catch(() => undefined);
       }
+      investingRef.current = false;
       setInvestingMode(null);
       setInvestmentProgressByMode((current) => ({
         ...current,

@@ -9,6 +9,7 @@ import {
   type ChangeEvent,
   type ReactNode,
 } from "react";
+import dynamic from "next/dynamic";
 import {
   CalendarClock,
   CheckCircle2,
@@ -44,6 +45,7 @@ import {
 import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
 import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
 import { formatApiTimestamp } from "@/lib/datetime";
+import { useAuth } from "@/hooks/useAuth";
 import {
   BullpenEventIdentityResolver,
   buildBullpenEventIdentityFromDecision,
@@ -56,7 +58,7 @@ import {
 } from "@/lib/bullpenPositions";
 import { resolveLatestVerifiedStage1Portfolio } from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
-import { APIError, apiService } from "@/services/api";
+import { APIError, RequestTimeoutError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveOutcomeSide,
@@ -72,13 +74,26 @@ import {
   buildBullpenAutoRunWorkflowView,
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
-import { BullpenInvestmentMathDialog } from "./BullpenInvestmentMathDialog";
+import {
+  createAbortableBullpenAutoRunRequestDeduper,
+  getBullpenAutoRunActiveRunId,
+  getBullpenAutoRunStatusCacheKey,
+  getBullpenAutoRunStatusBadges,
+  getBullpenAutoRunStatusRetryDelay,
+  isBullpenAutoRunProgressActive,
+  isBullpenAutoRunSchedulerEnabled,
+  isBullpenAutoRunPageVisible,
+  normalizeBullpenAutoRunStatusData,
+  readCachedBullpenAutoRunStatus,
+  writeCachedBullpenAutoRunStatus,
+  type BullpenAutoRunStatusData,
+  type BullpenAutoRunStatusLoadState,
+} from "./bullpenAutoRunStatus";
 import {
   BullpenReturnsPerDayFormulaDialog,
   BullpenReturnsPerDayHeader,
   BullpenReturnsPerDayValueButton,
 } from "./BullpenReturnsPerDayInfo";
-import { BullpenStage2To3StrategyDialog } from "./BullpenStage2To3StrategyDialog";
 import {
   buildBullpenStage3InvestPreviewSteps,
   buildBullpenStage3OnlyInvestExecutionPlan,
@@ -100,9 +115,6 @@ import {
   type Stage2TransferQueueMetricInfoKind,
 } from "./bullpenAutoRunInvestMetrics";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
-import { BullpenEventExitStrategiesDialog } from "./BullpenEventExitStrategiesDialog";
-import { BullpenEventHistoricalAssessmentTable } from "./BullpenEventHistoricalAssessmentTable";
-import { BullpenAutoRunStageOutputDialog } from "./BullpenAutoRunStageOutputDialog";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
   BullpenQuestionsTable,
@@ -139,6 +151,42 @@ import {
   type BullpenStage2To3StrategyMetadata,
   type BullpenStage2UniverseStatus,
 } from "./bullpenStage2To3Strategy";
+
+const BullpenInvestmentMathDialog = dynamic(
+  () =>
+    import("./BullpenInvestmentMathDialog").then(
+      (module) => module.BullpenInvestmentMathDialog,
+    ),
+  { ssr: false },
+);
+const BullpenStage2To3StrategyDialog = dynamic(
+  () =>
+    import("./BullpenStage2To3StrategyDialog").then(
+      (module) => module.BullpenStage2To3StrategyDialog,
+    ),
+  { ssr: false },
+);
+const BullpenEventExitStrategiesDialog = dynamic(
+  () =>
+    import("./BullpenEventExitStrategiesDialog").then(
+      (module) => module.BullpenEventExitStrategiesDialog,
+    ),
+  { ssr: false },
+);
+const BullpenEventHistoricalAssessmentTable = dynamic(
+  () =>
+    import("./BullpenEventHistoricalAssessmentTable").then(
+      (module) => module.BullpenEventHistoricalAssessmentTable,
+    ),
+  { ssr: false },
+);
+const BullpenAutoRunStageOutputDialog = dynamic(
+  () =>
+    import("./BullpenAutoRunStageOutputDialog").then(
+      (module) => module.BullpenAutoRunStageOutputDialog,
+    ),
+  { ssr: false },
+);
 
 type BullpenEventSummaryHighlight =
   | "active-retained"
@@ -177,7 +225,6 @@ type ActionState =
   | "pause-run"
   | "resume-run"
   | "kill-run"
-  | "balance"
   | null;
 type ErrorState = {
   message: string;
@@ -683,7 +730,72 @@ function buildScanCandidateReturnsPerDayQuestion(
 }
 
 const POLL_INTERVAL_MS = 10_000;
-const RUN_TIMER_INTERVAL_MS = 1_000;
+// The run summary itself refreshes at 10 seconds. Updating this very large
+// card every second only changes elapsed labels, so a five-second cadence
+// avoids needless whole-card renders while retaining useful timing feedback.
+const RUN_TIMER_INTERVAL_MS = 5_000;
+const AUTO_RUN_STATUS_TIMEOUT_MS = 5_000;
+const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
+const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;
+
+// React Strict Mode may mount this card twice in development. Keep one
+// resource-level request for the lightweight endpoint so that neither a
+// remount nor a manual retry fans out duplicate status reads.
+const persistedAutoRunStatusRequestDedupers = new Map<
+  string,
+  ReturnType<
+    typeof createAbortableBullpenAutoRunRequestDeduper<BullpenAutoRunStatusData>
+  >
+>();
+
+function getPersistedAutoRunStatus(scope: string, signal: AbortSignal) {
+  let dedupeRequest = persistedAutoRunStatusRequestDedupers.get(scope);
+  if (!dedupeRequest) {
+    dedupeRequest = createAbortableBullpenAutoRunRequestDeduper<
+      BullpenAutoRunStatusData
+    >((requestSignal) =>
+      apiService
+        .getBullpenAutoLiveStatus({
+          signal: requestSignal,
+          timeoutMs: AUTO_RUN_STATUS_TIMEOUT_MS,
+        })
+        .then((payload) => {
+          const normalized = normalizeBullpenAutoRunStatusData(payload);
+          if (!normalized) {
+            throw new Error("Auto-run status returned an invalid response.");
+          }
+          return normalized;
+        }),
+    );
+    persistedAutoRunStatusRequestDedupers.set(scope, dedupeRequest);
+  }
+
+  return dedupeRequest(signal);
+}
+
+function isRequestAbort(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
+function readBrowserCachedAutoRunStatus(cacheKey: string | null) {
+  if (typeof window === "undefined" || !cacheKey) return null;
+  return readCachedBullpenAutoRunStatus(window.sessionStorage, {}, cacheKey);
+}
+
+function saveBrowserCachedAutoRunStatus(
+  data: BullpenAutoRunStatusData,
+  cacheKey: string | null,
+) {
+  if (typeof window === "undefined" || !cacheKey) return null;
+  const savedAt = Date.now();
+  writeCachedBullpenAutoRunStatus(
+    window.sessionStorage,
+    data,
+    savedAt,
+    cacheKey,
+  );
+  return savedAt;
+}
 
 function formatIstScheduleSummaryDate(value: string) {
   const normalized = value.replace(",", "").trim();
@@ -8182,25 +8294,6 @@ function isAutoRunActive(summary: BullpenAutoLiveSummaryResponse | null) {
   );
 }
 
-function statusLabel(
-  summary: BullpenAutoLiveSummaryResponse | null,
-  runActive: boolean,
-) {
-  if (!summary) return "Loading";
-  if (!summary.settings.auto_live_enabled) return "Off";
-  if (!isConsoleProfileSelected(summary)) return "Other profile active";
-  if (summary.state.paused) return "Paused";
-  if (runActive) return "On";
-  return "Ready";
-}
-
-function modeLabel(summary: BullpenAutoLiveSummaryResponse | null) {
-  if (!summary) return "Checking";
-  if (summary.state.mode === "live-trading") return "Live trading";
-  if (summary.state.mode === "analysis-only") return "Analysis only";
-  return "Dry run";
-}
-
 function formatStageLastRunLabel(value: string | null) {
   return value ? formatIstDateTime(value) : "Not run yet";
 }
@@ -8974,11 +9067,46 @@ export function BullpenAutoRunScheduleCard({
   onSummaryUpdated,
   onOpenScanFilters,
 }: BullpenAutoRunScheduleCardProps) {
+  const { user, loading: authLoading } = useAuth();
+  const autoRunStatusCacheKey = getBullpenAutoRunStatusCacheKey(user?.id);
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
+  const [initialAutoRunStatusCache] = useState(() =>
+    readBrowserCachedAutoRunStatus(autoRunStatusCacheKey),
+  );
+  const [persistedAutoRunStatus, setPersistedAutoRunStatus] = useState<
+    BullpenAutoRunStatusData | null
+  >(() => initialAutoRunStatusCache?.data ?? null);
+  const [persistedAutoRunStatusCacheKey, setPersistedAutoRunStatusCacheKey] =
+    useState<string | null>(autoRunStatusCacheKey);
+  const visiblePersistedAutoRunStatus =
+    persistedAutoRunStatusCacheKey === autoRunStatusCacheKey
+      ? persistedAutoRunStatus
+      : null;
+  const [autoRunStatusLoadState, setAutoRunStatusLoadState] =
+    useState<BullpenAutoRunStatusLoadState>(() =>
+      initialAutoRunStatusCache ? "ready" : "loading",
+    );
+  const [autoRunStatusSavedAt, setAutoRunStatusSavedAt] = useState<
+    number | null
+  >(() => initialAutoRunStatusCache?.savedAt ?? null);
+  const [autoRunStatusError, setAutoRunStatusError] = useState<string | null>(
+    null,
+  );
+  const autoRunStatusRetryAttemptRef = useRef(0);
+  const autoRunStatusRetryTimerRef = useRef<number | null>(null);
+  const autoRunStatusPollTimerRef = useRef<number | null>(null);
+  const autoRunStatusAbortControllerRef = useRef<AbortController | null>(null);
+  const persistedStatusRunIdRef = useRef<string | null>(
+    initialAutoRunStatusCache?.data.state.active_run_id ?? null,
+  );
+  const hasObservedPersistedStatusRef = useRef(
+    Boolean(initialAutoRunStatusCache),
+  );
   const [action, setAction] = useState<ActionState>(null);
+  const actionInFlightRef = useRef<ActionState>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
@@ -8986,6 +9114,9 @@ export function BullpenAutoRunScheduleCard({
   const startNowProgressTimeoutRef = useRef<number | null>(null);
   const startNowCancelledRef = useRef(false);
   const summaryLoadInFlightRef = useRef(false);
+  const summaryAbortControllerRef = useRef<AbortController | null>(null);
+  const portfolioLoadInFlightRef = useRef(false);
+  const portfolioAbortControllerRef = useRef<AbortController | null>(null);
   const [killedRunIds, setKilledRunIds] = useState<Set<string>>(() => new Set());
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
@@ -9071,19 +9202,278 @@ export function BullpenAutoRunScheduleCard({
     (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null
   >(null);
   const [, setPortfolioLoading] = useState(true);
+  const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
   const postCompletionPortfolioRefreshRunIdsRef = useRef<Set<string>>(
     new Set(),
   );
 
+  function clearAutoRunStatusRetry() {
+    if (autoRunStatusRetryTimerRef.current !== null) {
+      window.clearTimeout(autoRunStatusRetryTimerRef.current);
+      autoRunStatusRetryTimerRef.current = null;
+    }
+  }
+
+  function clearAutoRunStatusPoll() {
+    if (autoRunStatusPollTimerRef.current !== null) {
+      window.clearTimeout(autoRunStatusPollTimerRef.current);
+      autoRunStatusPollTimerRef.current = null;
+    }
+  }
+
+  function claimAction(nextAction: Exclude<ActionState, null>) {
+    if (actionInFlightRef.current !== null || action !== null) return false;
+    actionInFlightRef.current = nextAction;
+    setAction(nextAction);
+    return true;
+  }
+
+  function releaseClaimedAction(nextAction: Exclude<ActionState, null>) {
+    if (actionInFlightRef.current === nextAction) {
+      actionInFlightRef.current = null;
+    }
+    setAction((currentAction) =>
+      currentAction === nextAction ? null : currentAction,
+    );
+  }
+
+  function scheduleAutoRunStatusRetry() {
+    const controller = autoRunStatusAbortControllerRef.current;
+    if (
+      !controller ||
+      controller.signal.aborted ||
+      !isBullpenAutoRunPageVisible(document.visibilityState)
+    ) {
+      return;
+    }
+
+    clearAutoRunStatusRetry();
+    const delay = getBullpenAutoRunStatusRetryDelay(
+      autoRunStatusRetryAttemptRef.current,
+    );
+    autoRunStatusRetryAttemptRef.current += 1;
+    autoRunStatusRetryTimerRef.current = window.setTimeout(() => {
+      autoRunStatusRetryTimerRef.current = null;
+      if (
+        controller.signal.aborted ||
+        !isBullpenAutoRunPageVisible(document.visibilityState)
+      ) {
+        return;
+      }
+      void refreshPersistedAutoRunStatus({ retrying: true });
+    }, delay);
+  }
+
+  function scheduleAutoRunStatusRevalidation(
+    nextStatus: BullpenAutoRunStatusData,
+  ) {
+    const controller = autoRunStatusAbortControllerRef.current;
+    if (
+      !controller ||
+      controller.signal.aborted ||
+      !isBullpenAutoRunPageVisible(document.visibilityState)
+    ) {
+      return;
+    }
+
+    // The configuration itself is static.  Only the tiny persisted scheduler
+    // state is revisited, every minute when idle and at run-progress cadence
+    // while a scheduled/manual run is active.
+    clearAutoRunStatusPoll();
+    const delay = isBullpenAutoRunProgressActive(nextStatus)
+      ? POLL_INTERVAL_MS
+      : AUTO_RUN_STATUS_IDLE_REVALIDATE_MS;
+    autoRunStatusPollTimerRef.current = window.setTimeout(() => {
+      autoRunStatusPollTimerRef.current = null;
+      if (
+        controller.signal.aborted ||
+        !isBullpenAutoRunPageVisible(document.visibilityState)
+      ) {
+        return;
+      }
+      void refreshPersistedAutoRunStatus();
+    }, delay);
+  }
+
+  async function refreshPersistedAutoRunStatus(options?: {
+    retrying?: boolean;
+  }) {
+    const controller = autoRunStatusAbortControllerRef.current;
+    const cacheKey = autoRunStatusCacheKey;
+    if (!controller || controller.signal.aborted || !cacheKey) return null;
+
+    clearAutoRunStatusRetry();
+    clearAutoRunStatusPoll();
+    setAutoRunStatusLoadState(options?.retrying ? "retrying" : "loading");
+    let settled = false;
+
+    try {
+      const nextStatus = await getPersistedAutoRunStatus(
+        cacheKey,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return null;
+
+      const savedAt = saveBrowserCachedAutoRunStatus(nextStatus, cacheKey);
+      const previousRunId = persistedStatusRunIdRef.current;
+      const hadObservedStatus = hasObservedPersistedStatusRef.current;
+      const nextRunId = nextStatus.state.active_run_id ?? null;
+      const runChanged = previousRunId !== nextRunId;
+      persistedStatusRunIdRef.current = nextRunId;
+      hasObservedPersistedStatusRef.current = true;
+      autoRunStatusRetryAttemptRef.current = 0;
+      setPersistedAutoRunStatus(nextStatus);
+      setPersistedAutoRunStatusCacheKey(cacheKey);
+      setAutoRunStatusSavedAt(savedAt);
+      setAutoRunStatusLoadState("ready");
+      setAutoRunStatusError(null);
+      scheduleAutoRunStatusRevalidation(nextStatus);
+
+      // A scheduled worker can start while this tab stays open.  The
+      // persisted state is cheap to poll and carries the run id, so use it to
+      // discover that transition before asking the expensive summary for
+      // stage-level detail.  The first non-cached active response gets the
+      // same treatment; the deferred initial summary is deduplicated.
+      if (
+        nextRunId &&
+        ((!hadObservedStatus && isBullpenAutoRunProgressActive(nextStatus)) ||
+          (hadObservedStatus && runChanged))
+      ) {
+        if (isBullpenAutoRunProgressActive(nextStatus)) {
+          setPendingRunId(nextRunId);
+        }
+        void loadSummary({
+          preserveLoading: true,
+          nextPendingRunId: nextRunId,
+        });
+      }
+      settled = true;
+      return nextStatus;
+    } catch (nextError) {
+      if (controller.signal.aborted || isRequestAbort(nextError)) {
+        settled = true;
+        return null;
+      }
+
+      const timedOut =
+        nextError instanceof RequestTimeoutError ||
+        (nextError instanceof APIError && nextError.status === 504);
+      setAutoRunStatusLoadState(timedOut ? "timeout" : "error");
+      setAutoRunStatusError(
+        timedOut
+          ? "Auto-run status timed out. Retrying in the background."
+          : "Auto-run status is unavailable. Retrying in the background.",
+      );
+      scheduleAutoRunStatusRetry();
+      settled = true;
+      return null;
+    } finally {
+      // Every request takes a terminal state. This guards against future
+      // changes that throw before the success/error branches above.
+      if (!controller.signal.aborted && !settled) {
+        setAutoRunStatusLoadState("error");
+        setAutoRunStatusError(
+          "Auto-run status could not be refreshed. Retry the check.",
+        );
+        scheduleAutoRunStatusRetry();
+      }
+    }
+  }
+
+  useEffect(() => {
+    const cachedStatus = readBrowserCachedAutoRunStatus(autoRunStatusCacheKey);
+    let disposed = false;
+    // Scheduling the reset avoids a synchronous effect cascade while still
+    // replacing account-scoped cached data before a network response can paint.
+    window.queueMicrotask(() => {
+      if (disposed) return;
+      setPersistedAutoRunStatusCacheKey(autoRunStatusCacheKey);
+      setPersistedAutoRunStatus(cachedStatus?.data ?? null);
+      setAutoRunStatusSavedAt(cachedStatus?.savedAt ?? null);
+      setAutoRunStatusLoadState(cachedStatus ? "ready" : "loading");
+      setAutoRunStatusError(null);
+      if (!autoRunStatusCacheKey && !authLoading) {
+        setAutoRunStatusLoadState("error");
+        setAutoRunStatusError("Sign in to refresh the auto-run status.");
+      }
+    });
+    autoRunStatusRetryAttemptRef.current = 0;
+    persistedStatusRunIdRef.current = cachedStatus?.data.state.active_run_id ?? null;
+    hasObservedPersistedStatusRef.current = Boolean(cachedStatus);
+
+    if (!autoRunStatusCacheKey) {
+      if (!authLoading) {
+        return () => {
+          disposed = true;
+        };
+      }
+
+      // A stuck session bootstrap used to leave the header skeleton visible
+      // forever before any status request could start. Authentication is a
+      // separate dependency, so fail this compact section explicitly instead.
+      const authTimeoutId = window.setTimeout(() => {
+        if (disposed) return;
+        setAutoRunStatusLoadState("timeout");
+        setAutoRunStatusError(
+          "Authentication is taking too long. Sign in again to refresh auto-run status.",
+        );
+      }, AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS);
+      return () => {
+        disposed = true;
+        window.clearTimeout(authTimeoutId);
+      };
+    }
+
+    const controller = new AbortController();
+    autoRunStatusAbortControllerRef.current = controller;
+
+    window.queueMicrotask(() => {
+      if (!controller.signal.aborted) {
+        void refreshPersistedAutoRunStatus();
+      }
+    });
+
+    const onVisibilityChange = () => {
+      if (!isBullpenAutoRunPageVisible(document.visibilityState)) {
+        clearAutoRunStatusRetry();
+        clearAutoRunStatusPoll();
+        return;
+      }
+      void refreshPersistedAutoRunStatus();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      controller.abort();
+      clearAutoRunStatusRetry();
+      clearAutoRunStatusPoll();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      if (autoRunStatusAbortControllerRef.current === controller) {
+        autoRunStatusAbortControllerRef.current = null;
+      }
+    };
+    // Status is isolated by authenticated user; changing accounts must cancel
+    // the previous resource and never render its last-known data.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRunStatusCacheKey, authLoading]);
+
   const persistedConsoleOrderUsd =
     summary?.state.last_console_trade_amount_usd ??
     summary?.settings.console_order_usd ??
+    visiblePersistedAutoRunStatus?.settings.console_order_usd ??
     DEFAULT_CONSOLE_ORDER_USD;
 
   useEffect(() => {
     if (scheduleSettingsDirty) return;
-    const nextStart = summary?.settings.console_auto_start_at ?? "";
-    const nextRefresh = summary?.settings.console_auto_refresh_minutes ?? 60;
+    const nextStart =
+      summary?.settings.console_auto_start_at ??
+      visiblePersistedAutoRunStatus?.settings.console_auto_start_at ??
+      "";
+    const nextRefresh =
+      summary?.settings.console_auto_refresh_minutes ??
+      visiblePersistedAutoRunStatus?.settings.console_auto_refresh_minutes ??
+      60;
     window.queueMicrotask(() => {
       setScheduleStartInput(nextStart);
       setScheduleRefreshInput(String(nextRefresh));
@@ -9095,6 +9485,8 @@ export function BullpenAutoRunScheduleCard({
     scheduleSettingsDirty,
     summary?.settings.console_auto_start_at,
     summary?.settings.console_auto_refresh_minutes,
+    visiblePersistedAutoRunStatus?.settings.console_auto_start_at,
+    visiblePersistedAutoRunStatus?.settings.console_auto_refresh_minutes,
   ]);
 
   useEffect(() => {
@@ -9223,6 +9615,8 @@ export function BullpenAutoRunScheduleCard({
     );
     pendingSelectedLlmTargetsSaveRef.current = legacyTargets;
     void flushSelectedLlmTargetSaves();
+    // flushSelectedLlmTargetSaves intentionally reads the latest refs/state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary]);
 
   async function handleSelectedLlmTargetsChange(
@@ -9347,6 +9741,7 @@ export function BullpenAutoRunScheduleCard({
     // if the API is slow (for example while Celery is reporting run status).
     if (summaryLoadInFlightRef.current) return null;
     summaryLoadInFlightRef.current = true;
+    const requestSignal = summaryAbortControllerRef.current?.signal;
 
     let loadingCleared = Boolean(options?.preserveLoading);
     const resolvedPendingRunId = options?.nextPendingRunId ?? pendingRunId;
@@ -9354,7 +9749,11 @@ export function BullpenAutoRunScheduleCard({
       setLoading(true);
     }
     try {
-      const nextSummary = await apiService.getBullpenAutoLiveSummary();
+      const nextSummary = await apiService.getBullpenAutoLiveSummary({
+        signal: requestSignal,
+        timeoutMs: 8_000,
+      });
+      if (requestSignal?.aborted) return null;
       setSummary(nextSummary);
       setError(null);
       const nextTrackedRun = getVisibleRun(nextSummary, resolvedPendingRunId);
@@ -9369,10 +9768,13 @@ export function BullpenAutoRunScheduleCard({
       }
       return nextSummary;
     } catch (nextError) {
+      if (requestSignal?.aborted || isRequestAbort(nextError)) {
+        return null;
+      }
       setError(normalizeError(nextError));
       return null;
     } finally {
-      if (!loadingCleared) {
+      if (!loadingCleared && !requestSignal?.aborted) {
         setLoading(false);
       }
       summaryLoadInFlightRef.current = false;
@@ -9380,31 +9782,72 @@ export function BullpenAutoRunScheduleCard({
   }
 
   useEffect(() => {
-    void loadSummary();
+    const controller = new AbortController();
+    summaryAbortControllerRef.current = controller;
+    const idleCallbackId = window.requestIdleCallback?.(
+      () => {
+        if (!controller.signal.aborted) {
+          void loadSummary();
+        }
+      },
+      { timeout: 1_000 },
+    );
+    if (idleCallbackId === undefined) {
+      window.queueMicrotask(() => {
+        if (!controller.signal.aborted) {
+          void loadSummary();
+        }
+      });
+    }
+    return () => {
+      controller.abort();
+      if (idleCallbackId !== undefined) {
+        window.cancelIdleCallback?.(idleCallbackId);
+      }
+      if (summaryAbortControllerRef.current === controller) {
+        summaryAbortControllerRef.current = null;
+      }
+    };
     // loadSummary intentionally reads the latest pending run id at execution time.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const refreshPortfolioSnapshot = useCallback(
     async (forceBalanceRefresh: boolean) => {
+      if (portfolioLoadInFlightRef.current) return;
+      const requestSignal = portfolioAbortControllerRef.current?.signal;
+      if (requestSignal?.aborted) return;
+      portfolioLoadInFlightRef.current = true;
       if (forceBalanceRefresh) {
-        setAction("balance");
+        setPortfolioRefreshing(true);
       }
       setPortfolioLoading(true);
       try {
         const nextState = forceBalanceRefresh
-          ? await apiService.polymarketLiveBalanceRefresh()
-          : await apiService.polymarketState();
+          ? await apiService.polymarketLiveBalanceRefresh({
+              signal: requestSignal,
+              timeoutMs: 8_000,
+            })
+          : await apiService.polymarketState({
+              signal: requestSignal,
+              timeoutMs: 8_000,
+            });
+        if (requestSignal?.aborted) return;
         setPortfolioState(nextState);
         if (isUsableBullpenBalance(nextState.live.balance)) {
           setLastUsablePortfolioBalance(nextState.live.balance);
         }
       } catch (nextError) {
-        setError(normalizeError(nextError));
+        if (!requestSignal?.aborted && !isRequestAbort(nextError)) {
+          setError(normalizeError(nextError));
+        }
       } finally {
-        setPortfolioLoading(false);
-        if (forceBalanceRefresh) {
-          setAction(null);
+        portfolioLoadInFlightRef.current = false;
+        if (!requestSignal?.aborted) {
+          setPortfolioLoading(false);
+          if (forceBalanceRefresh) {
+            setPortfolioRefreshing(false);
+          }
         }
       }
     },
@@ -9412,27 +9855,46 @@ export function BullpenAutoRunScheduleCard({
   );
 
   useEffect(() => {
-    const initialTimeoutId = window.setTimeout(() => {
-      void refreshPortfolioSnapshot(false);
-    }, 0);
+    const controller = new AbortController();
+    portfolioAbortControllerRef.current = controller;
+    const refreshIfVisible = () => {
+      if (isBullpenAutoRunPageVisible(document.visibilityState)) {
+        void refreshPortfolioSnapshot(false);
+      }
+    };
+
+    refreshIfVisible();
     const intervalId = window.setInterval(() => {
-      void refreshPortfolioSnapshot(false);
+      refreshIfVisible();
     }, 30_000);
+    document.addEventListener("visibilitychange", refreshIfVisible);
     return () => {
-      window.clearTimeout(initialTimeoutId);
+      controller.abort();
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", refreshIfVisible);
+      if (portfolioAbortControllerRef.current === controller) {
+        portfolioAbortControllerRef.current = null;
+      }
     };
   }, [refreshPortfolioSnapshot]);
 
+  const summaryActiveRunId =
+    summary?.latest_run?.status === "running" ||
+    summary?.latest_run?.status === "confirming"
+      ? summary.latest_run.id
+      : null;
   const trackedRunId =
     pendingRunId ??
-    (
-      summary?.latest_run?.status === "running" ||
-      summary?.latest_run?.status === "confirming"
-    ? summary.latest_run.id
-    : null);
+    getBullpenAutoRunActiveRunId(visiblePersistedAutoRunStatus) ??
+    // If the fast status is temporarily unavailable, preserve progress from
+    // an already-loaded summary. Once the fast status is ready, its indexed
+    // active-run identity is authoritative and terminal runs stop polling.
+    (autoRunStatusLoadState === "ready" ? null : summaryActiveRunId);
 
   const pollTrackedRun = useEffectEvent(async (runId: string) => {
+    if (!isBullpenAutoRunPageVisible(document.visibilityState)) {
+      return;
+    }
     const nextSummary = await loadSummary({ preserveLoading: true });
     if (!nextSummary) {
       return;
@@ -9448,6 +9910,11 @@ export function BullpenAutoRunScheduleCard({
     ) {
       return;
     }
+
+    // The status endpoint owns the active-run identity. Promptly revalidate
+    // it after a terminal summary so the 10-second progress poll is removed
+    // instead of retaining a completed historical run.
+    void refreshPersistedAutoRunStatus();
 
     if (!postCompletionPortfolioRefreshRunIdsRef.current.has(runId)) {
       postCompletionPortfolioRefreshRunIdsRef.current.add(runId);
@@ -9468,34 +9935,22 @@ export function BullpenAutoRunScheduleCard({
   useEffect(() => {
     if (!trackedRunId) return;
 
+    const pollIfVisible = () => {
+      if (isBullpenAutoRunPageVisible(document.visibilityState)) {
+        void pollTrackedRun(trackedRunId);
+      }
+    };
+    pollIfVisible();
     const intervalId = window.setInterval(() => {
-      void pollTrackedRun(trackedRunId);
+      pollIfVisible();
     }, POLL_INTERVAL_MS);
-    const timeoutId = window.setTimeout(() => {
-      void pollTrackedRun(trackedRunId);
-    }, 0);
+    document.addEventListener("visibilitychange", pollIfVisible);
 
     return () => {
       window.clearInterval(intervalId);
-      window.clearTimeout(timeoutId);
+      document.removeEventListener("visibilitychange", pollIfVisible);
     };
   }, [trackedRunId]);
-
-  const pollScheduledSummary = useEffectEvent(async () => {
-    await loadSummary({ preserveLoading: true });
-  });
-
-  useEffect(() => {
-    if (!summary?.settings.auto_live_enabled || trackedRunId) return;
-
-    const intervalId = window.setInterval(() => {
-      void pollScheduledSummary();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [summary?.settings.auto_live_enabled, trackedRunId]);
 
 
   useEffect(() => {
@@ -9541,6 +9996,7 @@ export function BullpenAutoRunScheduleCard({
           consoleLlmTargets,
         ),
       );
+      void refreshPersistedAutoRunStatus();
       setScheduleSettingsDirty(false);
       setScheduleStartInput(startWasNow ? "Now" : normalizedStart);
       const nextSummaryText = buildScheduleSummary(
@@ -9575,7 +10031,7 @@ export function BullpenAutoRunScheduleCard({
   }, [scheduleSettingsDirty, scheduleStartInput, scheduleRefreshInput, action]);
 
   async function handleEnableAutoRuns() {
-    setAction("enable");
+    if (!claimAction("enable")) return;
     setNotice(null);
     setError(null);
     startNowCancelledRef.current = false;
@@ -9615,6 +10071,7 @@ export function BullpenAutoRunScheduleCard({
         ),
       );
       const startedState = await apiService.startBullpenAutoLive();
+      void refreshPersistedAutoRunStatus();
       setSummary((currentSummary) =>
         currentSummary
           ? {
@@ -9642,29 +10099,32 @@ export function BullpenAutoRunScheduleCard({
         setPendingRunId(run.id);
         setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       }
-      const nextSummary = await loadSummary({ preserveLoading: true });
+      // Runtime diagnostics/history are intentionally background-only after
+      // the mutation succeeds; they must not keep the action controls busy.
+      void loadSummary({ preserveLoading: true });
+      const nextRunAt = startedState.next_run_at;
       if (!startWasNow && (!consoleLlmTargets || consoleLlmTargets.length === 0)) {
         setNotice(
-          nextSummary?.state.next_run_at
-            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextSummary.state.next_run_at)}. Select at least one LLM before that run so Stage 2 can execute.`
+          nextRunAt
+            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextRunAt)}. Select at least one LLM before that run so Stage 2 can execute.`
             : "Auto runs enabled. Select at least one LLM before the first run so Stage 2 can execute.",
         );
       } else {
         setNotice(
-          nextSummary?.state.next_run_at
-            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextSummary.state.next_run_at)}.`
+          nextRunAt
+            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextRunAt)}.`
             : "Auto runs enabled.",
         );
       }
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
-      setAction(null);
+      releaseClaimedAction("enable");
     }
   }
 
   async function handleStartAutoRunNow() {
-    setAction("start-now");
+    if (!claimAction("start-now")) return;
     const startedAt = new Date().toISOString();
     setRunNowStartedAt(startedAt);
     setTimerNowMs(Date.parse(startedAt));
@@ -9738,6 +10198,7 @@ export function BullpenAutoRunScheduleCard({
 
       setStartNowProgress("Starting the Auto-Live scheduler in the backend…");
       await apiService.startBullpenAutoLive();
+      void refreshPersistedAutoRunStatus();
       if (abortIfStartCancelled()) return;
       setStartNowProgress(
         "Building the latest Bullpen candidate snapshot for this run…",
@@ -9754,7 +10215,7 @@ export function BullpenAutoRunScheduleCard({
       setStartNowProgress(
         "Run queued. Fetching live backend status and worker stage updates…",
       );
-      await loadSummary({
+      void loadSummary({
         preserveLoading: true,
         nextPendingRunId: run.id,
       });
@@ -9775,31 +10236,32 @@ export function BullpenAutoRunScheduleCard({
       setRunNowStartedAt(null);
       setStartNowProgress(null);
     } finally {
-      setAction(null);
+      releaseClaimedAction("start-now");
     }
   }
 
   async function handleStopAutoRuns() {
-    setAction("stop");
+    if (!claimAction("stop")) return;
     setNotice(null);
     setError(null);
 
     try {
       await apiService.stopBullpenAutoLive();
-      await loadSummary({ preserveLoading: true });
+      void refreshPersistedAutoRunStatus();
+      void loadSummary({ preserveLoading: true });
       setNotice(
         "Auto runs stopped. Any active Auto-Live run was cancelled immediately.",
       );
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
-      setAction(null);
+      releaseClaimedAction("stop");
     }
   }
 
   async function handleInvestOnly(request: BullpenAutoLiveRunOnceRequest) {
+    if (!claimAction("invest-now")) return;
     const startedAt = new Date().toISOString();
-    setAction("invest-now");
     setRunNowStartedAt(startedAt);
     setTimerNowMs(Date.parse(startedAt));
     setNotice(null);
@@ -9818,7 +10280,6 @@ export function BullpenAutoRunScheduleCard({
         requireNonEmpty: true,
       });
       if (!consoleLlmTargets) {
-        setAction(null);
         setPendingRunId(null);
         setRunNowStartedAt(null);
         return;
@@ -9832,6 +10293,7 @@ export function BullpenAutoRunScheduleCard({
         ),
       );
       const run = await apiService.runBullpenAutoLiveOnce(request);
+      void refreshPersistedAutoRunStatus();
       const qualifiedCandidateCount =
         request.console_profile?.candidate_rows.length ?? 0;
       setPendingRunId(run.id);
@@ -9841,13 +10303,15 @@ export function BullpenAutoRunScheduleCard({
           qualifiedCandidateCount === 1 ? "event" : "events"
         }.`,
       );
-      await loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
-      setAction(null);
+      // Summary includes diagnostics and history, so it must never keep this
+      // submit action locked after the run has been safely queued.
+      void loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
     } catch (nextError) {
       setError(normalizeError(nextError));
-      setAction(null);
       setPendingRunId(null);
       setRunNowStartedAt(null);
+    } finally {
+      releaseClaimedAction("invest-now");
     }
   }
 
@@ -9920,8 +10384,11 @@ export function BullpenAutoRunScheduleCard({
   }
 
   async function handlePauseRun() {
-    const shouldResume = Boolean(summary?.state.paused);
-    setAction(shouldResume ? "resume-run" : "pause-run");
+    const shouldResume = Boolean(
+      visiblePersistedAutoRunStatus?.state.paused ?? summary?.state.paused,
+    );
+    const nextAction = shouldResume ? "resume-run" : "pause-run";
+    if (!claimAction(nextAction)) return;
     setNotice(null);
     setError(null);
 
@@ -9931,7 +10398,8 @@ export function BullpenAutoRunScheduleCard({
       } else {
         await apiService.pauseBullpenAutoLive();
       }
-      await loadSummary({ preserveLoading: true });
+      void refreshPersistedAutoRunStatus();
+      void loadSummary({ preserveLoading: true });
       setNotice(
         shouldResume
           ? "Auto-Live resumed. The active run can continue at the next safe backend checkpoint."
@@ -9940,43 +10408,65 @@ export function BullpenAutoRunScheduleCard({
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
-      setAction(null);
+      releaseClaimedAction(nextAction);
     }
   }
 
   async function handleKillRun() {
+    if (!claimAction("kill-run")) return;
     startNowCancelledRef.current = true;
-    setAction("kill-run");
     setNotice(null);
     setError(null);
     resetActiveAutoRunUi();
 
     try {
       await apiService.stopBullpenAutoLive();
-      const nextSummary = await loadSummary({
+      void refreshPersistedAutoRunStatus();
+      void (loadSummary({
         preserveLoading: true,
         nextPendingRunId: null,
-      });
-      if (nextSummary) {
-        const stillActiveRun = getVisibleRun(nextSummary, null);
-        if (stillActiveRun && isActivelyWorkingRunStatus(stillActiveRun.status)) {
-          setKilledRunIds((currentIds) => new Set(currentIds).add(stillActiveRun.id));
-          resetActiveAutoRunUi();
+      }).then((nextSummary) => {
+        const stillActiveRun = nextSummary ? getVisibleRun(nextSummary, null) : null;
+        if (!stillActiveRun || !isActivelyWorkingRunStatus(stillActiveRun.status)) {
+          return;
         }
-      }
+        setKilledRunIds((currentIds) => new Set(currentIds).add(stillActiveRun.id));
+        resetActiveAutoRunUi();
+      }));
       setNotice(
         "Auto-Live stopped. Active backend work was cancelled immediately.",
       );
     } catch (nextError) {
       setError(normalizeError(nextError));
     } finally {
-      setAction(null);
+      releaseClaimedAction("kill-run");
     }
   }
 
-  const autoRunActive = isAutoRunActive(summary);
-  const consoleProfileSelected = isConsoleProfileSelected(summary);
-  const mode = modeLabel(summary);
+  const persistedAutoRunIsActive = isBullpenAutoRunSchedulerEnabled(
+    visiblePersistedAutoRunStatus,
+  );
+  // Once the lightweight persisted read has resolved, it is fresher and more
+  // authoritative for scheduler controls than the deferred diagnostics
+  // summary. Never let a stale summary keep Start/Stop or Pause labels wrong.
+  const autoRunActive = visiblePersistedAutoRunStatus
+    ? persistedAutoRunIsActive
+    : isAutoRunActive(summary);
+  const consoleProfileSelected = visiblePersistedAutoRunStatus
+    ? visiblePersistedAutoRunStatus.settings.strategy_profile ===
+      CONSOLE_PROFILE_ID
+    : isConsoleProfileSelected(summary);
+  const autoRunStatusBadges = getBullpenAutoRunStatusBadges(
+    visiblePersistedAutoRunStatus,
+    autoRunStatusLoadState,
+  );
+  const mode = autoRunStatusBadges.modeLabel;
+  const schedulerNextRunAt =
+    visiblePersistedAutoRunStatus?.state.next_run_at ?? summary?.state.next_run_at;
+  const schedulerLastRunAt =
+    visiblePersistedAutoRunStatus?.state.last_run_at ?? summary?.state.last_run_at;
+  const schedulerPaused =
+    visiblePersistedAutoRunStatus?.state.paused ?? summary?.state.paused ?? false;
   const visibleRunCandidate = getVisibleRun(summary, pendingRunId);
   const visibleRun =
     visibleRunCandidate && killedRunIds.has(visibleRunCandidate.id)
@@ -10202,7 +10692,7 @@ export function BullpenAutoRunScheduleCard({
   const latestTerminalRunTimestamp =
     latestTerminalRun?.completed_at ??
     latestTerminalRun?.started_at ??
-    summary?.state.last_run_at;
+    schedulerLastRunAt;
   const lastRunTileClasses = runIsActive
     ? "border-emerald-200 bg-emerald-50 text-emerald-950 shadow-sm"
     : selectedRunSummaryTile === "last"
@@ -10417,7 +10907,7 @@ export function BullpenAutoRunScheduleCard({
           verifiedCashInHandUsd={
             verifiedStage1Portfolio?.cashInHandUsd ?? null
           }
-          refreshing={action === "balance"}
+          refreshing={portfolioRefreshing}
           historicalRuns={summary?.recent_runs ?? []}
           recentDecisions={recentDecisions}
           onRefresh={() => void refreshPortfolioSnapshot(true)}
@@ -10428,24 +10918,81 @@ export function BullpenAutoRunScheduleCard({
               <span className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-700">
                 Auto Run Schedule
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                Status: {statusLabel(summary, runIsActive)}
-                {loading && !summary ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                aria-live="polite"
+              >
+                {autoRunStatusBadges.statusLabel ? (
+                  <>Status: {autoRunStatusBadges.statusLabel}</>
+                ) : (
+                  <>
+                    <span>Status:</span>
+                    <span
+                      className="h-3.5 w-14 animate-pulse rounded bg-slate-200"
+                      aria-label="Retrieving auto-run status"
+                    />
+                  </>
+                )}
+                {autoRunStatusBadges.isUpdating ? (
                   <Loader2
-                    aria-label="Checking auto-run status"
+                    aria-label="Refreshing auto-run status"
                     className="size-3.5 animate-spin text-slate-500"
                   />
                 ) : null}
               </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                Mode: {mode}
-                {loading && !summary ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+                aria-live="polite"
+              >
+                {mode ? (
+                  <>Mode: {mode}</>
+                ) : (
+                  <>
+                    <span>Mode:</span>
+                    <span
+                      className="h-3.5 w-16 animate-pulse rounded bg-slate-200"
+                      aria-label="Retrieving auto-run mode"
+                    />
+                  </>
+                )}
+                {autoRunStatusBadges.isUpdating ? (
                   <Loader2
-                    aria-label="Checking auto-run mode"
+                    aria-label="Refreshing auto-run mode"
                     className="size-3.5 animate-spin text-slate-500"
                   />
                 ) : null}
               </span>
+              {autoRunStatusBadges.isStale ? (
+                <span className="text-[11px] font-medium text-slate-500">
+                  {autoRunStatusBadges.isUpdating
+                    ? "Updating…"
+                    : autoRunStatusSavedAt
+                      ? `Last refresh ${formatIstDateTime(new Date(autoRunStatusSavedAt).toISOString())}`
+                      : "Last known status"}
+                </span>
+              ) : autoRunStatusSavedAt ? (
+                <span className="text-[11px] font-medium text-slate-500">
+                  Refreshed {formatIstDateTime(new Date(autoRunStatusSavedAt).toISOString())}
+                </span>
+              ) : null}
+              {autoRunStatusError && !autoRunStatusBadges.isUpdating ? (
+                autoRunStatusCacheKey ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      autoRunStatusRetryAttemptRef.current = 0;
+                      void refreshPersistedAutoRunStatus({ retrying: true });
+                    }}
+                    className="text-[11px] font-semibold text-sky-700 underline-offset-2 transition hover:text-sky-900 hover:underline"
+                  >
+                    Retry status
+                  </button>
+                ) : (
+                  <span className="text-[11px] font-medium text-slate-500">
+                    Sign in again to retry
+                  </span>
+                )
+              ) : null}
             </div>
           </div>
 
@@ -10686,32 +11233,22 @@ export function BullpenAutoRunScheduleCard({
             <Button
               type="button"
               onClick={handlePauseRun}
-              disabled={
-                action === "pause-run" ||
-                action === "resume-run" ||
-                action === "kill-run" ||
-                action === "stop"
-              }
+              disabled={action !== null}
               className="rounded-full bg-orange-500 text-white hover:bg-orange-600"
             >
               {action === "pause-run" || action === "resume-run" ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : summary?.state.paused ? (
+              ) : schedulerPaused ? (
                 <PlayCircle className="mr-2 h-4 w-4" />
               ) : (
                 <PauseCircle className="mr-2 h-4 w-4" />
               )}
-              {summary?.state.paused ? "Resume" : "Pause"}
+              {schedulerPaused ? "Resume" : "Pause"}
             </Button>
             <Button
               type="button"
               onClick={handleKillRun}
-              disabled={
-                action === "pause-run" ||
-                action === "resume-run" ||
-                action === "kill-run" ||
-                action === "stop"
-              }
+              disabled={action !== null}
               className="rounded-full bg-rose-600 text-white hover:bg-rose-700"
             >
               {action === "kill-run" ? (
@@ -10746,7 +11283,7 @@ export function BullpenAutoRunScheduleCard({
               Next scheduled run
             </div>
             <p className="mt-2 text-sm font-semibold text-slate-950">
-              {formatIstDateTime(summary?.state.next_run_at)}
+              {formatIstDateTime(schedulerNextRunAt)}
             </p>
           </button>
 
@@ -11716,32 +12253,34 @@ export function BullpenAutoRunScheduleCard({
           />
         ) : null}
 
-        <BullpenStage2To3StrategyDialog
-          open={Boolean(stage2To3StrategyDialog)}
-          onClose={() => setStage2To3StrategyDialog(null)}
-          triggerRef={stage2To3StrategyDialogTriggerRef}
-          minLlmSideOdds={
-            stage2To3StrategyDialog?.strategyMetadata.minLlmSideOdds ??
-            DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS
-          }
-          maxPositions={
-            stage2To3StrategyDialog?.strategyMetadata.maxPositions ??
-            DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS
-          }
-          rankingFieldLabel={formatBullpenStage2To3RankingFieldLabel(
-            stage2To3StrategyDialog?.strategyMetadata.rankingField ??
-              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_FIELD,
-          )}
-          rankingTieBreakLabel={formatBullpenStage2To3RankingTieBreakLabel(
-            stage2To3StrategyDialog?.strategyMetadata.rankingTieBreak ??
-              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_TIE_BREAK,
-          )}
-          sizingFormulaLabel={formatBullpenStage2To3SizingFormulaLabel(
-            stage2To3StrategyDialog?.strategyMetadata.maxPositions ??
-              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
-          )}
-          universeStatus={stage2To3StrategyDialog?.universeStatus ?? null}
-        />
+        {stage2To3StrategyDialog ? (
+          <BullpenStage2To3StrategyDialog
+            open
+            onClose={() => setStage2To3StrategyDialog(null)}
+            triggerRef={stage2To3StrategyDialogTriggerRef}
+            minLlmSideOdds={
+              stage2To3StrategyDialog.strategyMetadata.minLlmSideOdds ??
+              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS
+            }
+            maxPositions={
+              stage2To3StrategyDialog.strategyMetadata.maxPositions ??
+              DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS
+            }
+            rankingFieldLabel={formatBullpenStage2To3RankingFieldLabel(
+              stage2To3StrategyDialog.strategyMetadata.rankingField ??
+                DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_FIELD,
+            )}
+            rankingTieBreakLabel={formatBullpenStage2To3RankingTieBreakLabel(
+              stage2To3StrategyDialog.strategyMetadata.rankingTieBreak ??
+                DEFAULT_BULLPEN_STAGE2_TO_STAGE3_RANKING_TIE_BREAK,
+            )}
+            sizingFormulaLabel={formatBullpenStage2To3SizingFormulaLabel(
+              stage2To3StrategyDialog.strategyMetadata.maxPositions ??
+                DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+            )}
+            universeStatus={stage2To3StrategyDialog.universeStatus}
+          />
+        ) : null}
 
         {scanCandidateDialog ? (
           <StageOneOutputDialog
@@ -11964,11 +12503,10 @@ export function BullpenAutoRunScheduleCard({
           </div>
         ) : null}
 
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-slate-600">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading auto-run status...
-          </div>
+        {loading && !summary ? (
+          <p className="text-xs text-slate-500" role="status">
+            Run history and runtime details are refreshing independently.
+          </p>
         ) : null}
 
         {openInputStage ? (

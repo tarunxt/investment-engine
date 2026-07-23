@@ -32,6 +32,7 @@ VALID_AUTO_LIVE_STATUSES = {
     "error",
     "not-configured",
 }
+ACTIVE_AUTO_LIVE_RUN_STATUSES = ("running", "confirming")
 
 LEGACY_AUTO_LIVE_STATUS_MAP = {
     "idle": "stopped",
@@ -395,6 +396,40 @@ class AsyncPolymarketAutoLiveRepository:
             # identity-map copy.
             query = query.with_for_update().execution_options(populate_existing=True)
         return (await self.session.execute(query)).scalar_one_or_none()
+
+    async def get_active_run_identity(
+        self,
+        user_id: int,
+    ) -> tuple[str, str] | None:
+        """Return only the current durable run identity for first-paint polling.
+
+        This is deliberately a narrow indexed read rather than a full run
+        deserialization or worker inspection. ``running`` and ``confirming``
+        are the only non-terminal Auto-Live run statuses.
+        """
+
+        row = (
+            await self.session.execute(
+                select(
+                    PolymarketAutoLiveRunRecord.id,
+                    PolymarketAutoLiveRunRecord.status,
+                )
+                .where(PolymarketAutoLiveRunRecord.user_id == user_id)
+                .where(
+                    PolymarketAutoLiveRunRecord.status.in_(
+                        ACTIVE_AUTO_LIVE_RUN_STATUSES
+                    )
+                )
+                .order_by(
+                    desc(PolymarketAutoLiveRunRecord.started_at),
+                    desc(PolymarketAutoLiveRunRecord.created_at),
+                )
+                .limit(1)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return str(row.id), str(row.status)
 
     async def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
         # A planning worker keeps a session open while its independent

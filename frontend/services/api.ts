@@ -38,6 +38,7 @@ import {
   BullpenAutoLiveRunOrdersResponse,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveDecision,
+  BullpenAutoLivePersistedStatus,
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
   BullpenRunAuditDetailResponse,
@@ -109,12 +110,14 @@ import {
   ZerodhaThreatRunResponse,
   ZerodhaStatusResponse,
 } from "@/types/api";
-import { IApiService } from "./api.types";
+import { IApiService, type ApiRequestControl } from "./api.types";
 
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
 const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
+const DEFAULT_API_REQUEST_TIMEOUT_MS = 8_000;
+const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
 
 export class APIError extends Error {
   constructor(
@@ -138,6 +141,17 @@ export class NetworkError extends Error {
   }
 }
 
+export class RequestTimeoutError extends NetworkError {
+  constructor(
+    method: string,
+    url: string,
+    public timeoutMs: number,
+  ) {
+    super(method, url, `Request timed out after ${timeoutMs}ms`);
+    this.name = "RequestTimeoutError";
+  }
+}
+
 // Helper function to get auth token
 async function getAuthToken(): Promise<string | null> {
   return sessionStorage.getAccessToken();
@@ -148,7 +162,78 @@ type ApiRequestOptions = RequestInit & {
   _retry?: boolean;
   skipAuth?: boolean;
   skipUnauthorizedRefresh?: boolean;
+} & ApiRequestControl;
+
+type RequestAbortContext = {
+  signal: AbortSignal;
+  didTimeout: () => boolean;
+  cleanup: () => void;
 };
+
+function createRequestAbortContext(
+  callerSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): RequestAbortContext {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const abortForCaller = () => controller.abort();
+  if (callerSignal?.aborted) {
+    abortForCaller();
+  } else {
+    callerSignal?.addEventListener("abort", abortForCaller, { once: true });
+  }
+
+  const timeoutId = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutId);
+      callerSignal?.removeEventListener("abort", abortForCaller);
+    },
+  };
+}
+
+function waitForRequestAbort<T>(promise: Promise<T>, signal: AbortSignal) {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Request aborted", "AbortError"));
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException("Request aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function hasHeader(headers: Record<string, string>, headerName: string) {
+  const normalizedHeaderName = headerName.toLowerCase();
+  return Object.keys(headers).some(
+    (key) => key.toLowerCase() === normalizedHeaderName,
+  );
+}
+
+function createCorrelationId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 // Flag to prevent infinite refresh loops
 let isRefreshing = false;
@@ -180,6 +265,10 @@ class apiServiceClass implements IApiService {
     options: ApiRequestOptions = {},
   ): Promise<T> {
     const method = options.method || "GET";
+    const timeoutMs = options.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS;
+    const startedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    let abortContext: RequestAbortContext | null = null;
     // Start a collapsed group to keep the console clean
     this.groupCollapsed(`🚀 API Request: ${method} ${url}`);
 
@@ -196,12 +285,40 @@ class apiServiceClass implements IApiService {
 
       if (token) {
         headers.Authorization = `Bearer ${token}`;
-        this.log("Auth: Token attached");
+      }
+      if (!hasHeader(headers, "X-Correlation-ID")) {
+        headers["X-Correlation-ID"] = createCorrelationId();
       }
 
-      this.log("Config:", { url, method, headers, body: options.body });
+      const {
+        token: _token,
+        _retry: _retry,
+        skipAuth: _skipAuth,
+        skipUnauthorizedRefresh: _skipUnauthorizedRefresh,
+        timeoutMs: _timeoutMs,
+        signal: callerSignal,
+        ...requestInit
+      } = options;
+      void _token;
+      void _retry;
+      void _skipAuth;
+      void _skipUnauthorizedRefresh;
+      void _timeoutMs;
+      abortContext = createRequestAbortContext(callerSignal, timeoutMs);
 
-      const response = await fetch(url, { ...options, headers });
+      this.log("Config:", {
+        url,
+        method,
+        timeoutMs,
+        hasAuthToken: Boolean(token),
+        hasBody: Boolean(options.body),
+      });
+
+      const response = await fetch(url, {
+        ...requestInit,
+        headers,
+        signal: abortContext.signal,
+      });
 
       if (!response.ok) {
         // Handle 401 Unauthorized with Retry Logic
@@ -234,10 +351,15 @@ class apiServiceClass implements IApiService {
               });
           }
 
-          const refreshed = await refreshPromise;
+          const pendingRefresh = refreshPromise;
+          if (!pendingRefresh) {
+            throw new Error("Token refresh did not start.");
+          }
+          const refreshed = await waitForRequestAbort(
+            pendingRefresh,
+            abortContext.signal,
+          );
           if (refreshed) {
-            await new Promise(resolve => setTimeout(resolve, 50));
-            this.groupEnd(); // Close current group before retrying to prevent nesting
             return this.fetch<T>(url, { ...options, _retry: true, token: undefined });
           }
         }
@@ -248,17 +370,51 @@ class apiServiceClass implements IApiService {
           response.statusText || `Request failed with status ${response.status}`;
         const errorMessage = deriveApiErrorMessage(errorData, fallbackMessage);
 
-        this.error(`❌ API Error ${response.status}:`, errorData);
+        this.error(`API request failed with HTTP ${response.status}.`, {
+          method,
+          url,
+        });
         throw new APIError(response.status, errorMessage, errorData);
       }
 
       const data = await response.json();
-      this.log("✅ API Response Success:", data);
+      const durationMs = Math.round(
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+          startedAt,
+      );
+      this.log("Response received:", {
+        method,
+        url,
+        status: response.status,
+        durationMs,
+      });
+      if (process.env.NODE_ENV === "development") {
+        console.debug("[api timing]", { method, status: response.status, durationMs });
+      }
+      if (durationMs >= SLOW_API_REQUEST_THRESHOLD_MS) {
+        this.warn("Slow API request:", { method, url, durationMs });
+      }
       return data;
 
     } catch (err: unknown) {
+      const durationMs = Math.round(
+        (typeof performance !== "undefined" ? performance.now() : Date.now()) -
+          startedAt,
+      );
+      if (abortContext?.didTimeout()) {
+        if (process.env.NODE_ENV === "development") {
+          console.debug("[api timing]", { method, status: "timeout", durationMs });
+        }
+        this.warn(`API request timed out after ${timeoutMs}ms.`, {
+          method,
+          url,
+          durationMs,
+        });
+        throw new RequestTimeoutError(method, url, timeoutMs);
+      }
+
       if (err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError')) {
-        this.log("Request canceled:", (err as { reason?: string }).reason || err.message);
+        this.log("Request canceled:", { method, url });
         throw err;
       }
 
@@ -269,12 +425,13 @@ class apiServiceClass implements IApiService {
       }
       throw err;
     } finally {
+      abortContext?.cleanup();
       this.groupEnd();
     }
   }
 
   // HTTP methods
-  get<T>(url: string, options?: RequestInit): Promise<T> {
+  get<T>(url: string, options?: ApiRequestOptions): Promise<T> {
     return this.fetch<T>(url, { method: "GET", ...options });
   }
 
@@ -290,22 +447,33 @@ class apiServiceClass implements IApiService {
     });
   }
 
-  put<T>(url: string, data?: unknown): Promise<T> {
+  put<T>(
+    url: string,
+    data?: unknown,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "PUT",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  patch<T>(url: string, data?: unknown): Promise<T> {
+  patch<T>(
+    url: string,
+    data?: unknown,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "PATCH",
       body: data ? JSON.stringify(data) : undefined,
     });
   }
 
-  delete<T>(url: string): Promise<T> {
+  delete<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
     return this.fetch<T>(url, {
+      ...options,
       method: "DELETE",
     });
   }
@@ -394,50 +562,69 @@ class apiServiceClass implements IApiService {
   /**
    * Refresh access token
    */
-  async refreshToken(): Promise<RefreshTokenResponse> {
+  async refreshToken(
+    options?: ApiRequestControl,
+  ): Promise<RefreshTokenResponse> {
     const refreshToken = sessionStorage.getRefreshToken();
     if (!refreshToken) {
       throw new Error("No refresh token available");
     }
 
     this.group("Refreshing access token");
-    this.log("Current refresh token:", refreshToken);
 
     // Make refresh call WITHOUT Authorization header since we're using refresh token in body
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "X-Correlation-ID": createCorrelationId(),
     };
+    const abortContext = createRequestAbortContext(
+      options?.signal,
+      options?.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS,
+    );
 
-    const response = await fetch(URLs.auth.refresh(), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-
-    if (!response.ok) {
-      const error = await this.parseErrorResponse(response);
-      const fallbackMessage =
-        response.statusText || `Request failed with status ${response.status}`;
-      const errorMessage = deriveApiErrorMessage(error, fallbackMessage);
-      this.error("Refresh token request failed:", error);
-      throw new APIError(response.status, errorMessage, error);
-    }
-
-    const data = await response.json() as RefreshTokenResponse;
-    this.log("Received new tokens:", data);
-    this.groupEnd();
-
-    if (data.access_token && data.refresh_token) {
-      sessionStorage.setTokens(data.access_token, data.refresh_token);
-      syncTokenToCookie(data.access_token);
-      notifyAuthTokensRefreshed({
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token,
-        expiresIn: data.expires_in,
+    try {
+      const response = await fetch(URLs.auth.refresh(), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ refresh_token: refreshToken }),
+        signal: abortContext.signal,
       });
-    }
 
-    return data;
+      if (!response.ok) {
+        const error = await this.parseErrorResponse(response);
+        const fallbackMessage =
+          response.statusText || `Request failed with status ${response.status}`;
+        const errorMessage = deriveApiErrorMessage(error, fallbackMessage);
+        this.error("Token refresh request failed.", { status: response.status });
+        throw new APIError(response.status, errorMessage, error);
+      }
+
+      const data = await response.json() as RefreshTokenResponse;
+
+      if (data.access_token && data.refresh_token) {
+        sessionStorage.setTokens(data.access_token, data.refresh_token);
+        syncTokenToCookie(data.access_token);
+        notifyAuthTokensRefreshed({
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresIn: data.expires_in,
+        });
+      }
+
+      return data;
+    } catch (error) {
+      if (abortContext.didTimeout()) {
+        throw new RequestTimeoutError(
+          "POST",
+          URLs.auth.refresh(),
+          options?.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS,
+        );
+      }
+      throw error;
+    } finally {
+      abortContext.cleanup();
+      this.groupEnd();
+    }
   }
 
   /**
@@ -599,16 +786,22 @@ class apiServiceClass implements IApiService {
     return this.get<PaginatedResponse<RunListItem>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
   }
 
-  getFullRuns(params?: { page?: number; limit?: number }): Promise<PaginatedResponse<RunResponse>> {
+  getFullRuns(
+    params?: { page?: number; limit?: number },
+    options?: ApiRequestControl,
+  ): Promise<PaginatedResponse<RunResponse>> {
     const qs = new URLSearchParams();
     if (params?.page) qs.set("page", String(params.page));
     if (params?.limit) qs.set("limit", String(params.limit));
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunResponse>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+    return this.get<PaginatedResponse<RunResponse>>(
+      `${URLs.runs.list()}${query ? `?${query}` : ""}`,
+      options,
+    );
   }
 
-  getRun(id: number): Promise<RunResponse> {
-    return this.get<RunResponse>(URLs.runs.get(id));
+  getRun(id: number, options?: ApiRequestControl): Promise<RunResponse> {
+    return this.get<RunResponse>(URLs.runs.get(id), options);
   }
 
   cancelRun(id: number): Promise<RunResponse> {
@@ -868,8 +1061,8 @@ class apiServiceClass implements IApiService {
     return this.post<IndMoneyUsThreatRunResponse>(URLs.indmoneyUs.threatsRun(), data ?? {});
   }
 
-  polymarketState(): Promise<PolymarketBotState> {
-    return this.get<PolymarketBotState>(URLs.polymarket.state());
+  polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState> {
+    return this.get<PolymarketBotState>(URLs.polymarket.state(), options);
   }
 
   polymarketStart(): Promise<PolymarketBotState> {
@@ -900,8 +1093,14 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketBotState>(URLs.polymarket.liveDoctor());
   }
 
-  polymarketLiveBalanceRefresh(): Promise<PolymarketBotState> {
-    return this.post<PolymarketBotState>(URLs.polymarket.liveBalanceRefresh());
+  polymarketLiveBalanceRefresh(
+    options?: ApiRequestControl,
+  ): Promise<PolymarketBotState> {
+    return this.post<PolymarketBotState>(
+      URLs.polymarket.liveBalanceRefresh(),
+      undefined,
+      options,
+    );
   }
 
   polymarketLiveRedeem(data?: {
@@ -948,10 +1147,11 @@ class apiServiceClass implements IApiService {
 
   polymarketManualInvest(data: {
     orders: PolymarketManualInvestOrderRequest[];
-  }): Promise<PolymarketManualInvestResponse> {
+  }, options?: ApiRequestControl): Promise<PolymarketManualInvestResponse> {
     return this.post<PolymarketManualInvestResponse>(
       URLs.polymarket.manualInvest(),
       data,
+      options,
     );
   }
 
@@ -980,10 +1180,21 @@ class apiServiceClass implements IApiService {
     return this.post<PolymarketDiscoveryDebugReport>(URLs.polymarket.discoveryDebug(), data);
   }
 
-  getBullpenAutoLiveSummary(): Promise<BullpenAutoLiveSummaryResponse> {
+  getBullpenAutoLiveStatus(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLivePersistedStatus> {
+    return this.get<BullpenAutoLivePersistedStatus>(
+      URLs.bullpenAutoLive.status(),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveSummary(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveSummaryResponse> {
     return this.get<BullpenAutoLiveSummaryResponse>(
       URLs.bullpenAutoLive.summary(),
-      { cache: "no-store" },
+      { cache: "no-store", ...options },
     );
   }
 

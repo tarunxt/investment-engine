@@ -297,7 +297,7 @@ test("Bullpen x AI auto-run card exposes the dynamic trade amount formula", () =
   );
 });
 
-test("Bullpen x AI auto-run card applies summary data before slower run detail hydration", () => {
+test("Bullpen x AI auto-run card defers bounded summary hydration behind fast status", () => {
   const autoRunCardSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -309,8 +309,10 @@ test("Bullpen x AI auto-run card applies summary data before slower run detail h
   assert.match(autoRunCardSource, /summaryLoadInFlightRef/);
   assert.match(
     autoRunCardSource,
-    /const nextSummary = await apiService\.getBullpenAutoLiveSummary\(\);/,
+    /const nextSummary = await apiService\.getBullpenAutoLiveSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 8_000,\s*\}\);/,
   );
+  assert.match(autoRunCardSource, /getPersistedAutoRunStatus\(/);
+  assert.match(autoRunCardSource, /AUTO_RUN_STATUS_TIMEOUT_MS/);
   assert.match(autoRunCardSource, /setSummary\(nextSummary\);/);
   assert.doesNotMatch(autoRunCardSource, /summaryPromise/);
 });
@@ -517,7 +519,7 @@ test("Bullpen x AI separates Manual Scan and Auto Scan result tabs", () => {
   assert.match(investmentsSectionSource, /readOnlyMessage: string \| null;/);
 });
 
-test("Bullpen x AI keeps pause and kill controls available during an active run", () => {
+test("Bullpen x AI serializes active-run control mutations", () => {
   const autoRunCardSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -536,10 +538,14 @@ test("Bullpen x AI keeps pause and kill controls available during an active run"
     autoRunCardSource,
     /isActivelyWorkingRunStatus\(liveWorkflowView\.runStatus\)/,
   );
+  assert.match(autoRunCardSource, /function claimAction\(nextAction:/);
+  assert.match(autoRunCardSource, /actionInFlightRef\.current !== null \|\| action !== null/);
+  assert.match(autoRunCardSource, /disabled=\{action !== null\}/);
   assert.match(autoRunCardSource, /action === "start-now" \? "start-now-pending" : null/);
   assert.match(autoRunCardSource, /setAction\(null\);\s*\n\s*\}/);
   assert.doesNotMatch(autoRunCardSource, /Run Scans and Invest Now/);
-  assert.match(autoRunCardSource, /Status: \{statusLabel\(summary, runIsActive\)\}/);
+  assert.match(autoRunCardSource, /Status: \{autoRunStatusBadges\.statusLabel\}/);
+  assert.match(autoRunCardSource, /Mode: \{mode\}/);
 });
 
 test("Bullpen x AI auto-run errors render detail text alongside the main message", () => {

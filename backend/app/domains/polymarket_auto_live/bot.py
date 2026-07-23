@@ -4,6 +4,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
@@ -51,6 +53,9 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveStageResult,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
+    BullpenAutoLivePersistedStatus,
+    BullpenAutoLiveSchedulerStatus,
+    BullpenAutoLiveStatusConfiguration,
     BullpenAutoLiveState,
     BullpenAutoLiveSummary,
     TradingBotGuardrail,
@@ -430,6 +435,88 @@ class BullpenAutoLiveBot:
             await repo.save_state(self.user_id, normalized_state)
             await session.commit()
             return settings
+
+    async def get_persisted_status(
+        self,
+        session: AsyncSession | None = None,
+    ) -> BullpenAutoLivePersistedStatus:
+        """Return only the persisted scheduler snapshot required for first paint.
+
+        This path must stay read-only.  In particular, it must not recover a
+        running workflow, enqueue a due run, inspect Celery, consult Redis, or
+        ask the Bullpen runtime to refresh authentication.  The richer
+        ``get_summary`` path remains available for deferred diagnostics and
+        history.
+        """
+
+        if session is None:
+            async with AsyncSessionLocal() as owned_session:
+                return await self.get_persisted_status(owned_session)
+
+        repo = AsyncPolymarketAutoLiveRepository(session)
+        settings_record = await repo.get_settings_record(self.user_id)
+        state_record = await repo.get_state_record(self.user_id)
+        active_run = await repo.get_active_run_identity(self.user_id)
+
+        settings = record_to_settings(settings_record)
+        persisted_state = record_to_state(state_record)
+        # This is a pure derivation from the rows already read above and the
+        # backend execution switch.  Do not persist it here: reads must not
+        # contend with worker state writes or create database rows on first
+        # page load.
+        state = self._synchronize_persisted_scheduler_state(settings, persisted_state)
+
+        def timestamp(value: datetime | None) -> str | None:
+            if value is None:
+                return None
+            if value.tzinfo is None:
+                return value.replace(tzinfo=UTC).isoformat()
+            return value.astimezone(UTC).isoformat()
+
+        return BullpenAutoLivePersistedStatus(
+            refreshed_at=utc_now(),
+            configuration=BullpenAutoLiveStatusConfiguration(
+                strategy_profile=settings.strategy_profile,
+                auto_live_enabled=settings.auto_live_enabled,
+                dry_run=settings.dry_run,
+                allow_live_execution=settings.allow_live_execution,
+                require_manual_confirmation=settings.require_manual_confirmation,
+                emergency_stop=settings.emergency_stop,
+                limit_orders_only=settings.limit_orders_only,
+                console_order_usd=settings.console_order_usd,
+                console_auto_start_at=settings.console_auto_start_at,
+                console_auto_refresh_minutes=settings.console_auto_refresh_minutes,
+                console_llm_target_count=len(settings.console_llm_targets),
+                updated_at=timestamp(
+                    getattr(settings_record, "updated_at", None)
+                    if settings_record is not None
+                    else None
+                ),
+            ),
+            scheduler=BullpenAutoLiveSchedulerStatus(
+                running=state.running,
+                paused=state.paused,
+                dry_run=state.dry_run,
+                live_armed=state.live_armed,
+                live_execution_allowed=state.live_execution_allowed,
+                emergency_stopped=state.emergency_stopped,
+                status=state.status,
+                mode=state.mode,
+                started_at=state.started_at,
+                stopped_at=state.stopped_at,
+                last_run_at=state.last_run_at,
+                last_execution_at=state.last_execution_at,
+                next_run_at=state.next_run_at,
+                last_run_id=state.last_run_id,
+                active_run_id=active_run[0] if active_run else None,
+                active_run_status=active_run[1] if active_run else None,
+                updated_at=timestamp(
+                    getattr(state_record, "updated_at", None)
+                    if state_record is not None
+                    else None
+                ),
+            ),
+        )
 
     async def update_settings(
         self, update: BullpenAutoLiveSettingsUpdate
@@ -975,6 +1062,23 @@ class BullpenAutoLiveBot:
         settings: BullpenAutoLiveSettings,
         state: BullpenAutoLiveState,
     ) -> BullpenAutoLiveState:
+        synchronized = self._synchronize_persisted_scheduler_state(settings, state)
+        synchronized.server_now = utc_now()
+        synchronized.latest_guardrail_checks = self._build_guardrail_checks(settings, synchronized)
+        return synchronized
+
+    def _synchronize_persisted_scheduler_state(
+        self,
+        settings: BullpenAutoLiveSettings,
+        state: BullpenAutoLiveState,
+    ) -> BullpenAutoLiveState:
+        """Derive only in-memory scheduler fields needed by first paint.
+
+        The full synchronization method also constructs verbose guardrail
+        diagnostics, including runtime-environment detail, for the deferred
+        summary endpoint.  Keep those out of the fast persisted status read.
+        """
+
         synchronized = state.model_copy()
         synchronized.dry_run = effective_dry_run(settings)
         synchronized.live_armed = live_execution_armed(settings)
@@ -986,8 +1090,6 @@ class BullpenAutoLiveBot:
         synchronized.emergency_stopped = settings.emergency_stop
         synchronized.mode = self._derive_mode(settings)
         synchronized.status = self._derive_status(settings, synchronized)
-        synchronized.server_now = utc_now()
-        synchronized.latest_guardrail_checks = self._build_guardrail_checks(settings, synchronized)
         return synchronized
 
     def _derive_mode(self, settings: BullpenAutoLiveSettings) -> str:

@@ -10,12 +10,12 @@ async function read(relativePath) {
   return readFile(path.join(root, relativePath), "utf8");
 }
 
-test("trade analysis page exposes the Runs Analysis action", async () => {
+test("trade analysis page exposes the run-audit navigation action", async () => {
   const source = await read(
     "app/console/bullpen-ai/analyse-events/_components/TradeAnalysisListClient.tsx",
   );
 
-  assert.match(source, /Runs Analysis/);
+  assert.match(source, /Trade Analysis/);
   assert.match(source, /URLs\.routes\.console\.bullpenAiAnalyseRuns\(\)/);
 });
 
@@ -50,6 +50,6 @@ test("list client loads paginated summaries instead of raw detail bundles", asyn
   assert.match(source, /apiService\.getBullpenRunAudits\(/);
   assert.doesNotMatch(source, /getBullpenRunAuditSection\(/);
   assert.match(source, /Bullpen Runs Audit/);
-  assert.match(source, /Runs Analysis/);
+  assert.match(source, /Trade Analysis/);
   assert.match(source, /URLs\.routes\.console\.bullpenAiAnalyseRuns\(\)/);
 });

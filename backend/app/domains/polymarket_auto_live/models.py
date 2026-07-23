@@ -56,6 +56,14 @@ class PolymarketAutoLiveStateRecord(Base, TimestampMixin):
 
 class PolymarketAutoLiveRunRecord(Base, TimestampMixin):
     __tablename__ = "polymarket_auto_live_runs"
+    __table_args__ = (
+        Index(
+            "ix_polymarket_auto_live_runs_user_status_started_at",
+            "user_id",
+            "status",
+            "started_at",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     user_id: Mapped[int] = mapped_column(

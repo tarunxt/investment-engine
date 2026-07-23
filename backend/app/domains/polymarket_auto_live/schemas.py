@@ -982,6 +982,67 @@ class BullpenAutoLiveState(BaseModel):
     balance_status: AutoLiveGuardrailStatus = "watch"
 
 
+class BullpenAutoLiveStatusConfiguration(BaseModel):
+    """Small persisted configuration payload used for the console's first paint.
+
+    This deliberately excludes prompt text, full LLM target definitions, and every
+    other execution setting.  Those belong to the deferred Auto-Live summary
+    endpoint, while this object must remain cheap enough to render scheduler
+    badges without waiting on runtime diagnostics.
+    """
+
+    strategy_profile: AutoLiveStrategyProfile
+    auto_live_enabled: bool
+    dry_run: bool
+    allow_live_execution: bool
+    require_manual_confirmation: bool
+    emergency_stop: bool
+    limit_orders_only: bool
+    console_order_usd: float
+    console_auto_start_at: str | None = None
+    console_auto_refresh_minutes: int | None = None
+    console_llm_target_count: int = Field(default=0, ge=0)
+    updated_at: str | None = None
+
+
+class BullpenAutoLiveSchedulerStatus(BaseModel):
+    """Persisted scheduler state only; no live runtime or worker probes."""
+
+    running: bool
+    paused: bool
+    dry_run: bool
+    live_armed: bool
+    live_execution_allowed: bool
+    emergency_stopped: bool
+    status: AutoLiveRuntimeStatus
+    mode: AutoLiveRuntimeMode
+    started_at: str | None = None
+    stopped_at: str | None = None
+    last_run_at: str | None = None
+    last_execution_at: str | None = None
+    next_run_at: str | None = None
+    last_run_id: str | None = None
+    # A scheduler can be running between cycles. These fields specifically
+    # identify the durable non-terminal workflow, if one exists, so clients do
+    # not poll a completed ``last_run_id`` as though it were still active.
+    active_run_id: str | None = None
+    active_run_status: AutoLiveRunStatus | None = None
+    updated_at: str | None = None
+
+
+class BullpenAutoLivePersistedStatus(BaseModel):
+    """Read-only Auto-Live scheduler/configuration snapshot.
+
+    ``source`` makes clear that this is a persisted scheduler snapshot, rather
+    than a fresh Bullpen CLI, Redis, Celery, provider, or wallet health check.
+    """
+
+    source: Literal["persisted"] = "persisted"
+    refreshed_at: str
+    configuration: BullpenAutoLiveStatusConfiguration
+    scheduler: BullpenAutoLiveSchedulerStatus
+
+
 class TradingBotGuardrail(BaseModel):
     label: str
     value: str

@@ -604,6 +604,25 @@ precondition for order reconciliation.
 Historical snapshots remain backward-compatible: missing watchdog fields mean the run
 predates the durable-intent watchdog and should be rendered as legacy diagnostics.
 
+## Console Scheduler First-Paint Status
+
+The Bullpen AI console's first-paint scheduler endpoint,
+`GET /polymarket/auto-live/status`, reads only the authenticated user's persisted
+Auto-Live settings and scheduler-state rows plus a narrow indexed identity/status
+lookup for a durable non-terminal run. It is intentionally read-only and does
+not recover runs, enqueue due work, inspect Celery or Redis, invoke Bullpen CLI
+authentication, or materialize audit evidence. This permits the console to
+render the persisted enabled/paused/mode state even while optional runtime
+diagnostics are unavailable, and prevents it from treating a historical last
+run as still in progress.
+
+Run transitions, Stage 1–3 evidence, and audit snapshot capture remain owned by
+the existing worker and summary flows. The lightweight response contains only
+existing persisted identifiers and timestamps; it neither mutates frozen audit
+snapshots nor changes their schema. Older snapshots therefore remain fully
+compatible, while deferred diagnostics continue to supply their established
+runtime and guardrail evidence.
+
 ## Active Auth Recovery and Restart-Safe Stage 3
 
 Snapshot schema version 2 adds the current Stage 3 recovery and durable-counter

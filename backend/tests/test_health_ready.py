@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 from fastapi import FastAPI
 import httpx
 import pytest
@@ -79,11 +82,7 @@ async def test_ready_returns_503_when_pending_stage3_intents_have_no_ai_consumer
         "checks": {
             "postgres": "ok",
             "redis": "ok",
-            "stage3_order_worker": (
-                "error: 2 pending Stage 3 intents require queue ai, but no worker reports "
-                "consuming it. No Celery worker currently reports consuming the ai queue "
-                "required by Stage 3 order intents."
-            ),
+            "stage3_order_worker": "unavailable",
         },
         "pending_stage3_intents": 2,
     }
@@ -119,3 +118,75 @@ async def test_ready_returns_200_after_an_ai_consumer_recovers(
         },
         "pending_stage3_intents": 2,
     }
+
+
+@pytest.mark.anyio
+async def test_ready_redacts_dependency_errors_from_public_response(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    postgres_secret = "postgresql://aiuser:do-not-leak@postgres.internal:5432/aidb"
+    redis_secret = "MISCONF Redis password=do-not-leak stop-writes-on-bgsave-error"
+
+    class FailingSession:
+        async def __aenter__(self):
+            raise RuntimeError(postgres_secret)
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    class FailingRedis:
+        async def ping(self) -> bool:
+            raise RuntimeError(redis_secret)
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(health_router, "AsyncSessionLocal", lambda: FailingSession())
+    monkeypatch.setattr(aioredis, "from_url", lambda _url: FailingRedis())
+
+    transport = httpx.ASGITransport(app=_ready_app())
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "checks": {
+            "postgres": "unavailable",
+            "redis": "unavailable",
+        },
+        "pending_stage3_intents": None,
+    }
+    assert postgres_secret not in response.text
+    assert redis_secret not in response.text
+
+
+@pytest.mark.anyio
+async def test_ready_bounds_a_stalled_postgres_check_and_keeps_redis_independent(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    class StalledSession:
+        async def __aenter__(self):
+            await asyncio.sleep(1)
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(health_router, "AsyncSessionLocal", lambda: StalledSession())
+    monkeypatch.setattr(aioredis, "from_url", lambda _url: _FakeRedis())
+    monkeypatch.setattr(health_router, "READY_POSTGRES_TIMEOUT_SECONDS", 0.01)
+
+    transport = httpx.ASGITransport(app=_ready_app())
+    started_at = time.perf_counter()
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/health/ready")
+    elapsed_seconds = time.perf_counter() - started_at
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "degraded",
+        "checks": {"postgres": "unavailable", "redis": "ok"},
+        "pending_stage3_intents": None,
+    }
+    assert elapsed_seconds < 0.25

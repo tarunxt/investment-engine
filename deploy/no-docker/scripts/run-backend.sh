@@ -18,4 +18,6 @@ exec "$BACKEND_ROOT/.venv/bin/uvicorn" \
   app.main:app \
   --host "${UVICORN_HOST:-127.0.0.1}" \
   --port "${UVICORN_PORT:-8000}" \
-  --workers "${UVICORN_WORKERS:-2}"
+  --workers "${UVICORN_WORKERS:-2}" \
+  --timeout-keep-alive "${UVICORN_TIMEOUT_KEEP_ALIVE:-5}" \
+  --timeout-graceful-shutdown "${UVICORN_TIMEOUT_GRACEFUL_SHUTDOWN:-30}"

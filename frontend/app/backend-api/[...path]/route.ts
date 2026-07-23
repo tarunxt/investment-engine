@@ -18,6 +18,7 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
 const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
+const DEFAULT_BACKEND_PROXY_TIMEOUT_MS = 8_000;
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -78,13 +79,16 @@ function resolveBackendApiBaseUrls(request: NextRequest) {
   );
 }
 
-function buildForwardHeaders(request: NextRequest) {
+function buildForwardHeaders(request: NextRequest, correlationId: string) {
   const headers = new Headers();
   request.headers.forEach((value, key) => {
     if (!FORWARDED_HEADER_BLOCKLIST.has(key.toLowerCase())) {
       headers.set(key, value);
     }
   });
+  if (!headers.has("x-correlation-id")) {
+    headers.set("X-Correlation-ID", correlationId);
+  }
   return headers;
 }
 
@@ -104,54 +108,197 @@ function buildTargetUrl(baseUrl: string, path: string, request: NextRequest) {
   return targetUrl;
 }
 
+function getProxyTimeoutMs() {
+  const configured = Number.parseInt(
+    process.env.BACKEND_PROXY_TIMEOUT_MS || "",
+    10,
+  );
+  if (!Number.isFinite(configured)) return DEFAULT_BACKEND_PROXY_TIMEOUT_MS;
+
+  // A browser-facing BFF endpoint should fail promptly. Keep this bounded so
+  // a malformed environment value cannot recreate an indefinite UI wait.
+  return Math.min(Math.max(configured, 1_000), 30_000);
+}
+
+function createProxyCorrelationId(request: NextRequest) {
+  return request.headers.get("x-correlation-id") || crypto.randomUUID();
+}
+
+function logProxyFailure(input: {
+  request: NextRequest;
+  correlationId: string;
+  outcome: string;
+  durationMs: number;
+  status?: number;
+  errorType?: string;
+}) {
+  // This runs on the Next server only. Do not include upstream URLs, error
+  // messages, credentials, or response bodies in browser-visible payloads.
+  console.warn(
+    JSON.stringify({
+      event: "backend_api_proxy_failure",
+      method: input.request.method,
+      path: input.request.nextUrl.pathname,
+      correlation_id: input.correlationId,
+      outcome: input.outcome,
+      duration_ms: Math.round(input.durationMs),
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.errorType ? { error_type: input.errorType } : {}),
+    }),
+  );
+}
+
+async function buildBufferedProxyResponse(
+  response: Response,
+  method: string,
+  correlationId: string,
+) {
+  // Browser-facing API calls are JSON payloads. Buffering makes the BFF
+  // deadline cover body delivery too (not merely response headers), which
+  // prevents a stalled upstream stream from leaving client state unresolved.
+  const body = method === "HEAD" ? null : await response.arrayBuffer();
+  const headers = buildResponseHeaders(response);
+  headers.set("X-Correlation-ID", correlationId);
+  return new NextResponse(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 async function proxyBackendRequest(request: NextRequest, context: RouteContext) {
   const params = await context.params;
   const path = (params.path ?? []).map(encodeURIComponent).join("/");
   const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
-  let lastErrorMessage: string | null = null;
+  const startedAt = performance.now();
+  const correlationId = createProxyCorrelationId(request);
+  let lastErrorType: string | null = null;
   let lastResponse: Response | null = null;
-
-  for (const baseUrl of resolveBackendApiBaseUrls(request)) {
-    const targetUrl = buildTargetUrl(baseUrl, path, request);
-
-    try {
-      const response = await fetch(targetUrl, {
-        method: request.method,
-        headers: buildForwardHeaders(request),
-        body,
-        cache: "no-store",
-      });
-
-      if (RETRYABLE_PROXY_STATUSES.has(response.status)) {
-        lastResponse = response;
-        continue;
-      }
-
-      return new NextResponse(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: buildResponseHeaders(response),
-      });
-    } catch (error) {
-      lastErrorMessage = error instanceof Error ? error.message : String(error);
-    }
-  }
-
-  if (lastResponse) {
-    return new NextResponse(lastResponse.body, {
-      status: lastResponse.status,
-      statusText: lastResponse.statusText,
-      headers: buildResponseHeaders(lastResponse),
+  let outcome = "unreachable";
+  let responseStatus: number | undefined;
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortForClientDisconnect = () => controller.abort();
+  if (request.signal.aborted) {
+    abortForClientDisconnect();
+  } else {
+    request.signal.addEventListener("abort", abortForClientDisconnect, {
+      once: true,
     });
   }
+  const timeoutId = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, getProxyTimeoutMs());
 
-  return NextResponse.json(
-    {
-      message: "Unable to reach backend API through the frontend proxy.",
-      detail: lastErrorMessage ?? "No backend API target was available.",
-    },
-    { status: 502 },
-  );
+  try {
+    for (const baseUrl of resolveBackendApiBaseUrls(request)) {
+      if (controller.signal.aborted) break;
+      const targetUrl = buildTargetUrl(baseUrl, path, request);
+
+      try {
+        const response = await fetch(targetUrl, {
+          method: request.method,
+          headers: buildForwardHeaders(request, correlationId),
+          body,
+          // Requests through this BFF include user auth and must not be shared
+          // across users. Client-side resource caches handle safe SWR state.
+          cache: "no-store",
+          signal: controller.signal,
+        });
+
+        if (RETRYABLE_PROXY_STATUSES.has(response.status)) {
+          // Avoid retaining a retry response body while trying the next safe
+          // origin. The final response (if every origin fails) stays intact.
+          if (lastResponse?.body) {
+            void lastResponse.body.cancel().catch(() => undefined);
+          }
+          lastResponse = response;
+          responseStatus = response.status;
+          outcome = `upstream_${response.status}`;
+          continue;
+        }
+
+        responseStatus = response.status;
+        const proxiedResponse = await buildBufferedProxyResponse(
+          response,
+          request.method,
+          correlationId,
+        );
+        outcome = "success";
+        return proxiedResponse;
+      } catch (error) {
+        lastErrorType = error instanceof Error ? error.name : "UnknownError";
+        outcome = "upstream_body_error";
+      }
+    }
+
+    if (timedOut) {
+      outcome = "timeout";
+      return NextResponse.json(
+        {
+          message: "The backend did not respond in time. Please retry.",
+        },
+        {
+          status: 504,
+          headers: {
+            "Retry-After": "1",
+            "X-Correlation-ID": correlationId,
+          },
+        },
+      );
+    }
+
+    if (lastResponse) {
+      try {
+        return await buildBufferedProxyResponse(
+          lastResponse,
+          request.method,
+          correlationId,
+        );
+      } catch (error) {
+        lastErrorType = error instanceof Error ? error.name : "UnknownError";
+        if (timedOut) {
+          outcome = "timeout";
+          return NextResponse.json(
+            { message: "The backend did not respond in time. Please retry." },
+            {
+              status: 504,
+              headers: {
+                "Retry-After": "1",
+                "X-Correlation-ID": correlationId,
+              },
+            },
+          );
+        }
+        outcome = "upstream_body_error";
+      }
+    }
+
+    outcome = "unreachable";
+    return NextResponse.json(
+      {
+        message: "Unable to reach the backend API right now.",
+      },
+      {
+        status: 502,
+        headers: { "X-Correlation-ID": correlationId },
+      },
+    );
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+    request.signal.removeEventListener("abort", abortForClientDisconnect);
+    if (outcome !== "success") {
+      logProxyFailure({
+        request,
+        correlationId,
+        outcome,
+        durationMs: performance.now() - startedAt,
+        status: responseStatus,
+        errorType: lastErrorType ?? undefined,
+      });
+    }
+  }
 }
 
 export const dynamic = "force-dynamic";

@@ -140,15 +140,18 @@ test("Stage 2 historical summary rows rebuild consensus from persisted event dat
   const historyModule = await loadStageTwoHistoryModule();
   const reviewedRows = historyModule.getStageTwoLlmReviewedRows(
     createStage({
-      llm_reviewed_candidates: [createReviewedRow()],
+      llm_reviewed_candidates: [
+        createReviewedRow({ close_time: HISTORICAL_CLOSE_TIME }),
+      ],
     }),
-    [createScanCandidate()],
+    [createScanCandidate({ closeTime: HISTORICAL_CLOSE_TIME })],
   );
 
   const rows = historyModule.buildStageTwoEventsSummaryRows({
     reviewedRows,
     decisions: [],
     runId: "run-1",
+    asOfTimestamp: HISTORICAL_AS_OF,
   });
 
   assert.equal(rows.length, 1);
@@ -160,7 +163,7 @@ test("Stage 2 historical summary rows rebuild consensus from persisted event dat
   assert.equal(rows[0].noOdds, 46);
   assert.equal(rows[0].llmYesOdds, 88);
   assert.equal(rows[0].llmNoOdds, 12);
-  assert.equal(rows[0].returnsPerDay, 17.6);
+  assert.equal(rows[0].returnsPerDay, 11.5);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].volume, "123,456");
   assert.equal(rows[0].liquidity, "7,890");
@@ -322,7 +325,7 @@ test("Stage 2 historical summary rows normalize yes_odds/no_odds aliases into ca
   assert.equal(rows.length, 1);
   assert.equal(rows[0].llmYesOdds, 12.5);
   assert.equal(rows[0].llmNoOdds, 87.5);
-  assert.equal(rows[0].returnsPerDay, 51.47);
+  assert.equal(rows[0].returnsPerDay, 11.47);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].isAmountToBeInvestedHighlighted, true);
   assert.equal(rows[0].llmBreakdown[0].invalidReason, null);
@@ -466,7 +469,7 @@ test("Stage 2 historical summary rows build consensus from completed and partial
   );
   assert.equal(rows[0].llmYesOdds, 84);
   assert.equal(rows[0].llmNoOdds, 16);
-  assert.equal(rows[0].returnsPerDay, 21);
+  assert.equal(rows[0].returnsPerDay, 10);
   assert.equal(rows[0].amountToBeInvested, 5);
   assert.equal(rows[0].isAmountToBeInvestedHighlighted, true);
 });

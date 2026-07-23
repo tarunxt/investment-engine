@@ -118,19 +118,9 @@ jobs:
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
 
             if command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-              echo "==> PostgreSQL is not ready; restarting it after disk recovery"
-              sudo systemctl restart postgresql
-              for attempt in $(seq 1 30); do
-                if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-                  break
-                fi
-                sleep 1
-              done
-              if ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-                sudo systemctl status postgresql --no-pager --full >&2 || true
-                exit 1
-              fi
-              echo "==> PostgreSQL is ready"
+              echo "==> PostgreSQL is not ready; refusing an automatic database restart during deploy" >&2
+              sudo systemctl status postgresql --no-pager --full >&2 || true
+              exit 1
             fi
 
             echo "==> Run backend deploy"
@@ -199,19 +189,9 @@ jobs:
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
 
             if command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-              echo "==> PostgreSQL is not ready; restarting it after disk recovery"
-              sudo systemctl restart postgresql
-              for attempt in $(seq 1 30); do
-                if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-                  break
-                fi
-                sleep 1
-              done
-              if ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-                sudo systemctl status postgresql --no-pager --full >&2 || true
-                exit 1
-              fi
-              echo "==> PostgreSQL is ready"
+              echo "==> PostgreSQL is not ready; refusing an automatic database restart during deploy" >&2
+              sudo systemctl status postgresql --no-pager --full >&2 || true
+              exit 1
             fi
 
             echo "==> Run full-stack deploy"

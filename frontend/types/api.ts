@@ -2620,6 +2620,54 @@ export interface BullpenAutoLiveState {
   balance_status: BullpenAutoLiveGuardrailStatus;
 }
 
+/**
+ * Small, persisted-only scheduler configuration used for the Bullpen first
+ * paint. It intentionally omits prompt bodies, run history, positions, and
+ * runtime/Bullpen-CLI diagnostics from the legacy Auto-Live summary.
+ */
+export interface BullpenAutoLiveStatusConfiguration {
+  strategy_profile: BullpenAutoLiveStrategyProfile;
+  auto_live_enabled: boolean;
+  dry_run: boolean;
+  allow_live_execution: boolean;
+  require_manual_confirmation: boolean;
+  emergency_stop: boolean;
+  limit_orders_only: boolean;
+  console_order_usd: number;
+  console_auto_start_at?: string | null;
+  console_auto_refresh_minutes?: number | null;
+  console_llm_target_count: number;
+  updated_at?: string | null;
+}
+
+/** Persisted scheduler state; this is not a live worker/runtime health check. */
+export interface BullpenAutoLiveSchedulerStatus {
+  running: boolean;
+  paused: boolean;
+  dry_run: boolean;
+  live_armed: boolean;
+  live_execution_allowed: boolean;
+  emergency_stopped: boolean;
+  status: BullpenAutoLiveRuntimeStatus;
+  mode: BullpenAutoLiveRuntimeMode;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  last_run_at?: string | null;
+  last_execution_at?: string | null;
+  next_run_at?: string | null;
+  last_run_id?: string | null;
+  active_run_id?: string | null;
+  active_run_status?: BullpenAutoLiveRunStatus | null;
+  updated_at?: string | null;
+}
+
+export interface BullpenAutoLivePersistedStatus {
+  source: "persisted";
+  refreshed_at: string;
+  configuration: BullpenAutoLiveStatusConfiguration;
+  scheduler: BullpenAutoLiveSchedulerStatus;
+}
+
 export type TradingBotStatus =
   | "running"
   | "paused"

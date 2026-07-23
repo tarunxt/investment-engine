@@ -161,6 +161,10 @@ function resolveWebSocketBaseUrl() {
 }
 
 const bullpenAutoLiveApiUrls = {
+  // This is intentionally separate from `summary`.  Console status badges need
+  // persisted scheduler configuration immediately and must not wait for run
+  // recovery, runtime diagnostics, or a Bullpen CLI auth refresh.
+  status: () => `${resolveApiBaseUrl()}/polymarket/auto-live/status`,
   summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
