@@ -134,7 +134,11 @@ jobs:
             fi
 
             echo "==> Run backend deploy"
-            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$APP_ROOT/deploy/no-docker/redeploy.sh" backend
+            sudo env \
+              SKIP_GIT_SYNC=true \
+              APP_ROOT="$APP_ROOT" \
+              APP_USER="$APP_USER" \
+              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" backend
 
   deploy-full:
     name: Deploy full stack
@@ -215,4 +219,8 @@ jobs:
             fi
 
             echo "==> Run full-stack deploy"
-            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
+            sudo env \
+              SKIP_GIT_SYNC=true \
+              APP_ROOT="$APP_ROOT" \
+              APP_USER="$APP_USER" \
+              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
