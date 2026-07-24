@@ -244,11 +244,11 @@ export interface IApiService {
     getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
-    getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]>;
+    getBullpenAutoLiveRuns(options?: ApiRequestControl): Promise<BullpenAutoLiveRun[]>;
     getBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     reconcileBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     retryBullpenAutoLiveExitsAndContinueBuys(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
-    getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]>;
+    getBullpenAutoLiveDecisions(options?: ApiRequestControl): Promise<BullpenAutoLiveDecision[]>;
     retryBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     cancelBullpenAutoLiveOrder(intentId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     getBullpenRunAudits(params?: {

@@ -9136,6 +9136,19 @@ export function BullpenAutoRunScheduleCard({
   const [stage3PreviewDialog, setStage3PreviewDialog] =
     useState<Stage3PreviewDialogState | null>(null);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
+  const [runHistoryRuns, setRunHistoryRuns] = useState<
+    BullpenAutoLiveRun[] | null
+  >(null);
+  const [runHistoryDecisions, setRunHistoryDecisions] = useState<
+    BullpenAutoLiveDecision[] | null
+  >(null);
+  const [runHistoryLoading, setRunHistoryLoading] = useState(false);
+  const [runHistoryError, setRunHistoryError] = useState<string | null>(null);
+  const [runHistoryOwnerKey, setRunHistoryOwnerKey] = useState<string | null>(
+    null,
+  );
+  const runHistoryOwnerKeyRef = useRef<string | null>(null);
+  const runHistoryAbortControllerRef = useRef<AbortController | null>(null);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
   const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
@@ -9783,6 +9796,67 @@ export function BullpenAutoRunScheduleCard({
       summaryLoadInFlightRef.current = false;
     }
   }
+
+  const loadRunHistory = useCallback(async () => {
+    runHistoryAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    const requestOwnerKey = autoRunStatusCacheKey;
+    runHistoryAbortControllerRef.current = controller;
+    if (runHistoryOwnerKeyRef.current !== requestOwnerKey) {
+      runHistoryOwnerKeyRef.current = requestOwnerKey;
+      setRunHistoryOwnerKey(requestOwnerKey);
+      setRunHistoryRuns(null);
+      setRunHistoryDecisions(null);
+    }
+    setRunHistoryLoading(true);
+    setRunHistoryError(null);
+
+    const [runsResult, decisionsResult] = await Promise.allSettled([
+      apiService.getBullpenAutoLiveRuns({
+        signal: controller.signal,
+        timeoutMs: 15_000,
+      }),
+      apiService.getBullpenAutoLiveDecisions({
+        signal: controller.signal,
+        timeoutMs: 15_000,
+      }),
+    ]);
+
+    if (controller.signal.aborted) return;
+
+    const errors: string[] = [];
+    if (runsResult.status === "fulfilled") {
+      setRunHistoryRuns(runsResult.value);
+    } else {
+      errors.push(
+        `Full run history could not be loaded. Showing recent runs instead. ${formatUnknownError(runsResult.reason)}`,
+      );
+    }
+
+    if (decisionsResult.status === "fulfilled") {
+      setRunHistoryDecisions(decisionsResult.value);
+    } else {
+      errors.push(
+        `Historical decision metrics could not be loaded. ${formatUnknownError(decisionsResult.reason)}`,
+      );
+    }
+
+    setRunHistoryError(errors.length > 0 ? errors.join(" ") : null);
+    setRunHistoryLoading(false);
+  }, [autoRunStatusCacheKey]);
+
+  useEffect(() => {
+    if (!isRunHistoryDialogOpen) {
+      runHistoryAbortControllerRef.current?.abort();
+      runHistoryAbortControllerRef.current = null;
+      return;
+    }
+
+    void loadRunHistory();
+    return () => {
+      runHistoryAbortControllerRef.current?.abort();
+    };
+  }, [autoRunStatusCacheKey, isRunHistoryDialogOpen, loadRunHistory]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -10872,6 +10946,14 @@ export function BullpenAutoRunScheduleCard({
       : tradeAmountView.source === "last-calculated"
         ? "Showing last diagnostic amount"
         : "Waiting for live portfolio data";
+  const runHistoryBelongsToCurrentUser =
+    runHistoryOwnerKey === autoRunStatusCacheKey;
+  const visibleRunHistoryRuns = runHistoryBelongsToCurrentUser
+    ? runHistoryRuns ?? summary?.recent_runs ?? []
+    : summary?.recent_runs ?? [];
+  const visibleRunHistoryDecisions = runHistoryBelongsToCurrentUser
+    ? runHistoryDecisions ?? summary?.recent_decisions ?? []
+    : summary?.recent_decisions ?? [];
 
   useEffect(() => {
     return () => {
@@ -12178,20 +12260,49 @@ export function BullpenAutoRunScheduleCard({
                   >
                     Bullpen Auto and Manual Runs
                   </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {runHistoryLoading
+                      ? "Loading complete history…"
+                      : `${visibleRunHistoryRuns.length.toLocaleString("en-IN")} saved run${visibleRunHistoryRuns.length === 1 ? "" : "s"}`}
+                  </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setIsRunHistoryDialogOpen(false)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                  aria-label="Close Bullpen run history"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void loadRunHistory()}
+                    disabled={runHistoryLoading}
+                    className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label="Refresh Bullpen run history"
+                  >
+                    <RefreshCw
+                      className={`mr-2 h-4 w-4 ${runHistoryLoading ? "animate-spin" : ""}`}
+                    />
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsRunHistoryDialogOpen(false)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                    aria-label="Close Bullpen run history"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
               <div className="max-h-[65vh] overflow-y-auto px-6 py-5">
-                {summary?.recent_runs.length ? (
+                {runHistoryError ? (
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    {runHistoryError}
+                  </div>
+                ) : null}
+                {runHistoryLoading && visibleRunHistoryRuns.length === 0 ? (
+                  <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-600">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading saved Bullpen runs…
+                  </div>
+                ) : visibleRunHistoryRuns.length ? (
                   <div className="space-y-3">
-                    {summary.recent_runs.map((run) => {
+                    {visibleRunHistoryRuns.map((run) => {
                       const runKind =
                         run.triggered_by === "scheduler"
                           ? "Auto Run"
@@ -12203,9 +12314,9 @@ export function BullpenAutoRunScheduleCard({
                       const runDecisions = mergeInvestStageDecisionRows({
                         stage,
                         persistedDecisions:
-                          summary?.recent_decisions.filter(
+                          visibleRunHistoryDecisions.filter(
                             (decision) => decision.run_id === run.id,
-                          ) ?? [],
+                          ),
                       });
                       return (
                         <div

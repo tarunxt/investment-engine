@@ -644,6 +644,23 @@ snapshots nor changes their schema. Older snapshots therefore remain fully
 compatible, while deferred diagnostics continue to supply their established
 runtime and guardrail evidence.
 
+## Console Run History Source
+
+The Bullpen console History dialog loads the authenticated user's complete,
+durable run and decision records from `GET /polymarket/auto-live/runs` and
+`GET /polymarket/auto-live/decisions` when the dialog opens. It must not treat
+`BullpenAutoLiveSummary.recent_runs` or `recent_decisions` as the authoritative
+history: those fields are intentionally bounded operational diagnostics for the
+live console. Recent summary rows remain only a visible fallback if a dedicated
+history request fails.
+
+History requests bypass browser caches, are cancelled when the dialog closes or
+the authenticated console is replaced, and can be retried from the dialog.
+This read-path change does not rewrite run records or frozen audit snapshots and
+does not change audit schema versions. Existing snapshots remain backward
+compatible; the modal renders their persisted Stage 1–3 evidence through the
+existing run-detail adapters.
+
 ## Active Auth Recovery and Restart-Safe Stage 3
 
 Snapshot schema version 2 adds the current Stage 3 recovery and durable-counter

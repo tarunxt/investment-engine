@@ -1646,8 +1646,13 @@ class apiServiceClass implements IApiService {
     return this.post<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.resetSettings());
   }
 
-  getBullpenAutoLiveRuns(): Promise<BullpenAutoLiveRun[]> {
-    return this.get<BullpenAutoLiveRun[]>(URLs.bullpenAutoLive.runs());
+  getBullpenAutoLiveRuns(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveRun[]> {
+    return this.get<BullpenAutoLiveRun[]>(
+      URLs.bullpenAutoLive.runs(),
+      { cache: "no-store", ...options },
+    );
   }
 
   getBullpenAutoLiveRunOrders(
@@ -1675,8 +1680,13 @@ class apiServiceClass implements IApiService {
     );
   }
 
-  getBullpenAutoLiveDecisions(): Promise<BullpenAutoLiveDecision[]> {
-    return this.get<BullpenAutoLiveDecision[]>(URLs.bullpenAutoLive.decisions());
+  getBullpenAutoLiveDecisions(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveDecision[]> {
+    return this.get<BullpenAutoLiveDecision[]>(
+      URLs.bullpenAutoLive.decisions(),
+      { cache: "no-store", ...options },
+    );
   }
 
   retryBullpenAutoLiveOrder(
