@@ -1,8 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
-import { fetchBackendRuntimeJson } from "../_lib/backendBullpenRuntime";
 import { redactBullpenSensitiveText } from "../_lib/bullpenHealthCore.ts";
 import { resolvePolymarketMarketsWithQuestionFallback } from "../_lib/polymarketMarketUrls";
+import {
+  backendSessionJson,
+  createBackendSessionContext,
+  fetchBackendJsonWithSession,
+  type BackendSessionContext,
+} from "../_lib/serverBackendSession";
 import {
   aggregateBullpenCliPositions,
   applyBullpenPositionMarketData,
@@ -112,38 +117,22 @@ function coerceErrorMessage(value: unknown): string | null {
   return null;
 }
 
-async function parseJsonResponse(response: Response) {
-  const text = await response.text();
-  if (!text.trim()) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+function isTruthyQueryValue(value: string | null) {
+  return ["1", "true", "yes"].includes(value?.trim().toLowerCase() || "");
 }
 
-async function loadTrackedPositionsFallback(request: NextRequest) {
-  const backendStateUrl = new URL("/backend-api/polymarket/state", request.url);
-  const accessToken = request.cookies.get("app_access_token")?.value || null;
-  const response = await fetch(backendStateUrl, {
-    headers: accessToken
-      ? {
-          Authorization: `Bearer ${accessToken}`,
-        }
-      : undefined,
-    cache: "no-store",
-  });
-  const payload = await parseJsonResponse(response);
+function isFalsyQueryValue(value: string | null) {
+  return ["0", "false", "no"].includes(value?.trim().toLowerCase() || "");
+}
 
-  if (!response.ok) {
-    throw new Error(
-      coerceErrorMessage(payload) ||
-        `Tracked-position fallback returned HTTP ${response.status}.`,
-    );
-  }
-
-  const state = payload as PolymarketBotState;
+async function loadTrackedPositionsFallback(context: BackendSessionContext) {
+  // Use the same server-resolved/rotated token as the live runtime request.
+  // Do not bounce through the public /backend-api proxy, where a stale legacy
+  // cookie can make the fallback fail even though the Auth.js session is valid.
+  const state = await fetchBackendJsonWithSession<PolymarketBotState>(
+    context,
+    "/polymarket/state",
+  );
   const openPositions = Array.isArray(state.open_positions)
     ? state.open_positions.filter((position) => position.shares > 0)
     : [];
@@ -158,7 +147,6 @@ async function loadTrackedPositionsFallback(request: NextRequest) {
   }
 
   let marketUpdates = {};
-
   try {
     marketUpdates = await resolvePolymarketMarketsWithQuestionFallback(
       openPositions.map((position) => ({
@@ -169,7 +157,7 @@ async function loadTrackedPositionsFallback(request: NextRequest) {
       })),
     );
   } catch {
-    // Keep the tracked-position fallback usable even if Polymarket enrichment fails.
+    // Keep tracked positions usable even if Polymarket enrichment fails.
   }
 
   const positions = buildTrackedBullpenPositionViews(openPositions, marketUpdates);
@@ -241,6 +229,7 @@ function normalizeHealthClassification(
   if (
     normalized.includes("auth required") ||
     normalized.includes("not logged in") ||
+    normalized.includes("not authenticated") ||
     normalized.includes("requires login") ||
     normalized.includes("requires_auth")
   ) {
@@ -263,7 +252,8 @@ function normalizeHealthClassification(
     normalized.includes("transport") ||
     normalized.includes("network") ||
     normalized.includes("bad gateway") ||
-    normalized.includes("connection reset")
+    normalized.includes("connection reset") ||
+    normalized.includes("fetch failed")
   ) {
     return "NETWORK_ERROR";
   }
@@ -304,28 +294,30 @@ function buildLiveHealth(
 
   const brokerHealth = payload?.broker_health || null;
   const lastFailure = payload?.last_failure || null;
+  const runtimeReady = Boolean(payload?.ok && snapshot && brokerHealth?.ok !== false);
   const diagnosticClassification =
     snapshot?.diagnostics?.error_classification ||
     brokerHealth?.error_classification ||
     lastFailure?.classification ||
     payload?.error;
-  const classification = normalizeHealthClassification(diagnosticClassification);
+  const classification = runtimeReady
+    ? null
+    : normalizeHealthClassification(diagnosticClassification);
   const credentialHome =
     brokerHealth?.effective_home ||
     snapshot?.diagnostics?.effective_home ||
     "/home/investor";
-  const message =
-    coerceErrorMessage(payload?.error) ||
-    coerceErrorMessage(lastFailure?.message) ||
-    coerceErrorMessage(brokerHealth?.message) ||
-    (payload?.ok
-      ? "Bullpen runtime health is ready."
-      : "Bullpen runtime health is unavailable.");
+  const message = runtimeReady
+    ? "Bullpen live wallet snapshot is ready."
+    : coerceErrorMessage(payload?.error) ||
+      coerceErrorMessage(lastFailure?.message) ||
+      coerceErrorMessage(brokerHealth?.message) ||
+      "Bullpen runtime health is unavailable.";
   const commandPath =
     brokerHealth?.command_path || process.env.BULLPEN_BIN || "/usr/local/bin/bullpen";
 
   return {
-    ok: Boolean(payload?.ok && brokerHealth?.ok !== false),
+    ok: runtimeReady,
     classification,
     stdout: null,
     stderr: null,
@@ -374,21 +366,30 @@ async function buildLiveSnapshotFromBackend(
 }
 
 export async function GET(request: NextRequest) {
-  const accessToken = request.cookies.get("app_access_token")?.value || null;
-  const forceFresh = ["1", "true", "yes"].includes(
-    request.nextUrl.searchParams.get("force_fresh")?.trim().toLowerCase() || "",
+  const backendSession = await createBackendSessionContext(request);
+  const forceFresh = isTruthyQueryValue(
+    request.nextUrl.searchParams.get("force_fresh"),
   );
-  const passive = ["1", "true", "yes"].includes(
-    request.nextUrl.searchParams.get("passive")?.trim().toLowerCase() || "",
-  );
-  const callerSource = request.nextUrl.searchParams.get("caller_source")?.trim() || "";
+  const passiveValue = request.nextUrl.searchParams.get("passive");
+  // Ordinary page loads are passive by default. An explicit operator refresh
+  // can opt into a CLI call with force_fresh=true or passive=false.
+  const passive = forceFresh
+    ? false
+    : passiveValue === null
+      ? true
+      : !isFalsyQueryValue(passiveValue);
+  const callerSource =
+    request.nextUrl.searchParams.get("caller_source")?.trim() ||
+    (passive ? "frontend-passive" : "frontend-active");
   const requestedMaxAge = Number.parseInt(
     request.nextUrl.searchParams.get("max_age_seconds") || "",
     10,
   );
   const maxAgeSeconds = Number.isFinite(requestedMaxAge)
     ? Math.min(Math.max(requestedMaxAge, 0), 300)
-    : 20;
+    : passive
+      ? 300
+      : 20;
 
   let backendPositions: BackendBullpenRuntimePositionsResponse | null = null;
 
@@ -396,19 +397,15 @@ export async function GET(request: NextRequest) {
     const backendQuery = new URLSearchParams({
       force_fresh: forceFresh ? "true" : "false",
       max_age_seconds: String(maxAgeSeconds),
+      caller_source: callerSource,
     });
     if (passive) {
       backendQuery.set("passive", "true");
     }
-    if (callerSource) {
-      backendQuery.set("caller_source", callerSource);
-    }
-    backendPositions = (await fetchBackendRuntimeJson(
+    backendPositions = await fetchBackendJsonWithSession<BackendBullpenRuntimePositionsResponse>(
+      backendSession,
       `/polymarket/runtime/positions?${backendQuery.toString()}`,
-      {
-        accessToken,
-      },
-    )) as BackendBullpenRuntimePositionsResponse;
+    );
   } catch (error) {
     const sanitizedMessage =
       redactBullpenSensitiveText(
@@ -436,8 +433,8 @@ export async function GET(request: NextRequest) {
     );
 
     try {
-      const trackedFallback = await loadTrackedPositionsFallback(request);
-      return NextResponse.json({
+      const trackedFallback = await loadTrackedPositionsFallback(backendSession);
+      return backendSessionJson(backendSession, {
         positions: trackedFallback.positions,
         summary: trackedFallback.summary,
         diagnostics: trackedFallback.diagnostics,
@@ -461,7 +458,8 @@ export async function GET(request: NextRequest) {
             : String(fallbackError),
         ) || "Tracked-position fallback failed.";
 
-      return NextResponse.json(
+      return backendSessionJson(
+        backendSession,
         {
           positions: [],
           summary: summarizeBullpenPositions([], {}),
@@ -471,10 +469,7 @@ export async function GET(request: NextRequest) {
           positionsSource: null,
           health: fallbackHealth,
           lastSuccessfulLiveSnapshot: null,
-          fallback: buildFallbackResponse({
-            source: null,
-            message: null,
-          }),
+          fallback: buildFallbackResponse({ source: null, message: null }),
           error: `${sanitizedMessage} Tracked-position fallback also failed: ${fallbackMessage}`,
         } satisfies BullpenPositionsResponse,
         { status: 503 },
@@ -494,7 +489,7 @@ export async function GET(request: NextRequest) {
   );
 
   if (backendPositions?.ok && liveSnapshot) {
-    return NextResponse.json({
+    return backendSessionJson(backendSession, {
       positions: liveSnapshot.positions,
       summary: liveSnapshot.summary,
       diagnostics: liveSnapshot.diagnostics,
@@ -503,15 +498,12 @@ export async function GET(request: NextRequest) {
       positionsSource: "live-cli",
       health,
       lastSuccessfulLiveSnapshot: liveSnapshot,
-      fallback: buildFallbackResponse({
-        source: null,
-        message: null,
-      }),
+      fallback: buildFallbackResponse({ source: null, message: null }),
     } satisfies BullpenPositionsResponse);
   }
 
   if (staleSnapshot) {
-    return NextResponse.json({
+    return backendSessionJson(backendSession, {
       positions: staleSnapshot.positions,
       summary: staleSnapshot.summary,
       diagnostics: staleSnapshot.diagnostics,
@@ -530,8 +522,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const trackedFallback = await loadTrackedPositionsFallback(request);
-    return NextResponse.json({
+    const trackedFallback = await loadTrackedPositionsFallback(backendSession);
+    return backendSessionJson(backendSession, {
       positions: trackedFallback.positions,
       summary: trackedFallback.summary,
       diagnostics: trackedFallback.diagnostics,
@@ -550,12 +542,11 @@ export async function GET(request: NextRequest) {
   } catch (fallbackError) {
     const fallbackMessage =
       redactBullpenSensitiveText(
-        fallbackError instanceof Error
-          ? fallbackError.message
-          : String(fallbackError),
+        fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
       ) || "Tracked-position fallback failed.";
 
-    return NextResponse.json(
+    return backendSessionJson(
+      backendSession,
       {
         positions: [],
         summary: summarizeBullpenPositions([], {}),
@@ -565,10 +556,7 @@ export async function GET(request: NextRequest) {
         positionsSource: null,
         health,
         lastSuccessfulLiveSnapshot: null,
-        fallback: buildFallbackResponse({
-          source: null,
-          message: null,
-        }),
+        fallback: buildFallbackResponse({ source: null, message: null }),
         error: `${coerceErrorMessage(backendPositions?.error) || "Bullpen runtime is unavailable."} Tracked-position fallback also failed: ${fallbackMessage}`,
       } satisfies BullpenPositionsResponse,
       { status: 503 },

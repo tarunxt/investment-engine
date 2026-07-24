@@ -24,7 +24,34 @@ async function parseBackendJson(response: Response) {
   }
 }
 
-export async function fetchBackendRuntimeJson(
+function backendErrorMessage(payload: unknown, status: number) {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    return String(
+      record.detail ||
+        record.message ||
+        record.error ||
+        `Backend runtime returned HTTP ${status}.`,
+    );
+  }
+  if (typeof payload === "string" && payload.trim()) {
+    return payload.trim();
+  }
+  return `Backend runtime returned HTTP ${status}.`;
+}
+
+export class BackendRuntimeHttpError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly payload: unknown,
+    message = backendErrorMessage(payload, status),
+  ) {
+    super(message);
+    this.name = "BackendRuntimeHttpError";
+  }
+}
+
+export async function fetchBackendRuntimeJson<T = unknown>(
   path: string,
   {
     accessToken,
@@ -35,7 +62,7 @@ export async function fetchBackendRuntimeJson(
     body?: unknown;
     method?: "GET" | "POST";
   } = {},
-) {
+): Promise<T> {
   const response = await fetch(`${resolveBackendBaseUrl()}${path}`, {
     method,
     cache: "no-store",
@@ -56,19 +83,8 @@ export async function fetchBackendRuntimeJson(
 
   const payload = await parseBackendJson(response);
   if (!response.ok) {
-    const message =
-      payload && typeof payload === "object"
-        ? String(
-            (payload as Record<string, unknown>).detail ||
-              (payload as Record<string, unknown>).message ||
-              (payload as Record<string, unknown>).error ||
-              `Backend runtime returned HTTP ${response.status}.`,
-          )
-        : typeof payload === "string" && payload.trim()
-          ? payload.trim()
-          : `Backend runtime returned HTTP ${response.status}.`;
-    throw new Error(message);
+    throw new BackendRuntimeHttpError(response.status, payload);
   }
 
-  return payload;
+  return payload as T;
 }

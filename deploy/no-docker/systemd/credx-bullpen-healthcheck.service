@@ -1,0 +1,18 @@
+[Unit]
+Description=Cred-X Bullpen live wallet healthcheck
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__APP_ROOT__
+EnvironmentFile=__FRONTEND_ENV_FILE__
+Environment=HOME=/home/__APP_USER__
+ExecStart=/usr/bin/node __APP_ROOT__/scripts/bullpen-healthcheck.ts
+User=__APP_USER__
+Group=__APP_USER__
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
