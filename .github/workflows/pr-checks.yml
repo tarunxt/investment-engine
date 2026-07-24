@@ -84,14 +84,17 @@ jobs:
           set +e
           python3 - <<'RUNNER' > apply-auto-rebalance.log 2>&1
           from pathlib import Path
-          import textwrap
 
           workflow = Path(".github/workflows/apply-auto-rebalance-provider-errors-ist.yml").read_text()
           start_marker = "          python3 - <<'PY'\n"
           end_marker = "\n          PY\n"
           start = workflow.index(start_marker) + len(start_marker)
           end = workflow.index(end_marker, start)
-          implementation = textwrap.dedent(workflow[start:end])
+          raw_implementation = workflow[start:end]
+          implementation = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in raw_implementation.splitlines()
+          ) + "\n"
           exec(compile(implementation, "apply-auto-rebalance-fix.py", "exec"))
           RUNNER
           status=$?
