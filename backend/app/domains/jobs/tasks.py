@@ -11,6 +11,7 @@ from app.infrastructure.database.sync_session import SyncSessionLocal
 import app.infrastructure.database.all_models  # noqa: F401 — registers all ORM models with the mapper
 from app.core.config import settings
 from app.core.logging import WorkerLogHelper, get_logger
+from app.domains.ai_providers.availability import is_provider_capacity_error
 from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
@@ -682,6 +683,9 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
     Terminal client errors (bad request, auth) are not retried.
     Everything else retries after 30 s.
     """
+
+    if is_provider_capacity_error(exc):
+        return False, 0
 
     text = str(exc).lower()
     if any(

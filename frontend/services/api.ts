@@ -72,6 +72,7 @@ import {
   PromptCreate,
   PromptResponse,
   PromptUpdate,
+  PortfolioAnalysisHistoryItem,
   PortfolioEventRunRequest,
   ProviderInfo,
   PaginatedResponse,
@@ -159,6 +160,65 @@ export class RequestTimeoutError extends NetworkError {
     super(method, url, `Request timed out after ${timeoutMs}ms`);
     this.name = "RequestTimeoutError";
   }
+}
+
+const AUTO_REBALANCE_START_RECONCILIATION_DELAYS_MS = [0, 750, 1_500, 3_000, 6_000] as const;
+
+type AnalysisHistoryResponse = {
+  history: PortfolioAnalysisHistoryItem[];
+};
+
+function matchesAutoRebalanceAnalysis(
+  item: PortfolioAnalysisHistoryItem,
+  data?: PortfolioEventRunRequest,
+) {
+  if (
+    !data?.auto_rebalance_portfolio ||
+    typeof data.auto_rebalance_sequence !== "number"
+  ) {
+    return false;
+  }
+  return (
+    item.auto_rebalance_portfolio === data.auto_rebalance_portfolio &&
+    item.auto_rebalance_sequence === data.auto_rebalance_sequence &&
+    (!data.auto_rebalance_label ||
+      !item.auto_rebalance_label ||
+      item.auto_rebalance_label === data.auto_rebalance_label)
+  );
+}
+
+async function reconcileTimedOutAutoRebalanceStart<TResponse>(
+  error: unknown,
+  data: PortfolioEventRunRequest | undefined,
+  loadHistory: () => Promise<AnalysisHistoryResponse>,
+  buildResponse: (item: PortfolioAnalysisHistoryItem) => Promise<TResponse>,
+): Promise<TResponse> {
+  if (
+    !(error instanceof RequestTimeoutError) ||
+    !data?.auto_rebalance_portfolio ||
+    typeof data.auto_rebalance_sequence !== "number"
+  ) {
+    throw error;
+  }
+
+  for (const delayMs of AUTO_REBALANCE_START_RECONCILIATION_DELAYS_MS) {
+    if (delayMs > 0) {
+      await new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
+    }
+    try {
+      const history = await loadHistory();
+      const match = history.history.find((item) =>
+        matchesAutoRebalanceAnalysis(item, data),
+      );
+      if (match) {
+        return await buildResponse(match);
+      }
+    } catch {
+      // The queueing request may still be committing. Keep reconciling until the
+      // bounded grace period ends, then surface the original timeout.
+    }
+  }
+  throw error;
 }
 
 // Helper function to get auth token
@@ -1054,8 +1114,31 @@ class apiServiceClass implements IApiService {
     return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId));
   }
 
-  zerodhaRunEvents(data?: PortfolioEventRunRequest): Promise<ZerodhaEventsRunResponse> {
-    return this.post<ZerodhaEventsRunResponse>(URLs.zerodha.eventsRun(), data ?? {});
+  async zerodhaRunEvents(data?: PortfolioEventRunRequest): Promise<ZerodhaEventsRunResponse> {
+    try {
+      return await this.post<ZerodhaEventsRunResponse>(URLs.zerodha.eventsRun(), data ?? {});
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.zerodhaEventsHistory({ limit: 50 }),
+        async (item) => {
+const analysis = await this.zerodhaEventJob(item.job_id);
+if (!analysis.snapshot_date || !analysis.captured_at) {
+  throw new Error("Queued Zerodha events job is missing snapshot metadata.");
+}
+return {
+  job_id: analysis.job_id,
+  status: analysis.status,
+  provider: analysis.provider,
+  model: analysis.model,
+  snapshot_date: analysis.snapshot_date,
+  captured_at: analysis.captured_at,
+  created_at: analysis.created_at,
+};
+        },
+      );
+    }
   }
 
   zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse> {
@@ -1075,8 +1158,31 @@ class apiServiceClass implements IApiService {
     return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId));
   }
 
-  zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse> {
-    return this.post<ZerodhaThreatRunResponse>(URLs.zerodha.threatsRun(), data ?? {});
+  async zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse> {
+    try {
+      return await this.post<ZerodhaThreatRunResponse>(URLs.zerodha.threatsRun(), data ?? {});
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.zerodhaThreatsHistory({ limit: 50 }),
+        async (item) => {
+const analysis = await this.zerodhaThreatJob(item.job_id);
+if (!analysis.snapshot_date || !analysis.captured_at) {
+  throw new Error("Queued Zerodha threats job is missing snapshot metadata.");
+}
+return {
+  job_id: analysis.job_id,
+  status: analysis.status,
+  provider: analysis.provider,
+  model: analysis.model,
+  snapshot_date: analysis.snapshot_date,
+  captured_at: analysis.captured_at,
+  created_at: analysis.created_at,
+};
+        },
+      );
+    }
   }
 
   indmoneyUsPortfolioOverview(): Promise<IndMoneyUsPortfolioOverviewResponse> {
@@ -1116,8 +1222,36 @@ class apiServiceClass implements IApiService {
     return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId));
   }
 
-  indmoneyUsRunEvents(data?: PortfolioEventRunRequest): Promise<IndMoneyUsEventsRunResponse> {
-    return this.post<IndMoneyUsEventsRunResponse>(URLs.indmoneyUs.eventsRun(), data ?? {});
+  async indmoneyUsRunEvents(data?: PortfolioEventRunRequest): Promise<IndMoneyUsEventsRunResponse> {
+    try {
+      return await this.post<IndMoneyUsEventsRunResponse>(URLs.indmoneyUs.eventsRun(), data ?? {});
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.indmoneyUsEventsHistory({ limit: 50 }),
+        async (item) => {
+const analysis = await this.indmoneyUsEventJob(item.job_id);
+if (
+  analysis.snapshot_id == null ||
+  !analysis.snapshot_date ||
+  !analysis.captured_at
+) {
+  throw new Error("Queued INDmoney events job is missing snapshot metadata.");
+}
+return {
+  job_id: analysis.job_id,
+  status: analysis.status,
+  provider: analysis.provider,
+  model: analysis.model,
+  snapshot_id: analysis.snapshot_id,
+  snapshot_date: analysis.snapshot_date,
+  captured_at: analysis.captured_at,
+  created_at: analysis.created_at,
+};
+        },
+      );
+    }
   }
 
   indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse> {
@@ -1137,8 +1271,36 @@ class apiServiceClass implements IApiService {
     return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId));
   }
 
-  indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse> {
-    return this.post<IndMoneyUsThreatRunResponse>(URLs.indmoneyUs.threatsRun(), data ?? {});
+  async indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse> {
+    try {
+      return await this.post<IndMoneyUsThreatRunResponse>(URLs.indmoneyUs.threatsRun(), data ?? {});
+    } catch (error) {
+      return reconcileTimedOutAutoRebalanceStart(
+        error,
+        data,
+        () => this.indmoneyUsThreatsHistory({ limit: 50 }),
+        async (item) => {
+const analysis = await this.indmoneyUsThreatJob(item.job_id);
+if (
+  analysis.snapshot_id == null ||
+  !analysis.snapshot_date ||
+  !analysis.captured_at
+) {
+  throw new Error("Queued INDmoney threats job is missing snapshot metadata.");
+}
+return {
+  job_id: analysis.job_id,
+  status: analysis.status,
+  provider: analysis.provider,
+  model: analysis.model,
+  snapshot_id: analysis.snapshot_id,
+  snapshot_date: analysis.snapshot_date,
+  captured_at: analysis.captured_at,
+  created_at: analysis.created_at,
+};
+        },
+      );
+    }
   }
 
   polymarketState(options?: ApiRequestControl): Promise<PolymarketBotState> {

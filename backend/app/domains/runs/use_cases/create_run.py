@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.ai_providers.availability import filter_recently_available_targets
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.runs.models import Run, RunJob
@@ -14,6 +16,9 @@ from app.infrastructure.messaging.task_registry import register_job_task
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 from app.shared.exceptions import ConflictException, ValidationException
 from app.shared.types import JobStatus, UserId
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -59,7 +64,28 @@ class CreateRunUseCase:
             if key in seen_targets:
                 continue
             seen_targets.add(key)
-            targets.append(target)
+  targets.append(target)
+
+        targets, blocked_targets = await filter_recently_available_targets(
+  self._session,
+  targets,
+        )
+        if blocked_targets:
+  logger.warning(
+      "Skipping temporarily unavailable provider targets: %s",
+      ", ".join(
+          f"{target.provider}/{target.model}"
+          for target, _availability in blocked_targets
+      ),
+  )
+        if not targets:
+  reasons = "; ".join(
+      availability.reason or f"{target.provider}/{target.model} is unavailable"
+      for target, availability in blocked_targets
+  )
+  raise ValidationException(
+      "No selected AI target is currently available. " + reasons
+  )
 
         now = datetime.now(timezone.utc)
         scheduled_at = cmd.scheduled_at

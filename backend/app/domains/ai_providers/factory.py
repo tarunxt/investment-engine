@@ -218,26 +218,50 @@ class ProviderFactory:
         return result
 
     @classmethod
+    def default_target_candidates(
+        cls,
+        preferred_provider: str,
+        preferred_model: str,
+    ) -> list[tuple[str, str]]:
+        preferred_provider_name = preferred_provider.strip().lower()
+        preferred_model_name = preferred_model.strip()
+        candidates: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+
+        def add_candidate(provider_name: str, model_name: str) -> None:
+  provider = provider_name.strip().lower()
+  model = model_name.strip()
+  provider_class = cls._providers.get(provider)
+  if provider_class is None or not provider_class.is_configured():
+      return
+  if model not in provider_class.supported_models:
+      return
+  compatible, _ = cls.model_compatibility(provider, model)
+  key = (provider, model)
+  if not compatible or key in seen:
+      return
+  seen.add(key)
+  candidates.append(key)
+
+        add_candidate(preferred_provider_name, preferred_model_name)
+        for provider_name in cls._ordered_provider_names(
+  preferred_provider=preferred_provider_name
+        ):
+  provider_class = cls._providers.get(provider_name)
+  if provider_class is None or not provider_class.is_configured():
+      continue
+  for model_name in provider_class.supported_models:
+      add_candidate(provider_name, model_name)
+        return candidates
+
+    @classmethod
     def resolve_default_target(
         cls,
         preferred_provider: str,
         preferred_model: str,
     ) -> tuple[str, str] | None:
-        provider_name = preferred_provider.strip().lower()
-        model_name = preferred_model.strip()
-
-        resolved = cls._resolve_target_for_provider(provider_name, preferred_model=model_name)
-        if resolved:
-            return resolved
-
-        for candidate_provider in cls._ordered_provider_names(preferred_provider=provider_name):
-            if candidate_provider == provider_name:
-                continue
-            resolved = cls._resolve_target_for_provider(candidate_provider)
-            if resolved:
-                return resolved
-
-        return None
+        candidates = cls.default_target_candidates(preferred_provider, preferred_model)
+        return candidates[0] if candidates else None
 
     @classmethod
     def _resolve_target_for_provider(
