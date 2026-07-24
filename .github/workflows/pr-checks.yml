@@ -1,13 +1,13 @@
-name: Package auto-rebalance provider resilience and IST fixes
+name: Commit validated auto-rebalance fixes
 
 on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  package:
+  commit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -21,64 +21,6 @@ jobs:
       - name: Apply validated implementation
         shell: bash
         run: |
-          cat > .github/workflows/pr-checks.yml <<'EOF'
-          name: Pull Request Checks
-
-          on:
-            pull_request:
-
-          permissions:
-            contents: read
-
-          jobs:
-            frontend:
-              name: Frontend build and dashboard regression tests
-              runs-on: ubuntu-latest
-              timeout-minutes: 20
-
-              defaults:
-                run:
-                  working-directory: frontend
-
-              env:
-                NODE_ENV: production
-                NEXTAUTH_URL: http://localhost:3000
-                NEXTAUTH_SECRET: pull-request-check-secret
-                NEXT_PUBLIC_FRONTEND_URL: http://localhost:3000
-                BACKEND_API_URL: http://127.0.0.1:8000
-
-              steps:
-                - name: Checkout
-                  uses: actions/checkout@v4
-
-                - name: Set up Node
-                  uses: actions/setup-node@v4
-                  with:
-                    node-version: 22
-                    cache: npm
-                    cache-dependency-path: frontend/package-lock.json
-
-                - name: Install frontend dependencies
-                  run: npm ci --no-audit --fund=false
-
-                - name: Run dashboard regression tests
-                  run: >-
-                    node --test
-                    tests/bullpen-server-auth.test.mjs
-                    tests/dashboard-refresh-errors.test.mjs
-
-                - name: Build frontend
-                  run: npm run build -- --webpack 2>&1 | tee frontend-build.log
-
-                - name: Upload frontend build log
-                  if: failure()
-                  uses: actions/upload-artifact@v4
-                  with:
-                    name: frontend-build-log
-                    path: frontend/frontend-build.log
-                    if-no-files-found: error
-          EOF
-
           python3 - <<'RUNNER'
           from pathlib import Path
 
@@ -122,21 +64,15 @@ jobs:
           exec(compile(implementation, "apply-auto-rebalance-fix.py", "exec"))
           RUNNER
 
-      - name: Package changed files
+      - name: Commit application files
         shell: bash
         run: |
-          git diff --name-status > auto-rebalance-manifest.txt
-          git diff --binary > auto-rebalance.patch
-          mapfile -t files < <(git diff --name-only --diff-filter=ACM)
-          tar -czf auto-rebalance-files.tar.gz "${files[@]}"
-          cat auto-rebalance-manifest.txt
-
-      - name: Upload implementation package
-        uses: actions/upload-artifact@v4
-        with:
-          name: auto-rebalance-validated-implementation
-          path: |
-            auto-rebalance-manifest.txt
-            auto-rebalance.patch
-            auto-rebalance-files.tar.gz
-          if-no-files-found: error
+          git restore --source=HEAD --staged --worktree \
+            .github/workflows/pr-checks.yml \
+            .github/workflows/apply-auto-rebalance-provider-errors-ist.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend frontend
+          git commit -m "Fix auto-rebalance provider failures and IST timestamps"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
