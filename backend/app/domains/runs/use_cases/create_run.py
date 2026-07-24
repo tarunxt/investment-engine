@@ -89,7 +89,6 @@ class CreateRunUseCase:
             )
 
         now = datetime.now(timezone.utc)
-        now = datetime.now(timezone.utc)
         scheduled_at = cmd.scheduled_at
         if scheduled_at is not None and scheduled_at.tzinfo is None:
             scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
