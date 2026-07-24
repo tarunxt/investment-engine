@@ -120,3 +120,30 @@ test("changed dashboard TypeScript and threat routers parse", () => {
     },
   );
 });
+
+
+test("stage Duration opens a dedicated breakdown dialog without navigating the tile", () => {
+  const workflowSource = read(
+    "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+  );
+  const dialogSource = read(
+    "../app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
+  );
+
+  assert.match(workflowSource, /row\.label === "Duration"/);
+  assert.match(
+    workflowSource,
+    /event\.preventDefault\(\);\s*event\.stopPropagation\(\);\s*setDurationDialogOpen\(true\);/,
+  );
+  assert.match(workflowSource, /<StageDurationBreakdownDialog/);
+  assert.match(workflowSource, /onClick\?\.\(\);/);
+  assert.match(dialogSource, /role="dialog"/);
+  assert.match(dialogSource, /Stage setup and LLM dispatch/);
+  assert.match(dialogSource, /LLM execution/);
+  assert.match(dialogSource, /Validation, aggregation and finalisation/);
+  assert.match(dialogSource, /providers run in parallel/);
+
+  transpileTypeScript(
+    "../app/console/dashboard/_components/StageDurationBreakdownDialog.tsx",
+  );
+});
