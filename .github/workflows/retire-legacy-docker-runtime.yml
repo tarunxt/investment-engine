@@ -58,7 +58,7 @@ jobs:
 
             declare -A IMAGE_IDS=()
             for container_id in "${TARGET_CONTAINER_IDS[@]}"; do
-              [[ "$container_id" =~ ^[a-f0-9]{64}$ ]] || {
+              [[ "$container_id" =~ ^[a-f0-9]{12}([a-f0-9]{52})?$ ]] || {
                 echo "Unexpected Docker container identifier: $container_id" >&2
                 exit 1
               }
