@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -13,7 +13,9 @@ from app.domains.bullpen_trade_analysis.schemas import (
 )
 from app.domains.bullpen_trade_analysis.service import (
     BullpenTradeAnalysisService,
-    sync_bullpen_trade_history_for_user,
+)
+from app.domains.bullpen_trade_analysis.tasks import (
+    request_bullpen_trade_analysis_history_sync,
 )
 from app.infrastructure.database.session import get_async_db
 
@@ -35,6 +37,7 @@ def _parse_optional_date(value: str | None) -> datetime | None:
 
 @router.get("", response_model=BullpenTradeAnalysisListResponse)
 async def list_bullpen_trade_analysis(
+    background_tasks: BackgroundTasks,
     status: str | None = Query(default=None),
     pnl_outcome: str | None = Query(default=None),
     final_tag: str | None = Query(default=None),
@@ -46,9 +49,8 @@ async def list_bullpen_trade_analysis(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db),
 ):
-    await sync_bullpen_trade_history_for_user(current_user.id)
     service = BullpenTradeAnalysisService(db)
-    return await service.list_trades(
+    response = await service.list_trades(
         user_id=current_user.id,
         status=status,
         pnl_outcome=pnl_outcome,
@@ -59,6 +61,15 @@ async def list_bullpen_trade_analysis(
         category=category,
         topic=topic,
     )
+    # The persisted snapshot is the authoritative, fast read path. Refreshing
+    # Bullpen CLI history may take tens of seconds, so enqueue it only after the
+    # response has been built; the scheduler and worker apply distributed
+    # deduplication and never fall back to inline execution.
+    background_tasks.add_task(
+        request_bullpen_trade_analysis_history_sync,
+        current_user.id,
+    )
+    return response
 
 
 @router.get("/{trade_id}", response_model=BullpenTradeAnalysisDetailResponse)

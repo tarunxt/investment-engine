@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -56,6 +57,18 @@ from app.infrastructure.database.session import AsyncSessionLocal
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class BullpenTradeHistorySyncResult:
+    trade_history_succeeded: bool
+    redeemed_history_succeeded: bool
+    trade_count: int
+    redeemed_trade_count: int
+
+    @property
+    def has_valid_source(self) -> bool:
+        return self.trade_history_succeeded or self.redeemed_history_succeeded
 
 
 def _serialize_datetime(value: datetime | None) -> datetime | None:
@@ -1116,19 +1129,30 @@ def _apply_filters(
     return query
 
 
-async def sync_bullpen_trade_history_for_user(user_id: int) -> None:
+async def sync_bullpen_trade_history_for_user(
+    user_id: int,
+) -> BullpenTradeHistorySyncResult:
+    trade_history_succeeded = True
     try:
         trades = await BullpenTradeHistoryReader().refresh()
     except Exception:
         logger.exception("Bullpen trade-analysis history sync failed")
+        trade_history_succeeded = False
         trades = []
+    redeemed_history_succeeded = True
     try:
         redeemed_trades = await BullpenRedeemedTradesReader().refresh()
     except Exception:
         logger.exception("Bullpen trade-analysis redeemed-history sync failed")
+        redeemed_history_succeeded = False
         redeemed_trades = []
     if not trades and not redeemed_trades:
-        return
+        return BullpenTradeHistorySyncResult(
+            trade_history_succeeded=trade_history_succeeded,
+            redeemed_history_succeeded=redeemed_history_succeeded,
+            trade_count=0,
+            redeemed_trade_count=0,
+        )
     async with AsyncSessionLocal() as session:
         service = BullpenTradeAnalysisService(session)
         if trades:
@@ -1138,6 +1162,12 @@ async def sync_bullpen_trade_history_for_user(user_id: int) -> None:
                 user_id=user_id,
                 redeemed_trades=redeemed_trades,
             )
+    return BullpenTradeHistorySyncResult(
+        trade_history_succeeded=trade_history_succeeded,
+        redeemed_history_succeeded=redeemed_history_succeeded,
+        trade_count=len(trades),
+        redeemed_trade_count=len(redeemed_trades),
+    )
 
 
 class BullpenTradeAnalysisService:

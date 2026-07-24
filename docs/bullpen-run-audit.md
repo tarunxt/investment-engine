@@ -102,6 +102,27 @@ Authenticated routes live under `/bullpen-ai/run-audits`.
 * `GET /bullpen-ai/run-audits/{run_id}/feedback/{feedback_id}`: persisted report detail
 * `GET /bullpen-ai/run-audits/{run_id}/export`: canonical bundle JSON
 
+### Trade-analysis read isolation
+
+`GET /bullpen-ai/trade-analysis` reads the authenticated user's persisted
+PostgreSQL trade-analysis snapshot first and never waits for Bullpen CLI
+history. After building that response, the API schedules a Celery history
+reconciliation behind per-user Redis pending and worker-lease keys. Duplicate
+page requests and redelivered tasks therefore do not execute parallel CLI
+refreshes; the task has bounded time limits and no automatic retry loop. Redis
+or broker failure is logged and does not fall back to running the CLI inside
+FastAPI.
+
+The browser validates the complete list response while trying its configured
+preferred transport first and the alternate direct-API or same-origin proxy
+transport second. Only when both transports fail, are unsupported, or return
+invalid data may the page show its tertiary last-known-good session cache. That
+cache is schema-validated, age-bounded, and scoped to the authenticated user
+plus the exact filter set. Every transition logs the failed stage and reason.
+Cached UI data is observational only: it never feeds Stage 1, Stage 2, Stage 3,
+order execution, reconciliation, or frozen run-audit snapshots, so historical
+schema versions remain backward compatible.
+
 ## Persisted Entities
 
 ### Snapshot

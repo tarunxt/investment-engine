@@ -1,5 +1,6 @@
 import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
+import { isBullpenTradeAnalysisListResponse } from "@/lib/bullpenTradeAnalysisFallback";
 import {
   notifyAuthTokensRefreshed,
   sessionStorage,
@@ -1715,7 +1716,10 @@ class apiServiceClass implements IApiService {
     if (params?.topic) query.set("topic", params.topic);
     const baseUrl = URLs.bullpenTradeAnalysis.list();
     const url = query.size > 0 ? `${baseUrl}?${query.toString()}` : baseUrl;
-    return this.get<BullpenTradeAnalysisListResponse>(url);
+    return this.get<BullpenTradeAnalysisListResponse>(url, {
+      cache: "no-store",
+      validate: isBullpenTradeAnalysisListResponse,
+    });
   }
 
   getBullpenTradeAnalysisDetail(

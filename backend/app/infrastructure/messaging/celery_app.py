@@ -45,6 +45,7 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace": {"queue": AUTO_LIVE_QUEUE},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
+    "app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history": {"queue": "ai"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -104,6 +105,7 @@ celery.autodiscover_tasks([
     "app.domains.runs",
     "app.domains.google_sheets",
     "app.domains.bullpen_run_audit",
+    "app.domains.bullpen_trade_analysis",
     "app.domains.polymarket_auto_live",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",

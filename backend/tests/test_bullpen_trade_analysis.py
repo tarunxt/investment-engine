@@ -382,12 +382,17 @@ async def test_history_sync_backfills_manual_trade_and_marks_it_squared_off():
 async def test_trade_analysis_list_route_passes_authenticated_user_id(monkeypatch):
     app = _build_test_app()
     captured: dict[str, object] = {}
+    queued_user_ids: list[int] = []
 
     async def fake_list_trades(self, **kwargs):
         captured.update(kwargs)
         return BullpenTradeAnalysisListResponse()
 
     monkeypatch.setattr(BullpenTradeAnalysisService, "list_trades", fake_list_trades)
+    monkeypatch.setattr(
+        "app.domains.bullpen_trade_analysis.router.request_bullpen_trade_analysis_history_sync",
+        lambda user_id: queued_user_ids.append(user_id),
+    )
 
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -397,6 +402,7 @@ async def test_trade_analysis_list_route_passes_authenticated_user_id(monkeypatc
     assert captured["user_id"] == 7
     assert captured["status"] == "OPEN"
     assert captured["final_tag"] == "PROFIT"
+    assert queued_user_ids == [7]
 
 
 @pytest.mark.anyio

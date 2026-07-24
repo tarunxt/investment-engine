@@ -7,8 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  buildTradeAnalysisFiltersKey,
+  readTradeAnalysisCache,
+  writeTradeAnalysisCache,
+} from "@/lib/bullpenTradeAnalysisFallback";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
+import { sessionStorage as authSessionStorage } from "@/services/session";
 import type {
   BullpenTradeAnalysisLearningInsights,
   BullpenTradeAnalysisListItem,
@@ -142,6 +148,7 @@ export function TradeAnalysisListClient() {
   const [data, setData] = useState<BullpenTradeAnalysisListResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -149,6 +156,16 @@ export function TradeAnalysisListClient() {
     async function load() {
       setLoading(true);
       setError(null);
+      setFallbackNotice(null);
+      const filtersKey = buildTradeAnalysisFiltersKey(filters);
+      let userId: number | undefined;
+      try {
+        userId = authSessionStorage.getUserData()?.id;
+      } catch {
+        // A malformed legacy auth cache must not strand the page in loading.
+        // It simply makes the user-scoped tertiary cache unavailable.
+        userId = undefined;
+      }
       try {
         const nextData = await apiService.bullpenAiTradeAnalysis({
           status: filters.status || undefined,
@@ -161,10 +178,46 @@ export function TradeAnalysisListClient() {
         });
         if (!cancelled) {
           setData(nextData);
+          writeTradeAnalysisCache({
+            userId,
+            filtersKey,
+            data: nextData,
+          });
         }
       } catch (nextError) {
         if (!cancelled) {
-          setError(nextError instanceof Error ? nextError.message : "Failed to load trade analysis.");
+          const cached = readTradeAnalysisCache({
+            userId,
+            filtersKey,
+          });
+          if (cached) {
+            const reason =
+              nextError instanceof Error
+                ? nextError.message
+                : "Live request failed.";
+            console.warn(
+              JSON.stringify({
+                event: "bullpen_trade_analysis_fallback_triggered",
+                from_stage: "secondary",
+                to_stage: "tertiary",
+                to_transport: "validated-session-cache",
+                reason,
+                cached_at: new Date(cached.cachedAt).toISOString(),
+              }),
+            );
+            setData(cached.data);
+            setFallbackNotice(
+              `Live refresh failed; showing saved trade analysis from ${formatDateTime(
+                new Date(cached.cachedAt).toISOString(),
+              )}.`,
+            );
+          } else {
+            setError(
+              nextError instanceof Error
+                ? nextError.message
+                : "Failed to load trade analysis.",
+            );
+          }
         }
       } finally {
         if (!cancelled) {
@@ -377,6 +430,20 @@ export function TradeAnalysisListClient() {
           <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">
             <p className="text-sm text-rose-700">{error}</p>
             <Button onClick={() => setFilters((current) => ({ ...current }))}>Retry</Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {fallbackNotice ? (
+        <Card className="rounded-none border-amber-200 bg-amber-50 shadow-none">
+          <CardContent className="flex flex-wrap items-center justify-between gap-4 py-6">
+            <p className="text-sm text-amber-800">{fallbackNotice}</p>
+            <Button
+              variant="outline"
+              onClick={() => setFilters((current) => ({ ...current }))}
+            >
+              Retry live data
+            </Button>
           </CardContent>
         </Card>
       ) : null}
