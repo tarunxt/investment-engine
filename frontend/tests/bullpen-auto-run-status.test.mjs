@@ -187,8 +187,26 @@ test("Bullpen auto-run status rejects malformed API and cache payloads", async (
       "ready",
     ),
     {
+      statusLabel: "Enabled",
+      modeLabel: "Live trading",
+      isStale: true,
+      isUpdating: false,
+    },
+  );
+  assert.deepEqual(
+    getBullpenAutoRunStatusBadges(
+      createStatus({
+        state: {
+          running: false,
+          status: "error",
+          mode: "analysis-only",
+        },
+      }),
+      "ready",
+    ),
+    {
       statusLabel: "Unavailable",
-      modeLabel: "Check failed",
+      modeLabel: "Analysis only",
       isStale: true,
       isUpdating: false,
     },
@@ -404,6 +422,19 @@ test("Bullpen auto-run polling is limited to visible active runs after initial s
   assert.equal(isBullpenAutoRunSchedulerEnabled(schedulerOnly), true);
   assert.equal(getBullpenAutoRunActiveRunId(schedulerOnly), null);
   assert.equal(isBullpenAutoRunProgressActive(schedulerOnly), false);
+
+  const schedulerWithHistoricalError = createStatus({
+    state: {
+      running: true,
+      paused: false,
+      emergency_stopped: false,
+      status: "error",
+    },
+  });
+  assert.equal(
+    isBullpenAutoRunSchedulerEnabled(schedulerWithHistoricalError),
+    true,
+  );
 
   const runInProgress = createStatus({
     state: {
