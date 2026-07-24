@@ -1,4 +1,4 @@
-name: Format Bullpen live portfolio fix
+name: Clean Bullpen live portfolio fix
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  format-and-validate:
+  clean-and-validate:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -30,21 +30,125 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Clean only the changed formatting
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_between(text, start_marker, end_marker, replacement, label):
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f"Could not find start of {label}")
+              end = text.find(end_marker, start + len(start_marker))
+              if end < 0:
+                  raise SystemExit(f"Could not find end of {label}")
+              return text[:start] + replacement + text[end:]
+
+          path = Path(
+              "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
+          )
+          source = path.read_text(encoding="utf-8")
+
+          source = replace_between(
+              source,
+              "  // Stage 1 is worker-verified, but it is historical run output and can",
+              "  const {\n    activePositionQuestionByKey: stage3PreviewQuestionByKey,",
+              (
+                  "  // Stage 1 is worker-verified, but it is historical run output and can\n"
+                  "  // be older than the current wallet read. Use it only until a portfolio\n"
+                  "  // snapshot has loaded; never let it hide fresher live Bullpen positions.\n"
+                  "  const useVerifiedStage1Fallback =\n"
+                  "    shouldUseVerifiedStage1PortfolioFallback({\n"
+                  "      hasActivePositionsSnapshot,\n"
+                  "      verifiedPortfolio: verifiedStage1Portfolio,\n"
+                  "    });\n"
+                  "  const portfolioActivePositions =\n"
+                  "    useVerifiedStage1Fallback && verifiedStage1Portfolio\n"
+                  "      ? verifiedStage1Portfolio.activePositions\n"
+                  "      : activePositions;\n"
+                  "  const portfolioHasActivePositionsSnapshot =\n"
+                  "    hasActivePositionsSnapshot || useVerifiedStage1Fallback;\n"
+              ),
+              "portfolio source selection",
+          )
+
+          source = replace_between(
+              source,
+              "  const liveTradeAmountActivePositions =",
+              "\n\n  useEffect(() => {",
+              (
+                  "  const liveTradeAmountActivePositions =\n"
+                  "    useVerifiedStage1Fallback && verifiedStage1Portfolio\n"
+                  "      ? verifiedStage1Portfolio.occupiedPositions\n"
+                  "      : hasActivePositionsSnapshot\n"
+                  "        ? activePositions.length\n"
+                  "        : portfolioState\n"
+                  "          ? portfolioState.open_positions.filter(\n"
+                  "              (position) => position.shares > 0,\n"
+                  "            ).length\n"
+                  "          : (summary?.state.active_positions ?? null);\n"
+                  "  const tradeAmountView = buildConsoleTradeAmountView({\n"
+                  "    cashInHandUsd:\n"
+                  "      liveTradeAmountBalance?.available_balance_usd ??\n"
+                  "      (useVerifiedStage1Fallback\n"
+                  "        ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)\n"
+                  "        : null),\n"
+                  "    activePositions: liveTradeAmountActivePositions,\n"
+                  "    lastCalculatedTradeAmountUsd:\n"
+                  "      summary?.state.last_console_trade_amount_usd ?? null,\n"
+                  "    lastCalculatedCashInHandUsd:\n"
+                  "      summary?.state.last_console_trade_cash_in_hand_usd ?? null,\n"
+                  "    lastCalculatedActivePositions:\n"
+                  "      summary?.state.last_console_trade_active_positions ?? null,\n"
+                  "    lastCalculatedAvailableSlots:\n"
+                  "      summary?.state.last_console_trade_available_slots ?? null,\n"
+                  "    lastCalculatedMaxPositions:\n"
+                  "      summary?.state.last_console_trade_max_positions ?? null,\n"
+                  "  });\n"
+                  "  const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);\n"
+                  "  const tradeAmountSummaryLabel =\n"
+                  "    tradeAmountView.source === \"live\"\n"
+                  "      ? useVerifiedStage1Fallback\n"
+                  "        ? \"Using latest Stage 1 fallback\"\n"
+                  "        : \"Preview from current portfolio\"\n"
+                  "      : tradeAmountView.source === \"last-calculated\"\n"
+                  "        ? \"Showing last diagnostic amount\"\n"
+                  "        : \"Waiting for live portfolio data\";"
+              ),
+              "trade amount source logic",
+          )
+
+          source = replace_between(
+              source,
+              '                    {tradeAmountView.source === "live"',
+              '                      : tradeAmountView.source === "last-calculated"',
+              (
+                  '                    {tradeAmountView.source === "live"\n'
+                  "                      ? useVerifiedStage1Fallback\n"
+                  '                        ? "Calculated from the latest completed Stage 1 fallback because a current portfolio snapshot is not available yet. The worker rechecks cash and occupied slots before any live buy."\n'
+                  '                        : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."\n'
+              ),
+              "trade amount explanation",
+          )
+
+          path.write_text(source, encoding="utf-8")
+
+          for test_path in (
+              Path("frontend/tests/bullpen-verified-portfolio.test.mjs"),
+              Path("frontend/tests/bullpen-ai-compatibility.test.mjs"),
+          ):
+              test_source = test_path.read_text(encoding="utf-8")
+              test_path.write_text(
+                  test_source.replace("});\n\n\ntest(", "});\n\ntest("),
+                  encoding="utf-8",
+              )
+
+          Path(".github/workflows/format-bullpen-live-portfolio-fix.yml").unlink()
+          PY
+
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --no-audit --fund=false
-
-      - name: Format changed Bullpen files
-        working-directory: frontend
-        run: >-
-          npx --yes prettier@3.6.2 --write
-          app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
-          lib/bullpenVerifiedPortfolio.ts
-          tests/bullpen-ai-compatibility.test.mjs
-          tests/bullpen-verified-portfolio.test.mjs
-
-      - name: Remove one-off workflow
-        run: rm .github/workflows/format-bullpen-live-portfolio-fix.yml
 
       - name: Run Bullpen portfolio regressions
         working-directory: frontend
@@ -57,10 +161,10 @@ jobs:
         working-directory: frontend
         run: npm run build -- --webpack
 
-      - name: Commit formatted validated fix
+      - name: Commit cleaned validated fix
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Format Bullpen live portfolio precedence fix"
+          git commit -m "Clean Bullpen live portfolio precedence fix"
           git push origin HEAD:fix/bullpen-live-portfolio-precedence
