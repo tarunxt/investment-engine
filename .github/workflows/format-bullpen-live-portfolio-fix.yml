@@ -1,0 +1,66 @@
+name: Format Bullpen live portfolio fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/format-bullpen-live-portfolio-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/bullpen-live-portfolio-precedence
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --fund=false
+
+      - name: Format changed Bullpen files
+        working-directory: frontend
+        run: >-
+          npx --yes prettier@3.6.2 --write
+          app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
+          lib/bullpenVerifiedPortfolio.ts
+          tests/bullpen-ai-compatibility.test.mjs
+          tests/bullpen-verified-portfolio.test.mjs
+
+      - name: Remove one-off workflow
+        run: rm .github/workflows/format-bullpen-live-portfolio-fix.yml
+
+      - name: Run Bullpen portfolio regressions
+        working-directory: frontend
+        run: >-
+          node --test
+          tests/bullpen-verified-portfolio.test.mjs
+          tests/bullpen-ai-compatibility.test.mjs
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build -- --webpack
+
+      - name: Commit formatted validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Format Bullpen live portfolio precedence fix"
+          git push origin HEAD:fix/bullpen-live-portfolio-precedence
