@@ -10,10 +10,24 @@ export function parseApiTimestamp(value: string | null | undefined): Date | null
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-export function formatApiTimestamp(
+type FormatApiTimestampOptions<TEmptyValue extends string | null = string> = {
+  emptyValue?: TEmptyValue;
+  locale?: string;
+  timeZone?: string;
+  timeZoneName?: 'short' | 'long' | 'shortOffset' | 'longOffset' | 'shortGeneric' | 'longGeneric';
+  weekday?: 'long' | 'short' | 'narrow';
+  year?: 'numeric' | '2-digit';
+  month?: 'numeric' | '2-digit' | 'long' | 'short' | 'narrow';
+  day?: 'numeric' | '2-digit';
+  hour?: 'numeric' | '2-digit';
+  minute?: 'numeric' | '2-digit';
+  second?: 'numeric' | '2-digit';
+};
+
+export function formatApiTimestamp<TEmptyValue extends string | null = string>(
   value: string | null | undefined,
   {
-    emptyValue = '-',
+    emptyValue = '-' as TEmptyValue,
     locale = 'en-IN',
     timeZone = 'Asia/Kolkata',
     timeZoneName = 'short',
@@ -24,20 +38,8 @@ export function formatApiTimestamp(
     hour = 'numeric',
     minute = '2-digit',
     second = '2-digit',
-  }: {
-    emptyValue?: string | null;
-    locale?: string;
-    timeZone?: string;
-    timeZoneName?: 'short' | 'long' | 'shortOffset' | 'longOffset' | 'shortGeneric' | 'longGeneric';
-    weekday?: 'long' | 'short' | 'narrow';
-    year?: 'numeric' | '2-digit';
-    month?: 'numeric' | '2-digit' | 'long' | 'short' | 'narrow';
-    day?: 'numeric' | '2-digit';
-    hour?: 'numeric' | '2-digit';
-    minute?: 'numeric' | '2-digit';
-    second?: 'numeric' | '2-digit';
-  } = {},
-) {
+  }: FormatApiTimestampOptions<TEmptyValue> = {},
+): string | TEmptyValue {
   const date = parseApiTimestamp(value);
   if (!date) return value || emptyValue;
 
