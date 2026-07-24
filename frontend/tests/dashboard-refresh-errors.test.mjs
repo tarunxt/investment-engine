@@ -12,11 +12,11 @@ function read(relativePath) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-function assertTypeScriptParses(relativePath) {
+function transpileTypeScript(relativePath, moduleKind = ts.ModuleKind.ESNext) {
   const source = read(relativePath);
   const result = ts.transpileModule(source, {
     compilerOptions: {
-      module: ts.ModuleKind.ESNext,
+      module: moduleKind,
       target: ts.ScriptTarget.ES2022,
       jsx: ts.JsxEmit.ReactJSX,
     },
@@ -30,6 +30,17 @@ function assertTypeScriptParses(relativePath) {
     errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
     [],
   );
+  return result.outputText;
+}
+
+function loadTypeScriptModule(relativePath) {
+  const output = transpileTypeScript(relativePath, ts.ModuleKind.CommonJS);
+  const module = { exports: {} };
+  const evaluate = new Function("exports", "module", "require", output);
+  evaluate(module.exports, module, (specifier) => {
+    throw new Error(`Unexpected runtime import while loading ${relativePath}: ${specifier}`);
+  });
+  return module.exports;
 }
 
 test("latest threat responses hydrate a bounded history with one snapshot query", () => {
@@ -58,22 +69,39 @@ test("latest threat responses hydrate a bounded history with one snapshot query"
   assert.doesNotMatch(indmoneySource, /await snapshot_repo\.get_by_user_and_id/);
 });
 
-test("structured Bullpen degradation stays readable by dashboard clients", () => {
-  const sessionSource = read(
-    "../app/api/bullpen-ai/_lib/serverBackendSession.ts",
-  );
+test("structured Bullpen errors become concise dashboard warnings", () => {
+  const relativePath =
+    "../app/console/dashboard/_components/dashboardOverviewUtils.ts";
+  const { normalizeError } = loadTypeScriptModule(relativePath);
+  assert.equal(typeof normalizeError, "function");
 
-  assert.match(sessionSource, /isStructuredDegradedPositionsResponse/);
-  assert.match(sessionSource, /upstreamStatus === 503/);
-  assert.match(sessionSource, /\{ \.\.\.init, status: 200 \}/);
-  assert.match(sessionSource, /X-CredX-Degraded/);
-  assert.match(sessionSource, /X-CredX-Upstream-Status/);
-  assertTypeScriptParses(
-    "../app/api/bullpen-ai/_lib/serverBackendSession.ts",
+  const rawPayload = JSON.stringify({
+    positions: [],
+    liveAvailable: false,
+    health: {
+      message: "Bullpen runtime is unavailable.",
+      actionNeeded: "Verify Bullpen auth in the backend runtime, then retry.",
+    },
+    error: "Backend request and tracked-position fallback both failed.",
+  });
+  const normalized = normalizeError(new Error(rawPayload));
+
+  assert.equal(
+    normalized,
+    "Bullpen runtime is unavailable. Verify Bullpen auth in the backend runtime, then retry.",
+  );
+  assert.doesNotMatch(normalized, /[{}]/);
+  assert.equal(
+    normalizeError(new Error("Request timed out after 20000ms")),
+    "Request timed out after 20000ms",
   );
 });
 
-test("changed threat routers have valid Python syntax", () => {
+test("changed dashboard TypeScript and threat routers parse", () => {
+  transpileTypeScript(
+    "../app/console/dashboard/_components/dashboardOverviewUtils.ts",
+  );
+
   execFileSync(
     "python3",
     [
