@@ -128,12 +128,40 @@ export async function fetchBackendJsonWithSession<T = unknown>(
   }
 }
 
+function isStructuredDegradedPositionsResponse(body: unknown) {
+  if (!body || typeof body !== "object") {
+    return false;
+  }
+
+  const record = body as Record<string, unknown>;
+  return (
+    record.liveAvailable === false &&
+    Array.isArray(record.positions) &&
+    typeof record.error === "string"
+  );
+}
+
 export function backendSessionJson<T>(
   context: BackendSessionContext,
   body: T,
   init?: ResponseInit,
 ) {
-  const response = NextResponse.json(body, init);
+  const upstreamStatus = init?.status;
+  const shouldReturnStructuredDegradation =
+    upstreamStatus === 503 && isStructuredDegradedPositionsResponse(body);
+  const response = NextResponse.json(
+    body,
+    shouldReturnStructuredDegradation ? { ...init, status: 200 } : init,
+  );
+
+  if (shouldReturnStructuredDegradation) {
+    // The positions endpoint still returns its explicit liveAvailable=false,
+    // health, fallback, and error fields. Keep the JSON envelope consumable by
+    // dashboard clients instead of making them stringify it as an exception.
+    response.headers.set("X-CredX-Degraded", "true");
+    response.headers.set("X-CredX-Upstream-Status", String(upstreamStatus));
+  }
+
   const rotated = context.rotatedTokens;
   if (!rotated) {
     return response;
