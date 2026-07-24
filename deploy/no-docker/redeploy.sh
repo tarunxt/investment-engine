@@ -74,8 +74,10 @@ FRONTEND_ACTIVE_BUILD_NAME=".next"
 FRONTEND_CANDIDATE_BUILD_NAME=".next-candidate"
 FRONTEND_LIVE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_ACTIVE_BUILD_NAME"
 FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
+FRONTEND_INACTIVE_BUILD_DIR="$FRONTEND_CANDIDATE_BUILD_DIR"
 FRONTEND_CANDIDATE_READY=false
 FRONTEND_PREVIOUS_BUILD_AVAILABLE=false
+FRONTEND_RECOVERY_BUILD_IN_PLACE=false
 
 default_service_prefix() {
   if [[ "$APP_ROOT" == "$LEGACY_APP_ROOT" || "$APP_USER" == "$LEGACY_APP_USER" ]]; then
@@ -439,6 +441,17 @@ select_frontend_build_slots() {
 
   FRONTEND_LIVE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_ACTIVE_BUILD_NAME"
   FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
+  FRONTEND_INACTIVE_BUILD_DIR="$FRONTEND_CANDIDATE_BUILD_DIR"
+
+  if ! run_as_app_user "test -f '$FRONTEND_LIVE_BUILD_DIR/BUILD_ID' && test -d '$FRONTEND_LIVE_BUILD_DIR/static'"; then
+    # The currently selected output is already invalid, so preserving it only
+    # consumes the disk space needed to restore service. Rebuild it in place
+    # while retaining the inactive slot for diagnostics and a later release.
+    FRONTEND_RECOVERY_BUILD_IN_PLACE=true
+    FRONTEND_INACTIVE_BUILD_DIR="$FRONTEND_CANDIDATE_BUILD_DIR"
+    FRONTEND_CANDIDATE_BUILD_NAME="$FRONTEND_ACTIVE_BUILD_NAME"
+    FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_LIVE_BUILD_DIR"
+  fi
 }
 
 prepare_frontend_candidate_build() {
@@ -463,11 +476,14 @@ prepare_frontend_candidate_build() {
     test -f node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js
     printf '%s\\n' \"\$lock_hash\" > \"\$lock_marker\"
 
+    if [[ '$FRONTEND_RECOVERY_BUILD_IN_PLACE' == 'true' ]]; then
+      rm -rf '$FRONTEND_INACTIVE_BUILD_DIR'
+    fi
     rm -rf '$FRONTEND_CANDIDATE_BUILD_DIR'
     set -a
     source '$FRONTEND_ENV_FILE'
     set +a
-    NEXT_DIST_DIR='$FRONTEND_CANDIDATE_BUILD_NAME' npm run build
+    NEXT_DIST_DIR='$FRONTEND_CANDIDATE_BUILD_NAME' npm run build -- --webpack
 
     test -f '$FRONTEND_CANDIDATE_BUILD_DIR/BUILD_ID'
     test -d '$FRONTEND_CANDIDATE_BUILD_DIR/static'
@@ -483,7 +499,7 @@ promote_frontend_candidate_build() {
     return 1
   fi
 
-  if run_as_app_user "test -d '$FRONTEND_LIVE_BUILD_DIR'"; then
+  if [[ "$FRONTEND_RECOVERY_BUILD_IN_PLACE" != "true" ]] && run_as_app_user "test -d '$FRONTEND_LIVE_BUILD_DIR'"; then
     FRONTEND_PREVIOUS_BUILD_AVAILABLE=true
   fi
 

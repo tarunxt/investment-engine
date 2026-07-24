@@ -63,6 +63,18 @@ jobs:
             sudo test -d "$APP/frontend"
             echo "$APP"
 
+            echo "==> Filesystem capacity"
+            df -h "$APP"
+            sudo du -x -h -d 1 "$APP" /var /tmp 2>/dev/null | sort -h | tail -n 80 || true
+            sudo du -x -h -d 2 "$APP/frontend" 2>/dev/null | sort -h | tail -n 80 || true
+
+            echo "==> Deleted files still held open"
+            if command -v lsof >/dev/null 2>&1; then
+              sudo lsof +L1 2>/dev/null | tail -n 80 || true
+            else
+              echo "lsof is not installed"
+            fi
+
             echo "==> Frontend env file presence"
             sudo test -f "$FRONTEND_ENV_FILE"
             sudo ls -l "$FRONTEND_ENV_FILE"

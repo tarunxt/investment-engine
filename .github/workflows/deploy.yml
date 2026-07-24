@@ -179,8 +179,8 @@ jobs:
 
             # Never remove the active Next runtime during capacity recovery:
             # the running server can otherwise keep returning HTML that points
-            # to assets which no longer exist. Candidate builds are cleaned
-            # safely because they are never served.
+            # to assets which no longer exist. The deploy script selects and
+            # cleans an inactive build slot only after reading its pointer.
             MIN_FREE_KB=3145728
             REQUIRED_FREE_KB=1048576
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
