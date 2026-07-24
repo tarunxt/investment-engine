@@ -21,7 +21,7 @@ jobs:
       - name: Format changed backend files
         shell: bash
         run: |
-          python3 -m pip install --quiet black==26.3.1
+          python3 -m pip install --quiet black==25.1.0
           black \
             backend/app/domains/ai_providers/availability.py \
             backend/app/domains/ai_providers/factory.py \
