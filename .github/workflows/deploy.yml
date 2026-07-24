@@ -200,6 +200,33 @@ jobs:
                 sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
               fi
               if [[ -d "$APP_ROOT/frontend" ]]; then
+                ACTIVE_FRONTEND_BUILD=".next"
+                ACTIVE_FRONTEND_POINTER="$APP_ROOT/frontend/.next-active-dir"
+                if sudo test -f "$ACTIVE_FRONTEND_POINTER"; then
+                  ACTIVE_FRONTEND_BUILD="$(
+                    sudo -u "$APP_USER" -H cat "$ACTIVE_FRONTEND_POINTER" |
+                      tr -d '\r\n'
+                  )"
+                fi
+                case "$ACTIVE_FRONTEND_BUILD" in
+                  .next)
+                    INACTIVE_FRONTEND_BUILD="$APP_ROOT/frontend/.next-candidate"
+                    ;;
+                  .next-candidate)
+                    INACTIVE_FRONTEND_BUILD="$APP_ROOT/frontend/.next"
+                    ;;
+                  *)
+                    echo "Invalid active Next build directory: ${ACTIVE_FRONTEND_BUILD:-<empty>}" >&2
+                    exit 1
+                    ;;
+                esac
+                if sudo test -d "$INACTIVE_FRONTEND_BUILD"; then
+                  INACTIVE_FRONTEND_BUILD_KB="$(
+                    sudo du -sk "$INACTIVE_FRONTEND_BUILD" | awk '{print $1}'
+                  )"
+                  echo "==> Removing inactive Next build slot ($INACTIVE_FRONTEND_BUILD_KB KiB): $INACTIVE_FRONTEND_BUILD"
+                  sudo -u "$APP_USER" -H rm -rf -- "$INACTIVE_FRONTEND_BUILD"
+                fi
                 sudo -u "$APP_USER" -H rm -rf \
                   "$APP_ROOT/frontend/.npm" \
                   "$APP_ROOT/frontend/out"
