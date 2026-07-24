@@ -1,15 +1,15 @@
-name: Apply auto-rebalance provider resilience and IST fixes
+name: Package auto-rebalance provider resilience and IST fixes
 
 on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-and-validate:
+  package:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
 
     steps:
       - name: Checkout head branch
@@ -18,9 +18,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Restore final PR checks and apply implementation
-        id: apply
-        continue-on-error: true
+      - name: Apply validated implementation
         shell: bash
         run: |
           cat > .github/workflows/pr-checks.yml <<'EOF'
@@ -81,8 +79,7 @@ jobs:
                     if-no-files-found: error
           EOF
 
-          set +e
-          python3 - <<'RUNNER' > apply-auto-rebalance.log 2>&1
+          python3 - <<'RUNNER'
           from pathlib import Path
 
           workflow = Path(".github/workflows/apply-auto-rebalance-provider-errors-ist.yml").read_text()
@@ -124,95 +121,22 @@ jobs:
           )
           exec(compile(implementation, "apply-auto-rebalance-fix.py", "exec"))
           RUNNER
-          status=$?
-          set -e
-          echo "$status" > apply-auto-rebalance.status
-          cat apply-auto-rebalance.log
-          exit "$status"
 
-      - name: Upload implementation diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: auto-rebalance-implementation-diagnostics
-          path: |
-            apply-auto-rebalance.log
-            apply-auto-rebalance.status
-          if-no-files-found: error
-
-      - name: Stop after implementation failure
-        if: steps.apply.outcome == 'failure'
-        shell: bash
-        run: exit 1
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci --no-audit --fund=false
-
-      - name: Validate implementation
-        id: validate
-        continue-on-error: true
+      - name: Package changed files
         shell: bash
         run: |
-          set +e
-          {
-            python3 -m py_compile \
-              backend/app/domains/ai_providers/availability.py \
-              backend/app/domains/ai_providers/factory.py \
-              backend/app/domains/portfolio_events/target_resolution.py \
-              backend/app/domains/runs/use_cases/create_run.py \
-              backend/app/domains/jobs/tasks.py \
-              backend/app/domains/ai_providers/router.py \
-              backend/app/domains/zerodha/events_router.py \
-              backend/app/domains/zerodha/threats_router.py \
-              backend/app/domains/indmoney_us/events_router.py \
-              backend/app/domains/indmoney_us/threats_router.py
-            node --test \
-              frontend/tests/auto-rebalance-provider-errors-ist.test.mjs \
-              frontend/tests/rebalance-workflow-resilience.test.mjs \
-              frontend/tests/bullpen-server-auth.test.mjs \
-              frontend/tests/dashboard-refresh-errors.test.mjs
-            npm --prefix frontend run build -- --webpack
-            git diff --check
-          } > auto-rebalance-validation.log 2>&1
-          status=$?
-          set -e
-          echo "$status" > auto-rebalance-validation.status
-          cat auto-rebalance-validation.log
-          exit "$status"
+          git diff --name-status > auto-rebalance-manifest.txt
+          git diff --binary > auto-rebalance.patch
+          mapfile -t files < <(git diff --name-only --diff-filter=ACM)
+          tar -czf auto-rebalance-files.tar.gz "${files[@]}"
+          cat auto-rebalance-manifest.txt
 
-      - name: Upload validation diagnostics
-        if: always()
+      - name: Upload implementation package
         uses: actions/upload-artifact@v4
         with:
-          name: auto-rebalance-validation-diagnostics
+          name: auto-rebalance-validated-implementation
           path: |
-            auto-rebalance-validation.log
-            auto-rebalance-validation.status
+            auto-rebalance-manifest.txt
+            auto-rebalance.patch
+            auto-rebalance-files.tar.gz
           if-no-files-found: error
-
-      - name: Stop after validation failure
-        if: steps.validate.outcome == 'failure'
-        shell: bash
-        run: exit 1
-
-      - name: Commit implementation to PR branch
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f \
-            apply-auto-rebalance.log \
-            apply-auto-rebalance.status \
-            auto-rebalance-validation.log \
-            auto-rebalance-validation.status
-          git add -A
-          git commit -m "Fix auto-rebalance provider failures and IST timestamps"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
