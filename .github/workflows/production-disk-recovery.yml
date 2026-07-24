@@ -1,0 +1,436 @@
+name: Recover Production Disk
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/production-disk-recovery.yml'
+  workflow_dispatch:
+    inputs:
+      deploy_after_cleanup:
+        description: Deploy the current main branch after cleanup
+        required: true
+        default: true
+        type: boolean
+  workflow_run:
+    workflows:
+      - Deploy to Production
+    types:
+      - completed
+  schedule:
+    - cron: '17 */6 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Reclaim disk and recover deploy
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Reclaim bounded production disk space
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 3600s
+          command_timeout: 3600s
+          script: |
+            set -euo pipefail
+
+            EVENT_NAME='${{ github.event_name }}'
+            WORKFLOW_CONCLUSION='${{ github.event.workflow_run.conclusion }}'
+            MANUAL_DEPLOY='${{ inputs.deploy_after_cleanup }}'
+            APP_ROOT='${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}'
+            LEGACY_APP_ROOT='/srv/investor'
+            APP_USER='${{ vars.EC2_APP_USER || 'investment-engine' }}'
+            LEGACY_APP_USER='investor'
+            BACKEND_ENV_FILE='/etc/investor/backend.env'
+            TARGET_FREE_KB=4194304
+            DISK_RECOVERY_TRIGGER_KB=4194304
+            MINIMUM_DEPLOY_FREE_KB=2097152
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+            command -v git >/dev/null
+            sudo test -d "$APP_ROOT/.git"
+            id "$APP_USER" >/dev/null
+
+            available_kb() {
+              df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}'
+            }
+
+            print_storage_report() {
+              echo '==> Filesystem usage'
+              df -hT "$APP_ROOT" || true
+              echo '==> Largest /var directories'
+              sudo du -xhd1 /var 2>/dev/null | sort -hr | head -n 20 || true
+              echo '==> Largest /var/lib directories'
+              sudo du -xhd1 /var/lib 2>/dev/null | sort -hr | head -n 20 || true
+              echo '==> Largest /var/log directories'
+              sudo du -xhd1 /var/log 2>/dev/null | sort -hr | head -n 20 || true
+              echo '==> Files larger than 250 MiB under /var'
+              sudo find /var -xdev -type f -size +250M -printf '%s %p\n' 2>/dev/null |
+                sort -nr | head -n 30 || true
+              if command -v lsof >/dev/null 2>&1; then
+                echo '==> Deleted files still held open and larger than 100 MiB'
+                sudo lsof -nP +L1 2>/dev/null |
+                  awk 'NR > 1 && $7 ~ /^[0-9]+$/ && $7 >= 104857600 {print $1, $2, $7, $9}' |
+                  sort -k3,3nr | head -n 30 || true
+              fi
+            }
+
+            remove_inactive_frontend_build() {
+              local frontend_root="$APP_ROOT/frontend"
+              local active_build='.next'
+              local pointer="$frontend_root/.next-active-dir"
+              local inactive_build
+
+              [[ -d "$frontend_root" ]] || return 0
+              if sudo test -f "$pointer"; then
+                active_build="$(sudo -u "$APP_USER" -H cat "$pointer" | tr -d '\r\n')"
+              fi
+              case "$active_build" in
+                .next)
+                  inactive_build="$frontend_root/.next-candidate"
+                  ;;
+                .next-candidate)
+                  inactive_build="$frontend_root/.next"
+                  ;;
+                *)
+                  echo "Skipping frontend slot cleanup because the active pointer is invalid: ${active_build:-<empty>}" >&2
+                  return 0
+                  ;;
+              esac
+              if sudo test -d "$inactive_build"; then
+                echo "==> Removing inactive frontend build: $inactive_build"
+                sudo -u "$APP_USER" -H rm -rf -- "$inactive_build"
+              fi
+              sudo -u "$APP_USER" -H rm -rf -- "$frontend_root/.npm" "$frontend_root/out" || true
+            }
+
+            primary_cleanup() {
+              echo '==> Primary cleanup: bounded logs, package caches, temporary files and app caches'
+
+              sudo mkdir -p /etc/systemd/journald.conf.d
+              printf '%s\n' \
+                '[Journal]' \
+                'SystemMaxUse=128M' \
+                'RuntimeMaxUse=64M' \
+                'SystemKeepFree=2G' \
+                'MaxRetentionSec=7day' |
+                sudo tee /etc/systemd/journald.conf.d/credx-disk-budget.conf >/dev/null
+              sudo journalctl --rotate || true
+              sudo journalctl --vacuum-time=7d --vacuum-size=128M || true
+              sudo systemctl restart systemd-journald || true
+
+              sudo apt-get clean || true
+              sudo rm -rf \
+                /var/cache/apt/archives/*.deb \
+                /var/lib/apt/lists/* \
+                /var/cache/man/* \
+                /var/crash/* \
+                /var/lib/systemd/coredump/* || true
+              sudo find /tmp /var/tmp -xdev -mindepth 1 -mtime +2 -delete 2>/dev/null || true
+
+              if command -v logrotate >/dev/null 2>&1; then
+                sudo logrotate /etc/logrotate.conf || true
+              fi
+              for log_path in /var/log/syslog /var/log/auth.log /var/log/kern.log; do
+                if sudo test -f "$log_path" && (( $(sudo stat -c '%s' "$log_path") >= 536870912 )); then
+                  echo "==> Emergency truncation of oversized active log: $log_path"
+                  sudo truncate -s 0 "$log_path"
+                fi
+              done
+              for log_dir in /var/log/nginx /var/log/postgresql; do
+                sudo test -d "$log_dir" || continue
+                while IFS= read -r oversized_log; do
+                  echo "==> Emergency truncation of oversized active log: $oversized_log"
+                  sudo truncate -s 0 "$oversized_log"
+                done < <(sudo find "$log_dir" -xdev -type f -name '*.log' -size +512M -print 2>/dev/null)
+              done
+              sudo find /var/log -xdev -type f \
+                \( -name '*.gz' -o -name '*.old' -o -name '*.log.[2-9]' -o -name '*.log.[1-9][0-9]' \) \
+                -mtime +7 -delete 2>/dev/null || true
+
+              if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
+                sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
+              fi
+              APP_HOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+              if [[ -n "$APP_HOME" && -d "$APP_HOME" ]]; then
+                sudo -u "$APP_USER" -H rm -rf -- \
+                  "$APP_HOME/.cache/pip" \
+                  "$APP_HOME/.cache/node-gyp" \
+                  "$APP_HOME/.npm/_cacache" || true
+              fi
+              remove_inactive_frontend_build
+            }
+
+            prune_disabled_snaps() {
+              command -v snap >/dev/null 2>&1 || return 0
+              echo '==> Secondary cleanup: disabled Snap revisions'
+              sudo snap set system refresh.retain=2 || true
+              while read -r snap_name snap_revision; do
+                [[ -n "$snap_name" && -n "$snap_revision" ]] || continue
+                sudo snap remove "$snap_name" --revision="$snap_revision" || true
+              done < <(LANG=C snap list --all 2>/dev/null | awk 'NR > 1 && $NF == "disabled" {print $1, $3}')
+            }
+
+            prune_unused_docker_data() {
+              command -v docker >/dev/null 2>&1 || return 0
+              if ! sudo docker info >/dev/null 2>&1; then
+                if sudo test -d /var/lib/docker; then
+                  echo 'Docker data exists but the Docker daemon is unavailable; leaving it untouched.'
+                  sudo du -sh /var/lib/docker 2>/dev/null || true
+                fi
+                return 0
+              fi
+
+              echo '==> Secondary cleanup: unused Docker objects older than seven days (volumes are never removed)'
+              sudo docker system df || true
+              sudo docker container prune -f --filter 'until=168h' || true
+              sudo docker image prune -af --filter 'until=168h' || true
+              sudo docker builder prune -af --filter 'until=168h' || true
+              sudo docker network prune -f || true
+
+              if (( $(available_kb) < TARGET_FREE_KB )); then
+                echo '==> Final Docker fallback: remove all currently unused containers, images and build cache; preserve volumes'
+                sudo docker system prune -af || true
+                sudo docker builder prune -af || true
+              fi
+              sudo docker system df || true
+            }
+
+            release_deleted_open_files() {
+              command -v lsof >/dev/null 2>&1 || return 0
+              local deleted_bytes
+              deleted_bytes="$(sudo lsof -nP +L1 2>/dev/null |
+                awk 'NR > 1 && $7 ~ /^[0-9]+$/ && $7 >= 104857600 {sum += $7} END {print sum + 0}')"
+              if (( deleted_bytes < 268435456 )); then
+                return 0
+              fi
+
+              echo "==> ${deleted_bytes} bytes are held by deleted open files; restarting only known stateless app/web services"
+              local service
+              for service in \
+                investor-backend investment-engine-backend \
+                investor-celery-worker investment-engine-celery-worker \
+                investor-celery-auto-live-worker investment-engine-celery-auto-live-worker \
+                investor-celery-beat investment-engine-celery-beat \
+                investor-celery-beat-worker investment-engine-celery-beat-worker \
+                investor-frontend investment-engine-frontend nginx; do
+                sudo systemctl try-restart "$service" >/dev/null 2>&1 || true
+              done
+            }
+
+            prune_orphan_audit_blobs() {
+              [[ -x "$APP_ROOT/backend/.venv/bin/python" ]] || return 0
+              [[ -f "$BACKEND_ENV_FILE" ]] || return 0
+
+              cat > /tmp/credx-prune-audit-blobs.py <<'PY'
+            from __future__ import annotations
+
+            from sqlalchemy import text
+
+            from app.infrastructure.database.sync_session import sync_engine
+
+            TABLE = "bullpen_run_audit_blobs"
+            DELETE_BATCH = text(
+                """
+                WITH candidates AS (
+                    SELECT b.id
+                    FROM bullpen_run_audit_blobs AS b
+                    WHERE b.created_at < now() - interval '6 hours'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bullpen_run_audit_snapshots s
+                          WHERE s.canonical_bundle_blob_id = b.id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bullpen_run_audit_stages s
+                          WHERE s.inputs_blob_id = b.id
+                             OR s.outputs_blob_id = b.id
+                             OR s.raw_stage_blob_id = b.id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bullpen_run_audit_events e
+                          WHERE e.payload_blob_id = b.id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bullpen_run_audit_feedback f
+                          WHERE f.raw_output_blob_id = b.id
+                             OR f.report_blob_id = b.id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bullpen_run_audit_feedback_subcalls f
+                          WHERE f.input_blob_id = b.id
+                             OR f.raw_output_blob_id = b.id
+                      )
+                    ORDER BY b.created_at
+                    LIMIT 5000
+                    FOR UPDATE SKIP LOCKED
+                )
+                DELETE FROM bullpen_run_audit_blobs AS b
+                USING candidates c
+                WHERE b.id = c.id
+                RETURNING b.size_bytes
+                """
+            )
+
+            with sync_engine.connect() as connection:
+                exists = connection.execute(
+                    text("SELECT to_regclass('public.bullpen_run_audit_blobs')")
+                ).scalar_one_or_none()
+                if not exists:
+                    print("Audit blob table is not installed; skipping database cleanup")
+                    raise SystemExit(0)
+
+                database_size = connection.execute(
+                    text("SELECT pg_database_size(current_database())")
+                ).scalar_one()
+                blob_table_size = connection.execute(
+                    text("SELECT pg_total_relation_size('bullpen_run_audit_blobs'::regclass)"),
+                ).scalar_one()
+                print(f"Database bytes before cleanup: {int(database_size)}")
+                print(f"Audit blob relation bytes before cleanup: {int(blob_table_size)}")
+
+            deleted_rows = 0
+            deleted_payload_bytes = 0
+            for _ in range(200):
+                with sync_engine.begin() as connection:
+                    sizes = [int(row[0] or 0) for row in connection.execute(DELETE_BATCH)]
+                if not sizes:
+                    break
+                deleted_rows += len(sizes)
+                deleted_payload_bytes += sum(sizes)
+                if len(sizes) < 5000:
+                    break
+
+            print(f"Deleted orphan audit blobs: {deleted_rows} rows / {deleted_payload_bytes} payload bytes")
+            if deleted_rows:
+                with sync_engine.connect().execution_options(
+                    isolation_level="AUTOCOMMIT"
+                ) as connection:
+                    connection.execute(text("VACUUM (ANALYZE) bullpen_run_audit_blobs"))
+
+            with sync_engine.connect() as connection:
+                print("Largest PostgreSQL relations:")
+                rows = connection.execute(
+                    text(
+                        """
+                        SELECT relname, pg_total_relation_size(relid) AS bytes
+                        FROM pg_catalog.pg_statio_user_tables
+                        ORDER BY bytes DESC
+                        LIMIT 15
+                        """
+                    )
+                )
+                for name, size_bytes in rows:
+                    print(f"  {int(size_bytes):>14} {name}")
+            PY
+
+              sudo -u "$APP_USER" -H bash -lc "
+                set -euo pipefail
+                set -a
+                source '$BACKEND_ENV_FILE'
+                set +a
+                cd '$APP_ROOT/backend'
+                '$APP_ROOT/backend/.venv/bin/python' /tmp/credx-prune-audit-blobs.py
+              " || true
+              rm -f /tmp/credx-prune-audit-blobs.py
+            }
+
+            echo "==> Recovery event: $EVENT_NAME${WORKFLOW_CONCLUSION:+ ($WORKFLOW_CONCLUSION)}"
+            echo "==> Production app root: $APP_ROOT"
+            echo "==> Production app user: $APP_USER"
+            INITIAL_AVAILABLE_KB="$(available_kb)"
+            echo "==> Initial free space: ${INITIAL_AVAILABLE_KB} KiB"
+            print_storage_report
+
+            if [[ "$EVENT_NAME" == 'workflow_run' ]] && (( INITIAL_AVAILABLE_KB >= DISK_RECOVERY_TRIGGER_KB )); then
+              echo 'The failed deployment did not begin with a low-disk condition; disk recovery will not retry an unrelated failure.'
+              exit 0
+            fi
+
+            if (( INITIAL_AVAILABLE_KB < TARGET_FREE_KB )); then
+              primary_cleanup
+              echo "==> Free space after primary cleanup: $(available_kb) KiB"
+
+              if (( $(available_kb) < TARGET_FREE_KB )); then
+                prune_disabled_snaps
+                prune_unused_docker_data
+                release_deleted_open_files
+                echo "==> Free space after secondary cleanup: $(available_kb) KiB"
+              fi
+            fi
+
+            if (( INITIAL_AVAILABLE_KB < TARGET_FREE_KB )) || [[ "$EVENT_NAME" == 'schedule' ]]; then
+              prune_orphan_audit_blobs
+              echo "==> Free space after database orphan cleanup: $(available_kb) KiB"
+            fi
+
+            FINAL_AVAILABLE_KB="$(available_kb)"
+            echo "==> Final free space: ${FINAL_AVAILABLE_KB} KiB"
+            print_storage_report
+
+            DEPLOY_AFTER_CLEANUP=false
+            case "$EVENT_NAME" in
+              push|workflow_run)
+                DEPLOY_AFTER_CLEANUP=true
+                ;;
+              workflow_dispatch)
+                [[ "$MANUAL_DEPLOY" == 'true' ]] && DEPLOY_AFTER_CLEANUP=true
+                ;;
+              schedule)
+                DEPLOY_AFTER_CLEANUP=false
+                ;;
+            esac
+
+            if [[ "$DEPLOY_AFTER_CLEANUP" != 'true' ]]; then
+              exit 0
+            fi
+            if (( FINAL_AVAILABLE_KB < MINIMUM_DEPLOY_FREE_KB )); then
+              echo 'Production still has less than 2 GiB free after all safe cleanup layers. Refusing to build until the largest reported /var consumer is addressed.' >&2
+              exit 1
+            fi
+
+            echo '==> Sync GitHub main to EC2 after capacity recovery'
+            sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
+
+            if command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+              echo '==> PostgreSQL is not ready; restarting it after disk recovery'
+              sudo systemctl restart postgresql
+              for attempt in $(seq 1 30); do
+                pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1 && break
+                sleep 1
+              done
+              pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1
+            fi
+
+            echo '==> Run recovered full-stack deployment'
+            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" \
+              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
+
+            if [[ -f "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh" ]]; then
+              APP_ROOT="$APP_ROOT" \
+                APP_USER="$APP_USER" \
+                FRONTEND_ENV_FILE='/etc/investor/frontend.env' \
+                bash "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh"
+            fi
+
+            echo "==> Recovery deployment completed with $(available_kb) KiB free"
