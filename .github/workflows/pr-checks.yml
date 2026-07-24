@@ -2,11 +2,24 @@ name: Pull Request Checks
 
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  backend-syntax:
+    name: Backend Python syntax checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compile backend Python sources
+        run: python3 -m compileall -q backend/app
+
   frontend:
     name: Frontend build and dashboard regression tests
     runs-on: ubuntu-latest
@@ -17,7 +30,6 @@ jobs:
         working-directory: frontend
 
     env:
-      NODE_ENV: production
       NEXTAUTH_URL: http://localhost:3000
       NEXTAUTH_SECRET: pull-request-check-secret
       NEXT_PUBLIC_FRONTEND_URL: http://localhost:3000
@@ -25,31 +37,34 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
-        run: npm ci --no-audit --fund=false
+        run: npm ci --include=dev --no-audit --fund=false
 
       - name: Run dashboard regression tests
         run: >-
           node --test
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs
+          tests/rebalance-workflow-resilience.test.mjs
           tests/auto-rebalance-provider-errors-ist.test.mjs
 
       - name: Build frontend
+        env:
+          NODE_ENV: production
         run: npm run build -- --webpack 2>&1 | tee frontend-build.log
 
       - name: Upload frontend build log
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: frontend-build-log
           path: frontend/frontend-build.log
