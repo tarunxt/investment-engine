@@ -238,3 +238,9 @@ jobs:
 
             echo "==> Run full-stack deploy"
             SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
+
+            echo "==> Install/update Bullpen wallet healthcheck timer"
+            APP_ROOT="$APP_ROOT" \
+              APP_USER="$APP_USER" \
+              FRONTEND_ENV_FILE="/etc/investor/frontend.env" \
+              bash "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh"
