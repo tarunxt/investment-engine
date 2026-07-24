@@ -62,10 +62,27 @@ async function pathExists(targetPath) {
   }
 }
 
-async function ensureLegacyMiddlewareManifest(projectRoot) {
+function resolveNextOutputPath(projectRoot, outputDirectory) {
+  if (!outputDirectory || path.isAbsolute(outputDirectory)) {
+    throw new Error("Next output directory must be a non-empty relative path.");
+  }
+
+  const outputPath = path.resolve(projectRoot, outputDirectory);
+  const relativeOutputPath = path.relative(projectRoot, outputPath);
+  if (
+    relativeOutputPath === "" ||
+    relativeOutputPath === ".." ||
+    relativeOutputPath.startsWith(`..${path.sep}`)
+  ) {
+    throw new Error("Next output directory must stay within the project root.");
+  }
+
+  return outputPath;
+}
+
+async function ensureLegacyMiddlewareManifest(nextOutputPath) {
   const rootManifestPath = path.join(
-    projectRoot,
-    ".next",
+    nextOutputPath,
     "server",
     "middleware-manifest.json",
   );
@@ -74,18 +91,17 @@ async function ensureLegacyMiddlewareManifest(projectRoot) {
   }
 
   const nestedManifestPath = path.join(
-    projectRoot,
-    ".next",
+    nextOutputPath,
     "server",
     "middleware",
     "middleware-manifest.json",
   );
   if (!(await pathExists(nestedManifestPath))) {
     const hasProxyEntrypoint =
-      (await pathExists(path.join(projectRoot, "middleware.ts"))) ||
-      (await pathExists(path.join(projectRoot, "middleware.js"))) ||
-      (await pathExists(path.join(projectRoot, "proxy.ts"))) ||
-      (await pathExists(path.join(projectRoot, "proxy.js")));
+      (await pathExists(path.join(path.dirname(nextOutputPath), "middleware.ts"))) ||
+      (await pathExists(path.join(path.dirname(nextOutputPath), "middleware.js"))) ||
+      (await pathExists(path.join(path.dirname(nextOutputPath), "proxy.ts"))) ||
+      (await pathExists(path.join(path.dirname(nextOutputPath), "proxy.js")));
 
     if (hasProxyEntrypoint) {
       throw new Error(
@@ -117,8 +133,8 @@ async function ensureLegacyMiddlewareManifest(projectRoot) {
   return rootManifestPath;
 }
 
-async function ensureFallback500Page(projectRoot) {
-  const errorPagePath = path.join(projectRoot, ".next", "server", "pages", "500.html");
+async function ensureFallback500Page(nextOutputPath) {
+  const errorPagePath = path.join(nextOutputPath, "server", "pages", "500.html");
   if (await pathExists(errorPagePath)) {
     return null;
   }
@@ -130,12 +146,16 @@ async function ensureFallback500Page(projectRoot) {
 
 async function main() {
   const projectRoot = path.resolve(process.argv[2] || process.cwd());
+  const nextOutputPath = resolveNextOutputPath(
+    projectRoot,
+    process.argv[3] || process.env.NEXT_DIST_DIR || ".next",
+  );
   const repairedPaths = [];
 
-  const manifestPath = await ensureLegacyMiddlewareManifest(projectRoot);
+  const manifestPath = await ensureLegacyMiddlewareManifest(nextOutputPath);
   if (manifestPath) repairedPaths.push(path.relative(projectRoot, manifestPath));
 
-  const errorPagePath = await ensureFallback500Page(projectRoot);
+  const errorPagePath = await ensureFallback500Page(nextOutputPath);
   if (errorPagePath) repairedPaths.push(path.relative(projectRoot, errorPagePath));
 
   if (repairedPaths.length > 0) {

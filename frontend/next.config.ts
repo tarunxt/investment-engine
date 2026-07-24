@@ -52,6 +52,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Production builds are assembled in the inactive slot and promoted only
+  // after a successful build. The launcher reads the selected build directory
+  // from the deployment pointer, so a failed build never removes live assets.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   allowedDevOrigins: ["192.168.10.2", "localhost"],
   poweredByHeader: false,
   async headers() {

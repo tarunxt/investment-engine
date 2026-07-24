@@ -68,6 +68,15 @@ if [[ ! -d "$APP_ROOT" ]]; then
   exit 1
 fi
 
+FRONTEND_ROOT="$APP_ROOT/frontend"
+FRONTEND_ACTIVE_BUILD_POINTER="$FRONTEND_ROOT/.next-active-dir"
+FRONTEND_ACTIVE_BUILD_NAME=".next"
+FRONTEND_CANDIDATE_BUILD_NAME=".next-candidate"
+FRONTEND_LIVE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_ACTIVE_BUILD_NAME"
+FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
+FRONTEND_CANDIDATE_READY=false
+FRONTEND_PREVIOUS_BUILD_AVAILABLE=false
+
 default_service_prefix() {
   if [[ "$APP_ROOT" == "$LEGACY_APP_ROOT" || "$APP_USER" == "$LEGACY_APP_USER" ]]; then
     printf 'investment-engine\n'
@@ -352,6 +361,159 @@ smoke_check() {
 
   echo "Smoke check failed after $SMOKE_RETRIES attempts: $label ($url)" >&2
   curl --fail --silent --show-error --location --max-time "$SMOKE_TIMEOUT_SECONDS" "$url" >/dev/null
+}
+
+smoke_check_frontend_static_asset() {
+  local html_file headers_file asset_path content_type
+
+  html_file="$(mktemp)"
+  headers_file="$(mktemp)"
+
+  cleanup_frontend_static_smoke_files() {
+    rm -f "$html_file" "$headers_file"
+  }
+
+  echo "==> Smoke check: frontend static asset ($FRONTEND_SMOKE_URL)"
+  if ! curl --fail --silent --show-error --location --max-time "$SMOKE_TIMEOUT_SECONDS" "$FRONTEND_SMOKE_URL" >"$html_file"; then
+    cleanup_frontend_static_smoke_files
+    return 1
+  fi
+
+  asset_path=$(python3 - "$html_file" <<'PY'
+import re
+import sys
+
+html = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r"/_next/static/[^\x22\x27\s>]+\.(?:css|js)(?:\?[^\x22\x27\s>]*)?", html)
+if match:
+    print(match.group(0))
+PY
+)
+
+  if [[ -z "$asset_path" ]]; then
+    echo "Frontend smoke response did not reference a Next static asset." >&2
+    cleanup_frontend_static_smoke_files
+    return 1
+  fi
+
+  if ! curl --fail --silent --show-error --max-time "$SMOKE_TIMEOUT_SECONDS" --dump-header "$headers_file" "http://127.0.0.1:3000${asset_path}" >/dev/null; then
+    cleanup_frontend_static_smoke_files
+    return 1
+  fi
+
+  content_type="$(awk 'BEGIN { IGNORECASE = 1 } /^content-type:/ { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print tolower($0); exit }' "$headers_file")"
+  cleanup_frontend_static_smoke_files
+
+  if [[ "$asset_path" == *.css* ]]; then
+    [[ "$content_type" == text/css* ]]
+  else
+    [[ "$content_type" == *javascript* || "$content_type" == *ecmascript* ]]
+  fi
+}
+
+select_frontend_build_slots() {
+  local active_build_name
+
+  active_build_name="$(run_as_app_user "
+    if [[ -f '$FRONTEND_ACTIVE_BUILD_POINTER' ]]; then
+      tr -d '\\r\\n' < '$FRONTEND_ACTIVE_BUILD_POINTER'
+    else
+      printf '.next'
+    fi
+  ")"
+
+  case "$active_build_name" in
+    .next)
+      FRONTEND_ACTIVE_BUILD_NAME=".next"
+      FRONTEND_CANDIDATE_BUILD_NAME=".next-candidate"
+      ;;
+    .next-candidate)
+      FRONTEND_ACTIVE_BUILD_NAME=".next-candidate"
+      FRONTEND_CANDIDATE_BUILD_NAME=".next"
+      ;;
+    *)
+      echo "Invalid active Next build directory: ${active_build_name:-<empty>}" >&2
+      return 1
+      ;;
+  esac
+
+  FRONTEND_LIVE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_ACTIVE_BUILD_NAME"
+  FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
+}
+
+prepare_frontend_candidate_build() {
+  echo "==> Build frontend candidate"
+  select_frontend_build_slots
+
+  run_as_app_user "
+    cd '$FRONTEND_ROOT'
+
+    lock_hash=\"\$(sha256sum package-lock.json | awk '{print \$1}')\"
+    lock_marker='node_modules/.investor-package-lock.sha256'
+
+    if [[ ! -x node_modules/.bin/next ]]; then
+      echo '==> Frontend dependencies are missing; installing them'
+      npm ci --prefer-offline --no-audit --fund=false
+    elif [[ -f \"\$lock_marker\" ]] && [[ \"\$(cat \"\$lock_marker\")\" != \"\$lock_hash\" ]]; then
+      echo 'Frontend dependency lock changed. Refusing an in-place npm install because it would remove the running frontend runtime. Free capacity for a staged dependency deployment, then retry.' >&2
+      exit 1
+    fi
+
+    test -f node_modules/next/dist/compiled/cookie/index.js
+    test -f node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js
+    printf '%s\\n' \"\$lock_hash\" > \"\$lock_marker\"
+
+    rm -rf '$FRONTEND_CANDIDATE_BUILD_DIR'
+    set -a
+    source '$FRONTEND_ENV_FILE'
+    set +a
+    NEXT_DIST_DIR='$FRONTEND_CANDIDATE_BUILD_NAME' npm run build
+
+    test -f '$FRONTEND_CANDIDATE_BUILD_DIR/BUILD_ID'
+    test -d '$FRONTEND_CANDIDATE_BUILD_DIR/static'
+    node '$APP_ROOT/deploy/no-docker/repair-next-runtime-artifacts.mjs' '$FRONTEND_ROOT' '$FRONTEND_CANDIDATE_BUILD_NAME'
+  "
+
+  FRONTEND_CANDIDATE_READY=true
+}
+
+promote_frontend_candidate_build() {
+  if [[ "$FRONTEND_CANDIDATE_READY" != "true" ]]; then
+    echo "Frontend candidate build is not ready for promotion." >&2
+    return 1
+  fi
+
+  if run_as_app_user "test -d '$FRONTEND_LIVE_BUILD_DIR'"; then
+    FRONTEND_PREVIOUS_BUILD_AVAILABLE=true
+  fi
+
+  run_as_app_user "
+    cd '$FRONTEND_ROOT'
+    printf '%s\\n' '$FRONTEND_CANDIDATE_BUILD_NAME' > '$FRONTEND_ACTIVE_BUILD_POINTER.next'
+    mv '$FRONTEND_ACTIVE_BUILD_POINTER.next' '$FRONTEND_ACTIVE_BUILD_POINTER'
+  "
+
+  FRONTEND_CANDIDATE_READY=false
+}
+
+restore_previous_frontend_build() {
+  if [[ "$FRONTEND_PREVIOUS_BUILD_AVAILABLE" != "true" ]]; then
+    return
+  fi
+
+  echo "==> Restoring the previous frontend build after failed verification"
+  run_as_app_user "
+    cd '$FRONTEND_ROOT'
+    printf '%s\\n' '$FRONTEND_ACTIVE_BUILD_NAME' > '$FRONTEND_ACTIVE_BUILD_POINTER.next'
+    mv '$FRONTEND_ACTIVE_BUILD_POINTER.next' '$FRONTEND_ACTIVE_BUILD_POINTER'
+  "
+  sudo systemctl restart "$FRONTEND_SERVICE_NAME" || true
+}
+
+discard_previous_frontend_build() {
+  # Retain the previous slot until a later successful build overwrites it so
+  # an immediate verification failure can be rolled back without rebuilding.
+  FRONTEND_PREVIOUS_BUILD_AVAILABLE=false
 }
 
 print_service_diagnostics() {
@@ -876,31 +1038,12 @@ run_as_app_user "
 
 if [[ "$SCOPE" == "full" ]]; then
   ensure_swap_file
-  echo "==> Update frontend dependencies and build"
-  run_as_app_user "
-    cd '$APP_ROOT/frontend'
-    rm -rf node_modules .next
-    npm ci --prefer-offline --no-audit --fund=false
-    test -f node_modules/next/dist/compiled/cookie/index.js
-    test -f node_modules/next/dist/server/lib/router-utils/instrumentation-globals.external.js
-    set -a
-    source '$FRONTEND_ENV_FILE'
-    set +a
-    npm run build
-    node '$APP_ROOT/deploy/no-docker/repair-next-runtime-artifacts.mjs' '$APP_ROOT/frontend'
-  "
+  prepare_frontend_candidate_build
 fi
 
 echo "==> Restart services"
 sudo systemctl enable "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
 sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
-
-if [[ "$SCOPE" == "full" ]]; then
-  sudo systemctl restart "$FRONTEND_SERVICE_NAME"
-  if [[ "$NGINX_RELOAD_REQUIRED" == "true" ]]; then
-    sudo systemctl reload nginx
-  fi
-fi
 
 echo "==> Verify service startup"
 verify_service_active "$BACKEND_SERVICE_NAME"
@@ -908,8 +1051,33 @@ verify_service_active "$WORKER_SERVICE_NAME"
 verify_service_active "$AUTO_LIVE_WORKER_SERVICE_NAME"
 verify_service_active "$BEAT_SERVICE_NAME"
 verify_service_active "$BEAT_WORKER_SERVICE_NAME"
+
+echo "==> Smoke checks"
+smoke_check "backend live" "$BACKEND_LIVE_URL"
+smoke_check "backend ready" "$BACKEND_READY_URL"
+
 if [[ "$SCOPE" == "full" ]]; then
-  verify_service_active "$FRONTEND_SERVICE_NAME"
+  echo "==> Promote frontend candidate and restart frontend service"
+  promote_frontend_candidate_build
+  sudo systemctl restart "$FRONTEND_SERVICE_NAME"
+  if [[ "$NGINX_RELOAD_REQUIRED" == "true" ]]; then
+    sudo systemctl reload nginx
+  fi
+
+  if ! verify_service_active "$FRONTEND_SERVICE_NAME"; then
+    restore_previous_frontend_build
+    exit 1
+  fi
+
+  if ! smoke_check "frontend login" "$FRONTEND_SMOKE_URL" || \
+    ! smoke_check "frontend console dashboard" "$FRONTEND_CONSOLE_SMOKE_URL" || \
+    ! smoke_check "frontend Bullpen AI console" "$FRONTEND_BULLPEN_AI_SMOKE_URL" || \
+    ! smoke_check_frontend_static_asset; then
+    restore_previous_frontend_build
+    exit 1
+  fi
+
+  discard_previous_frontend_build
 fi
 
 echo "==> Service status"
@@ -920,18 +1088,6 @@ sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
 sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager
 if [[ "$SCOPE" == "full" ]]; then
   sudo systemctl status "$FRONTEND_SERVICE_NAME" --no-pager
-fi
-
-echo "==> Smoke checks"
-smoke_check "backend live" "$BACKEND_LIVE_URL"
-smoke_check "backend ready" "$BACKEND_READY_URL"
-if [[ "$SCOPE" == "full" ]]; then
-  smoke_check "frontend login" "$FRONTEND_SMOKE_URL"
-  # The login route alone does not load the protected console route. Verify the
-  # dashboard too so a broken App Router/proxy artifact fails the release
-  # instead of surfacing as a production 500 after deployment.
-  smoke_check "frontend console dashboard" "$FRONTEND_CONSOLE_SMOKE_URL"
-  smoke_check "frontend Bullpen AI console" "$FRONTEND_BULLPEN_AI_SMOKE_URL"
 fi
 
 CONFIG_ROLLBACK_ENABLED=false

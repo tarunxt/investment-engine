@@ -12,10 +12,14 @@ const scriptPath = fileURLToPath(
   new URL("./repair-next-runtime-artifacts.mjs", import.meta.url),
 );
 
-async function runRepair(projectRoot) {
-  return execFileAsync(process.execPath, [scriptPath, projectRoot], {
-    cwd: projectRoot,
-  });
+async function runRepair(projectRoot, outputDirectory) {
+  return execFileAsync(
+    process.execPath,
+    [scriptPath, projectRoot, ...(outputDirectory ? [outputDirectory] : [])],
+    {
+      cwd: projectRoot,
+    },
+  );
 }
 
 test("repair-next-runtime-artifacts recreates missing runtime files", async () => {
@@ -104,4 +108,39 @@ test("repair-next-runtime-artifacts preserves existing files", async () => {
   assert.match(stdout, /already present/);
   assert.equal(await readFile(rootManifestPath, "utf8"), '{"version":3,"middleware":{},"sortedMiddleware":[],"functions":{}}\n');
   assert.equal(await readFile(errorPagePath, "utf8"), "custom-500");
+});
+
+test("repair-next-runtime-artifacts repairs a staged Next output directory", async () => {
+  const projectRoot = await mkdtemp(path.join(tmpdir(), "next-runtime-artifacts-"));
+  const outputDirectory = ".next-candidate";
+  const nestedManifestPath = path.join(
+    projectRoot,
+    outputDirectory,
+    "server",
+    "middleware",
+    "middleware-manifest.json",
+  );
+
+  await mkdir(path.dirname(nestedManifestPath), { recursive: true });
+  await writeFile(path.join(projectRoot, "proxy.ts"), "export default function proxy() {}\n", "utf8");
+  await writeFile(
+    nestedManifestPath,
+    JSON.stringify({ middleware: {}, sortedMiddleware: [], functions: {} }),
+    "utf8",
+  );
+
+  await runRepair(projectRoot, outputDirectory);
+
+  await readFile(
+    path.join(projectRoot, outputDirectory, "server", "middleware-manifest.json"),
+    "utf8",
+  );
+  await readFile(
+    path.join(projectRoot, outputDirectory, "server", "pages", "500.html"),
+    "utf8",
+  );
+  await assert.rejects(
+    readFile(path.join(projectRoot, ".next", "server", "pages", "500.html"), "utf8"),
+    { code: "ENOENT" },
+  );
 });

@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "postbuild": "node ../deploy/no-docker/repair-next-runtime-artifacts.mjs ."
+    "postbuild": "node ../deploy/no-docker/repair-next-runtime-artifacts.mjs . \"${NEXT_DIST_DIR:-.next}\""
   },
   "dependencies": {
     "@auth/core": "^0.41.2",

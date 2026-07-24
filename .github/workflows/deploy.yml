@@ -177,14 +177,15 @@ jobs:
             sudo test -d "$APP_ROOT/.git"
             id "$APP_USER" >/dev/null
 
-            # A frontend dependency install and Next build need significantly
-            # more working space than the 512 MiB final-artifact footprint.
-            # Trigger safe cache cleanup early, before npm starts extracting.
+            # Never remove the active Next runtime during capacity recovery:
+            # the running server can otherwise keep returning HTML that points
+            # to assets which no longer exist. Candidate builds are cleaned
+            # safely because they are never served.
             MIN_FREE_KB=3145728
-            REQUIRED_FREE_KB=1572864
+            REQUIRED_FREE_KB=1048576
             AVAILABLE_KB="$(df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}')"
             if (( AVAILABLE_KB < MIN_FREE_KB )); then
-              echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches and rebuildable frontend artifacts"
+              echo "==> Low disk space detected (${AVAILABLE_KB} KiB free); pruning bounded system caches and abandoned frontend candidates"
               sudo journalctl --vacuum-time=3d --vacuum-size=64M || true
               sudo apt-get clean || true
               sudo rm -rf \
@@ -200,8 +201,6 @@ jobs:
               fi
               if [[ -d "$APP_ROOT/frontend" ]]; then
                 sudo -u "$APP_USER" -H rm -rf \
-                  "$APP_ROOT/frontend/.next" \
-                  "$APP_ROOT/frontend/node_modules" \
                   "$APP_ROOT/frontend/.npm" \
                   "$APP_ROOT/frontend/out"
                 sudo -u "$APP_USER" -H sh -c 'rm -rf "$HOME/.npm" "$HOME/.cache"' || true
@@ -211,7 +210,7 @@ jobs:
               echo "==> Disk space after cache/artifact pruning: ${AVAILABLE_KB} KiB free"
             fi
             if (( AVAILABLE_KB < REQUIRED_FREE_KB )); then
-              echo "Production full-stack deploy requires at least 1.5 GiB free after bounded cache and rebuildable artifact cleanup." >&2
+              echo "Production full-stack deploy requires at least 1 GiB free after bounded cache cleanup." >&2
               df -h "$APP_ROOT" >&2
               exit 1
             fi
