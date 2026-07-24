@@ -41,4 +41,12 @@ jobs:
         run: node --test tests/bullpen-server-auth.test.mjs
 
       - name: Build frontend
-        run: npm run build -- --webpack
+        run: npm run build -- --webpack 2>&1 | tee frontend-build.log
+
+      - name: Upload frontend build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-log
+          path: frontend/frontend-build.log
+          if-no-files-found: error
