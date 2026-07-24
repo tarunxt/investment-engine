@@ -35,16 +35,46 @@ jobs:
         id: duration_patch
         working-directory: ${{ github.workspace }}
         run: |
-          pwd
-          ls -la scripts/apply_duration_breakdown_fix.py
-          python3 -u scripts/apply_duration_breakdown_fix.py
-          echo "applied=true" >> "$GITHUB_OUTPUT"
+          had_diagnostic=false
+          if [ -f duration-patch.log ]; then
+            had_diagnostic=true
+          fi
+          set +e
+          python3 -u scripts/apply_duration_breakdown_fix.py > /tmp/duration-patch.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/duration-patch.log
+          if [ "$status" -eq 0 ]; then
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+            echo "diagnostic_needed=false" >> "$GITHUB_OUTPUT"
+          else
+            git reset --hard HEAD
+            cp /tmp/duration-patch.log duration-patch.log
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+            if [ "$had_diagnostic" = false ]; then
+              echo "diagnostic_needed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "diagnostic_needed=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Commit patch diagnostics
+        if: steps.duration_patch.outputs.diagnostic_needed == 'true'
+        working-directory: ${{ github.workspace }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add duration-patch.log
+          git commit -m "Record duration patch diagnostic"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
       - name: Check patch formatting
+        if: steps.duration_patch.outputs.applied == 'true'
         working-directory: ${{ github.workspace }}
         run: git diff --check
 
       - name: Set up Node
+        if: steps.duration_patch.outputs.applied == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -52,15 +82,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
+        if: steps.duration_patch.outputs.applied == 'true'
         run: npm ci --no-audit --fund=false
 
       - name: Run dashboard regression tests
+        if: steps.duration_patch.outputs.applied == 'true'
         run: >-
           node --test
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs
 
       - name: Build frontend
+        if: steps.duration_patch.outputs.applied == 'true'
         run: npm run build -- --webpack 2>&1 | tee frontend-build.log
 
       - name: Commit generated duration popup fix
@@ -69,6 +102,7 @@ jobs:
         run: |
           git fetch --depth=1 origin main
           git checkout FETCH_HEAD -- .github/workflows/pr-checks.yml
+          rm -f duration-patch.log
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
