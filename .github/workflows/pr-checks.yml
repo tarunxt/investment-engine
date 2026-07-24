@@ -1,80 +1,56 @@
-name: Normalize auto-rebalance fixes
+name: Pull Request Checks
 
 on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  normalize:
+  frontend:
+    name: Frontend build and dashboard regression tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    env:
+      NODE_ENV: production
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: pull-request-check-secret
+      NEXT_PUBLIC_FRONTEND_URL: http://localhost:3000
+      BACKEND_API_URL: http://127.0.0.1:8000
 
     steps:
-      - name: Checkout head branch
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Normalize implementation source
-        run: python3 scripts/normalize_auto_rebalance_changes.py
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --fund=false
 
-      - name: Validate normalized implementation
-        id: validate
-        continue-on-error: true
-        run: |
-          set +e
-          {
-            python3 -m py_compile \
-              backend/app/domains/ai_providers/availability.py \
-              backend/app/domains/ai_providers/factory.py \
-              backend/app/domains/ai_providers/router.py \
-              backend/app/domains/portfolio_events/target_resolution.py \
-              backend/app/domains/runs/use_cases/create_run.py \
-              backend/app/domains/jobs/tasks.py \
-              backend/app/domains/zerodha/events_router.py \
-              backend/app/domains/zerodha/threats_router.py \
-              backend/app/domains/indmoney_us/events_router.py \
-              backend/app/domains/indmoney_us/threats_router.py
-            node --test \
-              frontend/tests/auto-rebalance-provider-errors-ist.test.mjs \
-              frontend/tests/rebalance-workflow-resilience.test.mjs \
-              frontend/tests/bullpen-server-auth.test.mjs \
-              frontend/tests/dashboard-refresh-errors.test.mjs
-            npm --prefix frontend ci --no-audit --fund=false
-            npm --prefix frontend run build -- --webpack
-            git diff --check
-          } > normalization-validation.log 2>&1
-          status=$?
-          set -e
-          echo "$status" > normalization-validation.status
-          cat normalization-validation.log
-          exit "$status"
+      - name: Run dashboard regression tests
+        run: >-
+          node --test
+          tests/bullpen-server-auth.test.mjs
+          tests/dashboard-refresh-errors.test.mjs
+          tests/auto-rebalance-provider-errors-ist.test.mjs
 
-      - name: Upload validation diagnostics
-        if: always()
+      - name: Build frontend
+        run: npm run build -- --webpack 2>&1 | tee frontend-build.log
+
+      - name: Upload frontend build log
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: normalization-validation-diagnostics
-          path: |
-            normalization-validation.log
-            normalization-validation.status
+          name: frontend-build-log
+          path: frontend/frontend-build.log
           if-no-files-found: error
-
-      - name: Stop after validation failure
-        if: steps.validate.outcome == 'failure'
-        run: exit 1
-
-      - name: Commit normalized application files
-        run: |
-          if git diff --quiet -- backend frontend; then
-            echo "Application files are already normalized."
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add backend frontend
-          git commit -m "Normalize auto-rebalance resilience changes"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
