@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   frontend:
-    name: Frontend build and Bullpen auth tests
+    name: Frontend build and dashboard regression tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -37,8 +37,11 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --no-audit --fund=false
 
-      - name: Run Bullpen server auth regression tests
-        run: node --test tests/bullpen-server-auth.test.mjs
+      - name: Run dashboard regression tests
+        run: >-
+          node --test
+          tests/bullpen-server-auth.test.mjs
+          tests/dashboard-refresh-errors.test.mjs
 
       - name: Build frontend
         run: npm run build -- --webpack 2>&1 | tee frontend-build.log
