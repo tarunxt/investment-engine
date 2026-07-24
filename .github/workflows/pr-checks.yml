@@ -157,33 +157,62 @@ jobs:
         run: npm ci --no-audit --fund=false
 
       - name: Validate implementation
+        id: validate
+        continue-on-error: true
         shell: bash
         run: |
-          python3 -m py_compile \
-            backend/app/domains/ai_providers/availability.py \
-            backend/app/domains/ai_providers/factory.py \
-            backend/app/domains/portfolio_events/target_resolution.py \
-            backend/app/domains/runs/use_cases/create_run.py \
-            backend/app/domains/jobs/tasks.py \
-            backend/app/domains/ai_providers/router.py \
-            backend/app/domains/zerodha/events_router.py \
-            backend/app/domains/zerodha/threats_router.py \
-            backend/app/domains/indmoney_us/events_router.py \
-            backend/app/domains/indmoney_us/threats_router.py
-          node --test \
-            frontend/tests/auto-rebalance-provider-errors-ist.test.mjs \
-            frontend/tests/rebalance-workflow-resilience.test.mjs \
-            frontend/tests/bullpen-server-auth.test.mjs \
-            frontend/tests/dashboard-refresh-errors.test.mjs
-          npm --prefix frontend run build -- --webpack
-          git diff --check
+          set +e
+          {
+            python3 -m py_compile \
+              backend/app/domains/ai_providers/availability.py \
+              backend/app/domains/ai_providers/factory.py \
+              backend/app/domains/portfolio_events/target_resolution.py \
+              backend/app/domains/runs/use_cases/create_run.py \
+              backend/app/domains/jobs/tasks.py \
+              backend/app/domains/ai_providers/router.py \
+              backend/app/domains/zerodha/events_router.py \
+              backend/app/domains/zerodha/threats_router.py \
+              backend/app/domains/indmoney_us/events_router.py \
+              backend/app/domains/indmoney_us/threats_router.py
+            node --test \
+              frontend/tests/auto-rebalance-provider-errors-ist.test.mjs \
+              frontend/tests/rebalance-workflow-resilience.test.mjs \
+              frontend/tests/bullpen-server-auth.test.mjs \
+              frontend/tests/dashboard-refresh-errors.test.mjs
+            npm --prefix frontend run build -- --webpack
+            git diff --check
+          } > auto-rebalance-validation.log 2>&1
+          status=$?
+          set -e
+          echo "$status" > auto-rebalance-validation.status
+          cat auto-rebalance-validation.log
+          exit "$status"
+
+      - name: Upload validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-rebalance-validation-diagnostics
+          path: |
+            auto-rebalance-validation.log
+            auto-rebalance-validation.status
+          if-no-files-found: error
+
+      - name: Stop after validation failure
+        if: steps.validate.outcome == 'failure'
+        shell: bash
+        run: exit 1
 
       - name: Commit implementation to PR branch
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f apply-auto-rebalance.log apply-auto-rebalance.status
+          rm -f \
+            apply-auto-rebalance.log \
+            apply-auto-rebalance.status \
+            auto-rebalance-validation.log \
+            auto-rebalance-validation.status
           git add -A
           git commit -m "Fix auto-rebalance provider failures and IST timestamps"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
