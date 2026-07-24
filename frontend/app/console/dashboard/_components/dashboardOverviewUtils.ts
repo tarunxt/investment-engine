@@ -6,7 +6,6 @@ import type {
 } from "@/types/api";
 
 export type DashboardMarket = "india" | "us";
-
 export type DashboardThreatAnalysis =
   | ZerodhaThreatAnalysis
   | IndMoneyUsThreatAnalysis;
@@ -94,8 +93,59 @@ function extractDateTimestamp(value: string) {
   return Number.POSITIVE_INFINITY;
 }
 
+function readErrorText(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function readErrorObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function extractStructuredErrorMessage(message: string) {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const payload = readErrorObject(JSON.parse(trimmed));
+    if (!payload) {
+      return null;
+    }
+
+    const health = readErrorObject(payload.health);
+    const fallback = readErrorObject(payload.fallback);
+    const primary =
+      readErrorText(health?.message) ||
+      readErrorText(payload.error) ||
+      readErrorText(payload.detail) ||
+      readErrorText(payload.message) ||
+      readErrorText(fallback?.message);
+    const actionNeeded = readErrorText(health?.actionNeeded);
+
+    if (!primary) {
+      return actionNeeded;
+    }
+    if (!actionNeeded || primary.includes(actionNeeded)) {
+      return primary;
+    }
+    return `${primary} ${actionNeeded}`;
+  } catch {
+    return null;
+  }
+}
+
+function truncateErrorMessage(message: string) {
+  return message.length > 220
+    ? `${message.slice(0, 217).trimEnd()}...`
+    : message;
+}
+
 export function normalizeError(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = extractStructuredErrorMessage(rawMessage) || rawMessage;
   if (/<(?:!doctype\s+html|html|head|body)[\s>]/i.test(message)) {
     const titleMatch = message.match(/<title[^>]*>([^<]+)<\/title>/i);
     const headingMatch = message.match(/<h1[^>]*>([^<]+)<\/h1>/i);
@@ -106,9 +156,7 @@ export function normalizeError(error: unknown) {
     );
   }
   if (message.trim()) {
-    return message.length > 220
-      ? `${message.slice(0, 217).trimEnd()}...`
-      : message;
+    return truncateErrorMessage(message);
   }
   return "Something went wrong";
 }
