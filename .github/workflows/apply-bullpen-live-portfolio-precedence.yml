@@ -43,8 +43,23 @@ jobs:
           def replace_once(text: str, old: str, new: str, label: str) -> str:
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"Expected exactly one {label} block, found {count}")
+                  raise SystemExit(f"Expected exactly one {label}, found {count}")
               return text.replace(old, new, 1)
+
+          def replace_between(
+              text: str,
+              start_marker: str,
+              end_marker: str,
+              replacement: str,
+              label: str,
+          ) -> str:
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f"Could not find start of {label}")
+              end = text.find(end_marker, start + len(start_marker))
+              if end < 0:
+                  raise SystemExit(f"Could not find end of {label}")
+              return text[:start] + replacement + text[end:]
 
           component_path = Path(
               "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
@@ -61,12 +76,10 @@ jobs:
               "verified portfolio import",
           )
 
-          component = replace_once(
+          component = replace_between(
               component,
-              '''  const portfolioActivePositions =
-            verifiedStage1Portfolio?.activePositions ?? activePositions;
-          const portfolioHasActivePositionsSnapshot =
-            verifiedStage1Portfolio !== null || hasActivePositionsSnapshot;''',
+              "  const portfolioActivePositions =",
+              "  const {\n    activePositionQuestionByKey: stage3PreviewQuestionByKey,",
               '''  // Stage 1 is worker-verified, but it is historical run output and can
           // be older than the current wallet read. Use it only until a portfolio
           // snapshot has loaded; never let it hide fresher live Bullpen positions.
@@ -80,20 +93,15 @@ jobs:
               ? verifiedStage1Portfolio.activePositions
               : activePositions;
           const portfolioHasActivePositionsSnapshot =
-            hasActivePositionsSnapshot || useVerifiedStage1Fallback;''',
+            hasActivePositionsSnapshot || useVerifiedStage1Fallback;
+          ''',
               "portfolio source selection",
           )
 
-          component = replace_once(
+          component = replace_between(
               component,
-              '''  const liveTradeAmountActivePositions = verifiedStage1Portfolio
-            ? verifiedStage1Portfolio.occupiedPositions
-            : hasActivePositionsSnapshot
-              ? activePositions.length
-            : portfolioState
-              ? portfolioState.open_positions.filter((position) => position.shares > 0)
-                  .length
-              : (summary?.state.active_positions ?? null);''',
+              "  const liveTradeAmountActivePositions =",
+              "  const tradeAmountView = buildConsoleTradeAmountView({",
               '''  const liveTradeAmountActivePositions =
             useVerifiedStage1Fallback && verifiedStage1Portfolio
               ? verifiedStage1Portfolio.occupiedPositions
@@ -103,34 +111,41 @@ jobs:
                   ? portfolioState.open_positions.filter(
                       (position) => position.shares > 0,
                     ).length
-                  : (summary?.state.active_positions ?? null);''',
-              "trade amount occupied positions",
+                  : (summary?.state.active_positions ?? null);
+          ''',
+              "trade amount occupied-position source",
           )
 
-          component = replace_once(
+          component = replace_between(
               component,
-              '''    cashInHandUsd:
-              liveTradeAmountBalance?.available_balance_usd ??
-              verifiedStage1Portfolio?.cashInHandUsd ??
-              null,''',
-              '''    cashInHandUsd:
+              "  const tradeAmountView = buildConsoleTradeAmountView({",
+              "  const tradeAmountDisplay =",
+              '''  const tradeAmountView = buildConsoleTradeAmountView({
+            cashInHandUsd:
               liveTradeAmountBalance?.available_balance_usd ??
               (useVerifiedStage1Fallback
                 ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)
-                : null),''',
-              "trade amount cash fallback",
+                : null),
+            activePositions: liveTradeAmountActivePositions,
+            lastCalculatedTradeAmountUsd:
+              summary?.state.last_console_trade_amount_usd ?? null,
+            lastCalculatedCashInHandUsd:
+              summary?.state.last_console_trade_cash_in_hand_usd ?? null,
+            lastCalculatedActivePositions:
+              summary?.state.last_console_trade_active_positions ?? null,
+            lastCalculatedAvailableSlots:
+              summary?.state.last_console_trade_available_slots ?? null,
+            lastCalculatedMaxPositions:
+              summary?.state.last_console_trade_max_positions ?? null,
+          });
+          ''',
+              "trade amount calculation",
           )
 
-          component = replace_once(
+          component = replace_between(
               component,
-              '''  const tradeAmountSummaryLabel =
-            tradeAmountView.source === "live"
-              ? verifiedStage1Portfolio
-                ? "Verified from latest Stage 1 scan"
-                : "Preview from current portfolio"
-              : tradeAmountView.source === "last-calculated"
-                ? "Showing last diagnostic amount"
-                : "Waiting for live portfolio data";''',
+              "  const tradeAmountSummaryLabel =",
+              "\n\n  useEffect(() => {",
               '''  const tradeAmountSummaryLabel =
             tradeAmountView.source === "live"
               ? useVerifiedStage1Fallback
@@ -139,17 +154,13 @@ jobs:
               : tradeAmountView.source === "last-calculated"
                 ? "Showing last diagnostic amount"
                 : "Waiting for live portfolio data";''',
-              "trade amount summary label",
+              "trade amount source label",
           )
 
-          component = replace_once(
+          component = replace_between(
               component,
-              '''          hasActivePositionsSnapshot={portfolioHasActivePositionsSnapshot}
-                    positionsVerifiedByStage1={verifiedStage1Portfolio !== null}
-                    positionsVerifiedAt={verifiedStage1Portfolio?.verifiedAt ?? null}
-                    verifiedCashInHandUsd={
-                      verifiedStage1Portfolio?.cashInHandUsd ?? null
-                    }''',
+              "          hasActivePositionsSnapshot={portfolioHasActivePositionsSnapshot}",
+              "          refreshing={portfolioRefreshing}",
               '''          hasActivePositionsSnapshot={portfolioHasActivePositionsSnapshot}
                     positionsVerifiedByStage1={useVerifiedStage1Fallback}
                     positionsVerifiedAt={
@@ -161,34 +172,36 @@ jobs:
                       useVerifiedStage1Fallback
                         ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)
                         : null
-                    }''',
-              "portfolio snapshot props",
+                    }
+          ''',
+              "portfolio snapshot source props",
           )
 
-          component = replace_once(
+          component = replace_between(
               component,
-              '''                    {tradeAmountView.source === "live"
-                              ? verifiedStage1Portfolio
-                                ? "Calculated with cash in hand and the occupied positions verified by the latest completed Stage 1 Bullpen scan. The worker rechecks both before any live buy."
-                                : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
-                              : tradeAmountView.source === "last-calculated"''',
+              '                    {tradeAmountView.source === "live"',
+              '                      : tradeAmountView.source === "last-calculated"',
               '''                    {tradeAmountView.source === "live"
                               ? useVerifiedStage1Fallback
                                 ? "Calculated from the latest completed Stage 1 fallback because a current portfolio snapshot is not available yet. The worker rechecks cash and occupied slots before any live buy."
                                 : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
-                              : tradeAmountView.source === "last-calculated"''',
-              "trade amount explanation",
+          ''',
+              "trade amount source explanation",
           )
 
           component_path.write_text(component, encoding="utf-8")
 
           helper_path = Path("frontend/lib/bullpenVerifiedPortfolio.ts")
           helper = helper_path.read_text(encoding="utf-8")
-          helper = replace_once(
-              helper,
-              '''/**
-           * Stage 1 and the portfolio panel historically used separate wallet reads.''',
-              '''export function shouldUseVerifiedStage1PortfolioFallback({
+          helper_marker = """/**
+           * Stage 1 and the portfolio panel historically used separate wallet reads."""
+          if "shouldUseVerifiedStage1PortfolioFallback" not in helper:
+              marker_index = helper.find(helper_marker)
+              if marker_index < 0:
+                  raise SystemExit("Could not find verified portfolio helper insertion point")
+              helper = (
+                  helper[:marker_index]
+                  + '''export function shouldUseVerifiedStage1PortfolioFallback({
             hasActivePositionsSnapshot,
             verifiedPortfolio,
           }: {
@@ -198,10 +211,9 @@ jobs:
             return !hasActivePositionsSnapshot && verifiedPortfolio !== null;
           }
 
-          /**
-           * Stage 1 and the portfolio panel historically used separate wallet reads.''',
-              "verified fallback helper insertion",
-          )
+          '''
+                  + helper[marker_index:]
+              )
           helper_path.write_text(helper, encoding="utf-8")
 
           verified_test_path = Path("frontend/tests/bullpen-verified-portfolio.test.mjs")
@@ -263,10 +275,9 @@ jobs:
           }});\n'''
           compatibility_test_path.write_text(compatibility_test, encoding="utf-8")
 
-          workflow_path = Path(
+          Path(
               ".github/workflows/apply-bullpen-live-portfolio-precedence.yml"
-          )
-          workflow_path.unlink()
+          ).unlink()
           PY
 
       - name: Install frontend dependencies
