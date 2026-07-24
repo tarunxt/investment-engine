@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.indmoney_us.repository import IndMoneyUsPortfolioSnapshotRepository
 from app.domains.indmoney_us.threats import (
     THREAT_ANALYSIS_MODEL,
@@ -49,6 +50,8 @@ from app.shared.types import JobId, UserId
 from app.shared.types import JobStatus
 
 logger = logging.getLogger(__name__)
+
+THREAT_HISTORY_AUGMENTATION_LIMIT = 50
 
 router = APIRouter(prefix="/indmoney-us/threats", tags=["indmoney-us"])
 
@@ -193,9 +196,12 @@ async def _get_completed_threat_jobs_upto(
             Job.status == JobStatus.COMPLETED,
             Job.prompt.ilike(f"%{THREAT_JOB_MARKER}%"),
         )
-        .order_by(Job.id.asc())
+        .order_by(Job.id.desc())
+        .limit(THREAT_HISTORY_AUGMENTATION_LIMIT)
     )
-    return list(result.scalars().all())
+    jobs = list(result.scalars().all())
+    jobs.reverse()
+    return jobs
 
 
 async def _serialize_threat_job(
@@ -235,24 +241,42 @@ async def _augment_report_with_urgent_history(
     if not history_jobs:
         return parsed
 
-    snapshot_repo = IndMoneyUsPortfolioSnapshotRepository(db)
-    holding_context_cache: dict[int, dict[str, HoldingContext]] = {}
-    history_entries = []
-
+    history_items = []
+    snapshot_ids = set()
     for history_job in history_jobs:
         history_report = parse_indmoney_us_threat_report(history_job.response)
         if not history_report:
             continue
 
         prompt_metadata = extract_indmoney_us_threat_prompt_metadata(history_job.prompt or "")
-        holding_context_index: dict[str, HoldingContext] = {}
+        history_items.append((history_job, history_report, prompt_metadata))
         if prompt_metadata.snapshot_id is not None:
-            cache_key = prompt_metadata.snapshot_id
-            if cache_key not in holding_context_cache:
-                snapshot = await snapshot_repo.get_by_user_and_id(job.user_id, cache_key)
-                holding_context_cache[cache_key] = _build_holding_context_index(snapshot)
-            holding_context_index = holding_context_cache[cache_key]
+            snapshot_ids.add(prompt_metadata.snapshot_id)
 
+    snapshots_by_id = {}
+    if snapshot_ids:
+        snapshot_result = await db.execute(
+            select(IndMoneyUsPortfolioSnapshot).where(
+                IndMoneyUsPortfolioSnapshot.user_id == job.user_id,
+                IndMoneyUsPortfolioSnapshot.id.in_(tuple(snapshot_ids)),
+            )
+        )
+        snapshots_by_id = {
+            snapshot.id: snapshot
+            for snapshot in snapshot_result.scalars().all()
+        }
+
+    holding_context_by_snapshot_id = {
+        snapshot_id: _build_holding_context_index(snapshot)
+        for snapshot_id, snapshot in snapshots_by_id.items()
+    }
+    history_entries = []
+    for history_job, history_report, prompt_metadata in history_items:
+        holding_context_index = (
+            holding_context_by_snapshot_id.get(prompt_metadata.snapshot_id, {})
+            if prompt_metadata.snapshot_id is not None
+            else {}
+        )
         history_entries.extend(
             build_urgent_action_history_entries(
                 history_report,

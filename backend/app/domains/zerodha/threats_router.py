@@ -25,6 +25,7 @@ from app.domains.portfolio_events.schemas import (
     PortfolioEventRunRequest,
 )
 from app.domains.portfolio_events.target_resolution import resolve_portfolio_analysis_target
+from app.domains.zerodha.models import ZerodhaPortfolioSnapshot
 from app.domains.zerodha.repository import ZerodhaPortfolioSnapshotRepository
 from app.domains.zerodha.threats import (
     THREAT_ANALYSIS_MODEL,
@@ -49,6 +50,8 @@ from app.shared.types import JobId, UserId
 from app.shared.types import JobStatus
 
 logger = logging.getLogger(__name__)
+
+THREAT_HISTORY_AUGMENTATION_LIMIT = 50
 
 router = APIRouter(prefix="/zerodha/threats", tags=["zerodha"])
 
@@ -192,9 +195,12 @@ async def _get_completed_threat_jobs_upto(
             Job.status == JobStatus.COMPLETED,
             Job.prompt.ilike(f"%{THREAT_JOB_MARKER}%"),
         )
-        .order_by(Job.id.asc())
+        .order_by(Job.id.desc())
+        .limit(THREAT_HISTORY_AUGMENTATION_LIMIT)
     )
-    return list(result.scalars().all())
+    jobs = list(result.scalars().all())
+    jobs.reverse()
+    return jobs
 
 
 async def _serialize_threat_job(
@@ -233,27 +239,42 @@ async def _augment_report_with_urgent_history(
     if not history_jobs:
         return parsed
 
-    snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
-    holding_context_cache: dict[str, dict[str, HoldingContext]] = {}
-    history_entries = []
-
+    history_items = []
+    snapshot_dates = set()
     for history_job in history_jobs:
         history_report = parse_zerodha_threat_report(history_job.response)
         if not history_report:
             continue
 
         prompt_metadata = extract_threat_prompt_metadata(history_job.prompt or "")
-        holding_context_index: dict[str, HoldingContext] = {}
+        history_items.append((history_job, history_report, prompt_metadata))
         if prompt_metadata.snapshot_date:
-            cache_key = prompt_metadata.snapshot_date.isoformat()
-            if cache_key not in holding_context_cache:
-                snapshot = await snapshot_repo.get_by_user_and_date(
-                    job.user_id,
-                    prompt_metadata.snapshot_date,
-                )
-                holding_context_cache[cache_key] = _build_holding_context_index(snapshot)
-            holding_context_index = holding_context_cache[cache_key]
+            snapshot_dates.add(prompt_metadata.snapshot_date)
 
+    snapshots_by_date = {}
+    if snapshot_dates:
+        snapshot_result = await db.execute(
+            select(ZerodhaPortfolioSnapshot).where(
+                ZerodhaPortfolioSnapshot.user_id == job.user_id,
+                ZerodhaPortfolioSnapshot.snapshot_date.in_(tuple(snapshot_dates)),
+            )
+        )
+        snapshots_by_date = {
+            snapshot.snapshot_date: snapshot
+            for snapshot in snapshot_result.scalars().all()
+        }
+
+    holding_context_by_snapshot_date = {
+        snapshot_date: _build_holding_context_index(snapshot)
+        for snapshot_date, snapshot in snapshots_by_date.items()
+    }
+    history_entries = []
+    for history_job, history_report, prompt_metadata in history_items:
+        holding_context_index = (
+            holding_context_by_snapshot_date.get(prompt_metadata.snapshot_date, {})
+            if prompt_metadata.snapshot_date
+            else {}
+        )
         history_entries.extend(
             build_urgent_action_history_entries(
                 history_report,
