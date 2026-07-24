@@ -70,6 +70,7 @@ import {
 import { getAutoRebalanceRunDisplayLabel, getRunDetailPathFromPrompt, isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import { formatApiTimestamp } from "@/lib/datetime";
 import { INDIA_TIMEZONE } from "../_context";
 import { cn } from "@/lib/utils";
 import type {
@@ -464,14 +465,12 @@ function parseTimestampMs(value?: string | null) {
 }
 
 function formatTimestamp(value?: string | null) {
-  if (!value) return "Not available";
-  const ms = parseTimestampMs(value);
-  if (!ms) return value;
-  return new Intl.DateTimeFormat("en-IN", {
+  return formatApiTimestamp(value, {
+    emptyValue: "Not available",
+    locale: "en-IN",
     timeZone: INDIA_TIMEZONE,
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(ms));
+    timeZoneName: "short",
+  });
 }
 
 function getStageLabel(stage: WorkflowStageKey, state: StageState) {

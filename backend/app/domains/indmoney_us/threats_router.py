@@ -100,7 +100,7 @@ async def run_threat_analysis(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    provider, model = _resolve_threat_target(body)
+    provider, model = await _resolve_threat_target(body, db)
 
     snapshot_repo = IndMoneyUsPortfolioSnapshotRepository(db)
     latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
@@ -155,9 +155,13 @@ async def run_threat_analysis(
     )
 
 
-def _resolve_threat_target(body: PortfolioEventRunRequest | None) -> tuple[str, str]:
-    return resolve_portfolio_analysis_target(
+async def _resolve_threat_target(
+    body: PortfolioEventRunRequest | None,
+    db: AsyncSession,
+) -> tuple[str, str]:
+    return await resolve_portfolio_analysis_target(
         body,
+        db=db,
         default_provider=THREAT_ANALYSIS_PROVIDER,
         default_model=THREAT_ANALYSIS_MODEL,
         analysis_label="threats",

@@ -8,6 +8,7 @@ from app.domains.auth.models import User
 from app.domains.jobs.models import Job
 from app.infrastructure.database.session import get_async_db
 from app.domains.api_usage.router import _fetch_usd_inr_rate
+from app.domains.ai_providers.availability import get_recent_target_availability
 from app.domains.ai_providers.factory import ProviderFactory
 from app.shared.types import JobStatus
 from app.domains.ai_providers.anthropic import AnthropicProvider
@@ -163,7 +164,23 @@ async def list_providers(
         )
 
         for model in provider["models"]:
-            is_compatible, reason = ProviderFactory.model_compatibility(provider["name"], model)
+            is_compatible, reason = ProviderFactory.model_compatibility(
+                provider["name"], model
+            )
+            if is_compatible and not provider["configured"]:
+                is_compatible = False
+                reason = (
+                    f"Provider '{provider['name']}' is not configured on this server."
+                )
+            if is_compatible:
+                availability = await get_recent_target_availability(
+                    db,
+                    provider["name"],
+                    model,
+                )
+                if not availability.available:
+                    is_compatible = False
+                    reason = availability.reason
             compatibility[model] = {
                 "compatible": is_compatible,
                 "reason": reason,

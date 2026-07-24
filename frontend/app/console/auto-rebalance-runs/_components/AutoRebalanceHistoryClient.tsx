@@ -15,6 +15,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { URLs } from "@/lib/urls";
+import { formatApiTimestamp } from "@/lib/datetime";
 import { apiService } from "@/services/api";
 import type {
   AutoRebalanceHistoryDetailResponse,
@@ -67,14 +68,12 @@ function stageCardTone(status?: string | null) {
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return "Not available";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(date);
+  return formatApiTimestamp(value, {
+    emptyValue: "Not available",
+    locale: "en-IN",
+    timeZone: "Asia/Kolkata",
+    timeZoneName: "short",
+  });
 }
 
 function formatCost(value?: number | null) {

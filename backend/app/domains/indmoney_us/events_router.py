@@ -90,7 +90,7 @@ async def run_events_analysis(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
-    provider, model = _resolve_events_target(body)
+    provider, model = await _resolve_events_target(body, db)
 
     snapshot_repo = IndMoneyUsPortfolioSnapshotRepository(db)
     latest_snapshot = await snapshot_repo.get_latest_by_user(current_user.id)
@@ -115,6 +115,13 @@ async def run_events_analysis(
                 provider=provider,
                 model=model,
                 user_id=UserId(current_user.id),
+                auto_rebalance_portfolio=(
+                    body.auto_rebalance_portfolio if body else None
+                ),
+                auto_rebalance_sequence=(
+                    body.auto_rebalance_sequence if body else None
+                ),
+                auto_rebalance_label=body.auto_rebalance_label if body else None,
             )
         )
     finally:
@@ -142,9 +149,13 @@ async def run_events_analysis(
     )
 
 
-def _resolve_events_target(body: PortfolioEventRunRequest | None) -> tuple[str, str]:
-    return resolve_portfolio_analysis_target(
+async def _resolve_events_target(
+    body: PortfolioEventRunRequest | None,
+    db: AsyncSession,
+) -> tuple[str, str]:
+    return await resolve_portfolio_analysis_target(
         body,
+        db=db,
         default_provider=EVENT_ANALYSIS_PROVIDER,
         default_model=EVENT_ANALYSIS_MODEL,
         analysis_label="events",
