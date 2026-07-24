@@ -79,7 +79,8 @@ jobs:
                     if-no-files-found: error
           EOF
 
-          python3 - <<'RUNNER'
+          set +e
+          python3 - <<'RUNNER' > /tmp/apply-auto-rebalance.log 2>&1
           from pathlib import Path
           import textwrap
 
@@ -91,6 +92,18 @@ jobs:
           implementation = textwrap.dedent(workflow[start:end])
           exec(compile(implementation, "apply-auto-rebalance-fix.py", "exec"))
           RUNNER
+          status=$?
+          set -e
+          cat /tmp/apply-auto-rebalance.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/apply-auto-rebalance.log apply-auto-rebalance-error.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add apply-auto-rebalance-error.log .github/workflows/pr-checks.yml
+            git commit -m "Capture auto-rebalance implementation error"
+            git push origin HEAD:${{ github.event.pull_request.head.ref }}
+            exit "$status"
+          fi
 
       - name: Set up Node
         uses: actions/setup-node@v4
