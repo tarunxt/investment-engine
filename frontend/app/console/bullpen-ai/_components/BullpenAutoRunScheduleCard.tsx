@@ -10487,19 +10487,19 @@ export function BullpenAutoRunScheduleCard({
         : [],
   );
   // Stage 1 is worker-verified, but it is historical run output and can
-// be older than the current wallet read. Use it only until a portfolio
-// snapshot has loaded; never let it hide fresher live Bullpen positions.
-const useVerifiedStage1Fallback =
-  shouldUseVerifiedStage1PortfolioFallback({
-    hasActivePositionsSnapshot,
-    verifiedPortfolio: verifiedStage1Portfolio,
-  });
-const portfolioActivePositions =
-  useVerifiedStage1Fallback && verifiedStage1Portfolio
-    ? verifiedStage1Portfolio.activePositions
-    : activePositions;
-const portfolioHasActivePositionsSnapshot =
-  hasActivePositionsSnapshot || useVerifiedStage1Fallback;
+  // be older than the current wallet read. Use it only until a portfolio
+  // snapshot has loaded; never let it hide fresher live Bullpen positions.
+  const useVerifiedStage1Fallback =
+    shouldUseVerifiedStage1PortfolioFallback({
+      hasActivePositionsSnapshot,
+      verifiedPortfolio: verifiedStage1Portfolio,
+    });
+  const portfolioActivePositions =
+    useVerifiedStage1Fallback && verifiedStage1Portfolio
+      ? verifiedStage1Portfolio.activePositions
+      : activePositions;
+  const portfolioHasActivePositionsSnapshot =
+    hasActivePositionsSnapshot || useVerifiedStage1Fallback;
   const {
     activePositionQuestionByKey: stage3PreviewQuestionByKey,
     activePositionsNeedingAttention: stage3PreviewAttentionEntries,
@@ -10836,42 +10836,42 @@ const portfolioHasActivePositionsSnapshot =
     ? liveTradeAmountSource
     : lastUsablePortfolioBalance;
   const liveTradeAmountActivePositions =
-  useVerifiedStage1Fallback && verifiedStage1Portfolio
-    ? verifiedStage1Portfolio.occupiedPositions
-    : hasActivePositionsSnapshot
-      ? activePositions.length
-      : portfolioState
-        ? portfolioState.open_positions.filter(
-            (position) => position.shares > 0,
-          ).length
-        : (summary?.state.active_positions ?? null);
+    useVerifiedStage1Fallback && verifiedStage1Portfolio
+      ? verifiedStage1Portfolio.occupiedPositions
+      : hasActivePositionsSnapshot
+        ? activePositions.length
+        : portfolioState
+          ? portfolioState.open_positions.filter(
+              (position) => position.shares > 0,
+            ).length
+          : (summary?.state.active_positions ?? null);
   const tradeAmountView = buildConsoleTradeAmountView({
-  cashInHandUsd:
-    liveTradeAmountBalance?.available_balance_usd ??
-    (useVerifiedStage1Fallback
-      ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)
-      : null),
-  activePositions: liveTradeAmountActivePositions,
-  lastCalculatedTradeAmountUsd:
-    summary?.state.last_console_trade_amount_usd ?? null,
-  lastCalculatedCashInHandUsd:
-    summary?.state.last_console_trade_cash_in_hand_usd ?? null,
-  lastCalculatedActivePositions:
-    summary?.state.last_console_trade_active_positions ?? null,
-  lastCalculatedAvailableSlots:
-    summary?.state.last_console_trade_available_slots ?? null,
-  lastCalculatedMaxPositions:
-    summary?.state.last_console_trade_max_positions ?? null,
-});
+    cashInHandUsd:
+      liveTradeAmountBalance?.available_balance_usd ??
+      (useVerifiedStage1Fallback
+        ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)
+        : null),
+    activePositions: liveTradeAmountActivePositions,
+    lastCalculatedTradeAmountUsd:
+      summary?.state.last_console_trade_amount_usd ?? null,
+    lastCalculatedCashInHandUsd:
+      summary?.state.last_console_trade_cash_in_hand_usd ?? null,
+    lastCalculatedActivePositions:
+      summary?.state.last_console_trade_active_positions ?? null,
+    lastCalculatedAvailableSlots:
+      summary?.state.last_console_trade_available_slots ?? null,
+    lastCalculatedMaxPositions:
+      summary?.state.last_console_trade_max_positions ?? null,
+  });
   const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
   const tradeAmountSummaryLabel =
-  tradeAmountView.source === "live"
-    ? useVerifiedStage1Fallback
-      ? "Using latest Stage 1 fallback"
-      : "Preview from current portfolio"
-    : tradeAmountView.source === "last-calculated"
-      ? "Showing last diagnostic amount"
-      : "Waiting for live portfolio data";
+    tradeAmountView.source === "live"
+      ? useVerifiedStage1Fallback
+        ? "Using latest Stage 1 fallback"
+        : "Preview from current portfolio"
+      : tradeAmountView.source === "last-calculated"
+        ? "Showing last diagnostic amount"
+        : "Waiting for live portfolio data";
 
   useEffect(() => {
     return () => {
@@ -12376,9 +12376,9 @@ const portfolioHasActivePositionsSnapshot =
                   </p>
                   <p className="mt-2 text-sm text-slate-600">
                     {tradeAmountView.source === "live"
-                    ? useVerifiedStage1Fallback
-                      ? "Calculated from the latest completed Stage 1 fallback because a current portfolio snapshot is not available yet. The worker rechecks cash and occupied slots before any live buy."
-                      : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
+                      ? useVerifiedStage1Fallback
+                        ? "Calculated from the latest completed Stage 1 fallback because a current portfolio snapshot is not available yet. The worker rechecks cash and occupied slots before any live buy."
+                        : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
                       : tradeAmountView.source === "last-calculated"
                         ? "Showing the last successful diagnostic calculation until a fresh balance sync completes. That cached amount is never used as a live-buy fallback."
                         : "Waiting for Bullpen cash in hand and occupied-slot data."}

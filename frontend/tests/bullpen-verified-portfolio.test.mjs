@@ -175,7 +175,6 @@ test("incomplete Stage 1 data never overrides the live portfolio flow", async ()
   assert.equal(resolveLatestVerifiedStage1Portfolio([incomplete]), null);
 });
 
-
 test("live positions snapshot takes precedence over historical Stage 1 portfolio", async () => {
   const {
     resolveLatestVerifiedStage1Portfolio,

@@ -190,7 +190,6 @@ test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-inves
   assert.match(urlsSource, /manualInvest: \(\) => `\$\{resolveApiBaseUrl\(\)\}\/polymarket\/manual-invest`/);
 });
 
-
 test("Bullpen x AI investment result is shown below the Invest button", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
@@ -948,7 +947,6 @@ test("Bullpen x AI treats saved odds or timestamps as clickable LLM analysis", a
   assert.match(questionsTableSource, /hasBullpenLlmAnalysis/);
 });
 
-
 test("Bullpen auto-run summary sync keeps completed run visible after refresh", () => {
   const scheduleCardSource = readFileSync(
     new URL(
@@ -994,7 +992,6 @@ test("Bullpen x AI keeps BullpenQuestionsTable as the single canonical Events Su
   assert.doesNotMatch(scheduleCardSource, /const columnDefinitions:/);
   assert.doesNotMatch(bullpenAiPageSource, /const columnDefinitions:/);
 });
-
 
 test("Bullpen returns/day uses unpriced upside for current odds matching strongest LLM side divided by days left", async () => {
   const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();
@@ -1122,7 +1119,6 @@ test("Bullpen x AI stale fact validation excludes contradictory public-listing c
   assert.match(validation.staleFactReason, /already confirmed the company is public/i);
 });
 
-
 test("auto-run active position sync uses the shared event identity resolver", () => {
   const source = readFileSync(
     new URL(
@@ -1141,7 +1137,6 @@ test("auto-run active position sync uses the shared event identity resolver", ()
   assert.match(source, /snapshotAnalysesByKey\?: Record<string, BullpenActivePositionLlmAnalysis>/);
   assert.match(pageSource, /activePositions: openActivePositions/);
 });
-
 
 test("Bullpen portfolio uses Stage 1 verification only as a live-data fallback", () => {
   const source = readFileSync(
