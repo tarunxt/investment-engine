@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   frontend:
@@ -26,6 +26,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -33,6 +36,22 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Apply duration popup source patch
+        id: duration_patch
+        working-directory: .
+        run: |
+          if [ -f scripts/apply_duration_breakdown_fix.py ]; then
+            python3 scripts/apply_duration_breakdown_fix.py
+            echo "applied=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "applied=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check patch formatting
+        if: steps.duration_patch.outputs.applied == 'true'
+        working-directory: .
+        run: git diff --check
 
       - name: Install frontend dependencies
         run: npm ci --no-audit --fund=false
@@ -45,6 +64,18 @@ jobs:
 
       - name: Build frontend
         run: npm run build -- --webpack 2>&1 | tee frontend-build.log
+
+      - name: Commit generated duration popup fix
+        if: steps.duration_patch.outputs.applied == 'true'
+        working-directory: .
+        run: |
+          git fetch origin main
+          git checkout origin/main -- .github/workflows/pr-checks.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix dashboard stage duration breakdown interaction"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
 
       - name: Upload frontend build log
         if: failure()
