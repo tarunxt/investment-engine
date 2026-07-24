@@ -566,23 +566,30 @@ export function getBullpenAutoRunStatusBadges(
   const isUpdating = loadState === "loading" || loadState === "retrying";
 
   if (hasData) {
-    const schedulerErrored = data.state.status === "error";
+    const schedulerReportedError = data.state.status === "error";
     const schedulerPaused =
       data.state.paused ||
       data.state.emergency_stopped ||
       data.state.status === "paused";
-    const statusLabel = schedulerErrored
-      ? "Unavailable"
-      : !data.settings.auto_live_enabled
-        ? "Disabled"
-        : schedulerPaused
-          ? "Paused"
+    const schedulerRunning = data.state.running && !schedulerPaused;
+
+    // A prior run failure can leave the persisted status string at "error"
+    // even after the durable scheduler booleans show that auto-runs are active
+    // again. Keep the current scheduler status and configured mode visible;
+    // `isStale` still exposes the reported error without replacing both badges.
+    const statusLabel = !data.settings.auto_live_enabled
+      ? "Disabled"
+      : schedulerPaused
+        ? "Paused"
+        : schedulerReportedError && !schedulerRunning
+          ? "Unavailable"
           : "Enabled";
+
     return {
       statusLabel,
-      modeLabel: schedulerErrored ? "Check failed" : modeLabel(data.state.mode),
+      modeLabel: modeLabel(data.state.mode),
       isStale:
-        schedulerErrored ||
+        schedulerReportedError ||
         loadState === "error" ||
         loadState === "timeout" ||
         isUpdating,
@@ -627,8 +634,7 @@ export function isBullpenAutoRunSchedulerEnabled(
     data?.settings.auto_live_enabled &&
       data.state.running &&
       !data.state.paused &&
-      !data.state.emergency_stopped &&
-      data.state.status === "running",
+      !data.state.emergency_stopped,
   );
 }
 
