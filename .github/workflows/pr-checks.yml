@@ -21,6 +21,7 @@ jobs:
       - name: Apply validated implementation
         shell: bash
         run: |
+          git show origin/main:.github/workflows/pr-checks.yml > .github/workflows/pr-checks.yml
           python3 - <<'RUNNER'
           from pathlib import Path
 
