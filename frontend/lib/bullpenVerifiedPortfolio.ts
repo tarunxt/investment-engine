@@ -140,6 +140,16 @@ function timestampMs(value: string | null) {
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
 }
 
+export function shouldUseVerifiedStage1PortfolioFallback({
+  hasActivePositionsSnapshot,
+  verifiedPortfolio,
+}: {
+  hasActivePositionsSnapshot: boolean;
+  verifiedPortfolio: VerifiedBullpenStage1Portfolio | null;
+}) {
+  return !hasActivePositionsSnapshot && verifiedPortfolio !== null;
+}
+
 /**
  * Stage 1 and the portfolio panel historically used separate wallet reads. A
  * completed Stage 1 snapshot is the worker-verified source used by Stage 2/3,
