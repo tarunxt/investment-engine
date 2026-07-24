@@ -14,7 +14,7 @@ function resolveNextAuthSecret(): string {
   return "local-auth-disabled-fallback-secret";
 }
 
-export const authConfig: NextAuthConfig = {
+const authConfig: NextAuthConfig = {
   // Production runs behind nginx, so Auth.js must trust the forwarded host header.
   trustHost: true,
   providers: [
@@ -162,6 +162,6 @@ export const authConfig: NextAuthConfig = {
   secret: resolveNextAuthSecret(),
 };
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
+const { handlers } = NextAuth(authConfig);
 
 export const { GET, POST } = handlers;
