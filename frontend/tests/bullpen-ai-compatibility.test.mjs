@@ -1141,3 +1141,21 @@ test("auto-run active position sync uses the shared event identity resolver", ()
   assert.match(source, /snapshotAnalysesByKey\?: Record<string, BullpenActivePositionLlmAnalysis>/);
   assert.match(pageSource, /activePositions: openActivePositions/);
 });
+
+
+test("Bullpen portfolio uses Stage 1 verification only as a live-data fallback", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /shouldUseVerifiedStage1PortfolioFallback/);
+  assert.match(source, /positionsVerifiedByStage1={useVerifiedStage1Fallback}/);
+  assert.doesNotMatch(
+    source,
+    /verifiedStage1Portfolio\?\.activePositions \?\? activePositions/,
+  );
+});

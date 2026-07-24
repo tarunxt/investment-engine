@@ -174,3 +174,36 @@ test("incomplete Stage 1 data never overrides the live portfolio flow", async ()
 
   assert.equal(resolveLatestVerifiedStage1Portfolio([incomplete]), null);
 });
+
+
+test("live positions snapshot takes precedence over historical Stage 1 portfolio", async () => {
+  const {
+    resolveLatestVerifiedStage1Portfolio,
+    shouldUseVerifiedStage1PortfolioFallback,
+  } = await loadVerifiedPortfolioModule();
+  const verifiedPortfolio = resolveLatestVerifiedStage1Portfolio([
+    run("verified", "2026-07-24T03:13:46Z", []),
+  ]);
+
+  assert.equal(
+    shouldUseVerifiedStage1PortfolioFallback({
+      hasActivePositionsSnapshot: true,
+      verifiedPortfolio,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldUseVerifiedStage1PortfolioFallback({
+      hasActivePositionsSnapshot: false,
+      verifiedPortfolio,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldUseVerifiedStage1PortfolioFallback({
+      hasActivePositionsSnapshot: false,
+      verifiedPortfolio: null,
+    }),
+    false,
+  );
+});

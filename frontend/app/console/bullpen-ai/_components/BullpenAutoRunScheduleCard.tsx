@@ -56,7 +56,10 @@ import {
   type BullpenActivePositionView,
   type BullpenPositionsSummary,
 } from "@/lib/bullpenPositions";
-import { resolveLatestVerifiedStage1Portfolio } from "@/lib/bullpenVerifiedPortfolio";
+import {
+  resolveLatestVerifiedStage1Portfolio,
+  shouldUseVerifiedStage1PortfolioFallback,
+} from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, RequestTimeoutError, apiService } from "@/services/api";
 import type {
@@ -10483,10 +10486,20 @@ export function BullpenAutoRunScheduleCard({
         ? [workflowRun]
         : [],
   );
-  const portfolioActivePositions =
-    verifiedStage1Portfolio?.activePositions ?? activePositions;
-  const portfolioHasActivePositionsSnapshot =
-    verifiedStage1Portfolio !== null || hasActivePositionsSnapshot;
+  // Stage 1 is worker-verified, but it is historical run output and can
+// be older than the current wallet read. Use it only until a portfolio
+// snapshot has loaded; never let it hide fresher live Bullpen positions.
+const useVerifiedStage1Fallback =
+  shouldUseVerifiedStage1PortfolioFallback({
+    hasActivePositionsSnapshot,
+    verifiedPortfolio: verifiedStage1Portfolio,
+  });
+const portfolioActivePositions =
+  useVerifiedStage1Fallback && verifiedStage1Portfolio
+    ? verifiedStage1Portfolio.activePositions
+    : activePositions;
+const portfolioHasActivePositionsSnapshot =
+  hasActivePositionsSnapshot || useVerifiedStage1Fallback;
   const {
     activePositionQuestionByKey: stage3PreviewQuestionByKey,
     activePositionsNeedingAttention: stage3PreviewAttentionEntries,
@@ -10822,40 +10835,43 @@ export function BullpenAutoRunScheduleCard({
   const liveTradeAmountBalance = isUsableBullpenBalance(liveTradeAmountSource)
     ? liveTradeAmountSource
     : lastUsablePortfolioBalance;
-  const liveTradeAmountActivePositions = verifiedStage1Portfolio
+  const liveTradeAmountActivePositions =
+  useVerifiedStage1Fallback && verifiedStage1Portfolio
     ? verifiedStage1Portfolio.occupiedPositions
     : hasActivePositionsSnapshot
       ? activePositions.length
-    : portfolioState
-      ? portfolioState.open_positions.filter((position) => position.shares > 0)
-          .length
-      : (summary?.state.active_positions ?? null);
+      : portfolioState
+        ? portfolioState.open_positions.filter(
+            (position) => position.shares > 0,
+          ).length
+        : (summary?.state.active_positions ?? null);
   const tradeAmountView = buildConsoleTradeAmountView({
-    cashInHandUsd:
-      liveTradeAmountBalance?.available_balance_usd ??
-      verifiedStage1Portfolio?.cashInHandUsd ??
-      null,
-    activePositions: liveTradeAmountActivePositions,
-    lastCalculatedTradeAmountUsd:
-      summary?.state.last_console_trade_amount_usd ?? null,
-    lastCalculatedCashInHandUsd:
-      summary?.state.last_console_trade_cash_in_hand_usd ?? null,
-    lastCalculatedActivePositions:
-      summary?.state.last_console_trade_active_positions ?? null,
-    lastCalculatedAvailableSlots:
-      summary?.state.last_console_trade_available_slots ?? null,
-    lastCalculatedMaxPositions:
-      summary?.state.last_console_trade_max_positions ?? null,
-  });
+  cashInHandUsd:
+    liveTradeAmountBalance?.available_balance_usd ??
+    (useVerifiedStage1Fallback
+      ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)
+      : null),
+  activePositions: liveTradeAmountActivePositions,
+  lastCalculatedTradeAmountUsd:
+    summary?.state.last_console_trade_amount_usd ?? null,
+  lastCalculatedCashInHandUsd:
+    summary?.state.last_console_trade_cash_in_hand_usd ?? null,
+  lastCalculatedActivePositions:
+    summary?.state.last_console_trade_active_positions ?? null,
+  lastCalculatedAvailableSlots:
+    summary?.state.last_console_trade_available_slots ?? null,
+  lastCalculatedMaxPositions:
+    summary?.state.last_console_trade_max_positions ?? null,
+});
   const tradeAmountDisplay = formatMoney(tradeAmountView.tradeAmountUsd);
   const tradeAmountSummaryLabel =
-    tradeAmountView.source === "live"
-      ? verifiedStage1Portfolio
-        ? "Verified from latest Stage 1 scan"
-        : "Preview from current portfolio"
-      : tradeAmountView.source === "last-calculated"
-        ? "Showing last diagnostic amount"
-        : "Waiting for live portfolio data";
+  tradeAmountView.source === "live"
+    ? useVerifiedStage1Fallback
+      ? "Using latest Stage 1 fallback"
+      : "Preview from current portfolio"
+    : tradeAmountView.source === "last-calculated"
+      ? "Showing last diagnostic amount"
+      : "Waiting for live portfolio data";
 
   useEffect(() => {
     return () => {
@@ -10902,10 +10918,16 @@ export function BullpenAutoRunScheduleCard({
           activePositionsSummary={activePositionsSummary}
           activePositionQuestions={activePositionQuestions}
           hasActivePositionsSnapshot={portfolioHasActivePositionsSnapshot}
-          positionsVerifiedByStage1={verifiedStage1Portfolio !== null}
-          positionsVerifiedAt={verifiedStage1Portfolio?.verifiedAt ?? null}
+          positionsVerifiedByStage1={useVerifiedStage1Fallback}
+          positionsVerifiedAt={
+            useVerifiedStage1Fallback
+              ? (verifiedStage1Portfolio?.verifiedAt ?? null)
+              : null
+          }
           verifiedCashInHandUsd={
-            verifiedStage1Portfolio?.cashInHandUsd ?? null
+            useVerifiedStage1Fallback
+              ? (verifiedStage1Portfolio?.cashInHandUsd ?? null)
+              : null
           }
           refreshing={portfolioRefreshing}
           historicalRuns={summary?.recent_runs ?? []}
@@ -12354,9 +12376,9 @@ export function BullpenAutoRunScheduleCard({
                   </p>
                   <p className="mt-2 text-sm text-slate-600">
                     {tradeAmountView.source === "live"
-                      ? verifiedStage1Portfolio
-                        ? "Calculated with cash in hand and the occupied positions verified by the latest completed Stage 1 Bullpen scan. The worker rechecks both before any live buy."
-                        : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
+                    ? useVerifiedStage1Fallback
+                      ? "Calculated from the latest completed Stage 1 fallback because a current portfolio snapshot is not available yet. The worker rechecks cash and occupied slots before any live buy."
+                      : "Calculated from the latest Bullpen portfolio snapshot as a preview. The worker rechecks occupied slots and fresh balance before any live buy."
                       : tradeAmountView.source === "last-calculated"
                         ? "Showing the last successful diagnostic calculation until a fresh balance sync completes. That cached amount is never used as a live-buy fallback."
                         : "Waiting for Bullpen cash in hand and occupied-slot data."}
