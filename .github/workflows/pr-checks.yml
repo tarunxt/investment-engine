@@ -35,6 +35,16 @@ jobs:
         id: duration_patch
         working-directory: ${{ github.workspace }}
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/apply_duration_breakdown_fix.py")
+          source = path.read_text(encoding="utf-8")
+          old = "closing = '''      </div>\n    </button>\n  );\n}'''\n"
+          new = "closing = '''      </div>\n    </button>\n  );\n}\n'''\n"
+          if old not in source:
+              raise RuntimeError("Could not update the temporary closing matcher")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+          PY
           set +e
           python3 -u scripts/apply_duration_breakdown_fix.py > /tmp/duration-patch.log 2>&1
           status=$?
