@@ -426,6 +426,121 @@ export function normalizeBullpenAutoRunStatusData(
   };
 }
 
+/**
+ * Secondary semantic adapter for the established summary response. This is
+ * intentionally separate from the primary persisted-status validator: it is
+ * used only when that focused endpoint is unsupported, unavailable, or
+ * malformed, and it never fabricates an active run from a terminal history row.
+ */
+export function normalizeBullpenAutoRunStatusFromSummary(
+  value: unknown,
+): BullpenAutoRunStatusData | null {
+  const root = asRecord(value);
+  const rawState = asRecord(root?.state);
+  const rawSettings = asRecord(root?.settings);
+  const latestRun = asRecord(root?.latest_run);
+  const recentRuns = Array.isArray(root?.recent_runs)
+    ? root.recent_runs
+        .map((run) => asRecord(run))
+        .filter((run): run is UnknownRecord => run !== null)
+    : [];
+  if (!root || !rawState || !rawSettings) return null;
+
+  const mode = normalizeMode(rawState.mode);
+  if (
+    mode === null ||
+    typeof rawState.running !== "boolean" ||
+    typeof rawState.paused !== "boolean" ||
+    typeof rawState.emergency_stopped !== "boolean" ||
+    typeof rawSettings.auto_live_enabled !== "boolean" ||
+    !isNullableString(rawState.status) ||
+    !isNullableString(rawState.next_run_at) ||
+    !isNullableString(rawState.last_run_at) ||
+    !isNullableString(rawState.last_run_id) ||
+    !isNullableString(rawState.server_now) ||
+    !isNullableString(rawSettings.strategy_profile) ||
+    !isNullableFiniteNumber(rawSettings.console_order_usd) ||
+    !isNullableString(rawSettings.console_auto_start_at) ||
+    !isNullableFiniteNumber(rawSettings.console_auto_refresh_minutes)
+  ) {
+    return null;
+  }
+
+  const activeRun = [latestRun, ...recentRuns].find(
+    (run) => run?.status === "running" || run?.status === "confirming",
+  );
+  const latestRunStatus = activeRun?.status;
+  const activeRunStatus =
+    latestRunStatus === "running" || latestRunStatus === "confirming"
+      ? latestRunStatus
+      : null;
+  const activeRunId =
+    activeRunStatus && typeof activeRun?.id === "string" && activeRun.id.trim()
+      ? activeRun.id
+      : null;
+
+  return {
+    state: {
+      running: rawState.running,
+      paused: rawState.paused,
+      emergency_stopped: rawState.emergency_stopped,
+      mode,
+      status:
+        typeof rawState.status === "string" ? rawState.status : null,
+      next_run_at:
+        typeof rawState.next_run_at === "string" ? rawState.next_run_at : null,
+      last_run_at:
+        typeof rawState.last_run_at === "string" ? rawState.last_run_at : null,
+      last_run_id:
+        typeof rawState.last_run_id === "string" ? rawState.last_run_id : null,
+      active_run_id: activeRunId,
+      active_run_status: activeRunStatus,
+      server_now:
+        typeof rawState.server_now === "string" ? rawState.server_now : null,
+    },
+    settings: {
+      auto_live_enabled: rawSettings.auto_live_enabled,
+      strategy_profile:
+        typeof rawSettings.strategy_profile === "string"
+          ? rawSettings.strategy_profile
+          : null,
+      console_order_usd:
+        typeof rawSettings.console_order_usd === "number"
+          ? rawSettings.console_order_usd
+          : null,
+      console_auto_start_at:
+        typeof rawSettings.console_auto_start_at === "string"
+          ? rawSettings.console_auto_start_at
+          : null,
+      console_auto_refresh_minutes:
+        typeof rawSettings.console_auto_refresh_minutes === "number"
+          ? rawSettings.console_auto_refresh_minutes
+          : null,
+    },
+    fetched_at:
+      typeof rawState.server_now === "string"
+        ? rawState.server_now
+        : new Date().toISOString(),
+  };
+}
+
+export function logBullpenAutoRunStatusFallback(input: {
+  fromStage: "primary" | "secondary";
+  toStage: "secondary" | "tertiary";
+  approach: "validated-summary" | "last-known-good-cache";
+  reason: string;
+}) {
+  console.warn(
+    JSON.stringify({
+      event: "bullpen_auto_run_status_fallback_triggered",
+      from_stage: input.fromStage,
+      to_stage: input.toStage,
+      approach: input.approach,
+      reason: input.reason,
+    }),
+  );
+}
+
 export function isBullpenAutoRunStatusData(
   value: unknown,
 ): boolean {

@@ -118,6 +118,26 @@ test("API reads validate payloads, deduplicate requests, and avoid retry loops",
   assert.doesNotMatch(source, /while \(true\)/);
 });
 
+test("Auto-Live start ambiguity uses two read-only reconciliations and never repeats the POST", () => {
+  const source = read("../services/api.ts");
+  const method = source.match(
+    /runBullpenAutoLiveOnce\([\s\S]*?\n  startBullpenAutoLive\(\)/,
+  )?.[0];
+
+  assert.ok(method);
+  assert.equal(
+    method.match(/this\.post<BullpenAutoLiveRun>/g)?.length,
+    1,
+  );
+  assert.match(method, /client_run_id: clientRunId/);
+  assert.match(method, /this\.getBullpenAutoLiveRun\(clientRunId/);
+  assert.match(method, /this\.getBullpenAutoLiveRuns\(/);
+  assert.match(method, /isBullpenAutoLiveRunResponse/);
+  assert.match(method, /logBullpenRunStartFallback/);
+  assert.match(source, /bullpen_auto_live_run_start_fallback_triggered/);
+  assert.doesNotMatch(method, /while\s*\(/);
+});
+
 test("dashboard tertiary fallbacks validate age-bounded saved data", () => {
   const dashboardSource = read("../app/console/dashboard/page.tsx");
   const actionablesSource = read(
@@ -138,6 +158,7 @@ test("changed fallback TypeScript modules parse", () => {
     "../lib/urls.ts",
     "../services/api.ts",
     "../app/backend-api/[...path]/route.ts",
+    "../app/console/bullpen-ai/_components/bullpenAutoRunStatus.ts",
     "../app/console/dashboard/page.tsx",
     "../app/console/_components/FinalActionablesConsole.tsx",
   ]) {

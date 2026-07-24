@@ -2348,6 +2348,7 @@ export interface BullpenAutoLiveConsoleRunContext {
 
 export interface BullpenAutoLiveRunOnceRequest {
   console_profile?: BullpenAutoLiveConsoleRunContext | null;
+  client_run_id?: string | null;
 }
 
 export interface BullpenAutoLiveOrderFunnel {

@@ -293,6 +293,32 @@ def _serialize_event_records(
         },
         source_location="polymarket_auto_live.run",
     )
+    audit_metadata = (
+        run_payload.get("audit_metadata")
+        if isinstance(run_payload.get("audit_metadata"), dict)
+        else {}
+    )
+    execution_handoff = (
+        audit_metadata.get("execution_handoff")
+        if isinstance(audit_metadata.get("execution_handoff"), dict)
+        else {}
+    )
+    for handoff_stage in execution_handoff.get("stages", []):
+        if not isinstance(handoff_stage, dict):
+            continue
+        stage_name = str(handoff_stage.get("stage") or "").strip().lower()
+        if stage_name not in {"primary", "secondary", "tertiary"}:
+            continue
+        add_event(
+            event_key=f"execution-handoff-{stage_name}",
+            logical_stage_number=None,
+            event_type="execution_handoff",
+            scope_type="run",
+            scope_id=str(run_payload.get("id")),
+            occurred_at=handoff_stage.get("triggered_at"),
+            payload=handoff_stage,
+            source_location="polymarket_auto_live.execution_handoff",
+        )
     for index, stage in enumerate(run_payload.get("stage_results") or [], start=1):
         if not isinstance(stage, dict):
             continue
@@ -820,6 +846,11 @@ def _build_bundle(
             "code_provenance": code_provenance,
             "diagnostics": diagnostics,
             "request_context": run_payload.get("request_context"),
+            "execution_handoff": (
+                audit_metadata.get("execution_handoff")
+                if isinstance(audit_metadata.get("execution_handoff"), dict)
+                else {}
+            ),
             "missing_fields": missing_fields,
         },
         "stage_1": {

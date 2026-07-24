@@ -25,6 +25,7 @@ from app.domains.polymarket_auto_live.run_recovery import (
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
     BullpenAutoLiveStageResult,
     BullpenAutoLiveState,
@@ -284,6 +285,11 @@ async def test_get_summary_backfills_completed_run_decisions_from_stage3_payload
         async def ensure_state(self, user_id: int):
             assert user_id == 7
             return state
+
+        async def get_run_for_user(self, user_id: int, run_id: str):
+            assert user_id == 7
+            assert run_id == "client-run-recovery"
+            return None
 
         async def get_running_run_record(self, user_id: int):
             assert user_id == 7
@@ -1298,10 +1304,14 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
         _FakeExecuteTask(),
     )
 
-    result = await BullpenAutoLiveBot(user_id=7).run_once()
+    result = await BullpenAutoLiveBot(user_id=7).run_once(
+        request=BullpenAutoLiveRunOnceRequest(
+            client_run_id="client-run-recovery"
+        )
+    )
 
     assert result.status == "running"
-    assert result.id != stale_run.id
+    assert result.id == "client-run-recovery"
     assert fake_session.committed is True
     assert result.task_lifecycle is not None
     assert queued_runs == [((7, result.id), result.task_lifecycle.task_id, "auto_live")]

@@ -161,6 +161,68 @@ def test_build_deterministic_findings_flags_missing_stage3_handoff():
     assert "QUALIFIED_STAGE2_CANDIDATE_MISSING_STAGE3_RESULT" in codes
 
 
+def test_build_deterministic_findings_validates_bounded_execution_handoffs():
+    bundle = {
+        "metadata": {"run_id": "run-handoff"},
+        "overview": {
+            "run_status": "running",
+            "execution_handoff": {
+                "stages": [
+                    {
+                        "stage": "primary",
+                        "reason": "preferred_planning_queue",
+                        "validation": "durable_run_persisted",
+                        "triggered_at": "2026-07-25T10:00:00+00:00",
+                    },
+                    {
+                        "stage": "secondary",
+                        "reason": "dedicated_queue_handoff_timeout",
+                        "validation": "fallback_publish_accepted",
+                        "triggered_at": "2026-07-25T10:00:30+00:00",
+                    },
+                ]
+            },
+            "request_context": {"client_run_id": "run-handoff"},
+            "missing_fields": [],
+            "code_provenance": {"backend_commit_sha": "abc123"},
+        },
+        "stage_2": {"candidate_reviews": []},
+        "stage_3": {"decisions": [], "order_intents": []},
+        "raw": {},
+    }
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(bundle)
+    }
+    assert "RUN_HANDOFF_SECONDARY_FALLBACK_USED" in codes
+    assert "RUN_HANDOFF_FALLBACK_SEQUENCE_INVALID" not in codes
+    assert "RUN_START_IDEMPOTENCY_ID_MISMATCH" not in codes
+
+    bundle["overview"]["execution_handoff"]["stages"] = [
+        {
+            "stage": "primary",
+            "reason": "preferred_planning_queue",
+            "validation": "durable_run_persisted",
+            "triggered_at": "2026-07-25T10:00:00+00:00",
+        },
+        {
+            "stage": "tertiary",
+            "reason": "handoff_timeout",
+            "validation": "no_execution_owner",
+            "triggered_at": "2026-07-25T10:04:00+00:00",
+        },
+    ]
+    bundle["overview"]["request_context"]["client_run_id"] = "different-run"
+    invalid_codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(bundle)
+    }
+    assert "RUN_HANDOFF_FALLBACK_SEQUENCE_INVALID" in invalid_codes
+    assert "RUN_HANDOFF_TERTIARY_NOT_FAIL_CLOSED" in invalid_codes
+    assert "RUN_START_IDEMPOTENCY_ID_MISMATCH" in invalid_codes
+
+
 def test_build_deterministic_findings_flags_missing_stage2_top10_handoff_decision():
     bundle = {
         "metadata": {"run_id": "run-2"},
@@ -665,6 +727,7 @@ def test_build_bundle_projects_stage3_handoff_checkpoint_without_rewriting_legac
 def test_algorithm_registry_contains_required_audit_keys():
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert keys >= {
+        "run_execution_handoff_fallback",
         "stage2_consensus_statistics",
         "candidate_returns_per_day",
         "stage1_wallet_handoff_circuit_breaker",

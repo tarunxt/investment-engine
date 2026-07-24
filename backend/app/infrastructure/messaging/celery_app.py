@@ -141,13 +141,19 @@ def mark_received_auto_live_planning_task(**kwargs) -> None:
         )
         from app.infrastructure.database.sync_session import SyncSessionLocal
 
+        delivery_info = getattr(request, "delivery_info", None)
+        received_queue = (
+            str(delivery_info.get("routing_key"))
+            if isinstance(delivery_info, dict) and delivery_info.get("routing_key")
+            else AUTO_LIVE_QUEUE
+        )
         with SyncSessionLocal() as session:
             updated = update_auto_live_run_task_lifecycle_sync(
                 session,
                 run_id=run_id,
                 state="RESERVED",
                 task_id=task_id,
-                queue=AUTO_LIVE_QUEUE,
+                queue=received_queue,
                 worker_hostname=getattr(request, "hostname", None),
                 expected_task_id=task_id,
             )

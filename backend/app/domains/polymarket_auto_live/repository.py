@@ -350,6 +350,19 @@ class AsyncPolymarketAutoLiveRepository:
             await self.session.flush()
         return record_to_state(record)
 
+    async def lock_state_record(self, user_id: int) -> BullpenAutoLiveState:
+        """Serialize scheduler mutations and run creation for one user."""
+
+        record = (
+            await self.session.execute(
+                select(PolymarketAutoLiveStateRecord)
+                .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one()
+        return record_to_state(record)
+
     async def save_settings(self, user_id: int, settings: BullpenAutoLiveSettings) -> None:
         record = await self.get_settings_record(user_id)
         if record is None:
@@ -430,6 +443,23 @@ class AsyncPolymarketAutoLiveRepository:
         if row is None:
             return None
         return str(row.id), str(row.status)
+
+    async def get_run_for_user(
+        self,
+        user_id: int,
+        run_id: str,
+    ) -> BullpenAutoLiveRun | None:
+        """Load one durable run without allowing cross-user ID discovery."""
+
+        record = (
+            await self.session.execute(
+                select(PolymarketAutoLiveRunRecord)
+                .where(PolymarketAutoLiveRunRecord.id == run_id)
+                .where(PolymarketAutoLiveRunRecord.user_id == user_id)
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return record_to_run(record) if record is not None else None
 
     async def save_run(self, user_id: int, run: BullpenAutoLiveRun) -> None:
         # A planning worker keeps a session open while its independent

@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -9,7 +11,6 @@ from app.core.logging import get_logger
 from app.domains.bullpen_trade_analysis.service import (
     sync_auto_live_position_snapshots_sync,
 )
-from app.domains.bullpen_run_audit.provenance import build_native_run_audit_metadata
 from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.runtime_broker import run_with_bullpen_runtime_cleanup
@@ -27,6 +28,7 @@ from app.domains.polymarket_auto_live.advisory_lock import (
     AutoLiveAdvisoryLockUnavailable,
     acquire_auto_live_run_execution_advisory_lock_sync,
     acquire_order_intent_operation_advisory_lock_sync,
+    auto_live_run_execution_advisory_lock_is_live_sync,
 )
 from app.domains.polymarket_auto_live.event_exit import ExitSignal, PositionPriceSnapshot
 from app.domains.polymarket_auto_live.engine import BullpenAutoLiveEngine, PositionSnapshot
@@ -62,12 +64,21 @@ from app.domains.polymarket_auto_live.run_recovery import (
     finalize_failed_run_progress,
     reconcile_running_auto_live_run,
 )
+from app.domains.polymarket_auto_live.run_handoff import (
+    AutoLiveTaskPublishExhausted,
+    auto_live_handoff_fallback_action,
+    build_auto_live_run_audit_metadata,
+    publish_auto_live_task_with_fallback,
+    record_auto_live_execution_handoff,
+)
 from app.domains.polymarket_auto_live.run_lifecycle import (
+    AUTO_LIVE_FALLBACK_QUEUE,
     AUTO_LIVE_QUEUE,
     AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS,
     AutoLiveRunHeartbeat,
     AutoLiveRunLeaseUnavailable,
     acquire_auto_live_run_execution_lease_sync,
+    auto_live_run_execution_lease_is_live_sync,
     get_auto_live_run_execution_lease_sync,
     mark_auto_live_run_task_started_sync,
     queued_auto_live_task_lifecycle,
@@ -405,6 +416,15 @@ def _task_request_id(task: object) -> str:
     return str(task_id) if isinstance(task_id, str) and task_id else str(uuid4())
 
 
+def _task_delivery_queue(task: object) -> str | None:
+    request = getattr(task, "request", None)
+    delivery_info = getattr(request, "delivery_info", None)
+    if not isinstance(delivery_info, dict):
+        return None
+    routing_key = delivery_info.get("routing_key")
+    return str(routing_key) if routing_key else None
+
+
 def _begin_order_intent_operation(
     task: object,
     *,
@@ -695,6 +715,7 @@ def _mark_auto_live_task_lifecycle_best_effort(
     state: str,
     detail: str | None = None,
     worker_hostname: str | None = None,
+    queue: str | None = None,
 ) -> None:
     """Persist task outcome without letting observability mask workflow safety."""
 
@@ -705,7 +726,7 @@ def _mark_auto_live_task_lifecycle_best_effort(
                 run_id=run_id,
                 state=state,  # type: ignore[arg-type]
                 task_id=task_id,
-                queue=AUTO_LIVE_QUEUE,
+                queue=queue,
                 worker_hostname=worker_hostname,
                 detail=detail,
                 expected_task_id=task_id,
@@ -882,6 +903,7 @@ def execute_polymarket_auto_live_run(
                 run_id=run_id,
                 task_id=task_id,
                 worker_hostname=worker_hostname,
+                queue=_task_delivery_queue(self),
                 increment_redelivery=(
                     broker_redelivered or lease_observed_at is not None
                 ),
@@ -1328,12 +1350,283 @@ def _execute_polymarket_auto_live_run_with_lease(
         )
 
 
+def _planner_liveness_validation(run_id: str) -> tuple[bool, str]:
+    lease_live = auto_live_run_execution_lease_is_live_sync(run_id)
+    advisory_live = auto_live_run_execution_advisory_lock_is_live_sync(run_id)
+    if lease_live is True or advisory_live is True:
+        return True, (
+            f"execution_owner_live:redis={lease_live}:postgres={advisory_live}"
+        )
+    if lease_live is None and advisory_live is None:
+        return True, "execution_owner_unknown:redis=None:postgres=None"
+    return False, f"no_execution_owner:redis={lease_live}:postgres={advisory_live}"
+
+
+def dispatch_stalled_auto_live_run_fallbacks_sync(
+    *,
+    limit: int = 100,
+    now: datetime | None = None,
+) -> int:
+    """Republish an unclaimed planner once, then fail closed after its budget.
+
+    The same Celery task ID and durable run ID are reused on the secondary
+    queue. Redis and PostgreSQL execution fences protect against a delayed
+    primary delivery. No third execution dispatch exists: the tertiary stage
+    terminalizes a still-unclaimed run so it cannot spin forever.
+    """
+
+    observed_at = now or _utc_now()
+    changed = 0
+    terminal_run_ids: list[tuple[int, str]] = []
+    with SyncSessionLocal() as session:
+        record_ids = (
+            session.execute(
+                select(PolymarketAutoLiveRunRecord.id)
+                .where(PolymarketAutoLiveRunRecord.status == "running")
+                .order_by(PolymarketAutoLiveRunRecord.started_at.asc())
+                .limit(max(1, limit))
+            )
+            .scalars()
+            .all()
+        )
+        repo = SyncPolymarketAutoLiveRepository(session)
+        for record_id in record_ids:
+            # Check the persisted lifecycle before taking a row lock so a
+            # Celery task_received signal can publish RESERVED without being
+            # blocked behind this watchdog. The row is then refreshed and
+            # revalidated under a per-run lock immediately before mutation.
+            candidate = session.get(PolymarketAutoLiveRunRecord, record_id)
+            if candidate is None:
+                session.rollback()
+                continue
+            candidate_run = record_to_run(candidate)
+            action = auto_live_handoff_fallback_action(
+                candidate_run,
+                now=observed_at,
+            )
+            if action is None:
+                session.rollback()
+                continue
+            owner_live, validation = _planner_liveness_validation(
+                candidate_run.id
+            )
+            if owner_live:
+                logger.info(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "bullpen_auto_live_handoff_fallback_deferred",
+                            "run_id": candidate_run.id,
+                            "candidate_stage": action,
+                            "reason": validation,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+                session.rollback()
+                continue
+
+            record = (
+                session.execute(
+                    select(PolymarketAutoLiveRunRecord)
+                    .where(PolymarketAutoLiveRunRecord.id == record_id)
+                    .where(PolymarketAutoLiveRunRecord.status == "running")
+                    .with_for_update(skip_locked=True)
+                    .execution_options(populate_existing=True)
+                )
+                .scalars()
+                .one_or_none()
+            )
+            if record is None:
+                session.rollback()
+                continue
+            run = record_to_run(record)
+            action = auto_live_handoff_fallback_action(run, now=observed_at)
+            if action is None or run.task_lifecycle is None:
+                session.rollback()
+                continue
+
+            owner_live, validation = _planner_liveness_validation(run.id)
+            if owner_live:
+                logger.info(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "bullpen_auto_live_handoff_fallback_deferred",
+                            "run_id": run.id,
+                            "candidate_stage": action,
+                            "reason": validation,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+                session.rollback()
+                continue
+
+            triggered_at = observed_at.isoformat()
+            task_id = run.task_lifecycle.task_id
+            if not task_id:
+                session.rollback()
+                continue
+
+            if action == "secondary":
+                publish_validation = validation
+                try:
+                    execute_polymarket_auto_live_run.apply_async(  # type: ignore[attr-defined]
+                        args=(record.user_id, run.id),
+                        task_id=task_id,
+                        queue=AUTO_LIVE_FALLBACK_QUEUE,
+                    )
+                    publish_validation = f"{validation}:fallback_publish_accepted"
+                except Exception as exc:
+                    publish_validation = (
+                        f"{validation}:fallback_publish_failed:{type(exc).__name__}"
+                    )
+                    logger.warning(
+                        "Secondary Auto-Live queue publish failed for run %s.",
+                        run.id,
+                        exc_info=True,
+                    )
+
+                if not record_auto_live_execution_handoff(
+                    run,
+                    stage="secondary",
+                    approach="general_worker_queue",
+                    queue=AUTO_LIVE_FALLBACK_QUEUE,
+                    reason="dedicated_queue_handoff_timeout",
+                    validation=publish_validation,
+                    triggered_at=triggered_at,
+                ):
+                    session.rollback()
+                    continue
+                run.task_lifecycle = run.task_lifecycle.model_copy(
+                    update={
+                        "queue": AUTO_LIVE_FALLBACK_QUEUE,
+                        "detail": (
+                            "Dedicated planning queue did not claim the task "
+                            "within its handoff budget; one fenced fallback "
+                            "dispatch was attempted."
+                        ),
+                    }
+                )
+                repo.save_run(record.user_id, run)
+                session.commit()
+                register_auto_live_run_task_sync(run.id, task_id)
+                logger.warning(
+                    "%s",
+                    json.dumps(
+                        {
+                            "event": "bullpen_auto_live_handoff_fallback_triggered",
+                            "run_id": run.id,
+                            "from_stage": "primary",
+                            "to_stage": "secondary",
+                            "queue": AUTO_LIVE_FALLBACK_QUEUE,
+                            "reason": "dedicated_queue_handoff_timeout",
+                            "validation": publish_validation,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                )
+                changed += 1
+                continue
+
+            completed_at = triggered_at
+            failure_message = (
+                "No worker claimed the Auto-Live task through the dedicated "
+                "or fallback queue within the bounded handoff window."
+            )
+            record_auto_live_execution_handoff(
+                run,
+                stage="tertiary",
+                approach="bounded_fail_closed",
+                queue=None,
+                reason="primary_and_secondary_handoff_timeout",
+                validation=validation,
+                triggered_at=completed_at,
+            )
+            run.status = "failed"
+            run.completed_at = completed_at
+            run.error_message = failure_message
+            run.summary = finalize_failed_run_progress(
+                run,
+                failure_message=failure_message,
+                completed_at=completed_at,
+            )
+            run.task_lifecycle = run.task_lifecycle.model_copy(
+                update={
+                    "state": "FAILURE",
+                    "detail": failure_message,
+                }
+            )
+            state_record = (
+                session.execute(
+                    select(PolymarketAutoLiveStateRecord)
+                    .where(
+                        PolymarketAutoLiveStateRecord.user_id == record.user_id
+                    )
+                    .with_for_update()
+                    .execution_options(populate_existing=True)
+                )
+                .scalars()
+                .one_or_none()
+            )
+            if state_record is not None:
+                state = record_to_state(state_record)
+                state.last_run_id = run.id
+                state.last_run_at = completed_at
+                state.last_action = run.summary
+                state.last_error = run.summary
+                repo.save_state(record.user_id, state)
+            repo.save_run(record.user_id, run)
+            session.commit()
+            terminal_run_ids.append((record.user_id, run.id))
+            logger.error(
+                "%s",
+                json.dumps(
+                    {
+                        "event": "bullpen_auto_live_handoff_fallback_triggered",
+                        "run_id": run.id,
+                        "from_stage": "secondary",
+                        "to_stage": "tertiary",
+                        "approach": "bounded_fail_closed",
+                        "reason": "primary_and_secondary_handoff_timeout",
+                        "validation": validation,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+            changed += 1
+
+    for user_id, run_id in terminal_run_ids:
+        try:
+            with SyncSessionLocal() as audit_session:
+                materialize_run_audit_snapshot_sync(
+                    audit_session,
+                    user_id=user_id,
+                    run_id=run_id,
+                    force=True,
+                    freeze=True,
+                )
+                audit_session.commit()
+        except Exception:
+            logger.exception(
+                "Could not freeze terminal handoff audit for run %s.",
+                run_id,
+            )
+    return changed
+
+
 @celery.task(
     name="app.domains.polymarket_auto_live.tasks.enqueue_due_polymarket_auto_live_runs",
     queue="beat",
 )
 def enqueue_due_polymarket_auto_live_runs() -> None:
     now = _utc_now()
+    dispatch_stalled_auto_live_run_fallbacks_sync(now=now)
     with SyncSessionLocal() as session:
         repo = SyncPolymarketAutoLiveRepository(session)
         due_states = session.execute(
@@ -1393,50 +1686,57 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                 reference_time=now,
             )
             task_id = str(uuid4())
+            run_id = str(uuid4())
+            started_at = now.isoformat()
             run = BullpenAutoLiveRun(
-                id=str(uuid4()),
+                id=run_id,
                 triggered_by="scheduler",
                 status="running",
                 dry_run=effective_dry_run(settings),
-                started_at=now.isoformat(),
+                started_at=started_at,
                 summary=build_initial_run_summary(),
                 live_execution_requested=live_execution_requested(settings),
                 guardrail_checks=state.latest_guardrail_checks,
                 stage_results=[
                     build_initial_scan_stage_result(
-                        started_at=now.isoformat(),
+                        started_at=started_at,
                     )
                 ],
                 stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
-                audit_metadata=build_native_run_audit_metadata(
-                    settings_snapshot=settings.model_dump(mode="json"),
-                    prompt_template=settings.console_llm_prompt_template,
-                    execution_version=None,
-                    strategy_version=settings.strategy_profile,
+                audit_metadata=build_auto_live_run_audit_metadata(
+                    settings,
+                    run_id=run_id,
+                    task_id=task_id,
+                    enqueued_at=started_at,
                 ),
                 task_lifecycle=queued_auto_live_task_lifecycle(
                     task_id=task_id,
-                    enqueued_at=now.isoformat(),
+                    enqueued_at=started_at,
                 ),
             )
             repo.save_run(user_id, run)
             repo.save_state(user_id, state)
             session.commit()
             try:
-                task = execute_polymarket_auto_live_run.apply_async(  # type: ignore[attr-defined]
-                    args=(user_id, run.id),
+                task, fallback_used = publish_auto_live_task_with_fallback(
+                    execute_polymarket_auto_live_run,
+                    user_id=user_id,
+                    run=run,
                     task_id=task_id,
-                    queue=AUTO_LIVE_QUEUE,
+                    logger=logger,
                 )
-            except Exception:
-                logger.exception(
-                    "Could not enqueue scheduled Auto-Live run %s; marking it failed.",
-                    run.id,
-                )
+            except AutoLiveTaskPublishExhausted as publish_error:
                 run.status = "failed"
-                run.completed_at = _utc_now().isoformat()
-                run.error_message = "Could not enqueue Auto-Live worker task"
-                run.summary = run.error_message
+                run.completed_at = publish_error.failed_at
+                run.error_message = (
+                    "Could not enqueue Auto-Live worker task through the "
+                    "primary or fallback queue."
+                )
+                run.summary = finalize_failed_run_progress(
+                    run,
+                    failure_message=run.error_message,
+                    completed_at=publish_error.failed_at,
+                )
                 if run.task_lifecycle is not None:
                     run.task_lifecycle = run.task_lifecycle.model_copy(
                         update={
@@ -1444,10 +1744,17 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                             "detail": run.error_message,
                         }
                     )
+                state.last_run_id = run.id
+                state.last_run_at = publish_error.failed_at
+                state.last_action = run.summary
+                state.last_error = run.summary
                 repo.save_run(user_id, run)
                 repo.save_state(user_id, state)
                 session.commit()
                 continue
+            if fallback_used:
+                repo.save_run(user_id, run)
+                session.commit()
             register_auto_live_run_task_sync(run.id, str(task.id))
 
 

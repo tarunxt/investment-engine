@@ -126,6 +126,8 @@ const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
 const DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS = 6_000;
 const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
+const BULLPEN_RUN_START_SECONDARY_DELAY_MS = 250;
+const BULLPEN_RUN_START_TERTIARY_DELAY_MS = 750;
 
 export class APIError extends Error {
   constructor(
@@ -316,6 +318,65 @@ function getReadFallbackReason(error: unknown) {
   if (error instanceof APIError) return `http_${error.status}`;
   if (error instanceof Error) return error.name || "error";
   return "unknown_error";
+}
+
+function isAmbiguousBullpenRunStartError(error: unknown) {
+  return (
+    error instanceof RequestTimeoutError ||
+    error instanceof NetworkError ||
+    error instanceof InvalidAPIResponseError ||
+    (error instanceof APIError && (error.status === 429 || error.status >= 500))
+  );
+}
+
+function isBullpenAutoLiveRunResponse(
+  value: unknown,
+  expectedRunId?: string,
+): value is BullpenAutoLiveRun {
+  const validStatuses = new Set([
+    "running",
+    "confirming",
+    "completed",
+    "partial_success",
+    "failed",
+    "skipped",
+  ]);
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    !validStatuses.has(String(value.status)) ||
+    typeof value.triggered_by !== "string" ||
+    typeof value.dry_run !== "boolean" ||
+    typeof value.started_at !== "string" ||
+    typeof value.summary !== "string" ||
+    !Array.isArray(value.stage_results)
+  ) {
+    return false;
+  }
+  return expectedRunId === undefined || value.id === expectedRunId;
+}
+
+function logBullpenRunStartFallback(input: {
+  runId: string;
+  fromStage: "primary" | "secondary";
+  toStage: "secondary" | "tertiary";
+  approach: string;
+  reason: string;
+}) {
+  console.warn(
+    JSON.stringify({
+      event: "bullpen_auto_live_run_start_fallback_triggered",
+      run_id: input.runId,
+      from_stage: input.fromStage,
+      to_stage: input.toStage,
+      approach: input.approach,
+      reason: input.reason,
+    }),
+  );
+}
+
+function waitForBoundedFallback(delayMs: number) {
+  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
 }
 
 function logReadFallback(input: {
@@ -1655,6 +1716,16 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  getBullpenAutoLiveRun(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.get<BullpenAutoLiveRun>(
+      URLs.bullpenAutoLive.run(runId),
+      { cache: "no-store", ...options },
+    );
+  }
+
   getBullpenAutoLiveRunOrders(
     runId: string,
   ): Promise<BullpenAutoLiveRunOrdersResponse> {
@@ -1877,7 +1948,72 @@ class apiServiceClass implements IApiService {
   runBullpenAutoLiveOnce(
     data?: BullpenAutoLiveRunOnceRequest,
   ): Promise<BullpenAutoLiveRun> {
-    return this.post<BullpenAutoLiveRun>(URLs.bullpenAutoLive.runOnce(), data);
+    const clientRunId =
+      data?.client_run_id?.trim() ||
+      (typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `auto-run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+    const request: BullpenAutoLiveRunOnceRequest = {
+      ...(data ?? {}),
+      client_run_id: clientRunId,
+    };
+
+    return this.post<BullpenAutoLiveRun>(
+      URLs.bullpenAutoLive.runOnce(),
+      request,
+      {
+        validate: (value) =>
+          isBullpenAutoLiveRunResponse(value, clientRunId),
+      },
+    ).catch(async (primaryError: unknown) => {
+      if (!isAmbiguousBullpenRunStartError(primaryError)) {
+        throw primaryError;
+      }
+
+      logBullpenRunStartFallback({
+        runId: clientRunId,
+        fromStage: "primary",
+        toStage: "secondary",
+        approach: "read_durable_run_by_id",
+        reason: getReadFallbackReason(primaryError),
+      });
+      await waitForBoundedFallback(BULLPEN_RUN_START_SECONDARY_DELAY_MS);
+
+      try {
+        return await this.getBullpenAutoLiveRun(clientRunId, {
+          timeoutMs: 5_000,
+          validate: (value) =>
+            isBullpenAutoLiveRunResponse(value, clientRunId),
+        });
+      } catch (secondaryError) {
+        logBullpenRunStartFallback({
+          runId: clientRunId,
+          fromStage: "secondary",
+          toStage: "tertiary",
+          approach: "match_durable_run_history",
+          reason: getReadFallbackReason(secondaryError),
+        });
+      }
+
+      await waitForBoundedFallback(BULLPEN_RUN_START_TERTIARY_DELAY_MS);
+      try {
+        const runs = await this.getBullpenAutoLiveRuns({
+          timeoutMs: 5_000,
+          validate: (value) =>
+            Array.isArray(value) &&
+            value.every((run) => isBullpenAutoLiveRunResponse(run)),
+        });
+        const recoveredRun = runs.find((run) => run.id === clientRunId);
+        if (recoveredRun && isBullpenAutoLiveRunResponse(recoveredRun, clientRunId)) {
+          return recoveredRun;
+        }
+      } catch {
+        // Preserve the primary mutation error after all bounded, read-only
+        // reconciliation paths have failed. Never issue a second POST.
+      }
+
+      throw primaryError;
+    });
   }
 
   startBullpenAutoLive(): Promise<BullpenAutoLiveState> {

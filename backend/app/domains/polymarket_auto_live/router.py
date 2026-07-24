@@ -375,6 +375,20 @@ async def list_auto_live_runs(current_user: User = Depends(get_current_user)):
     return await bot.list_runs()
 
 
+@router.get("/runs/{run_id}", response_model=BullpenAutoLiveRun)
+async def get_auto_live_run(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Return one user-owned durable run for ambiguity-safe start recovery."""
+
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+
 @router.get("/runs/{run_id}/orders", response_model=BullpenAutoLiveRunOrdersResponse)
 async def get_auto_live_run_orders(
     run_id: str,

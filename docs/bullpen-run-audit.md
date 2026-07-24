@@ -690,6 +690,41 @@ terminal workflow failure. The two-hour workflow circuit breaker remains an
 independent absolute limit. Backend startup does not perform an immediate
 destructive stale-run sweep.
 
+Run creation and the worker handoff use a bounded three-layer recovery contract:
+
+1. The preferred primary path persists a client-generated run ID, task ID, and
+   `QUEUED` lifecycle before publishing once to the dedicated `auto_live` queue.
+2. If the primary publish fails immediately, or the durable lifecycle remains
+   strictly `QUEUED` beyond `AUTO_LIVE_PRIMARY_HANDOFF_TIMEOUT_SECONDS` (default
+   `30`), the same run ID and Celery task ID are dispatched once to
+   `CELERY_AUTO_LIVE_FALLBACK_QUEUE` (default `ai`). `RESERVED`, `STARTED`, or
+   `RETRYING` work never enters this fallback.
+3. If neither queue claims the task within
+   `AUTO_LIVE_FALLBACK_HANDOFF_TIMEOUT_SECONDS` (default `180`), and neither the
+   Redis execution lease nor PostgreSQL advisory fence proves a live owner, the
+   run is failed closed. Stage progress is terminalized and no inline or repeated
+   AI execution is attempted.
+
+Every layer is appended to `audit_metadata.execution_handoff` with the approach,
+queue, trigger time, reason, and validation result. Audit timelines expose these
+entries as `execution_handoff` events. Deterministic validation rejects duplicate
+or out-of-order fallback stages, missing trigger evidence, a non-failed tertiary
+result, or a mismatch between `request_context.client_run_id` and the durable run
+ID. A still-live legacy run with a persisted `QUEUED` lifecycle can reconstruct
+only that already-proven primary handoff before using the secondary; frozen
+legacy snapshots without this additive metadata remain valid and are not
+rewritten.
+
+The browser also treats a timed-out `POST /polymarket/auto-live/run-once` as
+ambiguous rather than failed. It never repeats the POST. It first reads the new
+user-scoped `GET /polymarket/auto-live/runs/{run_id}` resource, then falls back
+once to matching the existing run-history endpoint. The persisted client run ID
+makes both reconciliation reads deterministic and prevents duplicate execution.
+Status and mode use the focused persisted-status endpoint first, a schema-validated
+summary adapter second, and an age-bounded account-scoped last-known-good cache
+third. Automatic status retries are capped; fallback transitions and reasons are
+logged without credentials or response bodies.
+
 On worker recovery, persisted `running`/`confirming` work is reconciled only
 through those lifecycle and lease checks. Runs with a healthy worker heartbeat or
 queued/redelivered task are left alone.

@@ -21,6 +21,7 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 import app.domains.polymarket_auto_live.bot as bot_module
+import app.domains.polymarket_auto_live.run_handoff as handoff_module
 import app.domains.polymarket_auto_live.run_lifecycle as lifecycle_module
 import app.domains.polymarket_auto_live.run_recovery as recovery_module
 import app.domains.polymarket_auto_live.tasks as tasks_module
@@ -159,6 +160,222 @@ def test_all_stage3_order_intent_operations_stay_on_ai_not_the_planning_queue():
     assert _task_queue(
         "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run"
     ) == AUTO_LIVE_QUEUE
+
+
+def _queued_run_with_handoff(
+    *,
+    enqueued_at: datetime,
+    stages: list[dict[str, object]] | None = None,
+    lifecycle_state: str = "QUEUED",
+) -> BullpenAutoLiveRun:
+    return BullpenAutoLiveRun(
+        id="run-handoff-fallback",
+        triggered_by="manual",
+        status="running",
+        dry_run=True,
+        started_at=enqueued_at.isoformat(),
+        summary="Queued",
+        audit_metadata={
+            "execution_handoff": {
+                "stages": (
+                    stages
+                    if stages is not None
+                    else [
+                        {
+                            "stage": "primary",
+                            "triggered_at": enqueued_at.isoformat(),
+                            "reason": "preferred_planning_queue",
+                            "validation": "durable_run_persisted",
+                        }
+                    ]
+                )
+            }
+        },
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state=lifecycle_state,  # type: ignore[arg-type]
+            task_id="task-handoff-fallback",
+            queue=AUTO_LIVE_QUEUE,
+            enqueued_at=enqueued_at.isoformat(),
+        ),
+    )
+
+
+def test_auto_live_handoff_fallback_is_finite_and_only_targets_unclaimed_runs(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    enqueued_at = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)
+    monkeypatch.setattr(
+        handoff_module,
+        "AUTO_LIVE_PRIMARY_HANDOFF_TIMEOUT_SECONDS",
+        30,
+    )
+    monkeypatch.setattr(
+        handoff_module,
+        "AUTO_LIVE_FALLBACK_HANDOFF_TIMEOUT_SECONDS",
+        180,
+    )
+    queued = _queued_run_with_handoff(enqueued_at=enqueued_at)
+
+    assert (
+        tasks_module.auto_live_handoff_fallback_action(
+            queued,
+            now=enqueued_at + timedelta(seconds=29),
+        )
+        is None
+    )
+    assert (
+        tasks_module.auto_live_handoff_fallback_action(
+            queued,
+            now=enqueued_at + timedelta(seconds=30),
+        )
+        == "secondary"
+    )
+
+    legacy_queued = _queued_run_with_handoff(
+        enqueued_at=enqueued_at,
+        stages=[],
+    )
+    assert (
+        tasks_module.auto_live_handoff_fallback_action(
+            legacy_queued,
+            now=enqueued_at + timedelta(seconds=30),
+        )
+        == "secondary"
+    )
+    assert handoff_module.record_auto_live_execution_handoff(
+        legacy_queued,
+        stage="secondary",
+        approach="general_worker_queue",
+        queue="ai",
+        reason="dedicated_queue_handoff_timeout",
+        validation="fallback_publish_accepted",
+        triggered_at=(enqueued_at + timedelta(seconds=30)).isoformat(),
+    )
+    assert [
+        stage["stage"]
+        for stage in legacy_queued.audit_metadata["execution_handoff"]["stages"]
+    ] == ["primary", "secondary"]
+    assert not handoff_module.record_auto_live_execution_handoff(
+        legacy_queued,
+        stage="secondary",
+        approach="general_worker_queue",
+        queue="ai",
+        reason="duplicate",
+        validation="duplicate",
+        triggered_at=(enqueued_at + timedelta(seconds=31)).isoformat(),
+    )
+
+    secondary_at = enqueued_at + timedelta(seconds=30)
+    secondary = _queued_run_with_handoff(
+        enqueued_at=enqueued_at,
+        stages=[
+            {
+                "stage": "primary",
+                "triggered_at": enqueued_at.isoformat(),
+                "reason": "preferred_planning_queue",
+                "validation": "durable_run_persisted",
+            },
+            {
+                "stage": "secondary",
+                "triggered_at": secondary_at.isoformat(),
+                "reason": "dedicated_queue_handoff_timeout",
+                "validation": "fallback_publish_accepted",
+            },
+        ],
+    )
+    assert (
+        tasks_module.auto_live_handoff_fallback_action(
+            secondary,
+            now=secondary_at + timedelta(seconds=179),
+        )
+        is None
+    )
+    assert (
+        tasks_module.auto_live_handoff_fallback_action(
+            secondary,
+            now=secondary_at + timedelta(seconds=180),
+        )
+        == "tertiary"
+    )
+
+    reserved = _queued_run_with_handoff(
+        enqueued_at=enqueued_at,
+        lifecycle_state="RESERVED",
+    )
+    assert (
+        tasks_module.auto_live_handoff_fallback_action(
+            reserved,
+            now=enqueued_at + timedelta(hours=1),
+        )
+        is None
+    )
+
+
+def test_auto_live_publish_fallback_reuses_one_identity_and_stops_after_two_dispatches():
+    enqueued_at = datetime(2026, 7, 25, 10, 0, tzinfo=UTC)
+    run = _queued_run_with_handoff(enqueued_at=enqueued_at)
+    calls: list[tuple[tuple[int, str], str, str]] = []
+
+    class _Publisher:
+        outcomes: list[object] = [
+            ConnectionError("primary unavailable"),
+            SimpleNamespace(id="task-handoff-fallback"),
+        ]
+
+        def apply_async(self, *, args, task_id: str, queue: str):
+            calls.append((args, task_id, queue))
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+    logger = SimpleNamespace(
+        warning=lambda *_args, **_kwargs: None,
+        error=lambda *_args, **_kwargs: None,
+    )
+    task, fallback_used = handoff_module.publish_auto_live_task_with_fallback(
+        _Publisher(),
+        user_id=7,
+        run=run,
+        task_id="task-handoff-fallback",
+        logger=logger,
+    )
+
+    assert task.id == "task-handoff-fallback"
+    assert fallback_used is True
+    assert calls == [
+        ((7, run.id), "task-handoff-fallback", "auto_live"),
+        ((7, run.id), "task-handoff-fallback", "ai"),
+    ]
+    assert [
+        stage["stage"]
+        for stage in run.audit_metadata["execution_handoff"]["stages"]
+    ] == ["primary", "secondary"]
+
+    failed_run = _queued_run_with_handoff(enqueued_at=enqueued_at)
+
+    class _FailedPublisher:
+        calls = 0
+
+        def apply_async(self, **_kwargs):
+            self.calls += 1
+            raise ConnectionError(f"publish {self.calls} failed")
+
+    failed_publisher = _FailedPublisher()
+    with pytest.raises(handoff_module.AutoLiveTaskPublishExhausted):
+        handoff_module.publish_auto_live_task_with_fallback(
+            failed_publisher,
+            user_id=7,
+            run=failed_run,
+            task_id="task-handoff-fallback",
+            logger=logger,
+        )
+
+    assert failed_publisher.calls == 2
+    assert [
+        stage["stage"]
+        for stage in failed_run.audit_metadata["execution_handoff"]["stages"]
+    ] == ["primary", "secondary", "tertiary"]
 
 
 def test_worker_lost_redelivery_gets_one_new_run_lease_and_old_owner_is_fenced(

@@ -130,6 +130,136 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
             )
         )
 
+    execution_handoff = (
+        overview.get("execution_handoff")
+        if isinstance(overview.get("execution_handoff"), dict)
+        else {}
+    )
+    raw_handoff_stages = execution_handoff.get("stages")
+    if isinstance(raw_handoff_stages, list) and raw_handoff_stages:
+        handoff_stages = [
+            stage for stage in raw_handoff_stages if isinstance(stage, dict)
+        ]
+        stage_names = [
+            str(stage.get("stage") or "").strip().lower()
+            for stage in handoff_stages
+        ]
+        expected_prefix = ["primary", "secondary", "tertiary"][: len(stage_names)]
+        if (
+            len(handoff_stages) != len(raw_handoff_stages)
+            or len(stage_names) > 3
+            or stage_names != expected_prefix
+            or len(set(stage_names)) != len(stage_names)
+        ):
+            findings.append(
+                _finding(
+                    code="RUN_HANDOFF_FALLBACK_SEQUENCE_INVALID",
+                    severity="critical",
+                    stage="overview",
+                    category="execution-handoff",
+                    title="Run execution fallbacks are duplicated or out of order",
+                    explanation=(
+                        "The durable handoff must contain at most one primary, "
+                        "one secondary, and one tertiary stage in that order."
+                    ),
+                    observed_value=str(stage_names),
+                    expected_value=str(expected_prefix),
+                    blocking=True,
+                    evidence_pointers=["/overview/execution_handoff/stages"],
+                )
+            )
+
+        for index, stage in enumerate(handoff_stages):
+            if (
+                not str(stage.get("reason") or "").strip()
+                or not str(stage.get("validation") or "").strip()
+                or not str(stage.get("triggered_at") or "").strip()
+            ):
+                findings.append(
+                    _finding(
+                        code="RUN_HANDOFF_FALLBACK_EVIDENCE_MISSING",
+                        severity="high",
+                        stage="overview",
+                        category="execution-handoff",
+                        title="Run fallback is missing its trigger evidence",
+                        explanation=(
+                            "Every handoff stage must record when it was used, "
+                            "why it was triggered, and which validation allowed it."
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/overview/execution_handoff/stages/{index}"
+                        ],
+                    )
+                )
+
+        if "secondary" in stage_names:
+            findings.append(
+                _finding(
+                    code="RUN_HANDOFF_SECONDARY_FALLBACK_USED",
+                    severity="info",
+                    stage="overview",
+                    category="execution-handoff",
+                    title="Run used the bounded secondary worker handoff",
+                    explanation=(
+                        "The preferred dedicated queue did not produce a valid "
+                        "handoff, so the same fenced task identity was dispatched "
+                        "once through the configured fallback queue."
+                    ),
+                    evidence_pointers=["/overview/execution_handoff/stages"],
+                )
+            )
+
+        if "tertiary" in stage_names and overview.get("run_status") != "failed":
+            findings.append(
+                _finding(
+                    code="RUN_HANDOFF_TERTIARY_NOT_FAIL_CLOSED",
+                    severity="critical",
+                    stage="overview",
+                    category="execution-handoff",
+                    title="Tertiary handoff did not leave the run failed",
+                    explanation=(
+                        "The tertiary layer is a fail-closed terminal result; "
+                        "it must never continue Stage 1, Stage 2, or Stage 3."
+                    ),
+                    observed_value=str(overview.get("run_status")),
+                    expected_value="failed",
+                    blocking=True,
+                    evidence_pointers=[
+                        "/overview/run_status",
+                        "/overview/execution_handoff/stages",
+                    ],
+                )
+            )
+
+        request_context = (
+            overview.get("request_context")
+            if isinstance(overview.get("request_context"), dict)
+            else {}
+        )
+        client_run_id = request_context.get("client_run_id")
+        if client_run_id and client_run_id != metadata.get("run_id"):
+            findings.append(
+                _finding(
+                    code="RUN_START_IDEMPOTENCY_ID_MISMATCH",
+                    severity="critical",
+                    stage="overview",
+                    category="idempotency",
+                    title="Client run identity does not match the durable run",
+                    explanation=(
+                        "An ambiguity-safe start must persist the client-generated "
+                        "run ID as the actual durable run primary key."
+                    ),
+                    observed_value=str(client_run_id),
+                    expected_value=str(metadata.get("run_id")),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/overview/request_context/client_run_id",
+                        "/metadata/run_id",
+                    ],
+                )
+            )
+
     verified_portfolio = (
         stage_1.get("verified_portfolio_snapshot")
         if isinstance(stage_1.get("verified_portfolio_snapshot"), dict)

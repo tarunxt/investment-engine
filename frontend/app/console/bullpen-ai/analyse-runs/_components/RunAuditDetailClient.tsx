@@ -526,6 +526,11 @@ function renderSectionData(section: string, data: unknown) {
         </SectionShell>
         <SectionShell title="Context and Diagnostics">
           <JsonPanel title="Request Context" value={overview.request_context} />
+          <JsonPanel
+            title="Execution Handoff Fallbacks"
+            value={overview.execution_handoff}
+            defaultOpen
+          />
           <JsonPanel title="Settings Snapshot" value={overview.settings_snapshot} />
           <JsonPanel title="Diagnostics" value={overview.diagnostics} />
           <JsonPanel title="Code Provenance" value={overview.code_provenance} />

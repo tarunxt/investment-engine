@@ -46,6 +46,9 @@ logger = get_logger("app.domains.polymarket_auto_live.run_lifecycle")
 # Normalizing it in one module means an intentional non-default production
 # queue cannot strand planning messages on a hard-coded routing key.
 AUTO_LIVE_QUEUE = os.getenv("CELERY_AUTO_LIVE_WORKER_QUEUE", "auto_live").strip() or "auto_live"
+AUTO_LIVE_FALLBACK_QUEUE = (
+    os.getenv("CELERY_AUTO_LIVE_FALLBACK_QUEUE", "ai").strip() or "ai"
+)
 
 
 def _positive_int_env(name: str, default: int, *, minimum: int = 1) -> int:
@@ -99,6 +102,12 @@ AUTO_LIVE_RUN_STARTUP_RECOVERY_GRACE_SECONDS = _positive_int_env(
 )
 AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS = _positive_int_env(
     "AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS", 15
+)
+AUTO_LIVE_PRIMARY_HANDOFF_TIMEOUT_SECONDS = _positive_int_env(
+    "AUTO_LIVE_PRIMARY_HANDOFF_TIMEOUT_SECONDS", 30
+)
+AUTO_LIVE_FALLBACK_HANDOFF_TIMEOUT_SECONDS = _positive_int_env(
+    "AUTO_LIVE_FALLBACK_HANDOFF_TIMEOUT_SECONDS", 180
 )
 
 _RELEASE_SCRIPT = (
@@ -378,12 +387,15 @@ def lifecycle_detail_for_state(state: AutoLiveTaskLifecycleState) -> str:
 
 
 def queued_auto_live_task_lifecycle(
-    *, task_id: str, enqueued_at: str | None = None
+    *,
+    task_id: str,
+    enqueued_at: str | None = None,
+    queue: str = AUTO_LIVE_QUEUE,
 ) -> BullpenAutoLiveTaskLifecycle:
     return BullpenAutoLiveTaskLifecycle(
         state="QUEUED",
         task_id=task_id,
-        queue=AUTO_LIVE_QUEUE,
+        queue=queue,
         enqueued_at=enqueued_at or utc_now_iso(),
         detail=lifecycle_detail_for_state("QUEUED"),
     )
@@ -593,6 +605,7 @@ def mark_auto_live_run_task_started_sync(
     run_id: str,
     task_id: str,
     worker_hostname: str | None,
+    queue: str | None = None,
     increment_redelivery: bool = False,
 ) -> BullpenAutoLiveRun | None:
     return update_auto_live_run_task_lifecycle_sync(
@@ -600,7 +613,7 @@ def mark_auto_live_run_task_started_sync(
         run_id=run_id,
         state="STARTED",
         task_id=task_id,
-        queue=AUTO_LIVE_QUEUE,
+        queue=queue,
         worker_hostname=worker_hostname,
         heartbeat_at=utc_now_iso(),
         started_at=utc_now_iso(),
@@ -623,7 +636,6 @@ def heartbeat_auto_live_run_task_sync(
                 run_id=run_id,
                 state="STARTED",
                 task_id=task_id,
-                queue=AUTO_LIVE_QUEUE,
                 worker_hostname=worker_hostname,
                 heartbeat_at=utc_now_iso(),
                 expected_task_id=task_id,

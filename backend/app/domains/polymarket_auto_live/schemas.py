@@ -531,6 +531,16 @@ class BullpenAutoLiveConsoleRunContext(BaseModel):
 
 class BullpenAutoLiveRunOnceRequest(BaseModel):
     console_profile: BullpenAutoLiveConsoleRunContext | None = None
+    # Optional client-generated durable identity for ambiguity-safe starts.
+    # Existing clients may omit it. When present, the API returns the already
+    # persisted run for the same authenticated user instead of creating or
+    # enqueueing a duplicate after a timed-out HTTP response.
+    client_run_id: str | None = Field(
+        default=None,
+        min_length=8,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$",
+    )
 
 
 class BullpenAutoLiveRejectedCandidateDiagnostic(BaseModel):

@@ -230,6 +230,88 @@ test("Bullpen auto-run status rejects malformed API and cache payloads", async (
   assert.equal(normalizeBullpenAutoRunStatusData({ scheduler: {} }), null);
 });
 
+test("Bullpen auto-run status uses only a validated summary as its secondary semantic fallback", async () => {
+  const { normalizeBullpenAutoRunStatusFromSummary } = await loadStatusModule();
+  const summary = {
+    state: {
+      running: true,
+      paused: false,
+      emergency_stopped: false,
+      mode: "live-trading",
+      status: "running",
+      next_run_at: "2026-07-23T12:00:00+00:00",
+      last_run_at: "2026-07-23T11:00:00+00:00",
+      last_run_id: "run-active",
+      server_now: "2026-07-23T11:01:00+00:00",
+    },
+    settings: {
+      auto_live_enabled: true,
+      strategy_profile: "bullpen_console_top10",
+      console_order_usd: 5,
+      console_auto_start_at: "2026-07-23T12:00:00+00:00",
+      console_auto_refresh_minutes: 60,
+    },
+    latest_run: {
+      id: "run-active",
+      status: "running",
+    },
+  };
+
+  assert.deepEqual(
+    normalizeBullpenAutoRunStatusFromSummary(summary),
+    createStatus({
+      state: {
+        last_run_id: "run-active",
+        active_run_id: "run-active",
+        active_run_status: "running",
+        server_now: "2026-07-23T11:01:00+00:00",
+      },
+      fetched_at: "2026-07-23T11:01:00+00:00",
+    }),
+  );
+  assert.equal(
+    normalizeBullpenAutoRunStatusFromSummary({
+      ...summary,
+      latest_run: { id: "run-complete", status: "completed" },
+    })?.state.active_run_id,
+    null,
+  );
+  assert.equal(
+    normalizeBullpenAutoRunStatusFromSummary({
+      ...summary,
+      latest_run: { id: "run-skipped", status: "skipped" },
+      recent_runs: [
+        { id: "run-skipped", status: "skipped" },
+        { id: "run-active", status: "confirming" },
+      ],
+    })?.state.active_run_id,
+    "run-active",
+  );
+  assert.equal(
+    normalizeBullpenAutoRunStatusFromSummary({
+      ...summary,
+      state: { ...summary.state, running: "true" },
+    }),
+    null,
+  );
+});
+
+test("Bullpen auto-run status component bounds automatic retries and records semantic fallbacks", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3/);
+  assert.match(source, /normalizeBullpenAutoRunStatusFromSummary/);
+  assert.match(source, /approach: "validated-summary"/);
+  assert.match(source, /approach: "last-known-good-cache"/);
+  assert.match(source, /Automatic status retries are exhausted/);
+});
+
 test("Bullpen auto-run status deduplicates concurrent requests and releases after settlement", async () => {
   const { createBullpenAutoRunRequestDeduper } = await loadStatusModule();
   const dedupe = createBullpenAutoRunRequestDeduper();

@@ -234,6 +234,8 @@ const bullpenAutoLiveApiUrls = {
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
   runs: () => `${resolveApiBaseUrl()}/polymarket/auto-live/runs`,
+  run: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}`,
   runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
   reconcileRunOrders: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/reconcile`,

@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-21-stage3-handoff-checkpoint-v16"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-25-run-handoff-fallback-v17"
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-21-stage3-handoff-checkpoint-v16"
+    "2026-07-25-run-handoff-fallback-v17"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -42,6 +42,14 @@ AUDIT_SECTION_KEYS: Final[tuple[str, ...]] = (
 )
 
 AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
+    {
+        "algorithm_key": "run_execution_handoff_fallback",
+        "stage": "overview",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.tasks",
+        "source_function": "dispatch_stalled_auto_live_run_fallbacks_sync",
+        "label": "Bounded primary, secondary, and fail-closed run handoff",
+    },
     {
         "algorithm_key": "stage2_consensus_statistics",
         "stage": "stage-2",
@@ -305,6 +313,8 @@ DEFAULT_MANUAL_CHECKS: Final[tuple[dict[str, str], ...]] = (
 )
 
 BULLPEN_AUDIT_CRITICAL_SOURCE_FILES: Final[tuple[str, ...]] = (
+    "backend/app/domains/polymarket_auto_live/bot.py",
+    "backend/app/domains/polymarket_auto_live/run_handoff.py",
     "backend/app/domains/polymarket_auto_live/engine.py",
     "backend/app/domains/polymarket_auto_live/tasks.py",
     "backend/app/domains/polymarket_auto_live/order_intent_service.py",

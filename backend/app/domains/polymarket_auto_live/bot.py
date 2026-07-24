@@ -16,7 +16,6 @@ from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
 )
-from app.domains.bullpen_run_audit.provenance import build_native_run_audit_metadata
 from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
 from app.domains.polymarket_auto_live.order_intent_service import (
     cancel_unsubmitted_run_order_intents_for_user_sync,
@@ -31,10 +30,12 @@ from app.domains.polymarket_auto_live.run_recovery import (
     reconcile_running_auto_live_run,
     run_contains_historical_auth_error,
 )
-from app.domains.polymarket_auto_live.run_lifecycle import (
-    AUTO_LIVE_QUEUE,
-    queued_auto_live_task_lifecycle,
+from app.domains.polymarket_auto_live.run_handoff import (
+    AutoLiveTaskPublishExhausted,
+    build_auto_live_run_audit_metadata,
+    publish_auto_live_task_with_fallback,
 )
+from app.domains.polymarket_auto_live.run_lifecycle import queued_auto_live_task_lifecycle
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
     apply_run_to_record,
@@ -263,15 +264,6 @@ def _stage2_llm_targets_snapshot(
     settings: BullpenAutoLiveSettings,
 ):
     return [target.model_copy(deep=True) for target in settings.console_llm_targets]
-
-
-def _native_audit_metadata(settings: BullpenAutoLiveSettings) -> dict[str, object]:
-    return build_native_run_audit_metadata(
-        settings_snapshot=settings.model_dump(mode="json"),
-        prompt_template=settings.console_llm_prompt_template,
-        execution_version=None,
-        strategy_version=settings.strategy_profile,
-    )
 
 
 class BullpenAutoLiveBot:
@@ -627,6 +619,14 @@ class BullpenAutoLiveBot:
                 return await repo.list_runs(self.user_id)
             return runs
 
+    async def get_run(self, run_id: str) -> BullpenAutoLiveRun:
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            run = await repo.get_run_for_user(self.user_id, run_id)
+            if run is None:
+                raise ValueError("Auto-Live run not found.")
+            return run
+
     async def list_decisions(self) -> list[BullpenAutoLiveDecision]:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
@@ -729,7 +729,29 @@ class BullpenAutoLiveBot:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
             settings = await repo.ensure_settings(self.user_id)
-            state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
+            state = await repo.ensure_state(self.user_id)
+            lock_state_record = getattr(repo, "lock_state_record", None)
+            if callable(lock_state_record):
+                # Two concurrent HTTP deliveries for the same click must not
+                # both observe "no active run" and publish separate tasks.
+                state = await lock_state_record(self.user_id)
+            state = self._synchronize_state(settings, state)
+            requested_run_id = request.client_run_id if request else None
+            if requested_run_id:
+                get_run_for_user = getattr(repo, "get_run_for_user", None)
+                existing_run = (
+                    await get_run_for_user(self.user_id, requested_run_id)
+                    if callable(get_run_for_user)
+                    else None
+                )
+                if existing_run is not None:
+                    logger.info(
+                        "Returning idempotent Auto-Live run %s for user %s; "
+                        "the client start identity was already persisted.",
+                        requested_run_id,
+                        self.user_id,
+                    )
+                    return existing_run
             running_run, state = await self._get_active_run_or_recover(
                 repo,
                 settings,
@@ -737,7 +759,7 @@ class BullpenAutoLiveBot:
             )
             if settings.emergency_stop:
                 run = BullpenAutoLiveRun(
-                    id=str(uuid4()),
+                    id=requested_run_id or str(uuid4()),
                     triggered_by=triggered_by,  # type: ignore[arg-type]
                     status="skipped",
                     dry_run=effective_dry_run(settings),
@@ -746,7 +768,8 @@ class BullpenAutoLiveBot:
                     summary="Emergency stop is active.",
                     guardrail_checks=self._build_guardrail_checks(settings, state),
                     stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
-                    audit_metadata=_native_audit_metadata(settings),
+                    request_context=request,
+                    audit_metadata=build_auto_live_run_audit_metadata(settings),
                 )
                 run_record = self._new_run_record(run)
                 session.add(run_record)
@@ -758,7 +781,7 @@ class BullpenAutoLiveBot:
 
             if running_run is not None:
                 run = BullpenAutoLiveRun(
-                    id=str(uuid4()),
+                    id=requested_run_id or str(uuid4()),
                     triggered_by=triggered_by,  # type: ignore[arg-type]
                     status="skipped",
                     dry_run=effective_dry_run(settings),
@@ -767,7 +790,8 @@ class BullpenAutoLiveBot:
                     summary=f"Run {running_run.id} is already in progress.",
                     guardrail_checks=self._build_guardrail_checks(settings, state),
                     stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
-                    audit_metadata=_native_audit_metadata(settings),
+                    request_context=request,
+                    audit_metadata=build_auto_live_run_audit_metadata(settings),
                 )
                 session.add(self._new_run_record(run))
                 state.last_action = run.summary
@@ -781,8 +805,9 @@ class BullpenAutoLiveBot:
             # distinguishes queue wait from workflow execution even if the
             # broker delivers before the API response returns.
             task_id = str(uuid4())
+            run_id = requested_run_id or str(uuid4())
             run = BullpenAutoLiveRun(
-                id=str(uuid4()),
+                id=run_id,
                 triggered_by=triggered_by,  # type: ignore[arg-type]
                 status="running",
                 dry_run=effective_dry_run(settings),
@@ -798,7 +823,13 @@ class BullpenAutoLiveBot:
                 ],
                 stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                 request_context=request,
-                audit_metadata=_native_audit_metadata(settings),
+                audit_metadata=build_auto_live_run_audit_metadata(
+                    settings,
+                    run_id=run_id,
+                    task_id=task_id,
+                    enqueued_at=started_at,
+                    client_supplied_run_id=bool(requested_run_id),
+                ),
                 task_lifecycle=queued_auto_live_task_lifecycle(
                     task_id=task_id,
                     enqueued_at=started_at,
@@ -814,29 +845,37 @@ class BullpenAutoLiveBot:
             await repo.save_state(self.user_id, state)
             await session.commit()
             try:
-                task = execute_polymarket_auto_live_run.apply_async(  # type: ignore[attr-defined]
-                    args=(self.user_id, run.id),
+                task, fallback_used = publish_auto_live_task_with_fallback(
+                    execute_polymarket_auto_live_run,
+                    user_id=self.user_id,
+                    run=run,
                     task_id=task_id,
-                    queue=AUTO_LIVE_QUEUE,
+                    logger=logger,
                 )
-            except Exception:
-                # Do not leave a run looking merely queued if the broker could
-                # not accept it. This is a publish failure, not a stale-worker
-                # verdict, so callers get an immediate actionable error.
+            except AutoLiveTaskPublishExhausted as publish_error:
                 if run.task_lifecycle is not None:
                     run.task_lifecycle = run.task_lifecycle.model_copy(
                         update={
                             "state": "FAILURE",
-                            "detail": "Could not enqueue Auto-Live worker task",
+                            "detail": (
+                                "Primary and fallback worker queues could not "
+                                "accept the task."
+                            ),
                         }
                     )
                 run.status = "failed"
-                run.completed_at = utc_now()
-                run.error_message = "Could not enqueue Auto-Live worker task"
+                run.completed_at = publish_error.failed_at
+                run.error_message = (
+                    "Could not enqueue Auto-Live worker task through the "
+                    "primary or fallback queue."
+                )
                 run.summary = run.error_message
                 await repo.save_run(self.user_id, run)
                 await session.commit()
-                raise
+                raise publish_error.fallback_error from publish_error.primary_error
+            if fallback_used:
+                await repo.save_run(self.user_id, run)
+                await session.commit()
             await register_auto_live_run_task(run.id, str(task.id))
             return run
 

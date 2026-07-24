@@ -141,6 +141,18 @@ class _FakeAutoLiveBot:
             request_context=request,
         )
 
+    async def get_run(self, run_id: str) -> BullpenAutoLiveRun:
+        if run_id != "run-1":
+            raise ValueError("Auto-Live run not found.")
+        return BullpenAutoLiveRun(
+            id=run_id,
+            triggered_by="manual",
+            status="running",
+            dry_run=True,
+            started_at="2026-06-21T10:00:00+00:00",
+            summary="Queued",
+        )
+
 
 @pytest.mark.anyio
 async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
@@ -222,6 +234,7 @@ async def test_auto_live_run_once_route_accepts_manual_console_rows(monkeypatch)
         response = await client.post(
             "/polymarket/auto-live/run-once",
             json={
+                "client_run_id": "client-run-0001",
                 "console_profile": {
                     "source_label": "Bullpen CLI",
                     "total_candidates": 2,
@@ -247,9 +260,38 @@ async def test_auto_live_run_once_route_accepts_manual_console_rows(monkeypatch)
 
     assert response.status_code == 200
     assert fake_bot.run_once_request is not None
+    assert fake_bot.run_once_request.client_run_id == "client-run-0001"
     assert fake_bot.run_once_request.console_profile is not None
     assert fake_bot.run_once_request.console_profile.source_label == "Bullpen CLI"
     assert fake_bot.run_once_request.console_profile.candidate_rows[0].selected is True
+
+
+@pytest.mark.anyio
+async def test_auto_live_exact_run_route_supports_idempotent_start_recovery(
+    monkeypatch,
+):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        found = await client.get("/polymarket/auto-live/runs/run-1")
+        missing = await client.get("/polymarket/auto-live/runs/missing-run")
+
+    assert found.status_code == 200
+    assert found.json()["id"] == "run-1"
+    assert missing.status_code == 404
 
 
 def test_polymarket_manual_invest_route_remains_available():

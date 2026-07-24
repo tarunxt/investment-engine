@@ -86,7 +86,9 @@ import {
   isBullpenAutoRunProgressActive,
   isBullpenAutoRunSchedulerEnabled,
   isBullpenAutoRunPageVisible,
+  logBullpenAutoRunStatusFallback,
   normalizeBullpenAutoRunStatusData,
+  normalizeBullpenAutoRunStatusFromSummary,
   readCachedBullpenAutoRunStatus,
   writeCachedBullpenAutoRunStatus,
   type BullpenAutoRunStatusData,
@@ -740,6 +742,7 @@ const RUN_TIMER_INTERVAL_MS = 5_000;
 const AUTO_RUN_STATUS_TIMEOUT_MS = 5_000;
 const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
 const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;
+const AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3;
 
 // React Strict Mode may mount this card twice in development. Keep one
 // resource-level request for the lightweight endpoint so that neither a
@@ -9260,7 +9263,14 @@ export function BullpenAutoRunScheduleCard({
       controller.signal.aborted ||
       !isBullpenAutoRunPageVisible(document.visibilityState)
     ) {
-      return;
+      return false;
+    }
+    if (
+      autoRunStatusRetryAttemptRef.current >=
+      AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES
+    ) {
+      clearAutoRunStatusRetry();
+      return false;
     }
 
     clearAutoRunStatusRetry();
@@ -9278,6 +9288,7 @@ export function BullpenAutoRunScheduleCard({
       }
       void refreshPersistedAutoRunStatus({ retrying: true });
     }, delay);
+    return true;
   }
 
   function scheduleAutoRunStatusRevalidation(
@@ -9374,13 +9385,62 @@ export function BullpenAutoRunScheduleCard({
       const timedOut =
         nextError instanceof RequestTimeoutError ||
         (nextError instanceof APIError && nextError.status === 504);
+      const primaryFailureReason = timedOut
+        ? "primary_status_timeout"
+        : nextError instanceof APIError
+          ? `primary_status_http_${nextError.status}`
+          : "primary_status_unavailable_or_invalid";
+
+      let fallbackSummary = summary;
+      if (!fallbackSummary) {
+        fallbackSummary = await loadSummary({ preserveLoading: true });
+      }
+      const summaryStatus =
+        normalizeBullpenAutoRunStatusFromSummary(fallbackSummary);
+      if (summaryStatus) {
+        logBullpenAutoRunStatusFallback({
+          fromStage: "primary",
+          toStage: "secondary",
+          approach: "validated-summary",
+          reason: primaryFailureReason,
+        });
+        const savedAt = saveBrowserCachedAutoRunStatus(summaryStatus, cacheKey);
+        persistedStatusRunIdRef.current =
+          summaryStatus.state.active_run_id ?? null;
+        hasObservedPersistedStatusRef.current = true;
+        autoRunStatusRetryAttemptRef.current = 0;
+        setPersistedAutoRunStatus(summaryStatus);
+        setPersistedAutoRunStatusCacheKey(cacheKey);
+        setAutoRunStatusSavedAt(savedAt);
+        setAutoRunStatusLoadState("ready");
+        setAutoRunStatusError(null);
+        scheduleAutoRunStatusRevalidation(summaryStatus);
+        settled = true;
+        return summaryStatus;
+      }
+
+      const cachedStatus = readBrowserCachedAutoRunStatus(cacheKey);
+      if (cachedStatus) {
+        logBullpenAutoRunStatusFallback({
+          fromStage: "secondary",
+          toStage: "tertiary",
+          approach: "last-known-good-cache",
+          reason: "summary_unavailable_or_invalid",
+        });
+        setPersistedAutoRunStatus(cachedStatus.data);
+        setPersistedAutoRunStatusCacheKey(cacheKey);
+        setAutoRunStatusSavedAt(cachedStatus.savedAt);
+      }
+
       setAutoRunStatusLoadState(timedOut ? "timeout" : "error");
+      const retryScheduled = scheduleAutoRunStatusRetry();
       setAutoRunStatusError(
-        timedOut
-          ? "Auto-run status timed out. Retrying in the background."
-          : "Auto-run status is unavailable. Retrying in the background.",
+        retryScheduled
+          ? timedOut
+            ? "Auto-run status timed out. Retrying in the background."
+            : "Auto-run status is unavailable. Retrying in the background."
+          : "Automatic status retries are exhausted. Use Retry status to check again.",
       );
-      scheduleAutoRunStatusRetry();
       settled = true;
       return null;
     } finally {
@@ -9391,7 +9451,11 @@ export function BullpenAutoRunScheduleCard({
         setAutoRunStatusError(
           "Auto-run status could not be refreshed. Retry the check.",
         );
-        scheduleAutoRunStatusRetry();
+        if (!scheduleAutoRunStatusRetry()) {
+          setAutoRunStatusError(
+            "Automatic status retries are exhausted. Use Retry status to check again.",
+          );
+        }
       }
     }
   }

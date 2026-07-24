@@ -245,6 +245,7 @@ export interface IApiService {
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     getBullpenAutoLiveRuns(options?: ApiRequestControl): Promise<BullpenAutoLiveRun[]>;
+    getBullpenAutoLiveRun(runId: string, options?: ApiRequestControl): Promise<BullpenAutoLiveRun>;
     getBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     reconcileBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     retryBullpenAutoLiveExitsAndContinueBuys(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
