@@ -95,6 +95,33 @@ jobs:
               line[10:] if line.startswith("          ") else line
               for line in raw_implementation.splitlines()
           ) + "\n"
+
+          helper_start = implementation.index("def replace_once(")
+          helper_end = implementation.index(
+              '\n\nPath("backend/app/domains/ai_providers/availability.py")',
+              helper_start,
+          )
+          tolerant_helper = (
+              "def replace_once(path: str, old: str, new: str) -> None:\n"
+              "    file_path = Path(path)\n"
+              "    text = file_path.read_text()\n"
+              "    if old in text:\n"
+              "        file_path.write_text(text.replace(old, new, 1))\n"
+              "        return\n"
+              "    source_lines = text.splitlines(keepends=True)\n"
+              "    needle = [line.strip() for line in old.strip('\\n').splitlines()]\n"
+              "    for index in range(0, len(source_lines) - len(needle) + 1):\n"
+              "        candidate = [line.strip() for line in source_lines[index:index + len(needle)]]\n"
+              "        if candidate == needle:\n"
+              "            file_path.write_text(''.join(source_lines[:index]) + new + ''.join(source_lines[index + len(needle):]))\n"
+              "            return\n"
+              "    raise SystemExit(f'Expected snippet not found in {path}: {old[:120]!r}')\n"
+          )
+          implementation = (
+              implementation[:helper_start]
+              + tolerant_helper
+              + implementation[helper_end:]
+          )
           exec(compile(implementation, "apply-auto-rebalance-fix.py", "exec"))
           RUNNER
           status=$?
