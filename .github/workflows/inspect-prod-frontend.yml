@@ -82,6 +82,21 @@ jobs:
                 WHERE datallowconn
                 ORDER BY pg_database_size(datname) DESC;
               " || true
+              sudo -u postgres psql -X -d aidb -P pager=off -c "
+                SELECT
+                  n.nspname AS schema,
+                  c.relname AS relation,
+                  c.relkind AS kind,
+                  pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+                  pg_size_pretty(pg_relation_size(c.oid)) AS table_size,
+                  pg_size_pretty(pg_indexes_size(c.oid)) AS index_size
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind IN ('r', 'm')
+                  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY pg_total_relation_size(c.oid) DESC
+                LIMIT 40;
+              " || true
             else
               echo "postgres psql access is unavailable"
             fi
@@ -112,6 +127,18 @@ jobs:
             if command -v nerdctl >/dev/null 2>&1; then
               sudo nerdctl system df || true
             fi
+            if command -v docker >/dev/null 2>&1; then
+              echo "==> Docker containers and reclaimability (read-only)"
+              sudo docker ps -a --no-trunc --format 'table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}\t{{.Mounts}}' || true
+              sudo docker system df -v || true
+            else
+              echo "docker is not installed"
+            fi
+
+            echo "==> Listener ownership"
+            sudo ss -ltnp || true
+            echo "==> App service families"
+            sudo systemctl list-units --type=service --all 'investor-*' 'investment-engine-*' --no-pager || true
 
             echo "==> Journal allocation"
             sudo journalctl --disk-usage || true
