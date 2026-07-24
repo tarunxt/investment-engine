@@ -52,6 +52,7 @@ jobs:
       - name: Run dashboard regression tests
         run: >-
           node --test
+          tests/api-read-fallbacks.test.mjs
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs
           tests/rebalance-workflow-resilience.test.mjs

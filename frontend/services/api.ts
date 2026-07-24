@@ -1,4 +1,4 @@
-import { URLs } from "@/lib/urls";
+import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
 import {
   notifyAuthTokensRefreshed,
@@ -122,12 +122,9 @@ const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
 const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
-// Dashboard reads fan out to several independent services. Eight seconds was
-// short enough to turn a healthy-but-slow proxy response into a false workflow
-// failure, leaving the next auto-rebalance stage stranded in the browser.
 const DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000;
+const DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS = 6_000;
 const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
-const READ_RETRY_DELAYS_MS = [500, 1_500, 3_000] as const;
 
 export class APIError extends Error {
   constructor(
@@ -159,6 +156,17 @@ export class RequestTimeoutError extends NetworkError {
   ) {
     super(method, url, `Request timed out after ${timeoutMs}ms`);
     this.name = "RequestTimeoutError";
+  }
+}
+
+export class InvalidAPIResponseError extends Error {
+  constructor(
+    public method: string,
+    public url: string,
+    public reason: string,
+  ) {
+    super(`Invalid response from ${url} (${method}). ${reason}`);
+    this.name = "InvalidAPIResponseError";
   }
 }
 
@@ -290,30 +298,96 @@ function waitForRequestAbort<T>(promise: Promise<T>, signal: AbortSignal) {
 }
 
 function isRetryableReadError(error: unknown) {
-  if (error instanceof RequestTimeoutError || error instanceof NetworkError) {
+  if (
+    error instanceof RequestTimeoutError ||
+    error instanceof NetworkError ||
+    error instanceof InvalidAPIResponseError
+  ) {
     return true;
   }
   return error instanceof APIError && (error.status === 429 || error.status >= 500);
 }
 
-function waitForReadRetry(delayMs: number, signal?: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    const finish = () => {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    };
-    const timer = globalThis.setTimeout(finish, delayMs);
-    const abort = () => {
-      globalThis.clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      reject(new DOMException("Request aborted", "AbortError"));
-    };
-    if (signal?.aborted) {
-      abort();
-      return;
-    }
-    signal?.addEventListener("abort", abort, { once: true });
-  });
+function getReadFallbackReason(error: unknown) {
+  if (error instanceof RequestTimeoutError) return "timeout";
+  if (error instanceof InvalidAPIResponseError) return "invalid_response";
+  if (error instanceof NetworkError) return "network_error";
+  if (error instanceof APIError) return `http_${error.status}`;
+  if (error instanceof Error) return error.name || "error";
+  return "unknown_error";
+}
+
+function logReadFallback(input: {
+  url: string;
+  fromStage: string;
+  toStage: string;
+  toTransport: string;
+  reason: string;
+}) {
+  const parsed = new URL(
+    input.url,
+    typeof window === "undefined" ? "http://localhost" : window.location.origin,
+  );
+  console.warn(
+    JSON.stringify({
+      event: "api_read_fallback_triggered",
+      method: "GET",
+      resource: `${parsed.pathname}${parsed.search}`,
+      from_stage: input.fromStage,
+      to_stage: input.toStage,
+      to_transport: input.toTransport,
+      reason: input.reason,
+    }),
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isNullableString(value: unknown) {
+  return value === null || typeof value === "string";
+}
+
+function isZerodhaStatusResponse(value: unknown): value is ZerodhaStatusResponse {
+  if (!isRecord(value) || typeof value.connected !== "boolean") return false;
+  return (
+    isNullableString(value.login_time) &&
+    isNullableString(value.expires_at) &&
+    (value.last_portfolio_sync_at === undefined ||
+      isNullableString(value.last_portfolio_sync_at)) &&
+    (value.last_portfolio_snapshot_date === undefined ||
+      isNullableString(value.last_portfolio_snapshot_date))
+  );
+}
+
+function isThreatLatestResponse(
+  value: unknown,
+): value is ZerodhaThreatLatestResponse | IndMoneyUsThreatLatestResponse {
+  if (!isRecord(value) || !("analysis" in value)) return false;
+  if (value.analysis === null) return true;
+  return (
+    isRecord(value.analysis) &&
+    typeof value.analysis.job_id === "number" &&
+    typeof value.analysis.status === "string" &&
+    typeof value.analysis.provider === "string" &&
+    typeof value.analysis.model === "string"
+  );
+}
+
+function isPaginatedResponse<T>(value: unknown): value is PaginatedResponse<T> {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    typeof value.total === "number" &&
+    Number.isFinite(value.total) &&
+    typeof value.page === "number" &&
+    Number.isFinite(value.page) &&
+    typeof value.size === "number" &&
+    Number.isFinite(value.size) &&
+    typeof value.pages === "number" &&
+    Number.isFinite(value.pages)
+  );
 }
 
 function hasHeader(headers: Record<string, string>, headerName: string) {
@@ -339,6 +413,8 @@ let refreshPromise: Promise<boolean> | null = null;
  * API Service - Wrapper around URL resolver for making API calls
  */
 class apiServiceClass implements IApiService {
+  private readonly inFlightReads = new Map<string, Promise<unknown>>();
+
   async parseErrorResponse(response: Response): Promise<unknown> {
     const text = await response.text();
     if (!text.trim()) {
@@ -392,6 +468,7 @@ class apiServiceClass implements IApiService {
         skipAuth: _skipAuth,
         skipUnauthorizedRefresh: _skipUnauthorizedRefresh,
         timeoutMs: _timeoutMs,
+        validate: _validate,
         signal: callerSignal,
         ...requestInit
       } = options;
@@ -400,6 +477,7 @@ class apiServiceClass implements IApiService {
       void _skipAuth;
       void _skipUnauthorizedRefresh;
       void _timeoutMs;
+      void _validate;
       abortContext = createRequestAbortContext(callerSignal, timeoutMs);
 
       this.log("Config:", {
@@ -473,7 +551,23 @@ class apiServiceClass implements IApiService {
         throw new APIError(response.status, errorMessage, errorData);
       }
 
-      const data = await response.json();
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch {
+        throw new InvalidAPIResponseError(
+          method,
+          url,
+          "Response body was not valid JSON.",
+        );
+      }
+      if (options.validate && !options.validate(data)) {
+        throw new InvalidAPIResponseError(
+          method,
+          url,
+          "Response body did not match the expected schema.",
+        );
+      }
       const durationMs = Math.round(
         (typeof performance !== "undefined" ? performance.now() : Date.now()) -
           startedAt,
@@ -490,7 +584,7 @@ class apiServiceClass implements IApiService {
       if (durationMs >= SLOW_API_REQUEST_THRESHOLD_MS) {
         this.warn("Slow API request:", { method, url, durationMs });
       }
-      return data;
+      return data as T;
 
     } catch (err: unknown) {
       const durationMs = Math.round(
@@ -514,7 +608,11 @@ class apiServiceClass implements IApiService {
         throw err;
       }
 
-      if (!(err instanceof APIError) && !(err instanceof NetworkError)) {
+      if (
+        !(err instanceof APIError) &&
+        !(err instanceof NetworkError) &&
+        !(err instanceof InvalidAPIResponseError)
+      ) {
         const message = err instanceof Error ? err.message : String(err);
         this.error("❌ Network or Unexpected Error:", message);
         throw new NetworkError(method, url, message);
@@ -527,21 +625,66 @@ class apiServiceClass implements IApiService {
   }
 
   // HTTP methods
-  async get<T>(url: string, options?: ApiRequestOptions): Promise<T> {
-    let attempt = 0;
-    while (true) {
+  private async getAcrossTransports<T>(
+    url: string,
+    options: ApiRequestOptions = {},
+  ): Promise<T> {
+    const candidates = resolveApiReadTransportCandidates(url);
+    let lastError: unknown = null;
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
       try {
-        return await this.fetch<T>(url, { method: "GET", ...options });
+        return await this.fetch<T>(candidate.url, {
+          method: "GET",
+          ...options,
+          timeoutMs:
+            options.timeoutMs ?? DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS,
+        });
       } catch (error) {
-        const delay = READ_RETRY_DELAYS_MS[attempt];
-        if (!delay || options?.signal?.aborted || !isRetryableReadError(error)) {
+        lastError = error;
+        const nextCandidate = candidates[index + 1];
+        if (
+          !nextCandidate ||
+          options.signal?.aborted ||
+          !isRetryableReadError(error)
+        ) {
           throw error;
         }
-        attempt += 1;
-        this.warn("Retrying transient GET request.", { url, attempt });
-        await waitForReadRetry(delay, options?.signal);
+
+        logReadFallback({
+          url,
+          fromStage: candidate.stage,
+          toStage: nextCandidate.stage,
+          toTransport: nextCandidate.transport,
+          reason: getReadFallbackReason(error),
+        });
       }
     }
+
+    throw lastError;
+  }
+
+  get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {
+    // A caller-owned abort signal must retain independent cancellation
+    // semantics. Unsignalled dashboard reads can safely share one in-flight
+    // request, preventing mount/refresh fan-out from duplicating work.
+    if (options.signal) {
+      return this.getAcrossTransports<T>(url, options);
+    }
+
+    const existing = this.inFlightReads.get(url);
+    if (existing) {
+      return existing as Promise<T>;
+    }
+
+    const request = this.getAcrossTransports<T>(url, options).finally(() => {
+      if (this.inFlightReads.get(url) === request) {
+        this.inFlightReads.delete(url);
+      }
+    });
+    this.inFlightReads.set(url, request);
+    return request;
   }
 
   post<T>(
@@ -923,7 +1066,10 @@ class apiServiceClass implements IApiService {
     if (params?.limit) qs.set("limit", String(params.limit));
     if (params?.summary) qs.set("summary", "true");
     const query = qs.toString();
-    return this.get<PaginatedResponse<RunListItem>>(`${URLs.runs.list()}${query ? `?${query}` : ""}`);
+    return this.get<PaginatedResponse<RunListItem>>(
+      `${URLs.runs.list()}${query ? `?${query}` : ""}`,
+      { validate: isPaginatedResponse<RunListItem> },
+    );
   }
 
   getFullRuns(
@@ -936,7 +1082,10 @@ class apiServiceClass implements IApiService {
     const query = qs.toString();
     return this.get<PaginatedResponse<RunResponse>>(
       `${URLs.runs.list()}${query ? `?${query}` : ""}`,
-      options,
+      {
+        ...options,
+        validate: isPaginatedResponse<RunResponse>,
+      },
     );
   }
 
@@ -1058,7 +1207,9 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaStatus(): Promise<ZerodhaStatusResponse> {
-    return this.get<ZerodhaStatusResponse>(URLs.zerodha.status());
+    return this.get<ZerodhaStatusResponse>(URLs.zerodha.status(), {
+      validate: isZerodhaStatusResponse,
+    });
   }
 
   zerodhaPortfolioOverview(): Promise<ZerodhaPortfolioOverviewResponse> {
@@ -1149,7 +1300,9 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse> {
-    return this.get<ZerodhaThreatLatestResponse>(URLs.zerodha.threatsLatest());
+    return this.get<ZerodhaThreatLatestResponse>(URLs.zerodha.threatsLatest(), {
+      validate: isThreatLatestResponse,
+    });
   }
 
   zerodhaThreatsHistory(params?: { limit?: number }): Promise<ZerodhaThreatHistoryResponse> {
@@ -1276,7 +1429,10 @@ class apiServiceClass implements IApiService {
   }
 
   indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse> {
-    return this.get<IndMoneyUsThreatLatestResponse>(URLs.indmoneyUs.threatsLatest());
+    return this.get<IndMoneyUsThreatLatestResponse>(
+      URLs.indmoneyUs.threatsLatest(),
+      { validate: isThreatLatestResponse },
+    );
   }
 
   indmoneyUsThreatsHistory(params?: { limit?: number }): Promise<IndMoneyUsThreatHistoryResponse> {

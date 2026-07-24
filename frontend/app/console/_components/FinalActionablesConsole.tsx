@@ -462,6 +462,7 @@ const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 
 const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
+const DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 1;
 const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
@@ -595,11 +596,26 @@ function readDashboardFinalActionablesCache() {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw) as Partial<CachedDashboardFinalActionables>;
-    if (parsed.version !== DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION || !Array.isArray(parsed.runs) || !parsed.portfolioSnapshots) {
+    if (
+      parsed.version !== DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION ||
+      !Number.isFinite(parsed.cachedAt) ||
+      Date.now() - (parsed.cachedAt ?? 0) >
+        DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS ||
+      !Array.isArray(parsed.runs) ||
+      !parsed.runs.every(
+        (run) =>
+          run &&
+          typeof run === "object" &&
+          typeof run.id === "number" &&
+          Array.isArray(run.run_jobs),
+      ) ||
+      !parsed.portfolioSnapshots
+    ) {
       return null;
     }
 
     return {
+      cachedAt: parsed.cachedAt as number,
       runs: parsed.runs,
       portfolioSnapshots: {
         india: parsed.portfolioSnapshots.india ?? null,
@@ -7048,6 +7064,8 @@ export function DashboardFinalActionablesTables() {
   }>(() => cachedDashboardFinalActionablesOnFirstRender?.portfolioSnapshots ?? { india: null, us: null });
   const [loading, setLoading] = useState(() => !cachedDashboardFinalActionablesOnFirstRender);
   const [error, setError] = useState<string | null>(null);
+  const [fallbackNotice, setFallbackNotice] = useState<string | null>(null);
+  const loadRunsPromiseRef = useRef<Promise<void> | null>(null);
   const [sortStates, setSortStates] = useState<Record<string, DashboardActionSortState>>({});
   const [finalActionableLayout, setFinalActionableLayout] = useState<FinalActionableColumnLayout>(() => loadFinalActionableLayout());
   const [draggedFinalActionableColumn, setDraggedFinalActionableColumn] = useState<FinalActionableColumnKey | null>(null);
@@ -7064,31 +7082,87 @@ export function DashboardFinalActionablesTables() {
     () => readDashboardActionablesCompletedAtByMarket(),
   );
 
-  const loadRuns = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [allRuns, zerodhaOverview, indmoneyOverview] = await Promise.all([
-        fetchAllFullRuns(),
-        apiService.zerodhaPortfolioOverview(),
-        apiService.indmoneyUsPortfolioOverview(),
-      ]);
-      const nextPortfolioSnapshots = {
-        india: zerodhaOverview.latest,
-        us: indmoneyOverview.latest,
-      };
-      setRuns(allRuns);
-      setPortfolioSnapshots(nextPortfolioSnapshots);
-      writeDashboardFinalActionablesCache(allRuns, nextPortfolioSnapshots);
-      setDetailsDataByMarket((current) => ({
-        india: { ...current.india, portfolioSnapshot: zerodhaOverview.latest },
-        us: { ...current.us, portfolioSnapshot: indmoneyOverview.latest },
-      }));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load final actionables.");
-    } finally {
-      setLoading(false);
+  const loadRuns = useCallback(() => {
+    if (loadRunsPromiseRef.current) {
+      console.info(
+        JSON.stringify({
+          event: "final_actionables_refresh_deduplicated",
+          reason: "refresh_already_in_flight",
+        }),
+      );
+      return loadRunsPromiseRef.current;
     }
+
+    const loadPromise = (async () => {
+      setLoading(true);
+      setError(null);
+      setFallbackNotice(null);
+      try {
+        const [allRuns, zerodhaOverview, indmoneyOverview] = await Promise.all([
+          fetchAllFullRuns(),
+          apiService.zerodhaPortfolioOverview(),
+          apiService.indmoneyUsPortfolioOverview(),
+        ]);
+        const nextPortfolioSnapshots = {
+          india: zerodhaOverview.latest,
+          us: indmoneyOverview.latest,
+        };
+        setRuns(allRuns);
+        setPortfolioSnapshots(nextPortfolioSnapshots);
+        writeDashboardFinalActionablesCache(allRuns, nextPortfolioSnapshots);
+        setDetailsDataByMarket((current) => ({
+          india: { ...current.india, portfolioSnapshot: zerodhaOverview.latest },
+          us: { ...current.us, portfolioSnapshot: indmoneyOverview.latest },
+        }));
+      } catch (err) {
+        const cachedFallback = readDashboardFinalActionablesCache();
+        if (cachedFallback) {
+          console.warn(
+            JSON.stringify({
+              event: "final_actionables_fallback_triggered",
+              from_stage: "secondary",
+              to_stage: "tertiary",
+              to_transport: "last-known-good-cache",
+              reason:
+                err instanceof Error
+                  ? err.name || "error"
+                  : "unknown_error",
+            }),
+          );
+          setRuns(cachedFallback.runs);
+          setPortfolioSnapshots(cachedFallback.portfolioSnapshots);
+          setDetailsDataByMarket((current) => ({
+            india: {
+              ...current.india,
+              portfolioSnapshot: cachedFallback.portfolioSnapshots.india,
+            },
+            us: {
+              ...current.us,
+              portfolioSnapshot: cachedFallback.portfolioSnapshots.us,
+            },
+          }));
+          setFallbackNotice(
+            `Live refresh failed; showing saved actionables from ${new Date(
+              cachedFallback.cachedAt,
+            ).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}.`,
+          );
+        } else {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Failed to load final actionables.",
+          );
+        }
+      } finally {
+        setLoading(false);
+      }
+    })().finally(() => {
+      if (loadRunsPromiseRef.current === loadPromise) {
+        loadRunsPromiseRef.current = null;
+      }
+    });
+    loadRunsPromiseRef.current = loadPromise;
+    return loadPromise;
   }, []);
 
   useEffect(() => {
@@ -7574,6 +7648,12 @@ export function DashboardFinalActionablesTables() {
       </div>
 
       <div className="p-6">
+        {fallbackNotice ? (
+          <div className="mb-4 rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            {fallbackNotice}
+          </div>
+        ) : null}
+
         {error ? (
           <div className="mb-4 rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             {error}

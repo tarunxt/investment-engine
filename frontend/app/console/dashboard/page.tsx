@@ -82,6 +82,8 @@ const INITIAL_STATE: DashboardState = {
 };
 
 const DASHBOARD_OVERVIEW_CACHE_KEY =
+  "investment-engine:dashboard-overview-cache:v2";
+const LEGACY_DASHBOARD_OVERVIEW_CACHE_KEY =
   "investment-engine:dashboard-overview-cache:v1";
 const DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const DASHBOARD_SECTION_KEYS = [
@@ -104,13 +106,13 @@ const DASHBOARD_CRITICAL_KEYS = [
 type DashboardSectionKey = (typeof DASHBOARD_SECTION_KEYS)[number];
 type DashboardPendingState = Record<DashboardSectionKey, boolean>;
 type DashboardErrorsState = Partial<Record<DashboardSectionKey, string>>;
+type DashboardCacheEntry = {
+  cachedAt: number;
+  value: DashboardState[DashboardSectionKey];
+};
 type DashboardOverviewCachePayload = {
-  cachedAt: string;
-  zerodhaStatus: ZerodhaStatusResponse | null;
-  zerodhaOverview: ZerodhaPortfolioOverviewResponse | null;
-  indmoneyOverview: IndMoneyUsPortfolioOverviewResponse | null;
-  polymarketState: PolymarketBotState | null;
-  bullpenPositions: BullpenPositionsResponse | null;
+  version: 2;
+  entries: Partial<Record<DashboardSectionKey, DashboardCacheEntry>>;
 };
 
 const DeferredRebalanceWorkflowSections = dynamic(
@@ -147,43 +149,136 @@ function createPendingSectionsState(isPending: boolean): DashboardPendingState {
   };
 }
 
-function readDashboardOverviewCache(): Partial<DashboardState> | null {
-  if (typeof window === "undefined") return null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
-  try {
-    const raw = window.localStorage.getItem(DASHBOARD_OVERVIEW_CACHE_KEY);
-    if (!raw) return null;
+function isValidDashboardCacheValue(
+  key: DashboardSectionKey,
+  value: unknown,
+): value is DashboardState[DashboardSectionKey] {
+  if (value === null) return false;
+  if (!isRecord(value)) return false;
 
-    const parsed = JSON.parse(raw) as Partial<DashboardOverviewCachePayload>;
-    const cachedAtMs = Date.parse(parsed.cachedAt ?? "");
-    if (!Number.isFinite(cachedAtMs)) return null;
-    if (Date.now() - cachedAtMs > DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS) {
-      return null;
-    }
-
-    return {
-      zerodhaStatus: parsed.zerodhaStatus ?? null,
-      zerodhaOverview: parsed.zerodhaOverview ?? null,
-      indmoneyOverview: parsed.indmoneyOverview ?? null,
-      polymarketState: parsed.polymarketState ?? null,
-      bullpenPositions: parsed.bullpenPositions ?? null,
-    };
-  } catch {
-    return null;
+  switch (key) {
+    case "zerodhaStatus":
+      return typeof value.connected === "boolean";
+    case "zerodhaOverview":
+    case "indmoneyOverview":
+      return "latest" in value && Array.isArray(value.history);
+    case "zerodhaThreat":
+    case "indmoneyThreat":
+      return (
+        typeof value.job_id === "number" &&
+        typeof value.status === "string" &&
+        typeof value.provider === "string" &&
+        typeof value.model === "string"
+      );
+    case "polymarketState":
+    case "bullpenPositions":
+      return true;
   }
 }
 
-function writeDashboardOverviewCache(state: DashboardState) {
-  if (typeof window === "undefined") return;
+function sanitizeDashboardCacheValue(
+  key: DashboardSectionKey,
+  value: DashboardState[DashboardSectionKey],
+) {
+  if (
+    (key === "zerodhaThreat" || key === "indmoneyThreat") &&
+    value &&
+    "report" in value &&
+    value.report
+  ) {
+    // The dashboard renders structured threat fields, not the full prompt
+    // markdown. Avoid duplicating a large raw model response in browser cache.
+    return {
+      ...value,
+      report: {
+        ...value.report,
+        raw_markdown: "",
+      },
+    } as DashboardState[DashboardSectionKey];
+  }
+  return value;
+}
+
+function readDashboardOverviewCachePayload(): DashboardOverviewCachePayload {
+  const emptyPayload: DashboardOverviewCachePayload = {
+    version: 2,
+    entries: {},
+  };
+  if (typeof window === "undefined") return emptyPayload;
 
   try {
-    const payload: DashboardOverviewCachePayload = {
-      cachedAt: new Date().toISOString(),
-      zerodhaStatus: state.zerodhaStatus,
-      zerodhaOverview: state.zerodhaOverview,
-      indmoneyOverview: state.indmoneyOverview,
-      polymarketState: state.polymarketState,
-      bullpenPositions: state.bullpenPositions,
+    const raw = window.localStorage.getItem(DASHBOARD_OVERVIEW_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DashboardOverviewCachePayload>;
+      if (parsed.version === 2 && isRecord(parsed.entries)) {
+        return {
+          version: 2,
+          entries: parsed.entries,
+        };
+      }
+    }
+
+    const legacyRaw = window.localStorage.getItem(
+      LEGACY_DASHBOARD_OVERVIEW_CACHE_KEY,
+    );
+    if (!legacyRaw) return emptyPayload;
+    const legacy = JSON.parse(legacyRaw) as Record<string, unknown>;
+    const legacyCachedAt = Date.parse(
+      typeof legacy.cachedAt === "string" ? legacy.cachedAt : "",
+    );
+    if (!Number.isFinite(legacyCachedAt)) return emptyPayload;
+
+    const entries: DashboardOverviewCachePayload["entries"] = {};
+    for (const key of DASHBOARD_SECTION_KEYS) {
+      if (isValidDashboardCacheValue(key, legacy[key])) {
+        entries[key] = {
+          cachedAt: legacyCachedAt,
+          value: legacy[key],
+        };
+      }
+    }
+    return { version: 2, entries };
+  } catch {
+    return emptyPayload;
+  }
+}
+
+function readDashboardOverviewCache(): Partial<DashboardState> | null {
+  if (typeof window === "undefined") return null;
+
+  const payload = readDashboardOverviewCachePayload();
+  const result: Partial<DashboardState> = {};
+  for (const key of DASHBOARD_SECTION_KEYS) {
+    const entry = payload.entries[key];
+    if (
+      !entry ||
+      !Number.isFinite(entry.cachedAt) ||
+      Date.now() - entry.cachedAt > DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS ||
+      !isValidDashboardCacheValue(key, entry.value)
+    ) {
+      continue;
+    }
+    Object.assign(result, { [key]: entry.value });
+  }
+  return Object.keys(result).length ? result : null;
+}
+
+function writeDashboardOverviewCacheEntry(
+  key: DashboardSectionKey,
+  value: DashboardState[DashboardSectionKey],
+) {
+  if (typeof window === "undefined") return;
+  if (!isValidDashboardCacheValue(key, value)) return;
+
+  try {
+    const payload = readDashboardOverviewCachePayload();
+    payload.entries[key] = {
+      cachedAt: Date.now(),
+      value: sanitizeDashboardCacheValue(key, value),
     };
     window.localStorage.setItem(
       DASHBOARD_OVERVIEW_CACHE_KEY,
@@ -192,6 +287,22 @@ function writeDashboardOverviewCache(state: DashboardState) {
   } catch {
     // Keep rendering fresh data even if local storage is unavailable.
   }
+}
+
+function logDashboardCacheFallback(
+  key: DashboardSectionKey,
+  reason: unknown,
+) {
+  console.warn(
+    JSON.stringify({
+      event: "dashboard_read_fallback_triggered",
+      from_stage: "secondary",
+      to_stage: "tertiary",
+      to_transport: "last-known-good-cache",
+      section: key,
+      reason: normalizeError(reason),
+    }),
+  );
 }
 
 function hasCriticalDashboardContent(state: DashboardState) {
@@ -1065,6 +1176,7 @@ export default function DashboardPage() {
   );
   const usdInrRate = useUsdInrRate();
   const requestIdRef = useRef(0);
+  const loadDashboardPromiseRef = useRef<Promise<void> | null>(null);
 
   const refreshZerodhaTile = useCallback(() => {
     window.dispatchEvent(new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT));
@@ -1083,6 +1195,16 @@ export default function DashboardPage() {
   );
 
   const loadDashboard = useCallback((initialLoad = false) => {
+    if (loadDashboardPromiseRef.current) {
+      console.info(
+        JSON.stringify({
+          event: "dashboard_refresh_deduplicated",
+          reason: "refresh_already_in_flight",
+        }),
+      );
+      return loadDashboardPromiseRef.current;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
@@ -1120,7 +1242,7 @@ export default function DashboardPage() {
               ...current,
               [key]: toValue(value),
             };
-            writeDashboardOverviewCache(nextState);
+            writeDashboardOverviewCacheEntry(key, nextState[key]);
             return nextState;
           });
 
@@ -1133,6 +1255,20 @@ export default function DashboardPage() {
         })
         .catch((error) => {
           if (requestId !== requestIdRef.current) return;
+
+          const cachedValue = readDashboardOverviewCache()?.[key];
+          if (isValidDashboardCacheValue(key, cachedValue)) {
+            logDashboardCacheFallback(key, error);
+            setDashboard((current) => ({
+              ...current,
+              [key]: cachedValue,
+            }));
+            setErrorsBySection((current) => ({
+              ...current,
+              [key]: `${label}: Live refresh failed; showing last saved data.`,
+            }));
+            return;
+          }
 
           setErrorsBySection((current) => ({
             ...current,
@@ -1189,7 +1325,15 @@ export default function DashboardPage() {
       ),
     ];
 
-    return Promise.allSettled(requests).then(() => undefined);
+    const loadPromise = Promise.allSettled(requests)
+      .then(() => undefined)
+      .finally(() => {
+        if (loadDashboardPromiseRef.current === loadPromise) {
+          loadDashboardPromiseRef.current = null;
+        }
+      });
+    loadDashboardPromiseRef.current = loadPromise;
+    return loadPromise;
   }, []);
 
   useEffect(() => {
@@ -1297,7 +1441,10 @@ export default function DashboardPage() {
       const positions = await fetchBullpenPositions();
       setDashboard((current) => {
         const nextState = { ...current, bullpenPositions: positions };
-        writeDashboardOverviewCache(nextState);
+        writeDashboardOverviewCacheEntry(
+          "bullpenPositions",
+          nextState.bullpenPositions,
+        );
         return nextState;
       });
       setErrorsBySection((current) => {

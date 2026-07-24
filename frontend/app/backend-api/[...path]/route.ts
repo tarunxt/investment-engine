@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const LOCAL_SERVER_API_BASE_URLS = [
-  "http://127.0.0.1:8000",
-  "http://localhost:8000",
-];
-const VERCEL_BACKEND_ROUTE_PREFIX = "/_/backend";
+const LOCAL_SERVER_API_BASE_URL = "http://127.0.0.1:8000";
+const DOCKER_SERVER_API_BASE_URL = "http://backend:8000";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
 const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 const FORWARDED_HEADER_BLOCKLIST = new Set([
@@ -18,7 +15,19 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
 const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
-const DEFAULT_BACKEND_PROXY_TIMEOUT_MS = 8_000;
+const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 3_000;
+const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
+const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
+
+type BackendApiCandidate = {
+  baseUrl: string;
+  stage: "primary" | "secondary" | "tertiary";
+  transport:
+    | "configured-server-api"
+    | "host-loopback"
+    | "docker-service"
+    | "public-api";
+};
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -44,39 +53,73 @@ function isPlaceholderHostname(hostname: string) {
   return PLACEHOLDER_HOST_SNIPPETS.some((snippet) => hostname.includes(snippet));
 }
 
-function resolveConfiguredBackendApiBaseUrls() {
-  return [
-    process.env.BACKEND_API_URL,
-    process.env.API_URL,
-    process.env.NEXT_PUBLIC_API_URL,
-    ...LOCAL_SERVER_API_BASE_URLS,
-  ]
+function resolveFirstConfiguredBackendApiBaseUrl() {
+  return [process.env.BACKEND_API_URL, process.env.API_URL]
     .map(parseConfiguredUrl)
     .filter((parsed): parsed is URL => Boolean(parsed))
     .filter((parsed) => !isPlaceholderHostname(parsed.hostname))
-    .map((parsed) => trimTrailingSlash(parsed.toString()));
+    .map((parsed) => trimTrailingSlash(parsed.toString()))[0] ?? null;
 }
 
-function inferBackendApiBaseUrlsFromRequest(request: NextRequest) {
+function resolvePublicBackendApiBaseUrl(request: NextRequest) {
+  const configured = parseConfiguredUrl(process.env.NEXT_PUBLIC_API_URL);
+  if (configured && !isPlaceholderHostname(configured.hostname)) {
+    return trimTrailingSlash(configured.toString());
+  }
+
   const host = request.nextUrl.hostname;
   if (LOCAL_HOSTNAMES.has(host)) {
-    return LOCAL_SERVER_API_BASE_URLS;
+    return null;
   }
 
   const rootHostname = host.replace(/^www\./, "");
-  return [
-    `${request.nextUrl.protocol}//${request.nextUrl.host}${VERCEL_BACKEND_ROUTE_PREFIX}`,
-    `${request.nextUrl.protocol}//api.${rootHostname}`,
-  ];
+  return `${request.nextUrl.protocol}//api.${rootHostname}`;
 }
 
-function resolveBackendApiBaseUrls(request: NextRequest) {
-  return Array.from(
-    new Set([
-      ...resolveConfiguredBackendApiBaseUrls(),
-      ...inferBackendApiBaseUrlsFromRequest(request),
-    ]),
-  );
+function resolveBackendApiCandidates(request: NextRequest): BackendApiCandidate[] {
+  const configuredServerUrl = resolveFirstConfiguredBackendApiBaseUrl();
+  const primary: BackendApiCandidate = configuredServerUrl
+    ? {
+        baseUrl: configuredServerUrl,
+        stage: "primary",
+        transport: "configured-server-api",
+      }
+    : {
+        baseUrl: LOCAL_SERVER_API_BASE_URL,
+        stage: "primary",
+        transport: "host-loopback",
+      };
+  const secondary: BackendApiCandidate = configuredServerUrl
+    ? {
+        baseUrl: LOCAL_SERVER_API_BASE_URL,
+        stage: "secondary",
+        transport: "host-loopback",
+      }
+    : {
+        baseUrl: DOCKER_SERVER_API_BASE_URL,
+        stage: "secondary",
+        transport: "docker-service",
+      };
+  const publicUrl = resolvePublicBackendApiBaseUrl(request);
+  const candidates = [
+    primary,
+    secondary,
+    ...(publicUrl
+      ? [
+          {
+            baseUrl: publicUrl,
+            stage: "tertiary" as const,
+            transport: "public-api" as const,
+          },
+        ]
+      : []),
+  ];
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    if (seen.has(candidate.baseUrl)) return false;
+    seen.add(candidate.baseUrl);
+    return true;
+  });
 }
 
 function buildForwardHeaders(request: NextRequest, correlationId: string) {
@@ -108,16 +151,22 @@ function buildTargetUrl(baseUrl: string, path: string, request: NextRequest) {
   return targetUrl;
 }
 
-function getProxyTimeoutMs() {
+function getProxyAttemptTimeoutMs(method: string) {
   const configured = Number.parseInt(
     process.env.BACKEND_PROXY_TIMEOUT_MS || "",
     10,
   );
-  if (!Number.isFinite(configured)) return DEFAULT_BACKEND_PROXY_TIMEOUT_MS;
+  if (!Number.isFinite(configured)) {
+    return SAFE_FALLBACK_METHODS.has(method)
+      ? DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS
+      : DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS;
+  }
 
-  // A browser-facing BFF endpoint should fail promptly. Keep this bounded so
-  // a malformed environment value cannot recreate an indefinite UI wait.
-  return Math.min(Math.max(configured, 1_000), 30_000);
+  // Reads may traverse three bounded transports. Mutations execute exactly
+  // once and retain the historical, slightly longer proxy deadline.
+  return SAFE_FALLBACK_METHODS.has(method)
+    ? Math.min(Math.max(configured, 1_000), 5_000)
+    : Math.min(Math.max(configured, 1_000), 30_000);
 }
 
 function createProxyCorrelationId(request: NextRequest) {
@@ -148,6 +197,61 @@ function logProxyFailure(input: {
   );
 }
 
+function logProxyFallback(input: {
+  request: NextRequest;
+  correlationId: string;
+  failedCandidate: BackendApiCandidate;
+  nextCandidate: BackendApiCandidate;
+  reason: string;
+  durationMs: number;
+  status?: number;
+  errorType?: string;
+}) {
+  console.warn(
+    JSON.stringify({
+      event: "backend_api_proxy_fallback_triggered",
+      method: input.request.method,
+      path: input.request.nextUrl.pathname,
+      correlation_id: input.correlationId,
+      from_stage: input.failedCandidate.stage,
+      from_transport: input.failedCandidate.transport,
+      to_stage: input.nextCandidate.stage,
+      to_transport: input.nextCandidate.transport,
+      reason: input.reason,
+      duration_ms: Math.round(input.durationMs),
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.errorType ? { error_type: input.errorType } : {}),
+    }),
+  );
+}
+
+function createProxyAttemptContext(
+  requestSignal: AbortSignal,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortForRequest = () => controller.abort();
+  if (requestSignal.aborted) {
+    abortForRequest();
+  } else {
+    requestSignal.addEventListener("abort", abortForRequest, { once: true });
+  }
+  const timeoutId = globalThis.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    didTimeout: () => timedOut,
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutId);
+      requestSignal.removeEventListener("abort", abortForRequest);
+    },
+  };
+}
+
 async function buildBufferedProxyResponse(
   response: Response,
   method: string,
@@ -173,28 +277,26 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   const startedAt = performance.now();
   const correlationId = createProxyCorrelationId(request);
   let lastErrorType: string | null = null;
-  let lastResponse: Response | null = null;
+  let lastRetryableResponse: NextResponse | null = null;
   let outcome = "unreachable";
   let responseStatus: number | undefined;
-  const controller = new AbortController();
-  let timedOut = false;
-  const abortForClientDisconnect = () => controller.abort();
-  if (request.signal.aborted) {
-    abortForClientDisconnect();
-  } else {
-    request.signal.addEventListener("abort", abortForClientDisconnect, {
-      once: true,
-    });
-  }
-  const timeoutId = globalThis.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, getProxyTimeoutMs());
+  let anyAttemptTimedOut = false;
+  const resolvedCandidates = resolveBackendApiCandidates(request);
+  const candidates = SAFE_FALLBACK_METHODS.has(request.method)
+    ? resolvedCandidates
+    : resolvedCandidates.slice(0, 1);
 
   try {
-    for (const baseUrl of resolveBackendApiBaseUrls(request)) {
-      if (controller.signal.aborted) break;
-      const targetUrl = buildTargetUrl(baseUrl, path, request);
+    for (let index = 0; index < candidates.length; index += 1) {
+      if (request.signal.aborted) break;
+      const candidate = candidates[index];
+      const nextCandidate = candidates[index + 1];
+      const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
+      const attemptStartedAt = performance.now();
+      const attempt = createProxyAttemptContext(
+        request.signal,
+        getProxyAttemptTimeoutMs(request.method),
+      );
 
       try {
         const response = await fetch(targetUrl, {
@@ -204,18 +306,28 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
           // Requests through this BFF include user auth and must not be shared
           // across users. Client-side resource caches handle safe SWR state.
           cache: "no-store",
-          signal: controller.signal,
+          signal: attempt.signal,
         });
 
         if (RETRYABLE_PROXY_STATUSES.has(response.status)) {
-          // Avoid retaining a retry response body while trying the next safe
-          // origin. The final response (if every origin fails) stays intact.
-          if (lastResponse?.body) {
-            void lastResponse.body.cancel().catch(() => undefined);
-          }
-          lastResponse = response;
           responseStatus = response.status;
           outcome = `upstream_${response.status}`;
+          lastRetryableResponse = await buildBufferedProxyResponse(
+            response,
+            request.method,
+            correlationId,
+          );
+          if (nextCandidate) {
+            logProxyFallback({
+              request,
+              correlationId,
+              failedCandidate: candidate,
+              nextCandidate,
+              reason: outcome,
+              durationMs: performance.now() - attemptStartedAt,
+              status: response.status,
+            });
+          }
           continue;
         }
 
@@ -229,11 +341,30 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
         return proxiedResponse;
       } catch (error) {
         lastErrorType = error instanceof Error ? error.name : "UnknownError";
-        outcome = "upstream_body_error";
+        const attemptTimedOut = attempt.didTimeout();
+        anyAttemptTimedOut ||= attemptTimedOut;
+        outcome = attemptTimedOut ? "timeout" : "upstream_body_error";
+        if (nextCandidate && !request.signal.aborted) {
+          logProxyFallback({
+            request,
+            correlationId,
+            failedCandidate: candidate,
+            nextCandidate,
+            reason: outcome,
+            durationMs: performance.now() - attemptStartedAt,
+            errorType: lastErrorType,
+          });
+        }
+      } finally {
+        attempt.cleanup();
       }
     }
 
-    if (timedOut) {
+    if (lastRetryableResponse) {
+      return lastRetryableResponse;
+    }
+
+    if (anyAttemptTimedOut) {
       outcome = "timeout";
       return NextResponse.json(
         {
@@ -249,32 +380,6 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       );
     }
 
-    if (lastResponse) {
-      try {
-        return await buildBufferedProxyResponse(
-          lastResponse,
-          request.method,
-          correlationId,
-        );
-      } catch (error) {
-        lastErrorType = error instanceof Error ? error.name : "UnknownError";
-        if (timedOut) {
-          outcome = "timeout";
-          return NextResponse.json(
-            { message: "The backend did not respond in time. Please retry." },
-            {
-              status: 504,
-              headers: {
-                "Retry-After": "1",
-                "X-Correlation-ID": correlationId,
-              },
-            },
-          );
-        }
-        outcome = "upstream_body_error";
-      }
-    }
-
     outcome = "unreachable";
     return NextResponse.json(
       {
@@ -286,8 +391,6 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       },
     );
   } finally {
-    globalThis.clearTimeout(timeoutId);
-    request.signal.removeEventListener("abort", abortForClientDisconnect);
     if (outcome !== "success") {
       logProxyFailure({
         request,

@@ -105,6 +105,7 @@ import {
 export type ApiRequestControl = {
     signal?: AbortSignal;
     timeoutMs?: number;
+    validate?: (value: unknown) => boolean;
 };
 
 // Define the API service interface with proper types

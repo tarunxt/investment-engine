@@ -133,6 +133,71 @@ function resolveApiBaseUrl() {
   return inferBrowserApiBaseUrl() || LOCAL_API_FALLBACK;
 }
 
+export type ApiReadTransportCandidate = {
+  url: string;
+  stage: "primary" | "secondary";
+  transport: "configured-or-inferred-api" | "same-origin-proxy";
+};
+
+/**
+ * Builds the bounded browser read path used by the API service.
+ *
+ * Production normally calls the public API directly. If that transport is
+ * unreachable, the same request can travel through the frontend's server-side
+ * proxy, which can reach the backend over the host-local/container network.
+ * Local development stays on its configured API origin and does not add a
+ * redundant proxy hop.
+ */
+export function resolveApiReadTransportCandidates(
+  primaryUrl: string,
+): ApiReadTransportCandidate[] {
+  const primary: ApiReadTransportCandidate = {
+    url: primaryUrl,
+    stage: "primary",
+    transport: primaryUrl.startsWith(BROWSER_API_PROXY_BASE)
+      ? "same-origin-proxy"
+      : "configured-or-inferred-api",
+  };
+
+  if (typeof window === "undefined" || LOCAL_HOSTNAMES.has(window.location.hostname)) {
+    return [primary];
+  }
+
+  const parsedPrimary = new URL(primaryUrl, window.location.origin);
+  const proxyPrefix = `${window.location.origin}${BROWSER_API_PROXY_BASE}`;
+  const primaryUsesProxy =
+    parsedPrimary.origin === window.location.origin &&
+    (parsedPrimary.pathname === BROWSER_API_PROXY_BASE ||
+      parsedPrimary.pathname.startsWith(`${BROWSER_API_PROXY_BASE}/`));
+
+  const secondaryUrl = primaryUsesProxy
+    ? (() => {
+        const directBase =
+          resolveConfiguredClientApiBaseUrl() || inferBrowserApiBaseUrl();
+        if (!directBase) return null;
+        const backendPath = parsedPrimary.pathname.slice(
+          BROWSER_API_PROXY_BASE.length,
+        );
+        return `${directBase}${backendPath}${parsedPrimary.search}`;
+      })()
+    : `${proxyPrefix}${parsedPrimary.pathname}${parsedPrimary.search}`;
+
+  if (!secondaryUrl || secondaryUrl === primaryUrl) {
+    return [primary];
+  }
+
+  return [
+    primary,
+    {
+      url: secondaryUrl,
+      stage: "secondary",
+      transport: primaryUsesProxy
+        ? "configured-or-inferred-api"
+        : "same-origin-proxy",
+    },
+  ];
+}
+
 function resolveFrontendBaseUrl() {
   const configuredFrontendUrl = resolveConfiguredBrowserUrl(
     process.env.NEXT_PUBLIC_FRONTEND_URL ||
