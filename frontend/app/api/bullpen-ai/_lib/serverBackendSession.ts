@@ -1,3 +1,4 @@
+import type { Session } from "next-auth";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
@@ -30,7 +31,7 @@ export type BackendSessionContext = {
 export async function createBackendSessionContext(
   request: NextRequest,
 ): Promise<BackendSessionContext> {
-  let session: Awaited<ReturnType<typeof auth>> = null;
+  let session: Session | null = null;
   try {
     session = await auth();
   } catch (error) {
