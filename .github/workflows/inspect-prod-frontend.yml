@@ -69,6 +69,53 @@ jobs:
             sudo du -x -h -d 2 /var/lib 2>/dev/null | sort -h | tail -n 100 || true
             sudo du -x -h -d 2 "$APP/frontend" 2>/dev/null | sort -h | tail -n 80 || true
 
+            echo "==> PostgreSQL allocation (read-only)"
+            if [[ -d /var/lib/postgresql ]]; then
+              sudo du -x -h -d 3 /var/lib/postgresql 2>/dev/null | sort -h | tail -n 120 || true
+            fi
+            if command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+              sudo -u postgres psql -X -d postgres -P pager=off -c "
+                SELECT
+                  datname AS database,
+                  pg_size_pretty(pg_database_size(datname)) AS size
+                FROM pg_database
+                WHERE datallowconn
+                ORDER BY pg_database_size(datname) DESC;
+              " || true
+            else
+              echo "postgres psql access is unavailable"
+            fi
+
+            echo "==> Container runtime allocation (read-only)"
+            if [[ -d /var/lib/containerd ]]; then
+              sudo du -x -h -d 4 /var/lib/containerd 2>/dev/null | sort -h | tail -n 160 || true
+            fi
+            sudo systemctl list-units --type=service --all 'containerd*' 'docker*' 'kubelet*' --no-pager || true
+            sudo systemctl list-unit-files 'containerd*' 'docker*' 'kubelet*' --no-pager || true
+            if command -v ctr >/dev/null 2>&1; then
+              sudo ctr namespaces list || true
+              while IFS= read -r namespace; do
+                [[ "$namespace" =~ ^[A-Za-z0-9._-]+$ ]] || continue
+                echo "-- containerd namespace: $namespace"
+                sudo ctr --namespace "$namespace" containers list || true
+                sudo ctr --namespace "$namespace" tasks list || true
+                sudo ctr --namespace "$namespace" images list || true
+                sudo ctr --namespace "$namespace" snapshots list || true
+              done < <(sudo ctr namespaces list -q 2>/dev/null || true)
+            else
+              echo "ctr is not installed"
+            fi
+            if command -v crictl >/dev/null 2>&1; then
+              sudo crictl ps -a || true
+              sudo crictl images || true
+            fi
+            if command -v nerdctl >/dev/null 2>&1; then
+              sudo nerdctl system df || true
+            fi
+
+            echo "==> Journal allocation"
+            sudo journalctl --disk-usage || true
+
             echo "==> Deleted files still held open"
             if command -v lsof >/dev/null 2>&1; then
               sudo lsof +L1 2>/dev/null | tail -n 80 || true
