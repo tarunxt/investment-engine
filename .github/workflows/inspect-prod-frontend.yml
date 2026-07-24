@@ -97,6 +97,45 @@ jobs:
                 ORDER BY pg_total_relation_size(c.oid) DESC
                 LIMIT 40;
               " || true
+              sudo -u postgres psql -X -d aidb -P pager=off -c "
+                SELECT
+                  c.reltuples::bigint AS estimated_rows,
+                  s.n_live_tup,
+                  s.n_dead_tup,
+                  pg_size_pretty(pg_total_relation_size(c.oid)) AS total_size,
+                  pg_size_pretty(pg_total_relation_size(c.reltoastrelid)) AS toast_size,
+                  s.last_vacuum,
+                  s.last_autovacuum
+                FROM pg_class c
+                LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
+                WHERE c.oid = 'public.bullpen_run_audit_blobs'::regclass;
+              " || true
+              sudo -u postgres psql -X -d aidb -P pager=off -c "
+                SELECT
+                  count(*) AS blob_count,
+                  pg_size_pretty(sum(size_bytes)) AS payload_bytes,
+                  min(created_at) AS oldest_blob,
+                  max(created_at) AS newest_blob
+                FROM bullpen_run_audit_blobs;
+              " || true
+              sudo -u postgres psql -X -d aidb -P pager=off -c "
+                SELECT
+                  content_type,
+                  count(*) AS blob_count,
+                  pg_size_pretty(sum(size_bytes)) AS payload_bytes,
+                  min(created_at) AS oldest_blob,
+                  max(created_at) AS newest_blob
+                FROM bullpen_run_audit_blobs
+                GROUP BY content_type
+                ORDER BY sum(size_bytes) DESC;
+              " || true
+              sudo -u postgres psql -X -d aidb -P pager=off -c "
+                SELECT conrelid::regclass AS referencing_table, pg_get_constraintdef(oid) AS foreign_key
+                FROM pg_constraint
+                WHERE contype = 'f'
+                  AND confrelid = 'public.bullpen_run_audit_blobs'::regclass
+                ORDER BY conrelid::regclass::text;
+              " || true
             else
               echo "postgres psql access is unavailable"
             fi
@@ -137,6 +176,15 @@ jobs:
 
             echo "==> Listener ownership"
             sudo ss -ltnp || true
+            echo "==> Nginx upstream targets"
+            sudo nginx -T 2>/dev/null | grep -E '^[[:space:]]*(server_name|proxy_pass|upstream)' || true
+            echo "==> Systemd frontend command"
+            sudo systemctl cat "$FRONTEND_SERVICE_NAME" || true
+            echo "==> Processes listening on application ports"
+            for pid in $(sudo ss -ltnpH 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | sort -u); do
+              sudo ps -o pid,ppid,user,etimes,args -p "$pid" || true
+              sudo cat "/proc/$pid/cgroup" 2>/dev/null || true
+            done
             echo "==> App service families"
             sudo systemctl list-units --type=service --all 'investor-*' 'investment-engine-*' --no-pager || true
 
