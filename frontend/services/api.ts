@@ -1114,28 +1114,35 @@ class apiServiceClass implements IApiService {
     return this.get<ZerodhaEventsAnalysis>(URLs.zerodha.eventJob(jobId));
   }
 
-  async zerodhaRunEvents(data?: PortfolioEventRunRequest): Promise<ZerodhaEventsRunResponse> {
+  async zerodhaRunEvents(
+    data?: PortfolioEventRunRequest,
+  ): Promise<ZerodhaEventsRunResponse> {
     try {
-      return await this.post<ZerodhaEventsRunResponse>(URLs.zerodha.eventsRun(), data ?? {});
+      return await this.post<ZerodhaEventsRunResponse>(
+        URLs.zerodha.eventsRun(),
+        data ?? {},
+      );
     } catch (error) {
       return reconcileTimedOutAutoRebalanceStart(
         error,
         data,
         () => this.zerodhaEventsHistory({ limit: 50 }),
         async (item) => {
-const analysis = await this.zerodhaEventJob(item.job_id);
-if (!analysis.snapshot_date || !analysis.captured_at) {
-  throw new Error("Queued Zerodha events job is missing snapshot metadata.");
-}
-return {
-  job_id: analysis.job_id,
-  status: analysis.status,
-  provider: analysis.provider,
-  model: analysis.model,
-  snapshot_date: analysis.snapshot_date,
-  captured_at: analysis.captured_at,
-  created_at: analysis.created_at,
-};
+          const analysis = await this.zerodhaEventJob(item.job_id);
+          if (!analysis.snapshot_date || !analysis.captured_at) {
+            throw new Error(
+              "Queued Zerodha events job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
         },
       );
     }
@@ -1158,28 +1165,35 @@ return {
     return this.get<ZerodhaThreatAnalysis>(URLs.zerodha.threatJob(jobId));
   }
 
-  async zerodhaRunThreats(data?: PortfolioEventRunRequest): Promise<ZerodhaThreatRunResponse> {
+  async zerodhaRunThreats(
+    data?: PortfolioEventRunRequest,
+  ): Promise<ZerodhaThreatRunResponse> {
     try {
-      return await this.post<ZerodhaThreatRunResponse>(URLs.zerodha.threatsRun(), data ?? {});
+      return await this.post<ZerodhaThreatRunResponse>(
+        URLs.zerodha.threatsRun(),
+        data ?? {},
+      );
     } catch (error) {
       return reconcileTimedOutAutoRebalanceStart(
         error,
         data,
         () => this.zerodhaThreatsHistory({ limit: 50 }),
         async (item) => {
-const analysis = await this.zerodhaThreatJob(item.job_id);
-if (!analysis.snapshot_date || !analysis.captured_at) {
-  throw new Error("Queued Zerodha threats job is missing snapshot metadata.");
-}
-return {
-  job_id: analysis.job_id,
-  status: analysis.status,
-  provider: analysis.provider,
-  model: analysis.model,
-  snapshot_date: analysis.snapshot_date,
-  captured_at: analysis.captured_at,
-  created_at: analysis.created_at,
-};
+          const analysis = await this.zerodhaThreatJob(item.job_id);
+          if (!analysis.snapshot_date || !analysis.captured_at) {
+            throw new Error(
+              "Queued Zerodha threats job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
         },
       );
     }
@@ -1222,33 +1236,40 @@ return {
     return this.get<IndMoneyUsEventsAnalysis>(URLs.indmoneyUs.eventJob(jobId));
   }
 
-  async indmoneyUsRunEvents(data?: PortfolioEventRunRequest): Promise<IndMoneyUsEventsRunResponse> {
+  async indmoneyUsRunEvents(
+    data?: PortfolioEventRunRequest,
+  ): Promise<IndMoneyUsEventsRunResponse> {
     try {
-      return await this.post<IndMoneyUsEventsRunResponse>(URLs.indmoneyUs.eventsRun(), data ?? {});
+      return await this.post<IndMoneyUsEventsRunResponse>(
+        URLs.indmoneyUs.eventsRun(),
+        data ?? {},
+      );
     } catch (error) {
       return reconcileTimedOutAutoRebalanceStart(
         error,
         data,
         () => this.indmoneyUsEventsHistory({ limit: 50 }),
         async (item) => {
-const analysis = await this.indmoneyUsEventJob(item.job_id);
-if (
-  analysis.snapshot_id == null ||
-  !analysis.snapshot_date ||
-  !analysis.captured_at
-) {
-  throw new Error("Queued INDmoney events job is missing snapshot metadata.");
-}
-return {
-  job_id: analysis.job_id,
-  status: analysis.status,
-  provider: analysis.provider,
-  model: analysis.model,
-  snapshot_id: analysis.snapshot_id,
-  snapshot_date: analysis.snapshot_date,
-  captured_at: analysis.captured_at,
-  created_at: analysis.created_at,
-};
+          const analysis = await this.indmoneyUsEventJob(item.job_id);
+          if (
+            analysis.snapshot_id == null ||
+            !analysis.snapshot_date ||
+            !analysis.captured_at
+          ) {
+            throw new Error(
+              "Queued INDmoney events job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_id: analysis.snapshot_id,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
         },
       );
     }
@@ -1271,33 +1292,40 @@ return {
     return this.get<IndMoneyUsThreatAnalysis>(URLs.indmoneyUs.threatJob(jobId));
   }
 
-  async indmoneyUsRunThreats(data?: PortfolioEventRunRequest): Promise<IndMoneyUsThreatRunResponse> {
+  async indmoneyUsRunThreats(
+    data?: PortfolioEventRunRequest,
+  ): Promise<IndMoneyUsThreatRunResponse> {
     try {
-      return await this.post<IndMoneyUsThreatRunResponse>(URLs.indmoneyUs.threatsRun(), data ?? {});
+      return await this.post<IndMoneyUsThreatRunResponse>(
+        URLs.indmoneyUs.threatsRun(),
+        data ?? {},
+      );
     } catch (error) {
       return reconcileTimedOutAutoRebalanceStart(
         error,
         data,
         () => this.indmoneyUsThreatsHistory({ limit: 50 }),
         async (item) => {
-const analysis = await this.indmoneyUsThreatJob(item.job_id);
-if (
-  analysis.snapshot_id == null ||
-  !analysis.snapshot_date ||
-  !analysis.captured_at
-) {
-  throw new Error("Queued INDmoney threats job is missing snapshot metadata.");
-}
-return {
-  job_id: analysis.job_id,
-  status: analysis.status,
-  provider: analysis.provider,
-  model: analysis.model,
-  snapshot_id: analysis.snapshot_id,
-  snapshot_date: analysis.snapshot_date,
-  captured_at: analysis.captured_at,
-  created_at: analysis.created_at,
-};
+          const analysis = await this.indmoneyUsThreatJob(item.job_id);
+          if (
+            analysis.snapshot_id == null ||
+            !analysis.snapshot_date ||
+            !analysis.captured_at
+          ) {
+            throw new Error(
+              "Queued INDmoney threats job is missing snapshot metadata.",
+            );
+          }
+          return {
+            job_id: analysis.job_id,
+            status: analysis.status,
+            provider: analysis.provider,
+            model: analysis.model,
+            snapshot_id: analysis.snapshot_id,
+            snapshot_date: analysis.snapshot_date,
+            captured_at: analysis.captured_at,
+            created_at: analysis.created_at,
+          };
         },
       );
     }

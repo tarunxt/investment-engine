@@ -229,29 +229,29 @@ class ProviderFactory:
         seen: set[tuple[str, str]] = set()
 
         def add_candidate(provider_name: str, model_name: str) -> None:
-  provider = provider_name.strip().lower()
-  model = model_name.strip()
-  provider_class = cls._providers.get(provider)
-  if provider_class is None or not provider_class.is_configured():
-      return
-  if model not in provider_class.supported_models:
-      return
-  compatible, _ = cls.model_compatibility(provider, model)
-  key = (provider, model)
-  if not compatible or key in seen:
-      return
-  seen.add(key)
-  candidates.append(key)
+            provider = provider_name.strip().lower()
+            model = model_name.strip()
+            provider_class = cls._providers.get(provider)
+            if provider_class is None or not provider_class.is_configured():
+                return
+            if model not in provider_class.supported_models:
+                return
+            compatible, _ = cls.model_compatibility(provider, model)
+            key = (provider, model)
+            if not compatible or key in seen:
+                return
+            seen.add(key)
+            candidates.append(key)
 
         add_candidate(preferred_provider_name, preferred_model_name)
         for provider_name in cls._ordered_provider_names(
-  preferred_provider=preferred_provider_name
+            preferred_provider=preferred_provider_name
         ):
-  provider_class = cls._providers.get(provider_name)
-  if provider_class is None or not provider_class.is_configured():
-      continue
-  for model_name in provider_class.supported_models:
-      add_candidate(provider_name, model_name)
+            provider_class = cls._providers.get(provider_name)
+            if provider_class is None or not provider_class.is_configured():
+                continue
+            for model_name in provider_class.supported_models:
+                add_candidate(provider_name, model_name)
         return candidates
 
     @classmethod

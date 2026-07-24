@@ -64,29 +64,31 @@ class CreateRunUseCase:
             if key in seen_targets:
                 continue
             seen_targets.add(key)
-  targets.append(target)
+            targets.append(target)
 
         targets, blocked_targets = await filter_recently_available_targets(
-  self._session,
-  targets,
+            self._session,
+            targets,
         )
         if blocked_targets:
-  logger.warning(
-      "Skipping temporarily unavailable provider targets: %s",
-      ", ".join(
-          f"{target.provider}/{target.model}"
-          for target, _availability in blocked_targets
-      ),
-  )
+            logger.warning(
+                "Skipping temporarily unavailable provider targets: %s",
+                ", ".join(
+                    f"{target.provider}/{target.model}"
+                    for target, _availability in blocked_targets
+                ),
+            )
         if not targets:
-  reasons = "; ".join(
-      availability.reason or f"{target.provider}/{target.model} is unavailable"
-      for target, availability in blocked_targets
-  )
-  raise ValidationException(
-      "No selected AI target is currently available. " + reasons
-  )
+            reasons = "; ".join(
+                availability.reason
+                or f"{target.provider}/{target.model} is unavailable"
+                for target, availability in blocked_targets
+            )
+            raise ValidationException(
+                "No selected AI target is currently available. " + reasons
+            )
 
+        now = datetime.now(timezone.utc)
         now = datetime.now(timezone.utc)
         scheduled_at = cmd.scheduled_at
         if scheduled_at is not None and scheduled_at.tzinfo is None:

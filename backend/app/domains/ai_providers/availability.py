@@ -75,9 +75,9 @@ async def get_recent_target_availability(
     result = await session.execute(
         select(Job)
         .where(
-  Job.provider == provider,
-  Job.model == model,
-  Job.status.in_(terminal_statuses),
+            Job.provider == provider,
+            Job.model == model,
+            Job.status.in_(terminal_statuses),
         )
         .order_by(desc(Job.id))
         .limit(1)
@@ -100,8 +100,8 @@ async def get_recent_target_availability(
         available=False,
         retry_after=retry_after,
         reason=(
-  f"{provider}/{model} is temporarily paused after a provider billing or quota error. "
-  f"Automatic retry is allowed after {_format_retry_after_ist(retry_after)}."
+            f"{provider}/{model} is temporarily paused after a provider billing or quota error. "
+            f"Automatic retry is allowed after {_format_retry_after_ist(retry_after)}."
         ),
     )
 
@@ -114,12 +114,12 @@ async def filter_recently_available_targets(
     blocked: list[tuple[TargetT, TargetAvailability]] = []
     for target in targets:
         availability = await get_recent_target_availability(
-  session,
-  target.provider,
-  target.model,
+            session,
+            target.provider,
+            target.model,
         )
         if availability.available:
-  available.append(target)
+            available.append(target)
         else:
-  blocked.append((target, availability))
+            blocked.append((target, availability))
     return available, blocked

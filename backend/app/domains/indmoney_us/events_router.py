@@ -115,10 +115,14 @@ async def run_events_analysis(
                 provider=provider,
                 model=model,
                 user_id=UserId(current_user.id),
-      auto_rebalance_portfolio=body.auto_rebalance_portfolio if body else None,
-      auto_rebalance_sequence=body.auto_rebalance_sequence if body else None,
-      auto_rebalance_label=body.auto_rebalance_label if body else None,
-  )
+                auto_rebalance_portfolio=(
+                    body.auto_rebalance_portfolio if body else None
+                ),
+                auto_rebalance_sequence=(
+                    body.auto_rebalance_sequence if body else None
+                ),
+                auto_rebalance_label=body.auto_rebalance_label if body else None,
+            )
         )
     finally:
         await redis.aclose()

@@ -164,25 +164,29 @@ async def list_providers(
         )
 
         for model in provider["models"]:
-            is_compatible, reason = ProviderFactory.model_compatibility(provider["name"], model)
-  if is_compatible and not provider["configured"]:
-      is_compatible = False
-      reason = f"Provider '{provider['name']}' is not configured on this server."
-  if is_compatible:
-      availability = await get_recent_target_availability(
-          db,
-          provider["name"],
-          model,
-      )
-      if not availability.available:
-          is_compatible = False
-          reason = availability.reason
-  compatibility[model] = {
-      "compatible": is_compatible,
-      "reason": reason,
-  }
-  if is_compatible:
-      compatible_models.append(model)
+            is_compatible, reason = ProviderFactory.model_compatibility(
+                provider["name"], model
+            )
+            if is_compatible and not provider["configured"]:
+                is_compatible = False
+                reason = (
+                    f"Provider '{provider['name']}' is not configured on this server."
+                )
+            if is_compatible:
+                availability = await get_recent_target_availability(
+                    db,
+                    provider["name"],
+                    model,
+                )
+                if not availability.available:
+                    is_compatible = False
+                    reason = availability.reason
+            compatibility[model] = {
+                "compatible": is_compatible,
+                "reason": reason,
+            }
+            if is_compatible:
+                compatible_models.append(model)
 
             # Primary source of truth: latest successful run for this exact model.
             # This keeps estimate badges aligned to actual recent behavior.
