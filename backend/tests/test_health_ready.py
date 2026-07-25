@@ -65,7 +65,7 @@ async def test_ready_returns_503_when_pending_stage3_intents_have_no_ai_consumer
     monkeypatch.setattr(
         health_router,
         "celery_ai_queue_consumer_diagnostics",
-        lambda: {
+        lambda *_args: {
             "ok": False,
             "required_queue": "ai",
             "error": "No Celery worker currently reports consuming the ai queue required by Stage 3 order intents.",
@@ -96,7 +96,7 @@ async def test_ready_returns_200_after_an_ai_consumer_recovers(
     monkeypatch.setattr(
         health_router,
         "celery_ai_queue_consumer_diagnostics",
-        lambda: {
+        lambda *_args: {
             "ok": True,
             "required_queue": "ai",
             "consuming_workers": ["celery@worker-1"],
@@ -118,6 +118,46 @@ async def test_ready_returns_200_after_an_ai_consumer_recovers(
         },
         "pending_stage3_intents": 2,
     }
+
+
+@pytest.mark.anyio
+async def test_ready_allows_celery_inspector_to_use_its_full_reply_window(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _install_healthy_dependencies(monkeypatch, pending_stage3_intents=1)
+    observed_timeouts: list[float] = []
+
+    def delayed_healthy_diagnostics(timeout: float):
+        observed_timeouts.append(timeout)
+        time.sleep(timeout + 0.01)
+        return {
+            "ok": True,
+            "required_queue": "ai",
+            "consuming_workers": ["celery@worker-1"],
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        health_router,
+        "celery_ai_queue_consumer_diagnostics",
+        delayed_healthy_diagnostics,
+    )
+    monkeypatch.setattr(
+        health_router,
+        "READY_WORKER_INSPECT_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(health_router, "READY_WORKER_TIMEOUT_SECONDS", 0.05)
+
+    transport = httpx.ASGITransport(app=_ready_app())
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/health/ready")
+
+    assert response.status_code == 200
+    assert observed_timeouts == [0.01]
 
 
 @pytest.mark.anyio

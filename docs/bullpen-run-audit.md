@@ -64,7 +64,9 @@ transaction references are captured before a refreshed snapshot is built. A
 pending intent without an `ai` consumer is an operational readiness failure
 (HTTP `503` from `/health/ready`), not an external order rejection. This keeps
 the historical audit distinction between an unstarted `READY` intent and an
-ambiguous or submitted remote order intact.
+ambiguous or submitted remote order intact. The readiness wrapper gives the
+Celery inspector its complete reply window plus separate async scheduling
+headroom, preventing a healthy consumer from being recorded as unavailable.
 
 The relevant operational environment variables are:
 

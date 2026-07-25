@@ -42,7 +42,10 @@ only and must not be used as a Stage 3 fallback.
 When durable pending Stage 3 intents exist, `/health/ready` queries Celery
 active queues. It returns HTTP `503` unless at least one worker reports
 consuming `ai`; this intentionally makes the deployment `curl --fail` smoke
-check fail instead of accepting an unavailable order-intent consumer.
+check fail instead of accepting an unavailable order-intent consumer. The
+async readiness deadline is longer than the Celery inspector's reply window,
+so normal thread scheduling and result serialization cannot turn a healthy
+consumer into a false timeout after a service restart.
 
 After an `ai`-consumer outage, run the **Verify Bullpen Stage 3 Queue Recovery**
 workflow with the affected run ID. It reports the primary worker status and

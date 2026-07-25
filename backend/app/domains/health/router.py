@@ -15,7 +15,11 @@ router = APIRouter(prefix="/health", tags=["health"])
 logger = get_logger(__name__)
 READY_POSTGRES_TIMEOUT_SECONDS = 0.75
 READY_REDIS_TIMEOUT_SECONDS = 0.75
-READY_WORKER_TIMEOUT_SECONDS = 1.0
+READY_WORKER_INSPECT_TIMEOUT_SECONDS = 1.0
+# Celery's inspector is allowed to consume its complete reply window. Keep the
+# surrounding async deadline larger so normal thread scheduling/serialization
+# overhead cannot turn a healthy ai consumer into a deterministic timeout.
+READY_WORKER_TIMEOUT_SECONDS = 2.0
 
 
 def _log_readiness_failure(
@@ -141,7 +145,10 @@ async def health_ready(request: Request, response: Response):
     if checks.get("postgres") == "ok" and (pending_stage3_intents or 0) > 0:
         try:
             diagnostics = await asyncio.wait_for(
-                asyncio.to_thread(celery_ai_queue_consumer_diagnostics),
+                asyncio.to_thread(
+                    celery_ai_queue_consumer_diagnostics,
+                    READY_WORKER_INSPECT_TIMEOUT_SECONDS,
+                ),
                 timeout=READY_WORKER_TIMEOUT_SECONDS,
             )
         except Exception as exc:
