@@ -49,6 +49,8 @@ test("latest threat responses hydrate a bounded history with one snapshot query"
 
   for (const source of [zerodhaSource, indmoneySource]) {
     assert.match(source, /THREAT_HISTORY_AUGMENTATION_LIMIT = 50/);
+    assert.match(source, /load_only\(\s*Job\.id,\s*Job\.user_id,\s*Job\.prompt/);
+    assert.match(source, /parse_[a-z_]+_threat_urgent_actionables/);
     assert.match(
       source,
       /\.order_by\(Job\.id\.desc\(\)\)\s*\.limit\(THREAT_HISTORY_AUGMENTATION_LIMIT\)/,
@@ -67,6 +69,44 @@ test("latest threat responses hydrate a bounded history with one snapshot query"
     /IndMoneyUsPortfolioSnapshot\.id\.in_\(tuple\(snapshot_ids\)\)/,
   );
   assert.doesNotMatch(indmoneySource, /await snapshot_repo\.get_by_user_and_id/);
+});
+
+test("dashboard mount uses bounded summary-selected run details", () => {
+  const actionablesSource = read(
+    "../app/console/_components/FinalActionablesConsole.tsx",
+  );
+  const workflowSource = read(
+    "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+  );
+
+  assert.match(
+    actionablesSource,
+    /export async function fetchDashboardRecentFullRuns\(\)/,
+  );
+  assert.match(
+    actionablesSource,
+    /apiService\.getRuns\(\{\s*page: 1,\s*limit: DASHBOARD_RECENT_RUN_SUMMARY_LIMIT,\s*summary: true,/,
+  );
+  assert.match(
+    actionablesSource,
+    /DASHBOARD_RECENT_RUN_DETAIL_LIMIT = 24/,
+  );
+  assert.match(actionablesSource, /apiService\.getRun\(runId\)/);
+  assert.match(
+    actionablesSource,
+    /const \[allRuns, zerodhaOverview, indmoneyOverview\][\s\S]*?fetchDashboardRecentFullRuns\(\)/,
+  );
+  assert.match(
+    workflowSource,
+    /const loadLatestIdleStageInfo[\s\S]*?fetchDashboardRecentFullRuns\(\)/,
+  );
+
+  transpileTypeScript(
+    "../app/console/_components/FinalActionablesConsole.tsx",
+  );
+  transpileTypeScript(
+    "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+  );
 });
 
 test("structured Bullpen errors become concise dashboard warnings", () => {

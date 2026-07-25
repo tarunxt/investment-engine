@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from threading import Barrier, Lock
 import time
 from types import SimpleNamespace
@@ -107,6 +107,48 @@ def test_content_addressed_blob_insert_is_postgresql_upsert():
     compiled = str(session.statement.compile(dialect=postgresql.dialect()))
     assert "ON CONFLICT" in compiled
     assert "DO NOTHING" in compiled
+
+
+def test_orphan_blob_gc_checks_every_durable_blob_reference():
+    query = BullpenRunAuditRepository.unreferenced_blob_ids_query(
+        created_before=datetime.now(UTC) - timedelta(hours=24),
+        batch_size=100,
+    )
+    compiled = str(
+        query.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "bullpen_run_audit_blobs.created_at <" in compiled
+    for reference_column in (
+        "canonical_bundle_blob_id",
+        "inputs_blob_id",
+        "outputs_blob_id",
+        "raw_stage_blob_id",
+        "payload_blob_id",
+        "bullpen_run_audit_feedback.raw_output_blob_id",
+        "report_blob_id",
+        "input_blob_id",
+        "bullpen_run_audit_feedback_subcalls.raw_output_blob_id",
+    ):
+        assert reference_column in compiled
+    assert compiled.count("NOT (EXISTS") == 9
+    assert "LIMIT 100" in compiled
+
+
+def test_orphan_blob_gc_is_routed_and_scheduled_on_beat():
+    task_name = (
+        "app.domains.bullpen_run_audit.tasks."
+        "prune_unreferenced_bullpen_run_audit_blobs"
+    )
+
+    assert audit_tasks.prune_unreferenced_bullpen_run_audit_blobs.name == task_name
+    from app.infrastructure.messaging.celery_app import celery
+
+    assert celery.conf.task_routes[task_name]["queue"] == "beat"
+    assert celery.conf.beat_schedule["bullpen-run-audit-blob-gc"]["task"] == task_name
 
 
 class _ConcurrentMaterializationState:

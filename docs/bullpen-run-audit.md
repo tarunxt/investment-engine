@@ -70,6 +70,27 @@ The relevant operational environment variables are:
 
 * `BULLPEN_RUN_AUDIT_REFRESH_DEBOUNCE_SECONDS` (default `5`)
 * `BULLPEN_RUN_AUDIT_REFRESH_LEASE_SECONDS` (default `300`)
+* `BULLPEN_RUN_AUDIT_BLOB_GC_GRACE_HOURS` (default `24`)
+* `BULLPEN_RUN_AUDIT_BLOB_GC_BATCH_SIZE` (default `100`)
+* `BULLPEN_RUN_AUDIT_BLOB_GC_MAX_BATCHES` (default `10`)
+
+### Content-addressed blob retention
+
+Working snapshot rebuilds replace their stage and event child rows. The
+content-addressed payload rows behind those children are immutable, so a
+rebuild can leave old payloads unreferenced even though the current and frozen
+snapshot facts remain valid. Celery beat runs
+`prune_unreferenced_bullpen_run_audit_blobs` every six hours to prevent that
+storage from growing without bound.
+
+The task deletes only blobs older than the configured grace period that have no
+reference from a snapshot, stage input/output/raw payload, event, feedback
+report/output, or feedback subcall input/output. It rechecks those references in
+each small SQLAlchemy delete transaction, commits batches independently, logs
+failures, and is safe to retry. Referenced blobs, including all blobs used by
+existing frozen snapshots, are never eligible. This preserves the facts and
+backward compatibility of every historical snapshot while reclaiming only
+unreachable storage.
 
 ## Domain Layout
 
@@ -143,7 +164,9 @@ Stores the current or historical snapshot version for a run, including:
 `bullpen_run_audit_blobs`
 
 Content-addressed storage for sanitized raw JSON or text payloads such as prompts,
-responses, stage payloads, and canonical bundles.
+responses, stage payloads, and canonical bundles. Referenced payloads are retained
+for the lifetime of their audit records; only aged payloads with no durable
+reference are reclaimed by the scheduled blob-retention task.
 
 ### Stage, Event, Formula
 

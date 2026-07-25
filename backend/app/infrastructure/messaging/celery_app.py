@@ -45,6 +45,7 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace": {"queue": AUTO_LIVE_QUEUE},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
+    "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
     "app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history": {"queue": "ai"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
@@ -82,6 +83,13 @@ celery.conf.beat_schedule = {
     "polymarket-auto-live-order-intent-reconcile": {
         "task": "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders",
         "schedule": crontab(minute="*"),
+    },
+    "bullpen-run-audit-blob-gc": {
+        "task": "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs",
+        # Content-addressed payloads can become orphaned when a working audit
+        # snapshot is rebuilt. Reclaim only aged, unreferenced blobs in small
+        # batches so PostgreSQL storage cannot grow without bound.
+        "schedule": crontab(minute=37, hour="*/6"),
     },
 }
 

@@ -33,6 +33,7 @@ import {
   type ActionEstimate,
   extractRebalanceInputFingerprint,
   fetchAllFullRuns,
+  fetchDashboardRecentFullRuns,
   isCompletedRebalanceRun,
   type DashboardActionRow,
   type HistoricalDashboardActionRow,
@@ -6323,7 +6324,7 @@ ${zerodhaExecutionMode === "direct_market"
       apiService.indmoneyUsPortfolioOverview(),
       apiService.zerodhaThreatsLatest(),
       apiService.indmoneyUsThreatsLatest(),
-      fetchAllFullRuns(),
+      fetchDashboardRecentFullRuns(),
     ]);
 
     const zerodhaOverview =

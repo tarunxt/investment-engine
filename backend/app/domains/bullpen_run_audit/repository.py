@@ -5,7 +5,7 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import Select, and_, desc, func, or_, select
+from sqlalchemy import Select, and_, delete, desc, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, selectinload
@@ -282,6 +282,87 @@ class BullpenRunAuditRepository:
         self.session.add(record)
         self.session.flush()
         return record
+
+    @staticmethod
+    def unreferenced_blob_ids_query(
+        *,
+        created_before: datetime,
+        batch_size: int,
+    ) -> Select[tuple[str]]:
+        """Select an age-bounded batch of blobs with no durable references.
+
+        Snapshot materialization deliberately replaces mutable child rows while
+        retaining immutable content-addressed blobs.  This query is the
+        reference boundary for reclaiming the old payloads: every blob-bearing
+        foreign key must remain absent before a blob can be deleted.
+        """
+
+        blob_id = BullpenRunAuditBlobRecord.id
+        references = (
+            (
+                BullpenRunAuditSnapshotRecord,
+                BullpenRunAuditSnapshotRecord.canonical_bundle_blob_id,
+            ),
+            (BullpenRunAuditStageRecord, BullpenRunAuditStageRecord.inputs_blob_id),
+            (BullpenRunAuditStageRecord, BullpenRunAuditStageRecord.outputs_blob_id),
+            (BullpenRunAuditStageRecord, BullpenRunAuditStageRecord.raw_stage_blob_id),
+            (BullpenRunAuditEventRecord, BullpenRunAuditEventRecord.payload_blob_id),
+            (
+                BullpenRunAuditFeedbackRecord,
+                BullpenRunAuditFeedbackRecord.raw_output_blob_id,
+            ),
+            (
+                BullpenRunAuditFeedbackRecord,
+                BullpenRunAuditFeedbackRecord.report_blob_id,
+            ),
+            (
+                BullpenRunAuditFeedbackSubcallRecord,
+                BullpenRunAuditFeedbackSubcallRecord.input_blob_id,
+            ),
+            (
+                BullpenRunAuditFeedbackSubcallRecord,
+                BullpenRunAuditFeedbackSubcallRecord.raw_output_blob_id,
+            ),
+        )
+        no_references = tuple(
+            ~select(1)
+            .select_from(model)
+            .where(reference_column == blob_id)
+            .correlate(BullpenRunAuditBlobRecord)
+            .exists()
+            for model, reference_column in references
+        )
+        return (
+            select(blob_id)
+            .where(
+                BullpenRunAuditBlobRecord.created_at < created_before,
+                *no_references,
+            )
+            .order_by(
+                BullpenRunAuditBlobRecord.created_at.asc(),
+                blob_id.asc(),
+            )
+            .limit(max(1, int(batch_size)))
+        )
+
+    def delete_unreferenced_blobs_older_than(
+        self,
+        *,
+        created_before: datetime,
+        batch_size: int,
+    ) -> int:
+        """Delete one retry-safe batch of old, unreferenced audit blobs."""
+
+        candidate_ids = self.unreferenced_blob_ids_query(
+            created_before=created_before,
+            batch_size=batch_size,
+        )
+        result = self.session.execute(
+            delete(BullpenRunAuditBlobRecord).where(
+                BullpenRunAuditBlobRecord.id.in_(candidate_ids)
+            )
+        )
+        return max(0, int(getattr(result, "rowcount", 0) or 0))
 
     def clear_current_snapshot_children(self, snapshot_id: int) -> None:
         self.session.query(BullpenRunAuditStageRecord).filter(

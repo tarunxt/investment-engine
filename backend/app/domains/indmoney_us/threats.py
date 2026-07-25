@@ -14,6 +14,7 @@ from app.domains.zerodha.threats import (
     THREAT_ANALYSIS_PROVIDER,
     THREAT_WEB_SEARCH_MARKER,
     parse_zerodha_threat_report,
+    parse_zerodha_threat_urgent_actionables,
 )
 
 THREAT_JOB_MARKER = "[INDMONEY_US_THREATS]"
@@ -146,6 +147,12 @@ def is_indmoney_us_threat_job(job: Job | None) -> bool:
 
 def parse_indmoney_us_threat_report(markdown: str | None) -> dict[str, Any] | None:
     return parse_zerodha_threat_report(markdown)
+
+
+def parse_indmoney_us_threat_urgent_actionables(
+    markdown: str | None,
+) -> dict[str, Any] | None:
+    return parse_zerodha_threat_urgent_actionables(markdown)
 
 
 def _build_market_indices_markdown_table(snapshot: IndMoneyUsPortfolioSnapshot) -> str:

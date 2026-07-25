@@ -4,12 +4,49 @@ from types import SimpleNamespace
 from app.domains.indmoney_us.threats_router import (
     _build_holding_context_index as build_indmoney_context_index,
 )
+from app.domains.zerodha.threats import (
+    parse_zerodha_threat_urgent_actionables,
+)
 from app.domains.zerodha.threats_router import (
     _build_holding_context_index as build_zerodha_context_index,
 )
 
 
 class ThreatHoldingContextTests(unittest.TestCase):
+    def test_history_parser_materializes_only_urgent_actionables(self):
+        report = parse_zerodha_threat_urgent_actionables(
+            """
+## Summary
+
+- Main portfolio risk in one sentence: Test summary
+
+## Table 1: Portfolio-Level Risk Snapshot
+
+| Risk Factor | Current Situation | Why It Matters | Severity |
+|---|---|---|---|
+| Test | Test | Test | Low |
+
+## Table 10: Urgent Actionables / Immediate Risk-Control Actions
+
+| Exchange | Stock Symbol | Stock Name | Urgent Action Needed |
+|---|---|---|---|
+| NSE | SBIN | State Bank of India | Trim |
+
+## Bottom Line
+
+| Point | Conclusion |
+|---|---|
+| Test | Test |
+"""
+        )
+
+        self.assertIsNotNone(report)
+        assert report is not None
+        self.assertEqual(len(report["tables"]), 1)
+        self.assertEqual(report["tables"][0]["key"], "urgent_actionables")
+        self.assertEqual(report["tables"][0]["rows"][0]["Stock Symbol"], "SBIN")
+        self.assertNotIn("raw_markdown", report)
+
     def test_indmoney_urgent_history_uses_invested_amount_basis_for_portfolio_percentage(self):
         snapshot = SimpleNamespace(
             current_value=2000.0,

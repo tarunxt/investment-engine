@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 import redis.asyncio as aioredis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
@@ -35,6 +36,7 @@ from app.domains.zerodha.threats import (
     extract_threat_prompt_metadata,
     is_zerodha_threat_job,
     parse_zerodha_threat_report,
+    parse_zerodha_threat_urgent_actionables,
 )
 from app.domains.zerodha.threats_schemas import (
     ZerodhaThreatAnalysisResponse,
@@ -175,6 +177,26 @@ async def _get_latest_threat_job(db: AsyncSession, user_id: int) -> Job | None:
 async def _get_threat_jobs(db: AsyncSession, user_id: int, limit: int) -> list[Job]:
     result = await db.execute(
         select(Job)
+        .options(
+            load_only(
+                Job.id,
+                Job.user_id,
+                Job.prompt,
+                Job.provider,
+                Job.model,
+                Job.status,
+                Job.response,
+                Job.error_message,
+                Job.tokens_in,
+                Job.tokens_out,
+                Job.estimated_cost,
+                Job.auto_rebalance_portfolio,
+                Job.auto_rebalance_sequence,
+                Job.auto_rebalance_label,
+                Job.created_at,
+                Job.updated_at,
+            )
+        )
         .where(
             Job.user_id == user_id,
             Job.prompt.ilike(f"%{THREAT_JOB_MARKER}%"),
@@ -193,6 +215,17 @@ async def _get_completed_threat_jobs_upto(
 ) -> list[Job]:
     result = await db.execute(
         select(Job)
+        .options(
+            load_only(
+                Job.id,
+                Job.user_id,
+                Job.prompt,
+                Job.status,
+                Job.response,
+                Job.created_at,
+                Job.updated_at,
+            )
+        )
         .where(
             Job.user_id == user_id,
             Job.id <= max_job_id,
@@ -246,7 +279,9 @@ async def _augment_report_with_urgent_history(
     history_items = []
     snapshot_dates = set()
     for history_job in history_jobs:
-        history_report = parse_zerodha_threat_report(history_job.response)
+        history_report = parse_zerodha_threat_urgent_actionables(
+            history_job.response
+        )
         if not history_report:
             continue
 

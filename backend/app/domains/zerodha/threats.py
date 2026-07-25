@@ -538,6 +538,36 @@ def parse_zerodha_threat_report(markdown: str | None) -> dict[str, Any] | None:
     }
 
 
+def parse_zerodha_threat_urgent_actionables(
+    markdown: str | None,
+) -> dict[str, Any] | None:
+    """Parse only Table 10 for bounded latest-response history hydration."""
+
+    text = (markdown or "").strip()
+    if not text:
+        return None
+
+    sections = _split_markdown_sections(text)
+    title = next(
+        title
+        for key, title in THREAT_TABLE_SPECS
+        if key == "urgent_actionables"
+    )
+    parsed = _parse_markdown_table(sections.get(_normalize_heading(title), ""))
+    if not parsed["columns"] and not parsed["rows"]:
+        return None
+    return {
+        "tables": [
+            {
+                "key": "urgent_actionables",
+                "title": title,
+                "columns": parsed["columns"],
+                "rows": parsed["rows"],
+            }
+        ]
+    }
+
+
 def _build_holdings_markdown_table(snapshot: ZerodhaPortfolioSnapshot) -> str:
     holdings = sorted(
         [

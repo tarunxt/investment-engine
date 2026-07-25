@@ -48,6 +48,7 @@ import type {
   IndMoneyUsThreatAnalysis,
   PortfolioAnalysisHistoryItem,
   ProviderModelTarget,
+  RunListItem,
   RunResponse,
   ZerodhaEventsAnalysis,
   ZerodhaOrder,
@@ -3088,6 +3089,169 @@ export async function fetchAllFullRuns() {
     ...firstPage.items,
     ...remainingResults.flatMap((page) => page.items),
   ];
+}
+
+type DashboardRecentRunStage = "swing" | "rebalance" | "technical";
+
+const DASHBOARD_RECENT_RUN_SUMMARY_LIMIT = 100;
+const DASHBOARD_RECENT_RUN_DETAIL_LIMIT = 24;
+const DASHBOARD_RECENT_RUN_GROUP_LIMIT = 6;
+const DASHBOARD_RECENT_RUN_GROUP_WINDOW_MS = 30 * 60 * 1000;
+const DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY = 6;
+
+function getDashboardSummaryMarket(
+  run: RunListItem,
+): SwingTradeMarket | null {
+  if (run.auto_rebalance_portfolio === "india") return "india";
+  if (run.auto_rebalance_portfolio === "indmoney_us") return "us";
+
+  const prompt = run.prompt_preview || "";
+  const rebalanceMarket = inferRebalanceMarketFromPrompt(prompt);
+  if (rebalanceMarket) return rebalanceMarket;
+  if (/Market:\s*US equities/i.test(prompt)) return "us";
+  if (/Market:\s*India equities/i.test(prompt)) return "india";
+  if (isRunInSwingTradeMarket(prompt, "india")) return "india";
+  if (isRunInSwingTradeMarket(prompt, "us")) return "us";
+  return null;
+}
+
+function getDashboardSummaryStage(
+  run: RunListItem,
+): DashboardRecentRunStage | null {
+  const label = (run.auto_rebalance_label || "").toLowerCase();
+  const prompt = run.prompt_preview || "";
+  if (
+    label.includes("technical scan") ||
+    prompt.includes(TECHNICAL_SCAN_MARKER)
+  ) {
+    return "technical";
+  }
+  if (
+    label.includes("rebalance") ||
+    inferRebalanceMarketFromPrompt(prompt)
+  ) {
+    return "rebalance";
+  }
+  if (
+    label.includes("swing scan") ||
+    isRunInSwingTradeMarket(prompt, "india") ||
+    isRunInSwingTradeMarket(prompt, "us")
+  ) {
+    return "swing";
+  }
+  return null;
+}
+
+function selectLatestDashboardSummaryGroup(
+  summaries: RunListItem[],
+  stage: DashboardRecentRunStage,
+  market: SwingTradeMarket,
+) {
+  const matching = summaries
+    .filter(
+      (run) =>
+        getDashboardSummaryStage(run) === stage &&
+        getDashboardSummaryMarket(run) === market,
+    )
+    .sort(
+      (a, b) =>
+        parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at),
+    );
+  const latest = matching[0];
+  if (!latest) return [];
+
+  if (
+    latest.auto_rebalance_portfolio &&
+    typeof latest.auto_rebalance_sequence === "number"
+  ) {
+    return matching
+      .filter(
+        (run) =>
+          run.auto_rebalance_portfolio === latest.auto_rebalance_portfolio &&
+          run.auto_rebalance_sequence === latest.auto_rebalance_sequence,
+      )
+      .slice(0, DASHBOARD_RECENT_RUN_GROUP_LIMIT);
+  }
+
+  const latestCreatedAt = parseTimestampMs(latest.created_at);
+  return matching
+    .filter(
+      (run) =>
+        latestCreatedAt - parseTimestampMs(run.created_at) <=
+        DASHBOARD_RECENT_RUN_GROUP_WINDOW_MS,
+    )
+    .slice(0, DASHBOARD_RECENT_RUN_GROUP_LIMIT);
+}
+
+/**
+ * Load only the recent detailed runs required by the dashboard.
+ *
+ * The dashboard previously downloaded every full Run and embedded Job payload
+ * on mount. That made response size and latency grow forever with run history.
+ * A compact summary page now selects the latest stage groups, then bounded
+ * detail reads preserve the existing rendering contract for those runs.
+ */
+export async function fetchDashboardRecentFullRuns() {
+  const summaryPage = await apiService.getRuns({
+    page: 1,
+    limit: DASHBOARD_RECENT_RUN_SUMMARY_LIMIT,
+    summary: true,
+  });
+  const groups = (["india", "us"] as SwingTradeMarket[]).flatMap((market) =>
+    (["swing", "rebalance", "technical"] as DashboardRecentRunStage[]).map(
+      (stage) =>
+        selectLatestDashboardSummaryGroup(summaryPage.items, stage, market),
+    ),
+  );
+  const selectedIds: number[] = [];
+  const seenIds = new Set<number>();
+  for (
+    let groupIndex = 0;
+    groupIndex < DASHBOARD_RECENT_RUN_GROUP_LIMIT;
+    groupIndex += 1
+  ) {
+    groups.forEach((group) => {
+      const id = group[groupIndex]?.id;
+      if (
+        typeof id === "number" &&
+        !seenIds.has(id) &&
+        selectedIds.length < DASHBOARD_RECENT_RUN_DETAIL_LIMIT
+      ) {
+        seenIds.add(id);
+        selectedIds.push(id);
+      }
+    });
+  }
+
+  const detailedRuns: RunResponse[] = [];
+  const errors: unknown[] = [];
+  for (
+    let start = 0;
+    start < selectedIds.length;
+    start += DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY
+  ) {
+    const batch = selectedIds.slice(
+      start,
+      start + DASHBOARD_RECENT_RUN_DETAIL_CONCURRENCY,
+    );
+    const results = await Promise.allSettled(
+      batch.map((runId) => apiService.getRun(runId)),
+    );
+    results.forEach((result) => {
+      if (result.status === "fulfilled") detailedRuns.push(result.value);
+      else errors.push(result.reason);
+    });
+  }
+
+  if (selectedIds.length > 0 && detailedRuns.length === 0) {
+    const firstError = errors[0];
+    throw firstError instanceof Error
+      ? firstError
+      : new Error("Unable to load recent dashboard run details.");
+  }
+  return detailedRuns.sort(
+    (a, b) => parseTimestampMs(b.created_at) - parseTimestampMs(a.created_at),
+  );
 }
 
 function getRunDisplayLabelForBreakup(run: RunResponse) {
@@ -7099,7 +7263,7 @@ export function DashboardFinalActionablesTables() {
       setFallbackNotice(null);
       try {
         const [allRuns, zerodhaOverview, indmoneyOverview] = await Promise.all([
-          fetchAllFullRuns(),
+          fetchDashboardRecentFullRuns(),
           apiService.zerodhaPortfolioOverview(),
           apiService.indmoneyUsPortfolioOverview(),
         ]);

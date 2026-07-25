@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import os
 import threading
 import time
@@ -281,6 +281,65 @@ def _coverage_pct(section_keys: list[str], total_sections: int) -> float:
     if total_sections <= 0:
         return 0.0
     return round((len(unique_keys) / total_sections) * 100, 2)
+
+
+@celery.task(
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    soft_time_limit=60 * 10,
+    time_limit=(60 * 10) + 30,
+    name="app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs",
+    queue="beat",
+)
+def prune_unreferenced_bullpen_run_audit_blobs(self) -> int:
+    """Reclaim orphaned content blobs without touching frozen audit evidence.
+
+    A grace period keeps a concurrently-created blob well outside the deletion
+    window.  Each small transaction rechecks every durable blob reference and
+    commits independently, so task retries are idempotent and do not hold one
+    large PostgreSQL transaction across the full cleanup.
+    """
+
+    grace_hours = _positive_int_env(
+        "BULLPEN_RUN_AUDIT_BLOB_GC_GRACE_HOURS",
+        24,
+    )
+    batch_size = _positive_int_env(
+        "BULLPEN_RUN_AUDIT_BLOB_GC_BATCH_SIZE",
+        100,
+    )
+    max_batches = _positive_int_env(
+        "BULLPEN_RUN_AUDIT_BLOB_GC_MAX_BATCHES",
+        10,
+    )
+    created_before = _utc_now() - timedelta(hours=grace_hours)
+    deleted_total = 0
+
+    try:
+        for _batch_number in range(max_batches):
+            with SyncSessionLocal() as session:
+                repo = BullpenRunAuditRepository(session)
+                deleted = repo.delete_unreferenced_blobs_older_than(
+                    created_before=created_before,
+                    batch_size=batch_size,
+                )
+                session.commit()
+            deleted_total += deleted
+            if deleted < batch_size:
+                break
+        logger.info(
+            "Bullpen run-audit blob GC deleted %s unreferenced blobs older than %s",
+            deleted_total,
+            created_before.isoformat(),
+        )
+        return deleted_total
+    except Exception as exc:
+        logger.exception(
+            "Bullpen run-audit blob GC failed after deleting %s blobs",
+            deleted_total,
+        )
+        raise self.retry(exc=exc)
 
 
 @celery.task(
