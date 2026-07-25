@@ -249,35 +249,76 @@ jobs:
                 )
             )
 
-            try:
-                approval_check = run_with_bullpen_runtime_cleanup(
-                    run_bullpen(
-                        [
-                            "polymarket",
-                            "approve",
-                            "--check",
-                            "--output",
-                            "json",
-                        ],
-                        timeout_seconds=45,
-                        read_only=True,
+            recovery_plan = None
+            if not doctor.ok:
+                try:
+                    recovery_plan = run_with_bullpen_runtime_cleanup(
+                        run_bullpen(
+                            [
+                                "recover",
+                                "polymarket",
+                                "--refresh",
+                                "--output",
+                                "json",
+                            ],
+                            timeout_seconds=120,
+                            read_only=True,
+                        )
+                    )
+                except Exception as exc:
+                    recovery_plan = json.dumps(
+                        {"recovery_plan_error": sanitize_message(str(exc))}
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "polymarket_recovery_plan": sanitize_message(
+                                recovery_plan
+                            ),
+                        },
+                        sort_keys=True,
                     )
                 )
-            except Exception as exc:
-                approval_check = json.dumps(
-                    {"approval_check_error": sanitize_message(str(exc))}
+
+            approval_check = None
+            if doctor.ok:
+                try:
+                    approval_check = run_with_bullpen_runtime_cleanup(
+                        run_bullpen(
+                            [
+                                "polymarket",
+                                "approve",
+                                "--check",
+                                "--output",
+                                "json",
+                            ],
+                            timeout_seconds=45,
+                            read_only=True,
+                        )
+                    )
+                except Exception as exc:
+                    approval_check = json.dumps(
+                        {"approval_check_error": sanitize_message(str(exc))}
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "sell_approval_check": sanitize_message(
+                                approval_check
+                            ),
+                        },
+                        sort_keys=True,
+                    )
                 )
-            print(
-                json.dumps(
-                    {
-                        "sell_approval_check": sanitize_message(approval_check),
-                    },
-                    sort_keys=True,
-                )
-            )
 
             if mode == "inspect":
                 raise SystemExit(0)
+
+            if not doctor.ok:
+                raise SystemExit(
+                    "Bullpen preflight blocks live sell recovery. Follow the "
+                    "authoritative Polymarket recovery plan before retrying."
+                )
 
             if approve_missing_sell_operators:
                 approval_result = run_with_bullpen_runtime_cleanup(
