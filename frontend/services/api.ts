@@ -1686,6 +1686,15 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  getBullpenAutoLiveDashboardSummary(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveSummaryResponse> {
+    return this.get<BullpenAutoLiveSummaryResponse>(
+      URLs.bullpenAutoLive.dashboardSummary(),
+      { cache: "no-store", ...options },
+    );
+  }
+
   getBullpenAutoLiveState(): Promise<BullpenAutoLiveState> {
     return this.get<BullpenAutoLiveState>(
       URLs.bullpenAutoLive.state(),

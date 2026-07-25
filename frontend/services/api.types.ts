@@ -240,6 +240,7 @@ export interface IApiService {
     polymarketDiscoveryDebug(data: PolymarketDiscoveryDebugRequest): Promise<PolymarketDiscoveryDebugReport>;
     getBullpenAutoLiveStatus(options?: ApiRequestControl): Promise<BullpenAutoLivePersistedStatus>;
     getBullpenAutoLiveSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
+    getBullpenAutoLiveDashboardSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveState(): Promise<BullpenAutoLiveState>;
     getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;

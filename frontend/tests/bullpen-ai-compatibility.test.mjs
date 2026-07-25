@@ -304,16 +304,40 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
     ),
     "utf8",
   );
+  const overviewSource = readFileSync(
+    new URL(
+      "../app/console/trading-bots/_components/TradingBotsOverviewPage.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const apiSource = readFileSync(
+    new URL("../services/api.ts", import.meta.url),
+    "utf8",
+  );
+  const urlsSource = readFileSync(new URL("../lib/urls.ts", import.meta.url), "utf8");
 
   assert.match(autoRunCardSource, /summaryLoadInFlightRef/);
   assert.match(
     autoRunCardSource,
-    /const nextSummary = await apiService\.getBullpenAutoLiveSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 8_000,\s*\}\);/,
+    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 8_000,\s*\}\);/,
   );
   assert.match(autoRunCardSource, /getPersistedAutoRunStatus\(/);
   assert.match(autoRunCardSource, /AUTO_RUN_STATUS_TIMEOUT_MS/);
   assert.match(autoRunCardSource, /setSummary\(nextSummary\);/);
   assert.doesNotMatch(autoRunCardSource, /summaryPromise/);
+  assert.match(
+    overviewSource,
+    /apiService\.getBullpenAutoLiveDashboardSummary\(\)/,
+  );
+  assert.match(
+    apiSource,
+    /getBullpenAutoLiveDashboardSummary\([\s\S]*?URLs\.bullpenAutoLive\.dashboardSummary\(\)/,
+  );
+  assert.match(
+    urlsSource,
+    /dashboardSummary: \(\) =>\s*`\$\{resolveApiBaseUrl\(\)\}\/polymarket\/auto-live\/summary\/dashboard`/,
+  );
 });
 
 test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without persisting a timestamp", () => {

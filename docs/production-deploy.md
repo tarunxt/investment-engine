@@ -80,6 +80,13 @@ removes the obsolete
 drop-in and refuses to continue if any remaining override bypasses
 `deploy/no-docker/scripts/run-celery-worker.sh`.
 
+The live Bullpen dashboard reads
+`GET /polymarket/auto-live/summary/dashboard`, which hydrates the current full
+run only. The legacy `/polymarket/auto-live/summary` endpoint still returns ten
+full run snapshots for compatible clients. If the dashboard is responsive but a
+legacy summary is slow, compare their response size and duration before changing
+worker or database capacity.
+
 The run record exposes a durable task lifecycle: `QUEUED` means waiting for the
 Auto-Live worker, `RESERVED` means received but waiting for a pool slot, and
 `STARTED` has a worker heartbeat. Recovery never treats an ambiguous Celery

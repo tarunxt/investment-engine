@@ -141,6 +141,89 @@ def test_state_has_due_scheduled_run_respects_disabled_and_future_runs():
         reference_time=datetime(2026, 7, 19, 11, 56, 10, tzinfo=UTC),
     )
 
+
+@pytest.mark.anyio
+async def test_dashboard_summary_limits_full_run_hydration_without_changing_legacy_summary(
+    monkeypatch,
+):
+    settings = BullpenAutoLiveSettings(auto_live_enabled=False)
+    state = BullpenAutoLiveState(status="stopped", mode="analysis-only")
+    latest_run = BullpenAutoLiveRun(
+        id="latest-dashboard-run",
+        triggered_by="scheduler",
+        status="completed",
+        dry_run=True,
+        started_at="2026-07-25T13:02:00+00:00",
+        completed_at="2026-07-25T13:08:00+00:00",
+        summary="Completed.",
+    )
+    observed_run_limits: list[int | None] = []
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self) -> None:
+            return None
+
+    class _FakeRepo:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def ensure_settings(self, user_id: int):
+            assert user_id == 7
+            return settings
+
+        async def ensure_state(self, user_id: int):
+            assert user_id == 7
+            return state
+
+        async def save_state(self, user_id: int, _state: BullpenAutoLiveState) -> None:
+            assert user_id == 7
+
+        async def list_runs(self, user_id: int, *, limit: int | None = None):
+            assert user_id == 7
+            observed_run_limits.append(limit)
+            return [latest_run]
+
+        async def list_decisions(self, user_id: int, *, limit: int | None = None):
+            assert user_id == 7
+            assert limit == 25
+            return []
+
+    bot = BullpenAutoLiveBot(user_id=7)
+
+    async def _fake_active_run_or_recover(repo, next_settings, next_state):
+        assert isinstance(repo, _FakeRepo)
+        assert next_settings is settings
+        return None, next_state
+
+    async def _fake_reconcile(_repo, _runs):
+        return False
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        _FakeSession,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _FakeRepo,
+    )
+    monkeypatch.setattr(bot, "_get_active_run_or_recover", _fake_active_run_or_recover)
+    monkeypatch.setattr(bot, "_reconcile_terminal_stage3_decisions", _fake_reconcile)
+
+    dashboard_summary = await bot.get_dashboard_summary()
+    legacy_summary = await bot.get_summary()
+
+    assert dashboard_summary.latest_run == latest_run
+    assert dashboard_summary.recent_runs == [latest_run]
+    assert legacy_summary.latest_run == latest_run
+    assert observed_run_limits == [1, 10]
+
+
 def test_console_profile_next_cycle_uses_custom_auto_run_schedule():
     settings = BullpenAutoLiveSettings(
         strategy_profile=CONSOLE_PROFILE_ID,

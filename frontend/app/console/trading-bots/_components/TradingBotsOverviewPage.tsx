@@ -892,7 +892,7 @@ export function TradingBotsOverviewPage() {
             }
           }),
         withTimeout(
-          apiService.getBullpenAutoLiveSummary(),
+          apiService.getBullpenAutoLiveDashboardSummary(),
           AUTO_LIVE_TIMEOUT_MS,
           "Bullpen AI Auto-Live summary",
         )

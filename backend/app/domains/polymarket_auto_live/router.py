@@ -369,6 +369,19 @@ async def get_auto_live_summary(current_user: User = Depends(get_current_user)):
         raise _database_not_ready_error(exc) from exc
 
 
+@router.get("/summary/dashboard", response_model=BullpenAutoLiveSummary)
+async def get_auto_live_dashboard_summary(
+    current_user: User = Depends(get_current_user),
+):
+    """Load current dashboard progress without ten historical stage payloads."""
+
+    bot = await _get_bot(current_user)
+    try:
+        return await _attach_latest_active_auth(await bot.get_dashboard_summary())
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
+
+
 @router.get("/runs", response_model=list[BullpenAutoLiveRun])
 async def list_auto_live_runs(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)

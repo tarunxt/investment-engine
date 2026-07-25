@@ -231,6 +231,8 @@ const bullpenAutoLiveApiUrls = {
   // recovery, runtime diagnostics, or a Bullpen CLI auth refresh.
   status: () => `${resolveApiBaseUrl()}/polymarket/auto-live/status`,
   summary: () => `${resolveApiBaseUrl()}/polymarket/auto-live/summary`,
+  dashboardSummary: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard`,
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
   runs: () => `${resolveApiBaseUrl()}/polymarket/auto-live/runs`,

@@ -765,6 +765,16 @@ summary adapter second, and an age-bounded account-scoped last-known-good cache
 third. Automatic status retries are capped; fallback transitions and reasons are
 logged without credentials or response bodies.
 
+The Bullpen dashboard hydrates workflow progress from the additive
+`GET /polymarket/auto-live/summary/dashboard` resource. It returns the existing
+summary schema but includes only the latest full run in `recent_runs`; historical
+run detail remains available through the existing run resources and the legacy
+`GET /polymarket/auto-live/summary` contract is unchanged. This prevents every
+progress poll from hydrating and serializing ten multi-megabyte frozen Stage 1
+and Stage 2 snapshots. The projection changes no run inputs, evidence, formulas,
+decisions, execution state, frozen payload, audit schema, validator, or legacy
+backfill mapping.
+
 On worker recovery, persisted `running`/`confirming` work is reconciled only
 through those lifecycle and lease checks. Runs with a healthy worker heartbeat or
 queued/redelivered task are left alone.

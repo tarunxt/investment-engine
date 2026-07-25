@@ -9829,7 +9829,7 @@ export function BullpenAutoRunScheduleCard({
       setLoading(true);
     }
     try {
-      const nextSummary = await apiService.getBullpenAutoLiveSummary({
+      const nextSummary = await apiService.getBullpenAutoLiveDashboardSummary({
         signal: requestSignal,
         timeoutMs: 8_000,
       });

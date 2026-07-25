@@ -567,7 +567,11 @@ class BullpenAutoLiveBot:
 
         return state
 
-    async def get_summary(self) -> BullpenAutoLiveSummary:
+    async def _get_summary_with_run_limit(
+        self,
+        *,
+        run_limit: int,
+    ) -> BullpenAutoLiveSummary:
         should_enqueue_due_run = False
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
@@ -592,10 +596,10 @@ class BullpenAutoLiveBot:
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             _, state = await self._get_active_run_or_recover(repo, settings, state)
-            runs = await repo.list_runs(self.user_id, limit=10)
+            runs = await repo.list_runs(self.user_id, limit=run_limit)
             if await self._reconcile_terminal_stage3_decisions(repo, runs):
                 await session.commit()
-                runs = await repo.list_runs(self.user_id, limit=10)
+                runs = await repo.list_runs(self.user_id, limit=run_limit)
             decisions = await repo.list_decisions(self.user_id, limit=25)
             await repo.save_state(self.user_id, state)
             await session.commit()
@@ -609,6 +613,23 @@ class BullpenAutoLiveBot:
                 recent_decisions=decisions[:10],
                 latest_guardrail_checks=latest_guardrails,
             )
+
+    async def get_summary(self) -> BullpenAutoLiveSummary:
+        """Return the legacy summary with its ten full run snapshots."""
+
+        return await self._get_summary_with_run_limit(run_limit=10)
+
+    async def get_dashboard_summary(self) -> BullpenAutoLiveSummary:
+        """Return the dashboard data with only the latest full run snapshot.
+
+        Completed run snapshots can contain the full Stage 1 market universe and
+        Stage 2 evidence.  The dashboard needs the latest workflow for progress,
+        while historical detail is loaded separately from the existing run
+        endpoints.  Keeping this additive path separate preserves the legacy
+        ``/summary`` response for existing API clients.
+        """
+
+        return await self._get_summary_with_run_limit(run_limit=1)
 
     async def list_runs(self) -> list[BullpenAutoLiveRun]:
         async with AsyncSessionLocal() as session:
