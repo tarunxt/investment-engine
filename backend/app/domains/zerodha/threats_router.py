@@ -64,13 +64,26 @@ def _get_redis() -> aioredis.Redis:
 
 @router.get("/latest", response_model=ZerodhaThreatLatestResponse)
 async def get_latest_threat_analysis(
+    include_history: bool = Query(
+        default=False,
+        description=(
+            "Include historical urgent-action augmentation. Disabled by default "
+            "so dashboard refreshes only parse the latest report."
+        ),
+    ),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     job = await _get_latest_threat_job(db, current_user.id)
     if not job:
         return ZerodhaThreatLatestResponse(analysis=None)
-    return ZerodhaThreatLatestResponse(analysis=await _serialize_threat_job(db, job))
+    return ZerodhaThreatLatestResponse(
+        analysis=await _serialize_threat_job(
+            db,
+            job,
+            include_history=include_history,
+        )
+    )
 
 
 @router.get("/history", response_model=ZerodhaThreatHistoryResponse)
@@ -243,10 +256,13 @@ async def _get_completed_threat_jobs_upto(
 async def _serialize_threat_job(
     db: AsyncSession,
     job: Job,
+    *,
+    include_history: bool = True,
 ) -> ZerodhaThreatAnalysisResponse:
     metadata = extract_threat_prompt_metadata(job.prompt or "")
     parsed = parse_zerodha_threat_report(job.response)
-    parsed = await _augment_report_with_urgent_history(db, job, parsed)
+    if include_history:
+        parsed = await _augment_report_with_urgent_history(db, job, parsed)
     return ZerodhaThreatAnalysisResponse(
         job_id=job.id,
         status=job.status,
