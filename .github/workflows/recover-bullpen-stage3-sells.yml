@@ -280,6 +280,51 @@ jobs:
                     )
                 )
 
+                try:
+                    wallet_audit = run_with_bullpen_runtime_cleanup(
+                        run_bullpen(
+                            [
+                                "polymarket",
+                                "wallet-audit",
+                                "--refresh",
+                                "--include-order-credit",
+                                "--output",
+                                "json",
+                            ],
+                            timeout_seconds=180,
+                            read_only=True,
+                        )
+                    )
+                except Exception as exc:
+                    wallet_audit = json.dumps(
+                        {"wallet_audit_error": sanitize_message(str(exc))}
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "polymarket_wallet_audit": sanitize_message(
+                                wallet_audit
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
+                doctor = run_with_bullpen_runtime_cleanup(
+                    BullpenLiveExecutor().doctor()
+                )
+                print(
+                    json.dumps(
+                        {
+                            "bullpen_preflight_after_wallet_audit_ok": doctor.ok,
+                            "bullpen_preflight_after_wallet_audit_message": (
+                                sanitize_message(doctor.message)
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
             approval_check = None
             if doctor.ok:
                 try:
