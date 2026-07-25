@@ -2,22 +2,23 @@ name: Recover Production Disk
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/production-disk-recovery.yml'
+    branches: [main]
+    paths: ['.github/workflows/production-disk-recovery.yml']
   workflow_dispatch:
     inputs:
       deploy_after_cleanup:
-        description: Deploy the current main branch after cleanup
+        description: Deploy main after recovery
+        required: true
+        default: true
+        type: boolean
+      reset_generated_audit_blobs:
+        description: Reset oversized generated Bullpen audit blobs; core runs/orders/remarks/checks/report JSON remain
         required: true
         default: true
         type: boolean
   workflow_run:
-    workflows:
-      - Deploy to Production
-    types:
-      - completed
+    workflows: ['Deploy to Production']
+    types: [completed]
   schedule:
     - cron: '17 */6 * * *'
 
@@ -30,443 +31,260 @@ concurrency:
 
 jobs:
   recover:
-    name: Reclaim disk and recover deploy
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-
+    timeout-minutes: 90
     steps:
-      - name: Reclaim production disk space
+      - name: Reclaim disk and recover deploy
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 3600s
-          command_timeout: 3600s
+          timeout: 5400s
+          command_timeout: 5400s
           script: |
             set -Eeuo pipefail
 
-            EVENT_NAME='${{ github.event_name }}'
-            WORKFLOW_CONCLUSION='${{ github.event.workflow_run.conclusion }}'
-            MANUAL_DEPLOY='${{ inputs.deploy_after_cleanup }}'
-
+            EVENT='${{ github.event_name }}'
+            CONCLUSION='${{ github.event.workflow_run.conclusion }}'
+            DEPLOY_INPUT='${{ inputs.deploy_after_cleanup }}'
+            RESET_INPUT='${{ inputs.reset_generated_audit_blobs }}'
             APP_ROOT='${{ vars.EC2_APP_PATH || '/srv/investor' }}'
-            ALT_APP_ROOT='/srv/investment-engine'
             APP_USER='${{ vars.EC2_APP_USER || 'investor' }}'
-            ALT_APP_USER='investment-engine'
+            [[ -d "$APP_ROOT/.git" ]] || APP_ROOT='/srv/investment-engine'
+            id "$APP_USER" >/dev/null 2>&1 || APP_USER='investment-engine'
 
             TARGET_FREE_KB=4194304
-            MINIMUM_DEPLOY_FREE_KB=2097152
-            LEGACY_DOCKER_PROJECT='myapp'
+            REQUIRED_FREE_KB=2097152
+            RESET_THRESHOLD_BYTES=4294967296
+            SCHEDULE_THRESHOLD_BYTES=8589934592
+            DB=''
+            PREFIX=''
+            SERVICES_STOPPED=false
 
-            if [[ ! -d "$APP_ROOT/.git" && -d "$ALT_APP_ROOT/.git" ]]; then
-              APP_ROOT="$ALT_APP_ROOT"
-            fi
-            if ! id "$APP_USER" >/dev/null 2>&1 && id "$ALT_APP_USER" >/dev/null 2>&1; then
-              APP_USER="$ALT_APP_USER"
-            fi
+            free_kb() { df -Pk "$APP_ROOT" | awk 'NR==2 {print $4}'; }
 
-            command -v git >/dev/null
-            sudo test -d "$APP_ROOT/.git"
-            id "$APP_USER" >/dev/null
-
-            available_kb() {
-              df -Pk "$APP_ROOT" | awk 'NR == 2 {print $4}'
-            }
-
-            app_service_prefix() {
-              if sudo systemctl is-active --quiet investor-backend &&
-                 sudo systemctl is-active --quiet investor-frontend; then
-                printf 'investor\n'
-                return 0
-              fi
-              if sudo systemctl is-active --quiet investment-engine-backend &&
-                 sudo systemctl is-active --quiet investment-engine-frontend; then
-                printf 'investment-engine\n'
-                return 0
-              fi
+            find_db() {
+              local db found
+              while read -r db; do
+                found="$(sudo -u postgres psql -X -At -d "$db" \
+                  -c "SELECT to_regclass('public.bullpen_run_audit_blobs') IS NOT NULL" \
+                  2>/dev/null || true)"
+                [[ "$found" == t ]] && { echo "$db"; return 0; }
+              done < <(sudo -u postgres psql -X -At -d postgres \
+                -c "SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate")
               return 1
             }
 
-            systemd_runtime_healthy() {
-              local prefix
-              prefix="$(app_service_prefix)" || return 1
-              curl --fail --silent --show-error --max-time 20 \
-                http://127.0.0.1:8000/health/ready >/dev/null
-              curl --fail --silent --show-error --max-time 20 \
-                http://127.0.0.1:3000/login >/dev/null
-              sudo nginx -T 2>/dev/null |
-                grep -F 'proxy_pass http://127.0.0.1:8000;' >/dev/null
-              sudo nginx -T 2>/dev/null |
-                grep -F 'proxy_pass http://127.0.0.1:3000;' >/dev/null
-              echo "==> Verified live systemd runtime: ${prefix}-*"
+            pg_report() {
+              DB="${DB:-$(find_db || true)}"
+              [[ -n "$DB" ]] || return 0
+              echo "==> PostgreSQL database: $DB"
+              sudo -u postgres psql -X -P pager=off -d "$DB" <<'SQL' || true
+            SELECT relid::regclass AS relation,
+                   pg_size_pretty(pg_total_relation_size(relid)) AS total,
+                   pg_size_pretty(pg_relation_size(relid)) AS heap,
+                   n_live_tup, n_dead_tup
+            FROM pg_stat_user_tables
+            ORDER BY pg_total_relation_size(relid) DESC
+            LIMIT 20;
+            SQL
             }
 
-            storage_report() {
-              echo '==> Filesystem'
+            report() {
               df -hT "$APP_ROOT" || true
-              echo '==> Largest /var paths'
-              sudo du -xhd1 /var 2>/dev/null | sort -hr | head -n 25 || true
               echo '==> Largest /var/lib paths'
-              sudo du -xhd2 /var/lib 2>/dev/null | sort -hr | head -n 35 || true
-              echo '==> Largest /var/log paths'
-              sudo du -xhd2 /var/log 2>/dev/null | sort -hr | head -n 25 || true
-              echo '==> Files larger than 250 MiB under /var'
+              sudo du -xhd2 /var/lib 2>/dev/null | sort -hr | head -n 30 || true
+              echo '==> Large /var files'
               sudo find /var -xdev -type f -size +250M -printf '%s %p\n' \
-                2>/dev/null | sort -nr | head -n 40 || true
-              if command -v lsof >/dev/null 2>&1; then
-                echo '==> Deleted files still held open and larger than 50 MiB'
-                sudo lsof -nP +L1 2>/dev/null |
-                  awk 'NR > 1 && $7 ~ /^[0-9]+$/ && $7 >= 52428800 {print $1, $2, $7, $9}' |
-                  sort -k3,3nr | head -n 40 || true
-              fi
-              if command -v docker >/dev/null 2>&1 &&
-                 sudo docker info >/dev/null 2>&1; then
-                echo '==> Docker usage'
-                sudo docker system df -v || true
-                sudo docker ps -a \
-                  --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}' || true
-                echo '==> Docker volume data directories'
-                sudo find /var/lib/docker/volumes -mindepth 2 -maxdepth 2 \
-                  -type d -name _data -exec du -sh {} + 2>/dev/null |
-                  sort -hr | head -n 30 || true
-              fi
-              if sudo test -d /var/lib/postgresql; then
-                echo '==> PostgreSQL filesystem usage'
-                sudo du -xhd3 /var/lib/postgresql 2>/dev/null |
-                  sort -hr | head -n 35 || true
-              fi
+                2>/dev/null | sort -nr | head -n 35 || true
+              pg_report
             }
 
-            remove_inactive_frontend_build() {
-              local frontend_root="$APP_ROOT/frontend"
-              local active_build='.next'
-              local pointer="$frontend_root/.next-active-dir"
-              local inactive_build
-
-              [[ -d "$frontend_root" ]] || return 0
-              if sudo test -f "$pointer"; then
-                active_build="$(
-                  sudo -u "$APP_USER" -H cat "$pointer" | tr -d '\r\n'
-                )"
-              fi
-              case "$active_build" in
-                .next)
-                  inactive_build="$frontend_root/.next-candidate"
-                  ;;
-                .next-candidate)
-                  inactive_build="$frontend_root/.next"
-                  ;;
-                *)
-                  echo "Invalid Next active build pointer; preserving both slots: ${active_build:-<empty>}" >&2
-                  return 0
-                  ;;
-              esac
-
-              if sudo test -d "$inactive_build"; then
-                echo "==> Removing inactive Next build: $inactive_build"
-                sudo -u "$APP_USER" -H rm -rf -- "$inactive_build"
-              fi
-              sudo -u "$APP_USER" -H rm -rf -- \
-                "$frontend_root/.npm" \
-                "$frontend_root/out" || true
-            }
-
-            base_cleanup() {
-              echo '==> Base cleanup: logs, package caches, temp files and rebuildable app caches'
-
-              sudo mkdir -p /etc/systemd/journald.conf.d
-              printf '%s\n' \
-                '[Journal]' \
-                'SystemMaxUse=96M' \
-                'RuntimeMaxUse=48M' \
-                'SystemKeepFree=2G' \
-                'MaxRetentionSec=3day' |
-                sudo tee /etc/systemd/journald.conf.d/credx-disk-budget.conf >/dev/null
+            cleanup_caches() {
               sudo journalctl --rotate || true
               sudo journalctl --vacuum-time=3d --vacuum-size=96M || true
-              sudo systemctl restart systemd-journald || true
-
               sudo apt-get clean || true
-              sudo rm -rf \
-                /var/cache/apt/archives/*.deb \
-                /var/lib/apt/lists/* \
-                /var/cache/man/* \
-                /var/cache/debconf/*-old \
-                /var/lib/snapd/cache/* \
-                /var/crash/* \
+              sudo rm -rf /var/lib/apt/lists/* /var/lib/snapd/cache/* \
+                /var/cache/apt/archives/*.deb /var/crash/* \
                 /var/lib/systemd/coredump/* || true
+              sudo find /var/tmp -xdev -mindepth 1 -mtime +1 -delete 2>/dev/null || true
+              [[ -x "$APP_ROOT/backend/.venv/bin/python" ]] &&
+                sudo -u "$APP_USER" -H "$APP_ROOT/backend/.venv/bin/python" \
+                  -m pip cache purge || true
+              local home
+              home="$(getent passwd "$APP_USER" | cut -d: -f6)"
+              [[ -n "$home" ]] && sudo -u "$APP_USER" -H rm -rf \
+                "$home/.cache/pip" "$home/.npm/_cacache" || true
+            }
 
-              sudo find /var/tmp -xdev -mindepth 1 -mtime +1 -delete \
-                2>/dev/null || true
-              sudo find /var/log -xdev -type f \
-                \( -name '*.gz' -o -name '*.old' -o -name '*.log.[1-9]*' \) \
-                -mtime +2 -delete 2>/dev/null || true
+            resolve_prefix() {
+              sudo systemctl cat investor-backend >/dev/null 2>&1 && { echo investor; return; }
+              sudo systemctl cat investment-engine-backend >/dev/null 2>&1 && { echo investment-engine; return; }
+              return 1
+            }
 
-              if command -v logrotate >/dev/null 2>&1; then
-                sudo logrotate /etc/logrotate.conf || true
-              fi
-
-              for log_path in \
-                /var/log/syslog \
-                /var/log/auth.log \
-                /var/log/kern.log; do
-                if sudo test -f "$log_path" &&
-                   (( $(sudo stat -c '%s' "$log_path") >= 268435456 )); then
-                  echo "==> Truncating oversized active log: $log_path"
-                  sudo truncate -s 0 "$log_path"
-                fi
+            stop_app() {
+              PREFIX="$(resolve_prefix)"
+              local role unit
+              for role in frontend celery-auto-live-worker celery-worker \
+                celery-beat-worker celery-beat backend; do
+                unit="${PREFIX}-${role}"
+                sudo systemctl cat "$unit" >/dev/null 2>&1 &&
+                  sudo systemctl stop "$unit"
               done
+              SERVICES_STOPPED=true
+            }
 
-              for log_dir in /var/log/nginx /var/log/postgresql; do
-                sudo test -d "$log_dir" || continue
-                while IFS= read -r oversized_log; do
-                  echo "==> Truncating oversized active service log: $oversized_log"
-                  sudo truncate -s 0 "$oversized_log"
-                done < <(
-                  sudo find "$log_dir" -xdev -type f -name '*.log' \
-                    -size +256M -print 2>/dev/null
-                )
+            start_app() {
+              [[ "$SERVICES_STOPPED" == true ]] || return 0
+              local role unit
+              for role in backend celery-beat celery-beat-worker celery-worker \
+                celery-auto-live-worker frontend; do
+                unit="${PREFIX}-${role}"
+                sudo systemctl cat "$unit" >/dev/null 2>&1 &&
+                  sudo systemctl start "$unit" || true
               done
-
-              if [[ -x "$APP_ROOT/backend/.venv/bin/python" ]]; then
-                sudo -u "$APP_USER" -H \
-                  "$APP_ROOT/backend/.venv/bin/python" -m pip cache purge || true
-              fi
-
-              local app_home
-              app_home="$(getent passwd "$APP_USER" | cut -d: -f6)"
-              if [[ -n "$app_home" && -d "$app_home" ]]; then
-                sudo -u "$APP_USER" -H rm -rf -- \
-                  "$app_home/.cache/pip" \
-                  "$app_home/.cache/node-gyp" \
-                  "$app_home/.npm/_cacache" || true
-              fi
-
-              remove_inactive_frontend_build
+              SERVICES_STOPPED=false
             }
 
-            prune_disabled_snaps() {
-              command -v snap >/dev/null 2>&1 || return 0
-              echo '==> Removing disabled Snap revisions'
-              sudo snap set system refresh.retain=2 || true
-              while read -r snap_name snap_revision; do
-                [[ -n "$snap_name" && -n "$snap_revision" ]] || continue
-                sudo snap remove "$snap_name" --revision="$snap_revision" || true
-              done < <(
-                LANG=C snap list --all 2>/dev/null |
-                  awk 'NR > 1 && $NF == "disabled" {print $1, $3}'
-              )
+            repair_fk() {
+              [[ -n "$DB" ]] || return 0
+              local exists
+              exists="$(sudo -u postgres psql -X -At -d "$DB" \
+                -c "SELECT to_regclass('public.credx_blob_fk_restore') IS NOT NULL" \
+                2>/dev/null || true)"
+              [[ "$exists" == t ]] || return 0
+              sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DB" <<'SQL'
+            DO $x$ DECLARE r record; BEGIN
+              FOR r IN SELECT * FROM public.credx_blob_fk_restore LOOP
+                EXECUTE format('UPDATE %I.%I SET %I=NULL WHERE %I IS NOT NULL',
+                  r.table_schema,r.table_name,r.column_name,r.column_name);
+              END LOOP;
+            END $x$;
+            UPDATE public.bullpen_run_audit_snapshots
+               SET source_run_updated_at=NULL, canonical_bundle_hash=NULL;
+            DO $x$ DECLARE r record; BEGIN
+              FOR r IN SELECT * FROM public.credx_blob_fk_restore LOOP
+                IF NOT EXISTS (
+                  SELECT 1 FROM pg_constraint c
+                  JOIN pg_class t ON t.oid=c.conrelid
+                  JOIN pg_namespace n ON n.oid=t.relnamespace
+                  WHERE n.nspname=r.table_schema AND t.relname=r.table_name
+                    AND c.conname=r.constraint_name
+                ) THEN
+                  EXECUTE format('ALTER TABLE %I.%I ADD CONSTRAINT %I %s NOT VALID',
+                    r.table_schema,r.table_name,r.constraint_name,r.constraint_definition);
+                END IF;
+              END LOOP;
+            END $x$;
+            DO $x$ DECLARE r record; BEGIN
+              FOR r IN SELECT * FROM public.credx_blob_fk_restore LOOP
+                EXECUTE format('ALTER TABLE %I.%I VALIDATE CONSTRAINT %I',
+                  r.table_schema,r.table_name,r.constraint_name);
+              END LOOP;
+            END $x$;
+            DROP TABLE public.credx_blob_fk_restore;
+            SQL
             }
 
-            retire_legacy_docker_runtime() {
-              command -v docker >/dev/null 2>&1 || return 0
+            finish() {
+              status=$?
+              [[ "$status" -eq 0 ]] || repair_fk || true
+              start_app || true
+              exit "$status"
+            }
+            trap finish EXIT
 
-              if ! sudo docker info >/dev/null 2>&1; then
-                if ! systemd_runtime_healthy; then
-                  echo 'Docker is unavailable and the systemd runtime could not be verified; preserving Docker data.' >&2
-                  return 0
-                fi
-                echo '==> Starting Docker temporarily to inspect and retire the off-path runtime'
-                sudo systemctl start docker || return 0
-                sleep 3
-                sudo docker info >/dev/null 2>&1 || return 0
-              fi
+            compact_audit_store() {
+              DB="$(find_db || true)"
+              [[ -n "$DB" ]] || return 0
+              local bytes largest largest_bytes allow=false
+              bytes="$(sudo -u postgres psql -X -At -d "$DB" \
+                -c "SELECT pg_total_relation_size('public.bullpen_run_audit_blobs'::regclass)")"
+              read -r largest largest_bytes < <(sudo -u postgres psql -X -At -F ' ' \
+                -d "$DB" -c "SELECT relid::regclass::text,pg_total_relation_size(relid) FROM pg_stat_user_tables ORDER BY 2 DESC LIMIT 1")
+              echo "==> Largest DB relation: $largest ($largest_bytes bytes)"
+              echo "==> Audit blob relation: $bytes bytes"
+              (( bytes >= RESET_THRESHOLD_BYTES )) || return 0
+              [[ "$RESET_INPUT" == true ]] && allow=true
+              (( $(free_kb) < REQUIRED_FREE_KB )) && allow=true
+              [[ "$EVENT" == schedule && "$bytes" -ge "$SCHEDULE_THRESHOLD_BYTES" ]] && allow=true
+              [[ "$allow" == true ]] || { echo 'Audit reset not authorised.' >&2; return 1; }
+              [[ "$largest" == bullpen_run_audit_blobs ]] || {
+                echo 'Largest table is not bullpen_run_audit_blobs; refusing mutation.' >&2
+                return 1
+              }
 
-              mapfile -t target_container_ids < <(
-                sudo docker ps -aq \
-                  --filter "label=com.docker.compose.project=$LEGACY_DOCKER_PROJECT"
-              )
-
-              if (( ${#target_container_ids[@]} > 0 )); then
-                systemd_runtime_healthy
-
-                declare -A image_ids=()
-                local container_id container_name container_project
-                local port_bindings image_id
-
-                for container_id in "${target_container_ids[@]}"; do
-                  [[ "$container_id" =~ ^[a-f0-9]{12}([a-f0-9]{52})?$ ]] || {
-                    echo "Unexpected Docker container identifier: $container_id" >&2
-                    return 1
-                  }
-                  container_name="$(
-                    sudo docker inspect --format '{{.Name}}' "$container_id"
-                  )"
-                  container_project="$(
-                    sudo docker inspect \
-                      --format '{{ index .Config.Labels "com.docker.compose.project" }}' \
-                      "$container_id"
-                  )"
-                  port_bindings="$(
-                    sudo docker inspect \
-                      --format '{{json .HostConfig.PortBindings}}' "$container_id"
-                  )"
-                  image_id="$(
-                    sudo docker inspect --format '{{.Image}}' "$container_id"
-                  )"
-
-                  [[ "$container_name" == "/$LEGACY_DOCKER_PROJECT-"* ]] || {
-                    echo "Refusing unexpected Docker container: $container_name" >&2
-                    return 1
-                  }
-                  [[ "$container_project" == "$LEGACY_DOCKER_PROJECT" ]] || {
-                    echo "Refusing container outside project $LEGACY_DOCKER_PROJECT: $container_name" >&2
-                    return 1
-                  }
-                  [[ "$port_bindings" == 'null' || "$port_bindings" == '{}' ]] || {
-                    echo "Refusing published legacy container $container_name: $port_bindings" >&2
-                    return 1
-                  }
-                  [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || {
-                    echo "Unexpected image identifier for $container_name: $image_id" >&2
-                    return 1
-                  }
-
-                  image_ids["$image_id"]=1
-                  echo "==> Validated off-path legacy container: $container_name"
-                done
-
-                mapfile -t running_container_ids < <(
-                  sudo docker ps -q \
-                    --filter "label=com.docker.compose.project=$LEGACY_DOCKER_PROJECT"
-                )
-                if (( ${#running_container_ids[@]} > 0 )); then
-                  echo '==> Stopping off-path legacy Docker containers'
-                  sudo docker stop "${running_container_ids[@]}"
-                fi
-
-                echo '==> Removing off-path legacy Docker containers; volumes remain preserved'
-                sudo docker rm "${target_container_ids[@]}"
-
-                for image_id in "${!image_ids[@]}"; do
-                  if sudo docker ps -aq --filter "ancestor=$image_id" |
-                     grep -q .; then
-                    echo "Keeping image still referenced by another container: $image_id"
-                  else
-                    sudo docker image rm "$image_id" || true
-                  fi
-                done
-              fi
-
-              echo '==> Pruning all currently unused Docker containers, images, networks and build cache'
-              sudo docker container prune -f || true
-              sudo docker image prune -af || true
-              sudo docker network prune -f || true
-              sudo docker builder prune -af || true
-              sudo docker system df || true
-              echo 'Docker volumes are intentionally preserved.'
+              echo '==> Resetting generated Bullpen audit blob payloads'
+              echo 'Core runs/orders, snapshot metadata, remarks, manual checks and feedback report JSON remain.'
+              stop_app
+              sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DB" <<'SQL'
+            DROP TABLE IF EXISTS public.credx_blob_fk_restore;
+            CREATE TABLE public.credx_blob_fk_restore(
+              table_schema text, table_name text, column_name text,
+              constraint_name text, constraint_definition text,
+              PRIMARY KEY(table_schema,table_name,constraint_name));
+            INSERT INTO public.credx_blob_fk_restore
+            SELECT n.nspname,t.relname,a.attname,c.conname,pg_get_constraintdef(c.oid)
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid=c.conrelid
+            JOIN pg_namespace n ON n.oid=t.relnamespace
+            JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1]
+            WHERE c.contype='f'
+              AND c.confrelid='public.bullpen_run_audit_blobs'::regclass
+              AND array_length(c.conkey,1)=1;
+            DO $x$ DECLARE r record; BEGIN
+              FOR r IN SELECT * FROM public.credx_blob_fk_restore LOOP
+                EXECUTE format('ALTER TABLE %I.%I DROP CONSTRAINT %I',
+                  r.table_schema,r.table_name,r.constraint_name);
+              END LOOP;
+            END $x$;
+            SQL
+              sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DB" \
+                -c 'TRUNCATE public.bullpen_run_audit_blobs;'
+              echo "==> Free after truncate: $(free_kb) KiB"
+              repair_fk
+              sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d "$DB" \
+                -c 'ANALYZE public.bullpen_run_audit_blobs; CHECKPOINT;'
+              start_app
             }
 
-            release_deleted_open_files() {
-              command -v lsof >/dev/null 2>&1 || return 0
+            echo "==> Event: $EVENT ${CONCLUSION:-}"
+            echo "==> App root/user: $APP_ROOT / $APP_USER"
+            initial="$(free_kb)"
+            echo "==> Initial free: $initial KiB"
+            report
 
-              local deleted_bytes
-              deleted_bytes="$(
-                sudo lsof -nP +L1 2>/dev/null |
-                  awk 'NR > 1 && $7 ~ /^[0-9]+$/ && $7 >= 52428800 {sum += $7} END {print sum + 0}'
-              )"
-              if (( deleted_bytes < 134217728 )); then
-                return 0
-              fi
-
-              echo "==> Releasing ${deleted_bytes} bytes held by deleted files"
-              local service
-              for service in \
-                investor-backend investment-engine-backend \
-                investor-celery-worker investment-engine-celery-worker \
-                investor-celery-auto-live-worker investment-engine-celery-auto-live-worker \
-                investor-celery-beat investment-engine-celery-beat \
-                investor-celery-beat-worker investment-engine-celery-beat-worker \
-                investor-frontend investment-engine-frontend \
-                nginx rsyslog; do
-                sudo systemctl try-restart "$service" >/dev/null 2>&1 || true
-              done
-            }
-
-            checkpoint_postgresql() {
-              command -v psql >/dev/null 2>&1 || return 0
-              sudo systemctl is-active --quiet postgresql || return 0
-              echo '==> Requesting a PostgreSQL checkpoint; no tables or rows are deleted'
-              sudo -u postgres psql -X -v ON_ERROR_STOP=1 \
-                -d postgres -c 'CHECKPOINT;' >/dev/null 2>&1 || true
-            }
-
-            echo "==> Recovery event: $EVENT_NAME${WORKFLOW_CONCLUSION:+ ($WORKFLOW_CONCLUSION)}"
-            echo "==> Production app root: $APP_ROOT"
-            echo "==> Production app user: $APP_USER"
-            INITIAL_AVAILABLE_KB="$(available_kb)"
-            echo "==> Initial free space: ${INITIAL_AVAILABLE_KB} KiB"
-            storage_report
-
-            if [[ "$EVENT_NAME" == 'workflow_run' ]] &&
-               (( INITIAL_AVAILABLE_KB >= TARGET_FREE_KB )); then
-              echo 'The failed deploy was not caused by low disk space; skipping recovery.'
+            if [[ "$EVENT" == workflow_run && "$initial" -ge "$TARGET_FREE_KB" ]]; then
+              echo 'Deploy failure was not caused by disk pressure.'
               exit 0
             fi
 
-            if (( INITIAL_AVAILABLE_KB < TARGET_FREE_KB )); then
-              base_cleanup
-              prune_disabled_snaps
-              retire_legacy_docker_runtime
-              checkpoint_postgresql
-              release_deleted_open_files
+            if (( initial < TARGET_FREE_KB )); then
+              cleanup_caches
+              compact_audit_store
+            elif [[ "$EVENT" == schedule ]]; then
+              compact_audit_store
             fi
 
-            FINAL_AVAILABLE_KB="$(available_kb)"
-            echo "==> Final free space: ${FINAL_AVAILABLE_KB} KiB"
-            storage_report
+            final="$(free_kb)"
+            echo "==> Final free: $final KiB"
+            report
 
-            DEPLOY_AFTER_CLEANUP=false
-            case "$EVENT_NAME" in
-              push|workflow_run)
-                DEPLOY_AFTER_CLEANUP=true
-                ;;
-              workflow_dispatch)
-                [[ "$MANUAL_DEPLOY" == 'true' ]] &&
-                  DEPLOY_AFTER_CLEANUP=true
-                ;;
-              schedule)
-                DEPLOY_AFTER_CLEANUP=false
-                ;;
-            esac
-
-            if [[ "$DEPLOY_AFTER_CLEANUP" != 'true' ]]; then
-              exit 0
-            fi
-
-            if (( FINAL_AVAILABLE_KB < MINIMUM_DEPLOY_FREE_KB )); then
-              echo 'Less than 2 GiB remains after safe cleanup. The workflow preserved Docker volumes and PostgreSQL data; inspect the final storage report before deleting either.' >&2
+            deploy=false
+            [[ "$EVENT" == push || "$EVENT" == workflow_run ]] && deploy=true
+            [[ "$EVENT" == workflow_dispatch && "$DEPLOY_INPUT" == true ]] && deploy=true
+            [[ "$deploy" == true ]] || exit 0
+            (( final >= REQUIRED_FREE_KB )) || {
+              echo 'Less than 2 GiB remains after guarded recovery.' >&2
               exit 1
-            fi
+            }
 
-            echo '==> Sync GitHub main to EC2'
             sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
-
-            if command -v pg_isready >/dev/null 2>&1 &&
-               ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
-              echo '==> Restarting PostgreSQL after disk recovery'
-              sudo systemctl restart postgresql
-              for _ in $(seq 1 30); do
-                pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1 &&
-                  break
-                sleep 1
-              done
-              pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1
-            fi
-
-            echo '==> Run recovered full-stack deployment'
             SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" \
               bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
-
-            if [[ -f "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh" ]]; then
-              APP_ROOT="$APP_ROOT" \
-                APP_USER="$APP_USER" \
-                FRONTEND_ENV_FILE='/etc/investor/frontend.env' \
-                bash "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh"
-            fi
-
-            echo "==> Recovery deployment completed with $(available_kb) KiB free"
+            echo "==> Deployment complete; free: $(free_kb) KiB"
