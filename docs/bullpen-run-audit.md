@@ -730,6 +730,14 @@ acknowledgement, run lease, PostgreSQL advisory fence, heartbeat, and redelivery
 contract above. These runtime bounds add no snapshot fields and do not rewrite
 frozen historical audits.
 
+The synchronous Celery-to-async bridge also closes its Bullpen runtime broker
+and disposes the worker process's async SQLAlchemy pool before `asyncio.run()`
+closes the current loop. A later Stage 3 attempt therefore opens fresh asyncpg
+connections on its own loop instead of reusing a connection bound to an earlier
+task loop. This is execution-lifecycle cleanup only: retry identity, intent and
+attempt state, audit capture, snapshot schema, formulas, decisions, and frozen
+historical records are unchanged.
+
 Run creation and the worker handoff use a bounded three-layer recovery contract:
 
 1. The preferred primary path persists a client-generated run ID, task ID, and

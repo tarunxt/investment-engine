@@ -20,6 +20,7 @@ from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.position_classification import (
     BULLPEN_POSITION_CLASSIFIER_VERSION,
 )
+from app.infrastructure.database.session import async_engine
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 
 logger = get_logger(__name__)
@@ -2362,6 +2363,13 @@ def run_with_bullpen_runtime_cleanup(awaitable: Awaitable[_T]) -> _T:
         try:
             return await awaitable
         finally:
-            await close_bullpen_runtime_broker()
+            try:
+                await close_bullpen_runtime_broker()
+            finally:
+                # Celery invokes this synchronous bridge repeatedly in a
+                # long-lived child process. asyncio.run() creates a new event
+                # loop each time, so pooled asyncpg connections from the prior
+                # invocation cannot safely be reused by the next loop.
+                await async_engine.dispose()
 
     return asyncio.run(runner())

@@ -168,13 +168,19 @@ def test_get_broker_recreates_async_singleton_for_new_event_loop(monkeypatch):
 
 def test_run_with_bullpen_runtime_cleanup_resets_global_broker(monkeypatch):
     created_redis: list[LoopBoundRedis] = []
+    disposed_on_loops: list[asyncio.AbstractEventLoop] = []
 
     def fake_from_url(*args, **kwargs):
         redis = LoopBoundRedis()
         created_redis.append(redis)
         return redis
 
+    class FakeAsyncEngine:
+        async def dispose(self) -> None:
+            disposed_on_loops.append(asyncio.get_running_loop())
+
     monkeypatch.setattr(runtime_broker_module.aioredis, "from_url", fake_from_url)
+    monkeypatch.setattr(runtime_broker_module, "async_engine", FakeAsyncEngine())
     monkeypatch.setattr(runtime_broker_module, "_runtime_broker", None)
     monkeypatch.setattr(runtime_broker_module, "_runtime_broker_loop", None)
 
@@ -195,6 +201,9 @@ def test_run_with_bullpen_runtime_cleanup_resets_global_broker(monkeypatch):
 
     assert first_broker_id != second_broker_id
     assert len(created_redis) == 2
+    assert len(disposed_on_loops) == 2
+    assert disposed_on_loops[0] is not disposed_on_loops[1]
+    assert all(loop.is_closed() for loop in disposed_on_loops)
 
 
 def _build_raw_result(
