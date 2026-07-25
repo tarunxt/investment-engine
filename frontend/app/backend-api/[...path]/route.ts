@@ -15,7 +15,8 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
 const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
-const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 3_000;
+const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
+const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 5_250;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 
@@ -151,22 +152,47 @@ function buildTargetUrl(baseUrl: string, path: string, request: NextRequest) {
   return targetUrl;
 }
 
-function getProxyAttemptTimeoutMs(method: string) {
-  const configured = Number.parseInt(
-    process.env.BACKEND_PROXY_TIMEOUT_MS || "",
-    10,
-  );
+function readBoundedTimeout(
+  rawValue: string | undefined,
+  fallbackMs: number,
+  maximumMs: number,
+) {
+  const configured = Number.parseInt(rawValue || "", 10);
   if (!Number.isFinite(configured)) {
-    return SAFE_FALLBACK_METHODS.has(method)
-      ? DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS
-      : DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS;
+    return fallbackMs;
+  }
+  return Math.min(Math.max(configured, 1_000), maximumMs);
+}
+
+function getProxyAttemptTimeoutMs(method: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) {
+    return readBoundedTimeout(
+      process.env.BACKEND_PROXY_TIMEOUT_MS,
+      DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS,
+      30_000,
+    );
   }
 
-  // Reads may traverse three bounded transports. Mutations execute exactly
-  // once and retain the historical, slightly longer proxy deadline.
-  return SAFE_FALLBACK_METHODS.has(method)
-    ? Math.min(Math.max(configured, 1_000), 5_000)
-    : Math.min(Math.max(configured, 1_000), 30_000);
+  return readBoundedTimeout(
+    process.env.BACKEND_PROXY_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+  );
+}
+
+function getProxyTotalTimeoutMs(method: string) {
+  if (!SAFE_FALLBACK_METHODS.has(method)) {
+    return getProxyAttemptTimeoutMs(method);
+  }
+
+  // The browser read deadline is 6 seconds. Keep the entire same-origin BFF
+  // attempt chain below that deadline so the route can return a real 502/504
+  // instead of being aborted mid-fallback by the browser.
+  return readBoundedTimeout(
+    process.env.BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+    DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+  );
 }
 
 function createProxyCorrelationId(request: NextRequest) {
@@ -285,17 +311,28 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   const candidates = SAFE_FALLBACK_METHODS.has(request.method)
     ? resolvedCandidates
     : resolvedCandidates.slice(0, 1);
+  const perAttemptTimeoutMs = getProxyAttemptTimeoutMs(request.method);
+  const totalTimeoutMs = getProxyTotalTimeoutMs(request.method);
 
   try {
     for (let index = 0; index < candidates.length; index += 1) {
       if (request.signal.aborted) break;
+
+      const elapsedMs = performance.now() - startedAt;
+      const remainingBudgetMs = Math.floor(totalTimeoutMs - elapsedMs);
+      if (remainingBudgetMs <= 0) {
+        anyAttemptTimedOut = true;
+        outcome = "timeout_budget_exhausted";
+        break;
+      }
+
       const candidate = candidates[index];
       const nextCandidate = candidates[index + 1];
       const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
       const attemptStartedAt = performance.now();
       const attempt = createProxyAttemptContext(
         request.signal,
-        getProxyAttemptTimeoutMs(request.method),
+        Math.min(perAttemptTimeoutMs, remainingBudgetMs),
       );
 
       try {

@@ -12,6 +12,9 @@ from app.shared.pagination import PagedQuery, PagedResult
 from app.shared.types import JobStatus
 
 
+MAX_FULL_RUN_LIST_LIMIT = 20
+
+
 class PostgresRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -39,6 +42,16 @@ class PostgresRunRepository:
         user_id: int | None = None,
         summary: bool = False,
     ) -> PagedResult[Run]:
+        # Full run payloads include every linked LLM response and can grow to
+        # many megabytes. Protect the API from accidental limit=100 requests
+        # while leaving lightweight summary pages at their requested size.
+        effective_query = query
+        if not summary and query.limit > MAX_FULL_RUN_LIST_LIMIT:
+            effective_query = PagedQuery(
+                page=query.page,
+                limit=MAX_FULL_RUN_LIST_LIMIT,
+            )
+
         stmt = select(Run)
         if user_id is not None:
             stmt = stmt.where(Run.user_id == user_id)
@@ -92,13 +105,15 @@ class PostgresRunRepository:
             stmt = stmt.options(selectinload(Run.run_jobs).selectinload(RunJob.job))
 
         items_result = await self._session.execute(
-            stmt.order_by(Run.id.desc()).offset(query.offset).limit(query.limit)
+            stmt.order_by(Run.id.desc())
+            .offset(effective_query.offset)
+            .limit(effective_query.limit)
         )
         return PagedResult(
             items=list(items_result.scalars()),
             total=total,
-            page=query.page,
-            limit=query.limit,
+            page=effective_query.page,
+            limit=effective_query.limit,
         )
 
     async def get_latest_active_for_user(self, user_id: int) -> Run | None:

@@ -92,19 +92,70 @@ test("browser API reads use the public API before the same-origin proxy", () => 
   }
 });
 
-test("server proxy fallbacks are bounded and mutations execute only once", () => {
+test("server proxy fallbacks stay inside the browser read deadline and mutations execute once", () => {
   const source = read("../app/backend-api/[...path]/route.ts");
 
   assert.match(source, /stage: "primary"/);
   assert.match(source, /stage: "secondary"/);
   assert.match(source, /stage: "tertiary" as const/);
-  assert.match(source, /DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 3_000/);
+  assert.match(source, /DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500/);
+  assert.match(source, /DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 5_250/);
+  assert.match(source, /BACKEND_PROXY_TOTAL_TIMEOUT_MS/);
+  assert.match(source, /remainingBudgetMs/);
+  assert.match(
+    source,
+    /Math\.min\(perAttemptTimeoutMs, remainingBudgetMs\)/,
+  );
   assert.match(source, /SAFE_FALLBACK_METHODS = new Set\(\["GET", "HEAD"\]\)/);
   assert.match(
     source,
     /SAFE_FALLBACK_METHODS\.has\(request\.method\)[\s\S]*resolvedCandidates[\s\S]*resolvedCandidates\.slice\(0, 1\)/,
   );
   assert.match(source, /backend_api_proxy_fallback_triggered/);
+});
+
+test("dashboard threat latest reads skip historical augmentation unless explicitly requested", () => {
+  const routerSources = [
+    read("../../backend/app/domains/zerodha/threats_router.py"),
+    read("../../backend/app/domains/indmoney_us/threats_router.py"),
+  ];
+
+  for (const source of routerSources) {
+    assert.match(
+      source,
+      /include_history: bool = Query\(\s*default=False,/,
+    );
+    assert.match(source, /include_history=include_history/);
+    assert.match(
+      source,
+      /if include_history:\s*parsed = await _augment_report_with_urgent_history/,
+    );
+  }
+});
+test("large full-run list requests are capped while summary lists remain unaffected", () => {
+  const source = read("../../backend/app/domains/runs/repository.py");
+
+  assert.match(source, /MAX_FULL_RUN_LIST_LIMIT = 20/);
+  assert.match(
+    source,
+    /if not summary and query\.limit > MAX_FULL_RUN_LIST_LIMIT/,
+  );
+  assert.match(
+    source,
+    /PagedQuery\(\s*page=query\.page,\s*limit=MAX_FULL_RUN_LIST_LIMIT,/,
+  );
+  assert.match(source, /offset\(effective_query\.offset\)/);
+  assert.match(source, /limit\(effective_query\.limit\)/);
+});
+
+test("the production frontend exposes an immutable build fingerprint", () => {
+  const source = read("../app/api/runtime-fingerprint/route.ts");
+
+  assert.match(source, /GENERATED_BUILD_SHA/);
+  assert.match(source, /GENERATED_BUILD_TIMESTAMP/);
+  assert.match(source, /@\/lib\/generatedBuildInfo/);
+  assert.match(source, /Cache-Control/);
+  assert.match(source, /no-store/);
 });
 
 test("API reads validate payloads, deduplicate requests, and avoid retry loops", () => {
@@ -158,6 +209,8 @@ test("changed fallback TypeScript modules parse", () => {
     "../lib/urls.ts",
     "../services/api.ts",
     "../app/backend-api/[...path]/route.ts",
+    "../app/api/runtime-fingerprint/route.ts",
+    "../lib/generatedBuildInfo.ts",
     "../app/console/bullpen-ai/_components/bullpenAutoRunStatus.ts",
     "../app/console/dashboard/page.tsx",
     "../app/console/_components/FinalActionablesConsole.tsx",
