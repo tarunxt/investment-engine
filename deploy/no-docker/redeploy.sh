@@ -802,6 +802,44 @@ install_systemd_unit() {
   INSTALLED_SYSTEMD_UNITS+=("$target")
 }
 
+remove_obsolete_primary_worker_dropins() {
+  local unit_file
+  local dropin
+  local target
+
+  unit_file="$(systemd_unit_file_name "$WORKER_SERVICE_NAME")"
+  # This pre-topology drop-in replaced ExecStart with a hard-coded
+  # concurrency=4 command. It bypasses the canonical launcher, queue
+  # validation, environment concurrency, prefetch, and child recycling.
+  for dropin in no-beat-queue.conf; do
+    target="/etc/systemd/system/${unit_file}.d/$dropin"
+    if ! sudo test -e "$target" && ! sudo test -L "$target"; then
+      continue
+    fi
+    echo "==> Removing obsolete primary-worker systemd drop-in: $target"
+    backup_target "$target"
+    sudo rm -f -- "$target"
+  done
+}
+
+validate_primary_worker_launcher() {
+  local expected
+  local actual
+
+  expected="$APP_ROOT/deploy/no-docker/scripts/run-celery-worker.sh"
+  actual="$(
+    sudo systemctl show "$WORKER_SERVICE_NAME" \
+      --property=ExecStart \
+      --value \
+      --no-pager
+  )"
+  if [[ "$actual" != *"$expected"* ]]; then
+    echo "Primary worker ExecStart bypasses the canonical launcher: $actual" >&2
+    echo "Expected launcher: $expected" >&2
+    exit 1
+  fi
+}
+
 validate_systemd_units() {
   local unit_path
 
@@ -1025,6 +1063,7 @@ install_systemd_unit "$WORKER_SERVICE_NAME"
 install_systemd_unit "$AUTO_LIVE_WORKER_SERVICE_NAME"
 install_systemd_unit "$BEAT_SERVICE_NAME"
 install_systemd_unit "$BEAT_WORKER_SERVICE_NAME"
+remove_obsolete_primary_worker_dropins
 if [[ "$SCOPE" == "full" ]]; then
   install_systemd_unit "$FRONTEND_SERVICE_NAME"
 fi
@@ -1036,6 +1075,7 @@ fi
 
 echo "==> Validate configuration"
 sudo systemctl daemon-reload
+validate_primary_worker_launcher
 validate_systemd_units
 if [[ "$SCOPE" == "full" ]]; then
   sudo nginx -t

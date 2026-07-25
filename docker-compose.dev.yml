@@ -58,7 +58,7 @@ services:
     environment:
       ENVIRONMENT: development
 
-    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=debug --prefetch-multiplier=1
+    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=debug --concurrency=${CELERY_WORKER_CONCURRENCY:-2} --prefetch-multiplier=1 --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-25} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB:-800000}
 
     healthcheck:
       disable: true
@@ -71,7 +71,7 @@ services:
     environment:
       ENVIRONMENT: development
 
-    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=debug --concurrency=1 --prefetch-multiplier=1
+    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=debug --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=${CELERY_AUTO_LIVE_MAX_TASKS_PER_CHILD:-1}
 
     healthcheck:
       disable: true

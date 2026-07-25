@@ -92,7 +92,7 @@ services:
     build: ./backend
     restart: always
 
-    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=info --concurrency=8 --prefetch-multiplier=1 --max-tasks-per-child=1000
+    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=info --concurrency=${CELERY_WORKER_CONCURRENCY:-2} --prefetch-multiplier=${CELERY_WORKER_PREFETCH_MULTIPLIER:-1} --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-25} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB:-800000}
 
     environment:
       ENVIRONMENT: production
@@ -132,7 +132,7 @@ services:
     build: ./backend
     restart: always
 
-    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=1000
+    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=info --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=${CELERY_AUTO_LIVE_MAX_TASKS_PER_CHILD:-1}
 
     environment:
       ENVIRONMENT: production

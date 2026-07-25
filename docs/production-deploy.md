@@ -69,6 +69,17 @@ Do not merge `auto_live` back into `ai` (or leave `beat` on the primary worker)
 to increase throughput: that would allow slow remote-order reconciliation or
 periodic work to reserve planning capacity again.
 
+The canonical primary launcher defaults to concurrency `2`, replaces a child
+after 25 tasks or after it retains 800,000 KiB, and the planning worker replaces
+its only child after every completed run. Bullpen runtime calls are serialized
+by the shared runtime broker, so extra primary prefork children do not increase
+remote-order throughput; they only retain duplicate Python/response memory and
+hold extra database connections while waiting for the runtime lock. The deploy
+removes the obsolete
+`/etc/systemd/system/investor-celery-worker.service.d/no-beat-queue.conf`
+drop-in and refuses to continue if any remaining override bypasses
+`deploy/no-docker/scripts/run-celery-worker.sh`.
+
 The run record exposes a durable task lifecycle: `QUEUED` means waiting for the
 Auto-Live worker, `RESERVED` means received but waiting for a pool slot, and
 `STARTED` has a worker heartbeat. Recovery never treats an ambiguous Celery

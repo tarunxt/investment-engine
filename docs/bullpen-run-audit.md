@@ -717,6 +717,19 @@ terminal workflow failure. The two-hour workflow circuit breaker remains an
 independent absolute limit. Backend startup does not perform an immediate
 destructive stale-run sweep.
 
+Production launchers bound retained worker memory without changing Bullpen
+inputs, formulas, decisions, order identities, or evidence. The primary worker
+uses the canonical `ai,email` launcher with concurrency two, bounded child task
+count, and a post-task resident-memory limit. The dedicated planning child is
+replaced after every completed task so a large Stage 1 scan cannot retain its
+event payload into the next hourly cycle. Deploy removes the legacy hard-coded
+primary-worker `ExecStart` drop-in and verifies that the canonical launcher is
+effective before restarting services. Child replacement occurs only after a
+task completes; an OOM or other mid-task loss still follows the existing late
+acknowledgement, run lease, PostgreSQL advisory fence, heartbeat, and redelivery
+contract above. These runtime bounds add no snapshot fields and do not rewrite
+frozen historical audits.
+
 Run creation and the worker handoff use a bounded three-layer recovery contract:
 
 1. The preferred primary path persists a client-generated run ID, task ID, and
