@@ -9,7 +9,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Iterable, Sequence
 
 from sqlalchemy import and_, func, or_, select
-from celery import current_app
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.logging import get_logger
@@ -108,6 +107,22 @@ STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT = "auto-live:v2"
 STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH = 128
 
 logger = get_logger("app.domains.polymarket_auto_live.order_intent_service")
+
+
+def _configured_celery_app():
+    """Return the Redis-backed project app without creating an import cycle.
+
+    FastAPI does not import the worker bootstrap module during normal startup,
+    so Celery's global ``current_app`` proxy can still point at its default
+    AMQP application in an API process. Importing the project app at inspection
+    time makes readiness and restart recovery query the same broker as the
+    systemd workers.
+    """
+
+    from app.infrastructure.messaging.celery_app import celery
+
+    return celery
+
 
 _EXECUTABLE_STATUSES = frozenset(
     {"PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}
@@ -1926,7 +1941,8 @@ def _active_celery_task_ids_sync() -> set[str]:
     """Return task IDs actively executing across workers, if inspect responds."""
 
     try:
-        payload = current_app.control.inspect(timeout=1.0).active() or {}
+        app = _configured_celery_app()
+        payload = app.control.inspect(timeout=1.0).active() or {}
     except Exception:
         logger.warning(
             "Could not inspect active Celery tasks during Auto-Live restart recovery.",
@@ -1986,7 +2002,7 @@ def annotate_intent_dispatch_sync(
 
 def celery_ai_queue_consumer_diagnostics(timeout: float = 1.0) -> dict[str, object]:
     try:
-        inspect = current_app.control.inspect(timeout=timeout)
+        inspect = _configured_celery_app().control.inspect(timeout=timeout)
         active_queues = inspect.active_queues() or {}
     except Exception as exc:
         return {"ok": False, "error": sanitize_message(str(exc)), "required_queue": "ai"}

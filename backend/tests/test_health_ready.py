@@ -11,6 +11,7 @@ import pytest
 import redis.asyncio as aioredis
 
 from app.domains.health import router as health_router
+from app.domains.polymarket_auto_live import order_intent_service
 
 
 class _FakeAsyncSession:
@@ -42,6 +43,38 @@ def _ready_app() -> FastAPI:
     app = FastAPI()
     app.include_router(health_router.router)
     return app
+
+
+def test_stage3_worker_diagnostics_use_configured_celery_app(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    observed_timeouts: list[float] = []
+
+    class FakeInspect:
+        def active_queues(self):
+            return {"celery@worker-1": [{"name": "ai"}]}
+
+    class FakeControl:
+        def inspect(self, *, timeout: float):
+            observed_timeouts.append(timeout)
+            return FakeInspect()
+
+    class FakeCelery:
+        control = FakeControl()
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "_configured_celery_app",
+        lambda: FakeCelery(),
+    )
+
+    diagnostics = order_intent_service.celery_ai_queue_consumer_diagnostics(
+        timeout=3.5,
+    )
+
+    assert observed_timeouts == [3.5]
+    assert diagnostics["ok"] is True
+    assert diagnostics["consuming_workers"] == ["celery@worker-1"]
 
 
 def _install_healthy_dependencies(
