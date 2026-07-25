@@ -120,6 +120,7 @@ import {
   type Stage2TransferQueueMetricInfoKind,
 } from "./bullpenAutoRunInvestMetrics";
 import { getInvestStageImmediateSuccess } from "./bullpenAutoRunStageStatus";
+import { getBullpenStage3SellExecutionTelemetry } from "./bullpenStage3SellExecution";
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import {
   BullpenQuestionsTable,
@@ -4726,6 +4727,35 @@ function getPlannedOrderBrief(decision: BullpenAutoLiveDecision) {
   );
 }
 
+function Stage3SellExecutionTelemetry({
+  decision,
+}: {
+  decision: BullpenAutoLiveDecision;
+}) {
+  const telemetry = getBullpenStage3SellExecutionTelemetry(decision.order_plan);
+  if (!telemetry) return null;
+
+  return (
+    <div className="my-1.5 space-y-1">
+      <span
+        className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.1em] ${
+          telemetry.sequence === 1
+            ? "border-sky-200 bg-sky-50 text-sky-800"
+            : "border-amber-200 bg-amber-50 text-amber-800"
+        }`}
+      >
+        {telemetry.label}
+      </span>
+      {telemetry.reason ? (
+        <p className="text-[11px] leading-4 text-amber-800">
+          <span className="font-semibold">Fallback reason:</span>{" "}
+          {telemetry.reason}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function Stage3DecisionTable({
   title,
   rows,
@@ -4868,6 +4898,7 @@ function Stage3DecisionTable({
                       </BullpenReturnsPerDayValueButton>
                     </td>
                     <td className="min-w-64 px-4 py-3 text-slate-700">
+                      <Stage3SellExecutionTelemetry decision={decision} />
                       {plannedButNotSubmitted && onOpenPlannedOrderDetail ? (
                         <div className="flex items-start gap-2">
                           <span className="line-clamp-2 break-words">
@@ -7888,6 +7919,7 @@ function InvestMetricDetailsDialog({
                       </span>
                     </p>
                     <div className="mt-1 leading-5 text-amber-950">
+                      <Stage3SellExecutionTelemetry decision={decision} />
                       <ErrorCodeWithDetails
                         detail={
                           decision.order_plan?.detail ??
@@ -8092,6 +8124,9 @@ function InvestMetricDetailsDialog({
                                   decision.order_plan.limit_price_cents,
                                 )}
                                 <br />
+                                <Stage3SellExecutionTelemetry
+                                  decision={decision}
+                                />
                                 <ErrorCodeWithDetails
                                   detail={getPlannedOrderBrief(decision)}
                                   detailClassName="text-slate-700"

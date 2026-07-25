@@ -628,6 +628,70 @@ class BullpenLiveExecutor:
                 retry_args[min_price_index] = f"{retry_min_price:.4f}"
                 current_args = retry_args
 
+    async def sell_max_market(
+        self,
+        *,
+        market_id: str,
+        outcome: str,
+        min_price: float,
+        extra_env: dict[str, str] | None = None,
+    ) -> str:
+        """Submit the CLI's maximum-position market sell exactly once."""
+
+        stdout = await run_bullpen(
+            [
+                "polymarket",
+                "sell",
+                market_id,
+                outcome,
+                "--max",
+                "--min-price",
+                f"{_clamp_limit_price(min_price):.4f}",
+                "--yes",
+                "--non-interactive",
+                "--output",
+                "json",
+            ],
+            timeout_seconds=45,
+            read_only=False,
+            extra_env=extra_env,
+        )
+        return redact_secrets(stdout)
+
+    async def sell_fak_limit(
+        self,
+        *,
+        market_id: str,
+        outcome: str,
+        shares: float,
+        price: float,
+        extra_env: dict[str, str] | None = None,
+    ) -> str:
+        """Submit one aggressive fill-and-kill sell without leaving a resting order."""
+
+        stdout = await run_bullpen(
+            [
+                "polymarket",
+                "limit-sell",
+                "--price",
+                f"{_clamp_limit_price(price):.4f}",
+                "--shares",
+                f"{shares:.6f}",
+                "--expiration",
+                "fak",
+                market_id,
+                outcome,
+                "--yes",
+                "--non-interactive",
+                "--output",
+                "json",
+            ],
+            timeout_seconds=45,
+            read_only=False,
+            extra_env=extra_env,
+        )
+        return redact_secrets(stdout)
+
     async def poll_order(
         self,
         *,

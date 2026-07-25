@@ -201,24 +201,24 @@ def _queue_due_order_intents_for_run_sync(run_id: str, *, limit: int = 50) -> in
             limit=limit,
             statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
             now=_utc_now(),
+            run_id=run_id,
         )
         if not due_ids:
             return 0
-        run_due_ids = list(
-            session.execute(
-                select(PolymarketAutoLiveOrderIntentRecord.id)
-                .where(PolymarketAutoLiveOrderIntentRecord.id.in_(due_ids))
-                .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
-                .order_by(
-                    PolymarketAutoLiveOrderIntentRecord.priority.asc(),
-                    PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
-                )
-            )
-            .scalars()
-            .all()
+    queued_count = _enqueue_execute_order_intents(
+        due_ids,
+        source="immediate-run-execution",
+    )
+    if queued_count != len(due_ids):
+        logger.warning(
+            "Immediate Stage 3 dispatch queued %s of %s due intents for run %s; "
+            "the remaining intents were fenced by an existing lease or could "
+            "not be published and will stay visible to the watchdog.",
+            queued_count,
+            len(due_ids),
+            run_id,
         )
-    _enqueue_execute_order_intents(run_due_ids)
-    return len(run_due_ids)
+    return queued_count
 
 
 
@@ -260,6 +260,12 @@ def _enqueue_order_intent_operation(
         )
         return False
     if lease is None:
+        logger.info(
+            "Stage 3 %s dispatch for intent %s was skipped because another "
+            "queued or running operation lease already owns it.",
+            operation,
+            normalized_intent_id,
+        )
         return False
 
     try:
@@ -512,6 +518,7 @@ def recover_and_enqueue_stale_order_intents_for_run_sync(run_id: str, *, limit: 
             limit=limit,
             statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
             now=_utc_now(),
+            run_id=run_id,
         )
         due_ids = list(
             session.execute(

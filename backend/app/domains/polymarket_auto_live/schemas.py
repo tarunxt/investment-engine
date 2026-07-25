@@ -159,6 +159,8 @@ AutoLiveExecutorErrorCode = Literal[
     "PERMANENT_REJECTION",
     "CAPACITY_BLOCKED",
     "AMBIGUOUS_SUBMISSION",
+    "SELL_FALLBACK_EXHAUSTED",
+    "ATTEMPT_BUDGET_EXHAUSTED",
 ]
 
 
@@ -728,6 +730,8 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     remote_order_id: str | None = None
     remote_transaction_hash: str | None = None
     provider_alias: str | None = None
+    execution_path: str | None = None
+    fallback_history: list[dict[str, object]] = Field(default_factory=list)
     latest_error_code: AutoLiveExecutorErrorCode | str | None = None
     dependency_state: str | None = None
     reservation_state: AutoLiveReservationStatus | str | None = None

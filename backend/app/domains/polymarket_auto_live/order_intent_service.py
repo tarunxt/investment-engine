@@ -40,6 +40,11 @@ from app.domains.polymarket_auto_live.execution import (
     refresh_execution_quote,
     refresh_live_controls,
 )
+from app.domains.polymarket_auto_live.immediate_sell import (
+    IMMEDIATE_SELL_MIN_PRICE,
+    IMMEDIATE_SELL_STRATEGY_VERSION,
+    submit_immediate_sell_with_fallbacks,
+)
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveCapitalReservationRecord,
     PolymarketAutoLiveDecisionRecord,
@@ -171,6 +176,9 @@ class IntentSubmissionResult:
     filled_shares: float | None = None
     remaining_shares: float | None = None
     average_fill_price_cents: float | None = None
+    execution_path: str | None = None
+    fallback_history: list[dict[str, object]] | None = None
+    selected_fallback_layer: str | None = None
 
 
 def _isoformat(value: datetime | None) -> str | None:
@@ -277,6 +285,94 @@ def _matched_buy_submission_fill(
         average_price_cents = average_price * 100 if average_price <= 1 else average_price
         average_price_cents = max(0.0, min(100.0, average_price_cents))
     return filled_shares, average_price_cents
+
+
+def _matched_sell_submission_fill(
+    payload: dict[str, object],
+) -> tuple[float, float | None] | None:
+    rows: list[dict[str, object]] = []
+
+    def _collect_rows(value: object) -> None:
+        if isinstance(value, dict):
+            rows.append(value)
+            for nested in value.values():
+                _collect_rows(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                _collect_rows(nested)
+
+    _collect_rows(payload)
+    filled_shares = None
+    for key in (
+        "filled_size",
+        "filledSize",
+        "filled_shares",
+        "filledShares",
+        "sold_shares",
+        "soldShares",
+        "matched_size",
+        "matchedSize",
+    ):
+        candidates = [
+            value
+            for row in rows
+            if (value := _safe_float(row.get(key))) is not None and value > 0
+        ]
+        if candidates:
+            filled_shares = max(candidates)
+            break
+    if filled_shares is None or filled_shares <= 0:
+        return None
+    average_price = None
+    for key in ("avg_price", "avgPrice", "average_fill_price", "averageFillPrice"):
+        average_price = next(
+            (
+                value
+                for row in rows
+                if (value := _safe_float(row.get(key))) is not None
+            ),
+            None,
+        )
+        if average_price is not None:
+            break
+    average_price_cents = None
+    if average_price is not None:
+        average_price_cents = average_price * 100 if average_price <= 1 else average_price
+        average_price_cents = max(0.0, min(100.0, average_price_cents))
+    return filled_shares, average_price_cents
+
+
+def _immediate_sell_submission_detail(
+    *,
+    fallback_count: int,
+    execution_path: str,
+    fully_filled: bool,
+    partially_filled: bool,
+) -> str:
+    outcome = (
+        "filled"
+        if fully_filled
+        else "partially filled"
+        if partially_filled
+        else "accepted"
+    )
+    if fallback_count == 0:
+        if partially_filled:
+            return (
+                "Bullpen immediate market sell partially filled through the primary "
+                "explicit-share path; the durable intent will reconcile the remaining "
+                "wallet exposure."
+            )
+        return (
+            f"Bullpen immediate market sell was {outcome} by the primary "
+            "explicit-share path."
+        )
+    failure_label = "failure" if fallback_count == 1 else "failures"
+    return (
+        f"Bullpen immediate market sell was {outcome} through fallback "
+        f"{fallback_count + 1} of 3 ({execution_path}) after {fallback_count} "
+        f"verified pre-submit/no-fill {failure_label}."
+    )
 
 
 def _parse_response_payload(raw_response: str | None) -> dict[str, object]:
@@ -1560,28 +1656,27 @@ def list_due_order_intent_ids_sync(
     limit: int = 50,
     statuses: Sequence[str] | None = None,
     now: datetime | None = None,
+    run_id: str | None = None,
 ) -> list[str]:
     due_at = now or utc_now()
     due_statuses = tuple(statuses or sorted(_EXECUTABLE_STATUSES | _RECONCILABLE_STATUSES))
-    records = (
-        session.execute(
-            select(PolymarketAutoLiveOrderIntentRecord.id)
-            .where(PolymarketAutoLiveOrderIntentRecord.status.in_(due_statuses))
-            .where(
-                or_(
-                    PolymarketAutoLiveOrderIntentRecord.next_attempt_at.is_(None),
-                    PolymarketAutoLiveOrderIntentRecord.next_attempt_at <= due_at,
-                )
+    query = (
+        select(PolymarketAutoLiveOrderIntentRecord.id)
+        .where(PolymarketAutoLiveOrderIntentRecord.status.in_(due_statuses))
+        .where(
+            or_(
+                PolymarketAutoLiveOrderIntentRecord.next_attempt_at.is_(None),
+                PolymarketAutoLiveOrderIntentRecord.next_attempt_at <= due_at,
             )
-            .order_by(
-                PolymarketAutoLiveOrderIntentRecord.priority.asc(),
-                PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
-            )
-            .limit(limit)
         )
-        .scalars()
-        .all()
     )
+    if run_id is not None:
+        query = query.where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+    query = query.order_by(
+        PolymarketAutoLiveOrderIntentRecord.priority.asc(),
+        PolymarketAutoLiveOrderIntentRecord.created_at.asc(),
+    ).limit(limit)
+    records = session.execute(query).scalars().all()
     return [str(item) for item in records]
 
 
@@ -2049,6 +2144,7 @@ def retry_order_intent_sync(
     record.retryable = True
     record.next_attempt_at = utc_now()
     record.last_error_message = None
+    record.max_attempts = max(record.max_attempts, record.attempt_count + 1)
     record.version += 1
     record.execution_metadata_json = {
         **dict(record.execution_metadata_json or {}),
@@ -2516,29 +2612,76 @@ async def _submit_prepared_intent(
                     ),
                 )
             if prepared.action == "sell":
-                response = await executor.sell_limit(
+                sell_submission = await submit_immediate_sell_with_fallbacks(
+                    executor=executor,
                     market_id=stage3_execution_market_reference(
                         slug=prepared.slug,
                         market_id=prepared.market_id,
                     ),
                     outcome="Yes" if prepared.side == "YES" else "No",
                     shares=prepared.shares or 0.0,
-                    min_price=max(0.01, (prepared.limit_price_cents or 1) / 100),
                     extra_env=extra_env,
+                    provider_alias=alias,
                 )
-                payload = _parse_response_payload(response)
+                payload = dict(sell_submission.payload)
+                immediate_sell_audit = {
+                    "version": IMMEDIATE_SELL_STRATEGY_VERSION,
+                    "selected_layer": sell_submission.selected_layer,
+                    "execution_path": sell_submission.execution_path,
+                    "fallback_count": sum(
+                        1
+                        for item in sell_submission.fallback_history[:-1]
+                        if item.get("result") == "fallback"
+                    ),
+                    "attempts": list(sell_submission.fallback_history),
+                }
+                payload["_stage3_immediate_sell"] = immediate_sell_audit
                 remote_order_id, remote_transaction_hash = _extract_remote_refs(payload)
+                fallback_count = int(immediate_sell_audit["fallback_count"])
+                matched_fill = _matched_sell_submission_fill(payload)
+                requested_shares = max(0.0, float(prepared.shares or 0.0))
+                filled_shares = matched_fill[0] if matched_fill is not None else None
+                remaining_shares = (
+                    max(0.0, requested_shares - filled_shares)
+                    if filled_shares is not None
+                    else None
+                )
+                fully_filled = (
+                    filled_shares is not None and remaining_shares <= 0.000001
+                )
+                submission_status = (
+                    "FILLED"
+                    if fully_filled
+                    else "PARTIALLY_FILLED"
+                    if filled_shares is not None
+                    else "SUBMITTED"
+                )
                 return IntentSubmissionResult(
-                    status="SUBMITTED",
-                    detail="Bullpen sell order submitted successfully.",
-                    retryable=True,
+                    status=submission_status,
+                    detail=_immediate_sell_submission_detail(
+                        fallback_count=fallback_count,
+                        execution_path=sell_submission.execution_path,
+                        fully_filled=fully_filled,
+                        partially_filled=filled_shares is not None and not fully_filled,
+                    ),
+                    retryable=not fully_filled,
                     current_shares=prepared.shares,
-                    current_limit_price_cents=prepared.limit_price_cents,
+                    current_limit_price_cents=IMMEDIATE_SELL_MIN_PRICE * 100,
                     remote_order_id=remote_order_id,
                     remote_transaction_hash=remote_transaction_hash,
                     provider_alias=alias,
                     raw_response=payload,
-                    next_attempt_at=utc_now() + timedelta(seconds=3),
+                    next_attempt_at=(
+                        None if fully_filled else utc_now() + timedelta(seconds=3)
+                    ),
+                    filled_shares=filled_shares,
+                    remaining_shares=remaining_shares,
+                    average_fill_price_cents=(
+                        matched_fill[1] if matched_fill is not None else None
+                    ),
+                    execution_path=sell_submission.execution_path,
+                    fallback_history=list(sell_submission.fallback_history),
+                    selected_fallback_layer=sell_submission.selected_layer,
                 )
             redeem_result = await submit_scoped_redeem(
                 user_id=prepared.user_id,
@@ -2595,6 +2738,8 @@ async def _submit_prepared_intent(
                 during_write=True,
                 provider_alias=alias,
             )
+        if last_error and (prepared.action == "sell" or last_error.ambiguous_submission):
+            raise last_error
         if last_error and last_error.code == "RPC_RATE_LIMITED":
             continue
         if last_error and not last_error.retryable:
@@ -2619,6 +2764,27 @@ def _apply_executor_error(
 
     now = utc_now()
     metadata = dict(record.execution_metadata_json or {})
+    if exc.fallback_history:
+        fallback_history = [dict(item) for item in exc.fallback_history]
+        immediate_sell_audit = {
+            "version": IMMEDIATE_SELL_STRATEGY_VERSION,
+            "selected_layer": None,
+            "execution_path": None,
+            "fallback_count": sum(
+                1
+                for item in fallback_history[:-1]
+                if item.get("result") == "fallback"
+            ),
+            "attempts": fallback_history,
+        }
+        metadata["immediate_sell_strategy"] = immediate_sell_audit
+        attempt.sanitized_response_json = {
+            **dict(attempt.sanitized_response_json or {}),
+            "_stage3_immediate_sell": immediate_sell_audit,
+        }
+        latest_path = fallback_history[-1].get("path") if fallback_history else None
+        if isinstance(latest_path, str) and latest_path:
+            attempt.executor_path = latest_path
     record.last_error_code = exc.code
     record.last_error_message = sanitize_message(exc.message)
     record.error_class = "transient" if exc.retryable else "permanent"
@@ -2760,6 +2926,45 @@ def _apply_executor_error(
     record.execution_metadata_json = metadata
 
 
+def _automatic_attempt_budget_allows(
+    record: PolymarketAutoLiveOrderIntentRecord,
+    *,
+    now: datetime,
+) -> bool:
+    if record.max_attempts <= 0:
+        # Older durable rows used zero as "not configured". Preserve their
+        # ability to make one fenced attempt instead of terminalizing them
+        # before any remote write.
+        record.max_attempts = 1
+    if record.attempt_count < record.max_attempts:
+        return True
+
+    record.status = "FAILED_PERMANENT"
+    record.retryable = False
+    record.next_attempt_at = None
+    record.terminal_at = now
+    record.last_error_code = "ATTEMPT_BUDGET_EXHAUSTED"
+    record.last_error_message = (
+        f"Automatic Stage 3 execution stopped after the bounded "
+        f"{record.max_attempts}-attempt budget. No additional remote write was issued."
+    )
+    record.execution_metadata_json = {
+        **dict(record.execution_metadata_json or {}),
+        "attempt_budget_exhausted": True,
+        "stage3_status": (
+            "EXIT_FAILED_PERMANENTLY"
+            if record.action in {"sell", "redeem"}
+            else "BUY_FAILED"
+        ),
+        "current_blockage": record.last_error_message,
+        "how_to_resolve": (
+            "Inspect the stored attempts and verify remote absence before "
+            "requesting one explicit operator retry."
+        ),
+    }
+    return False
+
+
 def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = None) -> str | None:
     with SyncSessionLocal() as session:
         record = _lock_intent_for_execution(session, intent_id)
@@ -2818,6 +3023,14 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             return record.status
         now = utc_now()
         if record.next_attempt_at and record.next_attempt_at > now:
+            return record.status
+        if not _automatic_attempt_budget_allows(record, now=now):
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
+            session.commit()
             return record.status
         record.status = "SUBMITTING"
         record.attempt_count += 1
@@ -3084,10 +3297,29 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             **dict(record.execution_metadata_json or {}),
             "provider_alias": result.provider_alias,
             "stage3_status": stage3_status,
+            **(
+                {
+                    "execution_path": result.execution_path,
+                    "immediate_sell_strategy": {
+                        "version": IMMEDIATE_SELL_STRATEGY_VERSION,
+                        "selected_layer": result.selected_fallback_layer,
+                        "execution_path": result.execution_path,
+                        "fallback_count": sum(
+                            1
+                            for item in (result.fallback_history or [])[:-1]
+                            if item.get("result") == "fallback"
+                        ),
+                        "attempts": list(result.fallback_history or []),
+                    },
+                }
+                if record.action == "sell" and result.execution_path
+                else {}
+            ),
         }
         attempt.completed_at = now
         attempt.result_status = result.status
         attempt.rpc_provider = result.provider_alias
+        attempt.executor_path = result.execution_path or attempt.executor_path
         attempt.remote_order_id = result.remote_order_id
         attempt.remote_transaction_hash = result.remote_transaction_hash
         attempt.sanitized_response_json = dict(result.raw_response or {})

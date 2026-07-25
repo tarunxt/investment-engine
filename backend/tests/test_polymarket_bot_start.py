@@ -1616,6 +1616,77 @@ async def test_bullpen_sell_limit_retries_when_fill_price_falls_below_minimum(
 
 
 @pytest.mark.anyio
+async def test_bullpen_max_market_sell_uses_exchange_floor_and_single_write(
+    monkeypatch,
+):
+    calls = []
+
+    async def fake_run_bullpen(
+        args,
+        *,
+        timeout_seconds,
+        read_only,
+        extra_env=None,
+    ):
+        calls.append((args, timeout_seconds, read_only, extra_env))
+        return '{"status":"submitted","order_id":"max-order"}'
+
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+
+    await BullpenLiveExecutor().sell_max_market(
+        market_id="market-1",
+        outcome="Yes",
+        min_price=0.01,
+        extra_env={"POLYMARKET_POLYGON_RPC_URLS": "https://rpc.invalid"},
+    )
+
+    assert len(calls) == 1
+    args, timeout_seconds, read_only, extra_env = calls[0]
+    assert args[:5] == ["polymarket", "sell", "market-1", "Yes", "--max"]
+    assert args[args.index("--min-price") + 1] == "0.0100"
+    assert timeout_seconds == 45
+    assert read_only is False
+    assert extra_env == {"POLYMARKET_POLYGON_RPC_URLS": "https://rpc.invalid"}
+
+
+@pytest.mark.anyio
+async def test_bullpen_tertiary_sell_is_fill_and_kill_not_resting(
+    monkeypatch,
+):
+    calls = []
+
+    async def fake_run_bullpen(
+        args,
+        *,
+        timeout_seconds,
+        read_only,
+        extra_env=None,
+    ):
+        calls.append(args)
+        return '{"status":"submitted","order_id":"fak-order"}'
+
+    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
+
+    await BullpenLiveExecutor().sell_fak_limit(
+        market_id="market-1",
+        outcome="No",
+        shares=7.5,
+        price=0.01,
+    )
+
+    assert len(calls) == 1
+    args = calls[0]
+    assert args[:2] == ["polymarket", "limit-sell"]
+    assert args[args.index("--price") + 1] == "0.0100"
+    assert args[args.index("--shares") + 1] == "7.500000"
+    assert args[args.index("--expiration") + 1] == "fak"
+    assert args[args.index("--expiration") + 2 : args.index("--expiration") + 4] == [
+        "market-1",
+        "No",
+    ]
+
+
+@pytest.mark.anyio
 async def test_bullpen_execute_wraps_collateral_once_then_fails_safely_without_global_redeem(
     monkeypatch,
 ):

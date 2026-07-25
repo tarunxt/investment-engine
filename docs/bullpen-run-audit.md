@@ -419,6 +419,51 @@ value is at or below the configured economic dust threshold, the exit is
 confirmed and its slot is released while the exact residual shares remain in the
 snapshot.
 
+Live Stage 3 sells use one bounded immediate-exit strategy inside a single durable
+order-intent attempt. The strategy tries these paths in order:
+
+1. `primary` / `market_sell_explicit`
+2. `secondary` / `market_sell_max`
+3. `tertiary` / `limit_sell_fak`
+
+The next path is allowed only when the preceding path returns
+`result=fallback` with `safe_to_fallback=true`, proving that no ambiguous or
+accepted remote write exists. `accepted`, `ambiguous`, and
+`provider_retry_required` are terminal for the in-provider sequence. An ambiguous
+write moves to reconciliation; neither it nor a provider-level retry result may
+fall through to another sell path. Write-time RPC rate limiting is treated as
+ambiguous because acceptance might have preceded response loss, so it is never
+automatically resubmitted. This keeps all three paths under the same order-intent
+ID, idempotency key, worker operation lease, PostgreSQL advisory fence, and outer
+attempt budget.
+
+Fallback eligibility is deliberately fail-closed. It requires either a Bullpen CLI
+parse/argument rejection that could not issue an order, or a structured
+`unmatched`/`no_match` result with explicit zero-fill evidence and no order,
+transaction, or trade reference. Generic failure, rejection, cancellation,
+timeout, malformed output, any positive fill amount, or any remote reference stops
+the chain and reconciles instead of issuing another sell. A positive fill smaller
+than the requested shares remains `PARTIALLY_FILLED` until wallet/order
+reconciliation accounts for the residual exposure.
+
+Each telemetry-bearing sell stores
+`execution_metadata_json.immediate_sell_strategy` with `version=v1`,
+`selected_layer`, `execution_path`, `fallback_count`, and an ordered `attempts`
+list. Every layer records its sequence, layer, path, result, reason, validation,
+`safe_to_fallback`, provider alias, and start/completion timestamps. The exact
+strategy object is mirrored under the owning order attempt's sanitized response at
+`_stage3_immediate_sell`, so an audit can prove which fallback ran and why even if
+mutable intent metadata later changes. A later attempt that stops in preflight does
+not replace that owner. Missing immediate-sell telemetry is valid
+legacy evidence: snapshot schema version 2 is retained, frozen snapshots are not
+rewritten, and validators activate only when the versioned strategy key is
+present.
+`fallback_count` counts transitions that were actually taken and is therefore
+bounded to `0..2`; a verified no-write failure on the final tertiary layer may
+still record `result=fallback`, but it does not imply a fourth transition. That
+terminal case is valid only with null selected layer/path and a permanently failed
+intent.
+
 New Stage 3 intents use the `auto-live:v2` idempotency-key format: a SHA-256
 digest over the exact run, decision, and order-plan identity with a stable prefix.
 This preserves deterministic retry identity while keeping the stored value below
@@ -506,6 +551,7 @@ Current required keys:
 * `position_returns_per_day`
 * `stage3_rank_and_selection`
 * `order_funnel_aggregation`
+* `stage3_immediate_sell_fallback`
 * `stage3_persisted_counter_reconciliation`
 * `stage3_restart_recovery`
 * `stage3_bullpen_response_normalization`
@@ -518,6 +564,15 @@ references and treats a successful nested `result.status=matched` buy response a
 terminal fill. Reconciliation also backfills this evidence from persisted attempts,
 so older frozen snapshots remain unchanged while active runs can converge without a
 duplicate exchange write.
+
+`stage3_immediate_sell_fallback` identifies
+`submit_immediate_sell_with_fallbacks` as the execution source for the finite
+three-path sell strategy. The audit validates the ordered layer/path prefix, exact
+result vocabulary, terminal-stop behavior, safe fallback decisions, selected
+accepted path, fallback count, required reason/validation/timestamp evidence, and
+the identical latest telemetry-bearing attempt mirror. A valid use of the
+secondary or tertiary path is retained as an informational finding rather than
+treated as a failure.
 
 An authenticated operator may retry a `CONFIRMING` intent only by explicitly
 asserting that Bullpen order history and open orders were checked and contain no
@@ -568,6 +623,14 @@ Current deterministic checks include:
 * rank duplicates or gaps
 * selection count exceeding max positions
 * orphaned order intents and submitted orders without attempts
+* immediate-sell layers duplicated, out of order, unbounded, or mapped to the
+  wrong execution path
+* immediate-sell fallback without complete trigger, validation, provider, and
+  timestamp evidence
+* fallback count or selected accepted path contradicting the layer results
+* unsafe fallthrough after an accepted, ambiguous, or provider-retry result
+* intent-level immediate-sell telemetry missing from or disagreeing with its
+  newest telemetry-bearing durable attempt mirror
 * persisted Stage 3 counters that violate `submitted <= processed <= planned`
 * interrupted Stage 3 runs incorrectly left working/confirming
 * restart recovery that does not disable automatic resubmission
@@ -651,6 +714,10 @@ precondition for order reconciliation.
 
 Historical snapshots remain backward-compatible: missing watchdog fields mean the run
 predates the durable-intent watchdog and should be rendered as legacy diagnostics.
+The same rule applies to `immediate_sell_strategy`: its absence does not create a
+finding. The v1 checks run only for intents that opt in by persisting the strategy
+key, so existing schema-v2 frozen snapshots remain valid without backfilled or
+inferred fallback facts.
 
 ## Console Scheduler First-Paint Status
 

@@ -55,6 +55,441 @@ def _int(value: Any) -> int | None:
     return int(numeric)
 
 
+_IMMEDIATE_SELL_LAYERS = ("primary", "secondary", "tertiary")
+_IMMEDIATE_SELL_PATHS = (
+    "market_sell_explicit",
+    "market_sell_max",
+    "limit_sell_fak",
+)
+_IMMEDIATE_SELL_RESULTS = {
+    "accepted",
+    "fallback",
+    "provider_retry_required",
+    "ambiguous",
+}
+_IMMEDIATE_SELL_REQUIRED_ATTEMPT_STRINGS = (
+    "layer",
+    "path",
+    "result",
+    "reason",
+    "validation",
+    "provider_alias",
+    "started_at",
+    "completed_at",
+)
+
+
+def _immediate_sell_strategy_findings(
+    *,
+    order: dict[str, Any],
+    order_index: int,
+) -> list[dict[str, object]]:
+    """Validate an opt-in v1 immediate-sell trace without reinterpreting legacy rows."""
+
+    findings: list[dict[str, object]] = []
+    metadata = (
+        order.get("execution_metadata_json")
+        if isinstance(order.get("execution_metadata_json"), dict)
+        else {}
+    )
+    if "immediate_sell_strategy" not in metadata:
+        return findings
+
+    strategy_pointer = (
+        f"/stage_3/order_intents/{order_index}/execution_metadata_json/"
+        "immediate_sell_strategy"
+    )
+    strategy = metadata.get("immediate_sell_strategy")
+    if str(order.get("action") or "").lower() != "sell":
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_TELEMETRY_ON_NON_SELL",
+                severity="high",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell telemetry is attached to a non-sell intent",
+                explanation=(
+                    "The layered immediate-sell contract may only be recorded on a "
+                    "durable Stage 3 sell intent."
+                ),
+                observed_value=str(order.get("action")),
+                expected_value="sell",
+                blocking=True,
+                evidence_pointers=[strategy_pointer],
+            )
+        )
+    if not isinstance(strategy, dict):
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_TELEMETRY_INVALID",
+                severity="critical",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell telemetry is not a structured record",
+                explanation=(
+                    "A telemetry-bearing sell must preserve the versioned bounded "
+                    "strategy record; an absent field remains valid for legacy intents."
+                ),
+                observed_value=type(strategy).__name__,
+                expected_value="object",
+                blocking=True,
+                evidence_pointers=[strategy_pointer],
+            )
+        )
+        return findings
+
+    version = str(strategy.get("version") or "").strip()
+    if version != "v1":
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_TELEMETRY_VERSION_UNSUPPORTED",
+                severity="high",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell telemetry has an unsupported version",
+                explanation=(
+                    "The deterministic audit can validate only the v1 three-layer "
+                    "immediate-sell contract."
+                ),
+                observed_value=version or "missing",
+                expected_value="v1",
+                blocking=True,
+                evidence_pointers=[f"{strategy_pointer}/version"],
+            )
+        )
+        return findings
+
+    raw_attempts = strategy.get("attempts")
+    attempts = (
+        [item for item in raw_attempts if isinstance(item, dict)]
+        if isinstance(raw_attempts, list)
+        else []
+    )
+    sequences = [_int(item.get("sequence")) for item in attempts]
+    layers = [str(item.get("layer") or "").strip() for item in attempts]
+    paths = [str(item.get("path") or "").strip() for item in attempts]
+    results = [str(item.get("result") or "").strip() for item in attempts]
+    expected_attempt_count = len(attempts)
+    expected_sequences = list(range(1, expected_attempt_count + 1))
+    expected_layers = list(_IMMEDIATE_SELL_LAYERS[:expected_attempt_count])
+    expected_paths = list(_IMMEDIATE_SELL_PATHS[:expected_attempt_count])
+    sequence_invalid = (
+        not isinstance(raw_attempts, list)
+        or len(attempts) != len(raw_attempts)
+        or expected_attempt_count == 0
+        or expected_attempt_count > len(_IMMEDIATE_SELL_LAYERS)
+        or sequences != expected_sequences
+        or layers != expected_layers
+        or paths != expected_paths
+        or len(set(layers)) != len(layers)
+        or any(result not in _IMMEDIATE_SELL_RESULTS for result in results)
+    )
+    if sequence_invalid:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_FALLBACK_SEQUENCE_INVALID",
+                severity="critical",
+                stage="stage-3",
+                category="duplicate-prevention",
+                title="Immediate-sell fallback sequence is invalid",
+                explanation=(
+                    "The strategy must make one bounded, ordered pass through primary "
+                    "market sell, secondary max market sell, and tertiary FAK limit "
+                    "sell, with no duplicate layer or fourth execution path."
+                ),
+                observed_value=(
+                    f"sequences={sequences}; layers={layers}; paths={paths}; "
+                    f"results={results}"
+                ),
+                expected_value=(
+                    "ordered prefix of primary/market_sell_explicit, "
+                    "secondary/market_sell_max, tertiary/limit_sell_fak"
+                ),
+                blocking=True,
+                evidence_pointers=[f"{strategy_pointer}/attempts"],
+            )
+        )
+
+    missing_evidence: list[dict[str, object]] = []
+    for attempt_index, attempt in enumerate(attempts):
+        missing_fields = [
+            key
+            for key in _IMMEDIATE_SELL_REQUIRED_ATTEMPT_STRINGS
+            if not isinstance(attempt.get(key), str)
+            or not str(attempt.get(key)).strip()
+        ]
+        if not isinstance(attempt.get("safe_to_fallback"), bool):
+            missing_fields.append("safe_to_fallback")
+        if _int(attempt.get("sequence")) is None:
+            missing_fields.append("sequence")
+        if missing_fields:
+            missing_evidence.append(
+                {
+                    "attempt_index": attempt_index,
+                    "missing_or_invalid_fields": sorted(set(missing_fields)),
+                }
+            )
+    if missing_evidence:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_FALLBACK_EVIDENCE_MISSING",
+                severity="high",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell fallback is missing trigger evidence",
+                explanation=(
+                    "Every in-worker layer must record its sequence, path, result, "
+                    "reason, validation, safety decision, provider, and timestamps."
+                ),
+                blocking=True,
+                evidence_pointers=[f"{strategy_pointer}/attempts"],
+                detection_metadata={"attempts": missing_evidence},
+            )
+        )
+
+    recorded_fallback_count = _int(strategy.get("fallback_count"))
+    observed_fallback_count = sum(
+        1 for result in results[:-1] if result == "fallback"
+    )
+    if (
+        recorded_fallback_count is None
+        or recorded_fallback_count < 0
+        or recorded_fallback_count > 2
+        or recorded_fallback_count != observed_fallback_count
+    ):
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_FALLBACK_COUNT_MISMATCH",
+                severity="high",
+                stage="stage-3",
+                category="execution-aggregation",
+                title="Immediate-sell fallback count contradicts its layer results",
+                explanation=(
+                    "fallback_count must equal the number of layers that explicitly "
+                    "validated a safe transition to the next bounded path."
+                ),
+                observed_value=str(strategy.get("fallback_count")),
+                expected_value=str(observed_fallback_count),
+                blocking=True,
+                evidence_pointers=[
+                    f"{strategy_pointer}/fallback_count",
+                    f"{strategy_pointer}/attempts",
+                ],
+            )
+        )
+
+    unsafe_transitions: list[int] = []
+    terminal_fallthroughs: list[int] = []
+    for attempt_index, attempt in enumerate(attempts):
+        result = str(attempt.get("result") or "").strip()
+        safe_to_fallback = attempt.get("safe_to_fallback")
+        has_later_layer = attempt_index < len(attempts) - 1
+        if result == "fallback":
+            final_verified_failure = (
+                not has_later_layer
+                and attempt_index == len(_IMMEDIATE_SELL_LAYERS) - 1
+                and str(attempt.get("layer") or "") == "tertiary"
+                and str(attempt.get("path") or "") == "limit_sell_fak"
+                and order.get("status") == "FAILED_PERMANENT"
+                and strategy.get("selected_layer") is None
+                and strategy.get("execution_path") is None
+            )
+            if safe_to_fallback is not True or (
+                not has_later_layer and not final_verified_failure
+            ):
+                unsafe_transitions.append(attempt_index)
+        else:
+            if safe_to_fallback is not False:
+                unsafe_transitions.append(attempt_index)
+            if has_later_layer and result in {
+                "accepted",
+                "provider_retry_required",
+                "ambiguous",
+            }:
+                terminal_fallthroughs.append(attempt_index)
+    if unsafe_transitions:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_UNSAFE_FALLBACK",
+                severity="critical",
+                stage="stage-3",
+                category="duplicate-prevention",
+                title="Immediate-sell fallback safety decision is inconsistent",
+                explanation=(
+                    "Only a non-final result='fallback' layer with "
+                    "safe_to_fallback=true may advance. Accepted, ambiguous, and "
+                    "provider-retry results must stop the in-provider sequence."
+                ),
+                blocking=True,
+                evidence_pointers=[
+                    f"{strategy_pointer}/attempts/{index}"
+                    for index in unsafe_transitions
+                ],
+            )
+        )
+    if terminal_fallthroughs:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_TERMINAL_RESULT_FELL_THROUGH",
+                severity="critical",
+                stage="stage-3",
+                category="duplicate-prevention",
+                title="Immediate-sell execution continued after a terminal result",
+                explanation=(
+                    "An accepted write, ambiguous write, or provider-level retry "
+                    "result must reconcile or retry durably; it must never issue the "
+                    "next in-worker sell path."
+                ),
+                blocking=True,
+                evidence_pointers=[
+                    f"{strategy_pointer}/attempts/{index}"
+                    for index in terminal_fallthroughs
+                ],
+            )
+        )
+
+    selected_layer = strategy.get("selected_layer")
+    execution_path = strategy.get("execution_path")
+    accepted_indexes = [
+        index for index, result in enumerate(results) if result == "accepted"
+    ]
+    selected_invalid = False
+    if accepted_indexes:
+        accepted_index = accepted_indexes[-1]
+        selected_invalid = (
+            len(accepted_indexes) != 1
+            or accepted_index != len(attempts) - 1
+            or selected_layer != layers[accepted_index]
+            or execution_path != paths[accepted_index]
+        )
+    else:
+        selected_invalid = selected_layer is not None or execution_path is not None
+    if selected_invalid:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_SELECTED_PATH_INVALID",
+                severity="critical",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell selected layer does not match the accepted path",
+                explanation=(
+                    "selected_layer and execution_path must identify the one final "
+                    "accepted attempt, or both remain null when no layer was accepted."
+                ),
+                observed_value=(
+                    f"selected_layer={selected_layer}; execution_path={execution_path}; "
+                    f"accepted_indexes={accepted_indexes}"
+                ),
+                expected_value="the final accepted layer and path, or null/null",
+                blocking=True,
+                evidence_pointers=[
+                    f"{strategy_pointer}/selected_layer",
+                    f"{strategy_pointer}/execution_path",
+                    f"{strategy_pointer}/attempts",
+                ],
+            )
+        )
+
+    durable_attempts = (
+        order.get("attempts") if isinstance(order.get("attempts"), list) else []
+    )
+    durable_attempt_rows = [
+        item for item in durable_attempts if isinstance(item, dict)
+    ]
+    mirrored_attempt_rows = []
+    for durable_attempt in durable_attempt_rows:
+        response_json = durable_attempt.get("sanitized_response_json")
+        if (
+            isinstance(response_json, dict)
+            and "_stage3_immediate_sell" in response_json
+        ):
+            mirrored_attempt_rows.append(durable_attempt)
+    owning_attempt = (
+        max(
+            mirrored_attempt_rows,
+            key=lambda item: _int(item.get("attempt_number")) or 0,
+        )
+        if mirrored_attempt_rows
+        else None
+    )
+    mirrored_strategy: object = None
+    if owning_attempt is not None:
+        response_json = owning_attempt.get("sanitized_response_json")
+        if isinstance(response_json, dict):
+            mirrored_strategy = response_json.get("_stage3_immediate_sell")
+    if mirrored_strategy is None:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_ATTEMPT_MIRROR_MISSING",
+                severity="high",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell telemetry has no owning order attempt",
+                explanation=(
+                    "The intent-level strategy must be mirrored by the durable order "
+                    "attempt that ran it. A later retry that stops in preflight may "
+                    "legitimately have no immediate-sell response."
+                ),
+                blocking=True,
+                evidence_pointers=[
+                    strategy_pointer,
+                    f"/stage_3/order_intents/{order_index}/attempts",
+                ],
+            )
+        )
+    elif mirrored_strategy != strategy:
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_ATTEMPT_MIRROR_MISMATCH",
+                severity="high",
+                stage="stage-3",
+                category="execution-audit",
+                title="Immediate-sell intent and attempt telemetry disagree",
+                explanation=(
+                    "The two durable copies of the bounded fallback trace must be "
+                    "identical for deterministic reconstruction."
+                ),
+                blocking=True,
+                evidence_pointers=[
+                    strategy_pointer,
+                    (
+                        f"/stage_3/order_intents/{order_index}/attempts/"
+                        "_latest_with_immediate_sell/sanitized_response_json/"
+                        "_stage3_immediate_sell"
+                    ),
+                ],
+            )
+        )
+
+    if observed_fallback_count > 0:
+        fallback_reasons = [
+            str(attempt.get("reason"))
+            for attempt in attempts
+            if attempt.get("result") == "fallback"
+        ]
+        findings.append(
+            _finding(
+                code="STAGE3_IMMEDIATE_SELL_FALLBACK_USED",
+                severity="info",
+                stage="stage-3",
+                category="execution-fallback",
+                title="Stage 3 used an immediate-sell fallback",
+                explanation=(
+                    "A preferred immediate-sell path returned a validated safe "
+                    "fallback result, so the next bounded path was attempted."
+                ),
+                observed_value=(
+                    f"fallback_count={observed_fallback_count}; "
+                    f"selected_layer={selected_layer}"
+                ),
+                evidence_pointers=[strategy_pointer],
+                detection_metadata={"fallback_reasons": fallback_reasons},
+            )
+        )
+
+    return findings
+
+
 def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, object]]:
     findings: list[dict[str, object]] = []
     metadata = bundle.get("metadata") if isinstance(bundle.get("metadata"), dict) else {}
@@ -944,6 +1379,12 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         idempotency_key = order.get("idempotency_key")
         if isinstance(idempotency_key, str) and len(idempotency_key) > 128:
             oversized_idempotency_keys.append((index, len(idempotency_key)))
+        findings.extend(
+            _immediate_sell_strategy_findings(
+                order=order,
+                order_index=index,
+            )
+        )
 
     if orphan_intents > 0:
         findings.append(

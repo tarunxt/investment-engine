@@ -9,6 +9,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.bullpen_run_audit.constants import (
     AUDIT_SECTION_KEYS,
     AUDITED_ALGORITHM_REGISTRY,
+    BULLPEN_RUN_AUDIT_SCHEMA_VERSION,
 )
 from app.domains.bullpen_run_audit.prompt_builder import (
     REQUIRED_REPORT_KEYS,
@@ -63,6 +64,109 @@ def _feedback_report_payload() -> dict[str, object]:
         "recommended_tests": [],
         "priority_plan": [],
         "codex_prompt": "Fix the pipeline",
+    }
+
+
+def _immediate_sell_attempt(
+    sequence: int,
+    *,
+    result: str,
+    safe_to_fallback: bool,
+) -> dict[str, object]:
+    layer = ("primary", "secondary", "tertiary")[sequence - 1]
+    path = (
+        "market_sell_explicit",
+        "market_sell_max",
+        "limit_sell_fak",
+    )[sequence - 1]
+    return {
+        "sequence": sequence,
+        "layer": layer,
+        "path": path,
+        "result": result,
+        "reason": f"{path}:{result}",
+        "validation": (
+            "no_remote_write_safe_to_fallback"
+            if safe_to_fallback
+            else "terminal_result_stop"
+        ),
+        "safe_to_fallback": safe_to_fallback,
+        "provider_alias": "rpc-1",
+        "started_at": f"2026-07-26T10:00:0{sequence}+00:00",
+        "completed_at": f"2026-07-26T10:00:0{sequence + 1}+00:00",
+    }
+
+
+def _immediate_sell_strategy(
+    attempts: list[dict[str, object]],
+    *,
+    selected_layer: str | None,
+    execution_path: str | None,
+) -> dict[str, object]:
+    return {
+        "version": "v1",
+        "selected_layer": selected_layer,
+        "execution_path": execution_path,
+        "fallback_count": sum(
+            1 for attempt in attempts[:-1] if attempt.get("result") == "fallback"
+        ),
+        "attempts": attempts,
+    }
+
+
+def _immediate_sell_bundle(
+    strategy: dict[str, object] | None,
+    *,
+    mirror: dict[str, object] | None = None,
+    order_status: str = "SUBMITTED",
+    durable_attempts: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    execution_metadata = (
+        {"immediate_sell_strategy": strategy}
+        if strategy is not None
+        else {}
+    )
+    response_json = (
+        {"_stage3_immediate_sell": mirror if mirror is not None else strategy}
+        if strategy is not None
+        else {}
+    )
+    return {
+        "metadata": {
+            "run_id": "run-immediate-sell",
+            "snapshot_schema_version": 2,
+        },
+        "overview": {
+            "run_status": "confirming",
+            "started_at": "2026-07-26T10:00:00+00:00",
+            "completed_at": None,
+            "duration_seconds": None,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_2": {"candidate_reviews": []},
+        "stage_3": {
+            "decisions": [],
+            "max_positions": 10,
+            "order_intents": [
+                {
+                    "id": "sell-intent-1",
+                    "action": "sell",
+                    "status": order_status,
+                    "idempotency_key": "auto-live:v2:sell-intent-1",
+                    "execution_metadata_json": execution_metadata,
+                    "attempts": durable_attempts
+                    if durable_attempts is not None
+                    else [
+                        {
+                            "attempt_number": 1,
+                            "sanitized_response_json": response_json,
+                        }
+                    ],
+                }
+            ],
+        },
+        "raw": {},
     }
 
 
@@ -221,6 +325,274 @@ def test_build_deterministic_findings_validates_bounded_execution_handoffs():
     assert "RUN_HANDOFF_FALLBACK_SEQUENCE_INVALID" in invalid_codes
     assert "RUN_HANDOFF_TERTIARY_NOT_FAIL_CLOSED" in invalid_codes
     assert "RUN_START_IDEMPOTENCY_ID_MISMATCH" in invalid_codes
+
+
+def test_immediate_sell_audit_accepts_primary_and_legacy_intents():
+    primary_attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="accepted",
+            safe_to_fallback=False,
+        )
+    ]
+    primary_strategy = _immediate_sell_strategy(
+        primary_attempts,
+        selected_layer="primary",
+        execution_path="market_sell_explicit",
+    )
+
+    primary_codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(primary_strategy)
+        )
+        if str(finding["code"]).startswith("STAGE3_IMMEDIATE_SELL")
+    }
+    legacy_codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(None)
+        )
+        if str(finding["code"]).startswith("STAGE3_IMMEDIATE_SELL")
+    }
+
+    assert primary_codes == set()
+    assert legacy_codes == set()
+
+
+def test_immediate_sell_audit_records_valid_secondary_fallback():
+    attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="fallback",
+            safe_to_fallback=True,
+        ),
+        _immediate_sell_attempt(
+            2,
+            result="accepted",
+            safe_to_fallback=False,
+        ),
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer="secondary",
+        execution_path="market_sell_max",
+    )
+
+    findings = build_deterministic_findings(_immediate_sell_bundle(strategy))
+    immediate_findings = {
+        finding["code"]: finding
+        for finding in findings
+        if str(finding["code"]).startswith("STAGE3_IMMEDIATE_SELL")
+    }
+
+    assert set(immediate_findings) == {"STAGE3_IMMEDIATE_SELL_FALLBACK_USED"}
+    assert immediate_findings["STAGE3_IMMEDIATE_SELL_FALLBACK_USED"][
+        "detection_metadata"
+    ] == {"fallback_reasons": ["market_sell_explicit:fallback"]}
+
+
+def test_immediate_sell_audit_accepts_bounded_tertiary_fallback():
+    attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="fallback",
+            safe_to_fallback=True,
+        ),
+        _immediate_sell_attempt(
+            2,
+            result="fallback",
+            safe_to_fallback=True,
+        ),
+        _immediate_sell_attempt(
+            3,
+            result="accepted",
+            safe_to_fallback=False,
+        ),
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer="tertiary",
+        execution_path="limit_sell_fak",
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(strategy)
+        )
+        if str(finding["code"]).startswith("STAGE3_IMMEDIATE_SELL")
+    }
+
+    assert codes == {"STAGE3_IMMEDIATE_SELL_FALLBACK_USED"}
+
+
+def test_immediate_sell_audit_accepts_verified_tertiary_exhaustion():
+    attempts = [
+        _immediate_sell_attempt(
+            sequence,
+            result="fallback",
+            safe_to_fallback=True,
+        )
+        for sequence in (1, 2, 3)
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer=None,
+        execution_path=None,
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(
+                strategy,
+                order_status="FAILED_PERMANENT",
+            )
+        )
+        if str(finding["code"]).startswith("STAGE3_IMMEDIATE_SELL")
+    }
+
+    assert strategy["fallback_count"] == 2
+    assert codes == {"STAGE3_IMMEDIATE_SELL_FALLBACK_USED"}
+
+
+def test_immediate_sell_audit_rejects_stopping_after_safe_primary_failure():
+    attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="fallback",
+            safe_to_fallback=True,
+        )
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer=None,
+        execution_path=None,
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(
+                strategy,
+                order_status="FAILED_PERMANENT",
+            )
+        )
+    }
+
+    assert "STAGE3_IMMEDIATE_SELL_UNSAFE_FALLBACK" in codes
+
+
+def test_immediate_sell_audit_rejects_terminal_fallthrough_and_bad_selection():
+    attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="ambiguous",
+            safe_to_fallback=False,
+        ),
+        _immediate_sell_attempt(
+            2,
+            result="accepted",
+            safe_to_fallback=False,
+        ),
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer="primary",
+        execution_path="market_sell_explicit",
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(strategy)
+        )
+    }
+
+    assert "STAGE3_IMMEDIATE_SELL_TERMINAL_RESULT_FELL_THROUGH" in codes
+    assert "STAGE3_IMMEDIATE_SELL_SELECTED_PATH_INVALID" in codes
+
+
+def test_immediate_sell_audit_rejects_unbounded_sequence_and_attempt_mismatch():
+    attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="fallback",
+            safe_to_fallback=True,
+        ),
+        {
+            **_immediate_sell_attempt(
+                2,
+                result="accepted",
+                safe_to_fallback=False,
+            ),
+            "layer": "primary",
+            "path": "market_sell_explicit",
+        },
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer="primary",
+        execution_path="market_sell_explicit",
+    )
+    mismatched_mirror = {
+        **strategy,
+        "fallback_count": 0,
+    }
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(
+                strategy,
+                mirror=mismatched_mirror,
+            )
+        )
+    }
+
+    assert "STAGE3_IMMEDIATE_SELL_FALLBACK_SEQUENCE_INVALID" in codes
+    assert "STAGE3_IMMEDIATE_SELL_ATTEMPT_MIRROR_MISMATCH" in codes
+
+
+def test_immediate_sell_audit_binds_strategy_to_write_attempt_before_later_preflight_failure():
+    attempts = [
+        _immediate_sell_attempt(
+            1,
+            result="accepted",
+            safe_to_fallback=False,
+        )
+    ]
+    strategy = _immediate_sell_strategy(
+        attempts,
+        selected_layer="primary",
+        execution_path="market_sell_explicit",
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _immediate_sell_bundle(
+                strategy,
+                durable_attempts=[
+                    {
+                        "attempt_number": 1,
+                        "sanitized_response_json": {
+                            "_stage3_immediate_sell": strategy,
+                        },
+                    },
+                    {
+                        "attempt_number": 2,
+                        "error_code": "DOCTOR_READ_FAILED",
+                        "sanitized_response_json": {},
+                    },
+                ],
+            )
+        )
+        if str(finding["code"]).startswith("STAGE3_IMMEDIATE_SELL")
+    }
+
+    assert codes == set()
 
 
 def test_build_deterministic_findings_flags_missing_stage2_top10_handoff_decision():
@@ -725,6 +1097,7 @@ def test_build_bundle_projects_stage3_handoff_checkpoint_without_rewriting_legac
 
 
 def test_algorithm_registry_contains_required_audit_keys():
+    assert BULLPEN_RUN_AUDIT_SCHEMA_VERSION == 2
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert keys >= {
         "run_execution_handoff_fallback",
@@ -739,6 +1112,7 @@ def test_algorithm_registry_contains_required_audit_keys():
         "position_returns_per_day",
         "stage3_rank_and_selection",
         "order_funnel_aggregation",
+        "stage3_immediate_sell_fallback",
         "stage3_bullpen_response_normalization",
         "stage3_verified_remote_absence_retry",
         "stage3_reconciliation_generation_guard",

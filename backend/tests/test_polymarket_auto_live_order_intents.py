@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +16,7 @@ from app.domains.polymarket_auto_live.order_intents import (
 from app.domains.polymarket_auto_live.order_intent_service import (
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
+    _automatic_attempt_budget_allows,
     _cancel_unsubmitted_intent_for_user,
     _assert_intent_has_no_persisted_submission_reference,
     _assert_intent_retry_allowed,
@@ -436,3 +438,41 @@ def test_persisted_execution_step_completed_detail_omits_persisted_records_copy(
 
     assert step["status"] == "completed"
     assert step["detail"] == ""
+
+
+def test_automatic_attempt_budget_is_bounded_and_preserves_legacy_zero_budget():
+    now = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
+    legacy = SimpleNamespace(
+        max_attempts=0,
+        attempt_count=0,
+        status="READY",
+        retryable=True,
+        next_attempt_at=now,
+        terminal_at=None,
+        last_error_code=None,
+        last_error_message=None,
+        action="sell",
+        execution_metadata_json={},
+    )
+    exhausted = SimpleNamespace(
+        max_attempts=2,
+        attempt_count=2,
+        status="RETRY_WAIT",
+        retryable=True,
+        next_attempt_at=now,
+        terminal_at=None,
+        last_error_code=None,
+        last_error_message=None,
+        action="sell",
+        execution_metadata_json={},
+    )
+
+    assert _automatic_attempt_budget_allows(legacy, now=now) is True
+    assert legacy.max_attempts == 1
+
+    assert _automatic_attempt_budget_allows(exhausted, now=now) is False
+    assert exhausted.status == "FAILED_PERMANENT"
+    assert exhausted.retryable is False
+    assert exhausted.next_attempt_at is None
+    assert exhausted.last_error_code == "ATTEMPT_BUDGET_EXHAUSTED"
+    assert exhausted.execution_metadata_json["attempt_budget_exhausted"] is True

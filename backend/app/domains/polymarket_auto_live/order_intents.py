@@ -148,6 +148,7 @@ class AutoLiveExecutorError(Exception):
     retry_after_seconds: int | None = None
     ambiguous_submission: bool = False
     provider_alias: str | None = None
+    fallback_history: tuple[dict[str, object], ...] = ()
 
     def __str__(self) -> str:
         return self.message
@@ -343,6 +344,16 @@ def build_order_plan_from_intent(
     existing: BullpenAutoLiveOrderPlan,
     intent: BullpenAutoLiveOrderIntent,
 ) -> BullpenAutoLiveOrderPlan:
+    immediate_sell_strategy = intent.execution_metadata_json.get(
+        "immediate_sell_strategy"
+    )
+    fallback_history = existing.fallback_history
+    if isinstance(immediate_sell_strategy, dict):
+        raw_attempts = immediate_sell_strategy.get("attempts")
+        if isinstance(raw_attempts, list):
+            fallback_history = [
+                dict(attempt) for attempt in raw_attempts if isinstance(attempt, dict)
+            ]
     return existing.model_copy(
         update={
             "status": intent_status_to_order_plan_status(intent.status),
@@ -366,6 +377,12 @@ def build_order_plan_from_intent(
             "provider_alias": str(intent.execution_metadata_json.get("provider_alias"))
             if intent.execution_metadata_json.get("provider_alias")
             else existing.provider_alias,
+            "execution_path": (
+                str(intent.execution_metadata_json.get("execution_path"))
+                if intent.execution_metadata_json.get("execution_path")
+                else existing.execution_path
+            ),
+            "fallback_history": fallback_history,
             "latest_error_code": intent.last_error_code,
             "dependency_state": str(intent.dependency_metadata_json.get("state"))
             if intent.dependency_metadata_json.get("state") is not None

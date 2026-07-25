@@ -322,6 +322,48 @@ def test_periodic_execution_and_reconciliation_scanners_have_disjoint_status_set
     assert set(scanned_statuses[0]).isdisjoint(set(scanned_statuses[1]))
 
 
+def test_immediate_run_dispatch_is_run_scoped_and_reports_actual_publish_count(
+    monkeypatch,
+):
+    class _SessionContext:
+        def __enter__(self):
+            return object()
+
+        def __exit__(self, *_args):
+            return False
+
+    due_requests: list[dict[str, object]] = []
+    enqueue_requests: list[tuple[list[str], str]] = []
+
+    monkeypatch.setattr(tasks, "SyncSessionLocal", _SessionContext)
+
+    def list_due(_session, **kwargs):
+        due_requests.append(kwargs)
+        return ["intent-current-run-1", "intent-current-run-2"]
+
+    monkeypatch.setattr(tasks, "list_due_order_intent_ids_sync", list_due)
+    monkeypatch.setattr(
+        tasks,
+        "_enqueue_execute_order_intents",
+        lambda ids, *, source: (
+            enqueue_requests.append((list(ids), source)),
+            1,
+        )[1],
+    )
+
+    queued = tasks._queue_due_order_intents_for_run_sync("run-current", limit=10)
+
+    assert queued == 1
+    assert due_requests[0]["run_id"] == "run-current"
+    assert due_requests[0]["limit"] == 10
+    assert enqueue_requests == [
+        (
+            ["intent-current-run-1", "intent-current-run-2"],
+            "immediate-run-execution",
+        )
+    ]
+
+
 def test_worker_entry_lease_serializes_reconciliation_with_submission(monkeypatch):
     _install_fake_redis(monkeypatch)
     execution_task = SimpleNamespace(request=SimpleNamespace(id="execute-task"))

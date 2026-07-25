@@ -2484,6 +2484,8 @@ export interface BullpenAutoLiveOrderPlan {
   remote_order_id?: string | null;
   remote_transaction_hash?: string | null;
   provider_alias?: string | null;
+  execution_path?: string | null;
+  fallback_history?: Array<Record<string, unknown>> | null;
   latest_error_code?: BullpenAutoLiveExecutorErrorCode | string | null;
   dependency_state?: string | null;
   reservation_state?: BullpenAutoLiveReservationStatus | string | null;

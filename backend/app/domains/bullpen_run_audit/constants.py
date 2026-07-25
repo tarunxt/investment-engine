@@ -3,10 +3,12 @@ from __future__ import annotations
 from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
-BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = "2026-07-25-run-handoff-fallback-v17"
+BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
+    "2026-07-26-stage3-immediate-sell-fallback-v18"
+)
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-25-run-handoff-fallback-v17"
+    "2026-07-26-stage3-immediate-sell-fallback-v18"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -171,6 +173,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "label": "Bullpen CLI Stage 3 market-reference selection",
     },
     {
+        "algorithm_key": "stage3_immediate_sell_fallback",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.immediate_sell",
+        "source_function": "submit_immediate_sell_with_fallbacks",
+        "label": "Bounded primary, secondary, and tertiary immediate-sell execution",
+    },
+    {
         "algorithm_key": "stage3_auth_recovery_intent_preservation",
         "stage": "stage-3",
         "algorithm_version": "v3",
@@ -314,11 +324,13 @@ DEFAULT_MANUAL_CHECKS: Final[tuple[dict[str, str], ...]] = (
 
 BULLPEN_AUDIT_CRITICAL_SOURCE_FILES: Final[tuple[str, ...]] = (
     "backend/app/domains/polymarket_auto_live/bot.py",
+    "backend/app/domains/polymarket_auto_live/immediate_sell.py",
     "backend/app/domains/polymarket_auto_live/run_handoff.py",
     "backend/app/domains/polymarket_auto_live/engine.py",
     "backend/app/domains/polymarket_auto_live/tasks.py",
     "backend/app/domains/polymarket_auto_live/order_intent_service.py",
     "backend/app/domains/polymarket_auto_live/run_recovery.py",
+    "backend/app/domains/polymarket/bullpen.py",
     "backend/app/domains/polymarket/runtime_broker.py",
     "backend/app/domains/polymarket/bullpen_llm_execution.py",
     "backend/app/domains/bullpen_run_audit/service.py",

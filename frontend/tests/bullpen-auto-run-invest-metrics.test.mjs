@@ -24,6 +24,27 @@ async function loadInvestMetricsModule() {
   );
 }
 
+async function loadStage3SellExecutionModule() {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenStage3SellExecution.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const { outputText } = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: "bullpenStage3SellExecution.ts",
+  });
+
+  return import(
+    `data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`,
+  );
+}
+
 function createDecision({
   id,
   action = null,
@@ -322,5 +343,123 @@ test("Stage 2 transfer queue metric definitions explain conditions, prerequisite
   assert.match(waitingBlocked.summary, /do not yet have a concrete buy plan/i);
   assert.ok(
     waitingBlocked.workflow.some((item) => /latest blocker or missing-handoff reason/i.test(item)),
+  );
+});
+
+test("Stage 3 sell execution telemetry labels each bounded path and its fallback reason", async () => {
+  const { getBullpenStage3SellExecutionTelemetry } =
+    await loadStage3SellExecutionModule();
+  const primary = getBullpenStage3SellExecutionTelemetry({
+    action: "sell",
+    execution_path: "market_sell_explicit",
+    fallback_history: [
+      {
+        sequence: 1,
+        layer: "primary",
+        path: "market_sell_explicit",
+        result: "accepted",
+      },
+    ],
+  });
+  const secondary = getBullpenStage3SellExecutionTelemetry({
+    action: "sell",
+    execution_path: "market_sell_max",
+    fallback_history: [
+      {
+        sequence: 1,
+        layer: "primary",
+        path: "market_sell_explicit",
+        result: "fallback",
+        reason:
+          "The primary response did not contain a remote order reference.",
+        safe_to_fallback: true,
+      },
+      {
+        sequence: 2,
+        layer: "secondary",
+        path: "market_sell_max",
+        result: "accepted",
+      },
+    ],
+  });
+  const tertiary = getBullpenStage3SellExecutionTelemetry({
+    action: "sell",
+    execution_path: "limit_sell_fak",
+    fallback_history: [
+      {
+        layer: "primary",
+        path: "market_sell_explicit",
+        result: "fallback",
+        reason: "Explicit-share market sell is unsupported.",
+        safe_to_fallback: true,
+      },
+      {
+        layer: "secondary",
+        path: "market_sell_max",
+        result: "fallback",
+        validation: "The max-share market sell failed before any remote write.",
+        safe_to_fallback: true,
+      },
+      {
+        layer: "tertiary",
+        path: "limit_sell_fak",
+        result: "accepted",
+      },
+    ],
+  });
+
+  assert.deepEqual(primary, {
+    label: "Primary market sell",
+    reason: null,
+    sequence: 1,
+  });
+  assert.deepEqual(secondary, {
+    label: "Fallback 2/3",
+    reason: "The primary response did not contain a remote order reference.",
+    sequence: 2,
+  });
+  assert.deepEqual(tertiary, {
+    label: "Fallback 3/3",
+    reason: "The max-share market sell failed before any remote write.",
+    sequence: 3,
+  });
+});
+
+test("legacy and non-sell Stage 3 rows do not gain execution telemetry", async () => {
+  const { getBullpenStage3SellExecutionTelemetry } =
+    await loadStage3SellExecutionModule();
+
+  assert.equal(
+    getBullpenStage3SellExecutionTelemetry({
+      action: "sell",
+      execution_path: null,
+      fallback_history: null,
+    }),
+    null,
+  );
+  assert.equal(
+    getBullpenStage3SellExecutionTelemetry({
+      action: "buy",
+      execution_path: "market_sell_max",
+      fallback_history: [],
+    }),
+    null,
+  );
+});
+
+test("Stage 3 order and detail cells render immediate-sell telemetry", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /getBullpenStage3SellExecutionTelemetry/);
+  assert.match(source, /Fallback reason:/);
+  assert.ok(
+    source.match(/<Stage3SellExecutionTelemetry[\s\S]*?decision=\{decision\}/g)
+      ?.length >= 3,
   );
 });
