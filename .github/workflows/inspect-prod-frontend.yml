@@ -63,6 +63,30 @@ jobs:
             sudo test -d "$APP/frontend"
             echo "$APP"
 
+            echo "==> Frontend build slots"
+            if sudo test -f "$APP/frontend/.next-active-dir"; then
+              printf 'active_pointer='
+              sudo -u "$APP_SERVICE_USER" -H tr -d '\r\n' \
+                <"$APP/frontend/.next-active-dir"
+              printf '\n'
+            else
+              echo "active_pointer=<missing>"
+            fi
+            for slot in .next .next-candidate; do
+              slot_path="$APP/frontend/$slot"
+              if sudo test -d "$slot_path"; then
+                sudo find "$slot_path" -maxdepth 1 -mindepth 1 \
+                  -printf "$slot/%f %y %s bytes\n" | sort
+                if sudo test -f "$slot_path/server.js"; then
+                  echo "$slot/server.js=present"
+                else
+                  echo "$slot/server.js=missing"
+                fi
+              else
+                echo "$slot=<missing>"
+              fi
+            done
+
             echo "==> Filesystem capacity"
             df -h "$APP"
             sudo du -x -h -d 1 "$APP" /var /tmp 2>/dev/null | sort -h | tail -n 80 || true
