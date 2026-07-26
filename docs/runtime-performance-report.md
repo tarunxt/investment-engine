@@ -126,7 +126,13 @@ is not claimed as a material desktop improvement.
    seconds on the configured transport and then start a second timeout on the
    proxy. The direct API is currently healthy, so this was a latent high-severity
    tail-latency defect rather than the median production bottleneck.
-5. **Single-host data growth and process leakage.** Production inspection found
+5. **Burst CPU contention on the shared host.** The production `t3.large` has two
+   vCPUs. During the read-only snapshot, two AI/email Celery children each used
+   approximately one full CPU and `vmstat` recorded 71% CPU steal for four
+   consecutive samples. Load was 3.20 on two vCPUs. This explains intermittent
+   backend and database scheduling delay during worker bursts, although it does
+   not explain the dashboard's deterministic browser delay.
+6. **Single-host data growth and process leakage.** Production inspection found
    `aidb` at 5.497 GB, `bullpen_run_audit_blobs` at 4.595 GB (almost entirely
    TOAST), and `polymarket_auto_live_runs` at 785 MB. It also found a stale Next
    process rooted in a deleted release directory. These are operational risks,
@@ -210,6 +216,32 @@ retention decision.
 - No database index was added without an `EXPLAIN ANALYZE` plan proving value.
 - Process counts and EC2 size were not changed speculatively.
 
+## Production host and data-service evidence
+
+The branch's read-only production inspection ran through the existing
+GitHub-to-host workflow. It recorded:
+
+- a `t3.large` in `ap-south-1b`, with two vCPUs, seven Celery worker processes,
+  one Uvicorn worker, and two stale `next start` shell processes;
+- 7.6 GiB RAM with 5.2 GiB available; 593 MiB of swap allocated but no swap-in or
+  swap-out during the samples; 19% disk use and 0% I/O wait;
+- two active Celery children at 98-100% CPU while the guest received only 29% CPU
+  and reported 71% steal; seven-day EC2 CPU averaged 31.44% and reached 100%;
+- seven PostgreSQL connections with one active. Two Celery connections were
+  observed `idle in transaction`, which should be traced separately even though
+  connection count was not exhausted;
+- Redis latency averaging 0.20 ms, 10.19 MiB used, and no configured memory cap;
+- the 12-point INDmoney summary query at 1.424 ms. The 13-row Zerodha iterator
+  took 4.556 ms, but its end-to-end `EXPLAIN ANALYZE` elapsed time was 142.275 ms
+  while the host was CPU-starved. The plan did not scan an unbounded history, so
+  this snapshot does not justify a speculative index.
+
+Memory, disk, Redis, and PostgreSQL connection capacity were not the limiting
+resources in this sample. CPU scheduling during Celery work was. The report tool
+now records current and minimum CPU-credit values as well as seven-day averages
+so a follow-up sample can distinguish exhausted T-series credits from underlying
+host steal.
+
 ## Remaining manual infrastructure actions
 
 1. Remove the stale Next process only after confirming it is not referenced by
@@ -217,9 +249,14 @@ retention decision.
 2. Decide a retention/archive policy for Bullpen audit blobs; do not delete
    frozen audit data ad hoc.
 3. Re-run authenticated production Playwright with a secret test account.
-4. Consider separating Celery or PostgreSQL only if repeated resource snapshots
-   correlate latency with CPU, I/O wait, swap, or connection pressure.
-5. A CDN can reduce static distance/transfer time; apply only the safe rules in
+4. Run the updated resource report across several worker bursts. If CPU credits
+   reach zero with high steal again, move the AI/email Celery queue off the web
+   host or replace the burstable instance with a non-burstable instance sized
+   from p75/p95 CPU. Do not increase worker concurrency on the current two-vCPU
+   host.
+5. Trace and close Celery transactions that remain idle across task boundaries.
+   PostgreSQL did not need to be moved based on this sample alone.
+6. A CDN can reduce static distance/transfer time; apply only the safe rules in
    `docs/cdn-performance.md`.
 
 ## Security and correctness review

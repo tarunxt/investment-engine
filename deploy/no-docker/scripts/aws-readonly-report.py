@@ -139,7 +139,7 @@ def metric_summary(client: Any, instance_id: str, metric_name: str) -> dict[str,
         StartTime=start,
         EndTime=end,
         Period=3600,
-        Statistics=["Average", "Maximum"],
+        Statistics=["Average", "Maximum", "Minimum"],
     )
     datapoints = response.get("Datapoints", [])
     if not datapoints:
@@ -147,11 +147,21 @@ def metric_summary(client: Any, instance_id: str, metric_name: str) -> dict[str,
 
     averages = [float(point["Average"]) for point in datapoints if "Average" in point]
     maximums = [float(point["Maximum"]) for point in datapoints if "Maximum" in point]
+    minimums = [float(point["Minimum"]) for point in datapoints if "Minimum" in point]
     result: dict[str, float] = {}
     if averages:
         result["average"] = round(sum(averages) / len(averages), 2)
     if maximums:
         result["maximum"] = round(max(maximums), 2)
+    if minimums:
+        result["minimum"] = round(min(minimums), 2)
+    latest = max(
+        (point for point in datapoints if "Timestamp" in point and "Average" in point),
+        key=lambda point: point["Timestamp"],
+        default=None,
+    )
+    if latest:
+        result["latest"] = round(float(latest["Average"]), 2)
     return result or None
 
 
@@ -185,7 +195,8 @@ def emit_ec2_metrics(context: AwsContext, dry_run: bool) -> None:
             emit(
                 "CloudWatch CPU 7d: "
                 f"average={cpu.get('average', 'n/a')}% "
-                f"max={cpu.get('maximum', 'n/a')}%"
+                f"max={cpu.get('maximum', 'n/a')}% "
+                f"latest={cpu.get('latest', 'n/a')}%"
             )
     except Exception as exc:
         emit(
@@ -213,6 +224,10 @@ def emit_ec2_metrics(context: AwsContext, dry_run: bool) -> None:
                 credit_parts.append(f"{label}_max={stats['maximum']}")
             if "average" in stats:
                 credit_parts.append(f"{label}_avg={stats['average']}")
+            if "minimum" in stats:
+                credit_parts.append(f"{label}_min={stats['minimum']}")
+            if "latest" in stats:
+                credit_parts.append(f"{label}_latest={stats['latest']}")
         emit("CloudWatch CPU credits: " + ", ".join(credit_parts))
     except Exception as exc:
         emit(
