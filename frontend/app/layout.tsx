@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { BRAND_TITLE } from "@/lib/brand";
 import { cn } from "@/lib/utils";
-import { ClientProviders } from "@/providers/ClientProviders";
 
 export function generateMetadata(): Metadata {
   return {
@@ -32,10 +31,7 @@ export default function RootLayout({
             __html: `(function(){try{var theme=window.localStorage.getItem("investment-engine:theme-preference")||window.localStorage.getItem("investor:theme-preference")||"light";var isDark=theme==="dark"||(theme==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",isDark);document.documentElement.style.colorScheme=isDark?"dark":"light";}catch(e){}})();`,
           }}
         />
-        {/* SessionProvider must wrap AuthProvider */}
-        <ClientProviders>
-          {children}
-        </ClientProviders>
+        {children}
       </body>
     </html>
   );

@@ -20,6 +20,32 @@ jobs:
       - name: Compile backend Python sources
         run: python3 -m compileall -q backend/app
 
+  backend-performance-regressions:
+    name: Backend dashboard performance contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend test dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+
+      - name: Run compact dashboard response and degradation tests
+        env:
+          PYTHONPATH: backend
+        run: pytest -q backend/tests/test_dashboard_summary.py
+
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
     runs-on: ubuntu-latest
@@ -77,6 +103,7 @@ jobs:
         run: >-
           node --test
           tests/api-read-fallbacks.test.mjs
+          tests/runtime-performance-regressions.test.mjs
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs
           tests/rebalance-workflow-resilience.test.mjs

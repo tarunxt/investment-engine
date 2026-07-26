@@ -1,5 +1,9 @@
 import { resolveApiReadTransportCandidates, URLs } from "@/lib/urls";
 import { deriveApiErrorMessage } from "@/lib/apiErrors";
+import {
+  ApiReadCircuitBreaker,
+  getApiReadAttemptBudget,
+} from "@/lib/apiReadCircuitBreaker";
 import { isBullpenTradeAnalysisListResponse } from "@/lib/bullpenTradeAnalysisFallback";
 import {
   notifyAuthTokensRefreshed,
@@ -54,6 +58,7 @@ import {
   BullpenRunAuditRemark,
   BullpenRunAuditRemarkCreateRequest,
   BullpenRunAuditSectionResponse,
+  DashboardSummaryResponse,
   BullpenTradeAnalysisDetailResponse,
   BullpenTradeAnalysisListResponse,
   PolymarketBotState,
@@ -124,7 +129,8 @@ const devAuthDisabled =
   process.env.NODE_ENV === "development";
 const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
 const DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000;
-const DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS = 6_000;
+const DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000;
+const DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500;
 const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
 const BULLPEN_RUN_START_SECONDARY_DELAY_MS = 250;
 const BULLPEN_RUN_START_TERTIARY_DELAY_MS = 750;
@@ -470,6 +476,7 @@ function createCorrelationId() {
 // Flag to prevent infinite refresh loops
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
+const apiReadCircuitBreaker = new ApiReadCircuitBreaker();
 
 /**
  * API Service - Wrapper around URL resolver for making API calls
@@ -691,20 +698,43 @@ class apiServiceClass implements IApiService {
     url: string,
     options: ApiRequestOptions = {},
   ): Promise<T> {
-    const candidates = resolveApiReadTransportCandidates(url);
+    const candidates = apiReadCircuitBreaker.order(
+      resolveApiReadTransportCandidates(url),
+    );
+    const totalBudgetMs =
+      options.timeoutMs ?? DEFAULT_API_READ_TOTAL_TIMEOUT_MS;
+    const startedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
     let lastError: unknown = null;
 
     for (let index = 0; index < candidates.length; index += 1) {
       const candidate = candidates[index];
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      const attemptBudgetMs = getApiReadAttemptBudget({
+        startedAt,
+        now,
+        index,
+        candidateCount: candidates.length,
+        totalBudgetMs,
+        primaryAttemptBudgetMs: DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS,
+      });
+      if (attemptBudgetMs <= 0) {
+        break;
+      }
       try {
-        return await this.fetch<T>(candidate.url, {
+        const result = await this.fetch<T>(candidate.url, {
           method: "GET",
           ...options,
-          timeoutMs:
-            options.timeoutMs ?? DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS,
+          timeoutMs: attemptBudgetMs,
         });
+        apiReadCircuitBreaker.recordSuccess(candidate);
+        return result;
       } catch (error) {
         lastError = error;
+        if (isRetryableReadError(error)) {
+          apiReadCircuitBreaker.recordFailure(candidate);
+        }
         const nextCandidate = candidates[index + 1];
         if (
           !nextCandidate ||
@@ -1206,6 +1236,10 @@ class apiServiceClass implements IApiService {
     return this.get<ApiUsageSummaryResponse>(
       `${URLs.apiUsage.summary()}${query ? `?${query}` : ''}`,
     );
+  }
+
+  getDashboardSummary(): Promise<DashboardSummaryResponse> {
+    return this.get<DashboardSummaryResponse>(URLs.dashboard.summary());
   }
 
 

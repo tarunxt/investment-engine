@@ -11,6 +11,12 @@ import { validateArtifactDirectory } from "../deploy/no-docker/frontend-artifact
 
 const STARTUP_TIMEOUT_MS = 90_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const ROUTE_JAVASCRIPT_BUDGET_BYTES = {
+  login: 700_000,
+  dashboard: 1_100_000,
+  bullpen: 1_300_000,
+  automatedRebalance: 2_700_000,
+};
 
 function elapsedSeconds(startedAt) {
   return ((performance.now() - startedAt) / 1000).toFixed(2);
@@ -176,6 +182,34 @@ async function assertStaticAssets(baseUrl, assetPaths) {
     ) {
       throw new Error(`Static JS asset returned ${contentType || "<no content-type>"}`);
     }
+  }
+}
+
+async function assertRouteJavaScriptBudget(
+  baseUrl,
+  html,
+  label,
+  budgetBytes,
+) {
+  const javascriptPaths = extractStaticAssetPaths(html).filter((assetPath) =>
+    assetPath.includes(".js"),
+  );
+  let bytes = 0;
+  for (const assetPath of javascriptPaths) {
+    const response = await assertSuccessfulRoute(
+      baseUrl,
+      assetPath,
+      `${label} JavaScript asset`,
+    );
+    bytes += (await response.arrayBuffer()).byteLength;
+  }
+  console.log(
+    `${label} initial JavaScript: ${bytes} bytes (${javascriptPaths.length} files, budget ${budgetBytes})`,
+  );
+  if (bytes > budgetBytes) {
+    throw new Error(
+      `${label} initial JavaScript exceeded its ${budgetBytes}-byte budget: ${bytes}`,
+    );
   }
 }
 
@@ -460,11 +494,42 @@ async function main() {
       "Bullpen AI route runtime",
       { headers: { cookie: authenticatedCookie } },
     );
+    const automatedRebalanceHtml = await assertRenderedPage(
+      normalRuntime.baseUrl,
+      "/console/automated-rebalance",
+      "Automated rebalance route runtime",
+      { headers: { cookie: authenticatedCookie } },
+    );
+    await assertRouteJavaScriptBudget(
+      normalRuntime.baseUrl,
+      loginHtml,
+      "Login",
+      ROUTE_JAVASCRIPT_BUDGET_BYTES.login,
+    );
+    await assertRouteJavaScriptBudget(
+      normalRuntime.baseUrl,
+      dashboardHtml,
+      "Dashboard",
+      ROUTE_JAVASCRIPT_BUDGET_BYTES.dashboard,
+    );
+    await assertRouteJavaScriptBudget(
+      normalRuntime.baseUrl,
+      bullpenHtml,
+      "Bullpen AI",
+      ROUTE_JAVASCRIPT_BUDGET_BYTES.bullpen,
+    );
+    await assertRouteJavaScriptBudget(
+      normalRuntime.baseUrl,
+      automatedRebalanceHtml,
+      "Automated rebalance",
+      ROUTE_JAVASCRIPT_BUDGET_BYTES.automatedRebalance,
+    );
     const protectedAssetPaths = [
       ...new Set([
         ...extractStaticAssetPaths(loginHtml),
         ...extractStaticAssetPaths(dashboardHtml),
         ...extractStaticAssetPaths(bullpenHtml),
+        ...extractStaticAssetPaths(automatedRebalanceHtml),
       ]),
     ];
     await assertStaticAssets(normalRuntime.baseUrl, protectedAssetPaths);

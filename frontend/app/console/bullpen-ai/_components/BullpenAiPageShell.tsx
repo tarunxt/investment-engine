@@ -6,8 +6,15 @@ function BullpenAiPageFallback() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6" aria-busy="true">
       <div className="space-y-3">
-        <div className="h-4 w-36 animate-pulse rounded bg-purple-100" />
-        <div className="h-9 w-64 animate-pulse rounded bg-slate-200" />
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
+          Copy Trading Bots
+        </p>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+          Bullpen x AI
+        </h1>
+        <p className="text-sm text-slate-600">
+          Restoring interactive market controls…
+        </p>
       </div>
       <section className="rounded-3xl border border-fuchsia-100 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap gap-2">

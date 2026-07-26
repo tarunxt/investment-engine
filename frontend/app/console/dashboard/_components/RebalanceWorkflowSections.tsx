@@ -47,6 +47,10 @@ import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { LlmModelMixControls } from "@/components/shared/LlmModelMixControls";
 import MarkdownRenderer from "@/components/shared/MarkdownRenderer";
+import {
+  INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
+  ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
+} from "./dashboardEvents";
 import { LlmModelSelectionPanel } from "@/components/shared/LlmModelSelectionPanel";
 import {
   buildRebalanceInputBundle,
@@ -254,11 +258,6 @@ const MAX_ZERODHA_SYNC_POLLS = 30;
 const WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
-export const ZERODHA_DASHBOARD_SYNC_NOW_EVENT =
-  "investment-engine:dashboard:zerodha-sync-now";
-export const INDMONEY_DASHBOARD_SYNC_NOW_EVENT =
-  "investment-engine:dashboard:indmoney-sync-now";
-
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
   "threats",
