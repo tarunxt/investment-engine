@@ -1412,11 +1412,48 @@ validate_systemd_units() {
   done
 }
 
+install_rendered_nginx_site() {
+  local template="$1"
+  local target="$2"
+  local frontend_host="$3"
+  local api_host="$4"
+  local rendered
+
+  if [[ ! -f "$template" ]]; then
+    echo "Nginx site template not found: $template" >&2
+    exit 1
+  fi
+
+  case "$target" in
+    "$NGINX_CONFIG_ROOT"/*) ;;
+    *)
+      echo "Refusing to update Nginx site outside $NGINX_CONFIG_ROOT: $target" >&2
+      exit 1
+      ;;
+  esac
+
+  rendered="$(mktemp)"
+  render_nginx_template "$template" "$rendered" "$frontend_host" "$api_host"
+  if sudo test -f "$target" && sudo cmp -s "$rendered" "$target"; then
+    echo "==> Nginx site unchanged: $target"
+    rm -f "$rendered"
+    return 1
+  fi
+
+  backup_target "$target"
+  sudo install -D -m 0644 "$rendered" "$target"
+  rm -f "$rendered"
+  echo "==> Updated active Nginx site: $target"
+  return 0
+}
+
 install_or_update_nginx_template() {
   local template="$APP_ROOT/deploy/no-docker/nginx/investor.conf"
   local available="$NGINX_CONFIG_ROOT/sites-available/investor.conf"
   local enabled="$NGINX_CONFIG_ROOT/sites-enabled/investor.conf"
   local frontend_url api_url frontend_host api_host
+  local frontend_enabled api_enabled frontend_target api_target
+  local frontend_template api_template
   local available_preexisting=false
   local enabled_preexisting=false
   local rendered
@@ -1452,6 +1489,35 @@ install_or_update_nginx_template() {
   if [[ -z "$frontend_host" || -z "$api_host" ]]; then
     echo "Unable to render nginx template without frontend/api hostnames." >&2
     exit 1
+  fi
+
+  # Cred-X production predates the unified investor.conf and has two active,
+  # host-named sites. Update the files Nginx actually includes instead of
+  # silently writing an unused investor.conf beside them.
+  frontend_enabled="$NGINX_CONFIG_ROOT/sites-enabled/$frontend_host"
+  api_enabled="$NGINX_CONFIG_ROOT/sites-enabled/$api_host"
+  if sudo test -e "$frontend_enabled" && sudo test -e "$api_enabled"; then
+    frontend_target="$(sudo readlink -f "$frontend_enabled")"
+    api_target="$(sudo readlink -f "$api_enabled")"
+    if [[ -n "$frontend_target" && -n "$api_target" && "$frontend_target" != "$api_target" ]]; then
+      frontend_template="$APP_ROOT/deploy/no-docker/nginx/frontend-site.conf"
+      api_template="$APP_ROOT/deploy/no-docker/nginx/api-site.conf"
+      if install_rendered_nginx_site \
+        "$frontend_template" \
+        "$frontend_target" \
+        "$frontend_host" \
+        "$api_host"; then
+        NGINX_RELOAD_REQUIRED=true
+      fi
+      if install_rendered_nginx_site \
+        "$api_template" \
+        "$api_target" \
+        "$frontend_host" \
+        "$api_host"; then
+        NGINX_RELOAD_REQUIRED=true
+      fi
+      return
+    fi
   fi
 
   rendered="$(mktemp)"

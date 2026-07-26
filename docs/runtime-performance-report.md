@@ -184,7 +184,9 @@ The same-origin proxy remains the fallback. A per-origin circuit now:
   `Server-Timing`.
 - Nginx HTTP/2 syntax, TLS session cache, upstream keepalive, immutable hashed
   assets, JSON buffering, gzip, and explicit private/no-store rules for console,
-  Auth.js, and proxy data. WebSocket buffering remains disabled.
+  Auth.js, and proxy data. The deployment now detects and transactionally updates
+  the two host-named sites Nginx actually includes in production, rather than
+  writing only the unused generic template. WebSocket buffering remains disabled.
 - CI regression contracts for response size, bounded collections, partial
   dashboard failure, circuit behavior/recovery, deduplication, server auth,
   hidden-control mounting, Nginx policies, and per-route JavaScript budgets.
@@ -213,6 +215,10 @@ retention decision.
   still statically imported the rebalance event constants from the 5,000-line
   implementation. Moving those constants to a tiny module and removing the
   detailed dashboard workflow was the change that actually removed the chunks.
+- Editing the repository's generic `investor.conf` alone did not affect the live
+  host: effective-config inspection proved production includes separate
+  `cred-x.in` and `api.cred-x.in` sites. The deploy path now resolves, backs up,
+  validates, updates, and reloads those active targets.
 - Bullpen bundle and TBT reductions did not materially improve mobile
   interactive-ready time. More decomposition of `BullpenAiPageClient` into
   route-level islands remains necessary.
