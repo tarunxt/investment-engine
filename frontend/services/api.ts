@@ -40,6 +40,7 @@ import {
   BullpenAutoLiveSettings,
   BullpenAutoLiveSettingsUpdate,
   BullpenAutoLiveRun,
+  BullpenAutoLiveHistoryPage,
   BullpenAutoLiveRunOrdersResponse,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveDecision,
@@ -1736,8 +1737,13 @@ class apiServiceClass implements IApiService {
     );
   }
 
-  getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {
-    return this.get<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.settings());
+  getBullpenAutoLiveSettings(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveSettings> {
+    return this.get<BullpenAutoLiveSettings>(
+      URLs.bullpenAutoLive.settings(),
+      { cache: "no-store", ...options },
+    );
   }
 
   updateBullpenAutoLiveSettings(
@@ -1759,12 +1765,36 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  getBullpenAutoLiveHistory(
+    params: { page?: number; size?: number } = {},
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveHistoryPage> {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.size) query.set("size", String(params.size));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.get<BullpenAutoLiveHistoryPage>(
+      `${URLs.bullpenAutoLive.history()}${suffix}`,
+      { cache: "no-store", ...options },
+    );
+  }
+
   getBullpenAutoLiveRun(
     runId: string,
     options?: ApiRequestControl,
   ): Promise<BullpenAutoLiveRun> {
     return this.get<BullpenAutoLiveRun>(
       URLs.bullpenAutoLive.run(runId),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveRunDecisions(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveDecision[]> {
+    return this.get<BullpenAutoLiveDecision[]>(
+      URLs.bullpenAutoLive.runDecisions(runId),
       { cache: "no-store", ...options },
     );
   }

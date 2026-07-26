@@ -88,11 +88,17 @@ test("Bullpen Celery launchers bound retained memory and retire the legacy overr
   const planningLauncher = read(
     "../../deploy/no-docker/scripts/run-celery-auto-live-worker.sh",
   );
+  const emailLauncher = read(
+    "../../deploy/no-docker/scripts/run-celery-email-worker.sh",
+  );
   const redeploy = read("../../deploy/no-docker/redeploy.sh");
   const productionDocs = read("../../docs/production-deploy.md");
   const auditDocs = read("../../docs/bullpen-run-audit.md");
 
-  assert.match(primaryLauncher, /CELERY_WORKER_CONCURRENCY:-2/);
+  assert.match(primaryLauncher, /CELERY_AI_WORKER_CONCURRENCY:-1/);
+  assert.match(primaryLauncher, /-Q "\$EFFECTIVE_CELERY_WORKER_QUEUES"/);
+  assert.match(emailLauncher, /-Q email/);
+  assert.match(emailLauncher, /CELERY_EMAIL_WORKER_CONCURRENCY:-1/);
   assert.match(primaryLauncher, /CELERY_WORKER_MAX_TASKS_PER_CHILD:-\$\{CELERY_MAX_TASKS_PER_CHILD:-25\}/);
   assert.match(primaryLauncher, /CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB:-800000/);
   assert.match(planningLauncher, /CELERY_AUTO_LIVE_MAX_TASKS_PER_CHILD:-1/);

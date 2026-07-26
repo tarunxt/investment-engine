@@ -1338,7 +1338,7 @@ async def test_automatic_live_execution_skips_when_bot_is_paused(tmp_path):
 async def test_bullpen_redeem_uses_extended_timeout(monkeypatch):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(
             {
                 "args": args,
@@ -1370,34 +1370,34 @@ async def test_bullpen_redeem_uses_extended_timeout(monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_run_first_bullpen_json_waits_for_login_then_retries_original_command(
+async def test_run_first_bullpen_json_delegates_auth_retry_to_runtime_broker(
     monkeypatch,
 ):
-    json_calls: list[list[str]] = []
-    status_calls: list[list[str]] = []
-    sleep_calls: list[float] = []
+    calls = []
 
-    async def fake_run_bullpen_json(args, *, timeout_seconds):
-        json_calls.append(args)
-        if len(json_calls) == 1:
-            raise BullpenCommandError(
-                "AUTH_REQUIRED: Your session has expired. Run: bullpen login"
+    class FakeRuntimeBroker:
+        async def execute_first_json(
+            self,
+            command_variants,
+            *,
+            timeout_seconds,
+            extra_env,
+            retry_auth_once,
+        ):
+            calls.append(
+                {
+                    "command_variants": command_variants,
+                    "timeout_seconds": timeout_seconds,
+                    "extra_env": extra_env,
+                    "retry_auth_once": retry_auth_once,
+                }
             )
-        return {"ok": True}
-
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
-        status_calls.append(args)
-        return "JWT expires: 2099-01-01 00:00:00 UTC"
-
-    async def fake_sleep(seconds):
-        sleep_calls.append(seconds)
+            return {"ok": True}
 
     monkeypatch.setattr(
-        "app.domains.polymarket.bullpen.run_bullpen_json",
-        fake_run_bullpen_json,
+        "app.domains.polymarket.bullpen.get_bullpen_runtime_broker",
+        lambda: FakeRuntimeBroker(),
     )
-    monkeypatch.setattr("app.domains.polymarket.bullpen.run_bullpen", fake_run_bullpen)
-    monkeypatch.setattr("app.domains.polymarket.bullpen.asyncio.sleep", fake_sleep)
 
     result = await run_first_bullpen_json(
         [["polymarket", "positions", "--output", "json"]],
@@ -1405,12 +1405,16 @@ async def test_run_first_bullpen_json_waits_for_login_then_retries_original_comm
     )
 
     assert result == {"ok": True}
-    assert json_calls == [
-        ["polymarket", "positions", "--output", "json"],
-        ["polymarket", "positions", "--output", "json"],
+    assert calls == [
+        {
+            "command_variants": [
+                ["polymarket", "positions", "--output", "json"],
+            ],
+            "timeout_seconds": 3,
+            "extra_env": None,
+            "retry_auth_once": True,
+        }
     ]
-    assert status_calls == [["status"]]
-    assert sleep_calls == []
 
 
 def test_bullpen_execution_limit_prices_include_safety_buffer(monkeypatch):
@@ -1435,7 +1439,7 @@ def test_bullpen_buy_limit_price_keeps_minimum_buffer_when_configured_zero(monke
 async def test_bullpen_execute_uses_buffered_limit_prices(monkeypatch):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(
             {
                 "args": args,
@@ -1492,7 +1496,7 @@ async def test_bullpen_execute_uses_buffered_limit_prices(monkeypatch):
 async def test_bullpen_execute_retries_buy_when_fill_price_exceeds_limit(monkeypatch):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(args)
         if len(calls) == 1:
             raise BullpenCommandError(
@@ -1537,7 +1541,7 @@ async def test_bullpen_execute_retries_buy_when_fill_price_exceeds_limit(monkeyp
 async def test_bullpen_execute_retries_multiple_moving_buy_fill_prices(monkeypatch):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(args)
         if len(calls) == 1:
             raise BullpenCommandError(
@@ -1592,7 +1596,7 @@ async def test_bullpen_sell_limit_retries_when_fill_price_falls_below_minimum(
 ):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(args)
         if len(calls) == 1:
             raise BullpenCommandError(
@@ -1692,7 +1696,7 @@ async def test_bullpen_execute_wraps_collateral_once_then_fails_safely_without_g
 ):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(args)
         if len(calls) in {1, 3}:
             raise BullpenCommandError(
@@ -1749,7 +1753,7 @@ async def test_bullpen_execute_wraps_collateral_once_then_fails_safely_without_g
 async def test_bullpen_execute_wraps_collateral_then_retries_buy(monkeypatch):
     calls = []
 
-    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only, extra_env=None):
         calls.append(args)
         if len(calls) == 1:
             raise BullpenCommandError(

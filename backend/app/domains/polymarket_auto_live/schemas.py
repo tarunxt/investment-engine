@@ -1057,6 +1057,70 @@ class BullpenAutoLivePersistedStatus(BaseModel):
     scheduler: BullpenAutoLiveSchedulerStatus
 
 
+class BullpenAutoLiveSummarySection(BaseModel):
+    """Freshness and degradation metadata for one compact console section."""
+
+    source: str
+    status: Literal["live", "persisted", "cached", "stale", "degraded", "unavailable"]
+    as_of: str | None = None
+    age_seconds: float | None = Field(default=None, ge=0)
+    duration_ms: float | None = Field(default=None, ge=0)
+    detail: str | None = None
+
+
+class BullpenAutoLiveHistoryStage(BaseModel):
+    """High-level persisted stage state for the lightweight history page."""
+
+    key: Literal["scan", "llm", "invest"]
+    stage_number: int = Field(ge=1, le=7)
+    label: str
+    status: AutoLiveStageStatus
+    phase_status: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    input_count: int | None = Field(default=None, ge=0)
+    processed_count: int | None = Field(default=None, ge=0)
+    succeeded_count: int | None = Field(default=None, ge=0)
+    failed_count: int | None = Field(default=None, ge=0)
+    blocker_preview: str | None = None
+
+
+class BullpenAutoLiveHistoryItem(BaseModel):
+    """Bounded run tile data; full execution payloads remain detail-only."""
+
+    id: str
+    triggered_by: AutoLiveTriggeredBy
+    status: AutoLiveRunStatus
+    dry_run: bool
+    started_at: str
+    completed_at: str | None = None
+    duration_seconds: float | None = Field(default=None, ge=0)
+    summary: str
+    error_message: str | None = None
+    decisions_count: int = Field(default=0, ge=0)
+    orders_planned: int = Field(default=0, ge=0)
+    orders_submitted: int = Field(default=0, ge=0)
+    order_funnel: BullpenAutoLiveOrderFunnel = Field(
+        default_factory=BullpenAutoLiveOrderFunnel
+    )
+    stages: list[BullpenAutoLiveHistoryStage] = Field(default_factory=list)
+    blocker_preview: str | None = None
+    latest_update_at: str
+    projection_available: bool = True
+
+
+class BullpenAutoLiveHistoryPage(BaseModel):
+    """Database-paginated Auto-Live history first page."""
+
+    items: list[BullpenAutoLiveHistoryItem] = Field(default_factory=list)
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    size: int = Field(ge=1)
+    pages: int = Field(ge=0)
+    has_next: bool = False
+    generated_at: str
+
+
 class TradingBotGuardrail(BaseModel):
     label: str
     value: str
@@ -1094,3 +1158,7 @@ class BullpenAutoLiveSummary(BaseModel):
         default_factory=list
     )
     runtime_auth: BullpenRuntimeActiveAuthResult | None = None
+    generated_at: str | None = None
+    projection_version: int | None = None
+    sections: dict[str, BullpenAutoLiveSummarySection] = Field(default_factory=dict)
+    degraded_sections: list[str] = Field(default_factory=list)

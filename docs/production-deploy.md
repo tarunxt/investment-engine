@@ -11,7 +11,8 @@ This repo deploys production through GitHub Actions over SSH. Codex should chang
 - Frontend: Next.js on `127.0.0.1:3000`
 - Services restarted by deploy:
   - `investor-backend`
-  - `investor-celery-worker` — `ai,email` (including Stage 3 execution and reconciliation)
+  - `investor-celery-worker` — dedicated `ai` Stage 3 execution and reconciliation
+  - `investor-celery-email-worker` — dedicated low-priority `email`
   - `investor-celery-auto-live-worker` — dedicated `auto_live` planning queue
   - `investor-celery-beat`
   - `investor-celery-beat-worker` — `beat` periodic-dispatch queue
@@ -150,33 +151,35 @@ remote-order reconciliation:
 | Queue | Consumer | Work |
 | --- | --- | --- |
 | `auto_live` | `investor-celery-auto-live-worker` | `execute_polymarket_auto_live_run` (Stage 1/2 planning and the run handoff) |
-| `ai,email` | `investor-celery-worker` | Stage 3 intent execution/reconciliation, audit-refresh work, and ordinary AI/email work |
+| `ai` | `investor-celery-worker` | Stage 3 intent execution/reconciliation, audit-refresh work, and ordinary AI work |
+| `email` | `investor-celery-email-worker` | low-priority email delivery |
 | `beat` | `investor-celery-beat-worker` | periodic Auto-Live dispatch, reconciliation, watchdog, and outbox tasks |
 
-Keep `CELERY_WORKER_QUEUES=ai,email` and
-`CELERY_WORKER_PREFETCH_MULTIPLIER=1` in `/etc/investor/backend.env`; the
-dedicated planning worker also defaults to concurrency `1` and prefetch `1`.
+Legacy `/etc/investor/backend.env` files may retain
+`CELERY_WORKER_QUEUES=ai,email`; the canonical primary launcher deliberately
+consumes only `ai`, and the email unit consumes only `email`. The two workers
+default to one child each, preserving the former total primary concurrency of
+two. Keep prefetch at one. The dedicated planning worker also defaults to
+concurrency `1` and prefetch `1`.
 Do not merge `auto_live` back into `ai` (or leave `beat` on the primary worker)
 to increase throughput: that would allow slow remote-order reconciliation or
 periodic work to reserve planning capacity again.
 
-The canonical primary launcher defaults to concurrency `2`, replaces a child
+The canonical primary launcher defaults to concurrency `1`, replaces a child
 after 25 tasks or after it retains 800,000 KiB, and the planning worker replaces
-its only child after every completed run. Bullpen runtime calls are serialized
-by the shared runtime broker, so extra primary prefork children do not increase
-remote-order throughput; they only retain duplicate Python/response memory and
-hold extra database connections while waiting for the runtime lock. The deploy
-removes the obsolete
+its only child after every completed run. The email worker supplies the second
+existing child on a separate low-priority queue and uses a 400,000 KiB memory
+bound. Bullpen runtime calls are serialized by the shared runtime broker, so
+extra AI prefork children do not increase remote-order throughput. The deploy removes the obsolete
 `/etc/systemd/system/investor-celery-worker.service.d/no-beat-queue.conf`
 drop-in and refuses to continue if any remaining override bypasses
 `deploy/no-docker/scripts/run-celery-worker.sh`.
 
-The live Bullpen dashboard reads
-`GET /polymarket/auto-live/summary/dashboard`, which hydrates the current full
-run only. The legacy `/polymarket/auto-live/summary` endpoint still returns ten
-full run snapshots for compatible clients. If the dashboard is responsive but a
-legacy summary is slow, compare their response size and duration before changing
-worker or database capacity.
+The live Bullpen dashboard reads the additive
+`console_projection` beside the newest run; it never selects the full TOAST run
+payload. The legacy `/polymarket/auto-live/summary` endpoint still returns ten
+full run snapshots for compatible clients. History uses the paginated
+`/polymarket/auto-live/history` projection and full detail remains lazy.
 
 The run record exposes a durable task lifecycle: `QUEUED` means waiting for the
 Auto-Live worker, `RESERVED` means received but waiting for a pool slot, and

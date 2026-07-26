@@ -143,7 +143,12 @@ async def test_console_wallet_positions_use_fast_timeout_without_login_wait(
                             "end_date": "2026-07-19T00:00:00+00:00",
                         }
                     ]
-                }
+                },
+                source="fresh",
+                fetched_at="2026-07-19T00:00:00+00:00",
+                diagnostics=SimpleNamespace(
+                    model_dump=lambda **_kwargs: {"source": "fresh"}
+                ),
             )
 
     monkeypatch.setattr(
@@ -194,7 +199,12 @@ async def test_console_wallet_positions_allow_timeout_env_override(monkeypatch):
                             "end_date": "2026-07-19T00:00:00+00:00",
                         }
                     ]
-                }
+                },
+                source="fresh",
+                fetched_at="2026-07-19T00:00:00+00:00",
+                diagnostics=SimpleNamespace(
+                    model_dump=lambda **_kwargs: {"source": "fresh"}
+                ),
             )
 
     monkeypatch.setenv(CONSOLE_POSITIONS_TIMEOUT_ENV_VAR, "27")

@@ -2845,6 +2845,66 @@ export interface BullpenAutoLivePersistedStatus {
   scheduler: BullpenAutoLiveSchedulerStatus;
 }
 
+export interface BullpenAutoLiveSummarySection {
+  source: string;
+  status:
+    | "live"
+    | "persisted"
+    | "cached"
+    | "stale"
+    | "degraded"
+    | "unavailable";
+  as_of?: string | null;
+  age_seconds?: number | null;
+  duration_ms?: number | null;
+  detail?: string | null;
+}
+
+export interface BullpenAutoLiveHistoryStage {
+  key: "scan" | "llm" | "invest";
+  stage_number: number;
+  label: string;
+  status: BullpenAutoLiveStageStatus;
+  phase_status?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  input_count?: number | null;
+  processed_count?: number | null;
+  succeeded_count?: number | null;
+  failed_count?: number | null;
+  blocker_preview?: string | null;
+}
+
+export interface BullpenAutoLiveHistoryItem {
+  id: string;
+  triggered_by: BullpenAutoLiveTriggeredBy;
+  status: BullpenAutoLiveRunStatus;
+  dry_run: boolean;
+  started_at: string;
+  completed_at?: string | null;
+  duration_seconds?: number | null;
+  summary: string;
+  error_message?: string | null;
+  decisions_count: number;
+  orders_planned: number;
+  orders_submitted: number;
+  order_funnel: BullpenAutoLiveOrderFunnel;
+  stages: BullpenAutoLiveHistoryStage[];
+  blocker_preview?: string | null;
+  latest_update_at: string;
+  projection_available: boolean;
+}
+
+export interface BullpenAutoLiveHistoryPage {
+  items: BullpenAutoLiveHistoryItem[];
+  total: number;
+  page: number;
+  size: number;
+  pages: number;
+  has_next: boolean;
+  generated_at: string;
+}
+
 export type TradingBotStatus =
   | "running"
   | "paused"
@@ -2911,6 +2971,10 @@ export interface BullpenAutoLiveSummaryResponse {
   recent_decisions: BullpenAutoLiveDecision[];
   latest_guardrail_checks: BullpenAutoLiveGuardrailCheck[];
   runtime_auth?: BullpenRuntimeActiveAuthResult | null;
+  generated_at?: string | null;
+  projection_version?: number | null;
+  sections?: Record<string, BullpenAutoLiveSummarySection>;
+  degraded_sections?: string[];
 }
 
 export interface BullpenRuntimeActiveAuthResult {

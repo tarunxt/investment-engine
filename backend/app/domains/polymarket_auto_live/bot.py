@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+from time import perf_counter
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,9 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     next_console_schedule_time,
     next_custom_console_schedule_time,
+)
+from app.domains.polymarket_auto_live.console_projection import (
+    CONSOLE_PROJECTION_VERSION,
 )
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
@@ -48,6 +52,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveBotCardSummary,
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
+    BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
@@ -59,6 +64,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveStatusConfiguration,
     BullpenAutoLiveState,
     BullpenAutoLiveSummary,
+    BullpenAutoLiveSummarySection,
     TradingBotGuardrail,
 )
 from app.infrastructure.database.session import AsyncSessionLocal
@@ -620,16 +626,127 @@ class BullpenAutoLiveBot:
         return await self._get_summary_with_run_limit(run_limit=10)
 
     async def get_dashboard_summary(self) -> BullpenAutoLiveSummary:
-        """Return the dashboard data with only the latest full run snapshot.
+        """Return a read-only, bounded projection for the live console.
 
-        Completed run snapshots can contain the full Stage 1 market universe and
-        Stage 2 evidence.  The dashboard needs the latest workflow for progress,
-        while historical detail is loaded separately from the existing run
-        endpoints.  Keeping this additive path separate preserves the legacy
-        ``/summary`` response for existing API clients.
+        Unlike the legacy summary this path never creates scheduler rows,
+        performs stale-run recovery, publishes work, reconciles decisions, or
+        selects the full run/decision payload columns.
         """
 
-        return await self._get_summary_with_run_limit(run_limit=1)
+        query_started_at = perf_counter()
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            settings_record = await repo.get_settings_record(self.user_id)
+            state_record = await repo.get_state_record(self.user_id)
+            settings = record_to_settings(settings_record)
+            state = self._synchronize_persisted_scheduler_state(
+                settings,
+                record_to_state(state_record),
+            )
+            latest_projection = await repo.get_latest_projected_run(self.user_id)
+            latest_run = latest_projection[0] if latest_projection else None
+            projection_available = (
+                latest_projection[1] if latest_projection else True
+            )
+            workflow_as_of = (
+                latest_projection[2]
+                if latest_projection
+                else (
+                    state_record.updated_at.isoformat()
+                    if state_record is not None and state_record.updated_at is not None
+                    else utc_now()
+                )
+            )
+            decisions = (
+                await repo.list_projected_decisions_for_run(
+                    self.user_id,
+                    latest_run.id,
+                    limit=25,
+                )
+                if latest_run is not None
+                else []
+            )
+
+        database_duration_ms = (perf_counter() - query_started_at) * 1000
+        # Prompt text belongs to the explicit settings/editor read, not the
+        # two-second workflow poll. The legacy summary and settings routes keep
+        # returning it unchanged.
+        dashboard_settings = settings.model_copy(
+            update={"console_llm_prompt_template": None}
+        )
+        latest_guardrails = self._build_guardrail_checks(settings, state)
+        degraded_sections = []
+        workflow_status = "persisted"
+        workflow_detail = None
+        if latest_run is not None and not projection_available:
+            degraded_sections.append("workflow")
+            workflow_status = "unavailable"
+            workflow_detail = (
+                "This legacy run predates the bounded console projection. "
+                "Open run detail for its complete frozen evidence."
+            )
+        generated_at = utc_now()
+        return BullpenAutoLiveSummary(
+            state=state,
+            settings=dashboard_settings,
+            bot_card=self._build_bot_card_summary(
+                settings,
+                state,
+                latest_guardrails,
+            ),
+            latest_run=latest_run,
+            recent_runs=[latest_run] if latest_run is not None else [],
+            recent_decisions=decisions,
+            latest_guardrail_checks=latest_guardrails,
+            generated_at=generated_at,
+            projection_version=CONSOLE_PROJECTION_VERSION,
+            degraded_sections=degraded_sections,
+            sections={
+                "scheduler": BullpenAutoLiveSummarySection(
+                    source="postgresql_scheduler_rows",
+                    status="persisted",
+                    as_of=(
+                        state_record.updated_at.isoformat()
+                        if state_record is not None
+                        and state_record.updated_at is not None
+                        else generated_at
+                    ),
+                    duration_ms=database_duration_ms,
+                ),
+                "settings": BullpenAutoLiveSummarySection(
+                    source="postgresql_settings_projection",
+                    status="persisted",
+                    as_of=(
+                        settings_record.updated_at.isoformat()
+                        if settings_record is not None
+                        and settings_record.updated_at is not None
+                        else generated_at
+                    ),
+                    duration_ms=database_duration_ms,
+                    detail=(
+                        "The saved LLM prompt is loaded only when its editor opens."
+                    ),
+                ),
+                "workflow": BullpenAutoLiveSummarySection(
+                    source="postgresql_console_projection",
+                    status=workflow_status,  # type: ignore[arg-type]
+                    as_of=workflow_as_of,
+                    duration_ms=database_duration_ms,
+                    detail=workflow_detail,
+                ),
+                "decisions": BullpenAutoLiveSummarySection(
+                    source="postgresql_decision_projections",
+                    status="persisted" if latest_run is not None else "unavailable",
+                    as_of=workflow_as_of if latest_run is not None else None,
+                    duration_ms=database_duration_ms,
+                    detail=(
+                        None
+                        if latest_run is not None
+                        else "No durable Auto-Live run exists yet."
+                    ),
+                ),
+            },
+        )
 
     async def list_runs(self) -> list[BullpenAutoLiveRun]:
         async with AsyncSessionLocal() as session:
@@ -640,6 +757,20 @@ class BullpenAutoLiveBot:
                 return await repo.list_runs(self.user_id)
             return runs
 
+    async def list_run_history(
+        self,
+        *,
+        page: int,
+        size: int,
+    ) -> BullpenAutoLiveHistoryPage:
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            return await repo.list_run_history_page(
+                self.user_id,
+                page=page,
+                size=size,
+            )
+
     async def get_run(self, run_id: str) -> BullpenAutoLiveRun:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
@@ -647,6 +778,20 @@ class BullpenAutoLiveBot:
             if run is None:
                 raise ValueError("Auto-Live run not found.")
             return run
+
+    async def list_run_decisions(
+        self,
+        run_id: str,
+    ) -> list[BullpenAutoLiveDecision]:
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            if not await repo.run_exists_for_user(self.user_id, run_id):
+                raise ValueError("Auto-Live run not found.")
+            return await repo.list_decisions_for_run(
+                self.user_id,
+                run_id,
+                limit=200,
+            )
 
     async def list_decisions(self) -> list[BullpenAutoLiveDecision]:
         async with AsyncSessionLocal() as session:

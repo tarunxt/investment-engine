@@ -291,3 +291,46 @@ was effectively at its credit floor during the observed worker load.
 - Existing detail, refresh, trading, worker, retry, and audit APIs are retained.
 - No schema migration, destructive data action, or authentication relaxation is
   part of this change.
+
+## 2026-07-26 Bullpen Auto-Live reliability follow-up
+
+The read-only production inspection workflow run `30205980284` captured the
+baseline immediately before the console projection change:
+
+- `polymarket_auto_live_runs` occupied about 785 MB while its main heap was only
+  about 368 KB, proving that the operational cost was concentrated in large
+  TOASTed JSON payloads rather than the narrow scalar rows.
+- `bullpen_run_audit_blobs` occupied about 5.2 GB. Frozen audit data was not
+  rewritten, deleted, or used on the first-paint path.
+- both primary Celery children remained near 98-100% CPU while `vmstat`
+  reported 71-72% CPU steal on the two-vCPU `t3.large`;
+- seven-day CPU credit balance reached a minimum of `0.06` and the latest
+  observed balance was `0.18`, so the host remained effectively at its burst
+  credit floor;
+- memory remained non-exhausted (about 5.2 GiB available of 7.6 GiB), although
+  about 889 MiB of swap was allocated; disk was about 20% used;
+- Redis returned `PONG`, used about 9.7 MiB, and the sampled latency was
+  `0/8/2.40/5 ms` (min/max/avg/p95 sample format);
+- PostgreSQL showed seven connections, one active, and six waiting/idle. A
+  process snapshot again observed two Celery sessions idle in transaction,
+  which remains an operational item to trace at task boundaries.
+
+The repository response is deliberately two-part:
+
+1. the dashboard and paginated history now select additive bounded projections
+   instead of decompressing complete run/decision payloads; and
+2. the existing two primary worker children are reallocated into one `ai`
+   child and one `email` child. No same-host concurrency was added.
+
+A synthetic worst-case run fixture measured 12,043,208 bytes for the complete
+run, 36,164 bytes for its bounded console projection, and 3,614 bytes for one
+history item. The compact dashboard has a four-second server deadline and a
+150,000-byte warning budget; the prompt text is loaded only when the editor is
+opened.
+
+This repository work does not remove the host's CPU-credit limit. Production
+latency must not be declared fully resolved while steal remains near 70% or the
+credit balance remains at the floor. The evidence-backed next infrastructure
+action is to move latency-sensitive workers off the web host or migrate to a
+non-burstable instance after sizing from p75/p95 CPU. That change requires
+operator approval and is not performed by this task.

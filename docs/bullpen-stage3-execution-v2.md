@@ -24,7 +24,8 @@ beat schedules and dispatches run on `beat`. The production systemd topology is:
 
 ```text
 auto_live -> investor-celery-auto-live-worker (planning; default concurrency 1)
-ai,email  -> investor-celery-worker           (Stage 3 and general work)
+ai        -> investor-celery-worker           (Stage 3 and general AI work; concurrency 1)
+email     -> investor-celery-email-worker     (low-priority email; concurrency 1)
 beat      -> investor-celery-beat-worker      (periodic dispatch/recovery)
 ```
 
@@ -33,11 +34,13 @@ prefork child cannot reserve a hidden backlog of long reconciliation tasks.
 Isolation is intentional: adding Auto-Live planning back to the `ai` consumer
 would reintroduce queue starvation.
 
-`ai` is mandatory for `investor-celery-worker`. The no-Docker launch script
-trims whitespace around `CELERY_WORKER_QUEUES`, retains every configured extra
-queue, and appends `ai` with a prominent startup warning if it was omitted. It
-logs the final effective list. The dedicated `auto_live` worker remains planning
-only and must not be used as a Stage 3 fallback.
+`ai` is mandatory and exclusive for `investor-celery-worker`. The no-Docker
+launcher remains compatible with a legacy `CELERY_WORKER_QUEUES=ai,email`
+environment value but intentionally filters it to `ai`; the dedicated email
+unit consumes `email`. Both default to one child, so this separation reallocates
+the former concurrency of two rather than adding same-host CPU load. The
+dedicated `auto_live` worker remains planning only and must not be used as a
+Stage 3 fallback.
 
 When durable pending Stage 3 intents exist, `/health/ready` queries Celery
 active queues. It returns HTTP `503` unless at least one worker reports
@@ -278,11 +281,13 @@ Useful commands on the production host:
 sudo systemctl status \
   investor-backend \
   investor-celery-worker \
+  investor-celery-email-worker \
   investor-celery-auto-live-worker \
   investor-celery-beat \
   investor-celery-beat-worker \
   investor-frontend
 sudo journalctl -u investor-celery-worker -n 200 --no-pager
+sudo journalctl -u investor-celery-email-worker -n 100 --no-pager
 sudo journalctl -u investor-celery-auto-live-worker -n 200 --no-pager
 sudo journalctl -u investor-celery-beat -n 200 --no-pager
 sudo journalctl -u investor-celery-beat-worker -n 200 --no-pager
@@ -293,6 +298,7 @@ If you change backend env flags:
 ```bash
 sudo systemctl restart investor-backend
 sudo systemctl restart investor-celery-worker
+sudo systemctl restart investor-celery-email-worker
 sudo systemctl restart investor-celery-auto-live-worker
 sudo systemctl restart investor-celery-beat
 sudo systemctl restart investor-celery-beat-worker
