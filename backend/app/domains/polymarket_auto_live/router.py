@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,7 +23,9 @@ from app.domains.auth.models import User
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
+    BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunDiagnostics,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
@@ -30,6 +33,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLivePersistedStatus,
     BullpenAutoLiveState,
     BullpenAutoLiveSummary,
+    BullpenAutoLiveSummarySection,
 )
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
 from app.domains.polymarket_auto_live.run_recovery import (
@@ -47,6 +51,12 @@ logger = get_logger(__name__)
 PERSISTED_STATUS_TIMEOUT_SECONDS = 2.0
 PERSISTED_STATUS_SLOW_THRESHOLD_MS = 500.0
 PERSISTED_STATUS_CACHE_CONTROL = "private, max-age=5, stale-while-revalidate=30"
+DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 4.0
+DASHBOARD_AUTH_CACHE_TIMEOUT_SECONDS = 0.25
+DASHBOARD_SUMMARY_CACHE_CONTROL = "private, no-cache"
+DASHBOARD_SUMMARY_MAX_BYTES = 150_000
+DASHBOARD_SUMMARY_SLOW_THRESHOLD_MS = 1_500.0
+HISTORY_TIMEOUT_SECONDS = 4.0
 
 
 async def _get_bot(current_user: User):
@@ -200,6 +210,9 @@ def _log_persisted_status_duration(
 
 async def _attach_latest_active_auth(
     summary: BullpenAutoLiveSummary,
+    *,
+    refresh_if_stale: bool = True,
+    timeout_seconds: float | None = None,
 ) -> BullpenAutoLiveSummary:
     broker = get_bullpen_runtime_broker()
     historical_auth_error = any(
@@ -207,14 +220,179 @@ async def _attach_latest_active_auth(
         for run in [summary.latest_run, *summary.recent_runs]
     )
     try:
-        active_auth = await broker.resolve_latest_active_auth_result(
-            refresh_if_stale=historical_auth_error,
+        auth_read = broker.resolve_latest_active_auth_result(
+            refresh_if_stale=refresh_if_stale and historical_auth_error,
         )
-    except Exception:
+        active_auth = (
+            await asyncio.wait_for(auth_read, timeout=timeout_seconds)
+            if timeout_seconds is not None
+            else await auth_read
+        )
+    except Exception as exc:
         # Unknown live auth state must not turn a historical command error into
         # a login banner. Only a persisted active doctor verdict can do that.
         active_auth = None
-    return summary.model_copy(update={"runtime_auth": active_auth})
+        sections = dict(summary.sections)
+        sections["runtime_auth"] = {
+            "source": "redis_active_auth_cache",
+            "status": "degraded",
+            "detail": "Cached Bullpen authentication verdict is temporarily unavailable.",
+        }
+        degraded = list(dict.fromkeys([*summary.degraded_sections, "runtime_auth"]))
+        logger.warning(
+            "%s",
+            json.dumps(
+                {
+                    "event": "bullpen_dashboard_cached_auth_unavailable",
+                    "error_type": type(exc).__name__,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        return summary.model_copy(
+            update={
+                "runtime_auth": None,
+                "sections": sections,
+                "degraded_sections": degraded,
+            }
+        )
+
+    sections = dict(summary.sections)
+    sections["runtime_auth"] = {
+        "source": "redis_active_auth_cache",
+        "status": "cached" if active_auth is not None else "unavailable",
+        "as_of": active_auth.checked_at if active_auth is not None else None,
+        "detail": (
+            None
+            if active_auth is not None
+            else "No active Bullpen authentication verdict has been cached yet."
+        ),
+    }
+    return summary.model_copy(
+        update={
+            "runtime_auth": active_auth,
+            "sections": sections,
+        }
+    )
+
+
+def _dashboard_bytes(summary: BullpenAutoLiveSummary) -> bytes:
+    return summary.model_dump_json(exclude_none=True).encode("utf-8")
+
+
+def _fit_dashboard_response_budget(
+    summary: BullpenAutoLiveSummary,
+) -> tuple[BullpenAutoLiveSummary, bytes]:
+    """Degrade optional detail deterministically before exceeding 150 KB."""
+
+    serialized = _dashboard_bytes(summary)
+    if len(serialized) <= DASHBOARD_SUMMARY_MAX_BYTES:
+        return summary, serialized
+
+    sections = dict(summary.sections)
+    degraded = list(summary.degraded_sections)
+    sections["decisions"] = BullpenAutoLiveSummarySection(
+        source="postgresql_decision_projections",
+        status="degraded",
+        detail=(
+            "Only the ten newest decision summaries are included to keep "
+            "the live response bounded. Open History for full detail."
+        ),
+    )
+    degraded.append("decisions")
+    bounded = summary.model_copy(
+        update={
+            "recent_decisions": summary.recent_decisions[:10],
+            "sections": sections,
+            "degraded_sections": list(dict.fromkeys(degraded)),
+        }
+    )
+    serialized = _dashboard_bytes(bounded)
+    if len(serialized) <= DASHBOARD_SUMMARY_MAX_BYTES:
+        return bounded, serialized
+
+    # Projections are bounded at write time, but this also protects the route
+    # from a malformed/legacy projection containing excessive nested detail.
+    # Durable identities, status, counters, lifecycle, and order funnels stay.
+    latest_run = bounded.latest_run
+    if latest_run is not None:
+        latest_run = latest_run.model_copy(
+            update={
+                "stage_results": [],
+                "guardrail_checks": [],
+                "decision_ids": [],
+                "order_intent_ids": [],
+                "diagnostics": BullpenAutoLiveRunDiagnostics(),
+                "stage2_llm_targets_snapshot": [],
+            }
+        )
+    sections = dict(bounded.sections)
+    sections["workflow"] = BullpenAutoLiveSummarySection(
+        source="postgresql_console_projection",
+        status="degraded",
+        detail=(
+            "Expandable stage diagnostics exceeded the live response budget. "
+            "Open run detail for the complete frozen evidence."
+        ),
+    )
+    bounded = bounded.model_copy(
+        update={
+            "latest_run": latest_run,
+            "recent_runs": [latest_run] if latest_run is not None else [],
+            "recent_decisions": bounded.recent_decisions[:5],
+            "sections": sections,
+            "degraded_sections": list(
+                dict.fromkeys([*bounded.degraded_sections, "workflow"])
+            ),
+        }
+    )
+    serialized = _dashboard_bytes(bounded)
+    if len(serialized) <= DASHBOARD_SUMMARY_MAX_BYTES:
+        return bounded, serialized
+
+    # Fail closed for payload size while preserving scheduler/settings/control
+    # state. Full run and history endpoints remain the authoritative detail.
+    sections = dict(bounded.sections)
+    sections["workflow"] = BullpenAutoLiveSummarySection(
+        source="postgresql_console_projection",
+        status="unavailable",
+        detail=(
+            "Workflow detail is available from History but was omitted from "
+            "this live poll because it exceeded the response budget."
+        ),
+    )
+    sections["decisions"] = BullpenAutoLiveSummarySection(
+        source="postgresql_decision_projections",
+        status="unavailable",
+        detail=(
+            "Decision detail is available from History but was omitted from "
+            "this live poll because it exceeded the response budget."
+        ),
+    )
+    bounded = bounded.model_copy(
+        update={
+            "latest_run": None,
+            "recent_runs": [],
+            "recent_decisions": [],
+            "latest_guardrail_checks": [],
+            "sections": sections,
+            "degraded_sections": list(
+                dict.fromkeys([*bounded.degraded_sections, "workflow", "decisions"])
+            ),
+        }
+    )
+    serialized = _dashboard_bytes(bounded)
+    if len(serialized) > DASHBOARD_SUMMARY_MAX_BYTES:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Auto-Live dashboard data exceeded its safe response budget. "
+                "Scheduler status remains available; retry workflow detail shortly."
+            ),
+            headers={"Cache-Control": "no-store"},
+        )
+    return bounded, serialized
 
 
 @router.get("/settings", response_model=BullpenAutoLiveSettings)
@@ -371,15 +549,125 @@ async def get_auto_live_summary(current_user: User = Depends(get_current_user)):
 
 @router.get("/summary/dashboard", response_model=BullpenAutoLiveSummary)
 async def get_auto_live_dashboard_summary(
+    request: Request,
+    response: Response,
     current_user: User = Depends(get_current_user),
 ):
-    """Load current dashboard progress without ten historical stage payloads."""
+    """Load persisted console projections without worker or runtime work."""
 
+    started_at = time.perf_counter()
     bot = await _get_bot(current_user)
     try:
-        return await _attach_latest_active_auth(await bot.get_dashboard_summary())
+        summary = await asyncio.wait_for(
+            bot.get_dashboard_summary(),
+            timeout=DASHBOARD_SUMMARY_TIMEOUT_SECONDS,
+        )
+        summary = await _attach_latest_active_auth(
+            summary,
+            refresh_if_stale=False,
+            timeout_seconds=DASHBOARD_AUTH_CACHE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Auto-Live dashboard data is temporarily delayed. Retry shortly.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
     except SQLAlchemyError as exc:
         raise _database_not_ready_error(exc) from exc
+
+    summary, serialized = _fit_dashboard_response_budget(summary)
+    etag = f'"{hashlib.sha256(serialized).hexdigest()}"'
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    scheduler_section = summary.sections.get("scheduler")
+    database_duration_ms = (
+        scheduler_section.duration_ms
+        if scheduler_section is not None
+        and hasattr(scheduler_section, "duration_ms")
+        else None
+    )
+    server_timing = ", ".join(
+        [
+            *(
+                [f"db;dur={database_duration_ms:.1f}"]
+                if database_duration_ms is not None
+                else []
+            ),
+            f"app;dur={elapsed_ms:.1f}",
+        ]
+    )
+    if request.headers.get("if-none-match") == etag:
+        return Response(
+            status_code=304,
+            headers={
+                "Cache-Control": DASHBOARD_SUMMARY_CACHE_CONTROL,
+                "Vary": "Authorization, Cookie",
+                "ETag": etag,
+                "Server-Timing": server_timing,
+            },
+        )
+
+    response.headers["Cache-Control"] = DASHBOARD_SUMMARY_CACHE_CONTROL
+    response.headers["Vary"] = "Authorization, Cookie"
+    response.headers["ETag"] = etag
+    response.headers["Server-Timing"] = server_timing
+    response.headers["X-Response-Bytes"] = str(len(serialized))
+    if (
+        elapsed_ms >= DASHBOARD_SUMMARY_SLOW_THRESHOLD_MS
+        or len(serialized) > 50_000
+    ):
+        logger.warning(
+            "%s",
+            json.dumps(
+                {
+                    "event": "bullpen_dashboard_summary_slow_or_large",
+                    "response_bytes": len(serialized),
+                    "duration_ms": round(elapsed_ms, 2),
+                    "database_duration_ms": (
+                        round(database_duration_ms, 2)
+                        if database_duration_ms is not None
+                        else None
+                    ),
+                    "user_id": current_user.id,
+                    "correlation_id": getattr(request.state, "correlation_id", None),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+    return summary
+
+
+@router.get("/history", response_model=BullpenAutoLiveHistoryPage)
+async def list_auto_live_history(
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=20, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+):
+    """Return a compact, database-paginated run list for the History dialog."""
+
+    started_at = time.perf_counter()
+    bot = await _get_bot(current_user)
+    try:
+        history = await asyncio.wait_for(
+            bot.list_run_history(page=page, size=size),
+            timeout=HISTORY_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Auto-Live history is temporarily delayed. Retry shortly.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.headers["Vary"] = "Authorization, Cookie"
+    response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}, app;dur={elapsed_ms:.1f}"
+    return history
 
 
 @router.get("/runs", response_model=list[BullpenAutoLiveRun])
@@ -398,6 +686,23 @@ async def get_auto_live_run(
     bot = await _get_bot(current_user)
     try:
         return await bot.get_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+
+@router.get(
+    "/runs/{run_id}/decisions",
+    response_model=list[BullpenAutoLiveDecision],
+)
+async def list_auto_live_run_decisions(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Load full decision detail only after an operator selects one run."""
+
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.list_run_decisions(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
 

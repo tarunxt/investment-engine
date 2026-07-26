@@ -7030,6 +7030,62 @@ class BullpenAutoLiveEngine:
             )
         )
         total_reviewed_contexts = len(active_position_contexts) + len(candidate_contexts)
+        if (
+            _should_use_legacy_console_stage_two_path()
+            and not llm_execution_runtime_outputs.get("llm_target_runs")
+        ):
+            # The legacy adapter remains only for deterministic unit doubles
+            # that replace ``run_llm_consensus``. Mirror the production shared
+            # runner's target-level accounting so those tests still exercise
+            # the same fail-closed "selected and usable target" invariant.
+            legacy_target_runs: list[dict[str, object]] = []
+            for provider_name, model_name in console_llm_targets:
+                usable_event_count = sum(
+                    1
+                    for context_row in [
+                        *active_position_contexts,
+                        *candidate_contexts,
+                    ]
+                    if any(
+                        isinstance(output, BullpenAutoLiveLlmOutput)
+                        and output.provider.strip().lower()
+                        == provider_name.strip().lower()
+                        and output.model.strip().lower()
+                        == model_name.strip().lower()
+                        and output.error is None
+                        and output.invalid_reason is None
+                        and output.llm_yes_odds is not None
+                        for output in context_row.get("llm_outputs", [])
+                    )
+                )
+                legacy_target_runs.append(
+                    {
+                        "provider": provider_name,
+                        "model": model_name,
+                        "status": (
+                            "completed" if usable_event_count > 0 else "failed"
+                        ),
+                        "usable_event_count": usable_event_count,
+                    }
+                )
+            usable_legacy_target_count = sum(
+                1
+                for target_run in legacy_target_runs
+                if int(target_run["usable_event_count"]) > 0
+            )
+            llm_execution_runtime_outputs.update(
+                {
+                    "llm_target_runs": legacy_target_runs,
+                    "llm_selected_target_count": len(console_llm_targets),
+                    "llm_started_provider_target_count": len(console_llm_targets),
+                    "llm_completed_provider_target_count": len(console_llm_targets),
+                    "llm_usable_provider_target_count": usable_legacy_target_count,
+                    "llm_passed_provider_target_count": usable_legacy_target_count,
+                    "llm_failed_provider_target_count": (
+                        len(console_llm_targets) - usable_legacy_target_count
+                    ),
+                }
+            )
         actual_target_runs = [
             target_run
             for target_run in (

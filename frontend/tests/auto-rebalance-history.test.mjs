@@ -36,7 +36,8 @@ test("history routes and API methods expose summary and detail screens", () => {
 
 test("read-only API calls use bounded transport failover without retry loops", () => {
   assert.match(api, /DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000/);
-  assert.match(api, /DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS = 6_000/);
+  assert.match(api, /DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000/);
+  assert.match(api, /DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500/);
   assert.match(api, /resolveApiReadTransportCandidates\(url\)/);
   assert.match(api, /api_read_fallback_triggered/);
   assert.doesNotMatch(api, /READ_RETRY_DELAYS_MS/);

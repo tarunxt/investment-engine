@@ -320,7 +320,7 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
   assert.match(autoRunCardSource, /summaryLoadInFlightRef/);
   assert.match(
     autoRunCardSource,
-    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 8_000,\s*\}\);/,
+    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 4_000,\s*\}\);/,
   );
   assert.match(autoRunCardSource, /getPersistedAutoRunStatus\(/);
   assert.match(autoRunCardSource, /AUTO_RUN_STATUS_TIMEOUT_MS/);

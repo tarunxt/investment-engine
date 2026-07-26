@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from math import ceil
 from typing import Iterable, Sequence
 
 from pydantic import ValidationError
@@ -9,6 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
+from app.domains.polymarket_auto_live.console_projection import (
+    CONSOLE_HISTORY_MAX_SIZE,
+    build_decision_console_projection,
+    build_history_item,
+    build_run_console_projection,
+    projected_run_payload,
+)
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
     PolymarketAutoLivePositionRecord,
@@ -18,6 +26,7 @@ from app.domains.polymarket_auto_live.models import (
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
+    BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
     BullpenAutoLiveState,
@@ -138,6 +147,30 @@ def record_to_run(record: PolymarketAutoLiveRunRecord) -> BullpenAutoLiveRun:
     return BullpenAutoLiveRun.model_validate(payload)
 
 
+def projected_row_to_run(row: object) -> tuple[BullpenAutoLiveRun, bool]:
+    payload, projection_available = projected_run_payload(
+        projection=getattr(row, "console_projection", None),
+        id=str(getattr(row, "id")),
+        triggered_by=str(getattr(row, "triggered_by")),
+        status=str(getattr(row, "status")),
+        dry_run=bool(getattr(row, "dry_run")),
+        started_at=_isoformat(getattr(row, "started_at")) or utc_now().isoformat(),
+        completed_at=_isoformat(getattr(row, "completed_at")),
+        summary=str(getattr(row, "summary")),
+        live_execution_requested=bool(
+            getattr(row, "live_execution_requested", False)
+        ),
+        live_execution_attempted=bool(
+            getattr(row, "live_execution_attempted", False)
+        ),
+        decisions_count=int(getattr(row, "decisions_count", 0) or 0),
+        orders_planned=int(getattr(row, "orders_planned", 0) or 0),
+        orders_submitted=int(getattr(row, "orders_submitted", 0) or 0),
+        error_message=getattr(row, "error_message", None),
+    )
+    return BullpenAutoLiveRun.model_validate(payload), projection_available
+
+
 def _record_id(record: PolymarketAutoLiveDecisionRecord) -> str:
     return f"{record.id} (run={record.run_id}, market={record.market_id})"
 
@@ -178,6 +211,30 @@ def record_to_decision(record: PolymarketAutoLiveDecisionRecord) -> BullpenAutoL
                 )
                 return decision
         raise
+
+
+def projected_row_to_decision(row: object) -> BullpenAutoLiveDecision:
+    projection = getattr(row, "console_projection", None)
+    if not isinstance(projection, dict):
+        raise ValueError("decision console projection is unavailable")
+    payload = projection.copy()
+    payload.update(
+        {
+            "id": str(getattr(row, "id")),
+            "run_id": str(getattr(row, "run_id")),
+            "market_id": str(getattr(row, "market_id")),
+            "slug": getattr(row, "slug", None),
+            "market_title": str(getattr(row, "market_title")),
+            "side": str(getattr(row, "side")),
+            "decision": str(getattr(row, "decision")),
+            "risk_status": str(getattr(row, "risk_status")),
+            "edge_pp": float(getattr(row, "edge_pp", 0) or 0),
+            "score": float(getattr(row, "score", 0) or 0),
+            "created_at": _isoformat(getattr(row, "created_at")),
+            "updated_at": _isoformat(getattr(row, "updated_at")),
+        }
+    )
+    return BullpenAutoLiveDecision.model_validate(payload)
 
 
 def extract_stage3_decisions_from_run(
@@ -266,6 +323,7 @@ def apply_run_to_record(
     record.orders_submitted = run.orders_submitted
     record.summary = run.summary
     record.error_message = run.error_message
+    record.console_projection = build_run_console_projection(run)
     payload = run_to_record_payload(run)
     # A worker heartbeat is persisted from a short independent session while
     # the long-running planner retains its own SQLAlchemy session.  Preserve a
@@ -300,6 +358,7 @@ def apply_decision_to_record(
     record.risk_status = decision.risk_status
     record.edge_pp = decision.edge_pp
     record.score = decision.score
+    record.console_projection = build_decision_console_projection(decision)
     record.payload = decision_to_record_payload(decision)
 
 
@@ -566,6 +625,199 @@ class AsyncPolymarketAutoLiveRepository:
             query = query.limit(limit)
         rows = (await self.session.execute(query)).scalars().all()
         return [record_to_run(row) for row in rows]
+
+    async def get_latest_projected_run(
+        self,
+        user_id: int,
+    ) -> tuple[BullpenAutoLiveRun, bool, str] | None:
+        """Read the newest console projection without selecting the TOAST payload."""
+
+        record = PolymarketAutoLiveRunRecord
+        row = (
+            await self.session.execute(
+                select(
+                    record.id,
+                    record.status,
+                    record.triggered_by,
+                    record.dry_run,
+                    record.started_at,
+                    record.completed_at,
+                    record.live_execution_requested,
+                    record.live_execution_attempted,
+                    record.decisions_count,
+                    record.orders_planned,
+                    record.orders_submitted,
+                    record.summary,
+                    record.error_message,
+                    record.console_projection,
+                    record.updated_at,
+                )
+                .where(record.user_id == user_id)
+                .order_by(desc(record.started_at), desc(record.created_at))
+                .limit(1)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        run, projection_available = projected_row_to_run(row)
+        return (
+            run,
+            projection_available,
+            _isoformat(row.updated_at) or run.started_at,
+        )
+
+    async def list_run_history_page(
+        self,
+        user_id: int,
+        *,
+        page: int,
+        size: int,
+    ) -> BullpenAutoLiveHistoryPage:
+        """Return bounded history rows without loading ``run.payload``."""
+
+        normalized_page = max(1, page)
+        normalized_size = max(1, min(size, CONSOLE_HISTORY_MAX_SIZE))
+        record = PolymarketAutoLiveRunRecord
+        total = int(
+            await self.session.scalar(
+                select(func.count())
+                .select_from(record)
+                .where(record.user_id == user_id)
+            )
+            or 0
+        )
+        rows = (
+            await self.session.execute(
+                select(
+                    record.id,
+                    record.status,
+                    record.triggered_by,
+                    record.dry_run,
+                    record.started_at,
+                    record.completed_at,
+                    record.live_execution_requested,
+                    record.live_execution_attempted,
+                    record.decisions_count,
+                    record.orders_planned,
+                    record.orders_submitted,
+                    record.summary,
+                    record.error_message,
+                    record.console_projection,
+                    record.updated_at,
+                )
+                .where(record.user_id == user_id)
+                .order_by(desc(record.started_at), desc(record.created_at))
+                .offset((normalized_page - 1) * normalized_size)
+                .limit(normalized_size)
+            )
+        ).all()
+        items = []
+        for row in rows:
+            run, projection_available = projected_row_to_run(row)
+            items.append(
+                build_history_item(
+                    run,
+                    latest_update_at=_isoformat(row.updated_at) or run.started_at,
+                    projection_available=projection_available,
+                )
+            )
+        pages = ceil(total / normalized_size) if total else 0
+        return BullpenAutoLiveHistoryPage(
+            items=items,
+            total=total,
+            page=normalized_page,
+            size=normalized_size,
+            pages=pages,
+            has_next=normalized_page < pages,
+            generated_at=utc_now().isoformat(),
+        )
+
+    async def list_projected_decisions_for_run(
+        self,
+        user_id: int,
+        run_id: str,
+        *,
+        limit: int = 25,
+    ) -> list[BullpenAutoLiveDecision]:
+        """Load compact decision rows for the active dashboard only."""
+
+        record = PolymarketAutoLiveDecisionRecord
+        rows = (
+            await self.session.execute(
+                select(
+                    record.id,
+                    record.run_id,
+                    record.market_id,
+                    record.slug,
+                    record.market_title,
+                    record.side,
+                    record.decision,
+                    record.risk_status,
+                    record.edge_pp,
+                    record.score,
+                    record.console_projection,
+                    record.created_at,
+                    record.updated_at,
+                )
+                .where(record.user_id == user_id)
+                .where(record.run_id == run_id)
+                .where(record.console_projection.is_not(None))
+                .order_by(desc(record.created_at), desc(record.updated_at))
+                .limit(max(1, min(limit, 50)))
+            )
+        ).all()
+        decisions: list[BullpenAutoLiveDecision] = []
+        for row in rows:
+            try:
+                decisions.append(projected_row_to_decision(row))
+            except (ValidationError, ValueError) as exc:
+                logger.warning(
+                    "Skipping malformed Auto-Live decision console projection %s: %s",
+                    getattr(row, "id", "unknown"),
+                    exc,
+                )
+        return decisions
+
+    async def list_decisions_for_run(
+        self,
+        user_id: int,
+        run_id: str,
+        *,
+        limit: int = 200,
+    ) -> list[BullpenAutoLiveDecision]:
+        query = (
+            select(PolymarketAutoLiveDecisionRecord)
+            .where(PolymarketAutoLiveDecisionRecord.user_id == user_id)
+            .where(PolymarketAutoLiveDecisionRecord.run_id == run_id)
+            .order_by(
+                desc(PolymarketAutoLiveDecisionRecord.created_at),
+                desc(PolymarketAutoLiveDecisionRecord.updated_at),
+            )
+            .limit(max(1, min(limit, 200)))
+        )
+        rows = (await self.session.execute(query)).scalars().all()
+        decisions: list[BullpenAutoLiveDecision] = []
+        for row in rows:
+            try:
+                decisions.append(record_to_decision(row))
+            except ValidationError as exc:
+                logger.warning(
+                    "Skipping malformed Auto-Live decision %s during run detail load: %s",
+                    _record_id(row),
+                    exc,
+                )
+        return decisions
+
+    async def run_exists_for_user(self, user_id: int, run_id: str) -> bool:
+        """Check detail ownership without hydrating the large run payload."""
+
+        record_id = await self.session.scalar(
+            select(PolymarketAutoLiveRunRecord.id)
+            .where(PolymarketAutoLiveRunRecord.user_id == user_id)
+            .where(PolymarketAutoLiveRunRecord.id == run_id)
+            .limit(1)
+        )
+        return record_id is not None
 
     async def list_decisions(
         self, user_id: int, *, limit: int | None = None

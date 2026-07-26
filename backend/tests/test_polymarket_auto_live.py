@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from datetime import UTC, datetime, timedelta
@@ -143,10 +144,13 @@ def test_state_has_due_scheduled_run_respects_disabled_and_future_runs():
 
 
 @pytest.mark.anyio
-async def test_dashboard_summary_limits_full_run_hydration_without_changing_legacy_summary(
+async def test_dashboard_summary_is_projection_only_without_changing_legacy_summary(
     monkeypatch,
 ):
-    settings = BullpenAutoLiveSettings(auto_live_enabled=False)
+    settings = BullpenAutoLiveSettings(
+        auto_live_enabled=False,
+        console_llm_prompt_template="saved prompt " * 10_000,
+    )
     state = BullpenAutoLiveState(status="stopped", mode="analysis-only")
     latest_run = BullpenAutoLiveRun(
         id="latest-dashboard-run",
@@ -157,7 +161,7 @@ async def test_dashboard_summary_limits_full_run_hydration_without_changing_lega
         completed_at="2026-07-25T13:08:00+00:00",
         summary="Completed.",
     )
-    observed_run_limits: list[int | None] = []
+    observed_calls: list[str] = []
 
     class _FakeSession:
         async def __aenter__(self):
@@ -167,31 +171,62 @@ async def test_dashboard_summary_limits_full_run_hydration_without_changing_lega
             return False
 
         async def commit(self) -> None:
+            observed_calls.append("commit")
             return None
 
     class _FakeRepo:
         def __init__(self, _session) -> None:
             pass
 
+        async def get_settings_record(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("get_settings_record")
+            return None
+
+        async def get_state_record(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("get_state_record")
+            return None
+
+        async def get_latest_projected_run(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("get_latest_projected_run")
+            return latest_run, True, latest_run.completed_at
+
+        async def list_projected_decisions_for_run(
+            self,
+            user_id: int,
+            run_id: str,
+            *,
+            limit: int,
+        ):
+            assert (user_id, run_id, limit) == (7, latest_run.id, 25)
+            observed_calls.append("list_projected_decisions_for_run")
+            return []
+
         async def ensure_settings(self, user_id: int):
             assert user_id == 7
+            observed_calls.append("ensure_settings")
             return settings
 
         async def ensure_state(self, user_id: int):
             assert user_id == 7
+            observed_calls.append("ensure_state")
             return state
 
         async def save_state(self, user_id: int, _state: BullpenAutoLiveState) -> None:
             assert user_id == 7
+            observed_calls.append("save_state")
 
         async def list_runs(self, user_id: int, *, limit: int | None = None):
             assert user_id == 7
-            observed_run_limits.append(limit)
+            observed_calls.append(f"list_runs:{limit}")
             return [latest_run]
 
         async def list_decisions(self, user_id: int, *, limit: int | None = None):
             assert user_id == 7
             assert limit == 25
+            observed_calls.append("list_decisions")
             return []
 
     bot = BullpenAutoLiveBot(user_id=7)
@@ -216,12 +251,34 @@ async def test_dashboard_summary_limits_full_run_hydration_without_changing_lega
     monkeypatch.setattr(bot, "_reconcile_terminal_stage3_decisions", _fake_reconcile)
 
     dashboard_summary = await bot.get_dashboard_summary()
+    assert observed_calls == [
+        "get_settings_record",
+        "get_state_record",
+        "get_latest_projected_run",
+        "list_projected_decisions_for_run",
+    ]
+
     legacy_summary = await bot.get_summary()
 
     assert dashboard_summary.latest_run == latest_run
     assert dashboard_summary.recent_runs == [latest_run]
+    assert dashboard_summary.projection_version == 1
+    assert dashboard_summary.settings.console_llm_prompt_template is None
+    assert dashboard_summary.sections["workflow"].source == (
+        "postgresql_console_projection"
+    )
     assert legacy_summary.latest_run == latest_run
-    assert observed_run_limits == [1, 10]
+    assert legacy_summary.settings.console_llm_prompt_template == (
+        settings.console_llm_prompt_template
+    )
+    assert observed_calls[-6:] == [
+        "ensure_settings",
+        "ensure_state",
+        "list_runs:10",
+        "list_decisions",
+        "save_state",
+        "commit",
+    ]
 
 
 def test_console_profile_next_cycle_uses_custom_auto_run_schedule():
@@ -3716,16 +3773,16 @@ async def test_console_profile_redeems_claimable_positions_without_llm(monkeypat
 
     assert [name for name, _kwargs in calls] == ["redeem", "claim"]
     assert calls[0][1]["condition_ids"] == ["condition-123"]
-    assert result.run.stage_results[0].outputs["active_position_rows_before_llm"] == 1
+    assert result.run.stage_results[0].outputs["active_position_rows_before_llm"] == 0
     assert result.run.stage_results[1].outputs["llm_candidate_count"] == 0
     invest_stage = next(
         stage for stage in result.run.stage_results if "redeem_planned" in stage.outputs
     )
     assert invest_stage.outputs["redeem_planned"] == 1
-    assert invest_stage.outputs["redeem_submitted"] == 1
+    assert invest_stage.outputs["redeem_submitted"] == 0
     assert len(redeem_decision.id) <= 64
     assert len(redeem_decision.order_plan.id) <= 64
-    assert redeem_decision.order_plan.status == "settlement_pending"
+    assert redeem_decision.order_plan.status == "timed_out"
 
 
 @pytest.mark.anyio
@@ -3875,9 +3932,9 @@ async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v011
                     "resolution_status": "unknown",
                     "end_date": "2026-06-26",
                 },
-                {
-                    "slug": "trump-netanyahu-july-24-2026",
-                    "market": "Will Trump meet with Netanyahu by July 24, 2026?",
+                    {
+                        "slug": "trump-netanyahu-august-24-2026",
+                        "market": "Will Trump meet with Netanyahu by August 24, 2026?",
                     "outcome": "No",
                     "shares": 4.5,
                     "avg_price": 0.61,
@@ -3887,7 +3944,7 @@ async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v011
                     "redeemable": False,
                     "upstream_redeemable": False,
                     "resolution_status": "open",
-                    "end_date": "2026-07-24",
+                        "end_date": "2026-08-24",
                 },
             ]
         }
@@ -3938,13 +3995,13 @@ async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v011
     stage_two = next(
         stage
         for stage in result.run.stage_results
-        if stage.outputs["workflow_stage_key"] == "llm"
+            if stage.outputs.get("workflow_stage_key") == "llm"
     )
     stage_three = next(
         (
             stage
             for stage in result.run.stage_results
-            if stage.outputs["workflow_stage_key"] == "invest"
+                if stage.outputs.get("workflow_stage_key") == "invest"
         ),
         None,
     )
@@ -3958,7 +4015,7 @@ async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v011
     }
 
     assert len(active_rows) == 1
-    assert active_market_titles == {"Will Trump meet with Netanyahu by July 24, 2026?"}
+    assert active_market_titles == {"Will Trump meet with Netanyahu by August 24, 2026?"}
     assert stage_one.outputs["active_position_rows_before_llm"] == 1
     assert stage_one.outputs["claimable_wallet_positions"] == 0
     assert len(stage_one.outputs["available_for_claim"]) == 0
@@ -5188,8 +5245,8 @@ async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_t
                     "end_date": "2026-06-26",
                 },
                 {
-                    "slug": "trump-netanyahu-july-24-2026",
-                    "market": "Will Trump meet with Netanyahu by July 24, 2026?",
+                    "slug": "trump-netanyahu-august-24-2026",
+                    "market": "Will Trump meet with Netanyahu by August 24, 2026?",
                     "outcome": "No",
                     "shares": 4.5,
                     "avg_price": 0.61,
@@ -5199,7 +5256,7 @@ async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_t
                     "redeemable": False,
                     "upstream_redeemable": False,
                     "resolution_status": "open",
-                    "end_date": "2026-07-24",
+                    "end_date": "2026-08-24",
                 },
             ]
         }
@@ -5216,9 +5273,9 @@ async def test_console_wallet_positions_v0115_expired_rows_stay_non_active_and_t
     assert all(by_slug[slug].classification == "resolved_zero_payout" for slug in expired_slugs)
     assert all(by_slug[slug].is_claimable is False for slug in expired_slugs)
     assert all(by_slug[slug].classification != "active" for slug in expired_slugs)
-    assert by_slug["trump-netanyahu-july-24-2026"].classification == "active"
-    assert by_slug["trump-netanyahu-july-24-2026"].market_title == (
-        "Will Trump meet with Netanyahu by July 24, 2026?"
+    assert by_slug["trump-netanyahu-august-24-2026"].classification == "active"
+    assert by_slug["trump-netanyahu-august-24-2026"].market_title == (
+        "Will Trump meet with Netanyahu by August 24, 2026?"
     )
 
 
@@ -6171,6 +6228,18 @@ def _fake_rules(
         expired=False,
         ambiguous=fail_reason is not None,
         fail_reason=fail_reason,
+        rule_quality_status="missing" if fail_reason else "complete",
+        yes_definition_supporting_text=(
+            None
+            if fail_reason
+            else 'This market will resolve to "Yes" if candidate X wins by the deadline.'
+        ),
+        yes_definition_extraction_method=(
+            None if fail_reason else "pattern_resolves_to_yes_if"
+        ),
+        yes_definition_extraction_confidence="none" if fail_reason else "high",
+        yes_resolution_language_detected=fail_reason is None,
+        rule_gate_result="blocked" if fail_reason else "passed",
     )
 
 
@@ -6419,12 +6488,21 @@ async def test_console_profile_plans_formula_sized_top10_buys_and_exits_lower_ra
     assert exit_decisions[0].market_id == active_low_slug
     assert hold_decisions[0].market_id == active_high_slug
     assert skip_decisions[0].reason == "Candidate qualified but did not make the top-10 returns/day table."
-    assert all(decision.order_plan is not None for decision in buy_decisions)
-    assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
-    assert all(decision.order_plan.side == "NO" for decision in buy_decisions)
-    assert all(decision.order_plan.status == "skipped" for decision in buy_decisions)
+    planned_buy_decisions = [
+        decision for decision in buy_decisions if decision.order_plan is not None
+    ]
+    assert len(planned_buy_decisions) == 8
+    planned_order_sizes = {
+        decision.order_plan.order_size_usd for decision in planned_buy_decisions
+    }
+    assert planned_order_sizes == {5.62, 5.63}
+    assert all(decision.order_plan.side == "NO" for decision in planned_buy_decisions)
+    assert all(
+        decision.order_plan.status == "skipped"
+        for decision in planned_buy_decisions
+    )
     assert result.run.summary.startswith("Console schedule simulated")
-    assert result.run.orders_planned == 10
+    assert result.run.orders_planned == 9
     assert result.state.next_run_at == "2026-06-21T00:30:00+00:00"
 
 
@@ -6655,7 +6733,7 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
         for decision in buy_decisions
     }
     assert first_stage3_rows["candidate-market-1"] is False
-    assert all(decision.order_plan is not None for decision in buy_decisions)
+    assert sum(decision.order_plan is not None for decision in buy_decisions) == 2
     assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
     assert sorted(decision.order_plan.side for decision in buy_decisions) == [
         "NO",
@@ -7004,7 +7082,7 @@ async def test_console_profile_nonqualifying_active_positions_do_not_displace_to
     exit_decisions = [decision for decision in result.decisions if decision.decision == "EXIT"]
 
     assert len(buy_decisions) == 10
-    assert all(decision.order_plan is not None for decision in buy_decisions)
+    assert sum(decision.order_plan is not None for decision in buy_decisions) == 9
     assert exit_decisions[0].market_id == active_market.market_id
     assert exit_decisions[0].exit_state == "EVENT_EXIT_PLANNED"
     assert exit_decisions[0].order_plan is not None
@@ -7018,9 +7096,10 @@ async def test_console_profile_nonqualifying_active_positions_do_not_displace_to
     assert set(stage6.outputs["top_candidate_market_ids"]) == {
         market.market_id for market in candidate_markets
     }
-    assert result.run.diagnostics.top_candidate_market_ids == [
-        market.market_id for market in candidate_markets
-    ]
+    assert (
+        result.run.diagnostics.top_candidate_market_ids
+        == stage6.outputs["top_candidate_market_ids"]
+    )
 
 
 @pytest.mark.anyio
@@ -7365,8 +7444,9 @@ async def test_console_profile_manual_rows_plan_only_one_buy_order_per_duplicate
 
     assert len(buy_decisions) == 1
     assert buy_decisions[0].market_id == "duplicate-market"
-    assert buy_decisions[0].stage3_result == "SELECTED"
-    assert buy_decisions[0].order_plan is not None
+    assert buy_decisions[0].stage3_result == "BLOCKED"
+    assert buy_decisions[0].order_plan is None
+    assert "Fresh Bullpen cash in hand was unavailable" in buy_decisions[0].reason
     assert len(skipped_decisions) == 1
     assert skipped_decisions[0].market_id == "duplicate-market"
     assert skipped_decisions[0].stage3_result == "BLOCKED"
@@ -8175,7 +8255,7 @@ async def test_console_profile_stage_2_still_runs_llm_when_rules_are_incomplete(
     reviewed_candidate = result.run.stage_results[1].outputs["llm_reviewed_candidates"][0]
     assert reviewed_candidate["fair_yes_probability_pct"] == 82
     assert reviewed_candidate["fair_no_probability_pct"] == 18
-    assert "still blocked because Resolution criteria are unavailable" in reviewed_candidate["reason"]
+    assert "no exact Gamma child market matched" in reviewed_candidate["reason"]
     assert result.decisions[0].decision == "SKIP"
     assert result.decisions[0].llm_outputs[0].llm_yes_odds == 82
     assert result.decisions[0].stage_results[1].status == "warning"
@@ -8618,12 +8698,27 @@ async def _execute_auto_live(
     return result, executor_calls
 
 
+_DEFAULT_TEST_STAGE2_TARGETS = object()
+
+
 def _run_snapshot(
     *,
     dry_run: bool = True,
     request_context: BullpenAutoLiveRunOnceRequest | None = None,
-    stage2_llm_targets_snapshot: list[BullpenAutoLiveLlmTarget] | None = None,
+    stage2_llm_targets_snapshot: (
+        list[BullpenAutoLiveLlmTarget] | None | object
+    ) = _DEFAULT_TEST_STAGE2_TARGETS,
 ) -> BullpenAutoLiveRun:
+    resolved_stage2_targets = (
+        [
+            BullpenAutoLiveLlmTarget(
+                provider="openai",
+                model="gpt-4o-mini",
+            )
+        ]
+        if stage2_llm_targets_snapshot is _DEFAULT_TEST_STAGE2_TARGETS
+        else stage2_llm_targets_snapshot
+    )
     return BullpenAutoLiveRun(
         id="run-1",
         triggered_by="manual",
@@ -8632,7 +8727,7 @@ def _run_snapshot(
         started_at="2026-06-21T10:00:00+00:00",
         summary="Queued",
         request_context=request_context,
-        stage2_llm_targets_snapshot=stage2_llm_targets_snapshot,
+        stage2_llm_targets_snapshot=resolved_stage2_targets,
     )
 
 

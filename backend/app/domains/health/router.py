@@ -9,6 +9,10 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.models import PolymarketAutoLiveOrderIntentRecord
 from app.domains.polymarket_auto_live.order_intent_service import celery_ai_queue_consumer_diagnostics
+from app.domains.polymarket_auto_live.order_intents import (
+    INTENT_PENDING_CONFIRMATION_STATUSES,
+    INTENT_READY_STATUSES,
+)
 from app.infrastructure.database.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/health", tags=["health"])
@@ -20,6 +24,15 @@ READY_WORKER_INSPECT_TIMEOUT_SECONDS = 1.0
 # surrounding async deadline larger so normal thread scheduling/serialization
 # overhead cannot turn a healthy ai consumer into a deterministic timeout.
 READY_WORKER_TIMEOUT_SECONDS = 2.0
+PENDING_STAGE3_INTENT_STATUSES = tuple(
+    sorted(
+        {
+            "PLANNED",
+            *INTENT_READY_STATUSES,
+            *INTENT_PENDING_CONFIRMATION_STATUSES,
+        }
+    )
+)
 
 
 def _log_readiness_failure(
@@ -92,13 +105,7 @@ async def health_ready(request: Request, response: Response):
                     .select_from(PolymarketAutoLiveOrderIntentRecord)
                     .where(
                         PolymarketAutoLiveOrderIntentRecord.status.in_(
-                            (
-                                "PLANNED",
-                                "READY",
-                                "RETRY_WAIT",
-                                "WAITING_FOR_COLLATERAL",
-                                "WAITING_FOR_EXIT",
-                            )
+                            PENDING_STAGE3_INTENT_STATUSES
                         )
                     )
                 )

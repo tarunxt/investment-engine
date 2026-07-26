@@ -710,6 +710,12 @@ function normalizeError(error: unknown) {
   return formatUnknownError(error);
 }
 
+function markBullpenPerformance(name: string) {
+  if (typeof performance === "undefined") return;
+  if (performance.getEntriesByName(name, "mark").length > 0) return;
+  performance.mark(name);
+}
+
 function buildClaimPositionMessage(
   positions: BullpenActivePositionView[],
   { automatic }: { automatic: boolean },
@@ -1697,6 +1703,7 @@ function BullpenAiPageContent() {
     setAllowEvidenceGroundedNonWebModels,
   ] = useState(false);
   const [isPromptEditorOpen, setIsPromptEditorOpen] = useState(false);
+  const [isPromptEditorLoading, setIsPromptEditorLoading] = useState(false);
   const [isScanFiltersOpen, setIsScanFiltersOpen] = useState(false);
   const [isScanSectionExpanded, setIsScanSectionExpanded] = useState(false);
   const [openFilterDetailsId, setOpenFilterDetailsId] =
@@ -1944,6 +1951,22 @@ function BullpenAiPageContent() {
   const isInvesting = investingMode === activeMode;
   const isRefreshingCurrentOdds = refreshingCurrentOddsMode === activeMode;
   const selectionEnabled = isManualScanView && Boolean(activeCurrentSnapshot);
+
+  useEffect(() => {
+    markBullpenPerformance("bullpen-shell-visible");
+  }, []);
+
+  useEffect(() => {
+    if (hasLoadedPositions) {
+      markBullpenPerformance("bullpen-portfolio-ready");
+    }
+  }, [hasLoadedPositions]);
+
+  useEffect(() => {
+    if (activeCurrentSnapshot || hasLoadedStorage) {
+      markBullpenPerformance("bullpen-events-table-ready");
+    }
+  }, [activeCurrentSnapshot, hasLoadedStorage]);
   const selectedQuestionIds = selectionEnabled
     ? selectedQuestionIdsByMode[activeMode].filter((questionId) =>
         activeCurrentSnapshot?.questions.some((question) => question.id === questionId),
@@ -3786,6 +3809,36 @@ function BullpenAiPageContent() {
     writeBullpenLlmPromptToStorage(template);
   }
 
+  async function openPromptEditor() {
+    if (isPromptEditorLoading) return;
+    setIsPromptEditorLoading(true);
+    try {
+      const settings = await apiService.getBullpenAutoLiveSettings({
+        signal: pageRequestAbortControllerRef.current?.signal,
+        timeoutMs: 4_000,
+      });
+      const savedTemplate = normalizeServerBullpenLlmPromptTemplate(
+        settings.console_llm_prompt_template,
+      );
+      if (savedTemplate) {
+        setBullpenLlmPromptTemplate(savedTemplate);
+        writeBullpenLlmPromptToStorage(savedTemplate);
+      }
+    } catch (loadError) {
+      if (!isBullpenRequestAbort(loadError)) {
+        setLlmMessagesByMode((current) => ({
+          ...current,
+          [activeMode]: `Saved prompt could not be refreshed. ${normalizeError(loadError)}`,
+        }));
+      }
+    } finally {
+      setIsPromptEditorLoading(false);
+      if (!pageRequestAbortControllerRef.current?.signal.aborted) {
+        setIsPromptEditorOpen(true);
+      }
+    }
+  }
+
   return (
     <div
       className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6"
@@ -4372,8 +4425,8 @@ function BullpenAiPageContent() {
                   <Button
                     size="icon"
                     className="h-10 w-10 border-r border-primary-foreground/15"
-                    onClick={() => setIsPromptEditorOpen(true)}
-                    disabled={!isManualScanView}
+                    onClick={() => void openPromptEditor()}
+                    disabled={!isManualScanView || isPromptEditorLoading}
                     title="Open Bullpen LLM prompt"
                     aria-label="Open Bullpen LLM prompt"
                   >

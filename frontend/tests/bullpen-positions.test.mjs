@@ -38,7 +38,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
       avg_price: "0.45",
       current_price: "0.50",
       current_value: "5.00",
-      end_date: "2026-07-25",
+      end_date: "2026-08-25",
       status: "open",
     },
     () => null,
@@ -101,7 +101,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
       current_price: "0.50",
       current_value: "2.50",
       invested_usd: "2.75",
-      end_date: "2026-07-25",
+      end_date: "2026-08-25",
       status: "open",
     },
     () => null,
@@ -376,8 +376,8 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
       end_date: "2026-06-26",
     },
     {
-      slug: "trump-netanyahu-july-24-2026",
-      market: "Will Trump meet with Netanyahu by July 24, 2026?",
+      slug: "trump-netanyahu-august-24-2026",
+      market: "Will Trump meet with Netanyahu by August 24, 2026?",
       outcome: "No",
       shares: 4.5,
       avg_price: 0.61,
@@ -387,7 +387,7 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
       redeemable: false,
       upstream_redeemable: false,
       resolution_status: "open",
-      end_date: "2026-07-24",
+      end_date: "2026-08-24",
     },
   ];
 
@@ -399,7 +399,7 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
   assert.equal(visiblePositions.length, 1);
   assert.equal(
     visiblePositions[0].marketTitle,
-    "Will Trump meet with Netanyahu by July 24, 2026?",
+    "Will Trump meet with Netanyahu by August 24, 2026?",
   );
   assert.equal(visiblePositions[0].economicClassification, "active");
   assert.equal(summary.activeCount, 1);

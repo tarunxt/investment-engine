@@ -94,6 +94,12 @@ class PolymarketAutoLiveRunRecord(Base, TimestampMixin):
     orders_submitted: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Bounded console-only projection. The immutable/full execution payload
+    # remains in ``payload`` and is loaded only by run-detail or audit paths.
+    console_projection: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
     user: Mapped[User] = relationship()
@@ -129,6 +135,12 @@ class PolymarketAutoLiveDecisionRecord(Base, TimestampMixin):
     risk_status: Mapped[str] = mapped_column(String(32), nullable=False)
     edge_pp: Mapped[float] = mapped_column(Float, default=0, nullable=False)
     score: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    # Removes LLM output and nested stage payloads from frequent dashboard
+    # polling while retaining the complete immutable decision in ``payload``.
+    console_projection: Mapped[dict[str, object] | None] = mapped_column(
+        JSON,
+        nullable=True,
+    )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
     user: Mapped[User] = relationship()

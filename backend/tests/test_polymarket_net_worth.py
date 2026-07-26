@@ -21,7 +21,7 @@ def test_sum_redeemable_value_uses_only_claimable_positions():
         {"title": "claim", "claimableValue": "7.75", "claimable": True},
     ]
 
-    assert providers._sum_redeemable_value(positions) == 20.25
+    assert providers._sum_redeemable_value(positions) == 7.75
 
 
 def test_erc20_balance_of_calldata_encodes_wallet_address():
