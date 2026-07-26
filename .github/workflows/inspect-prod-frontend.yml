@@ -237,6 +237,10 @@ jobs:
             sudo ss -ltnp || true
             echo "==> Nginx upstream targets"
             sudo nginx -T 2>/dev/null | grep -E '^[[:space:]]*(server_name|proxy_pass|upstream)' || true
+            echo "==> Effective Nginx site and cache directives"
+            sudo nginx -T 2>/dev/null |
+              grep -E '^(# configuration file /etc/nginx/(sites-enabled|conf.d)/|[[:space:]]*(listen|server_name|location|proxy_pass|proxy_hide_header|add_header)[[:space:]])' ||
+              true
             echo "==> Systemd frontend command"
             sudo systemctl cat "$FRONTEND_SERVICE_NAME" || true
             echo "==> Processes listening on application ports"
