@@ -71,6 +71,16 @@ score. The login route therefore already met the 2.5 s LCP goal. Before this
 change it still issued two identical `/api/auth/session` requests despite being
 public; the route-scoped provider change removes that dependency.
 
+The equivalent three-run public measurement after the final production deploy
+recorded mobile first-visit LCP at 1,656 ms (-12%), TBT at 57 ms, and usable time
+at 2,064.4 ms (-1%). Mobile repeat-visit LCP improved from 560 ms to 412 ms and
+usable time from 558.7 ms to 409.7 ms. Transferred JavaScript fell from 179,147 B
+to 176,383 B, and initial Auth.js requests fell from two to zero. Desktop
+first-visit usable time varied from 436.1 ms to 739.6 ms alongside a connection
+and TTFB increase, so that cold desktop sample is not claimed as an improvement;
+desktop repeat usable time was 142.1 ms versus 153.5 ms. The machine-readable
+post-deploy capture is `performance-results/after-production-public.json`.
+
 Production authenticated before-results could not be collected because no
 performance test-account secret was available. The local identity is deliberately
 synthetic, and the report does not claim it is production account data. A
