@@ -4063,7 +4063,7 @@ function BullpenAiPageContent() {
         }}
       />
 
-      <div className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+      <div className="hidden">
         {TABS.map((tab) => (
           <Link
             key={tab.mode}
@@ -4075,7 +4075,7 @@ function BullpenAiPageContent() {
         ))}
       </div>
 
-      <Card className="border-slate-200 shadow-sm">
+      <Card className="hidden">
         <CardHeader className="gap-2">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-2">
