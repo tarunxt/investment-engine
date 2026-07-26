@@ -25,6 +25,7 @@ from app.domains.polymarket.runtime_broker import (
     BullpenPositionsSnapshotMetadata,
     BullpenPositionsSnapshot,
     BullpenRawCommandResult,
+    BullpenRuntimeActiveAuthResult,
     BullpenRuntimeBroker,
     BullpenRuntimeCommandError,
 )
@@ -33,6 +34,7 @@ from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
 AUTH_READY_CACHE_KEY = "bullpen:runtime:auth:ready"
 ACTIVE_AUTH_RESULT_KEY = "bullpen:runtime:auth:latest-active"
 POSITIONS_SNAPSHOT_CACHE_KEY = "bullpen:runtime:positions:snapshot"
+POSITIONS_DISPLAY_LKG_KEY = "bullpen:runtime:positions:display-lkg"
 
 
 class FakeRedis:
@@ -270,6 +272,48 @@ def _build_snapshot(
 
 
 @pytest.mark.anyio
+async def test_execute_process_records_post_command_credential_artifact(monkeypatch):
+    broker = _build_broker(monkeypatch)
+    before = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    after = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    artifacts = iter((before, after))
+
+    class CompletedProcess:
+        pid = 4321
+        returncode = 0
+        stdout = None
+        stderr = None
+
+        async def communicate(self):
+            return b'{"positions":[]}', b""
+
+    async def fake_create_subprocess_exec(*_args, **_kwargs):
+        return CompletedProcess()
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: next(artifacts),
+    )
+    monkeypatch.setattr(
+        runtime_broker_module.asyncio,
+        "create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await broker._execute_process(
+        ["polymarket", "positions", "--output", "json"],
+        timeout_seconds=5,
+        command_category="positions",
+        is_write=False,
+        requires_auth=True,
+    )
+
+    assert result.diagnostics.credential_artifact == after
+    assert broker._last_health.credential_artifact == after
+
+
+@pytest.mark.anyio
 async def test_positions_refresh_singleflight_shares_one_cli_execution(monkeypatch):
     broker = _build_broker(monkeypatch)
     calls = 0
@@ -325,6 +369,83 @@ async def test_positions_refresh_singleflight_shares_one_cli_execution(monkeypat
     assert calls == 1
     assert first_snapshot.payload == second_snapshot.payload
     assert first_snapshot.diagnostics.cache_status == "miss"
+
+
+@pytest.mark.anyio
+async def test_positions_refresh_rebinds_auth_lineage_and_persists_display_lkg(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    before = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    after = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    checked_at = "2026-07-19T12:00:00+00:00"
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: after,
+    )
+    await broker._write_auth_ready_cache(
+        cache_key=AUTH_READY_CACHE_KEY,
+        checked_at=checked_at,
+        credential_artifact=before,
+        account_identity="0xwallet-a",
+    )
+    await broker._write_active_auth_result(
+        BullpenRuntimeActiveAuthResult(
+            checked_at="2026-07-19T12:00:01+00:00",
+            auth_checked_at=checked_at,
+            healthy=True,
+            login_required=False,
+            doctor_refresh_succeeded=True,
+            account_identity="0xwallet-a",
+            credential_artifact=before,
+        )
+    )
+
+    async def fake_ensure_auth_ready_under_lock(**_kwargs):
+        return checked_at
+
+    async def fake_execute_raw_under_lock(*_args, **_kwargs):
+        return _build_raw_result(
+            json.dumps(
+                {
+                    "wallet_address": "0xWallet-A",
+                    "positions": [{"slug": "live-position", "shares": 2}],
+                }
+            ),
+            credential_artifact=after,
+        )
+
+    monkeypatch.setattr(
+        broker,
+        "ensure_auth_ready_under_lock",
+        fake_ensure_auth_ready_under_lock,
+    )
+    monkeypatch.setattr(
+        broker,
+        "_execute_raw_under_lock",
+        fake_execute_raw_under_lock,
+    )
+
+    snapshot = await broker.get_positions_snapshot(
+        force_fresh=True,
+        caller_source="stage1-console-profile",
+    )
+    rebound = await broker._read_auth_ready_cache(AUTH_READY_CACHE_KEY)
+
+    assert rebound is not None
+    assert rebound.checked_at == checked_at
+    assert rebound.credential_artifact == after
+    assert rebound.account_identity == "0xwallet-a"
+    assert snapshot.credential_artifact == after
+    assert snapshot.account_identity == "0xwallet-a"
+    assert await broker._redis.get(POSITIONS_DISPLAY_LKG_KEY) is not None
+    assert await broker._redis.ttl(POSITIONS_DISPLAY_LKG_KEY) > 23 * 60 * 60
+    active_auth = await broker.read_latest_active_auth_result()
+    assert active_auth is not None
+    assert active_auth.account_identity == "0xwallet-a"
+    assert active_auth.credential_artifact == after
 
 
 @pytest.mark.anyio
@@ -491,7 +612,8 @@ async def test_historical_auth_rejection_is_stale_after_healthy_active_doctor_re
     assert recovered.historical_error_stale is True
     assert await broker._redis.get(ACTIVE_AUTH_RESULT_KEY) is not None
     passive_health = await broker.read_passive_health()
-    assert passive_health.ok is True
+    assert passive_health.ok is False
+    assert passive_health.broker_health.error_classification == "passive_cache_miss"
     assert passive_health.last_failure is not None
     assert passive_health.last_failure.stale is True
     assert passive_health.last_failure.recovered_at == recovered.checked_at
@@ -1238,6 +1360,205 @@ async def test_read_cached_positions_snapshot_invalidates_when_credential_artifa
 
     assert cached is None
     assert await broker._redis.get(POSITIONS_SNAPSHOT_CACHE_KEY) is None
+
+
+@pytest.mark.anyio
+async def test_display_lkg_accepts_same_account_after_credential_rotation_but_execution_does_not(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    snapshot_artifact = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    current_artifact = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    snapshot = _build_snapshot(
+        seconds_ago=600,
+        credential_artifact=snapshot_artifact,
+        account_identity="wallet-a",
+    )
+    refresh_called = False
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: current_artifact,
+    )
+    await broker._write_auth_ready_cache(
+        cache_key=AUTH_READY_CACHE_KEY,
+        checked_at="2026-07-19T12:00:00+00:00",
+        credential_artifact=current_artifact,
+        account_identity="wallet-a",
+    )
+    await broker._redis.set(
+        POSITIONS_DISPLAY_LKG_KEY,
+        snapshot.model_dump_json(),
+        ex=24 * 60 * 60,
+    )
+
+    display_snapshot = await broker.read_display_positions_snapshot()
+
+    assert display_snapshot is not None
+    assert display_snapshot.source == "redis-cache"
+    assert display_snapshot.freshness_state == "stale"
+    assert display_snapshot.diagnostics.cache_status == "stale"
+
+    async def fail_if_execution_falls_back_to_lkg(**_kwargs):
+        nonlocal refresh_called
+        refresh_called = True
+        raise BullpenRuntimeCommandError(
+            "fresh execution snapshot required",
+            classification="passive_cache_miss",
+        )
+
+    monkeypatch.setattr(
+        broker,
+        "_refresh_positions_snapshot",
+        fail_if_execution_falls_back_to_lkg,
+    )
+
+    with pytest.raises(BullpenRuntimeCommandError, match="fresh execution snapshot"):
+        await broker.get_positions_snapshot(
+            caller_source="stage1-console-profile",
+        )
+
+    assert refresh_called is True
+
+
+@pytest.mark.anyio
+async def test_display_lkg_uses_long_lived_active_auth_identity_after_ready_cache_expires(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    snapshot_artifact = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    current_artifact = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    snapshot = _build_snapshot(
+        seconds_ago=600,
+        credential_artifact=snapshot_artifact,
+        account_identity="wallet-a",
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: current_artifact,
+    )
+    await broker._write_active_auth_result(
+        BullpenRuntimeActiveAuthResult(
+            checked_at="2026-07-19T12:00:01+00:00",
+            auth_checked_at="2026-07-19T12:00:00+00:00",
+            healthy=True,
+            login_required=False,
+            doctor_refresh_succeeded=True,
+            account_identity="wallet-a",
+            credential_artifact=current_artifact,
+        )
+    )
+    await broker._redis.set(
+        POSITIONS_DISPLAY_LKG_KEY,
+        snapshot.model_dump_json(),
+        ex=24 * 60 * 60,
+    )
+
+    assert await broker._redis.get(AUTH_READY_CACHE_KEY) is None
+    display_snapshot = await broker.read_display_positions_snapshot()
+
+    assert display_snapshot is not None
+    assert display_snapshot.account_identity == "wallet-a"
+    assert display_snapshot.freshness_state == "stale"
+
+
+@pytest.mark.anyio
+async def test_display_lkg_rejects_stale_active_auth_from_previous_credential(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    previous_artifact = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    current_artifact = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    snapshot = _build_snapshot(
+        seconds_ago=600,
+        credential_artifact=previous_artifact,
+        account_identity="wallet-a",
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: current_artifact,
+    )
+    await broker._write_active_auth_result(
+        BullpenRuntimeActiveAuthResult(
+            checked_at="2026-07-19T12:00:01+00:00",
+            auth_checked_at="2026-07-19T12:00:00+00:00",
+            healthy=True,
+            login_required=False,
+            doctor_refresh_succeeded=True,
+            account_identity="wallet-a",
+            credential_artifact=previous_artifact,
+        )
+    )
+    await broker._redis.set(
+        POSITIONS_DISPLAY_LKG_KEY,
+        snapshot.model_dump_json(),
+        ex=24 * 60 * 60,
+    )
+
+    assert await broker.read_display_positions_snapshot() is None
+    assert await broker._redis.get(POSITIONS_DISPLAY_LKG_KEY) is None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("account_identity", "classifier_version"),
+    [
+        ("wallet-b", BULLPEN_POSITION_CLASSIFIER_VERSION),
+        ("wallet-a", BULLPEN_POSITION_CLASSIFIER_VERSION - 1),
+    ],
+)
+async def test_display_lkg_rejects_account_or_classifier_mismatch(
+    monkeypatch,
+    account_identity,
+    classifier_version,
+):
+    broker = _build_broker(monkeypatch)
+    snapshot_artifact = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    current_artifact = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    snapshot = _build_snapshot(
+        credential_artifact=snapshot_artifact,
+        account_identity=account_identity,
+        position_classifier_version=classifier_version,
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: current_artifact,
+    )
+    await broker._write_auth_ready_cache(
+        cache_key=AUTH_READY_CACHE_KEY,
+        checked_at="2026-07-19T12:00:00+00:00",
+        credential_artifact=current_artifact,
+        account_identity="wallet-a",
+    )
+    await broker._redis.set(
+        POSITIONS_DISPLAY_LKG_KEY,
+        snapshot.model_dump_json(),
+        ex=24 * 60 * 60,
+    )
+
+    assert await broker.read_display_positions_snapshot() is None
+    assert await broker._redis.get(POSITIONS_DISPLAY_LKG_KEY) is None
+
+
+def test_account_identity_extraction_is_stable_across_payload_key_order():
+    first = {
+        "user_id": "generic-user",
+        "wallet_address": "0xABCDEF",
+    }
+    second = {
+        "wallet_address": "0xABCDEF",
+        "user_id": "generic-user",
+    }
+
+    assert runtime_broker_module._extract_account_identity(first) == "0xabcdef"
+    assert runtime_broker_module._extract_account_identity(second) == "0xabcdef"
 
 
 @pytest.mark.anyio

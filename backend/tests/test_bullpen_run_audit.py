@@ -422,6 +422,41 @@ def _current_buy_audit_bundle(
     return bundle
 
 
+def _terminal_doctor_blocker_bundle(
+    *,
+    error_code: str,
+    status: str,
+    retryable: bool,
+    next_attempt_at: str | None,
+) -> dict[str, object]:
+    bundle = _current_buy_audit_bundle(status=status)
+    order = bundle["stage_3"]["order_intents"][0]
+    order.update(
+        {
+            "last_error_code": error_code,
+            "last_error_message": (
+                "POLYMARKET_WALLET_ROUTE_UNCONFIRMED: "
+                "Bullpen support must confirm the wallet route."
+            ),
+            "retryable": retryable,
+            "next_attempt_at": next_attempt_at,
+            "attempts": [
+                {
+                    "attempt_number": 1,
+                    "error_code": error_code,
+                    "error_message": (
+                        "POLYMARKET_WALLET_ROUTE_UNCONFIRMED"
+                    ),
+                    "reconciliation_json": {
+                        "retryable": retryable,
+                    },
+                }
+            ],
+        }
+    )
+    return bundle
+
+
 def _buy_market_preflight(
     *,
     conflict_count: int = 0,
@@ -1168,6 +1203,116 @@ def test_immediate_sell_audit_binds_strategy_to_write_attempt_before_later_prefl
     }
 
     assert codes == set()
+
+
+def test_audit_flags_flattened_retryable_terminal_doctor_blocker():
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _terminal_doctor_blocker_bundle(
+                error_code="DOCTOR_READ_FAILED",
+                status="RETRY_WAIT",
+                retryable=True,
+                next_attempt_at="2026-07-27T00:01:00+00:00",
+            )
+        )
+    }
+
+    assert "STAGE3_TERMINAL_DOCTOR_BLOCKER_RETRYABLE" in codes
+
+
+def test_audit_accepts_terminal_typed_doctor_blocker():
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(
+            _terminal_doctor_blocker_bundle(
+                error_code="POLYMARKET_WALLET_ROUTE_UNCONFIRMED",
+                status="FAILED_PERMANENT",
+                retryable=False,
+                next_attempt_at=None,
+            )
+        )
+    }
+
+    assert "STAGE3_TERMINAL_DOCTOR_BLOCKER_RETRYABLE" not in codes
+
+
+def test_audit_does_not_treat_ordinary_terminal_market_response_as_doctor_blocker():
+    bundle = _current_buy_audit_bundle(status="REJECTED")
+    order = bundle["stage_3"]["order_intents"][0]
+    order.update(
+        {
+            "last_error_code": "MARKET_CLOSED",
+            "last_error_message": "The market is closed.",
+            "retryable": False,
+            "next_attempt_at": None,
+            "attempts": [
+                {
+                    "attempt_number": 1,
+                    "error_code": "MARKET_CLOSED",
+                    "sanitized_response_json": {
+                        "code": "MARKET_CLOSED",
+                        "safe_to_retry": False,
+                    },
+                    "reconciliation_json": {
+                        "retryable": False,
+                    },
+                }
+            ],
+        }
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(bundle)
+    }
+
+    assert "STAGE3_TERMINAL_DOCTOR_BLOCKER_RETRYABLE" not in codes
+
+
+def test_audit_flags_terminal_success_without_submission_evidence():
+    bundle = _immediate_sell_bundle(
+        None,
+        order_status="FILLED",
+    )
+    order = bundle["stage_3"]["order_intents"][0]
+    order["attempt_count"] = 1
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(bundle)
+    }
+
+    assert (
+        "STAGE3_TERMINAL_SUCCESS_WITHOUT_SUBMISSION_EVIDENCE"
+        in codes
+    )
+
+
+def test_audit_accepts_terminal_success_with_submission_evidence():
+    bundle = _immediate_sell_bundle(
+        None,
+        order_status="FILLED",
+    )
+    order = bundle["stage_3"]["order_intents"][0]
+    order.update(
+        {
+            "attempt_count": 1,
+            "first_submitted_at": "2026-07-27T00:00:01+00:00",
+            "last_submitted_at": "2026-07-27T00:00:02+00:00",
+            "remote_order_id": "remote-order-1",
+        }
+    )
+
+    codes = {
+        finding["code"]
+        for finding in build_deterministic_findings(bundle)
+    }
+
+    assert (
+        "STAGE3_TERMINAL_SUCCESS_WITHOUT_SUBMISSION_EVIDENCE"
+        not in codes
+    )
 
 
 def test_build_deterministic_findings_flags_missing_stage2_top10_handoff_decision():
@@ -2475,11 +2620,11 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert BULLPEN_RUN_AUDIT_SCHEMA_VERSION == 2
     assert (
         BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION
-        == "2026-07-27-stage3-stale-balance-buy-fence-v27"
+        == "2026-07-27-stage3-submission-evidence-v29"
     )
     assert (
         BULLPEN_RUN_AUDIT_RULE_VERSION
-        == "2026-07-27-stage3-stale-balance-buy-fence-v27"
+        == "2026-07-27-stage3-submission-evidence-v29"
     )
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
     assert keys >= {
@@ -2498,11 +2643,15 @@ def test_algorithm_registry_contains_required_audit_keys():
         "order_funnel_aggregation",
         "stage3_sell_live_exposure_preflight",
         "stage3_buy_market_exposure_preflight",
+        "stage3_redeem_wallet_lineage_preflight",
+        "stage3_wallet_credential_rotation_attestation",
         "stage3_immediate_sell_fallback",
         "stage3_bullpen_response_normalization",
         "stage3_verified_remote_absence_retry",
         "stage3_reconciliation_generation_guard",
         "stage3_terminal_resume_preservation",
+        "stage3_terminal_doctor_blocker",
+        "stage3_submission_evidence_terminality",
     }
     claimability = next(
         entry
@@ -2541,6 +2690,12 @@ def test_algorithm_registry_contains_required_audit_keys():
         if entry["algorithm_key"] == "stage3_active_reservation_cash_filter"
     )
     assert active_reservation_filter["algorithm_version"] == "v2"
+    terminal_doctor_blocker = next(
+        entry
+        for entry in AUDITED_ALGORITHM_REGISTRY
+        if entry["algorithm_key"] == "stage3_terminal_doctor_blocker"
+    )
+    assert terminal_doctor_blocker["algorithm_version"] == "v1"
     assert BULLPEN_POSITION_CLASSIFIER_VERSION == 4
 
 

@@ -444,6 +444,12 @@ class PolymarketDoctorStatus(BaseModel):
     checked_at: str | None = None
     ok: bool
     message: str
+    error_code: str | None = None
+    error_classification: str | None = None
+    safe_to_retry: bool | None = None
+    support_required: bool | None = None
+    terminal: bool | None = None
+    resolution_owner: str | None = None
     bullpen_login_observed_at: str | None = None
     bullpen_jwt_expires_at: str | None = None
     bullpen_jwt_seconds_remaining: int | None = None

@@ -12,6 +12,10 @@ import {
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
 } from "@/lib/bullpenStage2To3Strategy";
 import type { BullpenAutoLiveDecision } from "@/types/api";
+import {
+  isSubmittedButUnsuccessfulInvestOrderPlan,
+  isSubmittedOrExecutedInvestOrderPlan,
+} from "./bullpenAutoRunInvestMetrics";
 
 type BullpenStage3ShortlistReasonDialogProps = {
   question: BullpenQuestionRow;
@@ -175,20 +179,6 @@ function getDecisionMaxPositions(decision: BullpenAutoLiveDecision | undefined) 
   return decision.stage3_max_positions;
 }
 
-function isSuccessfulStage3Order(decision: BullpenAutoLiveDecision) {
-  const orderPlan = decision.order_plan;
-  if (!orderPlan) return false;
-  if (["submitted", "confirmed"].includes(orderPlan.status)) return true;
-
-  const executionText = `${orderPlan.detail ?? ""}\n${orderPlan.execution_response ?? ""}`;
-  return (
-    /successfully|submitted|filled|executed/i.test(executionText) &&
-    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(
-      executionText,
-    )
-  );
-}
-
 function getStage3Outcome(
   latestDecision: BullpenAutoLiveDecision | undefined,
 ): Stage3Outcome {
@@ -212,7 +202,18 @@ function getStage3Outcome(
     };
   }
 
-  if (isSuccessfulStage3Order(latestDecision)) {
+  if (isSubmittedOrExecutedInvestOrderPlan(latestDecision.order_plan)) {
+    if (
+      isSubmittedButUnsuccessfulInvestOrderPlan(latestDecision.order_plan)
+    ) {
+      return {
+        completed: false,
+        label: "Submitted in Stage 3 but unsuccessful",
+        detail:
+          latestDecision.order_plan?.detail?.trim() ||
+          "Stage 3 submitted this order, but it ended in a terminal unsuccessful state.",
+      };
+    }
     return {
       completed: true,
       label: "Moved to Stage 3",

@@ -51,6 +51,7 @@ function createDecision({
   status = null,
   exitState = "ACTIVE",
   exitStrategies = [],
+  withExecutionEvidence = false,
 } = {}) {
   return {
     id: id ?? `decision-${Math.random()}`,
@@ -74,6 +75,13 @@ function createDecision({
           id: `order-${id ?? "x"}`,
           action,
           status,
+          dry_run: false,
+          executed_at: withExecutionEvidence
+            ? "2026-07-05T12:00:01Z"
+            : null,
+          remote_order_id: null,
+          remote_transaction_hash: null,
+          execution_response: null,
         }
       : null,
   };
@@ -100,13 +108,193 @@ test("stale running execution steps flip to completed when processed catches pla
   );
 });
 
-test("filled Stage 3 orders count as submitted", async () => {
-  const { isSubmittedOrSuccessfulInvestOrderPlan } =
+test("Stage 3 submitted and filled statuses require explicit execution evidence", async () => {
+  const {
+    hasInvestOrderSubmissionEvidence,
+    isSubmittedOrSuccessfulInvestOrderPlan,
+  } =
     await loadInvestMetricsModule();
 
   assert.equal(
-    isSubmittedOrSuccessfulInvestOrderPlan({ status: "filled" }),
+    isSubmittedOrSuccessfulInvestOrderPlan({
+      action: "sell",
+      status: "filled",
+      detail:
+        "Wallet reconciliation confirmed the sell reduced the position to zero.",
+      dry_run: false,
+      executed_at: null,
+      remote_order_id: null,
+      remote_transaction_hash: null,
+      execution_response: null,
+    }),
+    false,
+  );
+  assert.equal(
+    isSubmittedOrSuccessfulInvestOrderPlan({
+      action: "sell",
+      status: "filled",
+      detail: "Sell filled successfully.",
+      dry_run: false,
+    }),
+    false,
+  );
+  assert.equal(
+    isSubmittedOrSuccessfulInvestOrderPlan({
+      action: "sell",
+      status: "filled",
+      dry_run: false,
+      executed_at: "2026-07-05T12:00:01Z",
+    }),
     true,
+  );
+  assert.equal(
+    hasInvestOrderSubmissionEvidence({
+      action: "buy",
+      status: "submitted",
+      dry_run: false,
+      remote_order_id: "remote-order-1",
+    }),
+    true,
+  );
+  assert.equal(
+    hasInvestOrderSubmissionEvidence({
+      action: "buy",
+      status: "submitted",
+      dry_run: false,
+      execution_response: "Order filled successfully.",
+    }),
+    false,
+  );
+  assert.equal(
+    hasInvestOrderSubmissionEvidence({
+      action: "buy",
+      status: "submitted",
+      dry_run: false,
+      submission_evidence_present: true,
+      submission_evidence_kind: "uncertain_write_boundary",
+    }),
+    true,
+  );
+  assert.equal(
+    hasInvestOrderSubmissionEvidence({
+      action: "buy",
+      status: "submitted",
+      dry_run: false,
+      submission_evidence_present: false,
+      executed_at: "2026-07-05T12:00:01Z",
+    }),
+    false,
+  );
+  assert.equal(
+    isSubmittedOrSuccessfulInvestOrderPlan({
+      action: "buy",
+      status: "submitted",
+      dry_run: true,
+      remote_order_id: "dry-run-order",
+    }),
+    false,
+  );
+});
+
+test("legacy FILLED exits without submission evidence stay out of same-run submitted and executed groups", async () => {
+  const {
+    partitionInvestDecisionsByExecutionEvidence,
+    summarizeInvestStepCountsFromDecisions,
+  } = await loadInvestMetricsModule();
+  const decisions = [
+    ...Array.from({ length: 5 }, (_, index) =>
+      createDecision({
+        id: `legacy-filled-sell-${index + 1}`,
+        action: "sell",
+        status: "filled",
+      }),
+    ),
+    createDecision({
+      id: "timed-out-buy",
+      action: "buy",
+      status: "timed_out",
+    }),
+  ];
+
+  const groups = partitionInvestDecisionsByExecutionEvidence(decisions);
+
+  assert.equal(groups.submittedOrExecuted.length, 0);
+  assert.equal(groups.completedWithoutSubmission.length, 0);
+  assert.deepEqual(
+    groups.notSubmitted.map((decision) => decision.id),
+    [
+      "legacy-filled-sell-1",
+      "legacy-filled-sell-2",
+      "legacy-filled-sell-3",
+      "legacy-filled-sell-4",
+      "legacy-filled-sell-5",
+      "timed-out-buy",
+    ],
+  );
+  assert.equal(
+    summarizeInvestStepCountsFromDecisions("sell", decisions).submittedOrders,
+    0,
+  );
+  assert.equal(
+    summarizeInvestStepCountsFromDecisions("buy", decisions).submittedOrders,
+    0,
+  );
+});
+
+test("evidence-backed terminal failures count as submitted but render separately", async () => {
+  const {
+    partitionInvestDecisionsByExecutionEvidence,
+    summarizeInvestStepCountsFromDecisions,
+  } = await loadInvestMetricsModule();
+  const rejectedBuy = createDecision({
+    id: "rejected-after-submit",
+    action: "buy",
+    status: "rejected",
+  });
+  rejectedBuy.order_plan.submission_evidence_present = true;
+  rejectedBuy.order_plan.submission_evidence_kind = "remote_order_id";
+  rejectedBuy.order_plan.remote_order_id = "remote-rejected-1";
+
+  const groups = partitionInvestDecisionsByExecutionEvidence([rejectedBuy]);
+
+  assert.deepEqual(groups.submittedOrExecuted, []);
+  assert.deepEqual(
+    groups.submittedButUnsuccessful.map((decision) => decision.id),
+    ["rejected-after-submit"],
+  );
+  assert.deepEqual(groups.notSubmitted, []);
+  assert.equal(
+    summarizeInvestStepCountsFromDecisions("buy", [rejectedBuy])
+      .submittedOrders,
+    1,
+  );
+});
+
+test("redeem no-action outcomes are completed separately without inflating submitted counts", async () => {
+  const {
+    isCompletedWithoutSubmissionInvestOrderPlan,
+    partitionInvestDecisionsByExecutionEvidence,
+    summarizeInvestStepCountsFromDecisions,
+  } = await loadInvestMetricsModule();
+  const noActionRedeem = createDecision({
+    id: "already-redeemed",
+    action: "redeem",
+    status: "already_redeemed",
+  });
+
+  assert.equal(
+    isCompletedWithoutSubmissionInvestOrderPlan(noActionRedeem.order_plan),
+    true,
+  );
+  assert.deepEqual(
+    partitionInvestDecisionsByExecutionEvidence([noActionRedeem])
+      .completedWithoutSubmission.map((decision) => decision.id),
+    ["already-redeemed"],
+  );
+  assert.equal(
+    summarizeInvestStepCountsFromDecisions("sell", [noActionRedeem])
+      .submittedOrders,
+    0,
   );
 });
 
@@ -124,6 +312,7 @@ test("Stage 3 metric filters break out sell, processed, and forced-exit rows", a
       status: "submitted",
       exitState: "EVENT_EXIT_PLANNED",
       exitStrategies: ["OUTSIDE_TOP_10_RETURNS_DAY"],
+      withExecutionEvidence: true,
     }),
     createDecision({
       id: "sell-failed",
@@ -136,6 +325,7 @@ test("Stage 3 metric filters break out sell, processed, and forced-exit rows", a
       id: "buy-submitted",
       action: "buy",
       status: "submitted",
+      withExecutionEvidence: true,
     }),
     createDecision({
       id: "buy-planned",
@@ -180,6 +370,7 @@ test("decision rows recover submitted Step 2 counts when stored step tiles are s
       id: "buy-submitted",
       action: "buy",
       status: "submitted",
+      withExecutionEvidence: true,
     }),
     createDecision({
       id: "buy-failed",
@@ -212,6 +403,7 @@ test("planned Event Exit strategy filters exclude submitted rows", async () => {
       action: "sell",
       status: "submitted",
       exitStrategies: ["OUTSIDE_TOP_10_RETURNS_DAY"],
+      withExecutionEvidence: true,
     }),
     createDecision({
       id: "forced-planned",
@@ -230,6 +422,7 @@ test("planned Event Exit strategy filters exclude submitted rows", async () => {
       action: "redeem",
       status: "submitted",
       exitStrategies: ["REDEEM_CLAIM"],
+      withExecutionEvidence: true,
     }),
   ];
 
@@ -289,6 +482,28 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
   assert.match(source, /value: step\.rankingLlmSubmittedOrders/);
   assert.match(source, /value: step\.forcedExitSubmittedOrders/);
   assert.match(source, /value: step\.redeemSubmittedOrders/);
+});
+
+test("same-run schedule and detail views use the shared execution-evidence partition", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /partitionInvestDecisionsByExecutionEvidence\(decisions\)/);
+  assert.match(source, /partitionInvestDecisionsByExecutionEvidence\(tableRows\)/);
+  assert.match(source, /isSubmittedOrExecutedInvestOrderPlan/);
+  assert.match(source, /Completed without a New Order/);
+  assert.match(source, /Submitted but Unsuccessful/);
+  assert.match(source, /Orders Planned but not Submitted/);
+  assert.doesNotMatch(source, /function isSubmittedOrSuccessfulOrderPlan/);
+  assert.doesNotMatch(
+    source,
+    /successfully\|submitted\|filled\|redeemed\|claimed\|executed/,
+  );
 });
 
 test("persisted Stage 3 counters override historical decision-row maxima", () => {

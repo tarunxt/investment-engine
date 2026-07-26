@@ -10,6 +10,7 @@ import shutil
 from collections.abc import Iterable
 
 from app.domains.polymarket.logger import redact_secrets
+from app.domains.polymarket.doctor_errors import parse_bullpen_doctor_failure
 from app.domains.polymarket.runtime_broker import (
     BullpenRuntimeCommandError,
     get_bullpen_runtime_broker,
@@ -27,7 +28,22 @@ from app.domains.polymarket.schemas import (
 
 
 class BullpenCommandError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        classification: str | None = None,
+        stdout: str | None = None,
+        stderr: str | None = None,
+        exit_code: int | None = None,
+        signal: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.classification = classification
+        self.stdout = stdout
+        self.stderr = stderr
+        self.exit_code = exit_code
+        self.signal = signal
 
 
 def is_redeem_metadata_lookup_warning(message: str) -> bool:
@@ -376,7 +392,14 @@ async def run_bullpen(
         )
         return result.stdout
     except BullpenRuntimeCommandError as exc:
-        raise BullpenCommandError(redact_secrets(str(exc))) from exc
+        raise BullpenCommandError(
+            redact_secrets(str(exc)),
+            classification=exc.classification,
+            stdout=redact_secrets(exc.stdout) if exc.stdout else None,
+            stderr=redact_secrets(exc.stderr) if exc.stderr else None,
+            exit_code=exc.exit_code,
+            signal=exc.signal,
+        ) from exc
 
 
 async def run_bullpen_json(
@@ -503,6 +526,7 @@ class BullpenLiveExecutor:
                 read_only=True,
             )
         except Exception as exc:
+            failure = parse_bullpen_doctor_failure(exc)
             return PolymarketDoctorStatus(
                 checked_at=checked_at,
                 ok=False,
@@ -510,6 +534,12 @@ class BullpenLiveExecutor:
                     "Bullpen doctor failed "
                     f"using {runtime_context_label}: {redact_secrets(str(exc))}"
                 ),
+                error_code=failure.error_code,
+                error_classification=getattr(exc, "classification", None),
+                safe_to_retry=failure.safe_to_retry,
+                support_required=failure.support_required,
+                terminal=failure.is_terminal,
+                resolution_owner=failure.resolution_owner,
                 **session,
             )
 

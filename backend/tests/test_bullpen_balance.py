@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 
@@ -373,6 +374,87 @@ Account
     assert doctor.ok is False
     assert "doctor failed" in doctor.message
     assert doctor.bullpen_jwt_seconds_remaining == 846
+
+
+@pytest.mark.anyio
+async def test_bullpen_doctor_preserves_terminal_support_required_preflight(
+    monkeypatch,
+):
+    class FakeBroker:
+        async def ensure_auth_ready(self, *, force_refresh: bool = False):
+            assert force_refresh is False
+            return "2026-07-27T00:00:00+00:00"
+
+    typed_failure = {
+        "code": "POLYMARKET_WALLET_ROUTE_UNCONFIRMED",
+        "message": "Bullpen support must confirm the wallet route.",
+        "safe_to_retry": False,
+        "support_required": True,
+        "terminal": True,
+        "resolution_owner": "bullpen_support",
+    }
+
+    async def fake_run_bullpen(args, *, timeout_seconds, read_only):
+        if args == ["status"]:
+            return ""
+        if args == ["polymarket", "preflight"]:
+            raise bullpen.BullpenCommandError(
+                "Polymarket preflight failed.",
+                classification="wallet_route_unconfirmed",
+                stderr=json.dumps(typed_failure),
+                exit_code=1,
+            )
+        raise AssertionError(f"unexpected args: {args}")
+
+    monkeypatch.setattr(bullpen, "get_bullpen_runtime_broker", lambda: FakeBroker())
+    monkeypatch.setattr(bullpen, "run_bullpen", fake_run_bullpen)
+
+    doctor = await bullpen.BullpenLiveExecutor().doctor()
+
+    assert doctor.ok is False
+    assert doctor.error_code == "POLYMARKET_WALLET_ROUTE_UNCONFIRMED"
+    assert doctor.error_classification == "wallet_route_unconfirmed"
+    assert doctor.safe_to_retry is False
+    assert doctor.support_required is True
+    assert doctor.terminal is True
+    assert doctor.resolution_owner == "bullpen_support"
+
+
+@pytest.mark.anyio
+async def test_run_bullpen_preserves_runtime_command_error_payload(monkeypatch):
+    class FakeBroker:
+        async def execute_raw(
+            self,
+            args,
+            *,
+            timeout_seconds,
+            extra_env,
+            retry_auth_once,
+        ):
+            raise bullpen.BullpenRuntimeCommandError(
+                "Polymarket preflight failed.",
+                classification="wallet_route_unconfirmed",
+                stdout=json.dumps(
+                    {
+                        "code": "POLYMARKET_WALLET_ROUTE_UNCONFIRMED",
+                        "safe_to_retry": False,
+                    }
+                ),
+                exit_code=1,
+            )
+
+    monkeypatch.setattr(bullpen, "get_bullpen_runtime_broker", lambda: FakeBroker())
+
+    with pytest.raises(bullpen.BullpenCommandError) as error:
+        await bullpen.run_bullpen(
+            ["polymarket", "preflight"],
+            timeout_seconds=45,
+            read_only=True,
+        )
+
+    assert error.value.classification == "wallet_route_unconfirmed"
+    assert error.value.exit_code == 1
+    assert "POLYMARKET_WALLET_ROUTE_UNCONFIRMED" in (error.value.stdout or "")
 
 
 @pytest.mark.anyio

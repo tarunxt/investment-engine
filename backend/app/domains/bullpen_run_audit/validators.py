@@ -11,6 +11,10 @@ from app.domains.bullpen_run_audit.constants import (
     BULLPEN_RUN_AUDIT_RULE_VERSION,
     FINDING_SEVERITIES,
 )
+from app.domains.polymarket.doctor_errors import (
+    is_terminal_bullpen_support_error_code,
+    parse_bullpen_doctor_failure,
+)
 from app.domains.polymarket.position_classification import (
     BULLPEN_POSITION_CLASSIFIER_VERSION,
 )
@@ -2076,14 +2080,147 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         attempts = order.get("attempts") if isinstance(order.get("attempts"), list) else []
         if status in {"SUBMITTED", "CONFIRMING", "CONFIRMED", "FILLED"} and not attempts:
             submitted_without_attempt += 1
-        idempotency_key = order.get("idempotency_key")
-        if isinstance(idempotency_key, str) and len(idempotency_key) > 128:
-            oversized_idempotency_keys.append((index, len(idempotency_key)))
         execution_metadata = (
             order.get("execution_metadata_json")
             if isinstance(order.get("execution_metadata_json"), dict)
             else {}
         )
+        has_submission_evidence = bool(
+            order.get("first_submitted_at")
+            or order.get("last_submitted_at")
+            or order.get("remote_order_id")
+            or order.get("remote_transaction_hash")
+            or execution_metadata.get("uncertain_remote_write_boundary")
+        )
+        if status in {"CONFIRMED", "FILLED"} and not has_submission_evidence:
+            findings.append(
+                _finding(
+                    code="STAGE3_TERMINAL_SUCCESS_WITHOUT_SUBMISSION_EVIDENCE",
+                    severity="critical",
+                    stage="stage-3",
+                    category="execution-reconciliation",
+                    title=(
+                        "Stage 3 terminal success lacks submission evidence"
+                    ),
+                    explanation=(
+                        "A confirmed or filled durable intent must retain a "
+                        "submission timestamp, remote reference, or uncertain "
+                        "write-boundary marker. Attempt count and wallet "
+                        "absence alone do not prove that Bullpen executed it."
+                    ),
+                    observed_value=(
+                        f"status={status}; "
+                        f"attempt_count={order.get('attempt_count')}; "
+                        "submission_evidence=false"
+                    ),
+                    expected_value=(
+                        "terminal success with durable submission/remote-write "
+                        "evidence, or a deferred/failed unsubmitted outcome"
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/status",
+                        f"/stage_3/order_intents/{index}/first_submitted_at",
+                        f"/stage_3/order_intents/{index}/last_submitted_at",
+                        f"/stage_3/order_intents/{index}/remote_order_id",
+                        f"/stage_3/order_intents/{index}/remote_transaction_hash",
+                        (
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "uncertain_remote_write_boundary"
+                        ),
+                    ],
+                    suggested_remediation=(
+                        "Project the row as unsubmitted, keep replacement "
+                        "capacity blocked, and reconcile only from a persisted "
+                        "write boundary plus matching wallet/trade evidence."
+                    ),
+                )
+            )
+        latest_attempt = next(
+            (
+                attempt
+                for attempt in reversed(attempts)
+                if isinstance(attempt, dict)
+            ),
+            None,
+        )
+        terminal_doctor_failure = parse_bullpen_doctor_failure(
+            {
+                "error_code": order.get("last_error_code"),
+                "message": order.get("last_error_message"),
+            },
+            latest_attempt or {},
+        )
+        if (
+            terminal_doctor_failure.is_terminal
+            and is_terminal_bullpen_support_error_code(
+                terminal_doctor_failure.error_code
+            )
+        ):
+            latest_reconciliation = (
+                latest_attempt.get("reconciliation_json")
+                if isinstance(latest_attempt, dict)
+                and isinstance(
+                    latest_attempt.get("reconciliation_json"),
+                    dict,
+                )
+                else {}
+            )
+            flattened_code = str(order.get("last_error_code") or "") == (
+                "DOCTOR_READ_FAILED"
+            )
+            if (
+                flattened_code
+                or status != "FAILED_PERMANENT"
+                or order.get("retryable") is not False
+                or order.get("next_attempt_at") is not None
+                or latest_reconciliation.get("retryable") is True
+            ):
+                findings.append(
+                    _finding(
+                        code="STAGE3_TERMINAL_DOCTOR_BLOCKER_RETRYABLE",
+                        severity="critical",
+                        stage="stage-3",
+                        category="execution-guardrail",
+                        title=(
+                            "Terminal Bullpen doctor blocker remained retryable"
+                        ),
+                        explanation=(
+                            "A typed Bullpen preflight failure marked "
+                            "support-required or unsafe to retry must retain its "
+                            "upstream code and terminalize before any automatic "
+                            "Stage 3 resubmission."
+                        ),
+                        observed_value=(
+                            f"code={order.get('last_error_code')}; "
+                            f"status={status}; "
+                            f"retryable={order.get('retryable')}; "
+                            f"next_attempt_at={order.get('next_attempt_at')}"
+                        ),
+                        expected_value=(
+                            f"code={terminal_doctor_failure.auto_live_error_code}; "
+                            "status=FAILED_PERMANENT; retryable=false; "
+                            "next_attempt_at=null"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/last_error_code",
+                            f"/stage_3/order_intents/{index}/status",
+                            f"/stage_3/order_intents/{index}/retryable",
+                            f"/stage_3/order_intents/{index}/next_attempt_at",
+                            f"/stage_3/order_intents/{index}/attempts",
+                        ],
+                        suggested_remediation=(
+                            "Preserve the typed Bullpen doctor payload, disable "
+                            "automatic retry, and require Bullpen support or the "
+                            "reported resolution owner to clear the blocker."
+                        ),
+                    )
+                )
+        idempotency_key = order.get("idempotency_key")
+        if isinstance(idempotency_key, str) and len(idempotency_key) > 128:
+            oversized_idempotency_keys.append((index, len(idempotency_key)))
         sell_preflight = (
             execution_metadata.get("sell_live_preflight")
             if isinstance(execution_metadata.get("sell_live_preflight"), dict)

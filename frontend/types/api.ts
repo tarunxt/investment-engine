@@ -2027,6 +2027,12 @@ export interface PolymarketDoctorStatus {
   checked_at?: string | null;
   ok: boolean;
   message: string;
+  error_code?: string | null;
+  error_classification?: string | null;
+  safe_to_retry?: boolean | null;
+  support_required?: boolean | null;
+  terminal?: boolean | null;
+  resolution_owner?: string | null;
   bullpen_login_observed_at?: string | null;
   bullpen_jwt_expires_at?: string | null;
   bullpen_jwt_seconds_remaining?: number | null;
@@ -2280,6 +2286,12 @@ export type BullpenAutoLiveExecutorErrorCode =
   | "SESSION_INVALID"
   | "LIVE_LOCKED"
   | "DOCTOR_READ_FAILED"
+  | "BULLPEN_SUPPORT_REQUIRED"
+  | "L2_WALLET_DISAGREEMENT"
+  | "PM_LEGACY_DEPOSIT_WALLET_PENDING_RECOVERY"
+  | "POLYMARKET_RELAYER_WALLET_NOT_REGISTERED"
+  | "POLYMARKET_WALLET_ROUTE_UNCONFIRMED"
+  | "SUBMISSION_EVIDENCE_MISSING"
   | "ORDER_WRITE_UNAVAILABLE"
   | "BALANCE_UNAVAILABLE"
   | "INSUFFICIENT_COLLATERAL"
@@ -2602,6 +2614,13 @@ export interface BullpenAutoLiveOrderPlan {
   remaining_shares?: number;
   average_fill_price_cents?: number | null;
   execution_response?: string | null;
+  submission_evidence_present?: boolean | null;
+  submission_evidence_kind?:
+    | "remote_order_id"
+    | "remote_transaction_hash"
+    | "submitted_at"
+    | "uncertain_write_boundary"
+    | null;
   current_blockage?: string | null;
   how_to_resolve?: string | null;
   created_at: string;

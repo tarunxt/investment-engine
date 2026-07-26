@@ -37,6 +37,7 @@ _ACTIVE_AUTH_HEALTHY_REFRESH_SECONDS = 60
 _ACTIVE_AUTH_FAILED_REFRESH_SECONDS = 30
 _CLI_VERSION_TTL_SECONDS = 300
 _POSITIONS_SNAPSHOT_TTL_SECONDS = 300
+_POSITIONS_DISPLAY_LKG_TTL_SECONDS = 24 * 60 * 60
 _POSITIONS_FRESH_SECONDS = 20
 _POSITIONS_LOCK_TTL_SECONDS = 120
 _POSITIONS_LOCK_PROBE_TIMEOUT_SECONDS = 0.25
@@ -56,6 +57,8 @@ _REDIS_PREFIX = "bullpen:runtime"
 _ACTIVE_AUTH_RESULT_KEY = f"{_REDIS_PREFIX}:auth:latest-active"
 _AUTHENTICATED_CLI_LOCK_KEY = f"{_REDIS_PREFIX}:authenticated-cli"
 _POSITIONS_REFRESH_LOCK_KEY = f"{_REDIS_PREFIX}:positions-refresh"
+_POSITIONS_SNAPSHOT_KEY = f"{_REDIS_PREFIX}:positions:snapshot"
+_POSITIONS_DISPLAY_LKG_KEY = f"{_REDIS_PREFIX}:positions:display-lkg"
 _PRODUCTION_ENVIRONMENTS = {"production", "prod"}
 _STRICT_RUNTIME_OWNER = "investor"
 _READ_ONLY_FLAG = "--read-only"
@@ -210,6 +213,7 @@ class BullpenRuntimeActiveAuthResult(BaseModel):
     error_classification: str | None = None
     recovered_failure_at: str | None = None
     historical_error_stale: bool = False
+    account_identity: str | None = None
     credential_artifact: BullpenCredentialArtifact = Field(
         default_factory=BullpenCredentialArtifact
     )
@@ -568,32 +572,32 @@ def _credential_artifact_matches(
     )
 
 
-_ACCOUNT_IDENTITY_KEYS = {
-    "wallet",
+_ACCOUNT_IDENTITY_KEYS = (
     "wallet_address",
     "walletaddress",
     "proxy_wallet",
     "proxywallet",
-    "address",
     "public_key",
     "publickey",
-    "account",
+    "address",
+    "wallet",
+    "owner",
     "account_id",
     "accountid",
-    "user",
+    "account",
     "user_id",
     "userid",
-    "owner",
-}
-_ACCOUNT_IDENTITY_CONTAINER_KEYS = {
+    "user",
+)
+_ACCOUNT_IDENTITY_CONTAINER_KEYS = (
+    "wallet",
+    "identity",
     "summary",
     "account",
     "user",
-    "wallet",
-    "identity",
     "metadata",
     "meta",
-}
+)
 
 
 def _normalize_account_identity(value: object) -> str | None:
@@ -612,16 +616,19 @@ def _extract_account_identity(value: Any, *, max_depth: int = 3) -> str | None:
         if depth > max_depth:
             return None
         if isinstance(current, dict):
-            for key, nested in current.items():
-                normalized_key = str(key).strip().lower()
-                if normalized_key in _ACCOUNT_IDENTITY_KEYS:
-                    direct = _normalize_account_identity(nested)
-                    if direct:
-                        return direct
-                if normalized_key in _ACCOUNT_IDENTITY_CONTAINER_KEYS:
-                    nested_identity = walk(nested, depth + 1)
-                    if nested_identity:
-                        return nested_identity
+            normalized_items = {
+                str(key).strip().lower(): nested for key, nested in current.items()
+            }
+            for key in _ACCOUNT_IDENTITY_KEYS:
+                direct = _normalize_account_identity(normalized_items.get(key))
+                if direct:
+                    return direct
+            for key in _ACCOUNT_IDENTITY_CONTAINER_KEYS:
+                if key not in normalized_items:
+                    continue
+                nested_identity = walk(normalized_items[key], depth + 1)
+                if nested_identity:
+                    return nested_identity
             return None
         if isinstance(current, list):
             for item in current:
@@ -647,6 +654,30 @@ def _snapshot_matches_runtime(
     if current_account_identity and snapshot.account_identity != current_account_identity:
         return False
     return True
+
+
+def _snapshot_matches_display_runtime(
+    snapshot: BullpenPositionsSnapshot,
+    *,
+    current_credential: BullpenCredentialArtifact,
+    current_account_identity: str | None,
+) -> bool:
+    """Validate a display-only LKG without weakening execution cache lineage."""
+
+    if snapshot.position_classifier_version != BULLPEN_POSITION_CLASSIFIER_VERSION:
+        return False
+    if current_account_identity and snapshot.account_identity != current_account_identity:
+        return False
+    if _credential_artifact_matches(
+        snapshot.credential_artifact,
+        current_credential,
+    ):
+        return True
+    return bool(
+        current_account_identity
+        and snapshot.account_identity
+        and snapshot.account_identity == current_account_identity
+    )
 
 
 def _build_auth_refresh_failure(payload: Any, reason: str) -> BullpenRuntimeCommandError:
@@ -860,6 +891,7 @@ class BullpenRuntimeBroker:
                             token_valid=True,
                             trade_auth_blocked=False,
                             requires_login=False,
+                            account_identity=cached.account_identity,
                             credential_artifact=current_credential,
                             recovered_failure_at=(
                                 active_auth.checked_at if active_auth is not None else None
@@ -884,6 +916,10 @@ class BullpenRuntimeBroker:
         snapshot = await self.read_cached_positions_snapshot(
             delete_invalid=not strict_read_only
         )
+        if snapshot is None:
+            snapshot = await self.read_display_positions_snapshot(
+                delete_invalid=not strict_read_only
+            )
         auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
         active_auth = await self.read_latest_active_auth_result()
         broker_health = self._last_health
@@ -947,6 +983,37 @@ class BullpenRuntimeBroker:
                     ),
                     "command_category": "positions",
                     "error_classification": None,
+                }
+            )
+        if active_auth is not None and active_auth.wallet_ready is False:
+            broker_health = broker_health.model_copy(
+                update={
+                    "ok": False,
+                    "checked_at": active_auth.checked_at,
+                    "message": (
+                        "The latest shared Bullpen authentication check did not "
+                        "confirm that the wallet is ready."
+                    ),
+                    "command_category": "doctor-auth-refresh",
+                    "error_classification": "wallet_not_ready",
+                }
+            )
+        elif snapshot is None and not (
+            active_auth is not None and not active_auth.healthy
+        ):
+            broker_health = broker_health.model_copy(
+                update={
+                    "ok": False,
+                    "checked_at": (
+                        active_auth.checked_at
+                        if active_auth is not None
+                        else broker_health.checked_at
+                    ),
+                    "message": (
+                        "No verified shared Bullpen positions snapshot is available."
+                    ),
+                    "command_category": "positions",
+                    "error_classification": "passive_cache_miss",
                 }
             )
         latest_auth_checked_at = (
@@ -1540,7 +1607,7 @@ class BullpenRuntimeBroker:
         max_age_seconds: int = _POSITIONS_FRESH_SECONDS,
         timeout_seconds: int = _CLI_DEFAULT_TIMEOUT_SECONDS,
     ) -> BullpenPositionsSnapshot:
-        cache_key = f"{_REDIS_PREFIX}:positions:snapshot"
+        cache_key = _POSITIONS_SNAPSHOT_KEY
         refresh_requested_at = _utc_now_iso()
         normalized_caller_source = _normalize_caller_source(caller_source)
         cached = await self._read_valid_positions_snapshot(cache_key)
@@ -1748,34 +1815,96 @@ class BullpenRuntimeBroker:
                                 lock_key=auth_lease.lock_key,
                                 lock_wait_ms=auth_lease.wait_duration_seconds * 1000,
                             )
-                        try:
-                            payload = json.loads(result.stdout)
-                        except json.JSONDecodeError as exc:
-                            raise BullpenRuntimeCommandError(
-                                "Bullpen positions returned invalid JSON.",
-                                classification="json_parse_error",
-                                stdout=result.stdout,
-                                stderr=result.stderr,
-                                exit_code=result.exit_code,
-                                signal=result.signal,
-                            ) from exc
-                        auth_cache = await self._read_auth_ready_cache(
-                            f"{_REDIS_PREFIX}:auth:ready"
-                        )
+                            try:
+                                payload = json.loads(result.stdout)
+                            except json.JSONDecodeError as exc:
+                                raise BullpenRuntimeCommandError(
+                                    "Bullpen positions returned invalid JSON.",
+                                    classification="json_parse_error",
+                                    stdout=result.stdout,
+                                    stderr=result.stderr,
+                                    exit_code=result.exit_code,
+                                    signal=result.signal,
+                                ) from exc
+                            auth_cache_key = f"{_REDIS_PREFIX}:auth:ready"
+                            auth_cache = await self._read_auth_ready_cache(
+                                auth_cache_key
+                            )
+                            active_auth = await self.read_latest_active_auth_result()
+                            payload_account_identity = _extract_account_identity(
+                                payload
+                            )
+                            cached_account_identity = (
+                                auth_cache.account_identity
+                                if auth_cache is not None
+                                else None
+                            )
+                            active_account_identity = (
+                                active_auth.account_identity
+                                if active_auth is not None and active_auth.healthy
+                                else None
+                            )
+                            verified_account_identity = (
+                                cached_account_identity or active_account_identity
+                            )
+                            if (
+                                payload_account_identity
+                                and verified_account_identity
+                                and payload_account_identity
+                                != verified_account_identity
+                            ) or (
+                                cached_account_identity
+                                and active_account_identity
+                                and cached_account_identity != active_account_identity
+                            ):
+                                result.diagnostics.error_classification = (
+                                    "account_identity_mismatch"
+                                )
+                                message = (
+                                    "Bullpen positions account identity did not "
+                                    "match the authenticated account."
+                                )
+                                self._record_failure(
+                                    command_category="positions",
+                                    classification="account_identity_mismatch",
+                                    message=message,
+                                    diagnostics=result.diagnostics,
+                                )
+                                raise BullpenRuntimeCommandError(
+                                    message,
+                                    classification="account_identity_mismatch",
+                                )
+                            account_identity = (
+                                payload_account_identity
+                                or cached_account_identity
+                                or active_account_identity
+                            )
+                            await self._write_auth_ready_cache(
+                                cache_key=auth_cache_key,
+                                checked_at=auth_checked_at,
+                                credential_artifact=(
+                                    result.diagnostics.credential_artifact
+                                ),
+                                account_identity=account_identity,
+                            )
+                            if active_auth is not None and active_auth.healthy:
+                                await self._write_active_auth_result(
+                                    active_auth.model_copy(
+                                        update={
+                                            "account_identity": account_identity,
+                                            "credential_artifact": (
+                                                result.diagnostics.credential_artifact
+                                            ),
+                                        }
+                                    )
+                                )
                         snapshot = BullpenPositionsSnapshot(
                             payload=payload,
                             fetched_at=_utc_now_iso(),
                             cli_version=result.diagnostics.bullpen_version
                             or self._version_cache_value,
                             credential_artifact=result.diagnostics.credential_artifact,
-                            account_identity=(
-                                _extract_account_identity(payload)
-                                or (
-                                    auth_cache.account_identity
-                                    if auth_cache is not None
-                                    else None
-                                )
-                            ),
+                            account_identity=account_identity,
                             position_classifier_version=BULLPEN_POSITION_CLASSIFIER_VERSION,
                             auth_checked_at=auth_checked_at,
                             source="live-cli",
@@ -1797,11 +1926,23 @@ class BullpenRuntimeBroker:
                                 }
                             ),
                         )
+                        serialized_snapshot = snapshot.model_dump_json()
                         await self._redis.set(
                             cache_key,
-                            snapshot.model_dump_json(),
+                            serialized_snapshot,
                             ex=_POSITIONS_SNAPSHOT_TTL_SECONDS,
                         )
+                        try:
+                            await self._redis.set(
+                                _POSITIONS_DISPLAY_LKG_KEY,
+                                serialized_snapshot,
+                                ex=_POSITIONS_DISPLAY_LKG_TTL_SECONDS,
+                            )
+                        except Exception:
+                            logger.exception(
+                                "Failed to persist the display-only Bullpen "
+                                "positions last-known-good snapshot."
+                            )
                     finally:
                         await self._redis.delete(metadata_key)
                 snapshot.diagnostics.lock_hold_ms = (
@@ -2031,6 +2172,10 @@ class BullpenRuntimeBroker:
                 signal=process.returncode if process.returncode < 0 else None,
             )
 
+        final_credential = _stat_credential_artifact(config)
+        if final_credential.path is not None:
+            diagnostics.credential_artifact = final_credential
+
         if command_category == "version":
             version = redact_secrets(stdout_text or stderr_text)
             self._version_cache_value = version or None
@@ -2253,6 +2398,7 @@ class BullpenRuntimeBroker:
                 ),
                 recovered_failure_at=previous_failure_at,
                 historical_error_stale=previous_failure_at is not None,
+                account_identity=account_identity,
                 credential_artifact=(
                     final_credential
                     if final_credential.path is not None
@@ -2301,8 +2447,73 @@ class BullpenRuntimeBroker:
         delete_invalid: bool = True,
     ) -> BullpenPositionsSnapshot | None:
         return await self._read_valid_positions_snapshot(
-            f"{_REDIS_PREFIX}:positions:snapshot",
+            _POSITIONS_SNAPSHOT_KEY,
             delete_invalid=delete_invalid,
+        )
+
+    async def read_display_positions_snapshot(
+        self,
+        *,
+        delete_invalid: bool = True,
+    ) -> BullpenPositionsSnapshot | None:
+        """Read the bounded LKG for UI/health only.
+
+        Execution callers intentionally never consult this key.  A rotated
+        credential artifact is accepted only when both snapshots identify the
+        same non-empty account and the classifier version is current.
+        """
+
+        snapshot = await self._read_positions_snapshot(_POSITIONS_DISPLAY_LKG_KEY)
+        if snapshot is None:
+            return None
+        current_credential = _stat_credential_artifact(_runtime_config())
+        auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
+        active_auth = await self.read_latest_active_auth_result()
+        cached_account_identity = (
+            auth_cache.account_identity
+            if auth_cache is not None
+            and _credential_artifact_matches(
+                auth_cache.credential_artifact,
+                current_credential,
+            )
+            else None
+        )
+        active_account_identity = (
+            active_auth.account_identity
+            if active_auth is not None
+            and active_auth.healthy
+            and _credential_artifact_matches(
+                active_auth.credential_artifact,
+                current_credential,
+            )
+            else None
+        )
+        if (
+            cached_account_identity
+            and active_account_identity
+            and cached_account_identity != active_account_identity
+        ):
+            if delete_invalid:
+                await self._redis.delete(_POSITIONS_DISPLAY_LKG_KEY)
+            return None
+        if not _snapshot_matches_display_runtime(
+            snapshot,
+            current_credential=current_credential,
+            current_account_identity=(
+                cached_account_identity or active_account_identity
+            ),
+        ):
+            if delete_invalid:
+                await self._redis.delete(_POSITIONS_DISPLAY_LKG_KEY)
+            return None
+        return snapshot.model_copy(
+            update={
+                "source": "redis-cache",
+                "freshness_state": "stale",
+                "diagnostics": snapshot.diagnostics.model_copy(
+                    update={"cache_status": "stale"}
+                ),
+            }
         )
 
     def _snapshot_is_fresh(

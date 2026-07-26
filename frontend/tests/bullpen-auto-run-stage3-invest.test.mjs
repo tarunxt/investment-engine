@@ -42,8 +42,19 @@ async function loadStage3InvestModule() {
     new URL("../lib/bullpenPositions.ts", import.meta.url),
     "utf8",
   );
+  const investMetricsSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenAutoRunInvestMetrics.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
   const strategyPath = path.join(tempDir, "bullpenStage2To3Strategy.mjs");
   const positionsPath = path.join(tempDir, "bullpenPositions.mjs");
+  const investMetricsPath = path.join(
+    tempDir,
+    "bullpenAutoRunInvestMetrics.mjs",
+  );
   writeFileSync(
     strategyPath,
     transpileModuleSource(strategySource, "bullpenStage2To3Strategy.ts"),
@@ -52,6 +63,14 @@ async function loadStage3InvestModule() {
   writeFileSync(
     positionsPath,
     transpileModuleSource(positionsSource, "bullpenPositions.ts"),
+    "utf8",
+  );
+  writeFileSync(
+    investMetricsPath,
+    transpileModuleSource(
+      investMetricsSource,
+      "bullpenAutoRunInvestMetrics.ts",
+    ),
     "utf8",
   );
   const source = readFileSync(
@@ -72,6 +91,10 @@ async function loadStage3InvestModule() {
       .replace(
         'from "@/lib/bullpenStage2To3Strategy";',
         `from ${JSON.stringify(pathToFileURL(strategyPath).href)};`,
+      )
+      .replace(
+        'from "./bullpenAutoRunInvestMetrics";',
+        `from ${JSON.stringify(pathToFileURL(investMetricsPath).href)};`,
       ),
     "utf8",
   );
@@ -969,6 +992,78 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
     )?.investedSource,
     "live-position",
   );
+});
+
+test("Stage 3 invest reuse does not treat a legacy FILLED row without submission evidence as already invested", async () => {
+  const { buildBullpenStage3OnlyInvestExecutionPlan } =
+    await loadStage3InvestModule();
+  const run = createRun({
+    id: "run-stage3-legacy-filled",
+    stageResults: [
+      createStage(1, "scan", {
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            theme: "Politics",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-1",
+            question: "Will event one happen?",
+            market_url: "https://example.com/market-1",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            disagreement_level: "Low",
+            disagreement_category: "CONSENSUS",
+            adjudication_required: false,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+    ],
+  });
+  const legacyFilledDecision = createSubmittedBuyDecision({
+    runId: run.id,
+    marketId: "market-1",
+  });
+  legacyFilledDecision.order_plan.status = "filled";
+  legacyFilledDecision.order_plan.executed_at = null;
+  legacyFilledDecision.order_plan.remote_order_id = null;
+  legacyFilledDecision.order_plan.remote_transaction_hash = null;
+  legacyFilledDecision.order_plan.execution_response = null;
+  legacyFilledDecision.order_plan.detail =
+    "Wallet reconciliation confirmed the buy position is present.";
+
+  const executionPlan = buildBullpenStage3OnlyInvestExecutionPlan(
+    run,
+    [legacyFilledDecision],
+    {
+      activePositions: [],
+      hasActivePositionsSnapshot: true,
+    },
+  );
+
+  assert.equal(executionPlan.readyCandidateCount, 1);
+  assert.equal(executionPlan.alreadyInvestedCandidateCount, 0);
+  assert.deepEqual(executionPlan.alreadyInvestedMarketIds, []);
+  assert.equal(executionPlan.candidatePreviews[0]?.status, "ready");
 });
 
 test("Stage 3 invest execution plan ignores saved claimable positions when reconciling already-invested markets", async () => {

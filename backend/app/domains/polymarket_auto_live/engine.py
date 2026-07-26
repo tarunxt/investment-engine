@@ -1716,6 +1716,7 @@ def _stage1_wallet_snapshot_lineage_outputs(
         freshness_state = None
         account_identity = None
         classifier_version = None
+        auth_checked_at = None
         diagnostics: dict[str, object] = {}
     else:
         raw_credential_artifact = getattr(snapshot, "credential_artifact", {})
@@ -1738,6 +1739,7 @@ def _stage1_wallet_snapshot_lineage_outputs(
             "position_classifier_version",
             None,
         )
+        auth_checked_at = getattr(snapshot, "auth_checked_at", None)
         raw_diagnostics = getattr(snapshot, "diagnostics", {})
         diagnostics = (
             {
@@ -1762,6 +1764,7 @@ def _stage1_wallet_snapshot_lineage_outputs(
         "wallet_snapshot_freshness_state": freshness_state,
         "wallet_account_identity": account_identity,
         "wallet_position_classifier_version": classifier_version,
+        "wallet_auth_checked_at": auth_checked_at,
         "wallet_credential_artifact_inode": inode,
         "wallet_credential_artifact_mtime_ns": mtime_ns,
         "wallet_credential_artifact_size": size,
@@ -1824,6 +1827,66 @@ def _compare_console_wallet_snapshot_lineage(
             or actual_fetched_at < expected_fetched_at
         ):
             mismatches.append("wallet_snapshot_fetched_at_not_older")
+
+    credential_fields = {
+        "wallet_credential_artifact_inode",
+        "wallet_credential_artifact_mtime_ns",
+        "wallet_credential_artifact_size",
+    }
+    credential_mismatches = [
+        field_name for field_name in mismatches if field_name in credential_fields
+    ]
+    noncredential_mismatches = [
+        field_name for field_name in mismatches if field_name not in credential_fields
+    ]
+    expected_account_identity = expected_outputs.get("wallet_account_identity")
+    actual_account_identity = actual_outputs.get("wallet_account_identity")
+    expected_classifier = expected_outputs.get(
+        "wallet_position_classifier_version"
+    )
+    actual_classifier = actual_outputs.get(
+        "wallet_position_classifier_version"
+    )
+    actual_auth_checked_at = _parse_iso_datetime(
+        str(actual_outputs.get("wallet_auth_checked_at"))
+        if actual_outputs.get("wallet_auth_checked_at")
+        else None
+    )
+    same_account_rotation = bool(
+        credential_mismatches
+        and not noncredential_mismatches
+        and expected_account_identity
+        and expected_account_identity == actual_account_identity
+        and expected_classifier is not None
+        and expected_classifier == actual_classifier
+        and actual_auth_checked_at is not None
+        and (
+            expected_fetched_at is None
+            or actual_auth_checked_at >= expected_fetched_at
+        )
+    )
+    if same_account_rotation:
+        return {
+            "status": "match",
+            "compared_fields": compared_fields,
+            "mismatches": [],
+            "credential_rotation_attestation": {
+                "status": "deferred_to_durable_pre_submit_gate",
+                "old_credential_artifact": expected_outputs.get(
+                    "wallet_credential_artifact"
+                ),
+                "new_credential_artifact": actual_outputs.get(
+                    "wallet_credential_artifact"
+                ),
+                "account_identity": actual_account_identity,
+                "auth_checked_at": actual_outputs.get("wallet_auth_checked_at"),
+                "reason": (
+                    "The post-exit planner accepted a newer authenticated "
+                    "snapshot for the same wallet. Every durable BUY write "
+                    "still requires active-auth credential attestation."
+                ),
+            },
+        }
 
     return {
         "status": (

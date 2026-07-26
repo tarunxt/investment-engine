@@ -87,7 +87,26 @@ test("the Stage 3 shortlist explanation distinguishes eligibility from the final
   assert.match(dialogSource, /Not moved to Stage 3 yet/);
   assert.match(dialogSource, /Not finally moved to Stage 3/);
   assert.match(dialogSource, /Moved to Stage 3/);
-  assert.match(dialogSource, /submitted.*confirmed/);
+  assert.match(dialogSource, /Submitted in Stage 3 but unsuccessful/);
+  assert.match(dialogSource, /isSubmittedOrExecutedInvestOrderPlan/);
+  assert.match(dialogSource, /isSubmittedButUnsuccessfulInvestOrderPlan/);
+});
+
+test("the Stage 3 shortlist outcome requires shared submission evidence instead of success text", () => {
+  const dialogSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenStage3ShortlistReasonDialog.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(dialogSource, /isSubmittedOrExecutedInvestOrderPlan/);
+  assert.doesNotMatch(dialogSource, /function isSuccessfulStage3Order/);
+  assert.doesNotMatch(
+    dialogSource,
+    /successfully\|submitted\|filled\|executed/,
+  );
 });
 
 test("the pending Stage 3 outcome explains why a Stage 2 result cannot invest by itself", () => {

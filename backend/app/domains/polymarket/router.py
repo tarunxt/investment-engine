@@ -123,6 +123,8 @@ async def get_bullpen_runtime_positions(
         )
     broker = get_bullpen_runtime_broker()
     stale_snapshot = await broker.read_cached_positions_snapshot()
+    if stale_snapshot is None:
+        stale_snapshot = await broker.read_display_positions_snapshot()
     try:
         snapshot = await broker.get_positions_snapshot(
             force_fresh=force_fresh,

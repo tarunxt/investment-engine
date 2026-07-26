@@ -31,6 +31,7 @@ from app.domains.polymarket_auto_live.bot import (
 from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
+    ConsoleWalletPositionsSnapshot,
     candidate_returns_per_day,
     enrich_console_wallet_positions_authoritatively,
     llm_returns_per_day,
@@ -50,6 +51,7 @@ from app.domains.polymarket_auto_live.engine import (
     _execute_console_stage_two_shared_llm,
     _apply_next_cycle_schedule,
     _manual_console_market,
+    _compare_console_wallet_snapshot_lineage,
     _summarize_stage3_step2_buy_queue,
     _pending_submitted_buy_market_ids,
     _stage3_capacity_sizing_market_ids,
@@ -148,6 +150,76 @@ def test_state_has_due_scheduled_run_respects_disabled_and_future_runs():
         due_state.model_copy(update={"next_run_at": "2026-07-19T11:56:00+00:00"}),
         reference_time=datetime(2026, 7, 19, 11, 56, 10, tzinfo=UTC),
     )
+
+
+def test_stage3_planner_accepts_same_wallet_credential_rotation_for_durable_recheck():
+    stage1_snapshot = ConsoleWalletPositionsSnapshot(
+        positions=[],
+        source="live-cli",
+        fetched_at="2026-07-27T10:00:00+00:00",
+        raw_position_count=0,
+        diagnostics={},
+        credential_artifact={"inode": 11, "mtime_ns": 22, "size": 33},
+        account_identity="wallet-a",
+        position_classifier_version=5,
+        auth_checked_at="2026-07-27T09:59:59+00:00",
+    )
+    post_exit_snapshot = ConsoleWalletPositionsSnapshot(
+        positions=[],
+        source="live-cli",
+        fetched_at="2026-07-27T10:10:01+00:00",
+        raw_position_count=0,
+        diagnostics={},
+        credential_artifact={"inode": 12, "mtime_ns": 23, "size": 34},
+        account_identity="wallet-a",
+        position_classifier_version=5,
+        auth_checked_at="2026-07-27T10:10:00+00:00",
+    )
+
+    comparison = _compare_console_wallet_snapshot_lineage(
+        expected=stage1_snapshot,
+        actual=post_exit_snapshot,
+    )
+
+    assert comparison["status"] == "match"
+    assert comparison["mismatches"] == []
+    assert (
+        comparison["credential_rotation_attestation"]["status"]
+        == "deferred_to_durable_pre_submit_gate"
+    )
+
+
+def test_stage3_planner_rejects_wallet_change_during_credential_rotation():
+    stage1_snapshot = ConsoleWalletPositionsSnapshot(
+        positions=[],
+        source="live-cli",
+        fetched_at="2026-07-27T10:00:00+00:00",
+        raw_position_count=0,
+        diagnostics={},
+        credential_artifact={"inode": 11, "mtime_ns": 22, "size": 33},
+        account_identity="wallet-a",
+        position_classifier_version=5,
+        auth_checked_at="2026-07-27T09:59:59+00:00",
+    )
+    post_exit_snapshot = ConsoleWalletPositionsSnapshot(
+        positions=[],
+        source="live-cli",
+        fetched_at="2026-07-27T10:10:01+00:00",
+        raw_position_count=0,
+        diagnostics={},
+        credential_artifact={"inode": 12, "mtime_ns": 23, "size": 34},
+        account_identity="wallet-b",
+        position_classifier_version=5,
+        auth_checked_at="2026-07-27T10:10:00+00:00",
+    )
+
+    comparison = _compare_console_wallet_snapshot_lineage(
+        expected=stage1_snapshot,
+        actual=post_exit_snapshot,
+    )
+
+    assert comparison["status"] == "mismatch"
+    assert "wallet_account_identity" in comparison["mismatches"]
 
 
 @pytest.mark.anyio

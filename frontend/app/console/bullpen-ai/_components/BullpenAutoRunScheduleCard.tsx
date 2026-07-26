@@ -128,7 +128,10 @@ import {
   getInvestMetricRows,
   getInvestStepMetricDialogKind,
   getSellInvestMetricDialogKind,
+  isCompletedWithoutSubmissionInvestOrderPlan,
   isProcessedInvestOrderPlan,
+  isSubmittedOrExecutedInvestOrderPlan,
+  partitionInvestDecisionsByExecutionEvidence,
   summarizeInvestStepCountsFromDecisions,
   type InvestExecutionStepStatus,
   type InvestMetricDialogKind,
@@ -1466,6 +1469,19 @@ function getStageTwoInvestableDecisions(decisions: BullpenAutoLiveDecision[]) {
 
 function formatStageTwoInvestExecutionStatus(decision: BullpenAutoLiveDecision) {
   if (decision.order_plan?.action === "buy") {
+    if (
+      !isSubmittedOrExecutedInvestOrderPlan(decision.order_plan) &&
+      [
+        "submitted",
+        "confirming",
+        "partially_filled",
+        "settlement_pending",
+        "confirmed",
+        "filled",
+      ].includes(decision.order_plan.status)
+    ) {
+      return `${decision.order_plan.status.replaceAll("_", " ")} · no submission evidence`;
+    }
     return decision.order_plan.status.replaceAll("_", " ");
   }
   if (
@@ -1481,14 +1497,7 @@ function getStageTwoInvestExecutionTone(
   decision: BullpenAutoLiveDecision,
 ) {
   const status = decision.order_plan?.status ?? null;
-  if (
-    status === "submitted" ||
-    status === "confirming" ||
-    status === "partially_filled" ||
-    status === "settlement_pending" ||
-    status === "confirmed" ||
-    status === "filled"
-  ) {
+  if (isSubmittedOrExecutedInvestOrderPlan(decision.order_plan)) {
     return "success";
   }
   if (
@@ -2470,39 +2479,6 @@ function readDecisionExecutionTimestamp(decision: BullpenAutoLiveDecision) {
   );
 }
 
-function isSubmittedOrSuccessfulOrderPlan(
-  orderPlan: BullpenAutoLiveDecision["order_plan"],
-) {
-  if (!orderPlan) return false;
-  const status = orderPlan.status?.trim().toLowerCase();
-  if (
-    status === "submitted" ||
-    status === "confirmed" ||
-    status === "filled" ||
-    status === "settlement_pending" ||
-    status === "already_redeemed" ||
-    status === "resolved_zero_payout"
-  ) {
-    return true;
-  }
-
-  const detail = orderPlan.detail?.trim() ?? "";
-  const response = orderPlan.execution_response?.trim() ?? "";
-  const successText = `${detail}\n${response}`;
-  return (
-    /successfully|submitted|filled|redeemed|claimed|executed/i.test(
-      successText,
-    ) &&
-    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(
-      successText,
-    )
-  );
-}
-
-function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
-  return isSubmittedOrSuccessfulOrderPlan(decision.order_plan);
-}
-
 type RunSummaryWarning = { label: string; detail: string };
 type RunSummaryDetails = {
   overview: string | null;
@@ -2571,8 +2547,8 @@ function buildLatestSubmittedBuyTimestampsByMarketId(
 
   for (const decision of decisions) {
     if (
-      decision.order_plan?.status !== "submitted" ||
-      decision.order_plan.action !== "buy"
+      decision.order_plan?.action !== "buy" ||
+      !isSubmittedOrExecutedInvestOrderPlan(decision.order_plan)
     ) {
       continue;
     }
@@ -5082,9 +5058,16 @@ function SubmittedExecutionEventsTable({
   onOpenPlannedOrderDetail: (state: PlannedOrderDetailState) => void;
   onOpenLlmOdds: (decision: BullpenAutoLiveDecision) => void;
 }) {
-  const submittedDecisions = decisions.filter((decision) =>
-    isSubmittedOrSuccessfulDecision(decision),
-  );
+  const {
+    submittedOrExecuted: successfulOrPendingSubmittedDecisions,
+    submittedButUnsuccessful,
+    completedWithoutSubmission,
+    notSubmitted,
+  } = partitionInvestDecisionsByExecutionEvidence(decisions);
+  const submittedDecisions = [
+    ...successfulOrPendingSubmittedDecisions,
+    ...submittedButUnsuccessful,
+  ];
   const exitDecisions = decisions.filter(
     (decision) =>
       decision.order_plan?.action === "sell" ||
@@ -5093,19 +5076,30 @@ function SubmittedExecutionEventsTable({
   const buyDecisions = decisions.filter(
     (decision) => decision.order_plan?.action === "buy",
   );
+  const successfulOrPendingExitDecisions =
+    successfulOrPendingSubmittedDecisions.filter(
+      (decision) =>
+        decision.order_plan?.action === "sell" ||
+        decision.order_plan?.action === "redeem",
+    );
   const submittedExitDecisions = submittedDecisions.filter(
     (decision) =>
       decision.order_plan?.action === "sell" ||
       decision.order_plan?.action === "redeem",
   );
+  const successfulOrPendingBuyDecisions =
+    successfulOrPendingSubmittedDecisions.filter(
+      (decision) => decision.order_plan?.action === "buy",
+    );
   const submittedBuyDecisions = submittedDecisions.filter(
     (decision) => decision.order_plan?.action === "buy",
   );
-  const plannedButNotSubmittedBuys = buyDecisions.filter(
-    (decision) => !isSubmittedOrSuccessfulDecision(decision),
+  const actionableExitDecisions = exitDecisions.filter(
+    (decision) =>
+      !isCompletedWithoutSubmissionInvestOrderPlan(decision.order_plan),
   );
   const exitStatus = getSubmittedExecutionStatus(
-    exitDecisions.length,
+    actionableExitDecisions.length,
     submittedExitDecisions.length,
   );
   const buyStatus = getSubmittedExecutionStatus(
@@ -5118,10 +5112,10 @@ function SubmittedExecutionEventsTable({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/80 px-4 py-4">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
-            Executed Stage 3 Events
+            Stage 3 Order Outcomes
           </p>
           <h3 className="mt-1 text-sm font-semibold text-slate-950">
-            Step 1 Exit and Step 2 Buy execution results
+            Step 1 Exit and Step 2 Buy submission and execution results
           </h3>
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
@@ -5140,29 +5134,49 @@ function SubmittedExecutionEventsTable({
           >
             {submittedBuyDecisions.length.toLocaleString("en-IN")} buys
           </SubmittedExecutionCountPill>
+          {completedWithoutSubmission.length > 0 ? (
+            <SubmittedExecutionCountPill className="border-slate-200 bg-white/80 text-slate-700">
+              {completedWithoutSubmission.length.toLocaleString("en-IN")} no new
+              order
+            </SubmittedExecutionCountPill>
+          ) : null}
         </div>
       </div>
       <div className="space-y-4 p-4">
         <Stage3DecisionTable
           title="Step 1 Exit"
-          rows={submittedExitDecisions}
-          emptyMessage="No submitted Step 1 Exit events were returned for this run."
+          rows={successfulOrPendingExitDecisions}
+          emptyMessage="No pending or successful submitted Step 1 Exit events were returned for this run."
           onOpenLlmOdds={onOpenLlmOdds}
         />
         <Stage3DecisionTable
           title="Step 2 Buy"
-          rows={submittedBuyDecisions}
-          emptyMessage="No submitted Step 2 Buy events were returned for this run."
+          rows={successfulOrPendingBuyDecisions}
+          emptyMessage="No pending or successful submitted Step 2 Buy events were returned for this run."
           onOpenLlmOdds={onOpenLlmOdds}
         />
         <Stage3DecisionTable
-          title="Events Planned but not Submitted"
-          rows={plannedButNotSubmittedBuys}
-          emptyMessage="No planned buy orders were left unsubmitted for this run."
+          title="Submitted but Unsuccessful"
+          rows={submittedButUnsuccessful}
+          emptyMessage="No submitted orders ended in a terminal unsuccessful state."
+          onOpenLlmOdds={onOpenLlmOdds}
+        />
+        <Stage3DecisionTable
+          title="Orders Planned but not Submitted"
+          rows={notSubmitted}
+          emptyMessage="No planned orders were left unsubmitted for this run."
           plannedButNotSubmitted
           onOpenPlannedOrderDetail={onOpenPlannedOrderDetail}
           onOpenLlmOdds={onOpenLlmOdds}
         />
+        {completedWithoutSubmission.length > 0 ? (
+          <Stage3DecisionTable
+            title="Completed without a New Order"
+            rows={completedWithoutSubmission}
+            emptyMessage="No Stage 3 outcomes completed without a new order."
+            onOpenLlmOdds={onOpenLlmOdds}
+          />
+        ) : null}
       </div>
     </section>
   );
@@ -7522,13 +7536,16 @@ function InvestMetricDetailsDialog({
   const filteredProcessedCount = tableRows.filter((decision) =>
     isProcessedInvestOrderPlan(decision.order_plan),
   ).length;
-  const filteredSubmittedCount = tableRows.filter((decision) =>
-    isSubmittedOrSuccessfulDecision(decision),
-  ).length;
-  const filteredUnsubmittedRows = tableRows.filter(
-    (decision) =>
-      decision.order_plan && !isSubmittedOrSuccessfulDecision(decision),
-  );
+  const filteredExecutionGroups =
+    partitionInvestDecisionsByExecutionEvidence(tableRows);
+  const filteredSubmittedCount =
+    filteredExecutionGroups.submittedOrExecuted.length +
+    filteredExecutionGroups.submittedButUnsuccessful.length;
+  const filteredSubmittedUnsuccessfulRows =
+    filteredExecutionGroups.submittedButUnsuccessful;
+  const filteredUnsubmittedRows = filteredExecutionGroups.notSubmitted;
+  const filteredNoActionRows =
+    filteredExecutionGroups.completedWithoutSubmission;
   const filteredFailedRows = filteredUnsubmittedRows.filter(
     (decision) =>
       decision.order_plan?.status === "failed" ||
@@ -7544,7 +7561,7 @@ function InvestMetricDetailsDialog({
     (row) => !row.missingFromBuyPlan,
   ).length;
   const submittedBuyPlanCount = stage2TopTenHandoffRows.filter((row) =>
-    isSubmittedOrSuccessfulDecision(row.displayDecision),
+    isSubmittedOrExecutedInvestOrderPlan(row.displayDecision.order_plan),
   ).length;
   const blockedOrWaitingBuyPlanCount = stage2TopTenHandoffRows.filter(
     (row) => row.missingFromBuyPlan,
@@ -7705,6 +7722,34 @@ function InvestMetricDetailsDialog({
                 onOpenEventExitInfo={onOpenEventExitInfo}
                 onOpenInvestEligibilityInfo={onOpenInvestEligibilityInfo}
               />
+            </div>
+          ) : null}
+
+          {filteredNoActionRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-800">
+              <p className="font-semibold">Completed without a new order</p>
+              <p className="mt-1">
+                {filteredNoActionRows.length.toLocaleString("en-IN")} redeem or
+                settlement outcome
+                {filteredNoActionRows.length === 1 ? "" : "s"} required no new
+                remote submission and are excluded from Submitted counts.
+              </p>
+            </div>
+          ) : null}
+
+          {filteredSubmittedUnsuccessfulRows.length > 0 ? (
+            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-950">
+              <p className="font-semibold">Submitted but unsuccessful</p>
+              <p className="mt-1">
+                {filteredSubmittedUnsuccessfulRows.length.toLocaleString(
+                  "en-IN",
+                )}{" "}
+                evidence-backed submission
+                {filteredSubmittedUnsuccessfulRows.length === 1 ? "" : "s"}{" "}
+                ended cancelled, rejected, timed out, or permanently failed.
+                They remain included in Submitted and are not mislabeled as
+                never submitted.
+              </p>
             </div>
           ) : null}
 
