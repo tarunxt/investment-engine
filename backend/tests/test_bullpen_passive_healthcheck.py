@@ -109,6 +109,7 @@ def _passive_health(*, ok: bool = True) -> BullpenRuntimePassiveHealth:
                 )
             ),
             error_classification=None if ok else "auth_rejected",
+            account_identity=_PRIVATE_WALLET,
             credential_artifact=secret_artifact,
         ),
         command_path="/usr/local/bin/bullpen",
@@ -332,7 +333,9 @@ class _FakeRedis:
 
 
 @pytest.mark.anyio
-async def test_new_passive_process_uses_shared_active_auth_as_authority(monkeypatch):
+async def test_new_passive_process_requires_shared_positions_with_healthy_auth(
+    monkeypatch,
+):
     redis = _FakeRedis()
     monkeypatch.setattr(
         runtime_broker_module.aioredis,
@@ -356,11 +359,10 @@ async def test_new_passive_process_uses_shared_active_auth_as_authority(monkeypa
 
     shared_healthy = await broker.read_passive_health()
 
-    assert shared_healthy.ok is True
-    assert shared_healthy.broker_health.command_category == "doctor-auth-refresh"
-    assert "shared Bullpen authentication check is healthy" in (
-        shared_healthy.broker_health.message
-    )
+    assert shared_healthy.ok is False
+    assert shared_healthy.latest_snapshot is None
+    assert shared_healthy.broker_health.command_category == "positions"
+    assert shared_healthy.broker_health.error_classification == "passive_cache_miss"
 
     failed = healthy.model_copy(
         update={
@@ -381,6 +383,16 @@ async def test_new_passive_process_uses_shared_active_auth_as_authority(monkeypa
     assert shared_failed.ok is False
     assert shared_failed.broker_health.error_classification == "auth_rejected"
     assert shared_failed.broker_health.message == "authorization=[REDACTED]"
+
+
+def test_passive_report_never_marks_missing_positions_snapshot_healthy():
+    passive = _passive_health(ok=True).model_copy(update={"latest_snapshot": None})
+
+    report = passive_healthcheck.build_passive_health_report(passive)
+
+    assert report.ok is False
+    assert report.classification == "passive_cache_miss"
+    assert report.positions_snapshot.available is False
 
 
 @pytest.mark.anyio

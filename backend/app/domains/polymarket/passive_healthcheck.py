@@ -127,8 +127,10 @@ def build_passive_health_report(
     if classification is None and last_failure is not None and not last_failure.stale:
         classification = last_failure.classification
 
-    report_ok = passive_health.ok and not (
-        active_auth is not None and active_auth.wallet_ready is False
+    report_ok = (
+        passive_health.ok
+        and snapshot is not None
+        and not (active_auth is not None and active_auth.wallet_ready is False)
     )
     if (
         active_auth is not None
@@ -136,6 +138,8 @@ def build_passive_health_report(
         and _safe_classification(classification) is None
     ):
         classification = "wallet_not_ready"
+    if snapshot is None and _safe_classification(classification) is None:
+        classification = "passive_cache_miss"
     safe_classification = _safe_classification(classification)
     safe_message = (
         "Shared Bullpen runtime cache reports healthy."
