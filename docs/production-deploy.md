@@ -104,6 +104,22 @@ active pointer changes atomically only after those checks, and the old active
 slot remains intact as the rollback target.
 The production host must run Node.js 22; exact-major validation rejects an
 artifact before promotion when the host runtime differs from the CI builder.
+Slot selection accepts only the two exact active/inactive pairings, and the
+candidate is validated again immediately before pointer promotion. A legacy
+slot is rollback-capable only when its shared `next` executable is still
+present; an internal standalone `.next` directory cannot be mistaken for a
+legacy outer slot.
+
+The launcher includes a fail-closed compatibility path for the initial
+artifact migration state: when no active pointer exists and a manifest-backed
+standalone runtime is present directly under `frontend/`, it can serve that
+runtime while a candidate is prepared in the inactive slot. Once a pointer
+exists, this root fallback is disabled so it cannot conceal a broken selected
+release. Rollback can remove the newly created pointer and return to this
+validated root runtime during that one-time migration.
+Deployment CLIs canonicalize their direct-execution path before dispatching so
+the production `/srv/investor` compatibility symlink cannot turn slot
+selection, artifact validation, or pointer updates into silent no-ops.
 
 After restarting `investor-frontend`, the deployment verifies service
 stability, the exact runtime fingerprint, Auth.js routes, login, authenticated

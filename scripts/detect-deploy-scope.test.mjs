@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, symlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 import {
   classifyDeploymentScope,
   combineDeploymentScopes,
 } from "./detect-deploy-scope.mjs";
 
+const execFileAsync = promisify(execFile);
+const scopeScript = fileURLToPath(
+  new URL("./detect-deploy-scope.mjs", import.meta.url),
+);
 const deployWorkflow = await readFile(
   new URL("../.github/workflows/deploy.yml", import.meta.url),
   "utf8",
@@ -94,6 +103,22 @@ test("rejects unknown deployment scopes", () => {
     () => combineDeploymentScopes("frontend-only", "surprise"),
     /Cannot combine deployment scopes/,
   );
+});
+
+test("scope CLI executes through a symlinked workspace path", async () => {
+  const testRoot = await mkdtemp(
+    path.join(tmpdir(), "deploy-scope-cli-symlink-"),
+  );
+  const scopeLink = path.join(testRoot, "detect-deploy-scope.mjs");
+  await symlink(scopeScript, scopeLink);
+
+  const { stdout } = await execFileAsync(process.execPath, [
+    scopeLink,
+    "--combine",
+    "frontend-only",
+    "backend-only",
+  ]);
+  assert.equal(stdout.trim(), "full-stack");
 });
 
 test("production deployment remains cancellable while optional build jobs may skip", () => {

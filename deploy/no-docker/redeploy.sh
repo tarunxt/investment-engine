@@ -134,7 +134,9 @@ FRONTEND_LIVE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_ACTIVE_BUILD_NAME"
 FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
 FRONTEND_INACTIVE_BUILD_DIR="$FRONTEND_CANDIDATE_BUILD_DIR"
 FRONTEND_CANDIDATE_READY=false
+FRONTEND_CANDIDATE_IS_STANDALONE=false
 FRONTEND_PREVIOUS_BUILD_AVAILABLE=false
+FRONTEND_ACTIVE_POINTER_PRESENT=false
 
 default_service_prefix() {
   if [[ "$APP_ROOT" == "$LEGACY_APP_ROOT" || "$APP_USER" == "$LEGACY_APP_USER" ]]; then
@@ -647,28 +649,80 @@ verify_frontend_fingerprint() {
 select_frontend_build_slots() {
   local selected_slots
 
-  selected_slots="$(run_as_app_user "
-    node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' select '$FRONTEND_ROOT'
-  ")"
-  IFS=$'\t' read -r FRONTEND_ACTIVE_BUILD_NAME FRONTEND_CANDIDATE_BUILD_NAME <<<"$selected_slots"
+  selected_slots="$(
+    sudo -u "$APP_USER" -H -- \
+      node "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" \
+        select "$FRONTEND_ROOT"
+  )"
+  case "$selected_slots" in
+    $'.next\t.next-candidate')
+      FRONTEND_ACTIVE_BUILD_NAME=".next"
+      FRONTEND_CANDIDATE_BUILD_NAME=".next-candidate"
+      ;;
+    $'.next-candidate\t.next')
+      FRONTEND_ACTIVE_BUILD_NAME=".next-candidate"
+      FRONTEND_CANDIDATE_BUILD_NAME=".next"
+      ;;
+    *)
+      echo "Invalid frontend slot selection: ${selected_slots:-<empty>}" >&2
+      return 1
+      ;;
+  esac
 
   FRONTEND_LIVE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_ACTIVE_BUILD_NAME"
   FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
   FRONTEND_INACTIVE_BUILD_DIR="$FRONTEND_CANDIDATE_BUILD_DIR"
+
+  if sudo -u "$APP_USER" -H -- test -f "$FRONTEND_ACTIVE_BUILD_POINTER"; then
+    FRONTEND_ACTIVE_POINTER_PRESENT=true
+  else
+    FRONTEND_ACTIVE_POINTER_PRESENT=false
+  fi
+
+  case "$FRONTEND_LIVE_BUILD_DIR|$FRONTEND_CANDIDATE_BUILD_DIR" in
+    "$FRONTEND_ROOT/.next|$FRONTEND_ROOT/.next-candidate"|\
+    "$FRONTEND_ROOT/.next-candidate|$FRONTEND_ROOT/.next")
+      ;;
+    *)
+      echo "Frontend slots escaped their allowed roots." >&2
+      return 1
+      ;;
+  esac
+  echo "==> Frontend slots: active=$FRONTEND_ACTIVE_BUILD_NAME inactive=$FRONTEND_CANDIDATE_BUILD_NAME pointer_present=$FRONTEND_ACTIVE_POINTER_PRESENT"
+}
+
+resolve_frontend_launch_target_as_app_user() {
+  sudo -u "$APP_USER" -H -- bash -c '
+    set -euo pipefail
+    set -a
+    source "$1"
+    set +a
+    exec node "$2" resolve-launch "$3"
+  ' -- \
+    "$FRONTEND_ENV_FILE" \
+    "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" \
+    "$FRONTEND_ROOT"
 }
 
 frontend_slot_is_valid() {
   local slot="$1"
-  if run_as_app_user "test -f '$slot/server.js'"; then
-    if ! run_as_app_user "
-      node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' \
-        validate-host '$slot' '' - - false true >/dev/null
-    "; then
-      return 1
-    fi
-    return 0
+  local launch_target
+
+  launch_target="$(resolve_frontend_launch_target_as_app_user)"
+  [[
+    "$launch_target" == $'standalone-slot\t'"$slot"$'\t'"$FRONTEND_ACTIVE_BUILD_NAME" ||
+      "$launch_target" == $'legacy-slot\t'"$slot"$'\t'"$FRONTEND_ACTIVE_BUILD_NAME"
+  ]]
+}
+
+frontend_root_standalone_is_valid() {
+  local launch_target
+
+  if [[ "$FRONTEND_ACTIVE_POINTER_PRESENT" == "true" ]]; then
+    return 1
   fi
-  run_as_app_user "test -f '$slot/BUILD_ID' && test -d '$slot/static'"
+  launch_target="$(resolve_frontend_launch_target_as_app_user)"
+  [[ "$launch_target" == $'standalone-root-recovery\t'"$FRONTEND_ROOT"$'\t' ]]
 }
 
 validate_frontend_archive_members() {
@@ -736,6 +790,7 @@ prepare_frontend_candidate_artifact() {
       '$EXPECTED_FRONTEND_SHA'
   "
   FRONTEND_CANDIDATE_READY=true
+  FRONTEND_CANDIDATE_IS_STANDALONE=true
 }
 
 prepare_frontend_candidate_build_on_host() {
@@ -792,6 +847,7 @@ prepare_frontend_candidate_build_on_host() {
   "
 
   FRONTEND_CANDIDATE_READY=true
+  FRONTEND_CANDIDATE_IS_STANDALONE=false
 }
 
 prepare_frontend_candidate_build() {
@@ -808,32 +864,90 @@ prepare_frontend_candidate_build() {
 }
 
 promote_frontend_candidate_build() {
+  local promoted_pointer
+
   if [[ "$FRONTEND_CANDIDATE_READY" != "true" ]]; then
     echo "Frontend candidate build is not ready for promotion." >&2
     return 1
   fi
 
-  if frontend_slot_is_valid "$FRONTEND_LIVE_BUILD_DIR"; then
+  # Revalidate immediately before changing the pointer so a candidate cannot
+  # disappear or become incomplete between extraction and promotion.
+  if [[ "$FRONTEND_CANDIDATE_IS_STANDALONE" == "true" ]]; then
+    run_as_app_user "
+      set -a
+      source '$FRONTEND_ENV_FILE'
+      set +a
+      node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' \
+        validate-host \
+        '$FRONTEND_CANDIDATE_BUILD_DIR' \
+        '$EXPECTED_FRONTEND_SHA' \
+        '$FRONTEND_ROOT/package-lock.json' \
+        webpack \
+        true >/dev/null
+    "
+  else
+    run_as_app_user "
+      test -x '$FRONTEND_ROOT/node_modules/.bin/next'
+      test -f '$FRONTEND_CANDIDATE_BUILD_DIR/BUILD_ID'
+      test -d '$FRONTEND_CANDIDATE_BUILD_DIR/static'
+    "
+  fi
+
+  # Resolve a pointerless standalone overlay before the legacy .next shape so
+  # a restored shared next executable cannot make the overlay's internal
+  # dist directory look like an outer rollback slot.
+  if frontend_root_standalone_is_valid; then
     FRONTEND_PREVIOUS_BUILD_AVAILABLE=true
+  elif frontend_slot_is_valid "$FRONTEND_LIVE_BUILD_DIR"; then
+    FRONTEND_PREVIOUS_BUILD_AVAILABLE=true
+  else
+    echo "Refusing frontend promotion because no validated rollback runtime is available." >&2
+    return 1
   fi
 
   run_as_app_user "node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' point '$FRONTEND_ROOT' '$FRONTEND_CANDIDATE_BUILD_NAME'"
+  # The pointer is now live. Arm rollback before any subsequent assertion can
+  # fail so every post-mutation exit restores the previous runtime.
+  FRONTEND_PROMOTED=true
+  promoted_pointer="$(
+    sudo -u "$APP_USER" -H -- \
+      node -e \
+        'process.stdout.write(require("node:fs").readFileSync(process.argv[1], "utf8").replaceAll("\r", "").trim())' \
+        "$FRONTEND_ACTIVE_BUILD_POINTER"
+  )"
+  if [[ "$promoted_pointer" != "$FRONTEND_CANDIDATE_BUILD_NAME" ]]; then
+    echo "Frontend promotion pointer mismatch: expected=$FRONTEND_CANDIDATE_BUILD_NAME actual=${promoted_pointer:-<missing>}" >&2
+    return 1
+  fi
+  if [[ "$FRONTEND_CANDIDATE_IS_STANDALONE" == "true" ]]; then
+    run_as_app_user "test -f '$FRONTEND_CANDIDATE_BUILD_DIR/server.js'"
+  fi
 
   FRONTEND_CANDIDATE_READY=false
-  FRONTEND_PROMOTED=true
 }
 
 verify_restored_frontend_build() {
   local actual_pointer
   local verification_failed=false
 
-  actual_pointer="$(
-    run_as_app_user "tr -d '\\r\\n' < '$FRONTEND_ACTIVE_BUILD_POINTER'" 2>/dev/null ||
-      true
-  )"
-  if [[ "$actual_pointer" != "$FRONTEND_ACTIVE_BUILD_NAME" ]]; then
-    echo "Frontend rollback pointer mismatch: expected=$FRONTEND_ACTIVE_BUILD_NAME actual=${actual_pointer:-<missing>}" >&2
-    verification_failed=true
+  if [[ "$FRONTEND_ACTIVE_POINTER_PRESENT" != "true" ]]; then
+    if sudo -u "$APP_USER" -H -- test -e "$FRONTEND_ACTIVE_BUILD_POINTER"; then
+      echo "Frontend rollback pointer mismatch: expected=<missing> actual=<present>" >&2
+      verification_failed=true
+    fi
+  else
+    actual_pointer="$(
+      sudo -u "$APP_USER" -H -- \
+        node -e \
+          'process.stdout.write(require("node:fs").readFileSync(process.argv[1], "utf8").replaceAll("\r", "").trim())' \
+          "$FRONTEND_ACTIVE_BUILD_POINTER" 2>/dev/null ||
+        true
+    )"
+    if [[ "$actual_pointer" != "$FRONTEND_ACTIVE_BUILD_NAME" ]]; then
+      echo "Frontend rollback pointer mismatch: expected=$FRONTEND_ACTIVE_BUILD_NAME actual=${actual_pointer:-<missing>}" >&2
+      verification_failed=true
+    fi
   fi
   if ! verify_service_active "$FRONTEND_SERVICE_NAME"; then
     echo "Previous frontend service did not become stable." >&2
@@ -896,9 +1010,16 @@ restore_previous_frontend_build() {
   fi
 
   echo "==> Restoring the previous frontend build after failed verification"
-  if ! run_as_app_user "node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' point '$FRONTEND_ROOT' '$FRONTEND_ACTIVE_BUILD_NAME'"; then
-    echo "Failed to restore the previous frontend pointer." >&2
-    rollback_failed=true
+  if [[ "$FRONTEND_ACTIVE_POINTER_PRESENT" != "true" ]]; then
+    if ! run_as_app_user "rm -f -- '$FRONTEND_ACTIVE_BUILD_POINTER' '$FRONTEND_ACTIVE_BUILD_POINTER.next'"; then
+      echo "Failed to restore the previous pointerless frontend runtime." >&2
+      rollback_failed=true
+    fi
+  else
+    if ! run_as_app_user "node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' point '$FRONTEND_ROOT' '$FRONTEND_ACTIVE_BUILD_NAME'"; then
+      echo "Failed to restore the previous frontend pointer." >&2
+      rollback_failed=true
+    fi
   fi
 
   if ! sudo systemctl restart "$FRONTEND_SERVICE_NAME"; then
@@ -921,6 +1042,7 @@ discard_previous_frontend_build() {
   # Retain the previous slot until a later successful build overwrites it so
   # an immediate verification failure can be rolled back without rebuilding.
   FRONTEND_PREVIOUS_BUILD_AVAILABLE=false
+  FRONTEND_CANDIDATE_IS_STANDALONE=false
   FRONTEND_PROMOTED=false
 }
 

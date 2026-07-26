@@ -8,37 +8,40 @@ source "$SCRIPT_DIR/runtime-common.sh"
 
 APP_ROOT="$(resolve_app_root)"
 FRONTEND_ROOT="$APP_ROOT/frontend"
-ACTIVE_BUILD_POINTER="$FRONTEND_ROOT/.next-active-dir"
 
 cd "$FRONTEND_ROOT"
 
-ACTIVE_BUILD_DIRECTORY="${NEXT_DIST_DIR:-.next}"
-if [[ -f "$ACTIVE_BUILD_POINTER" ]]; then
-  ACTIVE_BUILD_DIRECTORY="$(tr -d '\r\n' < "$ACTIVE_BUILD_POINTER")"
-fi
-case "$ACTIVE_BUILD_DIRECTORY" in
-  .next|.next-candidate)
+LAUNCH_TARGET="$(
+  node "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" \
+    resolve-launch \
+    "$FRONTEND_ROOT"
+)"
+IFS=$'\t' read -r LAUNCH_KIND ACTIVE_RUNTIME_ROOT ACTIVE_BUILD_DIRECTORY \
+  <<<"$LAUNCH_TARGET"
+
+case "$LAUNCH_KIND" in
+  standalone-slot|standalone-root-recovery)
+    if [[ "$LAUNCH_KIND" == "standalone-root-recovery" ]]; then
+      echo "Using validated root standalone runtime for pointerless migration recovery." >&2
+    fi
+    cd "$ACTIVE_RUNTIME_ROOT"
+    # A standalone artifact always owns an internal .next directory. Do not
+    # leak the outer blue/green slot name into its embedded Next.js config.
+    unset NEXT_DIST_DIR
+    exec env \
+      HOSTNAME="${FRONTEND_HOST:-127.0.0.1}" \
+      PORT="${FRONTEND_PORT:-3000}" \
+      node "$ACTIVE_RUNTIME_ROOT/server.js"
+    ;;
+  legacy-slot)
+    export NEXT_DIST_DIR="$ACTIVE_BUILD_DIRECTORY"
+    exec "$FRONTEND_ROOT/node_modules/.bin/next" \
+      start \
+      -H "${FRONTEND_HOST:-127.0.0.1}" \
+      -p "${FRONTEND_PORT:-3000}"
     ;;
   *)
-    echo "Invalid active Next build directory: ${ACTIVE_BUILD_DIRECTORY:-<empty>}" >&2
+    echo "Invalid frontend launch target: ${LAUNCH_KIND:-<empty>}" >&2
     exit 1
     ;;
 esac
-
-ACTIVE_RUNTIME_ROOT="$FRONTEND_ROOT/$ACTIVE_BUILD_DIRECTORY"
-if [[ -f "$ACTIVE_RUNTIME_ROOT/server.js" ]]; then
-  cd "$ACTIVE_RUNTIME_ROOT"
-  # The standalone artifact always owns an internal .next directory. Do not
-  # leak the outer blue/green slot name into its embedded Next.js config.
-  unset NEXT_DIST_DIR
-  exec env \
-    HOSTNAME="${FRONTEND_HOST:-127.0.0.1}" \
-    PORT="${FRONTEND_PORT:-3000}" \
-    node "$ACTIVE_RUNTIME_ROOT/server.js"
-fi
-
-export NEXT_DIST_DIR="$ACTIVE_BUILD_DIRECTORY"
-exec "$FRONTEND_ROOT/node_modules/.bin/next" \
-  start \
-  -H "${FRONTEND_HOST:-127.0.0.1}" \
-  -p "${FRONTEND_PORT:-3000}"

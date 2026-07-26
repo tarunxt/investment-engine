@@ -1,21 +1,32 @@
 #!/usr/bin/env node
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { constants as fsConstants, realpathSync } from "node:fs";
 import {
+  access,
   lstat,
   readdir,
   readFile,
   realpath,
   rename,
+  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 export const ARTIFACT_SCHEMA_VERSION = 2;
 export const ACTIVE_BUILD_POINTER = ".next-active-dir";
 export const BUILD_SLOT_NAMES = [".next", ".next-candidate"];
+const REQUIRED_RUNTIME_ROUTES = [
+  "/(auth)/login/page",
+  "/api/auth/[...nextauth]/route",
+  "/api/runtime-fingerprint/route",
+  "/backend-api/[...path]/route",
+  "/console/dashboard/page",
+  "/console/bullpen-ai/page",
+];
 export const PUBLIC_BUILD_ENV_DEFAULTS = Object.freeze({
   NEXT_PUBLIC_API_URL: "https://api.cred-x.in",
   NEXT_PUBLIC_FRONTEND_URL: "https://cred-x.in",
@@ -89,12 +100,131 @@ export async function isValidBuildSlot(slotPath) {
     (await pathExists(path.join(slotPath, ".next", "BUILD_ID"))) &&
     (await pathExists(path.join(slotPath, ".next", "static")));
   if (standaloneFilesPresent) {
-    return true;
+    try {
+      await validateStandaloneLaunchRuntime(slotPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // A pointerless standalone overlay owns frontend/.next as its internal
+  // distribution directory. Never interpret that internal directory as an
+  // outer legacy slot, even if stale shared dependencies later reappear.
+  const frontendRoot = path.dirname(slotPath);
+  if (
+    path.basename(slotPath) === ".next" &&
+    (await pathExists(path.join(frontendRoot, "server.js"))) &&
+    (await pathExists(path.join(frontendRoot, "deployment-manifest.json")))
+  ) {
+    try {
+      await validateStandaloneLaunchRuntime(frontendRoot, {
+        allowSourceOverlay: true,
+      });
+      return false;
+    } catch {
+      // Stale root overlay files must not prevent a complete legacy .next
+      // build from remaining a valid rollback target.
+    }
   }
 
   return (
     (await pathExists(path.join(slotPath, "BUILD_ID"))) &&
-    (await pathExists(path.join(slotPath, "static")))
+    (await pathExists(path.join(slotPath, "static"))) &&
+    (await isExecutable(
+      path.join(frontendRoot, "node_modules", ".bin", "next"),
+    ))
+  );
+}
+
+async function isExecutable(targetPath) {
+  try {
+    await access(targetPath, fsConstants.X_OK);
+    return true;
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      ["EACCES", "ENOENT", "ENOTDIR"].includes(error.code)
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function inspectStandaloneRuntimeRoot(runtimeRoot, allowSourceOverlay) {
+  try {
+    await validateStandaloneLaunchRuntime(runtimeRoot, {
+      allowSourceOverlay,
+    });
+    return { valid: true, reason: null };
+  } catch (error) {
+    return {
+      valid: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function resolveFrontendLaunchTarget(frontendRoot) {
+  const pointerPath = path.join(frontendRoot, ACTIVE_BUILD_POINTER);
+  const pointerPresent = await pathExists(pointerPath);
+  const slots = await selectBuildSlots(frontendRoot);
+  const activeRuntimeRoot = path.join(frontendRoot, slots.active);
+  const selectedRuntime = await inspectStandaloneRuntimeRoot(
+    activeRuntimeRoot,
+    false,
+  );
+
+  if (selectedRuntime.valid) {
+    return {
+      kind: "standalone-slot",
+      runtimeRoot: activeRuntimeRoot,
+      slot: slots.active,
+    };
+  }
+
+  // Compatibility recovery for the first artifact rollout: a failed slot
+  // migration may leave the complete standalone runtime at frontendRoot with
+  // no pointer. Never use this fallback when a pointer exists, because that
+  // would mask a corrupt or incomplete selected release.
+  let rootRecovery = null;
+  if (!pointerPresent) {
+    rootRecovery = await inspectStandaloneRuntimeRoot(frontendRoot, true);
+    if (rootRecovery.valid) {
+      return {
+        kind: "standalone-root-recovery",
+        runtimeRoot: frontendRoot,
+        slot: null,
+      };
+    }
+  }
+
+  if (
+    (await pathExists(path.join(activeRuntimeRoot, "BUILD_ID"))) &&
+    (await pathExists(path.join(activeRuntimeRoot, "static"))) &&
+    (await isExecutable(
+      path.join(frontendRoot, "node_modules", ".bin", "next"),
+    ))
+  ) {
+    return {
+      kind: "legacy-slot",
+      runtimeRoot: activeRuntimeRoot,
+      slot: slots.active,
+    };
+  }
+
+  throw new Error(
+    `No restartable frontend runtime is available for ${
+      pointerPresent
+        ? `selected slot ${slots.active}`
+        : "the default slot or root recovery"
+    }. Selected standalone validation: ${selectedRuntime.reason ?? "not attempted"}${
+      rootRecovery
+        ? `. Root recovery validation: ${rootRecovery.reason ?? "unknown failure"}`
+        : ""
+    }`,
   );
 }
 
@@ -106,12 +236,18 @@ export async function writeActiveBuildPointer(frontendRoot, slotName) {
   }
 
   const pointerPath = path.join(frontendRoot, ACTIVE_BUILD_POINTER);
-  const pendingPointerPath = `${pointerPath}.next`;
-  await writeFile(pendingPointerPath, `${slotName}\n`, {
-    encoding: "utf8",
-    mode: 0o644,
-  });
-  await rename(pendingPointerPath, pointerPath);
+  const pendingPointerPath =
+    `${pointerPath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(pendingPointerPath, `${slotName}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o644,
+    });
+    await rename(pendingPointerPath, pointerPath);
+  } finally {
+    await rm(pendingPointerPath, { force: true });
+  }
 }
 
 export async function readArtifactManifest(artifactRoot) {
@@ -160,6 +296,7 @@ export async function validateArtifactDirectory(
   artifactRoot,
   {
     allowRuntimeCache = false,
+    allowSourceOverlay = false,
     allowedBundler,
     expectedBuildSha,
     expectedPackageLockSha256,
@@ -190,13 +327,17 @@ export async function validateArtifactDirectory(
     !allowRuntimeCache &&
     (await pathExists(path.join(artifactRoot, ".next", "cache")))
   ) {
-    throw new Error("Frontend artifact must not contain the reusable build cache");
+    throw new Error(
+      "Frontend artifact must not contain the reusable build cache",
+    );
   }
 
   const forbiddenEntries = [];
-  for (const rootEntry of FORBIDDEN_ROOT_ENTRIES) {
-    if (await pathExists(path.join(artifactRoot, rootEntry))) {
-      forbiddenEntries.push(rootEntry);
+  if (!allowSourceOverlay) {
+    for (const rootEntry of FORBIDDEN_ROOT_ENTRIES) {
+      if (await pathExists(path.join(artifactRoot, rootEntry))) {
+        forbiddenEntries.push(rootEntry);
+      }
     }
   }
   const scanQueue = [path.resolve(artifactRoot)];
@@ -223,11 +364,16 @@ export async function validateArtifactDirectory(
     );
   }
 
-  const staticFiles = await readdir(path.join(artifactRoot, ".next", "static"), {
-    recursive: true,
-  });
+  const staticFiles = await readdir(
+    path.join(artifactRoot, ".next", "static"),
+    {
+      recursive: true,
+    },
+  );
   if (!staticFiles.some((name) => name.endsWith(".js"))) {
-    throw new Error("Frontend artifact does not contain a static JavaScript asset");
+    throw new Error(
+      "Frontend artifact does not contain a static JavaScript asset",
+    );
   }
   if (!staticFiles.some((name) => name.endsWith(".css"))) {
     throw new Error("Frontend artifact does not contain a static CSS asset");
@@ -245,7 +391,9 @@ export async function validateArtifactDirectory(
     );
   }
   if (manifest.runtime_layout !== "next-standalone") {
-    throw new Error(`Unsupported frontend runtime layout: ${manifest.runtime_layout}`);
+    throw new Error(
+      `Unsupported frontend runtime layout: ${manifest.runtime_layout}`,
+    );
   }
   if (!["webpack", "turbopack"].includes(manifest.bundler)) {
     throw new Error(`Unsupported frontend bundler: ${manifest.bundler}`);
@@ -259,7 +407,9 @@ export async function validateArtifactDirectory(
     typeof manifest.build_sha !== "string" ||
     !/^[0-9a-f]{40}$/i.test(manifest.build_sha)
   ) {
-    throw new Error("Frontend artifact build_sha must be a 40-character Git SHA");
+    throw new Error(
+      "Frontend artifact build_sha must be a 40-character Git SHA",
+    );
   }
   if (expectedBuildSha && manifest.build_sha !== expectedBuildSha) {
     throw new Error(
@@ -288,10 +438,14 @@ export async function validateArtifactDirectory(
     throw new Error("Frontend artifact Node.js major version is invalid");
   }
   if (!["linux", "darwin"].includes(manifest.platform)) {
-    throw new Error(`Frontend artifact platform is invalid: ${manifest.platform}`);
+    throw new Error(
+      `Frontend artifact platform is invalid: ${manifest.platform}`,
+    );
   }
   if (!["x64", "arm64"].includes(manifest.arch)) {
-    throw new Error(`Frontend artifact architecture is invalid: ${manifest.arch}`);
+    throw new Error(
+      `Frontend artifact architecture is invalid: ${manifest.arch}`,
+    );
   }
   if (manifest.entrypoint !== "server.js" || manifest.dist_dir !== ".next") {
     throw new Error("Frontend artifact runtime entrypoint metadata is invalid");
@@ -304,7 +458,9 @@ export async function validateArtifactDirectory(
       JSON.stringify(resolvedPublicEnvironment) !==
       JSON.stringify(manifest.public_environment)
     ) {
-      throw new Error("Frontend artifact public build environment is incomplete");
+      throw new Error(
+        "Frontend artifact public build environment is incomplete",
+      );
     }
     if (
       expectedPublicEnvironment &&
@@ -324,7 +480,9 @@ export async function validateArtifactDirectory(
     ),
   );
   if (!manifest.next_version || manifest.next_version !== nextPackage.version) {
-    throw new Error("Frontend artifact Next.js version does not match its manifest");
+    throw new Error(
+      "Frontend artifact Next.js version does not match its manifest",
+    );
   }
 
   const buildId = (
@@ -340,16 +498,11 @@ export async function validateArtifactDirectory(
       "utf8",
     ),
   );
-  for (const requiredRoute of [
-    "/(auth)/login/page",
-    "/api/auth/[...nextauth]/route",
-    "/api/runtime-fingerprint/route",
-    "/backend-api/[...path]/route",
-    "/console/dashboard/page",
-    "/console/bullpen-ai/page",
-  ]) {
+  for (const requiredRoute of REQUIRED_RUNTIME_ROUTES) {
     if (!appPathsManifest[requiredRoute]) {
-      throw new Error(`Frontend artifact is missing key route: ${requiredRoute}`);
+      throw new Error(
+        `Frontend artifact is missing key route: ${requiredRoute}`,
+      );
     }
   }
 
@@ -358,17 +511,213 @@ export async function validateArtifactDirectory(
 }
 
 async function sha256File(filePath) {
-  return createHash("sha256").update(await readFile(filePath)).digest("hex");
+  return createHash("sha256")
+    .update(await readFile(filePath))
+    .digest("hex");
 }
 
 function compareVersions(left, right) {
   const leftParts = left.split(".").map(Number);
   const rightParts = right.split(".").map(Number);
-  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+  for (
+    let index = 0;
+    index < Math.max(leftParts.length, rightParts.length);
+    index += 1
+  ) {
     const difference = (leftParts[index] || 0) - (rightParts[index] || 0);
     if (difference !== 0) return difference;
   }
   return 0;
+}
+
+function assertRuntimePathInsideRoot(runtimeRoot, candidatePath, description) {
+  const root = path.resolve(runtimeRoot);
+  const candidate = path.resolve(candidatePath);
+  const relative = path.relative(root, candidate);
+  if (
+    relative === "" ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(
+      `Frontend traced runtime ${description} escapes its root: ${candidatePath}`,
+    );
+  }
+  return candidate;
+}
+
+async function assertRuntimeFile(filePath, description) {
+  let metadata;
+  try {
+    metadata = await stat(filePath);
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      ["ENOENT", "ENOTDIR"].includes(error.code)
+    ) {
+      throw new Error(`Frontend traced runtime is missing ${description}`);
+    }
+    throw error;
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`Frontend traced runtime ${description} is not a file`);
+  }
+}
+
+async function readRuntimeJson(filePath, description) {
+  try {
+    return JSON.parse(await readFile(filePath, "utf8"));
+  } catch (error) {
+    throw new Error(
+      `Invalid frontend traced runtime ${description}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
+
+async function assertTracedRuntimeComplete(runtimeRoot) {
+  const requiredServerFilesPath = path.join(
+    runtimeRoot,
+    ".next",
+    "required-server-files.json",
+  );
+  const requiredServerFiles = await readRuntimeJson(
+    requiredServerFilesPath,
+    "required-server-files.json",
+  );
+  if (
+    !Array.isArray(requiredServerFiles.files) ||
+    requiredServerFiles.files.length === 0
+  ) {
+    throw new Error(
+      "Frontend traced runtime required-server-files.json has no files",
+    );
+  }
+  for (const relativePath of requiredServerFiles.files) {
+    if (
+      typeof relativePath !== "string" ||
+      relativePath.length === 0 ||
+      path.isAbsolute(relativePath)
+    ) {
+      throw new Error(
+        "Frontend traced runtime required-server-files.json contains an invalid path",
+      );
+    }
+    const requiredPath = assertRuntimePathInsideRoot(
+      runtimeRoot,
+      path.resolve(runtimeRoot, relativePath),
+      `required server file ${relativePath}`,
+    );
+    await assertRuntimeFile(
+      requiredPath,
+      `required server file ${relativePath}`,
+    );
+  }
+
+  await assertRuntimeFile(
+    path.join(runtimeRoot, "node_modules", "next", "dist", "server", "next.js"),
+    "Next.js server entrypoint",
+  );
+
+  const appPathsManifest = await readRuntimeJson(
+    path.join(runtimeRoot, ".next", "server", "app-paths-manifest.json"),
+    "app-paths-manifest.json",
+  );
+  for (const route of REQUIRED_RUNTIME_ROUTES) {
+    const routeOutput = appPathsManifest[route];
+    if (typeof routeOutput !== "string" || routeOutput.length === 0) {
+      throw new Error(`Frontend traced runtime is missing key route: ${route}`);
+    }
+    const routeOutputPath = assertRuntimePathInsideRoot(
+      runtimeRoot,
+      path.resolve(runtimeRoot, ".next", "server", routeOutput),
+      `route output for ${route}`,
+    );
+    await assertRuntimeFile(routeOutputPath, `route output for ${route}`);
+
+    const tracePath = `${routeOutputPath}.nft.json`;
+    await assertRuntimeFile(tracePath, `trace manifest for ${route}`);
+    const trace = await readRuntimeJson(
+      tracePath,
+      `trace manifest for ${route}`,
+    );
+    if (!Array.isArray(trace.files) || trace.files.length === 0) {
+      throw new Error(
+        `Frontend traced runtime trace for ${route} has no files`,
+      );
+    }
+    for (const relativePath of trace.files) {
+      if (
+        typeof relativePath !== "string" ||
+        relativePath.length === 0 ||
+        path.isAbsolute(relativePath)
+      ) {
+        throw new Error(
+          `Frontend traced runtime trace for ${route} contains an invalid path`,
+        );
+      }
+      const tracedPath = assertRuntimePathInsideRoot(
+        runtimeRoot,
+        path.resolve(path.dirname(tracePath), relativePath),
+        `trace dependency for ${route}`,
+      );
+      await assertRuntimeFile(
+        tracedPath,
+        `trace dependency ${relativePath} for ${route}`,
+      );
+    }
+  }
+}
+
+function assertHostArtifactCompatibility(manifest) {
+  const nodeMajor = Number(process.versions.node.split(".")[0]);
+  if (manifest.platform !== process.platform) {
+    throw new Error(
+      `Frontend artifact platform mismatch: built for ${manifest.platform}, host is ${process.platform}`,
+    );
+  }
+  if (manifest.arch !== process.arch) {
+    throw new Error(
+      `Frontend artifact architecture mismatch: built for ${manifest.arch}, host is ${process.arch}`,
+    );
+  }
+  if (manifest.node_major !== nodeMajor) {
+    throw new Error(
+      `Frontend artifact Node.js mismatch: built with ${manifest.node_major}, host uses ${nodeMajor}`,
+    );
+  }
+  const hostLibc =
+    process.report?.getReport()?.header?.glibcVersionRuntime ?? "unknown";
+  if (
+    process.platform === "linux" &&
+    /^\d+(?:\.\d+)+$/.test(manifest.libc ?? "") &&
+    /^\d+(?:\.\d+)+$/.test(hostLibc) &&
+    compareVersions(manifest.libc, hostLibc) > 0
+  ) {
+    throw new Error(
+      `Frontend artifact glibc ${manifest.libc} is newer than host glibc ${hostLibc}`,
+    );
+  }
+}
+
+export async function validateStandaloneLaunchRuntime(
+  runtimeRoot,
+  { allowSourceOverlay = false } = {},
+) {
+  const manifest = await validateArtifactDirectory(runtimeRoot, {
+    // Packaging excludes the reusable build cache, but a live Next.js
+    // runtime may create its own image/data cache after promotion. That cache
+    // must not make a previously validated slot unstartable.
+    allowRuntimeCache: true,
+    allowSourceOverlay,
+    allowedBundler: "webpack",
+  });
+  assertHostArtifactCompatibility(manifest);
+  await assertTracedRuntimeComplete(runtimeRoot);
+  return manifest;
 }
 
 async function main() {
@@ -408,34 +757,7 @@ async function main() {
         expectedPublicEnvironment:
           comparePublicEnvironment === "true" ? process.env : undefined,
       });
-      const nodeMajor = Number(process.versions.node.split(".")[0]);
-      if (manifest.platform !== process.platform) {
-        throw new Error(
-          `Frontend artifact platform mismatch: built for ${manifest.platform}, host is ${process.platform}`,
-        );
-      }
-      if (manifest.arch !== process.arch) {
-        throw new Error(
-          `Frontend artifact architecture mismatch: built for ${manifest.arch}, host is ${process.arch}`,
-        );
-      }
-      if (manifest.node_major !== nodeMajor) {
-        throw new Error(
-          `Frontend artifact Node.js mismatch: built with ${manifest.node_major}, host uses ${nodeMajor}`,
-        );
-      }
-      const hostLibc =
-        process.report?.getReport()?.header?.glibcVersionRuntime ?? "unknown";
-      if (
-        process.platform === "linux" &&
-        /^\d+(?:\.\d+)+$/.test(manifest.libc ?? "") &&
-        /^\d+(?:\.\d+)+$/.test(hostLibc) &&
-        compareVersions(manifest.libc, hostLibc) > 0
-      ) {
-        throw new Error(
-          `Frontend artifact glibc ${manifest.libc} is newer than host glibc ${hostLibc}`,
-        );
-      }
+      assertHostArtifactCompatibility(manifest);
       process.stdout.write(`${JSON.stringify(manifest)}\n`);
       return;
     }
@@ -443,14 +765,35 @@ async function main() {
       await writeActiveBuildPointer(path.resolve(target), value);
       return;
     }
+    case "resolve-launch": {
+      const launchTarget = await resolveFrontendLaunchTarget(
+        path.resolve(target),
+      );
+      process.stdout.write(
+        `${launchTarget.kind}\t${launchTarget.runtimeRoot}\t${launchTarget.slot ?? ""}\n`,
+      );
+      return;
+    }
     default:
       throw new Error(
-        "Usage: frontend-artifact.mjs select <frontend-root> | validate <artifact-root> [expected-sha] | validate-host <artifact-root> [expected-sha] [source-package-lock|-] [allowed-bundler|-] [compare-public-env] [allow-runtime-cache] | point <frontend-root> <slot>",
+        "Usage: frontend-artifact.mjs select <frontend-root> | validate <artifact-root> [expected-sha] | validate-host <artifact-root> [expected-sha] [source-package-lock|-] [allowed-bundler|-] [compare-public-env] [allow-runtime-cache] | point <frontend-root> <slot> | resolve-launch <frontend-root>",
       );
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    return (
+      realpathSync(fileURLToPath(import.meta.url)) ===
+      realpathSync(process.argv[1])
+    );
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
