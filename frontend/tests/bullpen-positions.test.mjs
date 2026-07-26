@@ -436,3 +436,477 @@ test("Bullpen unresolved positions with missing pricing stay stale instead of be
   assert.equal(position.economicClassification, "stale_or_unknown");
   assert.equal(position.isClaimable, false);
 });
+
+test("authoritative open-market enrichment overrides stale redeemable and past-date hints", async () => {
+  const {
+    applyBullpenPositionMarketData,
+    normalizeBullpenPosition,
+  } = await loadBullpenPositionsModule();
+  const originalNow = Date.now;
+  Date.now = () => Date.parse("2026-07-27T00:00:00.000Z");
+
+  try {
+    const conditionId =
+      "0x2222222222222222222222222222222222222222222222222222222222222222";
+    const position = normalizeBullpenPosition(
+      {
+        marketSlug: "iran-action-july-25-no",
+        event_slug: "iran-action-july-25",
+        condition_id: conditionId,
+        market: "Iran military action against a Gulf State on July 25?",
+        outcome: "No",
+        shares: 4.737,
+        avg_price: 0.38,
+        current_price: 0.99,
+        current_value: 4.69,
+        expected_payout_usdc: 4.69,
+        redeemable: true,
+        upstream_redeemable: true,
+        status: "redeemable",
+        end_date: "2026-07-25",
+      },
+      (eventSlug) =>
+        eventSlug ? `https://polymarket.com/event/${eventSlug}` : null,
+    );
+
+    assert.equal(position.economicClassification, "positive_payout_claimable");
+
+    const refreshed = applyBullpenPositionMarketData(position, {
+      marketSlug: "iran-action-july-25-no",
+      eventSlug: "iran-action-july-25",
+      slug: "iran-action-july-25-no",
+      marketUrl: "https://polymarket.com/event/iran-action-july-25",
+      noOdds: 99,
+      yesOdds: 1,
+      authoritativeMarketOpen: true,
+    });
+
+    assert.equal(refreshed.economicClassification, "active");
+    assert.equal(refreshed.isClaimable, false);
+    assert.equal(refreshed.marketSlug, "iran-action-july-25-no");
+    assert.equal(refreshed.eventSlug, "iran-action-july-25");
+    assert.equal(refreshed.slug, "iran-action-july-25-no");
+    assert.equal(refreshed.conditionId, conditionId);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
+test("authoritative closed-market enrichment never leaves a row active", async () => {
+  const {
+    applyBullpenPositionMarketData,
+    normalizeBullpenPosition,
+  } = await loadBullpenPositionsModule();
+  const position = normalizeBullpenPosition(
+    {
+      slug: "closed-market",
+      event_slug: "closed-event",
+      market: "Explicitly closed market",
+      outcome: "No",
+      shares: 5,
+      current_price: 0.6,
+      current_value: 3,
+      resolution_status: "open",
+      end_date: "2027-08-01",
+    },
+    () => null,
+  );
+
+  const refreshed = applyBullpenPositionMarketData(position, {
+    authoritativeMarketOpen: false,
+    noOdds: 60,
+    yesOdds: 40,
+  });
+
+  assert.equal(refreshed.economicClassification, "stale_or_unknown");
+  assert.equal(refreshed.isClaimable, false);
+  assert.match(refreshed.classificationReason, /not open/i);
+});
+
+test("non-authoritative question fallback cannot reclassify a claimable row", async () => {
+  const {
+    applyBullpenPositionMarketData,
+    normalizeBullpenPosition,
+  } = await loadBullpenPositionsModule();
+  const position = normalizeBullpenPosition(
+    {
+      slug: "resolved-market",
+      market: "A duplicated question title",
+      outcome: "Yes",
+      shares: 5,
+      current_price: 1,
+      current_value: 5,
+      expected_payout_usdc: 5,
+      resolution_status: "resolved",
+      redeemable: true,
+    },
+    () => null,
+  );
+
+  assert.equal(position.economicClassification, "positive_payout_claimable");
+
+  const refreshed = applyBullpenPositionMarketData(position, {
+    marketSlug: "different-market-with-the-same-question",
+    authoritativeMarketOpen: null,
+    yesOdds: 45,
+    noOdds: 55,
+  });
+
+  assert.equal(refreshed.economicClassification, "positive_payout_claimable");
+  assert.equal(refreshed.isClaimable, true);
+});
+
+test("unresolved redeemable hints alone do not promote a live row to claimable", async () => {
+  const { normalizeBullpenPosition } = await loadBullpenPositionsModule();
+
+  const position = normalizeBullpenPosition(
+    {
+      slug: "still-open-market",
+      event_slug: "still-open-event",
+      market: "Still-open market",
+      outcome: "Yes",
+      shares: 5,
+      current_price: 0.6,
+      current_value: 3,
+      redeemable: true,
+      upstream_redeemable: true,
+      resolution_status: "open",
+      end_date: "2027-08-01",
+    },
+    () => null,
+  );
+
+  assert.equal(position.economicClassification, "active");
+  assert.equal(position.isClaimable, false);
+});
+
+test("empty degraded tracked fallback preserves a loaded wallet snapshot", async () => {
+  const {
+    isUsableBullpenPositionsSnapshot,
+    normalizeBullpenPosition,
+    shouldPreserveBullpenPositionsOnRefresh,
+    summarizeBullpenPositions,
+  } = await loadBullpenPositionsModule();
+  const position = normalizeBullpenPosition(
+    {
+      slug: "open-market",
+      event_slug: "open-event",
+      market: "Open market",
+      outcome: "No",
+      shares: 5,
+      current_price: 0.5,
+      current_value: 2.5,
+      resolution_status: "open",
+      end_date: "2027-08-01",
+    },
+    () => null,
+  );
+  const lastSuccessfulLiveSnapshot = {
+    positions: [position],
+    summary: summarizeBullpenPositions([position], {}),
+    diagnostics: {
+      excludedPositionCount: 0,
+      diagnosticPositionCount: 0,
+      settlementPendingCount: 0,
+      staleOrUnknownCount: 0,
+      closedPositionCount: 0,
+      resolvedZeroPayoutCount: 0,
+      settlementPendingPositions: [],
+      diagnosticPositions: [],
+      excludedPositions: [],
+    },
+    fetchedAt: "2026-07-27T00:00:00.000Z",
+    source: "live-cli",
+  };
+
+  assert.equal(
+    isUsableBullpenPositionsSnapshot({
+      positionsSource: "tracked-positions",
+      liveAvailable: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldPreserveBullpenPositionsOnRefresh({
+      incomingPositions: [],
+      incomingSource: "tracked-positions",
+      liveAvailable: false,
+      currentPositions: [],
+      currentSource: null,
+      lastSuccessfulLiveSnapshot,
+    }),
+    true,
+  );
+});
+
+test("wallet snapshot lineage safely auto-rebaselines only complete fresh same-account live rotations", async () => {
+  const {
+    canAutoRebaselineBullpenPositionsLineage,
+    getBullpenPositionsLineageMismatchFields,
+  } =
+    await loadBullpenPositionsModule();
+  const current = {
+    accountIdentity: "0xABCDEF",
+    credentialArtifact: {
+      inode: 10,
+      mtimeNs: 20,
+      size: 30,
+    },
+    positionClassifierVersion: 4,
+    source: "live-cli",
+    freshnessState: "fresh",
+  };
+
+  assert.deepEqual(
+    getBullpenPositionsLineageMismatchFields({
+      current,
+      incoming: {
+        accountIdentity: "0xabcdef",
+        credentialArtifact: {
+          inode: 10,
+          mtimeNs: 20,
+          size: 30,
+        },
+        positionClassifierVersion: 4,
+        source: "redis-cache",
+        freshnessState: "stale",
+      },
+    }),
+    [],
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: {
+        ...current,
+        credentialArtifact: {
+          inode: 11,
+          mtimeNs: 21,
+          size: 31,
+        },
+        positionClassifierVersion: 5,
+        freshnessState: "fresh",
+      },
+      incomingIsFreshLive: true,
+    }),
+    true,
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: {
+        ...current,
+        accountIdentity: "0x999999",
+        credentialArtifact: {
+          inode: 11,
+          mtimeNs: 21,
+          size: 31,
+        },
+        freshnessState: "fresh",
+      },
+      incomingIsFreshLive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: {
+        ...current,
+        credentialArtifact: {
+          inode: 11,
+          mtimeNs: 21,
+          size: 31,
+        },
+        positionClassifierVersion: 5,
+        source: "redis-cache",
+        freshnessState: "fresh",
+      },
+      incomingIsFreshLive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: {
+        ...current,
+        credentialArtifact: {
+          inode: null,
+          mtimeNs: 21,
+          size: 31,
+        },
+        positionClassifierVersion: 5,
+        freshnessState: "fresh",
+      },
+      incomingIsFreshLive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: {
+        ...current,
+        credentialArtifact: {
+          inode: 11,
+          mtimeNs: 21,
+          size: 31,
+        },
+        positionClassifierVersion: null,
+        freshnessState: "fresh",
+      },
+      incomingIsFreshLive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: {
+        ...current,
+        credentialArtifact: {
+          inode: 11,
+          mtimeNs: 21,
+          size: 31,
+        },
+        positionClassifierVersion: 5,
+        freshnessState: "stale",
+      },
+      incomingIsFreshLive: true,
+    }),
+    false,
+  );
+  assert.equal(
+    canAutoRebaselineBullpenPositionsLineage({
+      current,
+      incoming: null,
+      incomingIsFreshLive: true,
+    }),
+    false,
+  );
+  assert.deepEqual(
+    getBullpenPositionsLineageMismatchFields({
+      current,
+      incoming: {
+        accountIdentity: "0x999999",
+        credentialArtifact: {
+          inode: 11,
+          mtimeNs: 21,
+          size: 31,
+        },
+        positionClassifierVersion: 5,
+        source: "live-cli",
+        freshnessState: "fresh",
+      },
+    }),
+    [
+      "account-identity",
+      "credential-inode",
+      "credential-mtime",
+      "credential-size",
+      "position-classifier",
+    ],
+  );
+  assert.deepEqual(
+    getBullpenPositionsLineageMismatchFields({
+      current,
+      incoming: null,
+    }),
+    ["lineage"],
+  );
+  assert.deepEqual(
+    getBullpenPositionsLineageMismatchFields({
+      current: null,
+      incoming: current,
+    }),
+    [],
+  );
+});
+
+test("portfolio values respect source authority and reconcile verified components", async () => {
+  const {
+    resolveBullpenPreferredPortfolioValue,
+    resolveBullpenTotalPortfolioValue,
+    sumBullpenPortfolioPositionValue,
+    sumCurrentPositionValue,
+  } = await loadBullpenPositionsModule();
+
+  assert.equal(resolveBullpenPreferredPortfolioValue([0, 3.44, null]), 0);
+  assert.equal(resolveBullpenPreferredPortfolioValue([null, 3.44, 0]), 3.44);
+  assert.equal(
+    resolveBullpenTotalPortfolioValue({
+      walletValue: 0,
+      accountValue: 18.69,
+      summaryTotalValue: 0,
+      cashBalance: 3.44,
+      positionsValue: 0,
+      hasPositionsSnapshot: true,
+    }),
+    3.44,
+  );
+  assert.equal(
+    resolveBullpenTotalPortfolioValue({
+      walletValue: 0,
+      accountValue: null,
+      summaryTotalValue: 0,
+      cashBalance: 3.44,
+      positionsValue: 0,
+      hasPositionsSnapshot: true,
+    }),
+    3.44,
+  );
+  assert.equal(
+    resolveBullpenTotalPortfolioValue({
+      walletValue: 18.69,
+      accountValue: 18.69,
+      summaryTotalValue: 18.69,
+      cashBalance: 0,
+      positionsValue: 0,
+      hasPositionsSnapshot: true,
+    }),
+    0,
+  );
+  assert.equal(
+    resolveBullpenTotalPortfolioValue({
+      walletValue: 18.69,
+      accountValue: 18.69,
+      summaryTotalValue: 0,
+      cashBalance: null,
+      positionsValue: 0,
+      hasPositionsSnapshot: true,
+    }),
+    18.69,
+  );
+  assert.equal(
+    sumCurrentPositionValue([
+      {
+        currentValue: null,
+        costBasis: 4.25,
+      },
+      {
+        currentValue: 2.5,
+        costBasis: 2,
+      },
+    ]),
+    6.75,
+  );
+  assert.equal(
+    sumBullpenPortfolioPositionValue([
+      {
+        economicClassification: "active",
+        currentValue: 2.5,
+        costBasis: 2,
+      },
+      {
+        economicClassification: "positive_payout_claimable",
+        isClaimable: true,
+        claimableValue: 3.33,
+        expectedPayoutUsd: 3,
+        currentValue: 1,
+        costBasis: 0.5,
+      },
+    ]),
+    5.83,
+  );
+});

@@ -15,6 +15,7 @@ from app.domains.polymarket_auto_live.console_profile import (
 )
 from app.domains.polymarket_auto_live.console_projection import (
     CONSOLE_PROJECTION_VERSION,
+    build_verified_stage1_portfolio_snapshot,
 )
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
@@ -50,6 +51,7 @@ from app.domains.polymarket_auto_live.repository import (
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveBotCardSummary,
+    BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveHistoryPage,
@@ -76,6 +78,9 @@ from app.infrastructure.messaging.task_registry import (
 )
 
 logger = get_logger(__name__)
+
+CONSOLE_RUN_DETAIL_DECISION_LIMIT = 32
+CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT = 200
 
 
 def _summarize_run_for_list(run: BullpenAutoLiveRun) -> BullpenAutoLiveRun:
@@ -301,23 +306,38 @@ class BullpenAutoLiveBot:
         repo: AsyncPolymarketAutoLiveRepository,
         runs: list[BullpenAutoLiveRun],
     ) -> bool:
-        terminal_runs = [run for run in runs if run.status != "running"]
+        terminal_runs = [
+            run for run in runs if run.status not in {"running", "confirming"}
+        ]
         if not terminal_runs:
             return False
 
-        decision_counts = await repo.count_decisions_by_run([run.id for run in terminal_runs])
+        payload_decisions_by_run: dict[
+            str,
+            list[BullpenAutoLiveDecision],
+        ] = {}
+        for run in terminal_runs:
+            decisions = extract_stage3_decisions_from_run(run)
+            if decisions is not None:
+                payload_decisions_by_run[run.id] = decisions
+        decision_id_sets = await repo.list_visible_decision_id_sets_by_run(
+            self.user_id,
+            {
+                run_id: len({decision.id for decision in decisions})
+                for run_id, decisions in payload_decisions_by_run.items()
+            },
+        )
         reconciled = False
         for run in terminal_runs:
-            payload_decisions = extract_stage3_decisions_from_run(run)
+            payload_decisions = payload_decisions_by_run.get(run.id)
             if payload_decisions is None:
                 continue
-            payload_count = len(payload_decisions)
-            existing_count = decision_counts.get(run.id, 0)
-            if existing_count >= payload_count:
+            payload_ids = {decision.id for decision in payload_decisions}
+            if decision_id_sets.get(run.id, set()) == payload_ids:
                 continue
 
             await repo.replace_run_decisions_from_stage3_payload(self.user_id, run)
-            decision_counts[run.id] = payload_count
+            decision_id_sets[run.id] = payload_ids
             reconciled = True
 
         return reconciled
@@ -333,6 +353,22 @@ class BullpenAutoLiveBot:
             return None, state
 
         running_run = record_to_run(running_record)
+        if running_run.status == "confirming":
+            # Planning has already handed execution to durable Stage 3
+            # intents. Planner recovery must never reinterpret or replace that
+            # payload; intent dispatch/reconciliation owns this lifecycle.
+            confirming_state = self._synchronize_state(
+                settings,
+                state.model_copy(
+                    update={
+                        "last_run_id": running_run.id,
+                        "last_action": running_run.summary,
+                        "last_error": None,
+                    }
+                ),
+            )
+            return running_run, confirming_state
+
         recovered_run: BullpenAutoLiveRun | None = None
         recovered_auth_error = False
         if run_contains_historical_auth_error(
@@ -663,8 +699,39 @@ class BullpenAutoLiveBot:
                 settings,
                 record_to_state(state_record),
             )
-            latest_projection = await repo.get_latest_projected_run(self.user_id)
+            active_identity = await repo.get_active_run_identity(self.user_id)
+            latest_projection = (
+                await repo.get_projected_run_for_user(
+                    self.user_id,
+                    active_identity[0],
+                )
+                if active_identity is not None
+                else None
+            )
+            if latest_projection is None:
+                latest_projection = await repo.get_latest_projected_run(self.user_id)
             latest_run = latest_projection[0] if latest_projection else None
+            verified_portfolio_snapshot = state.verified_portfolio_snapshot
+            if verified_portfolio_snapshot is None and latest_run is not None:
+                verified_portfolio_snapshot = (
+                    build_verified_stage1_portfolio_snapshot(latest_run)
+                )
+            if verified_portfolio_snapshot is None:
+                verified_portfolio_snapshot = (
+                    await repo.get_latest_verified_portfolio_snapshot(
+                        self.user_id
+                    )
+                )
+            if verified_portfolio_snapshot is not None:
+                # This copy is response-only for legacy state rows. A fresh
+                # Stage 1 progress write persists the same small DTO.
+                state = state.model_copy(
+                    update={
+                        "verified_portfolio_snapshot": (
+                            verified_portfolio_snapshot
+                        )
+                    }
+                )
             projection_available = (
                 latest_projection[1] if latest_projection else True
             )
@@ -805,6 +872,58 @@ class BullpenAutoLiveBot:
             if run is None:
                 raise ValueError("Auto-Live run not found.")
             return run
+
+    async def get_console_run_detail(
+        self,
+        run_id: str,
+    ) -> BullpenAutoLiveConsoleRunDetail:
+        """Return one exact user-owned run without selecting large payload rows."""
+
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            snapshot = await repo.get_console_run_snapshot_for_user(
+                self.user_id,
+                run_id,
+                decision_limit=CONSOLE_RUN_DETAIL_DECISION_LIMIT,
+                visible_id_limit=CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT + 1,
+            )
+            if snapshot is None:
+                raise ValueError("Auto-Live run not found.")
+            (
+                run,
+                projection_available,
+                as_of,
+                decisions,
+                visible_decision_ids,
+            ) = snapshot
+        visible_decision_ids_truncated = (
+            len(visible_decision_ids)
+            > CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT
+        )
+        visible_decision_ids = visible_decision_ids[
+            :CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT
+        ]
+        if not visible_decision_ids_truncated:
+            run = run.model_copy(
+                update={"decisions_count": len(visible_decision_ids)}
+            )
+        return BullpenAutoLiveConsoleRunDetail(
+            run=run,
+            decisions=decisions,
+            visible_decision_ids=visible_decision_ids,
+            visible_decision_ids_truncated=(
+                visible_decision_ids_truncated
+            ),
+            generated_at=utc_now(),
+            as_of=as_of,
+            projection_version=CONSOLE_PROJECTION_VERSION,
+            projection_available=projection_available,
+            decisions_limit=CONSOLE_RUN_DETAIL_DECISION_LIMIT,
+            decisions_truncated=(
+                visible_decision_ids_truncated
+                or len(visible_decision_ids) > len(decisions)
+            ),
+        )
 
     async def list_run_decisions(
         self,

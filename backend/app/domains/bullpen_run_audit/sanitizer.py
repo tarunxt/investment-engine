@@ -11,6 +11,41 @@ _SECRET_KEY_PATTERN = re.compile(
     r"(token|secret|api[_-]?key|authorization|bearer|cookie|session|jwt|private[_-]?key|credential|password)",
     re.IGNORECASE,
 )
+_CREDENTIAL_ARTIFACT_KEYS = frozenset(
+    {
+        "credential_artifact",
+        "wallet_credential_artifact",
+    }
+)
+_CREDENTIAL_ARTIFACT_FINGERPRINT_FIELDS = frozenset(
+    {
+        "inode",
+        "mtime_ns",
+        "size",
+    }
+)
+_CREDENTIAL_ARTIFACT_SCALAR_KEYS = frozenset(
+    {
+        "wallet_credential_artifact_inode",
+        "wallet_credential_artifact_mtime_ns",
+        "wallet_credential_artifact_size",
+    }
+)
+
+
+def _sanitize_credential_artifact(value: Any) -> dict[str, int | None] | str:
+    """Preserve only the non-secret identity fingerprint of a credential file."""
+
+    if not isinstance(value, Mapping):
+        return "[REDACTED]"
+    sanitized: dict[str, int | None] = {}
+    for field_name in _CREDENTIAL_ARTIFACT_FINGERPRINT_FIELDS:
+        field_value = value.get(field_name)
+        if field_value is None:
+            sanitized[field_name] = None
+        elif isinstance(field_value, int) and not isinstance(field_value, bool):
+            sanitized[field_name] = field_value
+    return sanitized
 
 
 def _sanitize_url(value: str) -> str:
@@ -54,7 +89,21 @@ def sanitize_secret_value(value: Any) -> Any:
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
             normalized_key = str(key)
-            if _SECRET_KEY_PATTERN.search(normalized_key):
+            lower_key = normalized_key.lower()
+            if lower_key in _CREDENTIAL_ARTIFACT_KEYS:
+                sanitized[normalized_key] = _sanitize_credential_artifact(item)
+            elif (
+                lower_key in _CREDENTIAL_ARTIFACT_SCALAR_KEYS
+                and (
+                    item is None
+                    or (
+                        isinstance(item, int)
+                        and not isinstance(item, bool)
+                    )
+                )
+            ):
+                sanitized[normalized_key] = item
+            elif _SECRET_KEY_PATTERN.search(normalized_key):
                 sanitized[normalized_key] = "[REDACTED]"
             else:
                 sanitized[normalized_key] = sanitize_secret_value(item)
@@ -66,4 +115,3 @@ def sanitize_secret_value(value: Any) -> Any:
     if hasattr(value, "__dict__"):
         return sanitize_secret_value(vars(value))
     return redact_secrets(str(value))
-

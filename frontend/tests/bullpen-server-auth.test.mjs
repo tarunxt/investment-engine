@@ -29,6 +29,9 @@ function assertTypeScriptParses(relativePath) {
 
 test("Bullpen positions use one auth context and passive page-load reads", () => {
   const positionsSource = read("../app/api/bullpen-ai/positions/route.ts");
+  const marketResolutionSource = read(
+    "../app/api/bullpen-ai/_lib/polymarketMarketUrls.ts",
+  );
 
   assert.match(positionsSource, /createBackendSessionContext\(request\)/);
   assert.match(
@@ -43,9 +46,54 @@ test("Bullpen positions use one auth context and passive page-load reads", () =>
   assert.match(positionsSource, /passiveValue === null\s*\? true/);
   assert.match(positionsSource, /forceFresh\s*\? false/);
   assert.match(positionsSource, /backendQuery\.set\("passive", "true"\)/);
+  assert.match(
+    positionsSource,
+    /backendAccessToken:\s*context\.accessToken/,
+  );
+  assert.match(
+    positionsSource,
+    /runtimeSearch:\s*\(path, options\) =>\s*fetchBackendJsonWithSession\(context, path, options\)/,
+  );
+  assert.match(
+    marketResolutionSource,
+    /accessToken:\s*options\.backendAccessToken/,
+  );
+  assert.match(
+    marketResolutionSource,
+    /allowRuntimeQuestionFallback === false/,
+  );
+  assert.match(
+    marketResolutionSource,
+    /maxRuntimeQuestionFallbacks \?\? 1/,
+  );
+  assert.match(
+    positionsSource,
+    /allowRuntimeQuestionFallback:\s*false/,
+  );
+  assert.match(
+    positionsSource,
+    /\{ allowRuntimeQuestionFallback: !passive \}/,
+  );
+  assert.match(
+    positionsSource,
+    /\{ allowRuntimeQuestionFallback: false \}/,
+  );
+  assert.match(positionsSource, /conditionId:\s*position\.conditionId/);
+  assert.match(
+    marketResolutionSource,
+    /params\.append\("conditionId", conditionId\)/,
+  );
+  assert.match(
+    marketResolutionSource,
+    /recordsByConditionId\.get\(question\.conditionId\.trim\(\)\)/,
+  );
+  assert.match(
+    marketResolutionSource,
+    /question-text match[\s\S]+authoritativeMarketOpen:\s*null/,
+  );
 });
 
-test("Bullpen healthcheck systemd units are deployable", () => {
+test("Bullpen healthcheck systemd unit is a passive backend cache reader", () => {
   const installer = read("../../deploy/no-docker/install-bullpen-healthcheck.sh");
   const service = read(
     "../../deploy/no-docker/systemd/credx-bullpen-healthcheck.service",
@@ -56,10 +104,24 @@ test("Bullpen healthcheck systemd units are deployable", () => {
   const workflow = read("../../.github/workflows/deploy.yml");
 
   assert.match(installer, /systemctl enable --now "\$TIMER_NAME"/);
-  assert.match(service, /scripts\/bullpen-healthcheck\.ts/);
-  assert.match(service, /EnvironmentFile=__FRONTEND_ENV_FILE__/);
+  assert.match(installer, /systemctl start "\$SERVICE_NAME"/);
+  assert.match(installer, /--property=ExecMainStatus/);
+  assert.match(installer, /journalctl --unit "\$SERVICE_NAME"/);
+  assert.match(installer, /BACKEND_ENV_FILE=.*\/etc\/investor\/backend\.env/);
+  assert.match(installer, /backend\/\.venv\/bin\/python/);
+  assert.doesNotMatch(installer, /FRONTEND_ENV_FILE|\/usr\/bin\/node/);
+  assert.match(
+    service,
+    /-m app\.domains\.polymarket\.passive_healthcheck/,
+  );
+  assert.match(service, /EnvironmentFile=__BACKEND_ENV_FILE__/);
+  assert.doesNotMatch(service, /scripts\/bullpen-healthcheck|\/usr\/bin\/node/);
   assert.match(timer, /OnUnitActiveSec=5min/);
   assert.match(workflow, /install-bullpen-healthcheck\.sh/);
+  assert.match(
+    workflow,
+    /BACKEND_ENV_FILE="\$BACKEND_ENV_FILE"[\s\S]+install-bullpen-healthcheck\.sh/,
+  );
 });
 
 test("Bullpen Celery launchers bound retained memory and retire the legacy override", () => {

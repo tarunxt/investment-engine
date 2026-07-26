@@ -1,8 +1,13 @@
 import {
   calculateBullpenPositionReturnsPerDay,
   type BullpenActivePositionView,
+  type BullpenPositionEconomicClassification,
+  type BullpenPositionsSnapshotLineage,
 } from "./bullpenPositions";
-import type { BullpenAutoLiveRun } from "@/types/api";
+import type {
+  BullpenAutoLiveRun,
+  BullpenAutoLiveVerifiedPortfolioSnapshot,
+} from "@/types/api";
 
 const ACTIVE_CLASSIFICATION = "active";
 
@@ -10,11 +15,17 @@ export type VerifiedBullpenStage1Portfolio = {
   runId: string;
   verifiedAt: string | null;
   activePositions: BullpenActivePositionView[];
+  activePositionsTotal: number;
+  activePositionsTruncated: boolean;
+  claimablePositions: BullpenActivePositionView[];
+  settlementPendingPositions: BullpenActivePositionView[];
+  excludedPositions: BullpenActivePositionView[];
   cashInHandUsd: number | null;
   occupiedPositions: number;
   availableSlots: number | null;
   maxPositions: number | null;
   tradeAmountUsd: number | null;
+  lineage: BullpenPositionsSnapshotLineage | null;
 };
 
 function readString(value: unknown) {
@@ -39,6 +50,12 @@ function readBoolean(value: unknown) {
   );
 }
 
+function hasWalletRefreshError(value: unknown) {
+  if (value === null || value === undefined || value === false) return false;
+  if (typeof value === "string") return Boolean(value.trim());
+  return true;
+}
+
 function round(value: number, digits: number) {
   return Number(value.toFixed(digits));
 }
@@ -48,13 +65,33 @@ function centsToPrice(value: number | null) {
   return value > 1 ? value / 100 : value;
 }
 
-function readVerifiedPosition(value: unknown): BullpenActivePositionView | null {
+function readEventSlugFromMarketUrl(value: unknown) {
+  const marketUrl = readString(value);
+  if (!marketUrl) return null;
+  try {
+    const segments = new URL(marketUrl).pathname.split("/").filter(Boolean);
+    const eventIndex = segments.indexOf("event");
+    return eventIndex >= 0 ? (segments[eventIndex + 1] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readVerifiedPosition(
+  value: unknown,
+  expectedClassification: BullpenPositionEconomicClassification = "active",
+): BullpenActivePositionView | null {
   if (!value || typeof value !== "object") return null;
   const row = value as Record<string, unknown>;
   const classification = readString(row.classification);
-  if (
-    (classification && classification !== ACTIVE_CLASSIFICATION) ||
-    readBoolean(row.is_claimable ?? row.isClaimable)
+  const claimable = readBoolean(row.is_claimable ?? row.isClaimable);
+  if (expectedClassification === ACTIVE_CLASSIFICATION) {
+    if ((classification && classification !== ACTIVE_CLASSIFICATION) || claimable) {
+      return null;
+    }
+  } else if (
+    classification !== expectedClassification &&
+    !(expectedClassification === "positive_payout_claimable" && claimable)
   ) {
     return null;
   }
@@ -86,13 +123,20 @@ function readVerifiedPosition(value: unknown): BullpenActivePositionView | null 
       ? (unrealizedPnl / costBasis) * 100
       : null;
   const closeTime = readString(row.close_time);
+  const legacySlug = readString(row.slug);
+  const marketSlug = readString(row.market_slug) ?? legacySlug;
+  const eventSlug =
+    readString(row.event_slug) ??
+    readEventSlugFromMarketUrl(row.market_url);
 
   return {
     key:
       readString(row.position_key) ??
       `${marketId}::${heldSide ?? rawSide}`,
     marketId,
-    slug: readString(row.slug),
+    marketSlug,
+    eventSlug,
+    slug: marketSlug ?? eventSlug,
     conditionId: readString(row.condition_id),
     marketTitle,
     outcome: rawSide,
@@ -116,12 +160,12 @@ function readVerifiedPosition(value: unknown): BullpenActivePositionView | null 
     marketUrl: readString(row.market_url),
     closeTime,
     resolutionStatus: readString(row.resolution_status),
-    economicClassification: "active",
+    economicClassification: expectedClassification,
     classificationReason:
       readString(row.classification_reason) ??
       "Verified as economically active by the latest completed Stage 1 Bullpen scan.",
-    isClaimable: false,
-    claimableSignal: false,
+    isClaimable: expectedClassification === "positive_payout_claimable",
+    claimableSignal: claimable,
     upstreamRedeemable: readBoolean(row.upstream_redeemable),
     claimableValue: readNumber(row.claimable_value_usd),
     returnsPerDay: calculateBullpenPositionReturnsPerDay({
@@ -138,6 +182,36 @@ function timestampMs(value: string | null) {
   if (!value) return Number.NEGATIVE_INFINITY;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? Number.NEGATIVE_INFINITY : parsed;
+}
+
+function buildVerifiedPortfolioLineage({
+  accountIdentity,
+  credentialInode,
+  credentialMtimeNs,
+  credentialSize,
+  positionClassifierVersion,
+  source,
+  freshnessState,
+}: {
+  accountIdentity: unknown;
+  credentialInode: unknown;
+  credentialMtimeNs: unknown;
+  credentialSize: unknown;
+  positionClassifierVersion: unknown;
+  source: unknown;
+  freshnessState: unknown;
+}): BullpenPositionsSnapshotLineage {
+  return {
+    accountIdentity: readString(accountIdentity),
+    credentialArtifact: {
+      inode: readNumber(credentialInode),
+      mtimeNs: readNumber(credentialMtimeNs),
+      size: readNumber(credentialSize),
+    },
+    positionClassifierVersion: readNumber(positionClassifierVersion),
+    source: readString(source),
+    freshnessState: readString(freshnessState),
+  };
 }
 
 export function shouldUseVerifiedStage1PortfolioFallback({
@@ -180,13 +254,26 @@ export function resolveLatestVerifiedStage1Portfolio(
       const isComplete =
         Boolean(candidate.completed_at) ||
         phaseStatus === "completed" ||
-        phaseStatus === "partial" ||
         (!phaseStatus &&
           (candidate.status === "pass" || candidate.status === "warning"));
+      const walletSnapshotStatus = readString(
+        outputs.wallet_snapshot_status,
+      )?.toLowerCase();
+      const walletFreshness = readString(
+        outputs.wallet_snapshot_freshness_state ??
+          outputs.wallet_freshness_state,
+      )?.toLowerCase();
       return (
         isStageOne &&
         isComplete &&
-        Array.isArray(outputs.active_positions_found)
+        (candidate.status === "pass" || candidate.status === "warning") &&
+        Array.isArray(outputs.active_positions_found) &&
+        !readBoolean(outputs.stage2_candidate_only) &&
+        !readBoolean(outputs.blocked_by_stage1_wallet_refresh) &&
+        !hasWalletRefreshError(outputs.wallet_refresh_error) &&
+        !hasWalletRefreshError(outputs.wallet_market_enrichment_error) &&
+        walletSnapshotStatus === "fresh" &&
+        walletFreshness === "fresh"
       );
     });
     if (!stage || !stage.outputs || typeof stage.outputs !== "object") return;
@@ -208,15 +295,56 @@ export function resolveLatestVerifiedStage1Portfolio(
   const latest = candidates[0];
   if (!latest) return null;
 
-  const activePositions = (
-    latest.outputs.active_positions_found as unknown[]
+  const sourceActivePositions =
+    latest.outputs.active_positions_found as unknown[];
+  const activePositions = sourceActivePositions
+    .map((row) => readVerifiedPosition(row))
+    .filter((position): position is BullpenActivePositionView => Boolean(position));
+  const claimablePositions = (
+    Array.isArray(latest.outputs.available_for_claim)
+      ? latest.outputs.available_for_claim
+      : []
   )
-    .map(readVerifiedPosition)
+    .map((row) => readVerifiedPosition(row, "positive_payout_claimable"))
+    .filter((position): position is BullpenActivePositionView => Boolean(position));
+  const settlementPendingPositions = (
+    Array.isArray(latest.outputs.settlement_pending_positions)
+      ? latest.outputs.settlement_pending_positions
+      : []
+  )
+    .map((row) => readVerifiedPosition(row, "settlement_pending"))
+    .filter((position): position is BullpenActivePositionView => Boolean(position));
+  const excludedPositions = (
+    Array.isArray(latest.outputs.excluded_position_diagnostics)
+      ? latest.outputs.excluded_position_diagnostics
+      : []
+  )
+    .map((row) => {
+      const candidate = row as Record<string, unknown>;
+      const classification = readString(candidate.classification);
+      if (
+        classification !== "stale_or_unknown" &&
+        classification !== "resolved_zero_payout" &&
+        classification !== "closed"
+      ) {
+        return null;
+      }
+      return readVerifiedPosition(
+        row,
+        classification as BullpenPositionEconomicClassification,
+      );
+    })
     .filter((position): position is BullpenActivePositionView => Boolean(position));
   const maxPositions = readNumber(latest.outputs.console_trade_max_positions);
-  // The serialized rows are the verified evidence. Do not let a contradictory
-  // scalar count reintroduce the same zero-position bug in another shape.
-  const occupiedPositions = activePositions.length;
+  const activePositionsTotal = Math.max(
+    sourceActivePositions.length,
+    readNumber(latest.outputs.active_positions_total) ?? 0,
+    readNumber(latest.outputs.console_trade_active_positions) ?? 0,
+  );
+  const occupiedPositions = Math.max(
+    activePositionsTotal,
+    readNumber(latest.outputs.console_trade_occupied_positions) ?? 0,
+  );
   const availableSlots =
     maxPositions === null
       ? readNumber(latest.outputs.console_trade_available_slots)
@@ -226,6 +354,11 @@ export function resolveLatestVerifiedStage1Portfolio(
     runId: latest.run.id,
     verifiedAt: latest.verifiedAt,
     activePositions,
+    activePositionsTotal,
+    activePositionsTruncated: activePositionsTotal > activePositions.length,
+    claimablePositions,
+    settlementPendingPositions,
+    excludedPositions,
     cashInHandUsd: readNumber(
       latest.outputs.console_trade_cash_in_hand_usd,
     ),
@@ -233,5 +366,117 @@ export function resolveLatestVerifiedStage1Portfolio(
     availableSlots,
     maxPositions,
     tradeAmountUsd: readNumber(latest.outputs.console_trade_amount_usd),
+    lineage: buildVerifiedPortfolioLineage({
+      accountIdentity: latest.outputs.wallet_account_identity,
+      credentialInode: latest.outputs.wallet_credential_artifact_inode,
+      credentialMtimeNs:
+        latest.outputs.wallet_credential_artifact_mtime_ns,
+      credentialSize: latest.outputs.wallet_credential_artifact_size,
+      positionClassifierVersion:
+        latest.outputs.wallet_position_classifier_version ??
+        latest.outputs.position_classifier_version,
+      source: latest.outputs.wallet_source,
+      freshnessState:
+        latest.outputs.wallet_snapshot_freshness_state ??
+        latest.outputs.wallet_freshness_state,
+    }),
   };
+}
+
+export function resolveVerifiedStage1PortfolioSnapshot(
+  snapshot: BullpenAutoLiveVerifiedPortfolioSnapshot | null | undefined,
+): VerifiedBullpenStage1Portfolio | null {
+  if (!snapshot?.run_id || !snapshot.verified_at) return null;
+  const freshness = readString(snapshot.wallet_freshness_state)?.toLowerCase();
+  if (freshness !== "fresh") return null;
+  const activePositions = (snapshot.active_positions ?? [])
+    .map((row) => readVerifiedPosition(row))
+    .filter((position): position is BullpenActivePositionView =>
+      Boolean(position),
+    );
+  const claimablePositions = (snapshot.claimable_positions ?? [])
+    .map((row) => readVerifiedPosition(row, "positive_payout_claimable"))
+    .filter((position): position is BullpenActivePositionView =>
+      Boolean(position),
+    );
+  const settlementPendingPositions = (
+    snapshot.settlement_pending_positions ?? []
+  )
+    .map((row) => readVerifiedPosition(row, "settlement_pending"))
+    .filter((position): position is BullpenActivePositionView =>
+      Boolean(position),
+    );
+  const excludedPositions = (snapshot.excluded_positions ?? [])
+    .map((row) => {
+      const classification = readString(row.classification);
+      if (
+        classification !== "stale_or_unknown" &&
+        classification !== "resolved_zero_payout" &&
+        classification !== "closed"
+      ) {
+        return null;
+      }
+      return readVerifiedPosition(
+        row,
+        classification as BullpenPositionEconomicClassification,
+      );
+    })
+    .filter((position): position is BullpenActivePositionView =>
+      Boolean(position),
+    );
+  const maxPositions = readNumber(snapshot.max_positions);
+  const activePositionsTotal = Math.max(
+    activePositions.length,
+    readNumber(snapshot.active_positions_total) ?? 0,
+  );
+  const occupiedPositions = Math.max(
+    activePositionsTotal,
+    readNumber(snapshot.occupied_positions) ?? 0,
+  );
+  return {
+    runId: snapshot.run_id,
+    verifiedAt: snapshot.verified_at,
+    activePositions,
+    activePositionsTotal,
+    activePositionsTruncated:
+      Boolean(snapshot.active_positions_truncated) ||
+      activePositionsTotal > activePositions.length,
+    claimablePositions,
+    settlementPendingPositions,
+    excludedPositions,
+    cashInHandUsd: readNumber(snapshot.cash_in_hand_usd),
+    occupiedPositions,
+    availableSlots:
+      maxPositions === null
+        ? readNumber(snapshot.available_slots)
+        : Math.max(0, maxPositions - occupiedPositions),
+    maxPositions,
+    tradeAmountUsd: readNumber(snapshot.trade_amount_usd),
+    lineage: buildVerifiedPortfolioLineage({
+      accountIdentity: snapshot.wallet_account_identity,
+      credentialInode: snapshot.wallet_credential_artifact_inode,
+      credentialMtimeNs: snapshot.wallet_credential_artifact_mtime_ns,
+      credentialSize: snapshot.wallet_credential_artifact_size,
+      positionClassifierVersion: snapshot.position_classifier_version,
+      source: snapshot.wallet_source,
+      freshnessState: snapshot.wallet_freshness_state,
+    }),
+  };
+}
+
+export function selectLatestVerifiedStage1Portfolio(
+  candidates: Array<VerifiedBullpenStage1Portfolio | null | undefined>,
+): VerifiedBullpenStage1Portfolio | null {
+  return (
+    candidates
+      .filter(
+        (
+          candidate,
+        ): candidate is VerifiedBullpenStage1Portfolio => Boolean(candidate),
+      )
+      .sort(
+        (left, right) =>
+          timestampMs(right.verifiedAt) - timestampMs(left.verifiedAt),
+      )[0] ?? null
+  );
 }

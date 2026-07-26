@@ -4,6 +4,7 @@ from dataclasses import asdict
 
 import asyncio
 import json
+import math
 import re
 import time
 from contextlib import suppress
@@ -58,17 +59,20 @@ from app.domains.polymarket_auto_live.console_profile import (
     ConsoleWalletPosition,
     ConsoleWalletPositionsSnapshot,
     ConsoleScanResult,
-    apply_scanned_market_to_position,
     candidate_returns_per_day,
     console_stage1_wallet_refresh_timeout_seconds,
     llm_returns_per_day,
     console_market_filter_reasons,
     next_console_schedule_time,
     next_custom_console_schedule_time,
+    enrich_console_wallet_positions_authoritatively,
     position_returns_per_day,
     read_console_wallet_positions,
     read_console_wallet_positions_snapshot,
     scan_console_profile_markets,
+)
+from app.domains.polymarket_auto_live.console_projection import (
+    build_verified_stage1_portfolio_snapshot,
 )
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
@@ -112,7 +116,9 @@ from app.domains.polymarket_auto_live.normalization import (
 )
 from app.domains.polymarket_auto_live.rules import RuleEvaluation, evaluate_market_rules
 from app.domains.polymarket_auto_live.stage3_slots import (
+    auto_live_buy_balance_buffer_usd,
     classify_economic_slots,
+    spendable_buy_cash_usd,
 )
 from app.domains.polymarket_auto_live.rpc_retry import (
     compute_rpc_retry_delay_seconds,
@@ -182,6 +188,21 @@ _ORDER_ACCEPTED_STATUSES = {
     "partially_filled",
     "settlement_pending",
     *_EXIT_TERMINAL_SUCCESS_STATUSES,
+}
+_UNRESOLVED_BUY_ORDER_STATUSES = {
+    "submitted",
+    "submitting",
+    "confirming",
+    "partially_filled",
+    "settlement_pending",
+    "timed_out",
+}
+_AMBIGUOUS_TERMINAL_BUY_ORDER_STATUSES = {
+    "cancelled",
+    "deferred",
+    "failed",
+    "failed_permanent",
+    "rejected",
 }
 _SETTLED_ORDER_STATUSES = _EXIT_TERMINAL_SUCCESS_STATUSES
 _UNSETTLED_EXIT_ORDER_STATUSES = {
@@ -306,6 +327,76 @@ def build_console_trade_amount_breakdown(
         "available_slots": available_slots,
         "max_positions": max_positions,
         "order_usd": round(cash_in_hand_usd / available_slots, 2),
+    }
+
+
+def build_console_affordable_buy_allocation(
+    *,
+    available_balance_usd: float | None,
+    available_slots: int,
+    eligible_candidate_count: int,
+    min_order_usd: float,
+    max_order_usd: float,
+    balance_buffer_usd: float | None = None,
+) -> dict[str, float | int | None]:
+    """Bound ranked buys by cash, slots, candidates, and normal order limits."""
+
+    cash_in_hand_usd = round_money(available_balance_usd)
+    normalized_balance_buffer_usd = round_money(
+        auto_live_buy_balance_buffer_usd()
+        if balance_buffer_usd is None
+        else max(0.0, float(balance_buffer_usd))
+    )
+    spendable_cash_usd = spendable_buy_cash_usd(
+        cash_in_hand_usd,
+        balance_buffer_usd=normalized_balance_buffer_usd,
+    )
+    normalized_slots = max(0, int(available_slots))
+    normalized_candidates = max(0, int(eligible_candidate_count))
+    normalized_minimum = max(0.01, float(min_order_usd))
+    normalized_maximum = max(normalized_minimum, float(max_order_usd))
+    cash_affordable_count = (
+        max(
+            0,
+            math.floor(
+                (float(spendable_cash_usd) + 1e-9) / normalized_minimum
+            ),
+        )
+        if spendable_cash_usd is not None and spendable_cash_usd > 0
+        else 0
+    )
+    affordable_slot_count = min(
+        normalized_slots,
+        cash_affordable_count,
+    )
+    affordable_buy_count = min(
+        normalized_candidates,
+        affordable_slot_count,
+    )
+    initial_order_usd = (
+        round(
+            min(
+                normalized_maximum,
+                float(spendable_cash_usd) / affordable_slot_count,
+            ),
+            2,
+        )
+        if spendable_cash_usd is not None and affordable_slot_count > 0
+        else 0.0
+    )
+    return {
+        "cash_in_hand_usd": cash_in_hand_usd,
+        "gross_cash_in_hand_usd": cash_in_hand_usd,
+        "balance_buffer_usd": normalized_balance_buffer_usd,
+        "spendable_cash_usd": spendable_cash_usd,
+        "available_slots": normalized_slots,
+        "eligible_candidate_count": normalized_candidates,
+        "cash_affordable_buy_count": cash_affordable_count,
+        "affordable_slot_count": affordable_slot_count,
+        "affordable_buy_count": affordable_buy_count,
+        "min_order_usd": round(normalized_minimum, 2),
+        "max_order_usd": round(normalized_maximum, 2),
+        "initial_order_usd": initial_order_usd,
     }
 
 
@@ -1572,6 +1663,203 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+async def _read_stage1_wallet_positions_snapshot() -> ConsoleWalletPositionsSnapshot:
+    """Return the Stage 1 wallet rows with their forced-refresh lineage."""
+
+    if read_console_wallet_positions is not _ORIGINAL_READ_CONSOLE_WALLET_POSITIONS:
+        positions = await read_console_wallet_positions()
+        return ConsoleWalletPositionsSnapshot(
+            positions=positions,
+            source="live-cli",
+            fetched_at=datetime.now(UTC).isoformat(),
+            raw_position_count=len(positions),
+            diagnostics={"test_compatibility_reader": True},
+            raw_positions=list(positions),
+        )
+
+    return await read_console_wallet_positions_snapshot(
+        force_fresh=True,
+        caller_source="auto-live-stage1",
+        max_age_seconds=0,
+    )
+
+
+_STAGE1_WALLET_DIAGNOSTIC_KEYS = frozenset(
+    {
+        "command_category",
+        "bullpen_version",
+        "cache_status",
+        "auth_refresh_attempted",
+        "error_classification",
+        "refresh_requested_at",
+        "caller_source",
+        "snapshot_producer_source",
+        "produced_by_another_refresh",
+        "lock_wait_ms",
+        "lock_hold_ms",
+        "refresh_lock_wait_ms",
+        "refresh_lock_ttl_seconds",
+        "refresh_lock_age_ms",
+    }
+)
+
+
+def _stage1_wallet_snapshot_lineage_outputs(
+    snapshot: ConsoleWalletPositionsSnapshot | None,
+) -> dict[str, object]:
+    """Serialize non-secret wallet lineage into the frozen Stage 1 result."""
+
+    if snapshot is None:
+        credential_artifact: dict[str, object] = {}
+        source = None
+        fetched_at = None
+        freshness_state = None
+        account_identity = None
+        classifier_version = None
+        diagnostics: dict[str, object] = {}
+    else:
+        raw_credential_artifact = getattr(snapshot, "credential_artifact", {})
+        if isinstance(raw_credential_artifact, dict):
+            credential_artifact = dict(raw_credential_artifact)
+        elif hasattr(raw_credential_artifact, "model_dump"):
+            credential_artifact = raw_credential_artifact.model_dump(mode="json")
+        else:
+            credential_artifact = {
+                "inode": getattr(raw_credential_artifact, "inode", None),
+                "mtime_ns": getattr(raw_credential_artifact, "mtime_ns", None),
+                "size": getattr(raw_credential_artifact, "size", None),
+            }
+        source = getattr(snapshot, "source", None)
+        fetched_at = getattr(snapshot, "fetched_at", None)
+        freshness_state = getattr(snapshot, "freshness_state", None)
+        account_identity = getattr(snapshot, "account_identity", None)
+        classifier_version = getattr(
+            snapshot,
+            "position_classifier_version",
+            None,
+        )
+        raw_diagnostics = getattr(snapshot, "diagnostics", {})
+        diagnostics = (
+            {
+                key: value
+                for key, value in raw_diagnostics.items()
+                if key in _STAGE1_WALLET_DIAGNOSTIC_KEYS
+                and (
+                    value is None
+                    or isinstance(value, (str, int, float, bool))
+                )
+            }
+            if isinstance(raw_diagnostics, dict)
+            else {}
+        )
+
+    inode = credential_artifact.get("inode")
+    mtime_ns = credential_artifact.get("mtime_ns")
+    size = credential_artifact.get("size")
+    return {
+        "wallet_source": source,
+        "wallet_snapshot_fetched_at": fetched_at,
+        "wallet_snapshot_freshness_state": freshness_state,
+        "wallet_account_identity": account_identity,
+        "wallet_position_classifier_version": classifier_version,
+        "wallet_credential_artifact_inode": inode,
+        "wallet_credential_artifact_mtime_ns": mtime_ns,
+        "wallet_credential_artifact_size": size,
+        "wallet_snapshot_diagnostics": diagnostics,
+        # Compatibility aliases for audit/UI consumers that shipped before
+        # the explicit snapshot-prefixed field names.
+        "wallet_freshness_state": freshness_state,
+        "position_classifier_version": classifier_version,
+        "wallet_credential_artifact": {
+            "inode": inode,
+            "mtime_ns": mtime_ns,
+            "size": size,
+        },
+    }
+
+
+def _compare_console_wallet_snapshot_lineage(
+    *,
+    expected: ConsoleWalletPositionsSnapshot | None,
+    actual: ConsoleWalletPositionsSnapshot,
+) -> dict[str, object]:
+    if expected is None:
+        return {
+            "status": "unavailable",
+            "compared_fields": [],
+            "mismatches": [],
+        }
+    expected_outputs = _stage1_wallet_snapshot_lineage_outputs(expected)
+    actual_outputs = _stage1_wallet_snapshot_lineage_outputs(actual)
+    compared_fields: list[str] = []
+    mismatches: list[str] = []
+    for output_key in (
+        "wallet_account_identity",
+        "wallet_position_classifier_version",
+        "wallet_credential_artifact_inode",
+        "wallet_credential_artifact_mtime_ns",
+        "wallet_credential_artifact_size",
+    ):
+        expected_value = expected_outputs.get(output_key)
+        if expected_value is None:
+            continue
+        compared_fields.append(output_key)
+        if actual_outputs.get(output_key) != expected_value:
+            mismatches.append(output_key)
+
+    expected_fetched_at = _parse_iso_datetime(
+        str(expected_outputs.get("wallet_snapshot_fetched_at"))
+        if expected_outputs.get("wallet_snapshot_fetched_at")
+        else None
+    )
+    actual_fetched_at = _parse_iso_datetime(
+        str(actual_outputs.get("wallet_snapshot_fetched_at"))
+        if actual_outputs.get("wallet_snapshot_fetched_at")
+        else None
+    )
+    if expected_fetched_at is not None:
+        compared_fields.append("wallet_snapshot_fetched_at_not_older")
+        if (
+            actual_fetched_at is None
+            or actual_fetched_at < expected_fetched_at
+        ):
+            mismatches.append("wallet_snapshot_fetched_at_not_older")
+
+    return {
+        "status": (
+            "mismatch"
+            if mismatches
+            else "match"
+            if compared_fields
+            else "unavailable"
+        ),
+        "compared_fields": compared_fields,
+        "mismatches": mismatches,
+    }
+
+
+def _validate_stage3_wallet_snapshot_freshness(
+    *,
+    snapshot: ConsoleWalletPositionsSnapshot,
+    request_started_at: datetime,
+) -> dict[str, object]:
+    fetched_at = _parse_iso_datetime(snapshot.fetched_at)
+    freshness_state = str(
+        getattr(snapshot, "freshness_state", "") or ""
+    ).lower()
+    if (
+        snapshot.source not in {"live-cli", "redis-cache"}
+        or freshness_state != "fresh"
+        or fetched_at is None
+        or fetched_at <= request_started_at
+    ):
+        raise RuntimeError(
+            "post-exit Bullpen positions refresh lacked fresh, "
+            "fetched-after-request lineage proof"
+        )
+    return _stage1_wallet_snapshot_lineage_outputs(snapshot)
+
+
 async def _read_stage3_live_positions_snapshot() -> ConsoleWalletPositionsSnapshot:
     """Read the post-exit wallet snapshot with freshness proof.
 
@@ -1650,24 +1938,86 @@ def _pending_submitted_buy_market_ids(
     *,
     visible_active_market_ids: set[str],
 ) -> set[str]:
-    latest_buy_by_market_id = _latest_settled_market_timestamps(
-        decisions,
-        actions={"buy"},
-        statuses=_ORDER_ACCEPTED_STATUSES,
-    )
+    latest_buy_by_market_id: dict[
+        str,
+        tuple[datetime, bool, set[str]],
+    ] = {}
+    for decision in decisions:
+        order_plan = decision.order_plan
+        if (
+            order_plan is None
+            or order_plan.dry_run
+            or order_plan.action != "buy"
+        ):
+            continue
+        status = str(order_plan.status or "").strip().lower()
+        fill_evidence = (
+            order_plan.reconciliation_fill_evidence
+            if isinstance(order_plan.reconciliation_fill_evidence, dict)
+            else {}
+        )
+        try:
+            evidence_filled_shares = float(
+                fill_evidence.get("filled_shares")
+            )
+        except (TypeError, ValueError):
+            evidence_filled_shares = None
+        definitive_zero_fill = bool(
+            fill_evidence.get("quantity_known") is True
+            and fill_evidence.get("definitive_zero_fill") is True
+            and evidence_filled_shares is not None
+            and evidence_filled_shares <= 0
+        )
+        persisted_write_evidence = bool(
+            order_plan.remote_order_id
+            or order_plan.remote_transaction_hash
+            or order_plan.execution_response
+            or order_plan.executed_at
+            or order_plan.reservation_state == "active"
+        )
+        unresolved = status in _UNRESOLVED_BUY_ORDER_STATUSES or (
+            status in _AMBIGUOUS_TERMINAL_BUY_ORDER_STATUSES
+            and persisted_write_evidence
+            and not definitive_zero_fill
+        )
+        settled_exposure = status in _SETTLED_ORDER_STATUSES
+        if not unresolved and not settled_exposure:
+            continue
+        executed_at = _decision_execution_timestamp(decision)
+        if executed_at is None:
+            continue
+        current = latest_buy_by_market_id.get(decision.market_id)
+        if current is None or executed_at >= current[0]:
+            latest_buy_by_market_id[decision.market_id] = (
+                executed_at,
+                unresolved,
+                {
+                    alias.strip()
+                    for alias in (decision.market_id, decision.slug)
+                    if isinstance(alias, str) and alias.strip()
+                },
+            )
     latest_exit_by_market_id = _latest_settled_market_timestamps(
         decisions,
         actions={"sell", "redeem"},
         statuses=_EXIT_TERMINAL_SUCCESS_STATUSES,
     )
     pending_market_ids: set[str] = set()
-    for market_id, buy_timestamp in latest_buy_by_market_id.items():
-        if market_id in visible_active_market_ids:
+    for market_id, (
+        buy_timestamp,
+        unresolved,
+        market_aliases,
+    ) in latest_buy_by_market_id.items():
+        if market_aliases & visible_active_market_ids:
             continue
         latest_exit_timestamp = latest_exit_by_market_id.get(market_id)
-        if latest_exit_timestamp is not None and latest_exit_timestamp >= buy_timestamp:
+        if (
+            not unresolved
+            and latest_exit_timestamp is not None
+            and latest_exit_timestamp >= buy_timestamp
+        ):
             continue
-        pending_market_ids.add(market_id)
+        pending_market_ids.update(market_aliases or {market_id})
     return pending_market_ids
 
 
@@ -4910,7 +5260,9 @@ class BullpenAutoLiveEngine:
         durable_execution: bool = False,
     ) -> EngineResult:
         stage1_stage_started_at = run.started_at or utc_now_iso()
-        live_wallet_positions_task = asyncio.create_task(read_console_wallet_positions())
+        live_wallet_positions_task = asyncio.create_task(
+            _read_stage1_wallet_positions_snapshot()
+        )
         stage1_wallet_refresh_timeout_seconds = (
             console_stage1_wallet_refresh_timeout_seconds()
         )
@@ -5467,6 +5819,7 @@ class BullpenAutoLiveEngine:
 
         console_balance_task = asyncio.create_task(refresh_balance())
         stage1_wallet_refresh_error: str | None = None
+        live_wallet_snapshot: ConsoleWalletPositionsSnapshot | None = None
         try:
             completed_wallet_tasks, _ = await asyncio.wait(
                 {live_wallet_positions_task},
@@ -5489,7 +5842,8 @@ class BullpenAutoLiveEngine:
                 )
                 live_wallet_positions: list[ConsoleWalletPosition] = []
             else:
-                live_wallet_positions = live_wallet_positions_task.result()
+                live_wallet_snapshot = live_wallet_positions_task.result()
+                live_wallet_positions = live_wallet_snapshot.positions
         except Exception as exc:
             if not _is_stage1_wallet_handoff_timeout(exc):
                 _cancel_background_task(console_balance_task)
@@ -5516,6 +5870,10 @@ class BullpenAutoLiveEngine:
             )
             live_wallet_positions = []
 
+        stage1_wallet_snapshot_was_unavailable = bool(
+            stage1_wallet_refresh_error
+        )
+        stage1_wallet_enrichment_error: str | None = None
         stage1_scan_status = (
             "warning" if scan_warning or stage1_wallet_refresh_error else "pass"
         )
@@ -5555,19 +5913,56 @@ class BullpenAutoLiveEngine:
             for position in live_wallet_positions
             if _is_supported_outcome_side(position.side)
         ]
-        market_by_slug, market_by_id = await _hydrate_missing_active_position_markets(
+        (
+            enriched_wallet_positions,
+            stage1_market_enrichment_diagnostics,
+        ) = await enrich_console_wallet_positions_authoritatively(
             live_wallet_positions,
             market_by_slug=market_by_slug,
             market_by_id=market_by_id,
         )
-
-        enriched_wallet_positions = [
-            apply_scanned_market_to_position(
-                position,
-                market_by_slug.get(position.slug) or market_by_id.get(position.market_id),
+        unresolved_positive_exposure_positions = [
+            position
+            for position in enriched_wallet_positions
+            if position.authoritative_market_state == "unknown"
+            and position.classification
+            not in {"resolved_zero_payout", "closed"}
+            and (
+                float(position.shares or 0.0) > 0
+                or float(position.current_value_usd or 0.0) > 0
+                or float(position.exposure_usd or 0.0) > 0
             )
-            for position in live_wallet_positions
         ]
+        if unresolved_positive_exposure_positions:
+            stage1_wallet_enrichment_error = (
+                "Fresh Bullpen wallet snapshot contained "
+                f"{len(unresolved_positive_exposure_positions)} positive-exposure "
+                "position row(s) whose exact market identity and open/closed "
+                "state could not be verified authoritatively."
+            )
+            stage1_wallet_refresh_error = stage1_wallet_enrichment_error
+            stage1_scan_status = "warning"
+            stage1_scan_reason = (
+                f"{stage1_wallet_enrichment_error} Stage 2 will remain "
+                "candidate-only and Stage 3 is blocked, so no buys or sells "
+                "can be planned from an incomplete portfolio."
+            )
+            _cancel_background_task(console_balance_task)
+            console_balance_task = None
+        for position in live_wallet_positions:
+            if (
+                position.slug in market_by_slug
+                or position.market_id in market_by_id
+            ):
+                continue
+            fallback_market = _active_position_market(
+                position,
+                market_by_slug=market_by_slug,
+                market_by_id=market_by_id,
+            )
+            if position.slug:
+                market_by_slug[position.slug] = fallback_market
+            market_by_id[position.market_id] = fallback_market
         persisted_positions_by_key = {
             f"{position.market_id}::{position.side}": position for position in positions
         }
@@ -5720,7 +6115,19 @@ class BullpenAutoLiveEngine:
             historical_decisions,
             bullpen_wallet_positions,
         )
-        active_position_market_count = _active_market_count(position_snapshots)
+        conservatively_occupied_market_ids = {
+            position.market_id
+            for position in unresolved_positive_exposure_positions
+            if position.market_id
+        }
+        active_position_market_count = len(
+            {
+                position.market_id
+                for position in position_snapshots
+                if position.market_id
+            }
+            | conservatively_occupied_market_ids
+        )
         active_position_rows_before_llm = len(position_snapshots)
         reusable_manual_active_position_keys: set[str] = set()
         manual_active_positions_without_reusable_llm: list[ConsoleWalletPosition] = []
@@ -5858,13 +6265,32 @@ class BullpenAutoLiveEngine:
             )
 
         stage1_wallet_position_outputs = {
+            **_stage1_wallet_snapshot_lineage_outputs(live_wallet_snapshot),
             "wallet_snapshot_status": (
-                "unavailable" if stage1_wallet_refresh_error else "fresh"
+                "unavailable"
+                if stage1_wallet_snapshot_was_unavailable
+                else "degraded"
+                if stage1_wallet_enrichment_error
+                else "fresh"
             ),
             "wallet_refresh_timeout_seconds": stage1_wallet_refresh_timeout_seconds,
             "wallet_refresh_error": stage1_wallet_refresh_error,
             "stage2_candidate_only": bool(stage1_wallet_refresh_error),
             "live_wallet_positions": len(enriched_wallet_positions),
+            "wallet_market_enrichment": stage1_market_enrichment_diagnostics,
+            "wallet_market_enrichment_error": (
+                stage1_wallet_enrichment_error
+            ),
+            "unresolved_positive_exposure_position_count": len(
+                unresolved_positive_exposure_positions
+            ),
+            "unresolved_positive_exposure_positions": [
+                _serialize_active_wallet_position(position)
+                for position in unresolved_positive_exposure_positions
+            ],
+            "conservatively_occupied_market_ids": sorted(
+                conservatively_occupied_market_ids
+            ),
             "active_wallet_positions": active_position_rows_before_llm,
             "active_positions_found": serialized_active_positions_found,
             "available_for_claim": serialized_claimable_positions,
@@ -5960,6 +6386,11 @@ class BullpenAutoLiveEngine:
                 started_at=stage1_stage_started_at,
             ),
         )
+        verified_portfolio_snapshot = (
+            build_verified_stage1_portfolio_snapshot(run)
+        )
+        if verified_portfolio_snapshot is not None:
+            state.verified_portfolio_snapshot = verified_portfolio_snapshot
         self._report_progress(progress_callback, run, state)
         llm_stage_started_at = utc_now_iso()
         stage1_accepted_candidate_count = len(stage1_accepted_candidates)
@@ -6252,6 +6683,34 @@ class BullpenAutoLiveEngine:
                     item_label="events",
                     outputs={
                         **stage1_wallet_position_outputs,
+                        "pending_historical_exit_positions": len(
+                            pending_historical_sell_keys
+                        ),
+                        "pending_historical_redeem_conditions": len(
+                            pending_historical_redeem_condition_ids
+                        ),
+                        "console_trade_amount_usd": resolved_console_order_usd,
+                        "console_trade_amount_source": console_order_source,
+                        "console_trade_last_calculated_usd": (
+                            last_calculated_console_order_usd
+                        ),
+                        "console_trade_cash_in_hand_usd": (
+                            console_trade_amount_breakdown["cash_in_hand_usd"]
+                        ),
+                        "console_trade_occupied_positions": (
+                            console_trade_amount_breakdown[
+                                "occupied_positions"
+                            ]
+                        ),
+                        "console_trade_active_positions": (
+                            console_trade_amount_breakdown["active_positions"]
+                        ),
+                        "console_trade_available_slots": (
+                            console_trade_amount_breakdown["available_slots"]
+                        ),
+                        "console_trade_max_positions": (
+                            console_trade_amount_breakdown["max_positions"]
+                        ),
                         "non_bullpen_wallet_positions_skipped": len(non_bullpen_wallet_positions),
                         "scanned_candidates": scanned_total_candidates,
                         "active_position_rows_before_llm": active_position_rows_before_llm,
@@ -8412,13 +8871,14 @@ class BullpenAutoLiveEngine:
             and isinstance(entry.get("current_position"), PositionSnapshot)
             and entry["current_position"].exit_state not in {"EVENT_EXIT_PLANNED", "DUST_LOST"}
         ]
-        top_rows = sorted(
+        post_exit_rank_rows = sorted(
             [*investable_active_rank_rows, *candidate_rank_rows],
             key=lambda row: (
                 -float(row["returns_per_day"]),
                 row["market_id"],
             ),
-        )[:CONSOLE_RANKED_EVENT_LIMIT]
+        )
+        top_rows = post_exit_rank_rows[:CONSOLE_RANKED_EVENT_LIMIT]
         top_active_keys = {
             str(row["key"])
             for row in top_rows
@@ -8434,6 +8894,26 @@ class BullpenAutoLiveEngine:
             for row in top_rows
             if row["kind"] == "candidate"
         ]
+        # Event Exit evaluation can remove a previously top-ranked active row
+        # and promote a candidate into the investable Top 10.  From this point
+        # onward Stage 3 must use that recomputed order for affordability,
+        # dependency pairing, final ranks, and queue/UI counters.  Retaining
+        # the pre-exit handoff order made promoted candidates fall back to
+        # market-id sorting and disappear from the Step 2 counters.
+        ranking_top_candidate_market_ids = set(
+            ranked_post_exit_candidate_market_ids
+        )
+        ranking_top_candidate_market_id_order = list(
+            ranked_post_exit_candidate_market_id_order
+        )
+        stage3_buy_queue_market_ids = set(
+            ranked_post_exit_candidate_market_ids
+        )
+        candidate_final_rank_by_market_id = {
+            str(row["market_id"]): index
+            for index, row in enumerate(post_exit_rank_rows, start=1)
+            if row["kind"] == "candidate"
+        }
         top_candidate_market_ids = ranked_post_exit_candidate_market_ids
         run.diagnostics.top_candidate_market_ids = list(
             ranked_post_exit_candidate_market_id_order
@@ -9130,30 +9610,114 @@ class BullpenAutoLiveEngine:
                 and decision.order_plan.action in {"sell", "redeem"}
             )
         ]
-        rank_out_exit_decisions = [
-            decision
-            for decision in sell_execution_decisions
-            if any(
-                getattr(signal, "strategy", None) == "OUTSIDE_TOP_10_RETURNS_DAY"
-                for signal in decision.exit_signals
+        initial_occupied_market_ids = set(
+            initial_slot_allocation.occupied_market_ids
+        )
+        initial_position_count_by_market_id: dict[str, int] = {}
+        for initial_position in initial_slot_allocation.active_positions:
+            if not initial_position.market_id:
+                continue
+            initial_position_count_by_market_id[initial_position.market_id] = (
+                initial_position_count_by_market_id.get(
+                    initial_position.market_id,
+                    0,
+                )
+                + 1
             )
-        ]
+        initial_free_slot_count = max(
+            0,
+            CONSOLE_RANKED_EVENT_LIMIT
+            - len(initial_occupied_market_ids),
+        )
+        pre_exit_free_slot_allocation = build_console_affordable_buy_allocation(
+            available_balance_usd=console_trade_amount_breakdown.get(
+                "cash_in_hand_usd"
+            ),
+            available_slots=initial_free_slot_count,
+            eligible_candidate_count=len(ranked_buy_candidate_decisions),
+            min_order_usd=settings.min_order_usd,
+            max_order_usd=settings.max_order_usd,
+        )
+        pre_exit_immediate_buy_count = int(
+            pre_exit_free_slot_allocation["affordable_buy_count"] or 0
+        )
+        slot_releasing_exit_decisions: list[BullpenAutoLiveDecision] = []
+        slot_releasing_exit_market_ids: set[str] = set()
+        for exit_decision in sell_execution_decisions:
+            order_plan = exit_decision.order_plan
+            if (
+                order_plan is None
+                or order_plan.action != "sell"
+                or exit_decision.market_id not in initial_occupied_market_ids
+                or initial_position_count_by_market_id.get(
+                    exit_decision.market_id,
+                    0,
+                )
+                != 1
+                or exit_decision.market_id
+                in slot_releasing_exit_market_ids
+            ):
+                # Claim/redeem rows and non-economic/deduplicated records did
+                # not consume an initial portfolio slot, so they cannot fund a
+                # replacement reservation. A market with multiple economic
+                # sides also cannot release its slot when only one EXIT
+                # confirms, so it remains fail-closed until a fresh wallet
+                # refresh proves the whole market exposure is gone.
+                continue
+            slot_releasing_exit_decisions.append(exit_decision)
+            slot_releasing_exit_market_ids.add(exit_decision.market_id)
         replacement_reservations: dict[str, dict[str, object]] = {}
         for candidate, exit_decision in zip(
-            ranked_buy_candidate_decisions,
-            rank_out_exit_decisions,
+            ranked_buy_candidate_decisions[pre_exit_immediate_buy_count:],
+            slot_releasing_exit_decisions,
         ):
+            dependency_group = (
+                f"stage3-replacement:{run.id}:{exit_decision.market_id}"
+            )
+            # The durable executor correlates a replacement BUY to its EXIT by
+            # this exact group.  Persist it on both plans before the task
+            # handoff; putting it only on the BUY leaves WAITING_FOR_EXIT
+            # permanently unable to find or be awakened by its sibling EXIT.
+            if exit_decision.order_plan is not None:
+                exit_decision.order_plan.dependency_group = dependency_group
             replacement_reservations[candidate.market_id] = {
                 "replacement_market_id": candidate.market_id,
                 "replacement_side": candidate.side,
                 "exit_market_id": exit_decision.market_id,
-                "exit_side": exit_decision.order_plan.side if exit_decision.order_plan else exit_decision.side,
+                "exit_side": (
+                    exit_decision.order_plan.side
+                    if exit_decision.order_plan
+                    else exit_decision.side
+                ),
+                "dependency_group": dependency_group,
                 "status": "reserved",
-                "reason": "Rank-out exit reserved this slot for the ranked replacement buy.",
+                "reason": (
+                    "Executable Event Exit reserved this slot for the ranked "
+                    "replacement buy."
+                ),
             }
         stage3_slot_diagnostics["planned_exit_market_ids"] = [
             decision.market_id for decision in sell_execution_decisions
         ]
+        stage3_slot_diagnostics["initial_free_slots_before_exit"] = (
+            initial_free_slot_count
+        )
+        stage3_slot_diagnostics["pre_exit_immediate_buy_count"] = (
+            pre_exit_immediate_buy_count
+        )
+        stage3_slot_diagnostics["pre_exit_free_slot_allocation"] = dict(
+            pre_exit_free_slot_allocation
+        )
+        stage3_slot_diagnostics["slot_releasing_exit_market_ids"] = [
+            decision.market_id
+            for decision in slot_releasing_exit_decisions
+        ]
+        stage3_slot_diagnostics["multi_side_occupied_market_ids"] = sorted(
+            market_id
+            for market_id, position_count
+            in initial_position_count_by_market_id.items()
+            if position_count > 1
+        )
         stage3_slot_diagnostics["replacement_reservations"] = list(
             replacement_reservations.values()
         )
@@ -9352,9 +9916,14 @@ class BullpenAutoLiveEngine:
             dependency_group: str | None = None,
             reserved_replacement: bool = False,
             capacity_override_used: bool = False,
+            deferred_post_exit_sizing: bool = False,
         ) -> None:
             planned_reason = (
-                "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
+                "Ranked replacement was persisted while waiting for its Event Exit; "
+                "the executable order size will be calculated from a forced-fresh "
+                "post-exit balance."
+                if deferred_post_exit_sizing
+                else "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
             )
             plan_outputs = {
                 "order_usd": round(order_usd, 2),
@@ -9365,6 +9934,7 @@ class BullpenAutoLiveEngine:
                 "available_slots": available_slots,
                 "max_positions": CONSOLE_RANKED_EVENT_LIMIT,
                 "console_trade_last_calculated_usd": last_calculated_console_order_usd,
+                "deferred_post_exit_sizing": deferred_post_exit_sizing,
                 **stage2_universe_status,
                 **stage2_strategy_metadata,
             }
@@ -9415,13 +9985,26 @@ class BullpenAutoLiveEngine:
                 limit_price_cents=max(0.01, round(decision.price_cents, 2)),
                 max_slippage_cents=settings.max_slippage_cents,
                 dry_run=state.dry_run,
-                detail="Order planned after the post-exit wallet refresh.",
+                detail=(
+                    "Replacement intent is waiting for its Event Exit; final sizing "
+                    "will use the forced-fresh post-exit balance."
+                    if deferred_post_exit_sizing
+                    else "Order planned after the post-exit wallet refresh."
+                ),
                 created_at=utc_now_iso(),
             )
 
         async def _refresh_stage3_buy_state() -> dict[str, object]:
             snapshot_source = "stage1_snapshot_simulation"
             snapshot_fetched_at: str | None = None
+            snapshot_freshness_state: str | None = None
+            snapshot_lineage: dict[str, object] = {}
+            snapshot_lineage_comparison: dict[str, object] = {
+                "status": "unavailable",
+                "compared_fields": [],
+                "mismatches": [],
+            }
+            snapshot_market_enrichment: dict[str, object] = {}
             raw_position_count = len(position_snapshots)
             excluded_position_records: list[dict[str, object]] = []
             if state.dry_run:
@@ -9433,14 +10016,29 @@ class BullpenAutoLiveEngine:
                 economically_active_position_count = len(visible_active_market_ids)
                 deduplicated_occupied_market_ids = sorted(visible_active_market_ids)
             else:
+                refresh_requested_at = datetime.now(UTC)
                 live_snapshot = await _read_stage3_live_positions_snapshot()
                 snapshot_source = live_snapshot.source
                 snapshot_fetched_at = live_snapshot.fetched_at
+                snapshot_freshness_state = str(
+                    getattr(live_snapshot, "freshness_state", "") or ""
+                ).lower()
+                snapshot_lineage = _validate_stage3_wallet_snapshot_freshness(
+                    snapshot=live_snapshot,
+                    request_started_at=refresh_requested_at,
+                )
+                snapshot_lineage_comparison = (
+                    _compare_console_wallet_snapshot_lineage(
+                        expected=live_wallet_snapshot,
+                        actual=live_snapshot,
+                    )
+                )
                 exit_attempt_at = _parse_iso_datetime(stage3_exit_execution_attempt_at)
                 fetched_at = _parse_iso_datetime(snapshot_fetched_at)
-                if snapshot_source != "live-cli":
+                if snapshot_lineage_comparison["status"] == "mismatch":
                     raise RuntimeError(
-                        "post-exit Bullpen positions refresh returned a cached snapshot instead of live-cli"
+                        "post-exit Bullpen positions refresh did not match the "
+                        "Stage 1 account, credential, or classifier lineage"
                     )
                 if exit_attempt_at is not None and (
                     fetched_at is None or fetched_at <= exit_attempt_at
@@ -9448,8 +10046,24 @@ class BullpenAutoLiveEngine:
                     raise RuntimeError(
                         "post-exit Bullpen positions snapshot was not fetched after the Event Exit execution attempt"
                     )
-                allocation = classify_economic_slots(
+                (
+                    enriched_stage3_positions,
+                    snapshot_market_enrichment,
+                ) = await enrich_console_wallet_positions_authoritatively(
                     live_snapshot.raw_positions or live_snapshot.positions,
+                    market_by_slug=market_by_slug,
+                    market_by_id=market_by_id,
+                )
+                if snapshot_market_enrichment.get(
+                    "unresolved_position_count"
+                ):
+                    raise RuntimeError(
+                        "post-exit Bullpen positions refresh could not establish "
+                        "authoritative market identity and open/closed state for "
+                        "every wallet row"
+                    )
+                allocation = classify_economic_slots(
+                    enriched_stage3_positions,
                     dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
                 )
                 visible_active_market_ids = set(allocation.occupied_market_ids)
@@ -9462,6 +10076,12 @@ class BullpenAutoLiveEngine:
                 {
                     "post_exit_snapshot_source": snapshot_source,
                     "post_exit_snapshot_fetched_at": snapshot_fetched_at,
+                    "post_exit_snapshot_freshness_state": snapshot_freshness_state,
+                    "post_exit_snapshot_lineage": snapshot_lineage,
+                    "post_exit_snapshot_lineage_comparison": (
+                        snapshot_lineage_comparison
+                    ),
+                    "post_exit_market_enrichment": snapshot_market_enrichment,
                     "raw_position_count": raw_position_count,
                     "economically_active_position_count": economically_active_position_count,
                     "excluded_position_records": excluded_position_records,
@@ -9524,6 +10144,10 @@ class BullpenAutoLiveEngine:
             return {
                 "source": snapshot_source,
                 "snapshot_fetched_at": snapshot_fetched_at,
+                "snapshot_freshness_state": snapshot_freshness_state,
+                "snapshot_lineage": snapshot_lineage,
+                "snapshot_lineage_comparison": snapshot_lineage_comparison,
+                "market_enrichment": snapshot_market_enrichment,
                 "visible_active_market_ids": visible_active_market_ids,
                 "pending_submitted_buy_market_ids": pending_submitted_buy_market_ids,
                 "occupied_market_ids": occupied_market_ids,
@@ -9578,10 +10202,106 @@ class BullpenAutoLiveEngine:
                 refreshed_state["capacity_sizing_market_ids"]  # type: ignore[arg-type]
             )
             planned_buy_market_ids: set[str] = set()
+            planned_buy_market_aliases: set[str] = set()
             remaining_cash = (
                 float(refreshed_state["cash_in_hand_usd"])
                 if isinstance(refreshed_state["cash_in_hand_usd"], (int, float))
                 else None
+            )
+            normalized_occupied_market_aliases = {
+                value.strip().lower()
+                for value in occupied_market_ids
+                if isinstance(value, str) and value.strip()
+            }
+            eligible_ranked_candidates: list[BullpenAutoLiveDecision] = []
+            seen_ranked_candidate_aliases: set[str] = set()
+            for ranked_candidate in ranked_buy_candidate_decisions:
+                candidate_aliases = {
+                    value.strip().lower()
+                    for value in (ranked_candidate.market_id, ranked_candidate.slug)
+                    if isinstance(value, str) and value.strip()
+                }
+                reservation = replacement_reservations.get(
+                    ranked_candidate.market_id
+                )
+                waits_for_synchronous_exit = bool(
+                    reservation is not None
+                    and not state.dry_run
+                    and reservation.get("status") == "reserved"
+                    and not execution_v2_handoff
+                )
+                if (
+                    not candidate_aliases
+                    or candidate_aliases & normalized_occupied_market_aliases
+                    or candidate_aliases & seen_ranked_candidate_aliases
+                    or waits_for_synchronous_exit
+                ):
+                    continue
+                eligible_ranked_candidates.append(ranked_candidate)
+                seen_ranked_candidate_aliases.update(candidate_aliases)
+
+            sizing_available_slots = max(
+                0,
+                CONSOLE_RANKED_EVENT_LIMIT - len(capacity_sizing_market_ids),
+            )
+            allocation_slot_budget = (
+                len(eligible_ranked_candidates)
+                if settings.stage3_capacity_override
+                else sizing_available_slots
+            )
+            affordable_allocation = build_console_affordable_buy_allocation(
+                available_balance_usd=remaining_cash,
+                available_slots=allocation_slot_budget,
+                eligible_candidate_count=len(eligible_ranked_candidates),
+                min_order_usd=settings.min_order_usd,
+                max_order_usd=settings.max_order_usd,
+            )
+            affordable_buy_count = int(
+                affordable_allocation["affordable_buy_count"] or 0
+            )
+            remaining_spendable_buy_cash = float(
+                affordable_allocation["spendable_cash_usd"] or 0.0
+            )
+            affordable_planned_count = 0
+            stage3_slot_diagnostics.update(
+                {
+                    "affordable_allocation_version": "v2",
+                    "historical_duplicate_guard_market_count": len(
+                        set(
+                            refreshed_state.get(
+                                "pending_submitted_buy_market_ids", set()
+                            )
+                        )
+                    ),
+                    "capacity_sizing_available_slot_count": sizing_available_slots,
+                    "affordable_capacity_slot_budget": allocation_slot_budget,
+                    "eligible_ranked_buy_count": len(eligible_ranked_candidates),
+                    "cash_affordable_buy_count": int(
+                        affordable_allocation["cash_affordable_buy_count"] or 0
+                    ),
+                    "affordable_slot_count": int(
+                        affordable_allocation["affordable_slot_count"] or 0
+                    ),
+                    "affordable_buy_count": affordable_buy_count,
+                    "affordable_buy_gross_cash_in_hand_usd": (
+                        affordable_allocation["gross_cash_in_hand_usd"]
+                    ),
+                    "affordable_buy_balance_buffer_usd": (
+                        affordable_allocation["balance_buffer_usd"]
+                    ),
+                    "affordable_buy_spendable_cash_usd": (
+                        affordable_allocation["spendable_cash_usd"]
+                    ),
+                    "affordable_buy_min_order_usd": affordable_allocation[
+                        "min_order_usd"
+                    ],
+                    "affordable_buy_max_order_usd": affordable_allocation[
+                        "max_order_usd"
+                    ],
+                    "affordable_buy_initial_order_usd": affordable_allocation[
+                        "initial_order_usd"
+                    ],
+                }
             )
 
             for decision in ranked_buy_candidate_decisions:
@@ -9641,6 +10361,33 @@ class BullpenAutoLiveEngine:
                     "post_exit_snapshot_fetched_at": refreshed_state.get(
                         "snapshot_fetched_at"
                     ),
+                    "eligible_ranked_buy_count": len(eligible_ranked_candidates),
+                    "cash_affordable_buy_count": affordable_allocation[
+                        "cash_affordable_buy_count"
+                    ],
+                    "affordable_slot_count": affordable_allocation[
+                        "affordable_slot_count"
+                    ],
+                    "affordable_buy_count": affordable_buy_count,
+                    "affordable_buy_gross_cash_in_hand_usd": (
+                        affordable_allocation["gross_cash_in_hand_usd"]
+                    ),
+                    "affordable_buy_balance_buffer_usd": (
+                        affordable_allocation["balance_buffer_usd"]
+                    ),
+                    "affordable_buy_spendable_cash_usd": (
+                        affordable_allocation["spendable_cash_usd"]
+                    ),
+                    "affordable_buy_remaining_spendable_cash_usd": round(
+                        remaining_spendable_buy_cash,
+                        2,
+                    ),
+                    "affordable_buy_min_order_usd": affordable_allocation[
+                        "min_order_usd"
+                    ],
+                    "affordable_buy_max_order_usd": affordable_allocation[
+                        "max_order_usd"
+                    ],
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                 }
@@ -9652,7 +10399,8 @@ class BullpenAutoLiveEngine:
                     and not execution_v2_handoff
                 ):
                     reservation_reason = (
-                        "This ranked replacement is reserved for the corresponding rank-out exit; "
+                        "This ranked replacement is reserved for the corresponding "
+                        "slot-releasing Event Exit; "
                         "the exit must be confirmed and the live refresh must remove the old exposure first."
                     )
                     _mark_ranked_buy_candidate_unplanned(
@@ -9664,11 +10412,11 @@ class BullpenAutoLiveEngine:
                     continue
 
                 candidate_market_aliases = {
-                    value.strip()
+                    value.strip().lower()
                     for value in (decision.market_id, decision.slug)
                     if isinstance(value, str) and value.strip()
                 }
-                if candidate_market_aliases & occupied_market_ids:
+                if candidate_market_aliases & normalized_occupied_market_aliases:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
                         reason="Market already has an active or submitted Bullpen position after the post-exit refresh, so Stage 3 did not plan another buy.",
@@ -9676,11 +10424,46 @@ class BullpenAutoLiveEngine:
                     )
                     continue
 
-                if decision.market_id in planned_buy_market_ids:
+                if (
+                    decision.market_id in planned_buy_market_ids
+                    or candidate_market_aliases & planned_buy_market_aliases
+                ):
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
                         reason="Another ranked buy for this market was already planned earlier in the same run.",
                         outputs=current_outputs,
+                    )
+                    continue
+
+                if reserved_for_async_exit and reservation is not None:
+                    placeholder_order_usd = round(
+                        max(0.01, float(settings.min_order_usd)),
+                        2,
+                    )
+                    _plan_ranked_buy_candidate(
+                        decision,
+                        order_usd=placeholder_order_usd,
+                        cash_in_hand_usd=float(remaining_cash or 0.0),
+                        occupied_positions=current_occupied_positions,
+                        available_slots=current_available_slots,
+                        order_usd_source="deferred_for_forced_fresh_post_exit_balance",
+                        dependency_group=str(reservation["dependency_group"]),
+                        reserved_replacement=True,
+                        deferred_post_exit_sizing=True,
+                    )
+                    stage3_slot_diagnostics["planned_buy_ids"].append(
+                        decision.order_plan.id
+                    )
+                    planned_buy_market_ids.add(decision.market_id)
+                    planned_buy_market_aliases.update(candidate_market_aliases)
+                    reservation["status"] = "waiting_for_exit"
+                    reservation["reason"] = (
+                        "Durable replacement intent persisted before the exit; "
+                        "cash sizing is deferred until a forced-fresh post-exit balance."
+                    )
+                    stage3_slot_diagnostics["final_block_bypass_reason"] = (
+                        "The replacement slot is dependency-fenced; no pre-exit "
+                        "cash was reserved or treated as executable."
                     )
                     continue
 
@@ -9709,7 +10492,7 @@ class BullpenAutoLiveEngine:
                         exit_market_id = reservation.get("exit_market_id")
                         excluded_records = refreshed_state.get("excluded_position_records") or []
                         candidate_market_aliases = {
-                            value.strip()
+                            value.strip().lower()
                             for value in (decision.market_id, decision.slug)
                             if isinstance(value, str) and value.strip()
                         }
@@ -9728,15 +10511,22 @@ class BullpenAutoLiveEngine:
                                 )
                                 for record in excluded_records
                             )
-                            and remaining_cash >= settings.min_order_usd
-                            and candidate_market_aliases.isdisjoint(occupied_market_ids)
+                            and remaining_spendable_buy_cash
+                            >= settings.min_order_usd
+                            and candidate_market_aliases.isdisjoint(
+                                normalized_occupied_market_aliases
+                            )
                         )
                     if stale_bypass:
                         exit_market_id = str(reservation["exit_market_id"])
                         occupied_market_ids.discard(exit_market_id)
+                        capacity_sizing_market_ids.discard(exit_market_id)
+                        normalized_occupied_market_aliases.discard(
+                            exit_market_id.strip().lower()
+                        )
                         current_breakdown = build_console_trade_amount_breakdown(
                             available_balance_usd=remaining_cash,
-                            occupied_position_count=len(occupied_market_ids),
+                            occupied_position_count=len(capacity_sizing_market_ids),
                         )
                         current_occupied_positions = int(
                             current_breakdown["occupied_positions"] or 0
@@ -9760,13 +10550,52 @@ class BullpenAutoLiveEngine:
                         stage3_slot_diagnostics["final_block_bypass_reason"] = block_reason
                         continue
 
-                order_usd = float(current_breakdown["order_usd"] or 0.0)
-                if capacity_override_used and order_usd <= 0:
-                    order_usd = min(
-                        float(settings.console_order_usd),
-                        float(settings.max_order_usd),
-                        max(0.0, remaining_cash),
+                if affordable_planned_count >= affordable_buy_count:
+                    gross_cash_in_hand = float(
+                        affordable_allocation["gross_cash_in_hand_usd"] or 0.0
                     )
+                    balance_buffer = float(
+                        affordable_allocation["balance_buffer_usd"] or 0.0
+                    )
+                    initial_spendable_cash = float(
+                        affordable_allocation["spendable_cash_usd"] or 0.0
+                    )
+                    affordability_reason = (
+                        f"Fresh cash in hand ${gross_cash_in_hand:.2f}, after "
+                        f"preserving the ${balance_buffer:.2f} execution buffer, "
+                        f"leaves ${initial_spendable_cash:.2f} spendable and can safely fund "
+                        f"{affordable_buy_count} ranked buy"
+                        f"{'s' if affordable_buy_count != 1 else ''} at or above "
+                        f"the ${settings.min_order_usd:.2f} minimum; higher-ranked "
+                        "affordable candidates were planned first."
+                    )
+                    _mark_ranked_buy_candidate_unplanned(
+                        decision,
+                        reason=affordability_reason,
+                        outputs={
+                            **current_outputs,
+                            "affordable_ranked_buys_remaining": 0,
+                        },
+                    )
+                    continue
+
+                remaining_affordable_slots = max(
+                    1,
+                    int(affordable_allocation["affordable_slot_count"] or 0)
+                    - affordable_planned_count,
+                )
+                order_usd = round(
+                    min(
+                        float(settings.max_order_usd),
+                        max(0.0, remaining_spendable_buy_cash)
+                        / remaining_affordable_slots,
+                    ),
+                    2,
+                )
+                order_usd = min(
+                    order_usd,
+                    round(max(0.0, remaining_spendable_buy_cash), 2),
+                )
                 if order_usd <= 0:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
@@ -9806,7 +10635,7 @@ class BullpenAutoLiveEngine:
                     available_slots=current_available_slots,
                     order_usd_source=str(refreshed_state["source"]),
                     dependency_group=(
-                        f"stage3-replacement:{run.id}:{reservation['exit_market_id']}"
+                        str(reservation["dependency_group"])
                         if reserved_for_async_exit and reservation is not None
                         else None
                     ),
@@ -9817,7 +10646,13 @@ class BullpenAutoLiveEngine:
                 occupied_market_ids.add(decision.market_id)
                 capacity_sizing_market_ids.add(decision.market_id)
                 planned_buy_market_ids.add(decision.market_id)
+                planned_buy_market_aliases.update(candidate_market_aliases)
+                affordable_planned_count += 1
                 remaining_cash = round(max(0.0, remaining_cash - order_usd), 2)
+                remaining_spendable_buy_cash = round(
+                    max(0.0, remaining_spendable_buy_cash - order_usd),
+                    2,
+                )
                 if reservation is not None:
                     reservation["status"] = "consumed"
                     reservation["reason"] = (
@@ -9837,9 +10672,15 @@ class BullpenAutoLiveEngine:
             stage3_slot_diagnostics["replacement_reservations"] = list(
                 replacement_reservations.values()
             )
+            stage3_slot_diagnostics["affordable_planned_buy_count"] = (
+                affordable_planned_count
+            )
+            stage3_slot_diagnostics[
+                "affordable_buy_remaining_spendable_cash_usd"
+            ] = round(remaining_spendable_buy_cash, 2)
             stage3_slot_diagnostics["free_slots_after_planned_buys"] = max(
                 0,
-                CONSOLE_RANKED_EVENT_LIMIT - len(occupied_market_ids),
+                CONSOLE_RANKED_EVENT_LIMIT - len(capacity_sizing_market_ids),
             )
             report_invest_stage_progress(
                 phase_status="running",

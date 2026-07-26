@@ -16,15 +16,24 @@ const MARKET_CONTEXT_CAPTURE_CHARS = 40_000;
 const MAX_MARKET_CONTEXT_UPDATES = 6;
 const POLYMARKET_MARKET_CONTEXT_LABEL =
   "Experimental AI-generated summary referencing Polymarket data.";
-type CanonicalizableQuestion = Pick<BullpenQuestion, "id" | "slug" | "marketUrl">;
+type CanonicalizableQuestion = Pick<
+  BullpenQuestion,
+  "id" | "slug" | "marketUrl"
+> & {
+  conditionId?: string | null;
+};
 type SearchableCanonicalizableQuestion = CanonicalizableQuestion & {
   question?: string | null;
 };
 
 export type ResolvedPolymarketMarket = {
   id: string;
+  conditionId: string | null;
   slug: string | null;
+  marketSlug: string | null;
+  eventSlug: string | null;
   marketUrl: string | null;
+  authoritativeMarketOpen: boolean | null;
   category: string | null;
   yesOdds: number | null;
   noOdds: number | null;
@@ -38,6 +47,16 @@ export type ResolvedPolymarketMarket = {
 type PolymarketEventSupplement = {
   category: string | null;
   marketContext: string | null;
+};
+
+type PolymarketMarketResolutionOptions = {
+  backendAccessToken?: string | null;
+  allowRuntimeQuestionFallback?: boolean;
+  maxRuntimeQuestionFallbacks?: number;
+  runtimeSearch?: (
+    path: string,
+    options: { method: "POST"; body: unknown },
+  ) => Promise<unknown>;
 };
 
 function toArray(value: unknown): unknown[] {
@@ -73,6 +92,36 @@ function parseNumber(value: unknown) {
   if (typeof value === "string") {
     const parsed = Number(value.replace(/[%,$\s]/g, ""));
     return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function parseBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value !== 0;
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (["true", "1", "yes", "open", "active"].includes(normalized)) return true;
+  if (["false", "0", "no", "closed", "inactive"].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
+export function resolveAuthoritativeMarketOpenState(
+  record: Record<string, unknown>,
+): boolean | null {
+  const active = parseBoolean(record.active);
+  const closed = parseBoolean(record.closed);
+  const archived = parseBoolean(record.archived);
+  const acceptingOrders = parseBoolean(
+    record.acceptingOrders ?? record.accepting_orders,
+  );
+  if (closed === true || archived === true || active === false) {
+    return false;
+  }
+  if (active === true || acceptingOrders === true) {
+    return true;
   }
   return null;
 }
@@ -483,6 +532,7 @@ function normalizeResolvedMarket(
   fallbackSlug: string | null = null,
 ): ResolvedPolymarketMarket | null {
   const id = readString(record, ["id"]);
+  const conditionId = readString(record, ["conditionId", "condition_id"]);
   const slug = getCanonicalPolymarketMarketSlug(record, fallbackSlug);
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
   const { yesOdds, noOdds } = readOutcomeOdds(record);
@@ -497,8 +547,12 @@ function normalizeResolvedMarket(
 
   return {
     id,
+    conditionId,
     slug,
+    marketSlug: slug,
+    eventSlug,
     marketUrl: buildPolymarketEventUrl(eventSlug),
+    authoritativeMarketOpen: resolveAuthoritativeMarketOpenState(record),
     category,
     yesOdds,
     noOdds,
@@ -516,10 +570,18 @@ async function fetchGammaMarketLookupBatch(
   const params = new URLSearchParams();
   const seenIds = new Set<string>();
   const seenSlugs = new Set<string>();
+  const seenConditionIds = new Set<string>();
 
   for (const question of questions) {
     const id = question.id.trim();
     const slug = question.slug?.trim() || null;
+    const conditionId = question.conditionId?.trim() || null;
+
+    if (conditionId && !seenConditionIds.has(conditionId)) {
+      seenConditionIds.add(conditionId);
+      params.append("conditionId", conditionId);
+      continue;
+    }
 
     if (isNumericQuestionId(id) && !seenIds.has(id)) {
       seenIds.add(id);
@@ -565,6 +627,7 @@ export async function resolvePolymarketMarkets<
 
   const recordsById = new Map<string, Record<string, unknown>>();
   const recordsBySlug = new Map<string, Record<string, unknown>>();
+  const recordsByConditionId = new Map<string, Record<string, unknown>>();
 
   for (
     let index = 0;
@@ -577,8 +640,10 @@ export async function resolvePolymarketMarkets<
     for (const record of records) {
       const id = readString(record, ["id"]);
       const slug = getCanonicalPolymarketMarketSlug(record);
+      const conditionId = readString(record, ["conditionId", "condition_id"]);
       if (id) recordsById.set(id, record);
       if (slug) recordsBySlug.set(slug, record);
+      if (conditionId) recordsByConditionId.set(conditionId, record);
     }
   }
 
@@ -587,6 +652,9 @@ export async function resolvePolymarketMarkets<
   for (const question of questions) {
     const record =
       recordsById.get(question.id.trim()) ||
+      (question.conditionId
+        ? recordsByConditionId.get(question.conditionId.trim())
+        : undefined) ||
       (question.slug ? recordsBySlug.get(question.slug.trim()) : undefined);
     if (!record) continue;
 
@@ -623,19 +691,32 @@ export async function resolvePolymarketMarkets<
   return resolvedByQuestionId;
 }
 
-async function searchBullpenMarketByQuestion(question: string) {
+async function searchBullpenMarketByQuestion(
+  question: string,
+  options: PolymarketMarketResolutionOptions = {},
+) {
   const normalizedQuestion = normalizeQuestionLookupValue(question);
 
   try {
-    const payload = (await fetchBackendRuntimeJson("/polymarket/runtime/search", {
+    const runtimeSearch =
+      options.runtimeSearch ??
+      ((path: string, request: { method: "POST"; body: unknown }) =>
+        fetchBackendRuntimeJson(path, {
+          ...request,
+          accessToken: options.backendAccessToken,
+        }));
+    const payload = (await runtimeSearch("/polymarket/runtime/search", {
       method: "POST",
       body: { query: question },
     })) as {
       events?: Array<{
         slug?: string | null;
         markets?: Array<{
+          conditionId?: string | null;
           question?: string | null;
           slug?: string | null;
+          active?: boolean | null;
+          closed?: boolean | null;
           outcomes?: Array<{
             name?: string | null;
             price?: number | null;
@@ -686,8 +767,16 @@ async function searchBullpenMarketByQuestion(question: string) {
 
     return {
       id: fallbackMarket.id,
+      conditionId: matchedMarket.conditionId || null,
       slug: fallbackMarket.slug,
+      marketSlug: fallbackMarket.slug,
+      eventSlug: matchedMarket.eventSlug || null,
       marketUrl: fallbackMarket.marketUrl,
+      // A normalized question-text match is useful for display enrichment,
+      // but it is not exact condition/slug identity. Never let it reclassify
+      // an active, claimable, or unresolved wallet position. Exact Gamma
+      // identity lookups above may carry an authoritative open/closed verdict.
+      authoritativeMarketOpen: null,
       category: null,
       yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
       noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
@@ -704,8 +793,15 @@ async function searchBullpenMarketByQuestion(question: string) {
 
 export async function resolvePolymarketMarketsWithQuestionFallback<
   T extends SearchableCanonicalizableQuestion,
->(questions: T[]) {
+>(
+  questions: T[],
+  options: PolymarketMarketResolutionOptions = {},
+) {
   const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
+  if (options.allowRuntimeQuestionFallback === false) {
+    return resolvedByQuestionId;
+  }
+
   const unresolvedByNormalizedQuestion = new Map<
     string,
     SearchableCanonicalizableQuestion[]
@@ -723,11 +819,22 @@ export async function resolvePolymarketMarketsWithQuestionFallback<
     unresolvedByNormalizedQuestion.set(normalizedQuestion, current);
   }
 
-  for (const groupedQuestions of unresolvedByNormalizedQuestion.values()) {
+  const configuredFallbackLimit = options.maxRuntimeQuestionFallbacks ?? 1;
+  const fallbackLimit = Number.isFinite(configuredFallbackLimit)
+    ? Math.max(0, Math.floor(configuredFallbackLimit))
+    : 1;
+  const groupedQuestionBatches = [
+    ...unresolvedByNormalizedQuestion.values(),
+  ].slice(0, fallbackLimit);
+
+  for (const groupedQuestions of groupedQuestionBatches) {
     const searchQuestion = groupedQuestions[0]?.question?.trim();
     if (!searchQuestion) continue;
 
-    const searchedMarket = await searchBullpenMarketByQuestion(searchQuestion);
+    const searchedMarket = await searchBullpenMarketByQuestion(
+      searchQuestion,
+      options,
+    );
     if (!searchedMarket) continue;
 
     groupedQuestions.forEach((question) => {

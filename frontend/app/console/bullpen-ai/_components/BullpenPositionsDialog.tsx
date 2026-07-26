@@ -126,6 +126,8 @@ function getSourceLabel(source: BullpenPositionsSource | null) {
   switch (source) {
     case "live-cli":
       return "Live CLI";
+    case "redis-cache":
+      return "Fresh shared refresh";
     case "last-successful-live-snapshot":
       return "Cached live snapshot";
     case "tracked-positions":
@@ -463,6 +465,8 @@ export function BullpenPositionsDialog({
               detail={
                 positionsSource === "live-cli"
                   ? "Freshly read from the Bullpen CLI."
+                  : positionsSource === "redis-cache"
+                    ? "Freshly produced by another broker refresh and shared through Redis."
                   : positionsSource === "last-successful-live-snapshot"
                     ? "Using the last successful live wallet snapshot."
                     : positionsSource === "tracked-positions"

@@ -34,7 +34,11 @@ from app.domains.bullpen_run_audit.models import (
     BullpenRunAuditEventRecord,
 )
 from app.domains.bullpen_run_audit.provenance import stable_sha256
-from app.domains.bullpen_run_audit.repository import BullpenRunAuditRepository, isoformat
+from app.domains.bullpen_run_audit.repository import (
+    BullpenRunAuditRepository,
+    isoformat,
+    sanitize_audit_evidence,
+)
 from app.domains.bullpen_run_audit.schemas import (
     BullpenRunAuditDetailResponse,
     BullpenRunAuditFeedbackDetail,
@@ -58,7 +62,24 @@ from app.domains.polymarket_auto_live.repository import record_to_decision, reco
 logger = get_logger(__name__)
 
 TERMINAL_RUN_STATUSES = {"completed", "partial_success", "failed", "skipped"}
-STATUS_PRIORITY = {"fail": 3, "warning": 2, "pass": 1, "skipped": 0}
+_SAFE_WALLET_DIAGNOSTIC_KEYS = frozenset(
+    {
+        "command_category",
+        "bullpen_version",
+        "cache_status",
+        "auth_refresh_attempted",
+        "error_classification",
+        "refresh_requested_at",
+        "caller_source",
+        "snapshot_producer_source",
+        "produced_by_another_refresh",
+        "lock_wait_ms",
+        "lock_hold_ms",
+        "refresh_lock_wait_ms",
+        "refresh_lock_ttl_seconds",
+        "refresh_lock_age_ms",
+    }
+)
 
 
 def _parse_iso(value: str | None) -> datetime | None:
@@ -81,15 +102,61 @@ def _duration_seconds(started_at: str | None, completed_at: str | None) -> float
     return round((end - start).total_seconds(), 3)
 
 
+def _safe_stage1_wallet_credential_artifact(
+    stage1_outputs: dict[str, Any],
+) -> dict[str, object]:
+    raw_artifact = (
+        stage1_outputs.get("wallet_credential_artifact")
+        if isinstance(stage1_outputs.get("wallet_credential_artifact"), dict)
+        else {}
+    )
+    return {
+        "inode": stage1_outputs.get(
+            "wallet_credential_artifact_inode",
+            raw_artifact.get("inode"),
+        ),
+        "mtime_ns": stage1_outputs.get(
+            "wallet_credential_artifact_mtime_ns",
+            raw_artifact.get("mtime_ns"),
+        ),
+        "size": stage1_outputs.get(
+            "wallet_credential_artifact_size",
+            raw_artifact.get("size"),
+        ),
+    }
+
+
+def _safe_stage1_wallet_snapshot_diagnostics(
+    stage1_outputs: dict[str, Any],
+) -> dict[str, object]:
+    raw_diagnostics = (
+        stage1_outputs.get("wallet_snapshot_diagnostics")
+        if isinstance(stage1_outputs.get("wallet_snapshot_diagnostics"), dict)
+        else {}
+    )
+    return {
+        key: value
+        for key, value in raw_diagnostics.items()
+        if key in _SAFE_WALLET_DIAGNOSTIC_KEYS
+        and (
+            value is None
+            or isinstance(value, (str, int, float, bool))
+        )
+    }
+
+
+def _strict_boolean(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    if isinstance(value, (int, float)):
+        return value == 1
+    return False
+
+
 def _logical_stage_label(stage_number: int) -> str:
     return f"Stage {stage_number}"
-
-
-def _status_max(*values: str | None) -> str | None:
-    ranked = [value for value in values if value is not None]
-    if not ranked:
-        return None
-    return max(ranked, key=lambda value: STATUS_PRIORITY.get(value, -1))
 
 
 def _stage_result_dict(stage_result: Any) -> dict[str, Any]:
@@ -108,13 +175,66 @@ def _decision_dict(decision: Any) -> dict[str, Any]:
     return {}
 
 
-def _stage_outputs_for_workflow(run_payload: dict[str, Any], workflow_key: str) -> dict[str, Any]:
-    for stage in reversed(run_payload.get("stage_results") or []):
+def _stage_result_for_workflow(
+    run_payload: dict[str, Any],
+    workflow_key: str,
+) -> dict[str, Any]:
+    """Return the canonical persisted result for a user-facing workflow stage.
+
+    Exact Stage 1/2/3 rows always win over internal or historically mislabeled
+    rows carrying the same workflow key.  For legacy payloads without explicit
+    workflow metadata, the exact stage number supplies the key.  If there is
+    no exact row, retain the first persisted explicit legacy row, matching the
+    console projection's deterministic compatibility selector.
+    """
+
+    expected_stage_numbers = {"scan": 1, "llm": 2, "invest": 3}
+    expected_stage_number = expected_stage_numbers.get(workflow_key)
+    if expected_stage_number is None:
+        return {}
+
+    selected: dict[str, Any] | None = None
+    selected_is_exact = False
+    for stage in run_payload.get("stage_results") or []:
         if not isinstance(stage, dict):
             continue
         outputs = stage.get("outputs")
-        if isinstance(outputs, dict) and outputs.get("workflow_stage_key") == workflow_key:
-            return dict(outputs)
+        explicit_key = (
+            str(outputs.get("workflow_stage_key") or "").strip().lower()
+            if isinstance(outputs, dict)
+            else ""
+        )
+        try:
+            stage_number = int(stage.get("stage_number") or 0)
+        except (TypeError, ValueError):
+            stage_number = 0
+        inferred_key = next(
+            (
+                key
+                for key, number in expected_stage_numbers.items()
+                if stage_number == number
+            ),
+            None,
+        )
+        canonical_key = (
+            explicit_key
+            if explicit_key in expected_stage_numbers
+            else inferred_key
+        )
+        if canonical_key != workflow_key:
+            continue
+        is_exact = stage_number == expected_stage_number
+        if selected is None or (is_exact and not selected_is_exact):
+            selected = dict(stage)
+            selected_is_exact = is_exact
+    return selected or {}
+
+
+def _stage_outputs_for_workflow(run_payload: dict[str, Any], workflow_key: str) -> dict[str, Any]:
+    stage = _stage_result_for_workflow(run_payload, workflow_key)
+    outputs = stage.get("outputs")
+    if isinstance(outputs, dict):
+        return dict(outputs)
     return {}
 
 
@@ -196,6 +316,12 @@ def _serialize_stage_records(
     records: list[BullpenRunAuditStageRecord] = []
     sequence = 1
     for source_stage in [*run_stages, *decision_stages]:
+        sanitized_stage = sanitize_audit_evidence(source_stage)
+        if not isinstance(sanitized_stage, dict):
+            raise RuntimeError(
+                "Sanitized Bullpen run-audit stage must be an object"
+            )
+        source_stage = sanitized_stage
         raw_stage_blob = repo.create_blob(
             payload=source_stage,
             content_type="application/json",
@@ -480,7 +606,7 @@ def _build_formula_records(
                 scope_id=None,
                 algorithm_key="console_trade_amount_per_opportunity",
                 human_name="Cash per available Bullpen portfolio slot",
-                algorithm_version="v1",
+                algorithm_version="v2",
                 source_module="app.domains.polymarket_auto_live.engine",
                 source_function="build_console_trade_amount_breakdown",
                 inputs_json=inputs_json,
@@ -645,7 +771,7 @@ def _build_formula_records(
                         if is_active_position
                         else "Stage 2 current-odds returns per day"
                     ),
-                    algorithm_version="v1" if is_active_position else "v2",
+                    algorithm_version="v1" if is_active_position else "v3",
                     source_module="app.domains.polymarket_auto_live.console_profile",
                     source_function=(
                         "position_returns_per_day"
@@ -686,9 +812,9 @@ def _build_formula_records(
                 scope_id=decision_id,
                 algorithm_key="stage3_rank_and_selection",
                 human_name="Stage 3 ranking and selection",
-                algorithm_version="v1",
+                algorithm_version="v2",
                 source_module="app.domains.polymarket_auto_live.engine",
-                source_function="_serialize_stage3_decision_row",
+                source_function="BullpenAutoLiveEngine._execute_console_top10",
                 inputs_json=inputs_json,
                 intermediates_json={},
                 output_json=outputs_json,
@@ -748,14 +874,189 @@ def _build_bundle(
     decision_stage_results = _flatten_decision_stage_results(decisions)
     candidate_reviews = _list_stage2_candidate_reviews(run_payload)
     order_intents = run_orders_payload.get("orders") if isinstance(run_orders_payload.get("orders"), list) else []
+    stage1_stage_result = _stage_result_for_workflow(run_payload, "scan")
     stage1_outputs = _stage_outputs_for_workflow(run_payload, "scan")
     stage2_outputs = _stage_outputs_for_workflow(run_payload, "llm")
     stage3_outputs = _stage_outputs_for_workflow(run_payload, "invest")
     stage1_active_positions_found = stage1_outputs.get("active_positions_found")
+    safe_wallet_credential_artifact = (
+        _safe_stage1_wallet_credential_artifact(stage1_outputs)
+    )
+    safe_wallet_snapshot_diagnostics = (
+        _safe_stage1_wallet_snapshot_diagnostics(stage1_outputs)
+    )
+    wallet_snapshot_status = stage1_outputs.get("wallet_snapshot_status")
+    normalized_wallet_snapshot_status = str(
+        wallet_snapshot_status or ""
+    ).strip().lower()
+    wallet_snapshot_freshness_state = stage1_outputs.get(
+        "wallet_snapshot_freshness_state",
+        stage1_outputs.get("wallet_freshness_state"),
+    )
+    normalized_wallet_snapshot_freshness_state = str(
+        wallet_snapshot_freshness_state or ""
+    ).strip().lower()
+    wallet_refresh_error = stage1_outputs.get("wallet_refresh_error")
+    stage2_candidate_only = _strict_boolean(
+        stage1_outputs.get("stage2_candidate_only")
+    )
+    blocked_by_stage1_wallet_refresh = _strict_boolean(
+        stage1_outputs.get("blocked_by_stage1_wallet_refresh")
+    )
+    wallet_market_enrichment_error = stage1_outputs.get(
+        "wallet_market_enrichment_error"
+    )
+    stage1_stage_status = str(
+        stage1_stage_result.get("status") or ""
+    ).strip().lower()
+    raw_stage1_phase_status = stage1_outputs.get("phase_status")
+    stage1_phase_status = (
+        str(raw_stage1_phase_status).strip().lower()
+        if raw_stage1_phase_status is not None
+        else None
+    )
+    stage1_completed_at = stage1_stage_result.get("completed_at")
+    stage1_completion_evidence = bool(
+        _parse_iso(
+            stage1_completed_at
+            if isinstance(stage1_completed_at, str)
+            else None
+        )
+    )
+    stage1_hard_block = _strict_boolean(
+        stage1_stage_result.get("hard_block")
+    )
+    stage1_lifecycle_usable = bool(
+        stage1_stage_status in {"pass", "warning"}
+        and (
+            stage1_phase_status in {None, ""}
+            or stage1_phase_status in {"completed", "partial"}
+        )
+        and stage1_completion_evidence
+        and not stage1_hard_block
+    )
+    canonical_stage1_lifecycle = {
+        "status": stage1_stage_status or None,
+        "phase_status": stage1_phase_status or None,
+        "started_at": stage1_stage_result.get("started_at"),
+        "completed_at": stage1_completed_at,
+        "hard_block": stage1_hard_block,
+        "completion_evidence": stage1_completion_evidence,
+    }
+    portfolio_snapshot_verified = bool(
+        isinstance(stage1_active_positions_found, list)
+        and stage1_lifecycle_usable
+        and normalized_wallet_snapshot_status == "fresh"
+        and normalized_wallet_snapshot_freshness_state == "fresh"
+        and not wallet_refresh_error
+        and not wallet_market_enrichment_error
+        and not stage2_candidate_only
+        and not blocked_by_stage1_wallet_refresh
+    )
+    if portfolio_snapshot_verified:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 completed with a pass/warning lifecycle and a usable "
+            "fresh wallet snapshot."
+        )
+    elif stage1_stage_status not in {"pass", "warning"}:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 status was "
+            f"{stage1_stage_status or 'missing'}, not pass/warning; empty rows "
+            "are not proof of an empty portfolio."
+        )
+    elif stage1_phase_status not in {None, "", "completed", "partial"}:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 phase status was "
+            f"{stage1_phase_status}, not completed/partial; empty rows are not "
+            "proof of an empty portfolio."
+        )
+    elif not stage1_completion_evidence:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 did not retain a valid completion timestamp; empty rows "
+            "are not proof of an empty portfolio."
+        )
+    elif stage1_hard_block:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 retained a hard-block lifecycle; empty rows are not "
+            "proof of an empty portfolio."
+        )
+    elif wallet_refresh_error:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 wallet refresh failed: "
+            f"{str(wallet_refresh_error)[:300]}. "
+            "Empty rows are not proof of an empty portfolio."
+        )
+    elif wallet_market_enrichment_error:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 wallet enrichment failed: "
+            f"{str(wallet_market_enrichment_error)[:300]}. "
+            "Empty rows are not proof of an empty portfolio."
+        )
+    elif stage2_candidate_only:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 continued in candidate-only mode; empty rows are not "
+            "proof of an empty portfolio."
+        )
+    elif blocked_by_stage1_wallet_refresh:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 was blocked by wallet refresh; empty rows are not proof "
+            "of an empty portfolio."
+        )
+    elif normalized_wallet_snapshot_status != "fresh":
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 wallet status was "
+            f"{normalized_wallet_snapshot_status or 'missing'}, not fresh; "
+            "empty rows are not proof of an empty portfolio."
+        )
+    else:
+        portfolio_snapshot_verification_reason = (
+            "Stage 1 wallet freshness lineage was "
+            f"{normalized_wallet_snapshot_freshness_state or 'missing'}, not "
+            "fresh; empty rows are not proof of an empty portfolio."
+        )
     verified_portfolio_snapshot = (
         {
-            "source": "stage1_active_positions_found",
+            "source": stage1_outputs.get(
+                "wallet_source",
+                "stage1_active_positions_found",
+            ),
+            "fetched_at": stage1_outputs.get("wallet_snapshot_fetched_at"),
+            "freshness_state": wallet_snapshot_freshness_state,
+            "account_identity": stage1_outputs.get("wallet_account_identity"),
+            "credential_artifact": safe_wallet_credential_artifact,
+            "position_classifier_version": stage1_outputs.get(
+                "wallet_position_classifier_version",
+                stage1_outputs.get("position_classifier_version"),
+            ),
+            "snapshot_diagnostics": safe_wallet_snapshot_diagnostics,
+            "verified": portfolio_snapshot_verified,
+            "verification_reason": portfolio_snapshot_verification_reason,
+            "canonical_stage_lifecycle": canonical_stage1_lifecycle,
+            "stage_status": stage1_stage_status or None,
+            "phase_status": stage1_phase_status or None,
+            "stage_started_at": stage1_stage_result.get("started_at"),
+            "stage_completed_at": stage1_completed_at,
+            "completion_evidence": stage1_completion_evidence,
+            "stage_hard_block": stage1_hard_block,
+            "wallet_snapshot_status": wallet_snapshot_status,
+            "wallet_refresh_error": wallet_refresh_error,
+            "wallet_market_enrichment_error": (
+                wallet_market_enrichment_error
+            ),
+            "stage2_candidate_only": stage2_candidate_only,
+            "blocked_by_stage1_wallet_refresh": (
+                blocked_by_stage1_wallet_refresh
+            ),
             "active_positions_found": stage1_active_positions_found,
+            "available_for_claim": stage1_outputs.get("available_for_claim", []),
+            "settlement_pending_positions": stage1_outputs.get(
+                "settlement_pending_positions",
+                [],
+            ),
+            "excluded_position_diagnostics": stage1_outputs.get(
+                "excluded_position_diagnostics",
+                [],
+            ),
             "active_position_count": len(stage1_active_positions_found),
             "recorded_occupied_positions": stage1_outputs.get(
                 "console_trade_occupied_positions",
@@ -769,7 +1070,7 @@ def _build_bundle(
             "trade_amount_usd": stage1_outputs.get("console_trade_amount_usd"),
         }
         if isinstance(stage1_active_positions_found, list)
-        else {}
+        else None
     )
     stage2_to_stage3_handoff_market_ids = _stage2_to_stage3_handoff_market_ids(run_payload)
     audit_metadata = (
@@ -790,28 +1091,20 @@ def _build_bundle(
     diagnostics = (
         run_payload.get("diagnostics") if isinstance(run_payload.get("diagnostics"), dict) else {}
     )
+    # Status tiles and section payloads must describe the same canonical row.
+    # Aggregating every internal row carrying a historical workflow label can
+    # otherwise produce an impossible projection such as exact Stage 3=pass
+    # with overview Stage 3=fail.
     stage_statuses = {
-        "stage_1": _status_max(
-            *[
-                stage.get("status")
-                for stage in run_stage_results
-                if _logical_stage_number_for_result(stage) == 1
-            ]
-        ),
-        "stage_2": _status_max(
-            *[
-                stage.get("status")
-                for stage in run_stage_results
-                if _logical_stage_number_for_result(stage) == 2
-            ]
-        ),
-        "stage_3": _status_max(
-            *[
-                stage.get("status")
-                for stage in run_stage_results
-                if _logical_stage_number_for_result(stage) == 3
-            ]
-        ),
+        f"stage_{stage_number}": (
+            _stage_result_for_workflow(run_payload, workflow_key).get("status")
+            or None
+        )
+        for stage_number, workflow_key in (
+            (1, "scan"),
+            (2, "llm"),
+            (3, "invest"),
+        )
     }
     missing_fields: list[dict[str, Any]] = []
     if not settings_snapshot:
@@ -874,7 +1167,7 @@ def _build_bundle(
                     "wallet_refresh_timeout_seconds"
                 ),
                 "wallet_refresh_error": stage1_outputs.get("wallet_refresh_error"),
-                "stage2_candidate_only": bool(
+                "stage2_candidate_only": _strict_boolean(
                     stage1_outputs.get("stage2_candidate_only")
                 ),
             },
@@ -912,7 +1205,9 @@ def _build_bundle(
                 }
             ),
             "llm_invocations": stage2_outputs.get("llm_target_runs") or [],
-            "candidate_only": bool(stage2_outputs.get("stage2_candidate_only")),
+            "candidate_only": _strict_boolean(
+                stage2_outputs.get("stage2_candidate_only")
+            ),
             "stage1_wallet_snapshot_available": stage2_outputs.get(
                 "stage1_wallet_snapshot_available"
             ),
@@ -963,7 +1258,7 @@ def _build_bundle(
             ),
             "max_positions": stage3_outputs.get("top_table_size") or stage3_outputs.get("execution_step_total"),
             "stage2_handoff_candidate_market_ids": stage2_to_stage3_handoff_market_ids,
-            "blocked_by_stage1_wallet_refresh": bool(
+            "blocked_by_stage1_wallet_refresh": _strict_boolean(
                 stage3_outputs.get("blocked_by_stage1_wallet_refresh")
             ),
             "stage1_wallet_refresh_error": stage3_outputs.get(
@@ -1083,6 +1378,18 @@ class MaterializedSnapshot:
     bundle: dict[str, Any]
 
 
+def _materialized_snapshot_from_record(
+    snapshot: BullpenRunAuditSnapshotRecord,
+) -> MaterializedSnapshot:
+    bundle_blob = snapshot.canonical_bundle_blob
+    bundle = (
+        dict(bundle_blob.payload_json)
+        if bundle_blob is not None and isinstance(bundle_blob.payload_json, dict)
+        else {}
+    )
+    return MaterializedSnapshot(snapshot=snapshot, bundle=bundle)
+
+
 def materialize_run_audit_snapshot_sync(
     session: Session,
     *,
@@ -1104,6 +1411,26 @@ def materialize_run_audit_snapshot_sync(
     if run_record is None:
         raise ValueError("Run not found")
     current_snapshot = repo.get_current_snapshot(user_id=user_id, run_id=run_id)
+    current_is_frozen = (
+        current_snapshot is not None
+        and getattr(current_snapshot, "lifecycle_status", None)
+        == SNAPSHOT_STATUS_FROZEN
+    )
+    frozen_snapshot_is_unchanged = (
+        current_is_frozen
+        and current_snapshot.snapshot_schema_version
+        == BULLPEN_RUN_AUDIT_SCHEMA_VERSION
+        and current_snapshot.source_run_updated_at is not None
+        and run_record.updated_at is not None
+        and current_snapshot.source_run_updated_at >= run_record.updated_at
+    )
+    # A frozen snapshot is immutable evidence.  ``force=True`` means "observe
+    # the latest durable run state", not "rewrite history".  Return the
+    # existing version when its source row is unchanged.  If the source run
+    # was genuinely amended, the creation branch below writes a new version
+    # and links it to this frozen predecessor.
+    if frozen_snapshot_is_unchanged:
+        return _materialized_snapshot_from_record(current_snapshot)
     if (
         current_snapshot is not None
         and not force
@@ -1112,13 +1439,7 @@ def materialize_run_audit_snapshot_sync(
         and run_record.updated_at is not None
         and current_snapshot.source_run_updated_at >= run_record.updated_at
     ):
-        bundle_blob = current_snapshot.canonical_bundle_blob
-        bundle = (
-            dict(bundle_blob.payload_json)
-            if bundle_blob is not None and isinstance(bundle_blob.payload_json, dict)
-            else {}
-        )
-        return MaterializedSnapshot(snapshot=current_snapshot, bundle=bundle)
+        return _materialized_snapshot_from_record(current_snapshot)
 
     run = record_to_run(run_record)
     decision_records = repo.get_run_decision_records(user_id=user_id, run_id=run_id)
@@ -1139,7 +1460,10 @@ def materialize_run_audit_snapshot_sync(
     terminal = run.status in TERMINAL_RUN_STATUSES
     lifecycle_status = (
         SNAPSHOT_STATUS_FROZEN
-        if (freeze if freeze is not None else terminal)
+        if (
+            current_is_frozen
+            or (freeze if freeze is not None else terminal)
+        )
         else SNAPSHOT_STATUS_WORKING
     )
     bundle = _build_bundle(
@@ -1158,8 +1482,15 @@ def materialize_run_audit_snapshot_sync(
     if (
         current_snapshot is None
         or current_snapshot.snapshot_schema_version != BULLPEN_RUN_AUDIT_SCHEMA_VERSION
+        or current_is_frozen
     ):
+        superseded_snapshot = current_snapshot
         version = repo.latest_snapshot_version_for_run(user_id=user_id, run_id=run_id) + 1
+        # ``is_current`` is the mutable version-selection pointer, not frozen
+        # evidence.  Demote the predecessor under the same run lock so every
+        # consumer continues to observe exactly one current snapshot.  Its
+        # bundle, hash, children, findings and captured provenance remain
+        # untouched and directly addressable by snapshot id.
         repo.demote_current_snapshots(user_id=user_id, run_id=run_id)
         current_snapshot = BullpenRunAuditSnapshotRecord(
             user_id=user_id,
@@ -1177,6 +1508,11 @@ def materialize_run_audit_snapshot_sync(
             live_execution_attempted=run.live_execution_attempted,
             started_at=run_record.started_at,
             completed_at=run_record.completed_at,
+            supersedes_snapshot_id=(
+                superseded_snapshot.id
+                if superseded_snapshot is not None
+                else None
+            ),
         )
         session.add(current_snapshot)
         session.flush()
@@ -1219,40 +1555,53 @@ def materialize_run_audit_snapshot_sync(
 
     findings = build_deterministic_findings(bundle)
     for finding in findings:
+        safe_finding = sanitize_audit_evidence(finding)
+        if not isinstance(safe_finding, dict):
+            raise RuntimeError("Sanitized Bullpen run-audit finding must be an object")
         session.add(
             BullpenRunAuditFindingRecord(
                 snapshot_id=current_snapshot.id,
-                rule_version=str(finding["rule_version"]),
-                code=str(finding["code"]),
-                severity=str(finding["severity"]),
-                stage=str(finding["stage"]),
-                category=str(finding["category"]),
-                title=str(finding["title"]),
-                explanation=str(finding["explanation"]),
+                rule_version=str(safe_finding["rule_version"]),
+                code=str(safe_finding["code"]),
+                severity=str(safe_finding["severity"]),
+                stage=str(safe_finding["stage"]),
+                category=str(safe_finding["category"]),
+                title=str(safe_finding["title"]),
+                explanation=str(safe_finding["explanation"]),
                 observed_value=(
-                    str(finding["observed_value"])
-                    if finding.get("observed_value") is not None
+                    str(safe_finding["observed_value"])
+                    if safe_finding.get("observed_value") is not None
                     else None
                 ),
                 expected_value=(
-                    str(finding["expected_value"])
-                    if finding.get("expected_value") is not None
+                    str(safe_finding["expected_value"])
+                    if safe_finding.get("expected_value") is not None
                     else None
                 ),
-                blocking=bool(finding.get("blocking")),
-                classification=str(finding.get("classification") or "deterministic"),
+                blocking=bool(safe_finding.get("blocking")),
+                classification=str(
+                    safe_finding.get("classification") or "deterministic"
+                ),
                 suggested_remediation=(
-                    str(finding["suggested_remediation"])
-                    if finding.get("suggested_remediation") is not None
+                    str(safe_finding["suggested_remediation"])
+                    if safe_finding.get("suggested_remediation") is not None
                     else None
                 ),
-                evidence_pointers_json=list(finding.get("evidence_pointers") or []),
-                detection_metadata_json=dict(finding.get("detection_metadata") or {}),
+                evidence_pointers_json=list(
+                    safe_finding.get("evidence_pointers") or []
+                ),
+                detection_metadata_json=dict(
+                    safe_finding.get("detection_metadata") or {}
+                ),
                 resolution_status="open",
                 resolution_remark=None,
             )
         )
 
+    safe_bundle = sanitize_audit_evidence(bundle)
+    if not isinstance(safe_bundle, dict):
+        raise RuntimeError("Sanitized Bullpen run-audit bundle must be an object")
+    bundle = safe_bundle
     canonical_blob = repo.create_blob(payload=bundle, content_type="application/json")
     severity_counts = Counter(
         str(finding.get("severity") or "info") for finding in findings
@@ -1296,7 +1645,7 @@ def materialize_run_audit_snapshot_sync(
         else None
     )
     current_snapshot.canonical_bundle_blob_id = canonical_blob.id
-    current_snapshot.canonical_bundle_hash = stable_sha256(bundle)
+    current_snapshot.canonical_bundle_hash = canonical_blob.id
     current_snapshot.completeness_pct = completeness_pct
     current_snapshot.missing_fields_json = missing_fields
     current_snapshot.provenance_json = (

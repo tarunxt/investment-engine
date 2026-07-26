@@ -29,6 +29,18 @@ INTENT_PENDING_CONFIRMATION_STATUSES = frozenset(
         "WAITING_FOR_EXIT",
     }
 )
+# Only these states imply that a remote write may have happened or is being
+# reconciled. Pre-submit dependency/collateral waits remain executable work
+# and must not make a zero-submission run look "confirming".
+INTENT_REMOTE_CONFIRMATION_STATUSES = frozenset(
+    {
+        "SUBMITTING",
+        "SUBMITTED",
+        "CONFIRMING",
+        "PARTIALLY_FILLED",
+        "SETTLEMENT_PENDING",
+    }
+)
 INTENT_TERMINAL_SUCCESS_STATUSES = frozenset({"CONFIRMED", "FILLED"})
 INTENT_TERMINAL_FAILURE_STATUSES = frozenset(
     {"DEFERRED", "CANCELLED", "FAILED_PERMANENT", "REJECTED", "TIMED_OUT"}
@@ -391,6 +403,20 @@ def build_order_plan_from_intent(
             if intent.execution_metadata_json.get("reservation_state") is not None
             else existing.reservation_state,
             "reservation_amount_usd": intent.reserved_cash_usd,
+            "reconciliation_fill_evidence": (
+                dict(
+                    intent.execution_metadata_json.get(
+                        "reconciliation_fill_evidence"
+                    )
+                )
+                if isinstance(
+                    intent.execution_metadata_json.get(
+                        "reconciliation_fill_evidence"
+                    ),
+                    dict,
+                )
+                else {}
+            ),
             "stage3_status": str(intent.execution_metadata_json.get("stage3_status"))
             if intent.execution_metadata_json.get("stage3_status")
             else existing.stage3_status,
@@ -441,7 +467,7 @@ def build_order_funnel(intents: Iterable[BullpenAutoLiveOrderIntent]) -> Bullpen
             counts.deferred += 1
         elif status == "CANCELLED":
             counts.cancelled += 1
-        elif status == "FAILED_PERMANENT":
+        elif status in {"FAILED_PERMANENT", "REJECTED", "TIMED_OUT"}:
             counts.permanently_failed += 1
 
         if intent.attempt_count > 0:
@@ -454,7 +480,7 @@ def build_order_funnel(intents: Iterable[BullpenAutoLiveOrderIntent]) -> Bullpen
             counts.remotely_accepted += 1
         if status in {"SUBMITTED", "CONFIRMING"}:
             counts.submitted += 1
-        if status in INTENT_PENDING_CONFIRMATION_STATUSES:
+        if status in INTENT_REMOTE_CONFIRMATION_STATUSES:
             counts.confirming += 1
         if status == "CONFIRMED":
             counts.confirmed += 1
@@ -476,29 +502,55 @@ def build_order_funnel(intents: Iterable[BullpenAutoLiveOrderIntent]) -> Bullpen
 def derive_run_status_from_intents(intents: Sequence[BullpenAutoLiveOrderIntent]) -> str:
     if not intents:
         return "completed"
-    success_count = sum(1 for intent in intents if intent.status in INTENT_TERMINAL_SUCCESS_STATUSES)
-    pending_count = sum(1 for intent in intents if intent.status in INTENT_PENDING_CONFIRMATION_STATUSES)
-    hard_failure_count = sum(1 for intent in intents if intent.status == "FAILED_PERMANENT")
-    soft_failure_count = sum(1 for intent in intents if intent.status in {"DEFERRED", "CANCELLED"})
+    success_count = sum(
+        1
+        for intent in intents
+        if intent.status in INTENT_TERMINAL_SUCCESS_STATUSES
+    )
+    pending_count = sum(
+        1
+        for intent in intents
+        if intent.status in INTENT_REMOTE_CONFIRMATION_STATUSES
+    )
+    executable_count = sum(
+        1
+        for intent in intents
+        if intent.status
+        in {
+            "PLANNED",
+            "READY",
+            "RETRY_WAIT",
+            "WAITING_FOR_COLLATERAL",
+            "WAITING_FOR_EXIT",
+        }
+    )
+    failure_count = sum(
+        1
+        for intent in intents
+        if intent.status in INTENT_TERMINAL_FAILURE_STATUSES
+    )
 
     if pending_count > 0:
         return "confirming"
+    if executable_count > 0:
+        return "running"
     if success_count == len(intents):
         return "completed"
-    if success_count > 0 and (hard_failure_count > 0 or soft_failure_count > 0):
+    if success_count > 0 and failure_count > 0:
         return "partial_success"
-    if success_count > 0:
-        return "completed"
-    if hard_failure_count > 0 or soft_failure_count > 0:
+    if failure_count > 0:
         return "failed"
-    return "running"
+    # Unknown states must not be reported as completed. Fail closed so an
+    # unsupported persisted value is visible instead of silently stranding an
+    # order behind a false-success run.
+    return "failed"
 
 
 def oldest_pending_age_seconds(intents: Sequence[BullpenAutoLiveOrderIntent], *, now: datetime | None = None) -> float | None:
     pending_created = [
         parse_datetime(intent.created_at)
         for intent in intents
-        if intent.status in INTENT_PENDING_CONFIRMATION_STATUSES
+        if intent.status in INTENT_REMOTE_CONFIRMATION_STATUSES
     ]
     pending_created = [value for value in pending_created if value is not None]
     if not pending_created:

@@ -320,6 +320,7 @@ def test_periodic_execution_and_reconciliation_scanners_have_disjoint_status_set
         ("intent-reconcilable", "periodic-pending-reconciliation")
     ]
     assert set(scanned_statuses[0]).isdisjoint(set(scanned_statuses[1]))
+    assert "WAITING_FOR_EXIT" not in scanned_statuses[0]
 
 
 def test_immediate_run_dispatch_is_run_scoped_and_reports_actual_publish_count(
@@ -356,6 +357,7 @@ def test_immediate_run_dispatch_is_run_scoped_and_reports_actual_publish_count(
     assert queued == 1
     assert due_requests[0]["run_id"] == "run-current"
     assert due_requests[0]["limit"] == 10
+    assert "WAITING_FOR_EXIT" not in due_requests[0]["statuses"]
     assert enqueue_requests == [
         (
             ["intent-current-run-1", "intent-current-run-2"],

@@ -199,7 +199,7 @@ def _queue_due_order_intents_for_run_sync(run_id: str, *, limit: int = 50) -> in
         due_ids = list_due_order_intent_ids_sync(
             session,
             limit=limit,
-            statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"),
             now=_utc_now(),
             run_id=run_id,
         )
@@ -516,7 +516,7 @@ def recover_and_enqueue_stale_order_intents_for_run_sync(run_id: str, *, limit: 
         due_ids = list_due_order_intent_ids_sync(
             session,
             limit=limit,
-            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            statuses=("READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"),
             now=_utc_now(),
             run_id=run_id,
         )
@@ -1783,7 +1783,7 @@ def dispatch_due_auto_live_order_intents(limit: int = 50) -> None:
         executable_ids = list_due_order_intent_ids_sync(
             session,
             limit=limit,
-            statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+            statuses=("PLANNED", "READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"),
         )
 
     _enqueue_execute_order_intents(executable_ids, source="periodic-execution-dispatch")
@@ -2015,7 +2015,7 @@ def reconcile_auto_live_order_intent(
             due_ids = list_due_order_intent_ids_sync(
                 session,
                 limit=50,
-                statuses=("READY", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"),
+                statuses=("READY", "WAITING_FOR_COLLATERAL"),
                 now=_utc_now(),
             )
             if due_ids:

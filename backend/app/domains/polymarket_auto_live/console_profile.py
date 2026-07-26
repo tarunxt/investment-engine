@@ -37,9 +37,12 @@ from app.domains.polymarket_auto_live.scanner import (
     ScannedMarket,
     _collect_nested_strings,
     build_market_filter_search_text,
+    fetch_market_by_exact_identity,
+    fetch_market_by_slug,
     is_insult_market_text,
     is_sports_market_text,
     scan_candidate_markets,
+    shared_gamma_market_client,
 )
 
 CONSOLE_PROFILE_ID = "bullpen_console_top10"
@@ -61,6 +64,11 @@ CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS = 30
 CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_ENV_VAR = (
     "BULLPEN_CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS"
 )
+CONSOLE_POSITION_ENRICHMENT_MAX_LOOKUPS = 64
+CONSOLE_POSITION_ENRICHMENT_MAX_CONCURRENCY = 6
+CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS = 5.0
+CONSOLE_POSITION_ENRICHMENT_TOTAL_TIMEOUT_SECONDS = 15.0
+CONSOLE_POSITION_ENRICHMENT_DIAGNOSTIC_SAMPLE_LIMIT = 50
 
 _POSITIONS_COMMAND_VARIANTS = [
     ["polymarket", "positions", "--output", "json"],
@@ -179,6 +187,7 @@ class ConsoleWalletPosition:
     claimable_value_usd: float | None = None
     expected_payout_usdc: float | None = None
     resolution_status: str | None = None
+    authoritative_market_state: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -191,6 +200,12 @@ class ConsoleWalletPositionsSnapshot:
     raw_position_count: int
     diagnostics: dict[str, object]
     raw_positions: list[ConsoleWalletPosition] = field(default_factory=list)
+    cli_version: str | None = None
+    credential_artifact: dict[str, int | None] = field(default_factory=dict)
+    account_identity: str | None = None
+    position_classifier_version: int | None = None
+    auth_checked_at: str | None = None
+    freshness_state: str = "fresh"
 
 
 @dataclass
@@ -1029,7 +1044,9 @@ def _classify_console_wallet_position(
         current_price=position.current_price_cents,
         current_value=position.current_value_usd,
         close_time=position.close_time,
-        claimable_flag=position.raw_claimable_flag,
+        # ``is_claimable`` is the compatibility field used by older adapters
+        # and tests; newer broker payloads also retain the raw upstream flag.
+        claimable_flag=position.raw_claimable_flag or position.is_claimable,
         upstream_redeemable_flag=position.upstream_redeemable,
         expected_payout_usdc=position.expected_payout_usdc,
         claimable_value_usd=position.claimable_value_usd,
@@ -1315,6 +1332,11 @@ async def read_console_wallet_positions_snapshot(
             if position.shares > 0 or position.classification != "closed"
         ]
     )
+    credential_artifact = (
+        getattr(broker_snapshot, "credential_artifact", None)
+        if broker_snapshot is not None
+        else None
+    )
     return ConsoleWalletPositionsSnapshot(
         positions=positions,
         source=broker_snapshot.source if broker_snapshot is not None else "provided-payload",
@@ -1326,19 +1348,54 @@ async def read_console_wallet_positions_snapshot(
             else {"source": "provided-payload"}
         ),
         raw_positions=raw_positions,
+        cli_version=(
+            getattr(broker_snapshot, "cli_version", None)
+            if broker_snapshot is not None
+            else None
+        ),
+        credential_artifact=(
+            {
+                "inode": getattr(credential_artifact, "inode", None),
+                "mtime_ns": getattr(credential_artifact, "mtime_ns", None),
+                "size": getattr(credential_artifact, "size", None),
+            }
+            if credential_artifact is not None
+            else {}
+        ),
+        account_identity=(
+            getattr(broker_snapshot, "account_identity", None)
+            if broker_snapshot is not None
+            else None
+        ),
+        position_classifier_version=(
+            getattr(broker_snapshot, "position_classifier_version", None)
+            if broker_snapshot is not None
+            else None
+        ),
+        auth_checked_at=(
+            getattr(broker_snapshot, "auth_checked_at", None)
+            if broker_snapshot is not None
+            else None
+        ),
+        freshness_state=(
+            getattr(broker_snapshot, "freshness_state", "fresh")
+            if broker_snapshot is not None
+            else "fresh"
+        ),
     )
 
 
 def apply_scanned_market_to_position(
     position: ConsoleWalletPosition,
     market: ScannedMarket | None,
+    *,
+    authoritative_market_is_open: bool | None = None,
 ) -> ConsoleWalletPosition:
     if market is None:
         return position
 
-    authoritative_market_is_open = not (
-        isinstance(market.raw, dict) and market.raw.get("wallet_position_fallback")
-    )
+    if authoritative_market_is_open is None:
+        authoritative_market_is_open = _authoritative_market_open_state(market)
 
     if position.side == "YES":
         current_price_cents = market.current_yes_odds
@@ -1370,8 +1427,494 @@ def apply_scanned_market_to_position(
         current_no_odds=current_no_odds,
         close_time=market.close_time or position.close_time,
         theme=market.theme or position.theme,
+        authoritative_market_state=(
+            "open"
+            if authoritative_market_is_open is True
+            else "closed"
+            if authoritative_market_is_open is False
+            else "unknown"
+        ),
     )
     return _apply_console_wallet_position_classification(
         enriched_position,
         authoritative_market_is_open=authoritative_market_is_open,
     )
+
+
+def _read_market_boolean(value: object) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes"}:
+            return True
+        if normalized in {"false", "0", "no"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return None
+
+
+def _authoritative_market_open_state(market: ScannedMarket) -> bool | None:
+    if not isinstance(market.raw, dict):
+        return None
+    if market.raw.get("wallet_position_fallback"):
+        return None
+    active = _read_market_boolean(market.raw.get("active"))
+    closed = _read_market_boolean(market.raw.get("closed"))
+    archived = _read_market_boolean(market.raw.get("archived"))
+    if closed is True or archived is True or active is False:
+        return False
+    if active is True and closed is not True and archived is not True:
+        return True
+    return None
+
+
+async def enrich_console_wallet_positions_authoritatively(
+    positions: list[ConsoleWalletPosition],
+    *,
+    market_by_slug: dict[str, ScannedMarket] | None = None,
+    market_by_id: dict[str, ScannedMarket] | None = None,
+) -> tuple[list[ConsoleWalletPosition], dict[str, object]]:
+    """Resolve exact Gamma state within a fixed, observable resource budget."""
+
+    def has_positive_exposure(position: ConsoleWalletPosition) -> bool:
+        if position.classification in {"resolved_zero_payout", "closed"} and not any(
+            float(value or 0.0) > 0
+            for value in (
+                position.current_value_usd,
+                position.expected_payout_usdc,
+                position.claimable_value_usd,
+            )
+        ):
+            return False
+        return (
+            float(position.shares or 0.0) > 0
+            or float(position.current_value_usd or 0.0) > 0
+            or float(position.exposure_usd or 0.0) > 0
+        )
+
+    resolved_by_slug = market_by_slug if market_by_slug is not None else {}
+    resolved_by_id = market_by_id if market_by_id is not None else {}
+    event_loop = asyncio.get_running_loop()
+    lookup_started_at = event_loop.time()
+    lookup_deadline = (
+        lookup_started_at
+        + max(0.01, CONSOLE_POSITION_ENRICHMENT_TOTAL_TIMEOUT_SECONDS)
+    )
+    lookup_semaphore = asyncio.Semaphore(
+        max(1, CONSOLE_POSITION_ENRICHMENT_MAX_CONCURRENCY)
+    )
+    lookup_cap = max(0, CONSOLE_POSITION_ENRICHMENT_MAX_LOOKUPS)
+    scheduled_lookup_count = 0
+    attempted_lookup_count = 0
+    completed_lookup_count = 0
+    successful_lookup_count = 0
+    failed_lookup_count = 0
+    request_timeout_count = 0
+    total_timeout_count = 0
+    in_flight_lookup_count = 0
+    max_in_flight_lookup_count = 0
+    lookup_errors: list[dict[str, str]] = []
+    skipped_lookup_keys: list[str] = []
+
+    LookupRequest = tuple[str, str, str | None]
+
+    async def execute_lookup(
+        request: LookupRequest,
+    ) -> tuple[LookupRequest, ScannedMarket | None, str]:
+        nonlocal attempted_lookup_count
+        nonlocal completed_lookup_count
+        nonlocal successful_lookup_count
+        nonlocal failed_lookup_count
+        nonlocal request_timeout_count
+        nonlocal in_flight_lookup_count
+        nonlocal max_in_flight_lookup_count
+
+        kind, identity, condition_id = request
+        attempted_lookup_count += 1
+        async with lookup_semaphore:
+            in_flight_lookup_count += 1
+            max_in_flight_lookup_count = max(
+                max_in_flight_lookup_count,
+                in_flight_lookup_count,
+            )
+            try:
+                if kind == "slug":
+                    market = await asyncio.wait_for(
+                        fetch_market_by_slug(identity),
+                        timeout=max(
+                            0.01,
+                            CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS,
+                        ),
+                    )
+                else:
+                    market = await asyncio.wait_for(
+                        fetch_market_by_exact_identity(
+                            market_id=identity,
+                            condition_id=condition_id,
+                        ),
+                        timeout=max(
+                            0.01,
+                            CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS,
+                        ),
+                    )
+            except TimeoutError:
+                request_timeout_count += 1
+                failed_lookup_count += 1
+                completed_lookup_count += 1
+                if len(lookup_errors) < 20:
+                    lookup_errors.append(
+                        {
+                            "kind": kind,
+                            "identity": identity,
+                            "error": "request_timeout",
+                        }
+                    )
+                return request, None, "request_timeout"
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                failed_lookup_count += 1
+                completed_lookup_count += 1
+                if len(lookup_errors) < 20:
+                    lookup_errors.append(
+                        {
+                            "kind": kind,
+                            "identity": identity,
+                            "error": type(exc).__name__,
+                        }
+                    )
+                logger.warning(
+                    "Failed authoritative %s lookup for Bullpen identity %s.",
+                    kind,
+                    identity,
+                    exc_info=True,
+                )
+                return request, None, "error"
+            finally:
+                in_flight_lookup_count -= 1
+
+        completed_lookup_count += 1
+        if market is not None:
+            successful_lookup_count += 1
+            return request, market, "resolved"
+        return request, None, "not_found"
+
+    async def run_lookup_batch(
+        requests: list[LookupRequest],
+    ) -> list[tuple[LookupRequest, ScannedMarket | None, str]]:
+        nonlocal scheduled_lookup_count
+        nonlocal total_timeout_count
+
+        if not requests:
+            return []
+        remaining_capacity = max(0, lookup_cap - scheduled_lookup_count)
+        selected = requests[:remaining_capacity]
+        skipped = requests[remaining_capacity:]
+        if skipped:
+            skipped_lookup_keys.extend(
+                f"{kind}:{identity}" for kind, identity, _condition_id in skipped
+            )
+        scheduled_lookup_count += len(selected)
+        if not selected:
+            return []
+
+        tasks = {
+            asyncio.create_task(execute_lookup(request)): request
+            for request in selected
+        }
+        remaining_seconds = max(0.0, lookup_deadline - event_loop.time())
+        done, pending = await asyncio.wait(
+            tasks,
+            timeout=remaining_seconds,
+        )
+        results: list[tuple[LookupRequest, ScannedMarket | None, str]] = []
+        for task in done:
+            try:
+                results.append(task.result())
+            except asyncio.CancelledError:
+                pass
+        if pending:
+            total_timeout_count += len(pending)
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            for task in pending:
+                kind, identity, condition_id = tasks[task]
+                results.append(
+                    ((kind, identity, condition_id), None, "total_timeout")
+                )
+                if len(lookup_errors) < 20:
+                    lookup_errors.append(
+                        {
+                            "kind": kind,
+                            "identity": identity,
+                            "error": "total_timeout",
+                        }
+                    )
+        return results
+
+    known_active_market_ids = {
+        id(market)
+        for market in [*resolved_by_slug.values(), *resolved_by_id.values()]
+        if not (
+            isinstance(market.raw, dict)
+            and market.raw.get("wallet_position_fallback")
+        )
+    }
+    missing_slugs = sorted(
+        {
+            position.slug
+            for position in positions
+            if position.slug
+            and has_positive_exposure(position)
+            and position.slug not in resolved_by_slug
+            and position.market_id not in resolved_by_id
+        }
+    )
+    requested_lookup_count = len(missing_slugs)
+
+    async with shared_gamma_market_client(
+        timeout_seconds=CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS,
+    ):
+        slug_lookup_results = await run_lookup_batch(
+            [("slug", slug, None) for slug in missing_slugs]
+        )
+        for (
+            (_kind, requested_slug, _condition_id),
+            market,
+            _status,
+        ) in slug_lookup_results:
+            if (
+                market is None
+                or not market.slug
+                or market.slug.strip().lower()
+                != requested_slug.strip().lower()
+            ):
+                continue
+            resolved_by_slug[requested_slug] = market
+            resolved_by_slug.setdefault(market.slug, market)
+            resolved_by_id.setdefault(market.market_id, market)
+
+        missing_identities = sorted(
+            {
+                (
+                    position.market_id,
+                    position.condition_id,
+                )
+                for position in positions
+                if has_positive_exposure(position)
+                and not (
+                    (position.slug and position.slug in resolved_by_slug)
+                    or position.market_id in resolved_by_id
+                    or (
+                        position.condition_id
+                        and position.condition_id in resolved_by_id
+                    )
+                )
+                and (position.market_id or position.condition_id)
+            },
+            key=lambda item: (str(item[0]), str(item[1] or "")),
+        )
+        requested_lookup_count += len(missing_identities)
+        identity_lookup_results = await run_lookup_batch(
+            [
+                ("identity", market_id, condition_id)
+                for market_id, condition_id in missing_identities
+            ]
+        )
+        for (
+            (_kind, requested_market_id, requested_condition_id),
+            market,
+            _status,
+        ) in identity_lookup_results:
+            if market is None:
+                continue
+            resolved_by_id[requested_market_id] = market
+            if requested_condition_id:
+                resolved_by_id[requested_condition_id] = market
+            resolved_by_id.setdefault(market.market_id, market)
+            if market.slug:
+                resolved_by_slug.setdefault(market.slug, market)
+
+    enriched_positions: list[ConsoleWalletPosition] = []
+    unresolved_position_keys: list[str] = []
+    unresolved_position_diagnostics: list[dict[str, str]] = []
+    authoritative_position_keys: list[str] = []
+    authoritative_closed_position_keys: list[str] = []
+    for position in positions:
+        # Raw claimable/resolved hints can be stale. Every positive-exposure
+        # row with an identity must receive exact current-market enrichment so
+        # fresh open proof can restore it to active. Zero-exposure residues are
+        # safe to retain as diagnostics without a network lookup.
+        position_key = f"{position.market_id}::{position.side}"
+        if not has_positive_exposure(position):
+            enriched_positions.append(
+                _apply_console_wallet_position_classification(position)
+            )
+            continue
+        market = (
+            resolved_by_slug.get(position.slug)
+            if position.slug
+            else None
+        ) or resolved_by_id.get(position.market_id) or (
+            resolved_by_id.get(position.condition_id)
+            if position.condition_id
+            else None
+        )
+        position_aliases = {
+            str(value).strip().lower()
+            for value in (
+                position.slug,
+                position.market_id,
+                position.condition_id,
+            )
+            if isinstance(value, str) and value.strip()
+        }
+        market_aliases = {
+            str(value).strip().lower()
+            for value in (
+                getattr(market, "slug", None),
+                getattr(market, "market_id", None),
+                (
+                    market.raw.get("conditionId")
+                    or market.raw.get("condition_id")
+                    or market.raw.get("marketId")
+                    or market.raw.get("market_id")
+                    if market is not None and isinstance(market.raw, dict)
+                    else None
+                ),
+            )
+            if isinstance(value, str) and value.strip()
+        }
+        wallet_fallback = bool(
+            market is not None
+            and isinstance(market.raw, dict)
+            and market.raw.get("wallet_position_fallback")
+        )
+        explicit_market_open_state = (
+            _authoritative_market_open_state(market)
+            if market is not None
+            else None
+        )
+        market_open_state: bool | None = explicit_market_open_state
+        if (
+            market_open_state is None
+            and market is not None
+            and id(market) in known_active_market_ids
+        ):
+            market_open_state = True
+        unresolved_reason: str | None = None
+        if market is None:
+            unresolved_reason = "market_lookup_unresolved"
+        elif wallet_fallback:
+            unresolved_reason = "wallet_fallback_is_not_authoritative"
+        elif market_open_state is None:
+            unresolved_reason = "authoritative_open_state_unknown"
+        elif not position_aliases.intersection(market_aliases):
+            unresolved_reason = "exact_identity_mismatch"
+        if unresolved_reason is not None:
+            enriched_positions.append(
+                replace(
+                    position,
+                    is_claimable=False,
+                    classification="stale_or_unknown",
+                    classification_reason=(
+                        "The exact market identity and current open/closed state "
+                        "could not be verified within the bounded authoritative "
+                        "lookup budget. This exposure remains conservatively "
+                        "occupied and blocks execution."
+                    ),
+                    claimable_value_usd=None,
+                    authoritative_market_state="unknown",
+                )
+            )
+            unresolved_position_keys.append(position_key)
+            unresolved_position_diagnostics.append(
+                {
+                    "position_key": position_key,
+                    "reason": unresolved_reason,
+                }
+            )
+            continue
+        enriched_positions.append(
+            apply_scanned_market_to_position(
+                position,
+                market,
+                authoritative_market_is_open=market_open_state,
+            )
+        )
+        if market_open_state:
+            authoritative_position_keys.append(position_key)
+        else:
+            authoritative_closed_position_keys.append(position_key)
+
+    lookup_duration_ms = round(
+        max(0.0, event_loop.time() - lookup_started_at) * 1000,
+        3,
+    )
+    diagnostic_sample_limit = max(
+        0,
+        CONSOLE_POSITION_ENRICHMENT_DIAGNOSTIC_SAMPLE_LIMIT,
+    )
+    return enriched_positions, {
+        "authoritative_open_position_keys": authoritative_position_keys[
+            :diagnostic_sample_limit
+        ],
+        "authoritative_open_position_count": len(authoritative_position_keys),
+        "authoritative_open_position_keys_truncated": (
+            len(authoritative_position_keys) > diagnostic_sample_limit
+        ),
+        "authoritative_closed_position_keys": authoritative_closed_position_keys[
+            :diagnostic_sample_limit
+        ],
+        "authoritative_closed_position_count": len(
+            authoritative_closed_position_keys
+        ),
+        "authoritative_closed_position_keys_truncated": (
+            len(authoritative_closed_position_keys) > diagnostic_sample_limit
+        ),
+        "unresolved_position_keys": unresolved_position_keys[
+            :diagnostic_sample_limit
+        ],
+        "unresolved_position_count": len(unresolved_position_keys),
+        "unresolved_position_keys_truncated": (
+            len(unresolved_position_keys) > diagnostic_sample_limit
+        ),
+        "unresolved_position_diagnostics": unresolved_position_diagnostics[
+            :diagnostic_sample_limit
+        ],
+        "unresolved_position_diagnostics_total": len(
+            unresolved_position_diagnostics
+        ),
+        "unresolved_position_diagnostics_truncated": (
+            len(unresolved_position_diagnostics) > diagnostic_sample_limit
+        ),
+        "lookup_requested_count": requested_lookup_count,
+        "lookup_scheduled_count": scheduled_lookup_count,
+        "lookup_attempted_count": attempted_lookup_count,
+        "lookup_completed_count": completed_lookup_count,
+        "lookup_successful_count": successful_lookup_count,
+        "lookup_failed_count": failed_lookup_count,
+        "lookup_request_timeout_count": request_timeout_count,
+        "lookup_total_timeout_count": total_timeout_count,
+        "lookup_skipped_due_to_cap_count": len(skipped_lookup_keys),
+        "lookup_skipped_due_to_cap_keys": skipped_lookup_keys[:20],
+        "lookup_skipped_due_to_cap_keys_truncated": len(skipped_lookup_keys) > 20,
+        "lookup_cap": lookup_cap,
+        "lookup_cap_reached": bool(skipped_lookup_keys),
+        "lookup_max_concurrency": max(
+            1,
+            CONSOLE_POSITION_ENRICHMENT_MAX_CONCURRENCY,
+        ),
+        "lookup_max_in_flight": max_in_flight_lookup_count,
+        "lookup_request_timeout_seconds": (
+            CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS
+        ),
+        "lookup_total_timeout_seconds": (
+            CONSOLE_POSITION_ENRICHMENT_TOTAL_TIMEOUT_SECONDS
+        ),
+        "lookup_duration_ms": lookup_duration_ms,
+        "lookup_errors": lookup_errors,
+    }

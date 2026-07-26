@@ -15,7 +15,7 @@ BullpenPositionClassificationState = Literal[
     "closed",
 ]
 
-BULLPEN_POSITION_CLASSIFIER_VERSION = 3
+BULLPEN_POSITION_CLASSIFIER_VERSION = 4
 
 _VALUE_EPSILON = 0.000001
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
@@ -291,6 +291,7 @@ def classify_bullpen_position(
         parsed_close_time <= current_time if parsed_close_time is not None else None
     )
     current_market_is_open = authoritative_market_is_open is True
+    current_market_is_closed = authoritative_market_is_open is False
     # A fresh Gamma market snapshot is stronger evidence than a stale wallet
     # flag or an old payout field.  In particular, Bullpen has returned
     # `redeemable` for still-open child markets; those rows are holdings, not
@@ -397,17 +398,25 @@ def classify_bullpen_position(
             resolution_status=resolution_status,
         )
 
+    if current_market_is_closed:
+        return BullpenPositionClassification(
+            state="stale_or_unknown",
+            reason=(
+                "An authoritative market lookup confirmed that this market is "
+                "not open, but no verified settlement payout is available."
+            ),
+            is_claimable=False,
+            claimable_value_usd=None,
+            expected_payout_usdc=parsed_expected_payout_usdc,
+            resolution_status=resolution_status,
+        )
+
     return BullpenPositionClassification(
         state="active",
         reason=(
-            "This row still looks like an economically active Bullpen position."
-            if (
-                current_market_is_open
-                or past_close_time is False
-                or open_by_status
-                or normalized_resolution_status is None
-            )
-            else "An authoritative live market lookup confirmed that this position is still open."
+            "An authoritative live market lookup confirmed that this position is still open."
+            if current_market_is_open
+            else "This row still looks like an economically active Bullpen position."
         ),
         is_claimable=False,
         claimable_value_usd=None,

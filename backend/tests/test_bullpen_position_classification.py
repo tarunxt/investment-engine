@@ -8,7 +8,10 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from app.domains.polymarket.logger import redact_secrets
-from app.domains.polymarket.position_classification import classify_bullpen_position
+from app.domains.polymarket.position_classification import (
+    BULLPEN_POSITION_CLASSIFIER_VERSION,
+    classify_bullpen_position,
+)
 
 
 def test_resolved_zero_payout_residue_is_not_claimable():
@@ -70,6 +73,27 @@ def test_authoritative_open_market_overrides_stale_redeemable_evidence():
     assert classification.state == "active"
     assert classification.is_claimable is False
     assert classification.claimable_value_usd is None
+
+
+def test_authoritative_closed_market_can_never_remain_active():
+    classification = classify_bullpen_position(
+        {
+            "market": "Explicitly closed market",
+            "outcome": "No",
+            "shares": 8,
+            "current_price": 0.74,
+            "current_value": 5.92,
+            "resolution_status": "open",
+            "end_date": "2026-08-22",
+        },
+        authoritative_market_is_open=False,
+        now=datetime(2026, 7, 21, 0, 0, tzinfo=UTC),
+    )
+
+    assert BULLPEN_POSITION_CLASSIFIER_VERSION == 4
+    assert classification.state == "stale_or_unknown"
+    assert classification.is_claimable is False
+    assert "not open" in classification.reason
 
 
 def test_unresolved_missing_price_stays_stale_unknown():

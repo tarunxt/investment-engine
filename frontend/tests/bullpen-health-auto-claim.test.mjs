@@ -224,6 +224,14 @@ test("frontend positions polling calls only the backend positions runtime endpoi
         payload: { positions: [], summary: {} },
         fetched_at: "2026-07-19T12:00:00+00:00",
         cli_version: "bullpen 0.1.115",
+        credential_artifact: {
+          path: "/home/investor/.config/bullpen/credentials.json",
+          inode: 42,
+          mtime_ns: 1_726_000_000_000,
+          size: 512,
+        },
+        account_identity: "0xa70-account",
+        position_classifier_version: 3,
         auth_checked_at: "2026-07-19T11:59:00+00:00",
         source: "live-cli",
         freshness_state: "fresh",
@@ -261,6 +269,70 @@ test("frontend positions polling calls only the backend positions runtime endpoi
   assert.equal(payload.liveAvailable, true);
   assert.equal(payload.positionsSource, "live-cli");
   assert.equal(payload.health?.message, "Bullpen live wallet snapshot is ready.");
+  assert.deepEqual(payload.lineage, {
+    accountIdentity: "0xa70-account",
+    credentialArtifact: {
+      inode: 42,
+      mtimeNs: 1_726_000_000_000,
+      size: 512,
+    },
+    positionClassifierVersion: 3,
+    source: "live-cli",
+    freshnessState: "fresh",
+  });
+  assert.equal(
+    "path" in payload.lineage.credentialArtifact,
+    false,
+  );
+  assert.deepEqual(
+    payload.lastSuccessfulLiveSnapshot.lineage,
+    payload.lineage,
+  );
+});
+
+test("frontend distinguishes a fresh shared refresh from a display-only cached snapshot", async () => {
+  let freshnessState = "fresh";
+  const { GET } = await loadBullpenPositionsRoute(async () => ({
+    ok: true,
+    snapshot: {
+      payload: { positions: [], summary: {} },
+      fetched_at: "2026-07-27T00:00:00+00:00",
+      source: "redis-cache",
+      freshness_state: freshnessState,
+      diagnostics: {
+        cache_status: "hit",
+        produced_by_another_refresh: true,
+      },
+    },
+    broker_health: {
+      ok: true,
+      checked_at: "2026-07-27T00:00:00+00:00",
+      message: "Broker health is ready.",
+    },
+  }));
+  const request = {
+    nextUrl: new URL("http://testserver/api/bullpen-ai/positions"),
+    cookies: {
+      get() {
+        return undefined;
+      },
+    },
+  };
+
+  const freshPayload = await (await GET(request)).json();
+  assert.equal(freshPayload.liveAvailable, true);
+  assert.equal(freshPayload.positionsSource, "redis-cache");
+  assert.equal(freshPayload.lineage.freshnessState, "fresh");
+
+  freshnessState = "cached";
+  const cachedPayload = await (await GET(request)).json();
+  assert.equal(cachedPayload.liveAvailable, false);
+  assert.equal(
+    cachedPayload.positionsSource,
+    "last-successful-live-snapshot",
+  );
+  assert.equal(cachedPayload.lineage.freshnessState, "cached");
+  assert.match(cachedPayload.fallback.message, /display only/i);
 });
 
 test("frontend source tree contains no Bullpen child_process or execFile runtime usage", () => {

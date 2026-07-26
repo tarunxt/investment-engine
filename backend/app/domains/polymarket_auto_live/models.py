@@ -147,7 +147,11 @@ class PolymarketAutoLiveDecisionRecord(Base, TimestampMixin):
     run: Mapped[PolymarketAutoLiveRunRecord] = relationship(back_populates="decisions")
     order_intents: Mapped[list[PolymarketAutoLiveOrderIntentRecord]] = relationship(
         back_populates="decision",
-        cascade="all, delete-orphan",
+        # The database FK is deliberately ``ON DELETE SET NULL`` because an
+        # order intent is durable financial evidence and must outlive a
+        # reconstructed decision row. ``delete-orphan`` contradicted that
+        # contract and could erase intents/attempts during decision repair.
+        passive_deletes=True,
     )
 
 

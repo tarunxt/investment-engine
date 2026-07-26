@@ -224,11 +224,11 @@ def _source_type(domain: str | None) -> str:
     for pattern, label in _OFFICIAL_HOST_PATTERNS:
         if pattern.search(domain):
             return label
-    if _MAJOR_NEWS_HOST_PATTERNS.search(domain):
+    if any(pattern.search(domain) for pattern in _MAJOR_NEWS_HOST_PATTERNS):
         return "major_news"
-    if _SPECIALIST_NEWS_HOST_PATTERNS.search(domain):
+    if any(pattern.search(domain) for pattern in _SPECIALIST_NEWS_HOST_PATTERNS):
         return "specialist_news"
-    if _AGGREGATOR_HOST_PATTERNS.search(domain):
+    if any(pattern.search(domain) for pattern in _AGGREGATOR_HOST_PATTERNS):
         return "aggregator"
     return "unknown"
 

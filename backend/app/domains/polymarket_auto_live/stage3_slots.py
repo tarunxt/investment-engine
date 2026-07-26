@@ -1,9 +1,47 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Iterable
 
 from app.domains.polymarket_auto_live.console_profile import ConsoleWalletPosition
+
+
+DEFAULT_AUTO_LIVE_BUY_BALANCE_BUFFER_USD = 1.0
+
+
+def auto_live_buy_balance_buffer_usd() -> float:
+    """Return the shared cash buffer applied by planning and reservation."""
+
+    try:
+        return max(
+            0.0,
+            float(
+                os.getenv(
+                    "AUTO_LIVE_BUY_BALANCE_BUFFER_USD",
+                    str(DEFAULT_AUTO_LIVE_BUY_BALANCE_BUFFER_USD),
+                )
+            ),
+        )
+    except ValueError:
+        return DEFAULT_AUTO_LIVE_BUY_BALANCE_BUFFER_USD
+
+
+def spendable_buy_cash_usd(
+    available_balance_usd: float | None,
+    *,
+    balance_buffer_usd: float | None = None,
+) -> float | None:
+    """Return gross wallet cash less the non-spendable execution buffer."""
+
+    if available_balance_usd is None:
+        return None
+    buffer_usd = (
+        auto_live_buy_balance_buffer_usd()
+        if balance_buffer_usd is None
+        else max(0.0, float(balance_buffer_usd))
+    )
+    return round(max(0.0, float(available_balance_usd) - buffer_usd), 2)
 
 
 @dataclass(frozen=True)
@@ -106,11 +144,18 @@ def classify_economic_slots(
             excluded.append(_position_record(position, reason="missing canonical market or side", canonical_key=key))
             continue
 
-        state_reason = excluded_states.get(str(position.classification or "").lower())
+        normalized_state = str(position.classification or "").lower()
+        state_reason = excluded_states.get(normalized_state)
         if state_reason is None and (
             position.is_claimable
-            or (position.claimable_value_usd or 0.0) > dust_threshold_usd
-            or (position.expected_payout_usdc or 0.0) > dust_threshold_usd
+            or (
+                normalized_state in {"", "unknown", "unclassified"}
+                and (
+                    (position.claimable_value_usd or 0.0) > dust_threshold_usd
+                    or (position.expected_payout_usdc or 0.0)
+                    > dust_threshold_usd
+                )
+            )
         ):
             state_reason = "positive-payout claimable position"
         if state_reason:

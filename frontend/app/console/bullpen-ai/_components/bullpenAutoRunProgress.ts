@@ -593,6 +593,13 @@ export function buildBullpenAutoRunWorkflowView(
   const stageResults = WORKFLOW_DEFINITIONS.map((definition, index) =>
     findWorkflowStageResult(normalizedRun, definition, index + 1),
   );
+  const hasPersistedStageEvidence = stageResults.some(
+    (stage) => stage !== null,
+  );
+  const activeStageEvidenceUnavailable =
+    normalizedRun !== null &&
+    !hasPersistedStageEvidence &&
+    (runStatus === "running" || runStatus === "confirming");
   const completedStageCount = stageResults.filter(
     (stage) => {
       const phase = getPhaseStatus(stage);
@@ -609,6 +616,13 @@ export function buildBullpenAutoRunWorkflowView(
     if (runningStageIndex >= 0) return runningStageIndex;
     if (runStatus === "confirming") return WORKFLOW_DEFINITIONS.length - 1;
     if (runStatus !== "running") return -1;
+    if (!hasPersistedStageEvidence) {
+      // A locally acknowledged run may briefly precede its persisted
+      // projection. Once an exact run exists, however, missing stage evidence
+      // must stay explicit; inventing Stage 1 made the dashboard contradict
+      // History for the same Stage 3 run.
+      return normalizedRun === null && pendingRunId ? 0 : -1;
+    }
     return Math.min(completedStageCount, WORKFLOW_DEFINITIONS.length - 1);
   })();
 
@@ -790,6 +804,8 @@ export function buildBullpenAutoRunWorkflowView(
   const allStagesFinished = stages.every((stage) => stage.state === "finished");
   const currentStageLabel = taskLifecycleLabel ?? (currentStage
     ? currentStage.title
+    : activeStageEvidenceUnavailable
+      ? "Current stage evidence unavailable"
     : runStatus === "partial_success"
       ? "Stage 3 finished with partial success"
       : allStagesFinished
@@ -813,6 +829,11 @@ export function buildBullpenAutoRunWorkflowView(
         )
       : currentStage
         ? `Current stage: ${currentStage.title}`
+        : activeStageEvidenceUnavailable
+          ? formatBullpenRunSummaryForMonitor(
+              normalizedRun?.summary,
+              "The run is active, but its compact stage evidence is unavailable. Refresh or open History for the exact run.",
+            )
         : runStatus === "confirming"
           ? formatBullpenRunSummaryForMonitor(
               normalizedRun?.summary,

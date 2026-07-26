@@ -300,9 +300,16 @@ async def test_get_summary_backfills_completed_run_decisions_from_stage3_payload
             assert limit in {10, None}
             return [run]
 
-        async def count_decisions_by_run(self, run_ids):
-            assert run_ids == [run.id]
-            return {run.id: len(stored_decisions)}
+        async def list_visible_decision_id_sets_by_run(
+            self,
+            user_id,
+            expected_sizes_by_run,
+        ):
+            assert user_id == 7
+            assert expected_sizes_by_run == {run.id: 1}
+            return {
+                run.id: {decision.id for decision in stored_decisions}
+            }
 
         async def replace_run_decisions_from_stage3_payload(self, user_id: int, next_run):
             assert user_id == 7
@@ -339,6 +346,73 @@ async def test_get_summary_backfills_completed_run_decisions_from_stage3_payload
     assert summary.recent_decisions[0].stage3_result == "SELECTED"
     assert summary.recent_decisions[0].stage3_final_rank == 1
     assert fake_session.commits >= 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "stored_ids",
+    [
+        # Same count but a stale row replaced the canonical decision.
+        {"decision-stale-same-count"},
+        # An over-count used to be incorrectly treated as already repaired.
+        {
+            "decision-run-recovery-market-1",
+            "decision-stale-extra",
+        },
+    ],
+)
+async def test_terminal_decision_reconciliation_compares_exact_canonical_ids(
+    stored_ids,
+):
+    run = BullpenAutoLiveRun(
+        id="run-summary-backfill",
+        triggered_by="manual",
+        status="completed",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        completed_at="2026-07-05T12:10:00+00:00",
+        summary="Completed.",
+        stage_results=[
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="completed",
+                reason="Stage 3 finished.",
+                outputs={"decision_rows": [_stage3_decision_row()]},
+                completed_at="2026-07-05T12:10:00+00:00",
+            )
+        ],
+    )
+    replacement_calls: list[str] = []
+
+    class _Repository:
+        async def list_visible_decision_id_sets_by_run(
+            self,
+            user_id: int,
+            expected_sizes_by_run,
+        ):
+            assert user_id == 7
+            assert expected_sizes_by_run == {run.id: 1}
+            return {run.id: set(stored_ids)}
+
+        async def replace_run_decisions_from_stage3_payload(
+            self,
+            user_id: int,
+            next_run: BullpenAutoLiveRun,
+        ):
+            assert user_id == 7
+            replacement_calls.append(next_run.id)
+            return 1
+
+    reconciled = await BullpenAutoLiveBot(
+        user_id=7
+    )._reconcile_terminal_stage3_decisions(
+        _Repository(),  # type: ignore[arg-type]
+        [run],
+    )
+
+    assert reconciled is True
+    assert replacement_calls == [run.id]
 
 
 def test_task_inspection_reuses_a_recent_snapshot(monkeypatch):

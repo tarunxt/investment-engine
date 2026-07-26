@@ -53,6 +53,7 @@ import {
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveRun,
+    BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
@@ -255,6 +256,10 @@ export interface IApiService {
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveHistoryPage>;
     getBullpenAutoLiveRun(runId: string, options?: ApiRequestControl): Promise<BullpenAutoLiveRun>;
+    getBullpenAutoLiveRunConsole(
+        runId: string,
+        options?: ApiRequestControl,
+    ): Promise<BullpenAutoLiveConsoleRunDetail>;
     getBullpenAutoLiveRunDecisions(
         runId: string,
         options?: ApiRequestControl,

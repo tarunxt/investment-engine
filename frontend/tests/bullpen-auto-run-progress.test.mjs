@@ -816,6 +816,33 @@ test("Bullpen auto-run workflow view does not show a failed run as actively work
   assert.equal(view.stages[0].tone, "blue");
 });
 
+test("Bullpen auto-run workflow does not fabricate Stage 1 for an active exact run with missing compact stages", async () => {
+  const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
+
+  const view = buildBullpenAutoRunWorkflowView({
+    id: "run-active-stage3",
+    triggered_by: "scheduler",
+    status: "running",
+    dry_run: false,
+    started_at: "2026-07-26T18:17:04Z",
+    summary: "Stage 3 attempted 7 durable order intents; 7 await retry.",
+    live_execution_requested: true,
+    live_execution_attempted: true,
+    decisions_count: 24,
+    orders_planned: 7,
+    orders_submitted: 0,
+    error_message: null,
+    guardrail_checks: [],
+    decision_ids: [],
+    stage_results: [],
+  });
+
+  assert.equal(view.currentStageLabel, "Current stage evidence unavailable");
+  assert.equal(view.stages.some((stage) => stage.isCurrent), false);
+  assert.equal(view.stages[0].state, "queued");
+  assert.match(view.statusCopy, /Stage 3 attempted 7 durable order intents/);
+});
+
 test("Bullpen auto-run workflow view starts Stage 1 immediately for a pending run", async () => {
   const { buildBullpenAutoRunWorkflowView } = await loadProgressModule();
 

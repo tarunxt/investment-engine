@@ -1,140 +1,101 @@
-# Bullpen Healthcheck Automation
+# Bullpen Passive Healthcheck
 
-Cred-X now exposes:
+The production timer is a read-only observer of the centralized backend Bullpen
+runtime. It reads the runtime broker's shared Redis health, authentication, and
+positions-snapshot metadata and atomically writes a bounded report. It never:
 
-- `GET /api/bullpen-ai/health`
-- `GET /api/bullpen-ai/positions`
-- `GET /polymarket/runtime/diagnostics`
-- `scripts/bullpen-healthcheck.ts`
+- spawns the Bullpen CLI;
+- runs an active doctor or refresh;
+- logs in or owns a second authentication session;
+- submits a trade, claim, redeem, approval, or any other external mutation;
+- updates or deletes broker cache keys;
+- writes raw positions, wallet identity, credential metadata, or secrets.
 
-The healthcheck script reads the live Bullpen wallet snapshot, retries Bullpen redeem/claim whenever resolved positions still have verified positive payouts, writes a JSON health report, and optionally posts the report to `BULLPEN_HEALTH_WEBHOOK_URL`.
+The frontend health and positions routes remain passive cache readers. The
+authenticated `GET /polymarket/runtime/diagnostics` endpoint is reserved for an
+explicit operator-triggered preflight; the timer does not call it.
 
-As of Sunday, July 19, 2026, ordinary runtime health polling is passive:
-`GET /api/bullpen-ai/health` and the frontend positions polling path must read
-cached broker/runtime metadata only and must not spawn Bullpen CLI subprocesses.
-Use `GET /polymarket/runtime/diagnostics` only for explicit operator-triggered
-active doctor/preflight checks.
+## Configuration
 
-## Required env
-
-Configure these in both `/etc/investor/backend.env` and `/etc/investor/frontend.env`
-on the server so the backend worker and frontend health checks read the same Bullpen
-credential store:
+Configure monitoring only in the canonical production backend environment file,
+`/etc/investor/backend.env`:
 
 ```env
-BULLPEN_BIN=/usr/local/bin/bullpen
-BULLPEN_HOME=/home/investor/.bullpen
-BULLPEN_CREDENTIALS_HOME=/home/investor/.bullpen
 BULLPEN_HEALTH_STATE_DIR=/home/investor/.bullpen-health
 BULLPEN_HEALTH_WEBHOOK_URL=
-BULLPEN_AUTO_CLAIM_RESOLVED=false
-BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS=60000
+BULLPEN_HEALTH_WEBHOOK_TIMEOUT_SECONDS=10
 ```
 
-`BULLPEN_HOME` / `BULLPEN_CREDENTIALS_HOME` should point at the same credential HOME
-used for the Bullpen login on the server. If the backend worker reads a different
-`HOME`, Cred-X can still show `Session expired` even when a manual Bullpen login
-looked successful in another shell context.
+`BULLPEN_HEALTH_STATE_DIR` must be an absolute, non-symlink directory. The
+healthcheck creates the report with mode `0600` and replaces it atomically:
 
-Bullpen credential homes are valid when they contain either `credentials.json.enc`
-or `credentials.json`. The encrypted `credentials.json.enc` file is the normal
-production credential artifact and should be treated as the canonical server login
-state.
+```text
+${BULLPEN_HEALTH_STATE_DIR}/bullpen-health.json
+```
 
-## Manual run
+The optional webhook receives that same sanitized report with a timeout clamped
+to 1 through 30 seconds. The webhook URL is never included in the report or
+printed to the journal.
 
-Run the healthcheck from the repo root:
+The former frontend TypeScript health runner and its auto-claim behavior are
+retired. `BULLPEN_AUTO_CLAIM_RESOLVED` and
+`BULLPEN_AUTO_CLAIM_RETRY_COOLDOWN_MS` no longer control monitoring. Historical
+`last-successful-live-snapshot.json` and `bullpen-auto-claim.json` files are not
+read, updated, or deleted automatically. Claims and redeems belong only to the
+durable Stage 3 execution path with its normal authorization and reconciliation
+guards.
+
+## Manual passive run
+
+Load the canonical backend environment, then invoke the backend virtualenv
+module:
 
 ```bash
-node scripts/bullpen-healthcheck.ts
+cd /srv/investor/backend
+set -a
+. /etc/investor/backend.env
+set +a
+.venv/bin/python -m app.domains.polymarket.passive_healthcheck
 ```
 
-The script writes:
+The command exits zero only when the cached broker report is healthy and the
+optional webhook, when configured, succeeds. Redis/cache read failures,
+unhealthy shared authentication state, report-write failures, and webhook
+delivery failures exit non-zero. None of these failure paths starts an active
+Bullpen operation.
 
-- `${BULLPEN_HEALTH_STATE_DIR}/bullpen-health.json`
-- `${BULLPEN_HEALTH_STATE_DIR}/last-successful-live-snapshot.json`
-- `${BULLPEN_HEALTH_STATE_DIR}/bullpen-auto-claim.json`
+## systemd
 
-If the live CLI check fails, or if an automatic redeem/claim attempt fails, the script exits non-zero so `systemd`, `cron`, or external monitoring can alert.
+Deployment renders and installs:
 
-## systemd every 5 minutes
+- `credx-bullpen-healthcheck.service`
+- `credx-bullpen-healthcheck.timer`
 
-Create `/etc/systemd/system/credx-bullpen-healthcheck.service`:
-
-```ini
-[Unit]
-Description=Cred-X Bullpen live wallet healthcheck
-After=network-online.target
-
-[Service]
-Type=oneshot
-WorkingDirectory=/srv/investor
-EnvironmentFile=/etc/investor/frontend.env
-ExecStart=/usr/bin/node /srv/investor/scripts/bullpen-healthcheck.ts
-User=investor
-Group=investor
-```
-
-Create `/etc/systemd/system/credx-bullpen-healthcheck.timer`:
-
-```ini
-[Unit]
-Description=Run Cred-X Bullpen healthcheck every 5 minutes
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-Unit=credx-bullpen-healthcheck.service
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable it:
+The service runs the backend module as the application user with
+`/etc/investor/backend.env`; the timer runs five minutes after boot and every
+five minutes thereafter.
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now credx-bullpen-healthcheck.timer
-sudo systemctl status credx-bullpen-healthcheck.timer
-```
-
-Inspect recent runs:
-
-```bash
+sudo systemctl status credx-bullpen-healthcheck.timer --no-pager
+sudo systemctl start credx-bullpen-healthcheck.service
 journalctl -u credx-bullpen-healthcheck.service -n 50 --no-pager
 ```
 
-## cron every 5 minutes
+## Interpreting the report
 
-If you prefer cron, add:
+The report contains:
 
-```cron
-*/5 * * * * cd /srv/investor && set -a && . /etc/investor/frontend.env && set +a && /usr/bin/node scripts/bullpen-healthcheck.ts >> /var/log/credx-bullpen-healthcheck.log 2>&1
-```
+- `ok`, `classification`, and a redacted bounded message;
+- boolean and timestamp-only shared authentication status;
+- timestamp, source, freshness, and classifier version for the cached positions
+  snapshot;
+- a bounded, redacted last-failure summary when one exists.
 
-## Operator action
+It deliberately omits the account identity, wallet address, credential
+artifact, command path, effective home, raw snapshot payload, position rows, and
+runtime diagnostics.
 
-The health endpoint and Bullpen popup will classify failures as:
-
-- `AUTH_EXPIRED`
-- `NETWORK_ERROR`
-- `BINARY_MISSING`
-- `JSON_PARSE_ERROR`
-- `TIMEOUT`
-- `UNKNOWN_ERROR`
-
-If the UI shows `AUTH_EXPIRED`, re-login on the server using the configured `HOME`
-from `/etc/investor/frontend.env` and `/etc/investor/backend.env`:
-
-```bash
-sudo -u investor -H /usr/local/bin/bullpen login --no-browser
-sudo -u investor -H /usr/local/bin/bullpen polymarket positions --output json
-sudo systemctl restart \
-  investor-backend \
-  investor-celery-worker \
-  investor-celery-email-worker \
-  investor-celery-auto-live-worker \
-  investor-celery-beat-worker
-```
-
-Do not trade or auto-claim based on tracked fallback data or a stale cached live snapshot.
+If shared authentication is unhealthy, perform the normal operator login and
+active diagnostic workflow. Do not bypass doctor, wallet-route, balance,
+market-state, or Stage 3 safety gates, and do not trade or claim from a stale
+monitoring report.

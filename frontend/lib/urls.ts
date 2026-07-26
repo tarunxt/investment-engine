@@ -244,6 +244,8 @@ const bullpenAutoLiveApiUrls = {
     }`,
   run: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}`,
+  runConsole: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/console`,
   runDecisions: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/decisions`,
   runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,

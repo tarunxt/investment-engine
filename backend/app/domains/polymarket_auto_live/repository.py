@@ -2,23 +2,29 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from math import ceil
-from typing import Iterable, Sequence
+from types import SimpleNamespace
+from typing import Iterable, Mapping, Sequence
 
 from pydantic import ValidationError
-from sqlalchemy import Select, desc, func, select
+from sqlalchemy import Select, and_, desc, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.console_projection import (
     CONSOLE_HISTORY_MAX_SIZE,
+    CONSOLE_PROJECTION_VERSION,
     build_decision_console_projection,
     build_history_item,
     build_run_console_projection,
+    build_verified_stage1_portfolio_snapshot,
+    canonical_workflow_stage_results,
     projected_run_payload,
+    workflow_stage_key,
 )
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
+    PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLivePositionRecord,
     PolymarketAutoLiveRunRecord,
     PolymarketAutoLiveSettingsRecord,
@@ -30,6 +36,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
     BullpenAutoLiveState,
+    BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
 
 logger = get_logger("app.domains.polymarket_auto_live.repository")
@@ -42,6 +49,17 @@ VALID_AUTO_LIVE_STATUSES = {
     "not-configured",
 }
 ACTIVE_AUTO_LIVE_RUN_STATUSES = ("running", "confirming")
+TERMINAL_AUTO_LIVE_INTENT_STATUSES = frozenset(
+    {
+        "CONFIRMED",
+        "FILLED",
+        "DEFERRED",
+        "CANCELLED",
+        "FAILED_PERMANENT",
+        "REJECTED",
+        "TIMED_OUT",
+    }
+)
 
 LEGACY_AUTO_LIVE_STATUS_MAP = {
     "idle": "stopped",
@@ -53,6 +71,39 @@ LEGACY_AUTO_LIVE_STATUS_MAP = {
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+def _has_nonterminal_intent(*, user_id: int):
+    intent = PolymarketAutoLiveOrderIntentRecord
+    run = PolymarketAutoLiveRunRecord
+    return exists(
+        select(1)
+        .select_from(intent)
+        .where(intent.user_id == user_id)
+        .where(intent.run_id == run.id)
+        .where(intent.status.not_in(TERMINAL_AUTO_LIVE_INTENT_STATUSES))
+    )
+
+
+def _active_run_filter(*, user_id: int):
+    """Keep legacy orphan ``confirming`` rows from becoming active forever."""
+
+    run = PolymarketAutoLiveRunRecord
+    return or_(
+        run.status == "running",
+        and_(
+            run.status == "confirming",
+            _has_nonterminal_intent(user_id=user_id),
+        ),
+    )
+
+
+def _dashboard_relevant_run_filter(*, user_id: int):
+    run = PolymarketAutoLiveRunRecord
+    return or_(
+        run.status != "confirming",
+        _has_nonterminal_intent(user_id=user_id),
+    )
 
 
 def _isoformat(value: datetime | None) -> str | None:
@@ -240,19 +291,17 @@ def projected_row_to_decision(row: object) -> BullpenAutoLiveDecision:
 def extract_stage3_decisions_from_run(
     run: BullpenAutoLiveRun,
 ) -> list[BullpenAutoLiveDecision] | None:
-    invest_stages = [
-        stage
-        for stage in run.stage_results
-        if (
-            isinstance(stage.outputs, dict)
-            and stage.outputs.get("workflow_stage_key") == "invest"
-        )
-        or stage.stage_number == 3
-    ]
-    if not invest_stages:
+    invest_stage = next(
+        (
+            stage
+            for stage in canonical_workflow_stage_results(run.stage_results)
+            if workflow_stage_key(stage) == "invest"
+        ),
+        None,
+    )
+    if invest_stage is None:
         return None
 
-    invest_stage = max(invest_stages, key=lambda stage: stage.stage_number)
     raw_rows = invest_stage.outputs.get("decision_rows")
     if not isinstance(raw_rows, list):
         return []
@@ -265,7 +314,10 @@ def extract_stage3_decisions_from_run(
             continue
 
         payload = dict(raw_row)
-        payload.setdefault("run_id", run.id)
+        # The containing durable run is authoritative.  A stale or malformed
+        # embedded row must never be able to move a recovered decision onto a
+        # different run (and potentially a different user's run).
+        payload["run_id"] = run.id
         payload.setdefault("created_at", fallback_created_at)
         payload.setdefault("updated_at", fallback_updated_at or fallback_created_at)
         try:
@@ -309,6 +361,8 @@ def apply_run_to_record(
     *,
     user_id: int,
 ) -> None:
+    if record.id != run.id or record.user_id != user_id:
+        raise ValueError("Auto-Live run ownership mismatch.")
     record.id = run.id
     record.user_id = user_id
     record.status = run.status
@@ -346,10 +400,20 @@ def apply_decision_to_record(
     decision: BullpenAutoLiveDecision,
     *,
     user_id: int,
+    owning_run_id: str | None = None,
 ) -> None:
+    canonical_run_id = owning_run_id or decision.run_id
+    if (
+        record.id != decision.id
+        or record.user_id != user_id
+        or record.run_id != canonical_run_id
+    ):
+        raise ValueError("Auto-Live decision ownership mismatch.")
+    if decision.run_id != canonical_run_id:
+        decision = decision.model_copy(update={"run_id": canonical_run_id})
     record.id = decision.id
     record.user_id = user_id
-    record.run_id = decision.run_id
+    record.run_id = canonical_run_id
     record.market_id = decision.market_id
     record.slug = decision.slug
     record.market_title = decision.market_title
@@ -360,6 +424,38 @@ def apply_decision_to_record(
     record.score = decision.score
     record.console_projection = build_decision_console_projection(decision)
     record.payload = decision_to_record_payload(decision)
+
+
+def visible_auto_live_decision_filter():
+    """Exclude durable decision rows superseded by run reconciliation."""
+
+    record = PolymarketAutoLiveDecisionRecord
+    return (
+        func.coalesce(
+            record.payload["_console_reconciliation_state"].as_string(),
+            "active",
+        )
+        != "superseded"
+    )
+
+
+def _visible_decision_filter():
+    """Backward-compatible private alias for existing repository queries."""
+
+    return visible_auto_live_decision_filter()
+
+
+def _mark_decision_superseded(
+    record: PolymarketAutoLiveDecisionRecord,
+) -> None:
+    payload = _payload_or_default(record.payload)
+    payload["_console_reconciliation_state"] = "superseded"
+    payload["_console_superseded_at"] = utc_now().isoformat()
+    record.payload = payload
+    # Keep the immutable decision and durable FK parent, but remove it from
+    # bounded live reads so reconstructed Stage 3 payloads cannot show both
+    # old and replacement decisions for the same run.
+    record.console_projection = None
 
 
 def active_position_query(user_id: int) -> Select[tuple[PolymarketAutoLivePositionRecord]]:
@@ -454,7 +550,7 @@ class AsyncPolymarketAutoLiveRepository:
         query = (
             select(PolymarketAutoLiveRunRecord)
             .where(PolymarketAutoLiveRunRecord.user_id == user_id)
-            .where(PolymarketAutoLiveRunRecord.status == "running")
+            .where(_active_run_filter(user_id=user_id))
             .order_by(
                 desc(PolymarketAutoLiveRunRecord.started_at),
                 desc(PolymarketAutoLiveRunRecord.created_at),
@@ -487,11 +583,7 @@ class AsyncPolymarketAutoLiveRepository:
                     PolymarketAutoLiveRunRecord.status,
                 )
                 .where(PolymarketAutoLiveRunRecord.user_id == user_id)
-                .where(
-                    PolymarketAutoLiveRunRecord.status.in_(
-                        ACTIVE_AUTO_LIVE_RUN_STATUSES
-                    )
-                )
+                .where(_active_run_filter(user_id=user_id))
                 .order_by(
                     desc(PolymarketAutoLiveRunRecord.started_at),
                     desc(PolymarketAutoLiveRunRecord.created_at),
@@ -568,10 +660,55 @@ class AsyncPolymarketAutoLiveRepository:
                     func.count(PolymarketAutoLiveDecisionRecord.id),
                 )
                 .where(PolymarketAutoLiveDecisionRecord.run_id.in_(tuple(run_ids)))
+                .where(_visible_decision_filter())
                 .group_by(PolymarketAutoLiveDecisionRecord.run_id)
             )
         ).all()
         return {str(run_id): int(count) for run_id, count in rows}
+
+    async def list_visible_decision_id_sets_by_run(
+        self,
+        user_id: int,
+        expected_sizes_by_run: Mapping[str, int],
+    ) -> dict[str, set[str]]:
+        """Return bounded current decision identity for terminal run repair.
+
+        Counts cannot detect an equal-size replacement or an over-counted
+        stale row. Fetching the canonical payload size plus one row detects
+        both cases without allowing a corrupt run to make history polling
+        hydrate an unbounded decision table.
+        """
+
+        normalized_expected_sizes = {
+            str(run_id): max(0, int(expected_size))
+            for run_id, expected_size in expected_sizes_by_run.items()
+        }
+        if not normalized_expected_sizes:
+            return {}
+        decision_ids: dict[str, set[str]] = {}
+        for run_id, expected_size in normalized_expected_sizes.items():
+            rows = (
+                await self.session.execute(
+                    select(PolymarketAutoLiveDecisionRecord.id)
+                    .where(
+                        PolymarketAutoLiveDecisionRecord.user_id == user_id
+                    )
+                    .where(
+                        PolymarketAutoLiveDecisionRecord.run_id == run_id
+                    )
+                    .where(_visible_decision_filter())
+                    .order_by(
+                        desc(PolymarketAutoLiveDecisionRecord.created_at),
+                        desc(PolymarketAutoLiveDecisionRecord.updated_at),
+                        desc(PolymarketAutoLiveDecisionRecord.id),
+                    )
+                    .limit(expected_size + 1)
+                )
+            ).scalars().all()
+            decision_ids[run_id] = {
+                str(decision_id) for decision_id in rows
+            }
+        return decision_ids
 
     async def replace_run_decisions_from_stage3_payload(
         self,
@@ -581,34 +718,52 @@ class AsyncPolymarketAutoLiveRepository:
         decisions = extract_stage3_decisions_from_run(run)
         if decisions is None:
             return 0
+        if not await self.run_exists_for_user(user_id, run.id):
+            raise ValueError("Auto-Live run not found.")
 
-        existing = (
-            await self.session.execute(
-                select(PolymarketAutoLiveDecisionRecord).where(
-                    PolymarketAutoLiveDecisionRecord.run_id == run.id
+        existing = {
+            row.id: row
+            for row in (
+                await self.session.execute(
+                    select(PolymarketAutoLiveDecisionRecord).where(
+                        PolymarketAutoLiveDecisionRecord.run_id == run.id
+                    )
                 )
-            )
-        ).scalars().all()
-        for row in existing:
-            await self.session.delete(row)
+            ).scalars().all()
+        }
 
+        incoming_ids = {decision.id for decision in decisions}
         for decision in decisions:
-            record = PolymarketAutoLiveDecisionRecord(
-                id=decision.id,
+            record = existing.get(decision.id)
+            if record is None:
+                record = PolymarketAutoLiveDecisionRecord(
+                    id=decision.id,
+                    user_id=user_id,
+                    run_id=run.id,
+                    market_id=decision.market_id,
+                    slug=decision.slug,
+                    market_title=decision.market_title,
+                    side=decision.side,
+                    decision=decision.decision,
+                    risk_status=decision.risk_status,
+                    edge_pp=decision.edge_pp,
+                    score=decision.score,
+                    payload={},
+                )
+                self.session.add(record)
+            apply_decision_to_record(
+                record,
+                decision,
                 user_id=user_id,
-                run_id=run.id,
-                market_id=decision.market_id,
-                slug=decision.slug,
-                market_title=decision.market_title,
-                side=decision.side,
-                decision=decision.decision,
-                risk_status=decision.risk_status,
-                edge_pp=decision.edge_pp,
-                score=decision.score,
-                payload={},
+                owning_run_id=run.id,
             )
-            apply_decision_to_record(record, decision, user_id=user_id)
-            self.session.add(record)
+        for decision_id, record in existing.items():
+            if decision_id not in incoming_ids:
+                _mark_decision_superseded(record)
+        # Never delete an existing decision during payload reconciliation.
+        # Durable intents use ``decision_id ON DELETE SET NULL`` and must not
+        # be cascade-deleted merely because a late/recovered payload contains
+        # a different subset of decision rows.
         await self.session.flush()
         return len(decisions)
 
@@ -653,6 +808,7 @@ class AsyncPolymarketAutoLiveRepository:
                     record.updated_at,
                 )
                 .where(record.user_id == user_id)
+                .where(_dashboard_relevant_run_filter(user_id=user_id))
                 .order_by(desc(record.started_at), desc(record.created_at))
                 .limit(1)
             )
@@ -665,6 +821,306 @@ class AsyncPolymarketAutoLiveRepository:
             projection_available,
             _isoformat(row.updated_at) or run.started_at,
         )
+
+    async def get_projected_run_for_user(
+        self,
+        user_id: int,
+        run_id: str,
+    ) -> tuple[BullpenAutoLiveRun, bool, str] | None:
+        """Read one exact bounded projection without selecting the TOAST payload."""
+
+        record = PolymarketAutoLiveRunRecord
+        row = (
+            await self.session.execute(
+                select(
+                    record.id,
+                    record.status,
+                    record.triggered_by,
+                    record.dry_run,
+                    record.started_at,
+                    record.completed_at,
+                    record.live_execution_requested,
+                    record.live_execution_attempted,
+                    record.decisions_count,
+                    record.orders_planned,
+                    record.orders_submitted,
+                    record.summary,
+                    record.error_message,
+                    record.console_projection,
+                    record.updated_at,
+                )
+                .where(record.user_id == user_id)
+                .where(record.id == run_id)
+                .limit(1)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        run, projection_available = projected_row_to_run(row)
+        return (
+            run,
+            projection_available,
+            _isoformat(row.updated_at) or run.started_at,
+        )
+
+    async def get_console_run_snapshot_for_user(
+        self,
+        user_id: int,
+        run_id: str,
+        *,
+        decision_limit: int,
+        visible_id_limit: int,
+    ) -> (
+        tuple[
+            BullpenAutoLiveRun,
+            bool,
+            str,
+            list[BullpenAutoLiveDecision],
+            list[str],
+        ]
+        | None
+    ):
+        """Read the exact run and its current decisions in one DB snapshot.
+
+        PostgreSQL's default READ COMMITTED isolation gives each statement a
+        new snapshot.  Fetching the run, rows, and IDs with separate SELECTs
+        could therefore combine two Stage 3 reconciliation generations.  A
+        single bounded CTE/outer-join statement makes the projection coherent
+        without loading either immutable full payload.
+        """
+
+        normalized_decision_limit = max(1, min(decision_limit, 50))
+        normalized_visible_id_limit = max(1, min(visible_id_limit, 201))
+        row_limit = max(
+            normalized_decision_limit,
+            normalized_visible_id_limit,
+        )
+        run_record = PolymarketAutoLiveRunRecord
+        decision_record = PolymarketAutoLiveDecisionRecord
+        exact_run = (
+            select(
+                run_record.id,
+                run_record.status,
+                run_record.triggered_by,
+                run_record.dry_run,
+                run_record.started_at,
+                run_record.completed_at,
+                run_record.live_execution_requested,
+                run_record.live_execution_attempted,
+                run_record.decisions_count,
+                run_record.orders_planned,
+                run_record.orders_submitted,
+                run_record.summary,
+                run_record.error_message,
+                run_record.console_projection,
+                run_record.updated_at,
+            )
+            .where(run_record.user_id == user_id)
+            .where(run_record.id == run_id)
+            .limit(1)
+            .cte("exact_console_run")
+        )
+        rows = (
+            await self.session.execute(
+                select(
+                    *exact_run.c,
+                    decision_record.id.label("decision_record_id"),
+                    decision_record.run_id.label("decision_record_run_id"),
+                    decision_record.market_id.label("decision_record_market_id"),
+                    decision_record.slug.label("decision_record_slug"),
+                    decision_record.market_title.label(
+                        "decision_record_market_title"
+                    ),
+                    decision_record.side.label("decision_record_side"),
+                    decision_record.decision.label("decision_record_action"),
+                    decision_record.risk_status.label(
+                        "decision_record_risk_status"
+                    ),
+                    decision_record.edge_pp.label("decision_record_edge_pp"),
+                    decision_record.score.label("decision_record_score"),
+                    decision_record.console_projection.label(
+                        "decision_record_console_projection"
+                    ),
+                    decision_record.created_at.label(
+                        "decision_record_created_at"
+                    ),
+                    decision_record.updated_at.label(
+                        "decision_record_updated_at"
+                    ),
+                )
+                .select_from(
+                    exact_run.outerjoin(
+                        decision_record,
+                        and_(
+                            decision_record.user_id == user_id,
+                            decision_record.run_id == exact_run.c.id,
+                            decision_record.console_projection.is_not(None),
+                            _visible_decision_filter(),
+                        ),
+                    )
+                )
+                .order_by(
+                    desc(decision_record.created_at).nulls_last(),
+                    desc(decision_record.updated_at).nulls_last(),
+                    desc(decision_record.id).nulls_last(),
+                )
+                .limit(row_limit)
+            )
+        ).all()
+        if not rows:
+            return None
+
+        first_row = rows[0]
+        run, projection_available = projected_row_to_run(first_row)
+        decisions: list[BullpenAutoLiveDecision] = []
+        visible_decision_ids: list[str] = []
+        for row in rows:
+            decision_id = row.decision_record_id
+            if decision_id is None:
+                continue
+            visible_decision_ids.append(str(decision_id))
+            if len(visible_decision_ids) > normalized_decision_limit:
+                continue
+            projected_row = SimpleNamespace(
+                id=decision_id,
+                run_id=row.decision_record_run_id,
+                market_id=row.decision_record_market_id,
+                slug=row.decision_record_slug,
+                market_title=row.decision_record_market_title,
+                side=row.decision_record_side,
+                decision=row.decision_record_action,
+                risk_status=row.decision_record_risk_status,
+                edge_pp=row.decision_record_edge_pp,
+                score=row.decision_record_score,
+                console_projection=row.decision_record_console_projection,
+                created_at=row.decision_record_created_at,
+                updated_at=row.decision_record_updated_at,
+            )
+            try:
+                decisions.append(projected_row_to_decision(projected_row))
+            except (ValidationError, ValueError) as exc:
+                logger.warning(
+                    "Skipping malformed Auto-Live decision console projection %s: %s",
+                    decision_id,
+                    exc,
+                )
+        return (
+            run,
+            projection_available,
+            _isoformat(first_row.updated_at) or run.started_at,
+            decisions,
+            visible_decision_ids,
+        )
+
+    async def get_latest_verified_portfolio_snapshot(
+        self,
+        user_id: int,
+    ) -> BullpenAutoLiveVerifiedPortfolioSnapshot | None:
+        """Read one Stage 1-only legacy fallback without hydrating many runs."""
+
+        record = PolymarketAutoLiveRunRecord
+        stage = record.console_projection["stage_results"][0]
+        outputs = stage["outputs"]
+        wallet_status = func.lower(
+            func.coalesce(
+                outputs["wallet_snapshot_status"].as_string(),
+                "",
+            )
+        )
+        wallet_freshness = func.lower(
+            func.coalesce(
+                outputs["wallet_snapshot_freshness_state"].as_string(),
+                outputs["wallet_freshness_state"].as_string(),
+                "",
+            )
+        )
+        wallet_refresh_error = func.btrim(
+            func.coalesce(
+                outputs["wallet_refresh_error"].as_string(),
+                "",
+            )
+        )
+        wallet_market_enrichment_error = func.btrim(
+            func.coalesce(
+                outputs["wallet_market_enrichment_error"].as_string(),
+                "",
+            )
+        )
+        row = (
+            await self.session.execute(
+                select(
+                    record.id,
+                    record.status,
+                    record.triggered_by,
+                    record.dry_run,
+                    record.started_at,
+                    record.completed_at,
+                    record.live_execution_requested,
+                    record.live_execution_attempted,
+                    record.decisions_count,
+                    record.orders_planned,
+                    record.orders_submitted,
+                    record.summary,
+                    record.error_message,
+                    record.console_projection,
+                    record.updated_at,
+                )
+                .where(record.user_id == user_id)
+                .where(record.console_projection.is_not(None))
+                .where(_dashboard_relevant_run_filter(user_id=user_id))
+                .where(
+                    record.console_projection["version"].as_integer()
+                    == CONSOLE_PROJECTION_VERSION
+                )
+                .where(
+                    outputs["workflow_stage_key"].as_string() == "scan"
+                )
+                .where(stage["status"].as_string().in_(("pass", "warning")))
+                .where(
+                    or_(
+                        stage["completed_at"].as_string().is_not(None),
+                        outputs["phase_status"]
+                        .as_string()
+                        .in_(("completed",)),
+                    )
+                )
+                .where(outputs["active_positions_found"].is_not(None))
+                .where(
+                    func.coalesce(
+                        outputs["stage2_candidate_only"].as_boolean(),
+                        False,
+                    ).is_(False)
+                )
+                .where(
+                    func.coalesce(
+                        outputs[
+                            "blocked_by_stage1_wallet_refresh"
+                        ].as_boolean(),
+                        False,
+                    ).is_(False)
+                )
+                .where(wallet_refresh_error == "")
+                .where(wallet_market_enrichment_error == "")
+                .where(wallet_status == "fresh")
+                .where(wallet_freshness == "fresh")
+                .order_by(desc(record.started_at), desc(record.created_at))
+                .limit(1)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        try:
+            run, projection_available = projected_row_to_run(row)
+        except (ValidationError, ValueError) as exc:
+            logger.warning(
+                "Skipping malformed Auto-Live portfolio projection %s: %s",
+                getattr(row, "id", "unknown"),
+                exc,
+            )
+            return None
+        if not projection_available:
+            return None
+        return build_verified_stage1_portfolio_snapshot(run)
 
     async def list_run_history_page(
         self,
@@ -762,7 +1218,12 @@ class AsyncPolymarketAutoLiveRepository:
                 .where(record.user_id == user_id)
                 .where(record.run_id == run_id)
                 .where(record.console_projection.is_not(None))
-                .order_by(desc(record.created_at), desc(record.updated_at))
+                .where(_visible_decision_filter())
+                .order_by(
+                    desc(record.created_at),
+                    desc(record.updated_at),
+                    desc(record.id),
+                )
                 .limit(max(1, min(limit, 50)))
             )
         ).all()
@@ -778,6 +1239,33 @@ class AsyncPolymarketAutoLiveRepository:
                 )
         return decisions
 
+    async def list_visible_decision_ids_for_run(
+        self,
+        user_id: int,
+        run_id: str,
+        *,
+        limit: int = 201,
+    ) -> list[str]:
+        """Return bounded current decision identity without hydrating payloads."""
+
+        record = PolymarketAutoLiveDecisionRecord
+        rows = (
+            await self.session.execute(
+                select(record.id)
+                .where(record.user_id == user_id)
+                .where(record.run_id == run_id)
+                .where(record.console_projection.is_not(None))
+                .where(_visible_decision_filter())
+                .order_by(
+                    desc(record.created_at),
+                    desc(record.updated_at),
+                    desc(record.id),
+                )
+                .limit(max(1, min(limit, 201)))
+            )
+        ).scalars().all()
+        return [str(decision_id) for decision_id in rows]
+
     async def list_decisions_for_run(
         self,
         user_id: int,
@@ -789,6 +1277,7 @@ class AsyncPolymarketAutoLiveRepository:
             select(PolymarketAutoLiveDecisionRecord)
             .where(PolymarketAutoLiveDecisionRecord.user_id == user_id)
             .where(PolymarketAutoLiveDecisionRecord.run_id == run_id)
+            .where(_visible_decision_filter())
             .order_by(
                 desc(PolymarketAutoLiveDecisionRecord.created_at),
                 desc(PolymarketAutoLiveDecisionRecord.updated_at),
@@ -825,6 +1314,7 @@ class AsyncPolymarketAutoLiveRepository:
         query = (
             select(PolymarketAutoLiveDecisionRecord)
             .where(PolymarketAutoLiveDecisionRecord.user_id == user_id)
+            .where(_visible_decision_filter())
             .order_by(
                 desc(PolymarketAutoLiveDecisionRecord.created_at),
                 desc(PolymarketAutoLiveDecisionRecord.updated_at),
@@ -881,7 +1371,7 @@ class SyncPolymarketAutoLiveRepository:
         query = (
             select(PolymarketAutoLiveRunRecord)
             .where(PolymarketAutoLiveRunRecord.user_id == user_id)
-            .where(PolymarketAutoLiveRunRecord.status == "running")
+            .where(_active_run_filter(user_id=user_id))
             .order_by(
                 desc(PolymarketAutoLiveRunRecord.started_at),
                 desc(PolymarketAutoLiveRunRecord.created_at),
@@ -960,6 +1450,7 @@ class SyncPolymarketAutoLiveRepository:
                 func.count(PolymarketAutoLiveDecisionRecord.id),
             )
             .where(PolymarketAutoLiveDecisionRecord.run_id.in_(tuple(run_ids)))
+            .where(_visible_decision_filter())
             .group_by(PolymarketAutoLiveDecisionRecord.run_id)
         ).all()
         return {str(run_id): int(count) for run_id, count in rows}
@@ -970,31 +1461,55 @@ class SyncPolymarketAutoLiveRepository:
         run_id: str,
         decisions: Iterable[BullpenAutoLiveDecision],
     ) -> None:
-        existing = self.session.execute(
-            select(PolymarketAutoLiveDecisionRecord).where(
-                PolymarketAutoLiveDecisionRecord.run_id == run_id
-            )
-        ).scalars().all()
-        for row in existing:
-            self.session.delete(row)
+        decisions = list(decisions)
+        owned_run_id = self.session.scalar(
+            select(PolymarketAutoLiveRunRecord.id)
+            .where(PolymarketAutoLiveRunRecord.user_id == user_id)
+            .where(PolymarketAutoLiveRunRecord.id == run_id)
+            .limit(1)
+        )
+        if owned_run_id is None:
+            raise ValueError("Auto-Live run not found.")
+        existing = {
+            row.id: row
+            for row in self.session.execute(
+                select(PolymarketAutoLiveDecisionRecord).where(
+                    PolymarketAutoLiveDecisionRecord.run_id == run_id
+                )
+            ).scalars().all()
+        }
 
+        incoming_ids = {decision.id for decision in decisions}
         for decision in decisions:
-            record = PolymarketAutoLiveDecisionRecord(
-                id=decision.id,
+            record = existing.get(decision.id)
+            if record is None:
+                record = PolymarketAutoLiveDecisionRecord(
+                    id=decision.id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    market_id=decision.market_id,
+                    slug=decision.slug,
+                    market_title=decision.market_title,
+                    side=decision.side,
+                    decision=decision.decision,
+                    risk_status=decision.risk_status,
+                    edge_pp=decision.edge_pp,
+                    score=decision.score,
+                    payload={},
+                )
+                self.session.add(record)
+            apply_decision_to_record(
+                record,
+                decision,
                 user_id=user_id,
-                run_id=run_id,
-                market_id=decision.market_id,
-                slug=decision.slug,
-                market_title=decision.market_title,
-                side=decision.side,
-                decision=decision.decision,
-                risk_status=decision.risk_status,
-                edge_pp=decision.edge_pp,
-                score=decision.score,
-                payload={},
+                owning_run_id=run_id,
             )
-            apply_decision_to_record(record, decision, user_id=user_id)
-            self.session.add(record)
+        for decision_id, record in existing.items():
+            if decision_id not in incoming_ids:
+                _mark_decision_superseded(record)
+        # Preserve any existing decision rows and their durable intent lineage.
+        # This method is intentionally idempotent/upsert-only despite its
+        # legacy name.
 
     def replace_run_decisions_from_stage3_payload(
         self,
@@ -1027,6 +1542,7 @@ class SyncPolymarketAutoLiveRepository:
         query = (
             select(PolymarketAutoLiveDecisionRecord)
             .where(PolymarketAutoLiveDecisionRecord.user_id == user_id)
+            .where(_visible_decision_filter())
             .order_by(
                 desc(PolymarketAutoLiveDecisionRecord.created_at),
                 desc(PolymarketAutoLiveDecisionRecord.updated_at),

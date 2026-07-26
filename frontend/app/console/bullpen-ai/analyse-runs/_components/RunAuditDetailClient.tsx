@@ -546,6 +546,27 @@ function renderSectionData(section: string, data: unknown) {
     const activePositions = asArray(stage.active_positions);
     const runStages = asArray(stage.run_stages);
     const verifiedPortfolio = asRecord(stage.verified_portfolio_snapshot);
+    const portfolioSnapshotAvailable =
+      verifiedPortfolio !== null &&
+      typeof verifiedPortfolio.verified === "boolean";
+    const portfolioSnapshotIsVerified =
+      portfolioSnapshotAvailable && verifiedPortfolio.verified === true;
+    const portfolioSnapshotStatus = portfolioSnapshotAvailable
+      ? portfolioSnapshotIsVerified
+        ? "Verified"
+        : "Unverified"
+      : "Unavailable";
+    const portfolioSnapshotMetricPrefix = portfolioSnapshotAvailable
+      ? portfolioSnapshotStatus
+      : "Portfolio Snapshot";
+    const portfolioSnapshotVerificationReason = portfolioSnapshotAvailable
+      ? stringValue(
+          verifiedPortfolio.verification_reason,
+          portfolioSnapshotIsVerified
+            ? "Stage 1 portfolio snapshot verification passed."
+            : "Stage 1 portfolio snapshot verification was not confirmed.",
+        )
+      : "No Stage 1 portfolio snapshot was captured.";
     const verifiedPositionRows = asArray(
       verifiedPortfolio?.active_positions_found,
     );
@@ -560,17 +581,25 @@ function renderSectionData(section: string, data: unknown) {
               { label: "Candidate Reviews", value: String(candidateReviews.length) },
               { label: "Active Positions", value: String(activePositions.length) },
               {
-                label: "Verified Portfolio Positions",
-                value: verifiedPortfolio
+                label: "Portfolio Snapshot Status",
+                value: portfolioSnapshotStatus,
+              },
+              {
+                label: "Verification Reason",
+                value: portfolioSnapshotVerificationReason,
+              },
+              {
+                label: `${portfolioSnapshotMetricPrefix} Portfolio Positions`,
+                value: portfolioSnapshotAvailable
                   ? String(verifiedPositionRows.length)
                   : "—",
               },
               {
-                label: "Verified Available Slots",
+                label: `${portfolioSnapshotMetricPrefix} Available Slots`,
                 value: String(verifiedPortfolio?.available_slots ?? "—"),
               },
               {
-                label: "Verified Trade Amount",
+                label: `${portfolioSnapshotMetricPrefix} Trade Amount`,
                 value:
                   typeof verifiedPortfolio?.trade_amount_usd === "number"
                     ? formatCurrency(verifiedPortfolio.trade_amount_usd)
@@ -597,8 +626,8 @@ function renderSectionData(section: string, data: unknown) {
         ) : null}
         <JsonPanel title="Scan Context" value={stage.scan_context} defaultOpen />
         <JsonPanel
-          title="Verified Stage 1 Portfolio Snapshot"
-          value={verifiedPortfolio}
+          title={`${portfolioSnapshotStatus} Stage 1 Portfolio Snapshot`}
+          value={portfolioSnapshotAvailable ? verifiedPortfolio : null}
           defaultOpen
         />
         <JsonPanel title="Run Stage Records" value={runStages} />

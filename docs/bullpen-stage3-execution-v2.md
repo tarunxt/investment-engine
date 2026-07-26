@@ -159,7 +159,68 @@ Sizing guard:
 
 - Fresh balance
 - Minus active durable reservations
+- Minus consumed BUY reservations whose fill is newer than that balance read
 - Minus `AUTO_LIVE_BUY_BALANCE_BUFFER_USD` safety buffer
+
+Reservation accounting is serialized for the host-global Bullpen credential
+account with a PostgreSQL lock on one stable user row around the active
+reservation sum and upsert. Reservations from every app user therefore share
+the same collateral scope as the singleton CLI runtime. This prevents two
+workers from each observing the same unreserved cash. Amount comparisons use
+integer cents at the execution boundary. For example, with `$3.44` fresh cash
+and the default `$1.00` buffer, two concurrent `$1.22` buys may reserve exactly
+`$2.44`; the buffer remains unavailable to both workers.
+
+The intent and latest attempt retain the identical
+`buy_cash_reservation_preflight` v2 calculation. A missing balance timestamp,
+an unseen concurrent consumed reservation, or insufficient unreserved cents
+blocks locally before Bullpen receives an order.
+
+The reservation preflight re-reads emergency-stop state, fresh balance,
+existing active reservations, market identity, quote, minimum order, capacity,
+duplicate exposure, intent generation, and remote-reference evidence. The
+attempt row owns the sanitized preflight result before a Bullpen write. A
+missing preflight proof is an audit finding only after an intent reaches a
+remote-write boundary; a local attempt that failed before that boundary keeps
+its explicit failed-preflight evidence.
+
+The same locked transaction performs the authoritative cross-run market fence.
+It matches all other durable BUYs by exact market ID, condition ID, or slug,
+regardless of side. Pending writes and terminal intents with a remote order,
+transaction, submission timestamp, uncertain-write marker, or active
+reservation block the new BUY until reconciliation persists explicit,
+quantity-known definitive zero fill. `TIMED_OUT` never implies zero fill. The
+bounded `buy_market_exposure_preflight` result is mirrored on the owning attempt
+before reservation; nonzero conflicts transition the candidate to a local,
+non-retrying deferred block without issuing an external write.
+
+## Stage 1 Portfolio Boundary
+
+Stage 3 consumes only a Stage 1 wallet snapshot that explicitly records both
+`wallet_snapshot_status=fresh` and
+`wallet_snapshot_freshness_state=fresh`. Missing lineage is not interpreted as
+fresh for legacy projections. Every positive-exposure wallet row with a stable
+market identity receives exact current-market enrichment. Fresh authoritative
+open-market evidence overrides stale raw resolved/redeemable hints. If exact
+identity or open/closed state cannot be verified, the row remains
+conservatively occupied, Stage 1 is degraded, and Stage 3 is blocked rather
+than sizing a replacement buy from a possibly false free slot.
+
+The small persisted console portfolio snapshot keeps active, claimable,
+settlement-pending, and excluded rows in separate bounded collections. Only
+`active` rows occupy Stage 3 slots. Claimable and diagnostic rows remain
+visible without inflating the active-position count.
+
+## Sell Preflight
+
+Sell intents now run the same immediate live preflight boundary as buys:
+current account identity, emergency stop, generation ownership, authoritative
+market state, available shares, and existing remote evidence are checked
+immediately before the write. A current authoritative `active`
+classification wins over stale raw resolved/closed flags; a sell cannot be
+silently suppressed by yesterday's wallet metadata. The finite primary,
+maximum, and FAK fallback chain remains fail-closed after any accepted,
+partially filled, ambiguous, or remotely referenced response.
 
 ## Reconciliation Rules
 

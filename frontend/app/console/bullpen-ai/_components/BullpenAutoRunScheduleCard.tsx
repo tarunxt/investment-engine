@@ -53,14 +53,27 @@ import {
 } from "@/lib/bullpenEventIdentityResolver";
 import {
   isActiveBullpenPosition,
+  isClaimableBullpenPosition,
+  resolveBullpenPreferredPortfolioValue,
+  resolveBullpenTotalPortfolioValue,
+  sumBullpenPortfolioPositionValue,
+  sumCurrentPositionValue,
   type BullpenActivePositionView,
+  type BullpenPositionsSnapshotLineage,
+  type BullpenPositionsSource,
   type BullpenPositionsSummary,
 } from "@/lib/bullpenPositions";
 import {
   resolveLatestVerifiedStage1Portfolio,
+  resolveVerifiedStage1PortfolioSnapshot,
+  selectLatestVerifiedStage1Portfolio,
   shouldUseVerifiedStage1PortfolioFallback,
 } from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
+import {
+  mergeBullpenConsoleDecisionProjection,
+  mergeBullpenConsoleRunProjection,
+} from "@/lib/bullpenRunConsoleDetail";
 import { APIError, RequestTimeoutError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
@@ -208,12 +221,16 @@ const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
+  onRefreshPortfolioPositions?: () => void | Promise<void>;
   buildRunNowRequest?: () =>
     | Promise<BullpenAutoLiveRunOnceRequest | null>
     | BullpenAutoLiveRunOnceRequest
     | null;
   activePositions?: BullpenActivePositionView[];
   activePositionsSummary?: BullpenPositionsSummary | null;
+  positionsSource?: BullpenPositionsSource | null;
+  positionsUpdatedAt?: string | null;
+  positionsLineage?: BullpenPositionsSnapshotLineage | null;
   activePositionQuestions?: BullpenQuestionRow[];
   hasActivePositionsSnapshot?: boolean;
   recentDecisions?: BullpenAutoLiveDecision[];
@@ -271,6 +288,8 @@ type ScanCandidateDialogMode = "fresh-opportunities" | "active-positions";
 type RunDetailDialogState = {
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
+  decisionListTruncated?: boolean;
+  decisionListLimit?: number | null;
 };
 
 type StageTwoInvestEventsDialogState = {
@@ -4415,6 +4434,13 @@ function RunDetailDialog({
             onOpenPlannedOrderDetail={setPlannedOrderDetail}
             onOpenLlmOdds={(decision) => setDecisionLlmOdds({ decision })}
           />
+          {state.decisionListTruncated ? (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Showing the newest {decisions.length} of {run.decisions_count}{" "}
+              decisions while this run is active. The bounded live refresh
+              preserves already loaded rows.
+            </p>
+          ) : null}
           <RunDetailWorkerStages
             run={run}
             decisions={decisions}
@@ -8287,6 +8313,11 @@ function BullpenPortfolioSnapshot({
   hasActivePositionsSnapshot,
   positionsVerifiedByStage1,
   positionsVerifiedAt,
+  positionsSource,
+  positionsUpdatedAt,
+  positionsLineage,
+  verifiedActivePositionsTotal,
+  verifiedActivePositionsTruncated,
   verifiedCashInHandUsd,
   refreshing,
   historicalRuns,
@@ -8303,6 +8334,11 @@ function BullpenPortfolioSnapshot({
   hasActivePositionsSnapshot: boolean;
   positionsVerifiedByStage1: boolean;
   positionsVerifiedAt: string | null;
+  positionsSource: BullpenPositionsSource | null;
+  positionsUpdatedAt: string | null;
+  positionsLineage: BullpenPositionsSnapshotLineage | null;
+  verifiedActivePositionsTotal: number | null;
+  verifiedActivePositionsTruncated: boolean;
   verifiedCashInHandUsd: number | null;
   refreshing: boolean;
   historicalRuns: BullpenAutoLiveRun[];
@@ -8320,16 +8356,40 @@ function BullpenPortfolioSnapshot({
     ? liveBalance
     : lastUsableBalance;
   const usableBalance = isUsableBullpenBalance(balance);
-  const accountValue =
-    activePositionsSummary?.walletValue ??
-    activePositionsSummary?.totalValue ??
-    (usableBalance ? (balance.account_value_usd ?? null) : null);
-  const cash =
-    activePositionsSummary?.cashBalance ??
-    (usableBalance ? (balance.available_balance_usd ?? null) : null) ??
-    verifiedCashInHandUsd;
-  const pnl = usableBalance ? (balance.pnl_usd ?? null) : null;
-  const verifiedPositionsUpnl = activePositions.reduce(
+  const accountValue = resolveBullpenPreferredPortfolioValue([
+    positionsVerifiedByStage1 ? null : activePositionsSummary?.walletValue,
+    positionsVerifiedByStage1 || !usableBalance
+      ? null
+      : balance.account_value_usd,
+    positionsVerifiedByStage1 ? null : activePositionsSummary?.totalValue,
+  ]);
+  const positionsSnapshotCash =
+    typeof activePositionsSummary?.cashBalance === "number" &&
+    Number.isFinite(activePositionsSummary.cashBalance)
+      ? activePositionsSummary.cashBalance
+      : null;
+  const cash = positionsVerifiedByStage1
+    ? resolveBullpenPreferredPortfolioValue([verifiedCashInHandUsd])
+    : resolveBullpenPreferredPortfolioValue([
+        positionsSnapshotCash,
+        usableBalance ? balance.available_balance_usd : null,
+      ]);
+  const cashUsesSeparateBalanceSnapshot =
+    !positionsVerifiedByStage1 &&
+    positionsSnapshotCash === null &&
+    usableBalance;
+  const pnl = positionsVerifiedByStage1
+    ? null
+    : usableBalance
+      ? (balance.pnl_usd ?? null)
+      : null;
+  const verifiedActivePositions = activePositions.filter(
+    isActiveBullpenPosition,
+  );
+  const verifiedClaimablePositions = activePositions.filter(
+    isClaimableBullpenPosition,
+  );
+  const verifiedPositionsUpnl = verifiedActivePositions.reduce(
     (total, position) => total + (position.unrealizedPnl ?? 0),
     0,
   );
@@ -8338,13 +8398,16 @@ function BullpenPortfolioSnapshot({
     : activePositionsSummary?.unrealizedPnl ??
       (usableBalance ? (balance.upnl_usd ?? null) : null);
   const openPositions = state?.open_positions ?? [];
-  const activePositionCount = positionsVerifiedByStage1
-    ? activePositions.length
-    : hasActivePositionsSnapshot
-    ? (activePositionsSummary?.activeCount ?? activePositions.length)
+  // The rendered rows are the reconciled evidence. Do not let a stale scalar
+  // summary reintroduce the same zero-position contradiction. Claimable rows
+  // are rendered by the claim metric and must not inflate Active Positions.
+  const activePositionCount = hasActivePositionsSnapshot
+    ? positionsVerifiedByStage1 && verifiedActivePositionsTotal !== null
+      ? verifiedActivePositionsTotal
+      : verifiedActivePositions.length
     : openPositions.filter((position) => position.shares > 0).length;
   const activeInvested = hasActivePositionsSnapshot
-    ? activePositions.reduce((total, position) => {
+    ? verifiedActivePositions.reduce((total, position) => {
         const amount =
           typeof position.costBasis === "number" ? position.costBasis : 0;
         return total + amount;
@@ -8361,41 +8424,73 @@ function BullpenPortfolioSnapshot({
       text.includes("pending")
     );
   });
-  const claimableAmount = claimableRows.reduce(
-    (total, trade) => total + Math.max(0, trade.amount || 0),
-    0,
-  );
-  const lastRefresh = balance?.checked_at
-    ? formatIstDateTime(balance.checked_at)
-    : "—";
+  const claimableEventCount = hasActivePositionsSnapshot
+    ? verifiedClaimablePositions.length
+    : claimableRows.length;
+  const claimableAmount = hasActivePositionsSnapshot
+    ? verifiedClaimablePositions.reduce(
+        (total, position) =>
+          total +
+          Math.max(
+            0,
+            position.claimableValue ??
+              position.expectedPayoutUsd ??
+              position.currentValue ??
+              0,
+          ),
+        0,
+      )
+    : claimableRows.reduce(
+        (total, trade) => total + Math.max(0, trade.amount || 0),
+        0,
+      );
+  const positionsRefresh = positionsVerifiedByStage1
+    ? positionsVerifiedAt
+    : positionsUpdatedAt;
+  const balanceRefresh = balance?.checked_at ?? null;
   const positionVerification = positionsVerifiedByStage1
     ? `Positions verified by Stage 1: ${formatIstDateTime(positionsVerifiedAt)}`
-    : null;
+    : positionsSource === "redis-cache"
+      ? "Positions verified by a fresh shared Bullpen refresh"
+    : positionsSource === "tracked-positions"
+      ? "Tracked-position fallback: stale, read-only wallet rows"
+      : null;
+  const lineageAccount = positionsLineage?.accountIdentity?.trim() || null;
+  const displayedLineageAccount =
+    lineageAccount && lineageAccount.length > 14
+      ? `${lineageAccount.slice(0, 7)}…${lineageAccount.slice(-5)}`
+      : lineageAccount;
+  const displayedLineageSource =
+    positionsLineage?.source?.trim() || positionsSource;
+  const displayedClassifierVersion =
+    typeof positionsLineage?.positionClassifierVersion === "number" &&
+    Number.isFinite(positionsLineage.positionClassifierVersion)
+      ? positionsLineage.positionClassifierVersion
+      : null;
   const pendingConfirmationsCount =
     state?.live.pending_confirmations.length ?? 0;
   const balanceStatus = liveBalance?.status ?? balance?.status ?? "not loaded";
   const currentInvestmentsValue = hasActivePositionsSnapshot
-    ? activePositions.reduce((total, position) => {
-        const value =
-          typeof position.currentValue === "number" ? position.currentValue : 0;
-        return total + value;
-      }, 0)
+    ? sumCurrentPositionValue(verifiedActivePositions)
     : accountValue;
-  const displayedTotalPortfolioValue = positionsVerifiedByStage1
-    ? cash !== null || currentInvestmentsValue !== null
-      ? (cash ?? 0) + (currentInvestmentsValue ?? 0)
-      : null
-    : activePositionsSummary?.totalValue ??
-      accountValue ??
-      (cash !== null || currentInvestmentsValue !== null
-        ? (cash ?? 0) + (currentInvestmentsValue ?? 0)
-        : null);
+  const currentPortfolioPositionsValue = hasActivePositionsSnapshot
+    ? sumBullpenPortfolioPositionValue(activePositions)
+    : currentInvestmentsValue;
+  const displayedTotalPortfolioValue = resolveBullpenTotalPortfolioValue({
+    walletValue: activePositionsSummary?.walletValue,
+    accountValue,
+    summaryTotalValue: activePositionsSummary?.totalValue,
+    cashBalance: cash,
+    positionsValue: currentPortfolioPositionsValue,
+    hasPositionsSnapshot: hasActivePositionsSnapshot,
+    preferVerifiedComponents: positionsVerifiedByStage1,
+  });
   const {
     activePositionQuestionByKey,
     activePositionsNeedingAttention,
     topInvestmentRows,
   } = buildBullpenInvestmentDisplay({
-    activePositions,
+    activePositions: verifiedActivePositions,
     activePositionQuestions,
     candidates: [],
     recentDecisions,
@@ -8518,11 +8613,15 @@ function BullpenPortfolioSnapshot({
     {
       label: "Cash in hand",
       value: formatMoney(cash),
-      detail: "Available pUSD balance",
+      detail: positionsVerifiedByStage1
+        ? "Available pUSD · Stage 1 snapshot"
+        : cashUsesSeparateBalanceSnapshot
+          ? `Available pUSD · balance snapshot ${formatIstDateTime(balanceRefresh)}`
+          : "Available pUSD · wallet positions snapshot",
     },
     {
       label: "Events available for claim",
-      value: claimableRows.length.toLocaleString("en-IN"),
+      value: claimableEventCount.toLocaleString("en-IN"),
       detail: formatMoney(claimableAmount),
     },
     {
@@ -8530,7 +8629,13 @@ function BullpenPortfolioSnapshot({
       value: activePositionCount.toLocaleString("en-IN"),
       detail: `${formatMoney(activeInvested)} invested`,
     },
-    { label: "PnL", value: formatMoney(pnl), detail: "Realized PnL" },
+    {
+      label: "PnL",
+      value: formatMoney(pnl),
+      detail: positionsVerifiedByStage1
+        ? "Unavailable in Stage 1 snapshot"
+        : `Realized PnL · balance snapshot ${formatIstDateTime(balanceRefresh)}`,
+    },
     { label: "uPnL", value: formatMoney(upnl), detail: "Unrealized PnL" },
     {
       label: "Live trades today",
@@ -8570,11 +8675,35 @@ function BullpenPortfolioSnapshot({
             Refresh
           </Button>
           <span className="text-right text-[11px] text-slate-400">
-            Last successful refresh: {lastRefresh}
+            Wallet positions refresh: {formatIstDateTime(positionsRefresh)}
           </span>
+          {usableBalance && !positionsVerifiedByStage1 ? (
+            <span className="text-right text-[11px] text-slate-400">
+              Balance refresh: {formatIstDateTime(balanceRefresh)}
+            </span>
+          ) : null}
           {positionVerification ? (
             <span className="text-right text-[11px] font-semibold text-emerald-300">
               {positionVerification}
+            </span>
+          ) : null}
+          {displayedLineageAccount ||
+            displayedLineageSource ||
+            displayedClassifierVersion !== null ? (
+            <span className="text-right text-[11px] text-sky-200">
+              {[
+                displayedLineageAccount
+                  ? `Wallet ${displayedLineageAccount}`
+                  : null,
+                displayedLineageSource
+                  ? `source ${displayedLineageSource}`
+                  : null,
+                displayedClassifierVersion !== null
+                  ? `classifier v${displayedClassifierVersion}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           ) : null}
         </div>
@@ -8612,8 +8741,14 @@ function BullpenPortfolioSnapshot({
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.22em] text-fuchsia-700">Events available for claim</p>
-                <h3 className="mt-1 text-xl font-semibold">Claimable events: {claimableRows.length}</h3>
-                <p className="mt-2 text-sm text-slate-600">Shows Bullpen live redeemed/claimable rows whose status or detail mentions claim, redeem, or pending.</p>
+                <h3 className="mt-1 text-xl font-semibold">
+                  Claimable events: {claimableEventCount}
+                </h3>
+                <p className="mt-2 text-sm text-slate-600">
+                  {hasActivePositionsSnapshot
+                    ? "Shows claimable rows from the same verified Bullpen wallet snapshot as the portfolio card."
+                    : "Shows Bullpen redeemed/claimable activity while the wallet snapshot is unavailable."}
+                </p>
               </div>
               <button
                 type="button"
@@ -8625,7 +8760,61 @@ function BullpenPortfolioSnapshot({
               </button>
             </div>
             <div className="flex-1 overflow-auto px-6 py-5">
-              {claimableRows.length ? (
+              {hasActivePositionsSnapshot ? (
+                verifiedClaimablePositions.length ? (
+                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      {[
+                        "S. No",
+                        "Market",
+                        "Outcome",
+                        "Shares",
+                        "Claimable value",
+                        "Status",
+                      ].map((heading) => (
+                        <th key={heading} className="px-4 py-3">
+                          {heading}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {verifiedClaimablePositions.map((position, index) => (
+                      <tr key={position.key} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-semibold tabular-nums">
+                          {index + 1}
+                        </td>
+                        <td className="min-w-[18rem] px-4 py-3 font-semibold text-slate-950">
+                          {position.marketTitle}
+                        </td>
+                        <td className="px-4 py-3">{position.outcome}</td>
+                        <td className="px-4 py-3 tabular-nums">
+                          {position.shares.toLocaleString("en-IN", {
+                            maximumFractionDigits: 4,
+                          })}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums">
+                          {formatMoney(
+                            position.claimableValue ??
+                              position.expectedPayoutUsd ??
+                              position.currentValue,
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {position.classificationReason}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  </table>
+                ) : (
+                  <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    No claimable Bullpen events are present in the current
+                    verified snapshot.
+                  </p>
+                )
+              ) : claimableRows.length ? (
                 <table className="min-w-full divide-y divide-slate-200 text-sm">
                   <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                     <tr>{["S. No", "Market", "Outcome", "Side", "Amount", "Shares", "Price", "PnL", "Status", "Updated"].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr>
@@ -8648,7 +8837,10 @@ function BullpenPortfolioSnapshot({
                   </tbody>
                 </table>
               ) : (
-                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">No claimable Bullpen events are available. The live feed did not return any rows containing claim, redeem, or pending status.</p>
+                <p className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  No claimable Bullpen activity is available while the wallet
+                  snapshot is unavailable.
+                </p>
               )}
             </div>
           </div>
@@ -8663,11 +8855,12 @@ function BullpenPortfolioSnapshot({
                   Active Bullpen Positions
                 </p>
                 <h3 className="mt-1 text-xl font-semibold">
-                  Active positions: {popupRows.length}
+                  Active positions: {activePositionCount}
                 </h3>
                 <p className="mt-2 text-sm text-slate-600">
-                  Shows green active positions and red Event Exit positions
-                  only.
+                  {verifiedActivePositionsTruncated
+                    ? `Showing ${popupRows.length} retained rows from the bounded verified snapshot.`
+                    : "Shows green active positions and red Event Exit positions only."}
                 </p>
               </div>
               <button
@@ -8886,9 +9079,13 @@ function BullpenPortfolioSnapshot({
 
 export function BullpenAutoRunScheduleCard({
   onRunCompleted,
+  onRefreshPortfolioPositions,
   buildRunNowRequest,
   activePositions = [],
   activePositionsSummary = null,
+  positionsSource = null,
+  positionsUpdatedAt = null,
+  positionsLineage = null,
   activePositionQuestions = [],
   hasActivePositionsSnapshot = false,
   recentDecisions = [],
@@ -8946,6 +9143,7 @@ export function BullpenAutoRunScheduleCard({
   const summaryAbortControllerRef = useRef<AbortController | null>(null);
   const portfolioLoadInFlightRef = useRef(false);
   const portfolioAbortControllerRef = useRef<AbortController | null>(null);
+  const onRefreshPortfolioPositionsRef = useRef(onRefreshPortfolioPositions);
   const [killedRunIds, setKilledRunIds] = useState<Set<string>>(() => new Set());
   const [runNowStartedAt, setRunNowStartedAt] = useState<string | null>(null);
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
@@ -8975,6 +9173,8 @@ export function BullpenAutoRunScheduleCard({
   const runHistoryOwnerKeyRef = useRef<string | null>(null);
   const runHistoryAbortControllerRef = useRef<AbortController | null>(null);
   const runHistoryDetailAbortControllerRef =
+    useRef<AbortController | null>(null);
+  const runDetailRefreshAbortControllerRef =
     useRef<AbortController | null>(null);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
@@ -9053,6 +9253,10 @@ export function BullpenAutoRunScheduleCard({
   useEffect(() => {
     markBullpenAutoRunPerformance("bullpen-controls-interactive");
   }, []);
+
+  useEffect(() => {
+    onRefreshPortfolioPositionsRef.current = onRefreshPortfolioPositions;
+  }, [onRefreshPortfolioPositions]);
 
   function clearAutoRunStatusRetry() {
     if (autoRunStatusRetryTimerRef.current !== null) {
@@ -9740,7 +9944,7 @@ export function BullpenAutoRunScheduleCard({
       setRunHistoryDetailLoadingId(item.id);
       setRunHistoryError(null);
       try {
-        const [run, decisions] = await Promise.all([
+        const [run, decisions, consoleDetail] = await Promise.all([
           apiService.getBullpenAutoLiveRun(item.id, {
             signal: controller.signal,
             timeoutMs: 10_000,
@@ -9749,18 +9953,69 @@ export function BullpenAutoRunScheduleCard({
             signal: controller.signal,
             timeoutMs: 10_000,
           }),
+          apiService
+            .getBullpenAutoLiveRunConsole(item.id, {
+              signal: controller.signal,
+              timeoutMs: 5_000,
+            })
+            .catch((nextError) => {
+              if (
+                controller.signal.aborted ||
+                isRequestAbort(nextError)
+              ) {
+                throw nextError;
+              }
+              // Legacy runs remain readable through the full frozen payload.
+              // For current projections this optional exact-run read supplies
+              // the authoritative visible decision IDs used below.
+              return null;
+            }),
         ]);
         if (controller.signal.aborted) return;
-        const stage =
+        const fullStage =
           buildBullpenAutoRunWorkflowView(run).stages.find(
             (workflowStage) => workflowStage.key === "invest",
           ) ?? null;
+        let detailRun = run;
+        let detailDecisions = mergeInvestStageDecisionRows({
+          stage: fullStage,
+          persistedDecisions: decisions,
+        });
+        let decisionListTruncated = false;
+        let decisionListLimit: number | undefined;
+        if (consoleDetail?.projection_available) {
+          const projectedStage =
+            buildBullpenAutoRunWorkflowView(consoleDetail.run).stages.find(
+              (workflowStage) => workflowStage.key === "invest",
+            ) ?? null;
+          detailRun = mergeBullpenConsoleRunProjection({
+            existing: run,
+            projected: consoleDetail.run,
+            projectionAvailable: true,
+          });
+          detailDecisions = mergeBullpenConsoleDecisionProjection({
+            existing: detailDecisions,
+            projected: mergeInvestStageDecisionRows({
+              stage: projectedStage,
+              persistedDecisions: consoleDetail.decisions,
+            }),
+            truncated: consoleDetail.decisions_truncated,
+            visibleDecisionIds: consoleDetail.visible_decision_ids,
+            visibleDecisionIdsTruncated:
+              consoleDetail.visible_decision_ids_truncated,
+          });
+          decisionListTruncated =
+            consoleDetail.visible_decision_ids_truncated ||
+            (consoleDetail.decisions_truncated &&
+              detailDecisions.length <
+                consoleDetail.visible_decision_ids.length);
+          decisionListLimit = consoleDetail.decisions_limit;
+        }
         setRunDetailDialog({
-          run,
-          decisions: mergeInvestStageDecisionRows({
-            stage,
-            persistedDecisions: decisions,
-          }),
+          run: detailRun,
+          decisions: detailDecisions,
+          decisionListTruncated,
+          decisionListLimit,
         });
         closeRunHistoryDialog();
       } catch (nextError) {
@@ -9804,6 +10059,114 @@ export function BullpenAutoRunScheduleCard({
     };
   }, [autoRunStatusCacheKey, isRunHistoryDialogOpen, loadRunHistory]);
 
+  const runDetailRefreshRunId = runDetailDialog?.run.id ?? null;
+  const runDetailRefreshRunStatus = runDetailDialog?.run.status ?? null;
+  useEffect(() => {
+    if (
+      !runDetailRefreshRunId ||
+      (runDetailRefreshRunStatus !== "running" &&
+        runDetailRefreshRunStatus !== "confirming")
+    ) {
+      runDetailRefreshAbortControllerRef.current?.abort();
+      runDetailRefreshAbortControllerRef.current = null;
+      return;
+    }
+
+    const controller = new AbortController();
+    runDetailRefreshAbortControllerRef.current = controller;
+    let timeoutId: number | null = null;
+    let cancelled = false;
+
+    const refreshExactRun = async () => {
+      if (cancelled || controller.signal.aborted) return;
+      if (document.visibilityState === "hidden") {
+        timeoutId = window.setTimeout(refreshExactRun, POLL_INTERVAL_MS);
+        return;
+      }
+      try {
+        const {
+          run,
+          decisions,
+          projection_available: projectionAvailable,
+          decisions_truncated: decisionsTruncated,
+          decisions_limit: decisionsLimit,
+          visible_decision_ids: visibleDecisionIds,
+          visible_decision_ids_truncated: visibleDecisionIdsTruncated,
+        } =
+          await apiService.getBullpenAutoLiveRunConsole(
+            runDetailRefreshRunId,
+            {
+              signal: controller.signal,
+              timeoutMs: 5_000,
+            },
+          );
+        if (cancelled || controller.signal.aborted) return;
+        const stage =
+          buildBullpenAutoRunWorkflowView(run).stages.find(
+            (workflowStage) => workflowStage.key === "invest",
+          ) ?? null;
+        const projectedDecisions = mergeInvestStageDecisionRows({
+          stage,
+          persistedDecisions: decisions,
+        });
+        setRunDetailDialog((current) => {
+          if (!current || current.run.id !== run.id) return current;
+          if (!projectionAvailable) return current;
+          const nextDecisions = mergeBullpenConsoleDecisionProjection({
+            existing: current.decisions,
+            projected: projectedDecisions,
+            truncated: decisionsTruncated,
+            visibleDecisionIds,
+            visibleDecisionIdsTruncated,
+          });
+          return {
+            run: mergeBullpenConsoleRunProjection({
+              existing: current.run,
+              projected: run,
+              projectionAvailable,
+            }),
+            decisions: nextDecisions,
+            decisionListTruncated:
+              visibleDecisionIdsTruncated ||
+              (decisionsTruncated &&
+                nextDecisions.length <
+                  (visibleDecisionIds?.length ??
+                    run.decisions_count)),
+            decisionListLimit: decisionsLimit,
+          };
+        });
+      } catch (nextError) {
+        if (
+          controller.signal.aborted ||
+          cancelled ||
+          isRequestAbort(nextError)
+        ) {
+          return;
+        }
+        // Preserve the last verified dialog snapshot. The main workflow poll
+        // and the next bounded exact-run refresh can recover independently.
+      } finally {
+        if (!cancelled && !controller.signal.aborted) {
+          timeoutId = window.setTimeout(refreshExactRun, POLL_INTERVAL_MS);
+        }
+      }
+    };
+
+    window.queueMicrotask(() => {
+      void refreshExactRun();
+    });
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
+      if (runDetailRefreshAbortControllerRef.current === controller) {
+        runDetailRefreshAbortControllerRef.current = null;
+      }
+    };
+  }, [runDetailRefreshRunId, runDetailRefreshRunStatus]);
+
   useEffect(() => {
     const controller = new AbortController();
     summaryAbortControllerRef.current = controller;
@@ -9845,6 +10208,17 @@ export function BullpenAutoRunScheduleCard({
         setPortfolioRefreshing(true);
       }
       setPortfolioLoading(true);
+      const positionsRefreshTask =
+        forceBalanceRefresh && onRefreshPortfolioPositionsRef.current
+          ? Promise.resolve()
+              .then(() => onRefreshPortfolioPositionsRef.current?.())
+              .then(() => undefined)
+              .catch((nextError) => {
+                if (!requestSignal?.aborted && !isRequestAbort(nextError)) {
+                  setError(normalizeError(nextError));
+                }
+              })
+          : null;
       try {
         const nextState = forceBalanceRefresh
           ? await apiService.polymarketLiveBalanceRefresh({
@@ -9865,6 +10239,9 @@ export function BullpenAutoRunScheduleCard({
           setError(normalizeError(nextError));
         }
       } finally {
+        if (positionsRefreshTask) {
+          await positionsRefreshTask;
+        }
         portfolioLoadInFlightRef.current = false;
         if (!requestSignal?.aborted) {
           setPortfolioLoading(false);
@@ -10535,13 +10912,18 @@ export function BullpenAutoRunScheduleCard({
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);
-  const verifiedStage1Portfolio = resolveLatestVerifiedStage1Portfolio(
-    summary
-      ? [summary.latest_run, ...summary.recent_runs]
-      : workflowRun
-        ? [workflowRun]
-        : [],
-  );
+  const verifiedStage1Portfolio = selectLatestVerifiedStage1Portfolio([
+    resolveVerifiedStage1PortfolioSnapshot(
+      summary?.state.verified_portfolio_snapshot,
+    ),
+    resolveLatestVerifiedStage1Portfolio(
+      summary
+        ? [summary.latest_run, ...summary.recent_runs]
+        : workflowRun
+          ? [workflowRun]
+          : [],
+    ),
+  ]);
   // Stage 1 is worker-verified, but it is historical run output and can
   // be older than the current wallet read. Use it only until a portfolio
   // snapshot has loaded; never let it hide fresher live Bullpen positions.
@@ -10552,10 +10934,15 @@ export function BullpenAutoRunScheduleCard({
     });
   const portfolioActivePositions =
     useVerifiedStage1Fallback && verifiedStage1Portfolio
-      ? verifiedStage1Portfolio.activePositions
+      ? [
+          ...verifiedStage1Portfolio.activePositions,
+          ...verifiedStage1Portfolio.claimablePositions,
+        ]
       : activePositions;
   const portfolioHasActivePositionsSnapshot =
-    hasActivePositionsSnapshot || useVerifiedStage1Fallback;
+    hasActivePositionsSnapshot ||
+    useVerifiedStage1Fallback ||
+    (!verifiedStage1Portfolio && activePositions.length > 0);
   const {
     activePositionQuestionByKey: stage3PreviewQuestionByKey,
     activePositionsNeedingAttention: stage3PreviewAttentionEntries,
@@ -10902,7 +11289,7 @@ export function BullpenAutoRunScheduleCard({
     useVerifiedStage1Fallback && verifiedStage1Portfolio
       ? verifiedStage1Portfolio.occupiedPositions
       : hasActivePositionsSnapshot
-        ? activePositions.length
+        ? activePositions.filter(isActiveBullpenPosition).length
         : portfolioState
           ? portfolioState.open_positions.filter(
               (position) => position.shares > 0,
@@ -10992,6 +11379,23 @@ export function BullpenAutoRunScheduleCard({
             useVerifiedStage1Fallback
               ? (verifiedStage1Portfolio?.verifiedAt ?? null)
               : null
+          }
+          positionsSource={positionsSource}
+          positionsUpdatedAt={positionsUpdatedAt}
+          positionsLineage={
+            useVerifiedStage1Fallback
+              ? (verifiedStage1Portfolio?.lineage ?? null)
+              : positionsLineage
+          }
+          verifiedActivePositionsTotal={
+            useVerifiedStage1Fallback
+              ? (verifiedStage1Portfolio?.activePositionsTotal ?? null)
+              : null
+          }
+          verifiedActivePositionsTruncated={
+            useVerifiedStage1Fallback
+              ? (verifiedStage1Portfolio?.activePositionsTruncated ?? false)
+              : false
           }
           verifiedCashInHandUsd={
             useVerifiedStage1Fallback

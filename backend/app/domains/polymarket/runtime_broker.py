@@ -876,24 +876,76 @@ class BullpenRuntimeBroker:
             lease_wait_ms=lock_wait_ms,
         )
 
-    async def read_passive_health(self) -> BullpenRuntimePassiveHealth:
-        snapshot = await self.read_cached_positions_snapshot()
+    async def read_passive_health(
+        self,
+        *,
+        strict_read_only: bool = False,
+    ) -> BullpenRuntimePassiveHealth:
+        snapshot = await self.read_cached_positions_snapshot(
+            delete_invalid=not strict_read_only
+        )
         auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
         active_auth = await self.read_latest_active_auth_result()
         broker_health = self._last_health
+        awaiting_shared_state = (
+            not broker_health.ok
+            and broker_health.command_category is None
+            and broker_health.error_classification is None
+            and broker_health.message.startswith(
+                "Bullpen runtime broker initialized."
+            )
+        )
+        if (
+            active_auth is not None
+            and not active_auth.healthy
+            and (
+                broker_health.ok
+                or awaiting_shared_state
+                or broker_health.error_classification == "auth_rejected"
+            )
+        ):
+            broker_health = broker_health.model_copy(
+                update={
+                    "ok": False,
+                    "checked_at": active_auth.checked_at,
+                    "message": redact_secrets(
+                        active_auth.failure_reason
+                        or "The latest shared Bullpen authentication check failed."
+                    ),
+                    "command_category": "doctor-auth-refresh",
+                    "error_classification": (
+                        active_auth.error_classification or "auth_rejected"
+                    ),
+                }
+            )
         if (
             active_auth is not None
             and active_auth.healthy
-            and broker_health.error_classification == "auth_rejected"
+            and (
+                awaiting_shared_state
+                or broker_health.error_classification == "auth_rejected"
+            )
         ):
             broker_health = broker_health.model_copy(
                 update={
                     "ok": True,
                     "checked_at": active_auth.checked_at,
                     "message": (
-                        "Earlier Bullpen authentication failure recovered; the "
-                        "latest active doctor auth refresh is healthy."
+                        "The latest shared Bullpen authentication check is healthy."
                     ),
+                    "command_category": "doctor-auth-refresh",
+                    "error_classification": None,
+                }
+            )
+        elif active_auth is None and snapshot is not None and awaiting_shared_state:
+            broker_health = broker_health.model_copy(
+                update={
+                    "ok": True,
+                    "checked_at": snapshot.fetched_at,
+                    "message": (
+                        "A shared authenticated Bullpen positions snapshot is cached."
+                    ),
+                    "command_category": "positions",
                     "error_classification": None,
                 }
             )
@@ -2223,7 +2275,10 @@ class BullpenRuntimeBroker:
             return None
 
     async def _read_valid_positions_snapshot(
-        self, cache_key: str
+        self,
+        cache_key: str,
+        *,
+        delete_invalid: bool = True,
     ) -> BullpenPositionsSnapshot | None:
         snapshot = await self._read_positions_snapshot(cache_key)
         if snapshot is None:
@@ -2236,12 +2291,18 @@ class BullpenRuntimeBroker:
             auth_cache=auth_cache,
         ):
             return snapshot
-        await self._redis.delete(cache_key)
+        if delete_invalid:
+            await self._redis.delete(cache_key)
         return None
 
-    async def read_cached_positions_snapshot(self) -> BullpenPositionsSnapshot | None:
+    async def read_cached_positions_snapshot(
+        self,
+        *,
+        delete_invalid: bool = True,
+    ) -> BullpenPositionsSnapshot | None:
         return await self._read_valid_positions_snapshot(
-            f"{_REDIS_PREFIX}:positions:snapshot"
+            f"{_REDIS_PREFIX}:positions:snapshot",
+            delete_invalid=delete_invalid,
         )
 
     def _snapshot_is_fresh(

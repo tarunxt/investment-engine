@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import hashlib
 import json
+import re
 from typing import Any
 
 from sqlalchemy import Select, and_, delete, desc, func, or_, select
@@ -28,6 +29,55 @@ from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLiveRunRecord,
 )
+from app.domains.polymarket_auto_live.repository import (
+    visible_auto_live_decision_filter,
+)
+
+
+_ABSOLUTE_FILESYSTEM_PATH_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9:/])"
+    r"(?:"
+    r"/(?:Users|home|root|etc|var|opt|srv|tmp|private)"
+    r"(?:/[^\s'\"<>;,)]*)+"
+    r"|"
+    r"[A-Za-z]:\\(?:Users|home|root|etc|var|opt|srv|tmp|private)"
+    r"(?:\\[^\s'\"<>;,)]*)+"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _redact_host_paths(value: Any) -> Any:
+    """Apply the path-only pass to an already secret-sanitized value."""
+
+    sanitized = value
+    if isinstance(sanitized, str):
+        return _ABSOLUTE_FILESYSTEM_PATH_PATTERN.sub(
+            "[REDACTED_PATH]",
+            sanitized,
+        )
+    if isinstance(sanitized, dict):
+        return {
+            str(key): _redact_host_paths(item)
+            for key, item in sanitized.items()
+        }
+    if isinstance(sanitized, list):
+        return [_redact_host_paths(item) for item in sanitized]
+    return sanitized
+
+
+def sanitize_audit_evidence(value: Any) -> Any:
+    """Redact secrets and host filesystem identity from persisted evidence.
+
+    Secret-key sanitization deliberately preserves ordinary strings. Runtime
+    failures can nevertheless embed an absolute credential or environment
+    path inside an otherwise safe message, so audit persistence applies this
+    second, narrow pass for common Unix and Windows host roots. JSON pointers
+    such as ``/stage_3/order_intents`` and repository-relative source paths
+    remain intact.
+    """
+
+    return _redact_host_paths(sanitize_secret_value(value))
 
 
 def utc_now() -> datetime:
@@ -44,10 +94,10 @@ def isoformat(value: datetime | None) -> str | None:
 
 def stable_blob_id(payload: Any) -> str:
     if isinstance(payload, str):
-        value = payload
+        value = str(sanitize_audit_evidence(payload))
     else:
         value = json.dumps(
-            sanitize_secret_value(payload),
+            sanitize_audit_evidence(payload),
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
@@ -146,6 +196,7 @@ class BullpenRunAuditRepository:
                     PolymarketAutoLiveDecisionRecord.run_id == run_id,
                 )
             )
+            .where(visible_auto_live_decision_filter())
             .order_by(
                 desc(PolymarketAutoLiveDecisionRecord.created_at),
                 desc(PolymarketAutoLiveDecisionRecord.updated_at),
@@ -226,7 +277,7 @@ class BullpenRunAuditRepository:
         content_type: str,
         sanitized: bool = True,
     ) -> BullpenRunAuditBlobRecord:
-        sanitized_payload = sanitize_secret_value(payload)
+        sanitized_payload = sanitize_audit_evidence(payload)
         blob_id = stable_blob_id(sanitized_payload)
         existing = self.session.get(BullpenRunAuditBlobRecord, blob_id)
         if existing is not None:

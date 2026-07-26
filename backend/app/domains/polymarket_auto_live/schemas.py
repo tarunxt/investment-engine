@@ -736,6 +736,9 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     dependency_state: str | None = None
     reservation_state: AutoLiveReservationStatus | str | None = None
     reservation_amount_usd: float | None = Field(default=None, ge=0)
+    reconciliation_fill_evidence: dict[str, object] = Field(
+        default_factory=dict
+    )
     filled_shares: float = Field(default=0, ge=0)
     remaining_shares: float = Field(default=0, ge=0)
     average_fill_price_cents: float | None = Field(default=None, ge=0, le=100)
@@ -952,6 +955,65 @@ class BullpenAutoLiveRun(BaseModel):
         return _normalize_console_llm_targets(value)
 
 
+class BullpenAutoLiveConsoleRunDetail(BaseModel):
+    """Bounded exact-run projection used by the live dialog refresh."""
+
+    run: BullpenAutoLiveRun
+    decisions: list[BullpenAutoLiveDecision] = Field(
+        default_factory=list,
+        max_length=32,
+    )
+    visible_decision_ids: list[str] = Field(
+        default_factory=list,
+        max_length=200,
+    )
+    visible_decision_ids_truncated: bool = False
+    generated_at: str
+    as_of: str
+    projection_version: int = Field(ge=1)
+    projection_available: bool = True
+    decisions_limit: int = Field(default=32, ge=1, le=32)
+    decisions_truncated: bool = False
+
+
+class BullpenAutoLiveVerifiedPortfolioSnapshot(BaseModel):
+    """Small Stage 1 wallet snapshot retained across subsequent runs."""
+
+    run_id: str
+    verified_at: str
+    active_positions: list[dict[str, object]] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    active_positions_total: int = Field(default=0, ge=0)
+    active_positions_truncated: bool = False
+    claimable_positions: list[dict[str, object]] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    settlement_pending_positions: list[dict[str, object]] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    excluded_positions: list[dict[str, object]] = Field(
+        default_factory=list,
+        max_length=10,
+    )
+    cash_in_hand_usd: float | None = Field(default=None, ge=0)
+    occupied_positions: int = Field(default=0, ge=0)
+    available_slots: int | None = Field(default=None, ge=0)
+    max_positions: int | None = Field(default=None, ge=1)
+    trade_amount_usd: float | None = Field(default=None, ge=0)
+    wallet_source: str | None = None
+    wallet_snapshot_fetched_at: str | None = None
+    wallet_freshness_state: str | None = None
+    wallet_account_identity: str | None = None
+    wallet_credential_artifact_inode: int | None = Field(default=None, ge=0)
+    wallet_credential_artifact_mtime_ns: int | None = Field(default=None, ge=0)
+    wallet_credential_artifact_size: int | None = Field(default=None, ge=0)
+    position_classifier_version: str | None = None
+
+
 class BullpenAutoLiveState(BaseModel):
     running: bool = False
     paused: bool = False
@@ -988,6 +1050,7 @@ class BullpenAutoLiveState(BaseModel):
     last_console_trade_active_positions: int | None = Field(default=None, ge=0)
     last_console_trade_available_slots: int | None = Field(default=None, ge=0)
     last_console_trade_max_positions: int | None = Field(default=None, ge=1)
+    verified_portfolio_snapshot: BullpenAutoLiveVerifiedPortfolioSnapshot | None = None
     trades_today: int = Field(default=0, ge=0)
     consecutive_failed_orders: int = Field(default=0, ge=0)
     today_executed_orders: int = Field(default=0, ge=0)
