@@ -1,42 +1,60 @@
-"use client";
+import type { DashboardSummaryResponse } from "@/types/api";
 
-import dynamic from "next/dynamic";
+import { BullpenInteractiveIsland } from "./BullpenInteractiveIsland";
 
-function BullpenAiPageFallback() {
+export function BullpenAiPageShell({
+  summary,
+}: {
+  summary: DashboardSummaryResponse["bullpen"] | null;
+}) {
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6" aria-busy="true">
-      <div className="space-y-3">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
+      <header
+        className="rounded-3xl border border-purple-100 bg-white p-6 shadow-sm"
+        data-performance-usable="bullpen-passive-summary"
+      >
         <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
           Copy Trading Bots
         </p>
-        <h1 className="text-3xl font-bold tracking-tight text-slate-950">
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
           Bullpen x AI
         </h1>
-        <p className="text-sm text-slate-600">
-          Restoring interactive market controls…
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          Review the latest stored wallet state immediately. Interactive scans,
+          histories, audits, prompts, and execution controls load below.
         </p>
-      </div>
-      <section className="rounded-3xl border border-fuchsia-100 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          <span className="h-7 w-36 animate-pulse rounded-full bg-fuchsia-100" />
-          <span className="h-7 w-28 animate-pulse rounded-full bg-slate-100" />
-          <span className="h-7 w-28 animate-pulse rounded-full bg-slate-100" />
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Active positions
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-slate-950">
+              {summary?.active_count ?? "Unavailable"}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Claimable
+            </p>
+            <p className="mt-2 text-2xl font-semibold text-slate-950">
+              {summary?.claimable_count ?? "Unavailable"}
+            </p>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Stored snapshot
+            </p>
+            <p className="mt-2 text-sm font-semibold text-slate-950">
+              {summary?.fetched_at
+                ? new Date(summary.fetched_at).toLocaleString("en-IN", {
+                    timeZone: "Asia/Kolkata",
+                  })
+                : "Unavailable"}
+            </p>
+          </div>
         </div>
-        <div className="mt-5 grid gap-3 lg:grid-cols-3">
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
-        </div>
-      </section>
+      </header>
+      <BullpenInteractiveIsland />
     </div>
   );
-}
-
-const BullpenAiPageClient = dynamic(() => import("./BullpenAiPageClient"), {
-  loading: BullpenAiPageFallback,
-  ssr: false,
-});
-
-export function BullpenAiPageShell() {
-  return <BullpenAiPageClient />;
 }

@@ -55,6 +55,12 @@ class ZerodhaPortfolioSnapshot(Base, TimestampMixin):
     positions_pnl: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     positions_m2m: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
+    holdings_invested_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dashboard_top_holdings: Mapped[list[dict]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+    )
     holdings: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     net_positions: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)
     day_positions: Mapped[list[dict]] = mapped_column(JSON, nullable=False, default=list)

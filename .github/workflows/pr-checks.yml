@@ -72,8 +72,11 @@ jobs:
         run: |
           node --test \
             scripts/detect-deploy-scope.test.mjs \
+            scripts/check-javascript-budgets.test.mjs \
+            scripts/high-traffic-response-inventory.test.mjs \
             deploy/no-docker/frontend-artifact.test.mjs \
             deploy/no-docker/redeploy-contract.test.mjs \
+            deploy/no-docker/redeploy-transaction.test.mjs \
             deploy/no-docker/repair-next-runtime-artifacts.test.mjs
 
   frontend-regressions:
@@ -182,7 +185,7 @@ jobs:
           rm -rf .next
           started_at="$(date +%s)"
           if [[ "$BUNDLER" == "webpack" ]]; then
-            build_command=(npm run build -- --webpack)
+            build_command=(npm run build)
           else
             build_command=(npm run build)
           fi
@@ -211,6 +214,16 @@ jobs:
           mkdir "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime"
           tar -xzf "${RUNNER_TEMP}/frontend-${BUNDLER}.tar.gz" \
             -C "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime"
+
+      - name: Install Chromium for authenticated render checks
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify authenticated render and lazy route behavior
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: npm run test:playwright-hardening
 
       - name: Verify fingerprint, auth, routes, assets, and backend proxy
         id: runtime

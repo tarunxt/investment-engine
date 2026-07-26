@@ -71,6 +71,7 @@ export default async function ConsoleLayout({
       initialUser={initialUser}
       initialSession={{
         expires: session.expires,
+        generation: session.generation,
         user: {
           id: String(initialUser.id),
           email: initialUser.email,

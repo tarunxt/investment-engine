@@ -32,6 +32,10 @@ import {
 } from "@/lib/technicalSetups";
 import { STANDARD_ACTION_ORDER, getStandardActionBadgeClass } from "@/lib/actionColorScheme";
 import {
+  formatUsdAsVerifiedInr,
+  isVerifiedFxRate,
+} from "@/lib/fxPresentation";
+import {
   calculateWeightedRationaleScore,
   getScoreMatrixRowOutOfBoundsDenominatorWeight,
   isScoreMatrixRowOutOfBounds,
@@ -6418,7 +6422,7 @@ function ActionablesInputSelectionDialog({
                       <span className="text-sm text-slate-500">{group.timestamp ? formatDateTime(group.timestamp) : "—"}</span>
                       <span className="text-sm capitalize text-slate-500">{statusSummary}</span>
                       <span className="ml-auto text-sm font-semibold text-slate-600">
-                        {totalCostUsd > 0 ? `₹${(totalCostUsd * usdInrRate).toFixed(2)}` : "Cost n/a"}
+                        {totalCostUsd > 0 ? formatUsdAsVerifiedInr(totalCostUsd, usdInrRate) : "Cost n/a"}
                       </span>
                     </div>
                     {expanded ? (
@@ -6461,7 +6465,9 @@ function ActionablesInputSelectionDialog({
                                 </td>
                                 <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
                                 <td className="px-3 py-3 align-top text-slate-600">
-                                  {typeof candidate.costUsd === "number" ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}` : "n/a"}
+                                  {typeof candidate.costUsd === "number"
+                                    ? formatUsdAsVerifiedInr(candidate.costUsd, usdInrRate)
+                                    : "n/a"}
                                 </td>
                                 <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
                               </tr>
@@ -8061,6 +8067,7 @@ export function FinalActionablesConsole({
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
+    if (!isVerifiedFxRate(usdInrRate)) return costs;
     technicalScanHistory.forEach((item) => {
       if (item.status !== "completed" || typeof item.estimated_cost !== "number") return;
       const key = `${item.provider}::${item.model}`;

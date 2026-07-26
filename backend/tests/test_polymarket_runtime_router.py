@@ -13,6 +13,7 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from app.domains.auth.dependencies import get_current_user
+from app.domains.auth.models import UserRole
 from app.domains.polymarket.router import router as polymarket_router
 from app.domains.polymarket.runtime_broker import (
     BullpenCommandDiagnostics,
@@ -25,7 +26,32 @@ from app.domains.polymarket.runtime_broker import (
 
 
 def _current_user():
-    return SimpleNamespace(id=7)
+    return SimpleNamespace(id=7, role=UserRole.ADMIN)
+
+
+@pytest.mark.anyio
+async def test_singleton_runtime_rejects_non_admin_users(monkeypatch):
+    app = FastAPI()
+    app.include_router(polymarket_router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=8,
+        role=UserRole.USER,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket.router.get_bullpen_runtime_broker",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("Unauthorized users must not reach the singleton runtime.")
+        ),
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get("/polymarket/runtime/health")
+
+    assert response.status_code == 403
 
 
 @pytest.mark.anyio

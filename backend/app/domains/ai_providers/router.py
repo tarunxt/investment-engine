@@ -7,7 +7,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.jobs.models import Job
 from app.infrastructure.database.session import get_async_db
-from app.domains.api_usage.router import _fetch_usd_inr_rate
+from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.ai_providers.availability import get_recent_target_availability
 from app.domains.ai_providers.factory import ProviderFactory
 from app.shared.types import JobStatus
@@ -115,7 +115,8 @@ async def list_providers(
     db: AsyncSession = Depends(get_async_db),
 ):
     base = ProviderFactory.list_providers()
-    usd_inr_rate, _ = await _fetch_usd_inr_rate()
+    fx = await load_persisted_usd_inr_rate()
+    usd_inr_rate = fx.valid_value
     prompt_text = (prompt or "").strip()
     recent_model_limit = 80 if prompt_text else 20
     estimators = {
@@ -248,9 +249,19 @@ async def list_providers(
                     usd = provider_fallback_usd
 
             model_estimated_cost_usd[model] = round(usd, 6)
-            model_estimated_cost_inr[model] = round(usd * usd_inr_rate, 2)
+            if usd_inr_rate is not None:
+                model_estimated_cost_inr[model] = round(usd * usd_inr_rate, 2)
         provider["model_estimated_cost_usd"] = model_estimated_cost_usd
         provider["model_estimated_cost_inr"] = model_estimated_cost_inr
+        provider["fx"] = {
+            "pair": "USD/INR",
+            "value": usd_inr_rate,
+            "source": fx.source,
+            "as_of": fx.as_of,
+            "age_seconds": fx.age_seconds,
+            "stale_after_seconds": fx.stale_after_seconds,
+            "status": fx.status,
+        }
         provider["model_compatibility"] = compatibility
         provider["compatible_models"] = compatible_models
         provider["model_last_run_web_search_used"] = model_last_run_web_search_used

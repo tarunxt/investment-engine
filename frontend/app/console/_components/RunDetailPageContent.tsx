@@ -18,6 +18,7 @@ import { WSClient } from '@/services/websocket';
 import { URLs } from '@/lib/urls';
 import { type RunResponse } from '@/types/api';
 import { cn } from '@/lib/utils';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import InvestmentRecommendationTable from '@/components/InvestmentRecommendationTable';
 import {
   getAutoRebalanceRunDisplayLabel,
@@ -92,10 +93,9 @@ function formatTokens(value?: number | null) {
   return value?.toLocaleString() ?? '0';
 }
 
-function formatCostInr(value?: number | null, usdInrRate = 83.5) {
+function formatCostInr(value?: number | null, usdInrRate = 0) {
   if (value == null || !Number.isFinite(value)) return 'Not captured';
-  const inr = value * usdInrRate;
-  return `₹${inr.toFixed(2)}`;
+  return formatUsdAsVerifiedInr(value, usdInrRate);
 }
 
 function hasKnownCost(value?: number | null): value is number {
@@ -134,7 +134,7 @@ export default function RunDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
-  const [usdInrRate, setUsdInrRate] = useState(83.5);
+  const [usdInrRate, setUsdInrRate] = useState(0);
 
   const generationRef = useRef(0);
   const wsClientRef = useRef<WSClient | null>(null);
@@ -179,11 +179,13 @@ export default function RunDetailPage() {
     apiService
       .getApiUsageSummary()
       .then((summary) => {
-        if (summary.usd_inr_rate && summary.usd_inr_rate > 0) {
+        if (summary.fx_status === 'valid' && summary.usd_inr_rate && summary.usd_inr_rate > 0) {
           setUsdInrRate(summary.usd_inr_rate);
+        } else {
+          setUsdInrRate(0);
         }
       })
-      .catch(() => {});
+      .catch(() => setUsdInrRate(0));
 
     const client = new WSClient({
       url: URLs.runs.wsRun(runId),

@@ -671,9 +671,16 @@ async def list_auto_live_history(
 
 
 @router.get("/runs", response_model=list[BullpenAutoLiveRun])
-async def list_auto_live_runs(current_user: User = Depends(get_current_user)):
+async def list_auto_live_runs(
+    limit: int = Query(default=25, ge=1, le=50),
+    include_detail: bool = Query(
+        default=False,
+        description="Include full stages, audit metadata, and request context.",
+    ),
+    current_user: User = Depends(get_current_user),
+):
     bot = await _get_bot(current_user)
-    return await bot.list_runs()
+    return await bot.list_runs(limit=limit, include_detail=include_detail)
 
 
 @router.get("/runs/{run_id}", response_model=BullpenAutoLiveRun)

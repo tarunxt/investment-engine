@@ -1,5 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  ApiOriginCircuitBreaker,
+  ApiTransportDeadlineError,
+  executeBoundedApiRequest,
+  type BufferedTransportResponse,
+} from "@/lib/boundedApiTransport";
+import {
+  createBackendSessionContext,
+  rotateBackendTokens,
+} from "@/app/api/bullpen-ai/_lib/serverBackendSession";
+import { BackendRuntimeHttpError } from "@/app/api/bullpen-ai/_lib/backendBullpenRuntime";
+
 const LOCAL_SERVER_API_BASE_URL = "http://127.0.0.1:8000";
 const DOCKER_SERVER_API_BASE_URL = "http://backend:8000";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0"]);
@@ -7,18 +19,26 @@ const PLACEHOLDER_HOST_SNIPPETS = ["yourdomain.com", "example.com"];
 const FORWARDED_HEADER_BLOCKLIST = new Set([
   "accept-encoding",
   "content-length",
+  "cookie",
   "host",
+  "authorization",
   "x-forwarded-for",
   "x-forwarded-host",
   "x-forwarded-port",
   "x-forwarded-proto",
 ]);
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
-const RETRYABLE_PROXY_STATUSES = new Set([502, 503, 504]);
-const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
-const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 5_250;
+const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
+const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
+const PUBLIC_AUTH_PATHS = new Set([
+  "auth/register",
+  "auth/forgot-password",
+  "auth/reset-password",
+  "auth/verify-email",
+]);
+const originCircuit = new ApiOriginCircuitBreaker(2, 30_000);
 
 type BackendApiCandidate = {
   baseUrl: string;
@@ -123,7 +143,11 @@ function resolveBackendApiCandidates(request: NextRequest): BackendApiCandidate[
   });
 }
 
-function buildForwardHeaders(request: NextRequest, correlationId: string) {
+function buildForwardHeaders(
+  request: NextRequest,
+  correlationId: string,
+  accessToken: string | null,
+) {
   const headers = new Headers();
   request.headers.forEach((value, key) => {
     if (!FORWARDED_HEADER_BLOCKLIST.has(key.toLowerCase())) {
@@ -132,6 +156,9 @@ function buildForwardHeaders(request: NextRequest, correlationId: string) {
   });
   if (!headers.has("x-correlation-id")) {
     headers.set("X-Correlation-ID", correlationId);
+  }
+  if (accessToken) {
+    headers.set("Authorization", `Bearer ${accessToken}`);
   }
   return headers;
 }
@@ -185,9 +212,7 @@ function getProxyTotalTimeoutMs(method: string) {
     return getProxyAttemptTimeoutMs(method);
   }
 
-  // The browser read deadline is 6 seconds. Keep the entire same-origin BFF
-  // attempt chain below that deadline so the route can return a real 502/504
-  // instead of being aborted mid-fallback by the browser.
+  // Keep the same-origin BFF attempt chain inside one bounded deadline.
   return readBoundedTimeout(
     process.env.BACKEND_PROXY_TOTAL_TIMEOUT_MS,
     DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
@@ -223,77 +248,20 @@ function logProxyFailure(input: {
   );
 }
 
-function logProxyFallback(input: {
-  request: NextRequest;
-  correlationId: string;
-  failedCandidate: BackendApiCandidate;
-  nextCandidate: BackendApiCandidate;
-  reason: string;
-  durationMs: number;
-  status?: number;
-  errorType?: string;
-}) {
-  console.warn(
-    JSON.stringify({
-      event: "backend_api_proxy_fallback_triggered",
-      method: input.request.method,
-      path: input.request.nextUrl.pathname,
-      correlation_id: input.correlationId,
-      from_stage: input.failedCandidate.stage,
-      from_transport: input.failedCandidate.transport,
-      to_stage: input.nextCandidate.stage,
-      to_transport: input.nextCandidate.transport,
-      reason: input.reason,
-      duration_ms: Math.round(input.durationMs),
-      ...(input.status === undefined ? {} : { status: input.status }),
-      ...(input.errorType ? { error_type: input.errorType } : {}),
-    }),
-  );
-}
-
-function createProxyAttemptContext(
-  requestSignal: AbortSignal,
-  timeoutMs: number,
-) {
-  const controller = new AbortController();
-  let timedOut = false;
-  const abortForRequest = () => controller.abort();
-  if (requestSignal.aborted) {
-    abortForRequest();
-  } else {
-    requestSignal.addEventListener("abort", abortForRequest, { once: true });
-  }
-  const timeoutId = globalThis.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, timeoutMs);
-
-  return {
-    signal: controller.signal,
-    didTimeout: () => timedOut,
-    cleanup: () => {
-      globalThis.clearTimeout(timeoutId);
-      requestSignal.removeEventListener("abort", abortForRequest);
-    },
-  };
-}
-
-async function buildBufferedProxyResponse(
+async function bufferBackendResponse(
   response: Response,
   method: string,
-  correlationId: string,
-) {
+): Promise<BufferedTransportResponse> {
   // Browser-facing API calls are JSON payloads. Buffering makes the BFF
   // deadline cover body delivery too (not merely response headers), which
   // prevents a stalled upstream stream from leaving client state unresolved.
   const body = method === "HEAD" ? null : await response.arrayBuffer();
-  const headers = buildResponseHeaders(response);
-  headers.set("X-Correlation-ID", correlationId);
-  return new NextResponse(body, {
+  return {
+    body,
     status: response.status,
     statusText: response.statusText,
-    headers,
-  });
+    headers: buildResponseHeaders(response),
+  };
 }
 
 async function proxyBackendRequest(request: NextRequest, context: RouteContext) {
@@ -302,106 +270,74 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   const body = ["GET", "HEAD"].includes(request.method) ? undefined : await request.arrayBuffer();
   const startedAt = performance.now();
   const correlationId = createProxyCorrelationId(request);
-  let lastErrorType: string | null = null;
-  let lastRetryableResponse: NextResponse | null = null;
   let outcome = "unreachable";
   let responseStatus: number | undefined;
-  let anyAttemptTimedOut = false;
   const resolvedCandidates = resolveBackendApiCandidates(request);
-  const candidates = SAFE_FALLBACK_METHODS.has(request.method)
-    ? resolvedCandidates
-    : resolvedCandidates.slice(0, 1);
-  const perAttemptTimeoutMs = getProxyAttemptTimeoutMs(request.method);
+  const isPublicRequest = PUBLIC_AUTH_PATHS.has(path);
+  const backendSession = isPublicRequest
+    ? null
+    : await createBackendSessionContext(request);
+  if (
+    !isPublicRequest &&
+    process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true" &&
+    !backendSession?.accessToken &&
+    !backendSession?.refreshToken
+  ) {
+    return NextResponse.json(
+      { message: "Not authenticated" },
+      {
+        status: 401,
+        headers: { "X-Correlation-ID": correlationId },
+      },
+    );
+  }
+
   const totalTimeoutMs = getProxyTotalTimeoutMs(request.method);
 
   try {
-    for (let index = 0; index < candidates.length; index += 1) {
-      if (request.signal.aborted) break;
-
-      const elapsedMs = performance.now() - startedAt;
-      const remainingBudgetMs = Math.floor(totalTimeoutMs - elapsedMs);
-      if (remainingBudgetMs <= 0) {
-        anyAttemptTimedOut = true;
-        outcome = "timeout_budget_exhausted";
-        break;
-      }
-
-      const candidate = candidates[index];
-      const nextCandidate = candidates[index + 1];
-      const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
-      const attemptStartedAt = performance.now();
-      const attempt = createProxyAttemptContext(
-        request.signal,
-        Math.min(perAttemptTimeoutMs, remainingBudgetMs),
-      );
-
-      try {
+    const result = await executeBoundedApiRequest({
+      method: request.method,
+      candidates: resolvedCandidates,
+      circuit: originCircuit,
+      callerSignal: request.signal,
+      totalBudgetMs: totalTimeoutMs,
+      primaryAttemptBudgetMs: getProxyAttemptTimeoutMs(request.method),
+      refreshAuthentication: backendSession
+        ? (signal) => rotateBackendTokens(backendSession, signal)
+        : undefined,
+      fetchCandidate: async (candidate, signal) => {
+        const targetUrl = buildTargetUrl(candidate.baseUrl, path, request);
         const response = await fetch(targetUrl, {
           method: request.method,
-          headers: buildForwardHeaders(request, correlationId),
-          body,
-          // Requests through this BFF include user auth and must not be shared
-          // across users. Client-side resource caches handle safe SWR state.
-          cache: "no-store",
-          signal: attempt.signal,
-        });
-
-        if (RETRYABLE_PROXY_STATUSES.has(response.status)) {
-          responseStatus = response.status;
-          outcome = `upstream_${response.status}`;
-          lastRetryableResponse = await buildBufferedProxyResponse(
-            response,
-            request.method,
-            correlationId,
-          );
-          if (nextCandidate) {
-            logProxyFallback({
-              request,
-              correlationId,
-              failedCandidate: candidate,
-              nextCandidate,
-              reason: outcome,
-              durationMs: performance.now() - attemptStartedAt,
-              status: response.status,
-            });
-          }
-          continue;
-        }
-
-        responseStatus = response.status;
-        const proxiedResponse = await buildBufferedProxyResponse(
-          response,
-          request.method,
-          correlationId,
-        );
-        outcome = "success";
-        return proxiedResponse;
-      } catch (error) {
-        lastErrorType = error instanceof Error ? error.name : "UnknownError";
-        const attemptTimedOut = attempt.didTimeout();
-        anyAttemptTimedOut ||= attemptTimedOut;
-        outcome = attemptTimedOut ? "timeout" : "upstream_body_error";
-        if (nextCandidate && !request.signal.aborted) {
-          logProxyFallback({
+          headers: buildForwardHeaders(
             request,
             correlationId,
-            failedCandidate: candidate,
-            nextCandidate,
-            reason: outcome,
-            durationMs: performance.now() - attemptStartedAt,
-            errorType: lastErrorType,
-          });
-        }
-      } finally {
-        attempt.cleanup();
-      }
+            backendSession?.accessToken ?? null,
+          ),
+          body,
+          cache: "no-store",
+          signal,
+        });
+        return bufferBackendResponse(
+          response,
+          request.method,
+        );
+      },
+    });
+    responseStatus = result.response.status;
+    outcome = "success";
+    const responseHeaders = result.response.headers;
+    responseHeaders.set("X-Correlation-ID", correlationId);
+    if (result.candidate) {
+      responseHeaders.set("X-API-Transport", result.candidate.transport);
     }
-
-    if (lastRetryableResponse) {
-      return lastRetryableResponse;
-    }
-
-    if (anyAttemptTimedOut) {
+    return new NextResponse(result.response.body, {
+      status: result.response.status,
+      statusText: result.response.statusText,
+      headers: responseHeaders,
+    });
+  } catch (error) {
+    if (error instanceof ApiTransportDeadlineError) {
       outcome = "timeout";
       return NextResponse.json(
         {
@@ -413,6 +349,17 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
             "Retry-After": "1",
             "X-Correlation-ID": correlationId,
           },
+        },
+      );
+    }
+
+    if (error instanceof BackendRuntimeHttpError && error.status === 401) {
+      outcome = "authentication_failed";
+      return NextResponse.json(
+        { message: "Your session has expired. Please sign in again." },
+        {
+          status: 401,
+          headers: { "X-Correlation-ID": correlationId },
         },
       );
     }
@@ -435,7 +382,6 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
         outcome,
         durationMs: performance.now() - startedAt,
         status: responseStatus,
-        errorType: lastErrorType ?? undefined,
       });
     }
   }

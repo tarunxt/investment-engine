@@ -4,20 +4,62 @@ import { useCallback, useMemo, useState } from "react";
 import { signIn } from "next-auth/react";
 
 import { AuthContext, type AuthContextType } from "@/hooks/useAuth";
-import { URLs } from "@/lib/urls";
-import { APIError, NetworkError, apiService } from "@/services/api";
+
+class PublicAuthRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | null,
+  ) {
+    super(message);
+    this.name = "PublicAuthRequestError";
+  }
+}
+
+async function registerPublicAccount(input: {
+  email: string;
+  username: string;
+  password: string;
+  full_name?: string;
+}) {
+  let response: Response;
+  try {
+    response = await fetch("/backend-api/auth/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  } catch {
+    throw new PublicAuthRequestError(
+      "We could not reach the authentication server from your browser.",
+      null,
+    );
+  }
+
+  if (response.ok) return;
+  const payload = await response.json().catch(() => null);
+  const detail =
+    payload && typeof payload === "object" && "detail" in payload
+      ? payload.detail
+      : null;
+  throw new PublicAuthRequestError(
+    typeof detail === "string" && detail.trim()
+      ? detail
+      : `Registration failed with HTTP ${response.status}.`,
+    response.status,
+  );
+}
 
 function normalizeAuthError(error: unknown, fallback: string) {
-  if (error instanceof NetworkError) {
+  if (error instanceof PublicAuthRequestError && error.status === null) {
     return {
-      message: "We could not reach the authentication server from your browser.",
-      details: [`${error.method} ${error.url}`, error.originalMessage],
+      message: error.message,
+      details: [],
     };
   }
-  if (error instanceof APIError) {
+  if (error instanceof PublicAuthRequestError) {
     return {
       message: error.message || fallback,
-      details: [`HTTP ${error.status}`],
+      details: error.status === null ? [] : [`HTTP ${error.status}`],
     };
   }
   if (error instanceof Error && error.message === "CredentialsSignin") {
@@ -50,7 +92,7 @@ export function PublicAuthProvider({
     async (
       emailOrUsername: string,
       password: string,
-      redirectTo = URLs.routes.console.dashboard(),
+      redirectTo = "/console/dashboard",
     ) => {
       clearError();
       setLoading(true);
@@ -87,7 +129,7 @@ export function PublicAuthProvider({
       setLoading(true);
       let created = false;
       try {
-        await apiService.register({
+        await registerPublicAccount({
           email,
           username,
           password,

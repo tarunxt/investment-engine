@@ -22,6 +22,11 @@ from app.domains.auth.schemas import (
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
+    WebSocketTicketResponse,
+)
+from app.domains.auth.websocket_tickets import (
+    WEBSOCKET_TICKET_TTL_SECONDS,
+    issue_websocket_ticket,
 )
 from app.domains.auth.tasks import send_reset_password_email_task
 from app.infrastructure.database.session import get_async_db
@@ -144,6 +149,16 @@ async def logout(
     db.add(ActivityLog(user_id=current_user.id, action="logout", details="User logged out"))
     await db.commit()
     return {"message": "Logged out successfully"}
+
+
+@router.post("/websocket-ticket", response_model=WebSocketTicketResponse)
+async def create_websocket_ticket(
+    current_user: User = Depends(get_current_user),
+):
+    return WebSocketTicketResponse(
+        ticket=await issue_websocket_ticket(current_user.id),
+        expires_in=WEBSOCKET_TICKET_TTL_SECONDS,
+    )
 
 
 @router.get("/me", response_model=UserResponse)

@@ -88,6 +88,12 @@ class TokenResponse(BaseModel):
     expires_in: int = 900  # 15 minutes in seconds
 
 
+class WebSocketTicketResponse(BaseModel):
+    """One-time credential for a single WebSocket connection."""
+    ticket: str
+    expires_in: int
+
+
 class UserProfileResponse(BaseModel):
     """User profile response."""
     user_id: int

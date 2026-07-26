@@ -13,6 +13,16 @@ class DashboardSectionMeta(BaseModel):
     error: str | None = None
 
 
+class DashboardFxRate(BaseModel):
+    pair: Literal["USD/INR"] = "USD/INR"
+    value: float | None = None
+    source: str | None = None
+    as_of: datetime | None = None
+    age_seconds: int | None = Field(default=None, ge=0)
+    stale_after_seconds: int = Field(gt=0)
+    status: Literal["valid", "stale", "unavailable"]
+
+
 class DashboardHistoryPoint(BaseModel):
     captured_at: datetime
     value: float
@@ -34,7 +44,7 @@ class DashboardZerodhaSnapshot(BaseModel):
     source: str
     holdings_count: int
     holdings_market_value: float
-    holdings_invested_value: float
+    holdings_invested_value: float | None
     holdings_pnl: float
     holdings_day_change_value: float
     available_margin: float
@@ -85,8 +95,12 @@ class DashboardBullpenSection(BaseModel):
 class DashboardSummaryResponse(BaseModel):
     schema_version: Literal[1] = 1
     generated_at: datetime
-    usd_inr_rate: float
-    usd_inr_source: Literal["bounded-fallback"] = "bounded-fallback"
+    usd_inr_rate: float | None = None
+    usd_inr_source: str | None = None
+    usd_inr_as_of: datetime | None = None
+    usd_inr_age_seconds: int | None = Field(default=None, ge=0)
+    usd_inr_status: Literal["valid", "stale", "unavailable"] = "unavailable"
+    fx: DashboardFxRate
     zerodha: DashboardZerodhaSection | None = None
     indmoney_us: DashboardIndMoneySection | None = None
     bullpen: DashboardBullpenSection | None = None

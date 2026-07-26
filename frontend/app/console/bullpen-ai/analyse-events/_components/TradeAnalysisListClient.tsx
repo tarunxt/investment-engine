@@ -14,7 +14,7 @@ import {
 } from "@/lib/bullpenTradeAnalysisFallback";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
-import { sessionStorage as authSessionStorage } from "@/services/session";
+import { useAuth } from "@/hooks/useAuth";
 import type {
   BullpenTradeAnalysisLearningInsights,
   BullpenTradeAnalysisListItem,
@@ -143,6 +143,7 @@ function LearningCard({
 }
 
 export function TradeAnalysisListClient() {
+  const { user } = useAuth();
   const [filters, setFilters] = useState<AnalysisFilters>(defaultFilters);
   const [draftFilters, setDraftFilters] = useState<AnalysisFilters>(defaultFilters);
   const [data, setData] = useState<BullpenTradeAnalysisListResponse | null>(null);
@@ -158,14 +159,7 @@ export function TradeAnalysisListClient() {
       setError(null);
       setFallbackNotice(null);
       const filtersKey = buildTradeAnalysisFiltersKey(filters);
-      let userId: number | undefined;
-      try {
-        userId = authSessionStorage.getUserData()?.id;
-      } catch {
-        // A malformed legacy auth cache must not strand the page in loading.
-        // It simply makes the user-scoped tertiary cache unavailable.
-        userId = undefined;
-      }
+      const userId = user?.id;
       try {
         const nextData = await apiService.bullpenAiTradeAnalysis({
           status: filters.status || undefined,
@@ -230,7 +224,7 @@ export function TradeAnalysisListClient() {
     return () => {
       cancelled = true;
     };
-  }, [filters]);
+  }, [filters, user?.id]);
 
   const summary = data?.summary;
   const learning = data?.learning_insights;

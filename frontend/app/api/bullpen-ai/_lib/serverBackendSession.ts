@@ -1,8 +1,10 @@
-import type { Session } from "next-auth";
-import type { NextRequest } from "next/server";
+import { createHash } from "node:crypto";
+
+import { getToken } from "@auth/core/jwt";
 import { NextResponse } from "next/server";
 
-import { auth, unstable_update } from "@/auth";
+import { resolveNextAuthSecret, unstable_update } from "@/auth";
+import { SingleFlightByKey } from "@/lib/singleFlight";
 
 import {
   BackendRuntimeHttpError,
@@ -24,40 +26,83 @@ type BackendRefreshResponse = {
 export type BackendSessionContext = {
   accessToken: string | null;
   refreshToken: string | null;
+  accessTokenExpiresAt: number | null;
   hasAuthJsSession: boolean;
+  sessionGeneration: string;
   rotatedTokens: RotatedBackendTokens | null;
 };
 
+const refreshFlights = new SingleFlightByKey<RotatedBackendTokens>();
+
+function refreshFlightKey(refreshToken: string) {
+  return createHash("sha256").update(refreshToken).digest("hex");
+}
+
+function waitIndependently<T>(promise: Promise<T>, signal?: AbortSignal) {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Request aborted", "AbortError"));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () =>
+      reject(new DOMException("Request aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 export async function createBackendSessionContext(
-  request: NextRequest,
+  request: Request | { headers: Headers | Record<string, string> },
 ): Promise<BackendSessionContext> {
-  let session: Session | null = null;
+  let token = null;
   try {
-    session = await auth();
+    token = await getToken({
+      req: request,
+      secret: resolveNextAuthSecret(),
+    });
   } catch (error) {
-    // A malformed/stale Auth.js cookie must not prevent the legacy cookie from
-    // serving as a compatibility fallback while the user re-authenticates.
+    // Treat malformed, expired, or undecryptable Auth.js cookies as
+    // unauthenticated. Browser-readable bearer-cookie fallbacks are forbidden.
     console.warn("Unable to read Auth.js server session.", error);
   }
 
-  const sessionAccessToken = session?.accessToken?.trim() || null;
-  const sessionRefreshToken = session?.refreshToken?.trim() || null;
-  const legacyAccessToken =
-    request.cookies.get("app_access_token")?.value?.trim() || null;
-  const legacyRefreshToken =
-    request.cookies.get("app_refresh_token")?.value?.trim() || null;
+  const accessToken =
+    typeof token?.accessToken === "string" ? token.accessToken.trim() : "";
+  const refreshToken =
+    typeof token?.refreshToken === "string" ? token.refreshToken.trim() : "";
+  const expiresAt =
+    typeof token?.accessTokenExpiresAt === "number" &&
+    Number.isFinite(token.accessTokenExpiresAt)
+      ? token.accessTokenExpiresAt
+      : null;
+  const generationParts = [
+    typeof token?.sub === "string" ? token.sub : "",
+    typeof token?.iat === "number" ? token.iat : "",
+  ];
 
   return {
-    // Auth.js is authoritative. Client-created cookies remain supported only
-    // for older sessions and staged deployments.
-    accessToken: sessionAccessToken || legacyAccessToken,
-    refreshToken: sessionRefreshToken || legacyRefreshToken,
-    hasAuthJsSession: Boolean(session),
+    accessToken: accessToken || null,
+    refreshToken: refreshToken || null,
+    accessTokenExpiresAt: expiresAt,
+    hasAuthJsSession: Boolean(token),
+    sessionGeneration: generationParts.join(":"),
     rotatedTokens: null,
   };
 }
 
-async function rotateBackendTokens(context: BackendSessionContext) {
+export async function rotateBackendTokens(
+  context: BackendSessionContext,
+  signal?: AbortSignal,
+) {
   if (!context.refreshToken) {
     throw new BackendRuntimeHttpError(
       401,
@@ -66,34 +111,40 @@ async function rotateBackendTokens(context: BackendSessionContext) {
     );
   }
 
-  const refreshed = await fetchBackendRuntimeJson<BackendRefreshResponse>(
-    "/auth/refresh",
-    {
-      method: "POST",
-      body: { refresh_token: context.refreshToken },
-    },
-  );
-  const accessToken = refreshed.access_token?.trim() || null;
-  const refreshToken = refreshed.refresh_token?.trim() || null;
-  const expiresIn =
-    typeof refreshed.expires_in === "number" &&
-    Number.isFinite(refreshed.expires_in) &&
-    refreshed.expires_in > 0
-      ? refreshed.expires_in
-      : 15 * 60;
+  const currentRefreshToken = context.refreshToken;
+  const key = refreshFlightKey(currentRefreshToken);
+  const flight = refreshFlights.run(key, async () => {
+      const refreshed = await fetchBackendRuntimeJson<BackendRefreshResponse>(
+        "/auth/refresh",
+        {
+          method: "POST",
+          body: { refresh_token: currentRefreshToken },
+        },
+      );
+      const accessToken = refreshed.access_token?.trim() || null;
+      const refreshToken = refreshed.refresh_token?.trim() || null;
+      const expiresIn =
+        typeof refreshed.expires_in === "number" &&
+        Number.isFinite(refreshed.expires_in) &&
+        refreshed.expires_in > 0
+          ? refreshed.expires_in
+          : 15 * 60;
 
-  if (!accessToken || !refreshToken) {
-    throw new Error("Backend token refresh returned incomplete credentials.");
-  }
+      if (!accessToken || !refreshToken) {
+        throw new Error("Backend token refresh returned incomplete credentials.");
+      }
+      return { accessToken, refreshToken, expiresIn };
+    });
 
-  context.accessToken = accessToken;
-  context.refreshToken = refreshToken;
-  context.rotatedTokens = { accessToken, refreshToken, expiresIn };
+  const rotated = await waitIndependently(flight, signal);
+  context.accessToken = rotated.accessToken;
+  context.refreshToken = rotated.refreshToken;
+  context.accessTokenExpiresAt = Date.now() + rotated.expiresIn * 1_000;
+  context.rotatedTokens = rotated;
 
   if (context.hasAuthJsSession) {
-    // Persist the rotated pair in the encrypted Auth.js JWT. Without this,
-    // the next hard navigation can restore the access token that just failed.
-    await unstable_update({ accessToken, refreshToken, expiresIn });
+    // Persist only in the encrypted, HttpOnly Auth.js JWT.
+    await unstable_update(rotated as never);
   }
 }
 
@@ -108,6 +159,13 @@ export async function fetchBackendJsonWithSession<T = unknown>(
     method?: "GET" | "POST";
   } = {},
 ): Promise<T> {
+  if (
+    context.accessTokenExpiresAt !== null &&
+    context.accessTokenExpiresAt <= Date.now()
+  ) {
+    await rotateBackendTokens(context);
+  }
+
   try {
     return await fetchBackendRuntimeJson<T>(path, {
       accessToken: context.accessToken,
@@ -129,28 +187,9 @@ export async function fetchBackendJsonWithSession<T = unknown>(
 }
 
 export function backendSessionJson<T>(
-  context: BackendSessionContext,
+  _context: BackendSessionContext,
   body: T,
   init?: ResponseInit,
 ) {
-  const response = NextResponse.json(body, init);
-  const rotated = context.rotatedTokens;
-  if (!rotated) {
-    return response;
-  }
-
-  const secure = process.env.NODE_ENV === "production";
-  response.cookies.set("app_access_token", rotated.accessToken, {
-    maxAge: rotated.expiresIn,
-    path: "/",
-    sameSite: "lax",
-    secure,
-  });
-  response.cookies.set("app_refresh_token", rotated.refreshToken, {
-    maxAge: 30 * 24 * 60 * 60,
-    path: "/",
-    sameSite: "lax",
-    secure,
-  });
-  return response;
+  return NextResponse.json(body, init);
 }

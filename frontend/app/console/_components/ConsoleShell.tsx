@@ -22,13 +22,16 @@ export function ConsoleShell({
         '--console-sidebar-width': '22rem',
     } as CSSProperties;
     const brandExpansionLines = getBrandExpansionLines();
-    const { user, logout, loading } = useAuth();
+    const { user, logout, loading, error } = useAuth();
     const router = useRouter();
     const pathname = usePathname();
     const searchParams = useSearchParams();
     const searchParamString = searchParams.toString();
     const hasRedirectToParam = searchParams.has('redirectTo');
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    useEffect(() => {
+        performance.mark('console-shell-rendered');
+    }, []);
     useEffect(() => {
         if (!loading && !user) {
             router.replace(URLs.routes.login());
@@ -114,15 +117,19 @@ export function ConsoleShell({
                 </button>
 
                 {/* Page content */}
-                <main className="px-4 py-6 sm:px-6 lg:py-6">
-                    {loading ? (
+                <main
+                    className="px-4 py-6 sm:px-6 lg:py-6"
+                    data-console-shell="authenticated"
+                >
+                    {error ? (
                         <div
-                            role="status"
-                            className="rounded-2xl border border-border bg-card px-5 py-4 text-sm text-muted-foreground"
+                            role="alert"
+                            className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-900"
                         >
-                            Restoring your secure session…
+                            {error}
                         </div>
-                    ) : children}
+                    ) : null}
+                    {children}
                 </main>
             </div>
         </div>

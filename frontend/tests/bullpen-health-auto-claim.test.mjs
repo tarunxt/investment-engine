@@ -36,7 +36,7 @@ function encodeModule(source) {
   return `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 }
 
-async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
+async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
   const routePath = path.join(BULLPEN_API_ROOT, "positions", "route.ts");
   const routeSource = readFileSync(routePath, "utf8");
 
@@ -66,9 +66,20 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
       },
     };
   `);
-  const backendStubUrl = encodeModule(`
-    export async function fetchBackendRuntimeJson(path, options = {}) {
-      return globalThis.__bullpenFetchBackendRuntimeJson(path, options);
+  const serverBackendSessionStubUrl = encodeModule(`
+    export async function createBackendSessionContext() {
+      return { responseCookies: [] };
+    }
+    export async function fetchBackendJsonWithSession(_context, path, options = {}) {
+      return globalThis.__bullpenFetchBackendJsonWithSession(path, options);
+    }
+    export function backendSessionJson(_context, body, init = {}) {
+      return {
+        status: init.status ?? 200,
+        async json() {
+          return body;
+        },
+      };
     }
   `);
   const backendSessionStubUrl = encodeModule(`
@@ -145,8 +156,8 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
   const rewrittenSource = routeSource
     .replace(/from "next\/server"/g, `from "${nextServerStubUrl}"`)
     .replace(
-      /from "\.\.\/_lib\/backendBullpenRuntime"/g,
-      `from "${backendStubUrl}"`,
+      /from "\.\.\/_lib\/serverBackendSession"/g,
+      `from "${serverBackendSessionStubUrl}"`,
     )
     .replace(
       /from "\.\.\/_lib\/serverBackendSession"/g,
@@ -172,7 +183,8 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
     fileName: "route.ts",
   });
 
-  globalThis.__bullpenFetchBackendRuntimeJson = fetchBackendRuntimeJsonImpl;
+  globalThis.__bullpenFetchBackendJsonWithSession =
+    fetchBackendJsonWithSessionImpl;
   return import(encodeModule(outputText));
 }
 

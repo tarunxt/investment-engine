@@ -138,6 +138,15 @@ export interface ProviderInfo {
   internet_access: ProviderInternetAccess;
   model_estimated_cost_usd?: Record<string, number>;
   model_estimated_cost_inr?: Record<string, number>;
+  fx?: {
+    pair: 'USD/INR';
+    value: number | null;
+    source: string | null;
+    as_of: string | null;
+    age_seconds: number | null;
+    stale_after_seconds: number;
+    status: 'valid' | 'stale' | 'unavailable';
+  };
   model_compatibility?: Record<string, { compatible: boolean; reason?: string | null }>;
   compatible_models?: string[];
   model_last_run_web_search_used?: Record<string, boolean | null>;
@@ -597,7 +606,7 @@ export interface ApiUsageItem {
   daily_tokens_in: number;
   daily_tokens_out: number;
   daily_estimated_cost: number;
-  daily_estimated_cost_inr: number;
+  daily_estimated_cost_inr: number | null;
   daily_limit_requests: number | null;
   notes: string | null;
   console_url: string | null;
@@ -612,7 +621,7 @@ export interface ApiUsageItem {
 export interface LlmCostHistoryDay {
   date: string;
   estimated_cost: number;
-  estimated_cost_inr: number;
+  estimated_cost_inr: number | null;
   requests: number;
   tokens_in: number;
   tokens_out: number;
@@ -624,7 +633,7 @@ export interface LlmCostHistoryRun {
   status: string;
   timestamp: string;
   estimated_cost: number;
-  estimated_cost_inr: number;
+  estimated_cost_inr: number | null;
   tokens_in?: number | null;
   tokens_out?: number | null;
 }
@@ -633,7 +642,12 @@ export interface LlmCostHistoryResponse {
   provider: string;
   name: string;
   timezone: string;
-  usd_inr_rate: number;
+  usd_inr_rate: number | null;
+  fx_source: string | null;
+  fx_as_of: string | null;
+  fx_age_seconds: number | null;
+  fx_status: 'valid' | 'stale' | 'unavailable';
+  fx_stale_after_seconds: number;
   generated_at: string;
   day_limit: number;
   run_limit: number;
@@ -651,8 +665,12 @@ export interface ApiUsageSummaryResponse {
   period_label?: string;
   from_date?: string | null;
   to_date?: string | null;
-  usd_inr_rate?: number;
-  fx_source?: string;
+  usd_inr_rate?: number | null;
+  fx_source?: string | null;
+  fx_as_of?: string | null;
+  fx_age_seconds?: number | null;
+  fx_status?: 'valid' | 'stale' | 'unavailable';
+  fx_stale_after_seconds?: number;
   items: ApiUsageItem[];
 }
 
@@ -1080,6 +1098,7 @@ export interface ZerodhaPortfolioSnapshotSummary {
   net_positions_count: number;
   day_positions_count: number;
   holdings_market_value: number;
+  holdings_invested_value?: number | null;
   holdings_pnl: number;
   holdings_day_change_value: number;
   available_margin: number;
@@ -1212,8 +1231,20 @@ export interface DashboardHolding {
 export interface DashboardSummaryResponse {
   schema_version: 1;
   generated_at: string;
-  usd_inr_rate: number;
-  usd_inr_source: 'bounded-fallback';
+  usd_inr_rate: number | null;
+  usd_inr_source: string | null;
+  usd_inr_as_of: string | null;
+  usd_inr_age_seconds: number | null;
+  usd_inr_status: 'valid' | 'stale' | 'unavailable';
+  fx: {
+    pair: 'USD/INR';
+    value: number | null;
+    source: string | null;
+    as_of: string | null;
+    age_seconds: number | null;
+    stale_after_seconds: number;
+    status: 'valid' | 'stale' | 'unavailable';
+  };
   zerodha: {
     connected: boolean;
     login_time: string | null;
@@ -1224,7 +1255,7 @@ export interface DashboardSummaryResponse {
       source: string;
       holdings_count: number;
       holdings_market_value: number;
-      holdings_invested_value: number;
+      holdings_invested_value: number | null;
       holdings_pnl: number;
       holdings_day_change_value: number;
       available_margin: number;

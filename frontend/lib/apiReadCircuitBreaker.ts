@@ -1,8 +1,10 @@
 import type { ApiReadTransportCandidate } from "@/lib/urls";
 
 type CircuitState = {
+  phase: "closed" | "open" | "half-open";
   failures: number;
-  openUntil: number;
+  openedAt: number | null;
+  probeInFlight: boolean;
 };
 
 export class ApiReadCircuitBreaker {
@@ -27,16 +29,33 @@ export class ApiReadCircuitBreaker {
     const primary = candidates.find((candidate) => candidate.stage === "primary");
     if (!primary) return candidates;
     const state = this.states.get(this.key(primary));
-    if (!state || state.openUntil <= now) return candidates;
-    return [
-      ...candidates.filter((candidate) => candidate.stage !== "primary"),
-      primary,
-    ];
+    if (!state || state.phase === "closed") return candidates;
+    const fallbacks = candidates.filter(
+      (candidate) => candidate.stage !== "primary",
+    );
+    if (state.phase === "half-open") return fallbacks;
+    if (
+      state.openedAt !== null &&
+      now - state.openedAt < this.cooldownMs
+    ) {
+      return fallbacks;
+    }
+    this.states.set(this.key(primary), {
+      ...state,
+      phase: "half-open",
+      probeInFlight: true,
+    });
+    return [primary, ...fallbacks];
   }
 
   recordSuccess(candidate: ApiReadTransportCandidate) {
     if (candidate.stage === "primary") {
-      this.states.delete(this.key(candidate));
+      this.states.set(this.key(candidate), {
+        phase: "closed",
+        failures: 0,
+        openedAt: null,
+        probeInFlight: false,
+      });
     }
   }
 
@@ -44,36 +63,47 @@ export class ApiReadCircuitBreaker {
     if (candidate.stage !== "primary") return;
     const key = this.key(candidate);
     const previous = this.states.get(key);
-    const failures = (previous?.failures ?? 0) + 1;
+    const failures =
+      previous?.phase === "half-open"
+        ? this.failureThreshold
+        : (previous?.failures ?? 0) + 1;
     this.states.set(key, {
+      phase: failures >= this.failureThreshold ? "open" : "closed",
       failures,
-      openUntil:
-        failures >= this.failureThreshold ? now + this.cooldownMs : 0,
+      openedAt: failures >= this.failureThreshold ? now : null,
+      probeInFlight: false,
     });
   }
 
   snapshot(candidate: ApiReadTransportCandidate) {
-    return this.states.get(this.key(candidate)) ?? null;
+    return (
+      this.states.get(this.key(candidate)) ?? {
+        phase: "closed" as const,
+        failures: 0,
+        openedAt: null,
+        probeInFlight: false,
+      }
+    );
   }
 }
 
 export function getApiReadAttemptBudget({
   startedAt,
   now,
-  index,
+  candidateStage,
   candidateCount,
   totalBudgetMs,
   primaryAttemptBudgetMs,
 }: {
   startedAt: number;
   now: number;
-  index: number;
+  candidateStage: ApiReadTransportCandidate["stage"];
   candidateCount: number;
   totalBudgetMs: number;
   primaryAttemptBudgetMs: number;
 }) {
   const remainingMs = Math.max(0, totalBudgetMs - (now - startedAt));
-  if (index === 0 && candidateCount > 1) {
+  if (candidateStage === "primary" && candidateCount > 1) {
     return Math.min(remainingMs, primaryAttemptBudgetMs);
   }
   return remainingMs;

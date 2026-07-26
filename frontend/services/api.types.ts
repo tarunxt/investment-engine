@@ -19,7 +19,6 @@ import {
     UpdatePasswordRequest,
     HTTPValidationError,
     FullHealthCheckResponse,
-    RefreshTokenResponse,
     PaginatedResponse,
     PromptResponse,
     PromptCreate,
@@ -111,11 +110,12 @@ export type ApiRequestControl = {
 
 // Define the API service interface with proper types
 export interface IApiService {
+    setSessionGeneration(generation: string): void;
+
     // Auth endpoints
     login(data: { email?: string; username?: string; password: string }): Promise<LoginResponse>;
     register(data: { email: string; username: string; password: string; full_name?: string }): Promise<RegisterResponse>;
     logout(token?: string): Promise<void>;
-    refreshToken(options?: ApiRequestControl): Promise<RefreshTokenResponse>;
     getCurrentUser(token?: string): Promise<UserResponse>;
     updatePassword(data: UpdatePasswordRequest, token?: string): Promise<void>;
     getProfile(token?: string): Promise<UpdateProfileRequest>;
@@ -246,7 +246,10 @@ export interface IApiService {
     getBullpenAutoLiveSettings(options?: ApiRequestControl): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
-    getBullpenAutoLiveRuns(options?: ApiRequestControl): Promise<BullpenAutoLiveRun[]>;
+    getBullpenAutoLiveRuns(
+      options?: ApiRequestControl,
+      includeDetails?: boolean,
+    ): Promise<BullpenAutoLiveRun[]>;
     getBullpenAutoLiveHistory(
         params?: { page?: number; size?: number },
         options?: ApiRequestControl,

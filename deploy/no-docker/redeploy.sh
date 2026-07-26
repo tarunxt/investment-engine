@@ -63,8 +63,8 @@ esac
 declare -a CONFIG_BACKUPS=()
 declare -a INSTALLED_SYSTEMD_UNITS=()
 declare -a PHASE_NAMES=()
-declare -A PHASE_STARTED_AT=()
-declare -A PHASE_DURATIONS=()
+declare -a PHASE_STARTED_AT=()
+declare -a PHASE_DURATIONS=()
 CONFIG_BACKUP_DIR="$(mktemp -d)"
 BACKED_UP_PATHS_LIST=$'\n'
 CONFIG_ROLLBACK_ENABLED=false
@@ -75,36 +75,62 @@ FRONTEND_PROMOTED=false
 FRONTEND_ROLLBACK_ATTEMPTED=false
 DEPLOY_STARTED_AT="$(date +%s)"
 
+deployment_test_hook() {
+  local phase="$1"
+  if [[ "${INVESTOR_DEPLOY_TEST_MODE:-false}" != "true" ]]; then
+    return 0
+  fi
+  case "$APP_ROOT" in
+    /tmp/*|/private/tmp/*) ;;
+    *)
+      echo "Deployment failure injection is restricted to temporary test roots." >&2
+      return 1
+      ;;
+  esac
+  if [[ "${INVESTOR_DEPLOY_TEST_FAIL_PHASE:-}" == "$phase" ]]; then
+    echo "Injected deployment test failure: $phase" >&2
+    return 97
+  fi
+}
+
 start_phase() {
   local name="$1"
-  PHASE_STARTED_AT["$name"]="$(date +%s)"
   PHASE_NAMES+=("$name")
+  PHASE_STARTED_AT+=("$(date +%s)")
+  PHASE_DURATIONS+=("")
 }
 
 finish_phase() {
   local name="$1"
-  local finished_at
+  local finished_at index
   finished_at="$(date +%s)"
-  if [[ -n "${PHASE_STARTED_AT[$name]:-}" ]]; then
-    PHASE_DURATIONS["$name"]="$(( finished_at - PHASE_STARTED_AT[$name] ))"
-    unset 'PHASE_STARTED_AT[$name]'
-  fi
+  for (( index = ${#PHASE_NAMES[@]} - 1; index >= 0; index-- )); do
+    if [[ "${PHASE_NAMES[$index]}" == "$name" && -z "${PHASE_DURATIONS[$index]:-}" ]]; then
+      PHASE_DURATIONS[$index]="$(( finished_at - PHASE_STARTED_AT[$index] ))"
+      return
+    fi
+  done
 }
 
 print_timing_summary() {
-  local finished_at name duration
+  local finished_at name duration index
   finished_at="$(date +%s)"
   echo "==> Deployment timing summary"
-  for name in "${PHASE_NAMES[@]}"; do
-    duration="${PHASE_DURATIONS[$name]:-}"
-    if [[ -z "$duration" && -n "${PHASE_STARTED_AT[$name]:-}" ]]; then
-      duration="$(( finished_at - PHASE_STARTED_AT[$name] ))"
+  for (( index = 0; index < ${#PHASE_NAMES[@]}; index++ )); do
+    name="${PHASE_NAMES[$index]}"
+    duration="${PHASE_DURATIONS[$index]:-}"
+    if [[ -z "$duration" && -n "${PHASE_STARTED_AT[$index]:-}" ]]; then
+      duration="$(( finished_at - PHASE_STARTED_AT[$index] ))"
     fi
     if [[ -n "$duration" ]]; then
       printf '  %-32s %4ss\n' "$name" "$duration"
+      printf 'INVESTOR_DEPLOY_TIMING\t%s\t%s\n' "$name" "$duration"
     fi
   done
   printf '  %-32s %4ss\n' "ec2-deploy-total" "$(( finished_at - DEPLOY_STARTED_AT ))"
+  printf 'INVESTOR_DEPLOY_TIMING\t%s\t%s\n' \
+    "ec2-deploy-total" \
+    "$(( finished_at - DEPLOY_STARTED_AT ))"
 }
 
 cleanup_config_backup_dir() {
@@ -774,10 +800,16 @@ prepare_frontend_candidate_artifact() {
   )
   validate_frontend_archive_members
 
+  start_phase "frontend-artifact-extraction"
   run_as_app_user "
     rm -rf -- '$FRONTEND_CANDIDATE_BUILD_DIR'
     mkdir -p '$FRONTEND_CANDIDATE_BUILD_DIR'
     tar --no-same-owner -xzf '$FRONTEND_ARTIFACT' -C '$FRONTEND_CANDIDATE_BUILD_DIR'
+  "
+  finish_phase "frontend-artifact-extraction"
+
+  start_phase "frontend-candidate-verification"
+  run_as_app_user "
     set -a
     source '$FRONTEND_ENV_FILE'
     set +a
@@ -792,6 +824,7 @@ prepare_frontend_candidate_artifact() {
       '$FRONTEND_CANDIDATE_BUILD_DIR' \
       '$EXPECTED_FRONTEND_SHA'
   "
+  finish_phase "frontend-candidate-verification"
   FRONTEND_CANDIDATE_READY=true
   FRONTEND_CANDIDATE_IS_STANDALONE=true
 }
@@ -842,7 +875,7 @@ prepare_frontend_candidate_build_on_host() {
     set -a
     source '$FRONTEND_ENV_FILE'
     set +a
-    NEXT_DIST_DIR='$FRONTEND_CANDIDATE_BUILD_NAME' npm run build -- --webpack
+    NEXT_DIST_DIR='$FRONTEND_CANDIDATE_BUILD_NAME' npm run build
 
     test -f '$FRONTEND_CANDIDATE_BUILD_DIR/BUILD_ID'
     test -d '$FRONTEND_CANDIDATE_BUILD_DIR/static'
@@ -1803,12 +1836,15 @@ fi
 finish_phase "configuration"
 
 if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
-  start_phase "frontend-artifact-extraction"
+  start_phase "frontend-candidate-preparation"
+  deployment_test_hook "extraction"
   if [[ -z "$FRONTEND_ARTIFACT" && "$ALLOW_ON_HOST_FRONTEND_BUILD" == "true" ]]; then
     ensure_swap_file
   fi
   prepare_frontend_candidate_build
-  finish_phase "frontend-artifact-extraction"
+  deployment_test_hook "host-validation"
+  deployment_test_hook "candidate-verification"
+  finish_phase "frontend-candidate-preparation"
 fi
 
 if [[ "$DEPLOY_BACKEND" == "true" ]]; then
@@ -1853,18 +1889,23 @@ if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
   echo "==> Promote frontend candidate and restart only the frontend service"
   promote_frontend_candidate_build
   sudo systemctl restart "$FRONTEND_SERVICE_NAME"
+  deployment_test_hook "service-startup"
+  deployment_test_hook "nginx-validation"
   if [[ "$NGINX_RELOAD_REQUIRED" == "true" ]]; then
+    sudo nginx -t
     sudo systemctl reload nginx
   fi
   verify_service_active "$FRONTEND_SERVICE_NAME"
   finish_phase "frontend-service-restart"
 
   start_phase "frontend-fingerprint"
+  deployment_test_hook "fingerprint-verification"
   verify_frontend_fingerprint
   finish_phase "frontend-fingerprint"
 
   start_phase "frontend-smoke-tests"
   smoke_check "frontend login" "$FRONTEND_SMOKE_URL"
+  deployment_test_hook "authjs-verification"
   smoke_check_auth_payload \
     "frontend Auth.js CSRF route" \
     "http://127.0.0.1:3000/api/auth/csrf" \
@@ -1877,11 +1918,15 @@ if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
     "frontend console dashboard" \
     "$FRONTEND_CONSOLE_SMOKE_URL" \
     "/console/dashboard"
+  deployment_test_hook "dashboard-smoke"
   smoke_check_protected_frontend_route \
     "frontend Bullpen AI console" \
     "$FRONTEND_BULLPEN_AI_SMOKE_URL" \
     "/console/bullpen-ai"
+  deployment_test_hook "bullpen-smoke"
+  deployment_test_hook "js-css-verification"
   smoke_check_frontend_static_asset
+  deployment_test_hook "backend-proxy-verification"
   smoke_check "same-origin backend proxy" "http://127.0.0.1:3000/backend-api/health/live"
   finish_phase "frontend-smoke-tests"
 fi

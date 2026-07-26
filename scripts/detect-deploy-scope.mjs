@@ -30,6 +30,15 @@ function normalizePath(value) {
   return value.trim().replaceAll("\\", "/").replace(/^\.\/+/, "");
 }
 
+function isDocumentationPath(path) {
+  return (
+    path === "README.md" ||
+    path === "LICENSE" ||
+    path.startsWith("docs/") ||
+    path.endsWith(".md")
+  );
+}
+
 export function combineDeploymentScopes(left, right) {
   const leftComponents = SCOPE_COMPONENTS.get(left);
   const rightComponents = SCOPE_COMPONENTS.get(right);
@@ -60,6 +69,9 @@ export function classifyDeploymentScope(paths) {
   let backendChanged = false;
 
   for (const path of changedPaths) {
+    if (isDocumentationPath(path)) {
+      continue;
+    }
     if (
       FULL_STACK_PATHS.has(path) ||
       FULL_STACK_PREFIXES.some((prefix) => path.startsWith(prefix)) ||
@@ -75,7 +87,12 @@ export function classifyDeploymentScope(paths) {
 
     if (path.startsWith(BACKEND_PREFIX)) {
       backendChanged = true;
+      continue;
     }
+
+    // New or shared non-documentation paths can affect either runtime. Fail
+    // closed until an explicit narrow classification is reviewed.
+    return "full-stack";
   }
 
   if (frontendChanged && backendChanged) {

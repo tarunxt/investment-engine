@@ -934,3 +934,12 @@ Stage 3 `orders_planned`, `orders_processed`, `orders_submitted`, both execution
 tiles, and the run-level order funnel are materialized from durable order-intent and
 attempt records. `persisted_execution_counters.source` is
 `persisted_order_intents`; validators reject contradictory counter orderings.
+# Lightweight run-list projection
+
+`GET /polymarket/auto-live/runs` preserves the historical response shape but
+omits stage payloads, request context, diagnostics, identifiers, and audit
+metadata by default. These frozen facts remain unchanged and available from
+`GET /polymarket/auto-live/runs/{run_id}`. Explicit diagnostic callers may pass
+`include_detail=true`; ordinary list and initial-render callers must use the
+lightweight projection. This is a presentation-only projection and does not
+rewrite or version any frozen audit snapshot.

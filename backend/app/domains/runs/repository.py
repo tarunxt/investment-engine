@@ -15,6 +15,28 @@ from app.shared.types import JobStatus
 MAX_FULL_RUN_LIST_LIMIT = 20
 
 
+def run_summary_columns():
+    """Columns safe for list views; deliberately excludes the full prompt."""
+
+    return (
+        Run.id,
+        Run.prompt_preview,
+        Run.prompt_id,
+        Run.status,
+        Run.current_stage,
+        Run.auto_export_enabled,
+        Run.export_status,
+        Run.export_error,
+        Run.exported_at,
+        Run.exported_sheet_url,
+        Run.auto_rebalance_portfolio,
+        Run.auto_rebalance_sequence,
+        Run.auto_rebalance_label,
+        Run.created_at,
+        Run.updated_at,
+    )
+
+
 class PostgresRunRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -60,21 +82,8 @@ class PostgresRunRepository:
         if summary:
             stmt = stmt.options(
                 load_only(
-                    Run.id,
-                    Run.prompt,
-                    Run.prompt_id,
-                    Run.status,
-                    Run.current_stage,
-                    Run.auto_export_enabled,
-                    Run.export_status,
-                    Run.export_error,
-                    Run.exported_at,
-                    Run.exported_sheet_url,
-                    Run.auto_rebalance_portfolio,
-                    Run.auto_rebalance_sequence,
-                    Run.auto_rebalance_label,
-                    Run.created_at,
-                    Run.updated_at,
+                    *run_summary_columns(),
+                    raiseload=True,
                 ),
                 selectinload(Run.run_jobs)
                 .load_only(RunJob.id, RunJob.run_id, RunJob.job_id, RunJob.stage)

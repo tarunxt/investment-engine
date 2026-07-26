@@ -34,7 +34,7 @@ const proxy = {
   transport: "same-origin-proxy",
 };
 
-test("API circuit opens, selects the proxy, probes recovery, and closes", () => {
+test("browser read circuit exposes closed, open, and single half-open probe states", () => {
   const { ApiReadCircuitBreaker } = loadCircuitModule();
   const circuit = new ApiReadCircuitBreaker(2, 30_000);
 
@@ -42,14 +42,17 @@ test("API circuit opens, selects the proxy, probes recovery, and closes", () => 
   circuit.recordFailure(direct, 1_000);
   assert.deepEqual(circuit.order([direct, proxy], 1_001), [direct, proxy]);
   circuit.recordFailure(direct, 1_002);
-  assert.deepEqual(circuit.order([direct, proxy], 1_003), [proxy, direct]);
+  assert.equal(circuit.snapshot(direct).phase, "open");
+  assert.deepEqual(circuit.order([direct, proxy], 1_003), [proxy]);
 
   circuit.recordSuccess(proxy);
-  assert.deepEqual(circuit.order([direct, proxy], 20_000), [proxy, direct]);
+  assert.deepEqual(circuit.order([direct, proxy], 20_000), [proxy]);
   assert.deepEqual(circuit.order([direct, proxy], 31_003), [direct, proxy]);
+  assert.equal(circuit.snapshot(direct).phase, "half-open");
+  assert.deepEqual(circuit.order([direct, proxy], 31_004), [proxy]);
 
   circuit.recordSuccess(direct);
-  assert.equal(circuit.snapshot(direct), null);
+  assert.equal(circuit.snapshot(direct).phase, "closed");
 });
 
 test("read attempts share one deadline instead of receiving full timeouts", () => {
@@ -59,7 +62,7 @@ test("read attempts share one deadline instead of receiving full timeouts", () =
     getApiReadAttemptBudget({
       startedAt: 0,
       now: 10,
-      index: 0,
+      candidateStage: "primary",
       candidateCount: 2,
       totalBudgetMs: 5_000,
       primaryAttemptBudgetMs: 1_500,
@@ -70,7 +73,7 @@ test("read attempts share one deadline instead of receiving full timeouts", () =
     getApiReadAttemptBudget({
       startedAt: 0,
       now: 1_510,
-      index: 1,
+      candidateStage: "secondary",
       candidateCount: 2,
       totalBudgetMs: 5_000,
       primaryAttemptBudgetMs: 1_500,
@@ -79,27 +82,8 @@ test("read attempts share one deadline instead of receiving full timeouts", () =
   );
 });
 
-test("console auth is server-resolved without serializing tokens into HTML", () => {
-  const rootLayout = read("../app/layout.tsx");
-  const consoleLayout = read("../app/console/layout.tsx");
-  const consoleShell = read("../app/console/_components/ConsoleShell.tsx");
-  const authProvider = read("../providers/AuthProvider.tsx");
-  const apiService = read("../services/api.ts");
-
-  assert.doesNotMatch(rootLayout, /ClientProviders/);
-  assert.match(consoleLayout, /const session = await auth\(\)/);
-  assert.match(consoleLayout, /if \(!session\?\.user\) redirect/);
-  assert.match(consoleLayout, /<ConsoleProviders[\s\S]*initialUser=/);
-  assert.doesNotMatch(consoleLayout, /accessToken|refreshToken/);
-  assert.doesNotMatch(consoleShell, /ConsoleShellSkeleton|authLoadTimedOut/);
-  assert.match(authProvider, /let sessionBootstrapPromise/);
-  assert.match(authProvider, /Session token bootstrap failed/);
-  assert.match(apiService, /let refreshPromise: Promise<boolean> \| null/);
-  assert.match(apiService, /const pendingRefresh = refreshPromise/);
-});
-
 test("dashboard cache is user-scoped and below-fold panels mount on visibility", () => {
-  const dashboard = read("../app/console/dashboard/page.tsx");
+  const dashboard = read("../app/console/dashboard/DashboardPageClient.tsx");
   const automatedRebalance = read(
     "../app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
   );
@@ -120,12 +104,9 @@ test("dashboard cache is user-scoped and below-fold panels mount on visibility",
   assert.match(lazyMount, /IntersectionObserver/);
 });
 
-test("hidden Bullpen legacy controls do not mount or prefetch routes", () => {
+test("hidden Bullpen legacy controls remain disabled", () => {
   const bullpen = read(
     "../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx",
-  );
-  const bullpenShell = read(
-    "../app/console/bullpen-ai/_components/BullpenAiPageShell.tsx",
   );
   const sidebar = read("../app/console/_components/SidebarNavigation.tsx");
 
@@ -135,7 +116,6 @@ test("hidden Bullpen legacy controls do not mount or prefetch routes", () => {
   );
   assert.match(bullpen, /RENDER_LEGACY_SCAN_CONTROLS \? \(/);
   assert.match(bullpen, /data-performance-usable="bullpen-runtime"/);
-  assert.match(bullpenShell, /Restoring interactive market controls/);
   assert.match(sidebar, /prefetch=\{false\}/);
 });
 

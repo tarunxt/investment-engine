@@ -1,22 +1,21 @@
 "use client";
 
 import { AuthContextType, AuthContext, type User } from "@/hooks/useAuth";
-import { syncTokenToCookie, clearAuthCookies } from "@/services/cookies";
-import { useState, useEffect, useCallback } from "react";
-import {
-  AUTH_TOKENS_REFRESHED_EVENT,
-  type RefreshedAuthTokens,
-  sessionStorage as customSessionStorage,
-} from "@/services/session";
+import { clearAuthCookies } from "@/services/cookies";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signIn, signOut as nextSignOut } from "next-auth/react";
 import { UserResponse } from "@/types/api";
 import { APIError, NetworkError, apiService } from "@/services/api";
 import { URLs } from "@/lib/urls";
+import {
+  clearBrowserPrivateCacheOwner,
+  purgeBrowserPrivateDashboardCaches,
+  reconcileBrowserPrivateCacheOwner,
+} from "@/lib/privateDashboardCache";
 
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
-let sessionBootstrapPromise: Promise<unknown> | null = null;
 
 const devUser: UserResponse = {
   id: 1,
@@ -52,11 +51,26 @@ export function AuthProvider({
   const [user, setUser] = useState<UserResponse | null>(
     devAuthDisabled ? devUser : initialUser,
   );
-  const [loading, setLoading] = useState(
-    !devAuthDisabled,
-  );
+  const [loading, setLoading] = useState(!devAuthDisabled && !initialUser);
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
+  const previousUserIdRef = useRef<number | null>(initialUser?.id ?? null);
+
+  useEffect(() => {
+    const nextUserId = user?.id ?? null;
+    const previousUserId = previousUserIdRef.current;
+    if (
+      previousUserId !== null &&
+      nextUserId !== null &&
+      previousUserId !== nextUserId
+    ) {
+      purgeBrowserPrivateDashboardCaches();
+    }
+    if (nextUserId !== null) {
+      reconcileBrowserPrivateCacheOwner(nextUserId);
+    }
+    previousUserIdRef.current = nextUserId;
+  }, [user?.id]);
 
   const clearErrorState = useCallback(() => {
     setError(null);
@@ -116,183 +130,65 @@ export function AuthProvider({
     };
   }, []);
 
-  // Check if token is expired
-  const isTokenExpired = useCallback((): boolean => {
-    const expiryTime = customSessionStorage.getSessionExpiry();
-    if (!expiryTime) return true;
-
-    const now = Date.now();
-    const isExpired = now >= expiryTime;
-
-    if (isExpired) {
-      console.warn("Access token has expired");
-    }
-
-    return isExpired;
+  // Remove credentials left by pre-hardening clients. Auth.js's encrypted,
+  // HttpOnly cookie is now the only browser session credential.
+  useEffect(() => {
+    if (devAuthDisabled) return;
+    clearAuthCookies();
+    performance.mark("console-server-identity-visible");
+    performance.mark("auth-client-bootstrap-start");
   }, []);
 
-  // Refresh token or logout if expired
-  const handleTokenExpiry = useCallback(async () => {
-    const refreshToken = customSessionStorage.getRefreshToken();
-
-    if (!refreshToken) {
-      // No refresh token, must logout
-      await nextSignOut({ redirect: false });
-      customSessionStorage.clearSession();
-      clearAuthCookies();
-      setUser(null);
-      return;
-    }
-
-    try {
-      // Try to refresh the token
-      console.log("Token expired, attempting refresh...");
-
-      const data = await apiService.refreshToken();
-
-      if (data.access_token && data.refresh_token) {
-        // refreshToken emits an event that persists this rotated pair in the
-        // Auth.js JWT as well as local storage.
-        console.log("Token refreshed successfully");
-      }
-    } catch (err) {
-      console.error("Token refresh failed, logging out:", err);
-      // Refresh failed, logout the user
-      await nextSignOut({ redirect: false });
-      customSessionStorage.clearSession();
-      clearAuthCookies();
-      setUser(null);
-    }
-  }, []);
-
-  // Sync NextAuth session with custom storage
+  // The server-provided user is authoritative for the first render. A delayed
+  // /api/auth/session request must never replace already validated children
+  // with a restoration screen.
   useEffect(() => {
     if (devAuthDisabled) {
       return;
     }
 
-    // Only sync when status is no longer loading
     if (status === "loading") {
       return;
     }
 
-    // Sync authenticated session
     if (status === "authenticated" && session) {
       const userData = session.userData as unknown as UserResponse | undefined;
-
-      if (userData) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setUser(userData);
-
-        // Sync to existing session storage for backward compatibility
-        if (session.accessToken) {
-          customSessionStorage.setTokens(
-            session.accessToken as string,
-            session.refreshToken as string || ""
-          );
-          customSessionStorage.setUserData(userData);
-
-          // setSessionExpiry accepts a duration in seconds, not an absolute
-          // timestamp. Passing a timestamp kept expired tokens looking valid
-          // for decades and deferred refresh until requests were already 401.
-          customSessionStorage.setSessionExpiry(session.expiresIn ?? 900);
-
-          syncTokenToCookie(session.accessToken as string);
+      performance.mark("auth-client-session-ready");
+      performance.measure(
+        "auth-client-bootstrap",
+        "auth-client-bootstrap-start",
+        "auth-client-session-ready",
+      );
+      const timer = window.setTimeout(() => {
+        if (userData) {
+          setUser(userData);
         }
-      }
-      if (!session.accessToken) return;
-    }
-    // Clear session when unauthenticated
-    else if (status === "unauthenticated") {
-      setUser(null);
-      customSessionStorage.clearSession();
+        setLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    } else if (status === "unauthenticated") {
+      performance.mark("auth-client-session-failed");
+      performance.measure(
+        "auth-client-bootstrap",
+        "auth-client-bootstrap-start",
+        "auth-client-session-failed",
+      );
+      purgeBrowserPrivateDashboardCaches();
+      clearBrowserPrivateCacheOwner();
       clearAuthCookies();
+      const timer = window.setTimeout(() => {
+        setUser(null);
+        setLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
-
-    // Always ensure loading is false when status is not "loading"
-    setLoading(false);
   }, [session, status]);
 
   useEffect(() => {
-    if (
-      devAuthDisabled ||
-      status !== "authenticated" ||
-      session?.accessToken
-    ) {
-      return;
-    }
-
-    if (!sessionBootstrapPromise) {
-      sessionBootstrapPromise = update().finally(() => {
-        sessionBootstrapPromise = null;
-      });
-    }
-
-    void sessionBootstrapPromise.catch((bootstrapError) => {
-      console.error("Session token bootstrap failed:", bootstrapError);
-      setStructuredError(
-        "Your secure session could not be restored. Please sign in again.",
-      );
-      setUser(null);
-      setLoading(false);
-    });
-  }, [session?.accessToken, setStructuredError, status, update]);
-
-  // Keep Auth.js's cookie-backed JWT aligned with credentials refreshed by
-  // apiService. This prevents a hard navigation from restoring a stale token
-  // and firing a burst of unauthorized page-load requests.
-  useEffect(() => {
-    if (devAuthDisabled) return;
-
-    const handleTokensRefreshed = (event: Event) => {
-      const { accessToken, refreshToken, expiresIn } = (
-        event as CustomEvent<RefreshedAuthTokens>
-      ).detail;
-      void update({ accessToken, refreshToken, expiresIn });
-    };
-
-    window.addEventListener(AUTH_TOKENS_REFRESHED_EVENT, handleTokensRefreshed);
-    return () => {
-      window.removeEventListener(AUTH_TOKENS_REFRESHED_EVENT, handleTokensRefreshed);
-    };
-  }, [update]);
-
-  // Check token expiry on mount and when user changes
-  useEffect(() => {
-    if (devAuthDisabled) {
-      return;
-    }
-
-    // A server-resolved user can render the shell before SessionProvider has
-    // copied the encrypted session's token expiry into compatibility storage.
-    // Do not interpret that brief, expected gap as an expired token.
-    if (
-      status === "authenticated" &&
-      session?.accessToken &&
-      user &&
-      isTokenExpired()
-    ) {
-      queueMicrotask(() => {
-        handleTokenExpiry();
-      });
-    }
-  }, [handleTokenExpiry, isTokenExpired, session?.accessToken, status, user]);
-
-  // Set up visibility change listener to check token on tab focus
-  useEffect(() => {
-    if (devAuthDisabled) {
-      return;
-    }
-
-    const handleVisibilityChange = () => {
-      if (!document.hidden && user && isTokenExpired()) {
-        handleTokenExpiry();
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [user, isTokenExpired, handleTokenExpiry]);
+    apiService.setSessionGeneration(
+      session?.generation || (user ? `server-user:${user.id}` : "anonymous"),
+    );
+  }, [session?.generation, user]);
 
   const login = useCallback(async (
     emailOrUsername: string,
@@ -402,22 +298,22 @@ export function AuthProvider({
     setLoading(true);
 
     try {
-      // Call API logout if needed
-      const token = customSessionStorage.getAccessToken();
-      if (token) {
+      if (user) {
         await apiService.logout().catch(console.error);
       }
     } catch (err) {
       console.error("Logout API error:", err);
     } finally {
       await nextSignOut({ redirect: false });
-      customSessionStorage.clearSession();
+      purgeBrowserPrivateDashboardCaches();
+      clearBrowserPrivateCacheOwner();
+      apiService.setSessionGeneration("anonymous");
       clearAuthCookies();
       setUser(null);
       setLoading(false);
       window.location.href = "/login";
     }
-  }, [clearErrorState]);
+  }, [clearErrorState, user]);
 
   const refreshAuth = useCallback(async () => {
     if (devAuthDisabled) {
@@ -427,8 +323,27 @@ export function AuthProvider({
       return;
     }
 
-    await update();
-  }, [clearErrorState, update]);
+    try {
+      const updatedSession = await update();
+      if (!updatedSession?.user) {
+        throw new Error("The authenticated session could not be verified.");
+      }
+      clearErrorState();
+    } catch (refreshError) {
+      const normalized = normalizeAuthError(
+        refreshError,
+        "Your session could not be verified. Reload or sign in again.",
+      );
+      setStructuredError(normalized.message, normalized.details);
+      setLoading(false);
+      throw refreshError;
+    }
+  }, [
+    clearErrorState,
+    normalizeAuthError,
+    setStructuredError,
+    update,
+  ]);
 
   const clearError = clearErrorState;
 

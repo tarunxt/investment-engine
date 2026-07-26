@@ -2,18 +2,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, time
-import logging
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.concurrency import run_in_threadpool
-import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
 from app.domains.google_sheets.service import GoogleSheetsService
+from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.jobs.models import Job
 from app.domains.runs.models import Run, RunJob
 from app.domains.api_usage.schemas import (
@@ -32,7 +31,6 @@ router = APIRouter(prefix="/api-usage", tags=["api-usage"])
 
 
 API_USAGE_TZ = ZoneInfo("UTC")
-logger = logging.getLogger(__name__)
 _google_sheets_service = GoogleSheetsService()
 
 SCAN_MARKERS: tuple[tuple[str, str], ...] = (
@@ -118,10 +116,6 @@ def _build_llm_group(provider: str, model: str, scans: list[LlmScanPerformanceIt
         scans=sorted(scans, key=lambda item: item.created_at, reverse=True),
     )
 
-USD_INR_FALLBACK = 83.50
-FX_SOURCE = "https://open.er-api.com/v6/latest/USD"
-
-
 LLM_PROVIDER_LABELS = {
     "openai": "OpenAI",
     "anthropic": "Anthropic",
@@ -152,7 +146,7 @@ class ApiUsageItem:
     daily_tokens_in: int
     daily_tokens_out: int
     daily_estimated_cost: float
-    daily_estimated_cost_inr: float
+    daily_estimated_cost_inr: float | None
     daily_limit_requests: int | None
     notes: str | None
     console_url: str | None
@@ -214,18 +208,13 @@ def _window_utc(
     return _to_naive_utc(start), _to_naive_utc(end), label
 
 
-async def _fetch_usd_inr_rate() -> tuple[float, str]:
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(FX_SOURCE)
-            resp.raise_for_status()
-            payload = resp.json()
-            inr_rate = float((payload.get("rates") or {}).get("INR"))
-            if inr_rate > 0:
-                return inr_rate, FX_SOURCE
-    except Exception as exc:  # pragma: no cover - fallback is expected in outages
-        logger.warning("USD/INR live rate fetch failed, using fallback: %s", exc)
-    return USD_INR_FALLBACK, "fallback"
+def _convert_usd_to_inr(
+    value: float,
+    verified_rate: float | None,
+) -> float | None:
+    if verified_rate is None:
+        return None
+    return round(value * verified_rate, 4)
 
 
 @router.get("/summary")
@@ -240,7 +229,8 @@ async def api_usage_summary(
         lambda: _google_sheets_service.is_configured
     )
     start_utc, end_utc, period_label = _window_utc(period, custom_start, custom_end)
-    usd_inr_rate, fx_source = await _fetch_usd_inr_rate()
+    fx = await load_persisted_usd_inr_rate()
+    usd_inr_rate = fx.valid_value
 
     rows = (
         await db.execute(
@@ -328,7 +318,10 @@ async def api_usage_summary(
                         daily_tokens_in=total_tokens_in if consumed else 0,
                         daily_tokens_out=total_tokens_out if consumed else 0,
                         daily_estimated_cost=usd_cost if consumed else 0.0,
-                        daily_estimated_cost_inr=round((usd_cost if consumed else 0.0) * usd_inr_rate, 4),
+                        daily_estimated_cost_inr=_convert_usd_to_inr(
+                            usd_cost if consumed else 0.0,
+                            usd_inr_rate,
+                        ),
                         daily_limit_requests=None,
                         notes="Primary key is used first; fallback keys are used automatically on quota/rate-limit and transient provider errors.",
                         console_url=console_url,
@@ -350,7 +343,10 @@ async def api_usage_summary(
                 daily_tokens_in=usage.get("tokens_in", 0),
                 daily_tokens_out=usage.get("tokens_out", 0),
                 daily_estimated_cost=usd_cost,
-                daily_estimated_cost_inr=round(usd_cost * usd_inr_rate, 4),
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    usd_cost,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Daily request limit depends on provider plan/quota.",
                 console_url=console_url,
@@ -367,7 +363,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
-                daily_estimated_cost_inr=0.0,
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    0.0,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Usage from Google console quotas; app-side token metrics not tracked.",
                 console_url="https://console.cloud.google.com/apis/api/sheets.googleapis.com/quotas",
@@ -380,7 +379,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
-                daily_estimated_cost_inr=0.0,
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    0.0,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Kite limits are account-specific.",
                 console_url="https://kite.trade/docs/connect/v3/exceptions/#api-rate-limit",
@@ -393,7 +395,10 @@ async def api_usage_summary(
                 daily_tokens_in=0,
                 daily_tokens_out=0,
                 daily_estimated_cost=0.0,
-                daily_estimated_cost_inr=0.0,
+                daily_estimated_cost_inr=_convert_usd_to_inr(
+                    0.0,
+                    usd_inr_rate,
+                ),
                 daily_limit_requests=None,
                 notes="Used by DeepSeek tool-calling for live web search.",
                 console_url="https://app.tavily.com/home",
@@ -409,8 +414,12 @@ async def api_usage_summary(
         "period_label": period_label,
         "from_date": (custom_start.isoformat() if custom_start else None),
         "to_date": (custom_end.isoformat() if custom_end else None),
-        "usd_inr_rate": round(usd_inr_rate, 4),
-        "fx_source": fx_source,
+        "usd_inr_rate": round(usd_inr_rate, 4) if usd_inr_rate is not None else None,
+        "fx_source": fx.source,
+        "fx_as_of": fx.as_of,
+        "fx_age_seconds": fx.age_seconds,
+        "fx_status": fx.status,
+        "fx_stale_after_seconds": fx.stale_after_seconds,
         "items": [asdict(item) for item in items],
     }
 
@@ -424,7 +433,8 @@ async def llm_cost_history(
     current_user: User = Depends(get_current_user),
 ):
     normalized_provider = _normalize_llm_provider(provider)
-    usd_inr_rate, _fx_source = await _fetch_usd_inr_rate()
+    fx = await load_persisted_usd_inr_rate()
+    usd_inr_rate = fx.valid_value
 
     today = datetime.now(API_USAGE_TZ).date()
     oldest_day = today - timedelta(days=day_limit - 1)
@@ -491,7 +501,10 @@ async def llm_cost_history(
         LlmCostHistoryDay(
             date=day_key,
             estimated_cost=round(float(totals["cost"]), 6),
-            estimated_cost_inr=round(float(totals["cost"]) * usd_inr_rate, 4),
+            estimated_cost_inr=_convert_usd_to_inr(
+                float(totals["cost"]),
+                usd_inr_rate,
+            ),
             requests=int(totals["requests"]),
             tokens_in=int(totals["tokens_in"]),
             tokens_out=int(totals["tokens_out"]),
@@ -510,7 +523,10 @@ async def llm_cost_history(
                 status=status,
                 timestamp=job.created_at,
                 estimated_cost=round(cost, 6),
-                estimated_cost_inr=round(cost * usd_inr_rate, 4),
+                estimated_cost_inr=_convert_usd_to_inr(
+                    cost,
+                    usd_inr_rate,
+                ),
                 tokens_in=job.tokens_in,
                 tokens_out=job.tokens_out,
             )
@@ -520,7 +536,12 @@ async def llm_cost_history(
         provider=normalized_provider,
         name=LLM_PROVIDER_LABELS[normalized_provider],
         timezone="UTC",
-        usd_inr_rate=round(usd_inr_rate, 4),
+        usd_inr_rate=round(usd_inr_rate, 4) if usd_inr_rate is not None else None,
+        fx_source=fx.source,
+        fx_as_of=fx.as_of,
+        fx_age_seconds=fx.age_seconds,
+        fx_status=fx.status,
+        fx_stale_after_seconds=fx.stale_after_seconds,
         generated_at=datetime.now(ZoneInfo("UTC")),
         day_limit=day_limit,
         run_limit=run_limit,

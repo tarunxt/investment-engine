@@ -11,6 +11,7 @@ from app.domains.ai_providers.availability import filter_recently_available_targ
 from app.domains.jobs.models import Job
 from app.domains.jobs.repository import PostgresJobRepository
 from app.domains.runs.models import Run, RunJob
+from app.domains.runs.presentation import build_run_prompt_preview
 from app.domains.runs.repository import PostgresRunRepository
 from app.infrastructure.messaging.task_registry import register_job_task
 from app.infrastructure.locks.redis_lock import LockAcquisitionError, RedisLock
@@ -124,6 +125,7 @@ class CreateRunUseCase:
                 run = Run(
                     user_id=cmd.user_id,
                     prompt=cmd.prompt,
+                    prompt_preview=build_run_prompt_preview(cmd.prompt),
                     prompt_id=cmd.prompt_id,
                     status=initial_status,
                     current_stage=1,

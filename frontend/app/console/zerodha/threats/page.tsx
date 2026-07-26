@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { useHistoricalAnalysisCosts } from '@/hooks/useHistoricalAnalysisCosts';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
 import { formatApiTimestamp } from '@/lib/datetime';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import { URLs } from '@/lib/urls';
 import { apiService, APIError } from '@/services/api';
 import {
@@ -56,11 +57,7 @@ function formatInr(value: number | null | undefined) {
 }
 
 function formatInrCost(value: number, usdInrRate: number) {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(value * usdInrRate);
+  return formatUsdAsVerifiedInr(value, usdInrRate);
 }
 
 function hasKnownCost(value: number | null | undefined): value is number {

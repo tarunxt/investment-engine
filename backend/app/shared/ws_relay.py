@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.security import JWTUtils
 from app.domains.auth.dependencies import get_or_create_dev_user, is_auth_disabled
 from app.domains.auth.models import User
+from app.domains.auth.websocket_tickets import consume_websocket_ticket
 from app.infrastructure.database.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,12 @@ async def user_id_from_ws_token(token: str | None) -> int | None:
         return None
 
     user_id = user_id_from_token(token)
+    if user_id is None:
+        try:
+            user_id = await consume_websocket_ticket(token)
+        except Exception:
+            logger.warning("WebSocket ticket validation failed", exc_info=True)
+            return None
     if user_id is None:
         return None
 

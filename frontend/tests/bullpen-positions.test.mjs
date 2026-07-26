@@ -38,7 +38,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
       avg_price: "0.45",
       current_price: "0.50",
       current_value: "5.00",
-      end_date: "2026-08-25",
+      end_date: "2027-07-25",
       status: "open",
     },
     () => null,
@@ -101,7 +101,7 @@ test("claimable Bullpen rows are normalized and summarized correctly", async () 
       current_price: "0.50",
       current_value: "2.50",
       invested_usd: "2.75",
-      end_date: "2026-08-25",
+      end_date: "2027-07-25",
       status: "open",
     },
     () => null,
@@ -387,7 +387,7 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
       redeemable: false,
       upstream_redeemable: false,
       resolution_status: "open",
-      end_date: "2026-08-24",
+      end_date: "2027-07-24",
     },
   ];
 

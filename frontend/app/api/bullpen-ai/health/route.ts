@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { fetchBackendRuntimeJson } from "../_lib/backendBullpenRuntime";
+import {
+  createBackendSessionContext,
+  fetchBackendJsonWithSession,
+} from "../_lib/serverBackendSession";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const accessToken = request.cookies.get("app_access_token")?.value || null;
-  const payload = await fetchBackendRuntimeJson("/polymarket/runtime/health", {
-    accessToken,
-  });
+  const session = await createBackendSessionContext(request);
+  const payload = await fetchBackendJsonWithSession(
+    session,
+    "/polymarket/runtime/health",
+  );
 
   return NextResponse.json(payload, {
     status:

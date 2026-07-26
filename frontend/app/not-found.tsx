@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
-import { URLs } from "@/lib/urls";
 
 export default function NotFound() {
     return (
@@ -30,13 +29,13 @@ export default function NotFound() {
                     </div>
 
                     <div className="space-y-2">
-                        <Link href={URLs.routes.home()}>
+                        <Link href="/">
                             <Button className="w-full bg-purple-600 hover:bg-purple-700">
                                 Go to Home
                             </Button>
                         </Link>
 
-                        <Link href={URLs.routes.login()}>
+                        <Link href="/login">
                             <Button variant="outline" className="w-full">
                                 Sign In
                             </Button>

@@ -8,6 +8,7 @@ from fastapi.responses import Response as FastAPIResponse
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.polymarket.access import user_can_access_singleton_bullpen_runtime
 from app.domains.dashboard.schemas import DashboardSummaryResponse
 from app.domains.dashboard.service import build_dashboard_summary
 
@@ -20,7 +21,12 @@ async def get_dashboard_summary(
     current_user: User = Depends(get_current_user),
     if_none_match: str | None = Header(default=None),
 ):
-    summary = await build_dashboard_summary(current_user.id)
+    summary = await build_dashboard_summary(
+        current_user.id,
+        include_singleton_bullpen=user_can_access_singleton_bullpen_runtime(
+            current_user
+        ),
+    )
     etag_payload = summary.model_dump(mode="json")
     etag_payload.pop("generated_at", None)
     for section_meta in etag_payload.get("sections", {}).values():

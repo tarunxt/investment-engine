@@ -12,6 +12,7 @@ from app.domains.dashboard import service
 from app.domains.dashboard import router as dashboard_router
 from app.domains.dashboard.schemas import (
     DashboardBullpenSection,
+    DashboardFxRate,
     DashboardHistoryPoint,
     DashboardHolding,
     DashboardIndMoneySection,
@@ -20,6 +21,7 @@ from app.domains.dashboard.schemas import (
     DashboardZerodhaSection,
     DashboardZerodhaSnapshot,
 )
+from app.domains.auth.models import UserRole
 
 
 def _summary_fixture() -> DashboardSummaryResponse:
@@ -42,7 +44,19 @@ def _summary_fixture() -> DashboardSummaryResponse:
     ]
     return DashboardSummaryResponse(
         generated_at=now,
-        usd_inr_rate=83.5,
+        usd_inr_rate=86.125,
+        usd_inr_source="verified-fixture",
+        usd_inr_as_of=now,
+        usd_inr_age_seconds=0,
+        usd_inr_status="valid",
+        fx=DashboardFxRate(
+            value=86.125,
+            source="verified-fixture",
+            as_of=now,
+            age_seconds=0,
+            stale_after_seconds=36 * 60 * 60,
+            status="valid",
+        ),
         zerodha=DashboardZerodhaSection(
             connected=True,
             snapshot=DashboardZerodhaSnapshot(
@@ -80,6 +94,11 @@ def _summary_fixture() -> DashboardSummaryResponse:
                 duration_ms=12,
                 fresh_at=now,
             ),
+            "fx": DashboardSectionMeta(
+                status="ok",
+                duration_ms=1,
+                fresh_at=now,
+            ),
         },
     )
 
@@ -100,9 +119,21 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
         await asyncio.sleep(0.05)
         return DashboardBullpenSection()
 
+    async def load_fx(_user_id: int):
+        await asyncio.sleep(0.05)
+        return DashboardFxRate(
+            value=84.25,
+            source="verified-fixture",
+            as_of=datetime.now(UTC),
+            age_seconds=0,
+            stale_after_seconds=36 * 60 * 60,
+            status="valid",
+        )
+
     monkeypatch.setattr(service, "_load_zerodha", load_zerodha)
     monkeypatch.setattr(service, "_load_indmoney", load_indmoney)
     monkeypatch.setattr(service, "_load_bullpen", load_bullpen)
+    monkeypatch.setattr(service, "_load_fx", load_fx)
 
     started = monotonic()
     summary = await service.build_dashboard_summary(user_id=17)
@@ -147,14 +178,19 @@ def test_top_holdings_and_history_have_hard_schema_budgets():
 async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
     summary = _summary_fixture()
 
-    async def build_summary(_user_id: int):
+    async def build_summary(
+        _user_id: int,
+        *,
+        include_singleton_bullpen: bool,
+    ):
+        assert include_singleton_bullpen is True
         return summary
 
     monkeypatch.setattr(dashboard_router, "build_dashboard_summary", build_summary)
     first_response = Response()
     result = await dashboard_router.get_dashboard_summary(
         response=first_response,
-        current_user=SimpleNamespace(id=19),
+        current_user=SimpleNamespace(id=19, role=UserRole.ADMIN),
         if_none_match=None,
     )
 
@@ -165,7 +201,7 @@ async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
 
     not_modified = await dashboard_router.get_dashboard_summary(
         response=Response(),
-        current_user=SimpleNamespace(id=19),
+        current_user=SimpleNamespace(id=19, role=UserRole.ADMIN),
         if_none_match=etag,
     )
     assert not_modified.status_code == 304

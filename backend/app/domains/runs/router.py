@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone
+import json
 import re
 
 from app.core.config import settings
@@ -48,7 +49,7 @@ from app.shared.pagination import PagedQuery
 from app.shared.types import JobStatus, UserId
 
 router = APIRouter(prefix="/runs", tags=["runs"])
-RUN_PROMPT_PREVIEW_CHARS = 280
+MAX_FULL_RUN_LIST_RESPONSE_BYTES = 1_000_000
 AUTO_REBALANCE_LABEL_PREFIXES = {
     "india": "India Run",
     "indmoney_us": "IndMoney US Run",
@@ -132,13 +133,6 @@ async def _reserve_auto_rebalance_sequence(db: AsyncSession, redis: aioredis.Red
                 continue
 
 
-def _preview_prompt(prompt: str) -> str:
-    normalized = " ".join(prompt.split())
-    if len(normalized) <= RUN_PROMPT_PREVIEW_CHARS:
-        return normalized
-    return f"{normalized[:RUN_PROMPT_PREVIEW_CHARS].rstrip()}..."
-
-
 def _provider_uses_model_side_search(provider_name: str) -> bool:
     access = ProviderFactory.get_provider_internet_access(provider_name)
     return access.get("mode") != "none"
@@ -147,7 +141,7 @@ def _provider_uses_model_side_search(provider_name: str) -> bool:
 def _serialize_run_list_item(run) -> RunListItem:
     return RunListItem(
         id=run.id,
-        prompt_preview=_preview_prompt(run.prompt),
+        prompt_preview=run.prompt_preview,
         prompt_id=run.prompt_id,
         status=run.status,
         current_stage=run.current_stage,
@@ -162,6 +156,15 @@ def _serialize_run_list_item(run) -> RunListItem:
         auto_rebalance_label=run.auto_rebalance_label,
         created_at=run.created_at,
         updated_at=run.updated_at,
+    )
+
+
+def _full_run_list_size_bytes(items: list[RunResponse]) -> int:
+    return len(
+        json.dumps(
+            [item.model_dump(mode="json") for item in items],
+            separators=(",", ":"),
+        ).encode()
     )
 
 
@@ -761,6 +764,14 @@ async def list_runs(
         if summary
         else [RunResponse.model_validate(run) for run in result.items]
     )
+    if not summary and _full_run_list_size_bytes(items) > MAX_FULL_RUN_LIST_RESPONSE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "The requested full run list exceeds the response budget. "
+                "Use summary=true and load a selected run from /runs/{id}."
+            ),
+        )
     return {
         **result.to_dict(),
         "items": items,
