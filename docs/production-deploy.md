@@ -93,15 +93,15 @@ For frontend and full-stack scopes, GitHub Actions:
 5. Transfers the checksummed artifact to EC2.
 
 EC2 syncs the exact commit that produced the artifact, not whichever commit is
-newest when a queued deploy starts. The artifact is extracted and validated in
-a temporary sibling of the inactive `.next` / `.next-candidate` slot. Only the
-inactive slot can be replaced. EC2 validates the source lockfile, Node major,
-platform, architecture, glibc compatibility, public build configuration, and
-Webpack policy, then starts the candidate on isolated ports to exercise its
-fingerprint, authentication boundary, login, dashboard, Bullpen AI, route
-assets, and backend proxy before promotion. The active pointer changes
-atomically only after those checks, and the old active slot remains intact as
-the rollback target.
+newest when a queued deploy starts. The artifact is extracted directly into
+the inactive `.next` / `.next-candidate` slot; the selected active slot is
+never removed or overwritten during candidate preparation. EC2 validates the
+source lockfile, Node major, platform, architecture, glibc compatibility,
+public build configuration, and Webpack policy, then starts the candidate on
+isolated ports to exercise its fingerprint, authentication boundary, login,
+dashboard, Bullpen AI, route assets, and backend proxy before promotion. The
+active pointer changes atomically only after those checks, and the old active
+slot remains intact as the rollback target.
 The production host must run Node.js 22; exact-major validation rejects an
 artifact before promotion when the host runtime differs from the CI builder.
 

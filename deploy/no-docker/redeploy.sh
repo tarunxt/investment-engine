@@ -135,7 +135,6 @@ FRONTEND_CANDIDATE_BUILD_DIR="$FRONTEND_ROOT/$FRONTEND_CANDIDATE_BUILD_NAME"
 FRONTEND_INACTIVE_BUILD_DIR="$FRONTEND_CANDIDATE_BUILD_DIR"
 FRONTEND_CANDIDATE_READY=false
 FRONTEND_PREVIOUS_BUILD_AVAILABLE=false
-FRONTEND_STAGING_DIR=""
 
 default_service_prefix() {
   if [[ "$APP_ROOT" == "$LEGACY_APP_ROOT" || "$APP_USER" == "$LEGACY_APP_USER" ]]; then
@@ -697,7 +696,7 @@ PY
 }
 
 prepare_frontend_candidate_artifact() {
-  local artifact_directory artifact_name staging_dir
+  local artifact_directory artifact_name
 
   echo "==> Stage frontend artifact in the inactive build slot"
   if [[ -z "$FRONTEND_ARTIFACT" || -z "$EXPECTED_FRONTEND_SHA" ]]; then
@@ -718,27 +717,24 @@ prepare_frontend_candidate_artifact() {
   )
   validate_frontend_archive_members
 
-  staging_dir="$(run_as_app_user "mktemp -d '$FRONTEND_ROOT/.frontend-stage.XXXXXX'")"
-  FRONTEND_STAGING_DIR="$staging_dir"
   run_as_app_user "
-    tar --no-same-owner -xzf '$FRONTEND_ARTIFACT' -C '$staging_dir'
+    rm -rf -- '$FRONTEND_CANDIDATE_BUILD_DIR'
+    mkdir -p '$FRONTEND_CANDIDATE_BUILD_DIR'
+    tar --no-same-owner -xzf '$FRONTEND_ARTIFACT' -C '$FRONTEND_CANDIDATE_BUILD_DIR'
     set -a
     source '$FRONTEND_ENV_FILE'
     set +a
     node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' \
       validate-host \
-      '$staging_dir' \
+      '$FRONTEND_CANDIDATE_BUILD_DIR' \
       '$EXPECTED_FRONTEND_SHA' \
       '$FRONTEND_ROOT/package-lock.json' \
       webpack \
       true >/dev/null
     node '$APP_ROOT/scripts/verify-frontend-artifact-runtime.mjs' \
-      '$staging_dir' \
+      '$FRONTEND_CANDIDATE_BUILD_DIR' \
       '$EXPECTED_FRONTEND_SHA'
-    rm -rf -- '$FRONTEND_CANDIDATE_BUILD_DIR'
-    mv -- '$staging_dir' '$FRONTEND_CANDIDATE_BUILD_DIR'
   "
-  FRONTEND_STAGING_DIR=""
   FRONTEND_CANDIDATE_READY=true
 }
 
@@ -1507,9 +1503,6 @@ handle_deploy_exit() {
     fi
   fi
 
-  if [[ -n "${FRONTEND_STAGING_DIR:-}" && -d "$FRONTEND_STAGING_DIR" ]]; then
-    sudo -u "$APP_USER" -H rm -rf -- "$FRONTEND_STAGING_DIR" || true
-  fi
   cleanup_config_backup_dir
   print_timing_summary
   exit "$status"
