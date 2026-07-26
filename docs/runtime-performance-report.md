@@ -139,9 +139,11 @@ is not claimed as a material desktop improvement.
 5. **Burst CPU contention on the shared host.** The production `t3.large` has two
    vCPUs. During the read-only snapshot, two AI/email Celery children each used
    approximately one full CPU and `vmstat` recorded 71% CPU steal for four
-   consecutive samples. Load was 3.20 on two vCPUs. This explains intermittent
-   backend and database scheduling delay during worker bursts, although it does
-   not explain the dashboard's deterministic browser delay.
+   consecutive samples. Load was 3.20 on two vCPUs. A post-deploy sample then
+   recorded a latest CPU-credit balance of 0.16, a seven-day minimum of 0.06,
+   30% CPU utilization, and load 4.18. This confirms T3 credit exhaustion as the
+   main infrastructure cause of intermittent backend/database scheduling delay,
+   although it does not explain the dashboard's deterministic browser delay.
 6. **Single-host data growth and process leakage.** Production inspection found
    `aidb` at 5.497 GB, `bullpen_run_audit_blobs` at 4.595 GB (almost entirely
    TOAST), and `polymarket_auto_live_runs` at 785 MB. It also found a stale Next
@@ -257,9 +259,10 @@ GitHub-to-host workflow. It recorded:
 
 Memory, disk, Redis, and PostgreSQL connection capacity were not the limiting
 resources in this sample. CPU scheduling during Celery work was. The report tool
-now records current and minimum CPU-credit values as well as seven-day averages
-so a follow-up sample can distinguish exhausted T-series credits from underlying
-host steal.
+now records current and minimum CPU-credit values as well as seven-day averages.
+The post-deploy follow-up reported `balance_latest=0.16`,
+`balance_min=0.06`, and latest CPU at 30%, confirming that the burstable instance
+was effectively at its credit floor during the observed worker load.
 
 ## Remaining manual infrastructure actions
 
@@ -268,11 +271,10 @@ host steal.
 2. Decide a retention/archive policy for Bullpen audit blobs; do not delete
    frozen audit data ad hoc.
 3. Re-run authenticated production Playwright with a secret test account.
-4. Run the updated resource report across several worker bursts. If CPU credits
-   reach zero with high steal again, move the AI/email Celery queue off the web
-   host or replace the burstable instance with a non-burstable instance sized
-   from p75/p95 CPU. Do not increase worker concurrency on the current two-vCPU
-   host.
+4. Move the AI/email Celery queue off the web host or replace the burstable
+   instance with a non-burstable instance sized from p75/p95 CPU. The measured
+   credit floor and steal justify this action; do not increase worker concurrency
+   on the current two-vCPU host.
 5. Trace and close Celery transactions that remain idle across task boundaries.
    PostgreSQL did not need to be moved based on this sample alone.
 6. A CDN can reduce static distance/transfer time; apply only the safe rules in
