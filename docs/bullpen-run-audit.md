@@ -872,6 +872,16 @@ persisted submissions move only to reconciliation. The explicit operator retry p
 first checks remote order IDs, transaction hashes, and persisted submission
 timestamps so it cannot issue a duplicate order.
 
+While Stage 3 is visibly working, the console keeps its Stage 3 retry control
+available. Invoking it stops the scheduler, cancels the active worker and its
+unsubmitted intents through the existing backend stop contract, restores the
+scheduler when it was enabled, and queues a new Stage 3 pass from the complete
+persisted Stage 2 handoff. The control is disabled only while that retry request
+itself is in flight (or when no reusable Stage 2 handoff exists). This is an
+operator-control change only: cancellation, durable intent reconciliation,
+duplicate-submission guards, audit capture, frozen snapshots, schema versions,
+and legacy mappings retain their existing behavior.
+
 When a running record contains a historical auth rejection but active doctor
 auth is now healthy, the old error is recorded as stale in `auth_recovery`, the
 interrupted record is closed, and it no longer blocks a new run. That close keeps

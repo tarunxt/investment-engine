@@ -10745,6 +10745,13 @@ export function BullpenAutoRunScheduleCard({
   });
   const effectiveInvestOnlyRequest =
     stage3PreviewDialogState?.request ?? investOnlyPlan.request;
+  // The normal Invest action deliberately removes candidates that are already
+  // represented by live positions or submitted buys. A Stage 3 retry is a
+  // different operation: it must remain available while Stage 3 is running and
+  // replay the complete, persisted Stage 2 handoff after stop() has cancelled
+  // the active worker and its unsubmitted intents.
+  const stage3RetryRequest =
+    effectiveInvestOnlyRequest ?? investOnlySource.plan.request;
   const liveAlreadyInvestedRecords =
     summary && hasActivePositionsSnapshot
       ? buildLiveAlreadyInvestedRecords({
@@ -11922,16 +11929,18 @@ export function BullpenAutoRunScheduleCard({
                           <button
                             type="button"
                             onClick={() => {
-                              if (effectiveInvestOnlyRequest) {
+                              if (stage3RetryRequest) {
                                 void handleStage3Retry(
-                                  effectiveInvestOnlyRequest,
+                                  stage3RetryRequest,
                                   autoRunActive,
                                 );
                               }
                             }}
-                            disabled={!effectiveInvestOnlyRequest || action !== null}
+                            disabled={
+                              !stage3RetryRequest || action === "retry-stage3"
+                            }
                             className={`inline-flex h-7 w-7 items-center justify-center rounded-full border bg-white/80 transition focus:outline-none focus:ring-2 focus:ring-amber-300 dark:bg-slate-950/80 ${
-                              !effectiveInvestOnlyRequest || action !== null
+                              !stage3RetryRequest || action === "retry-stage3"
                                 ? "cursor-not-allowed opacity-45"
                                 : "hover:-translate-y-0.5 hover:bg-white dark:hover:bg-slate-900"
                             } ${toneClasses.badge}`}
