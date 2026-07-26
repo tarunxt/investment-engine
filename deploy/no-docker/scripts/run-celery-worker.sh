@@ -31,7 +31,7 @@ exec "$BACKEND_ROOT/.venv/bin/celery" \
   worker \
   -Q "$EFFECTIVE_CELERY_WORKER_QUEUES" \
   --loglevel="${CELERY_LOG_LEVEL:-info}" \
-  --concurrency="${CELERY_WORKER_CONCURRENCY:-2}" \
+  --concurrency="${CELERY_AI_WORKER_CONCURRENCY:-1}" \
   --prefetch-multiplier="${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}" \
   --max-tasks-per-child="${CELERY_WORKER_MAX_TASKS_PER_CHILD:-${CELERY_MAX_TASKS_PER_CHILD:-25}}" \
   --max-memory-per-child="${CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB:-800000}"

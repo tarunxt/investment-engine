@@ -13,12 +13,18 @@ from fastapi import FastAPI
 from types import SimpleNamespace
 
 from app.domains.auth.dependencies import get_current_user
+from app.domains.polymarket_auto_live.router import _fit_dashboard_response_budget
 from app.domains.polymarket_auto_live.router import router as auto_live_router
 from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveBotCardSummary,
+    BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOnceRequest,
+    BullpenAutoLiveStageResult,
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
+    BullpenAutoLiveState,
+    BullpenAutoLiveSummary,
 )
 from app.domains.trading_bots.router import router as trading_bots_router
 from app.domains.trading_bots.schemas import (
@@ -294,7 +300,161 @@ async def test_auto_live_exact_run_route_supports_idempotent_start_recovery(
     assert missing.status_code == 404
 
 
+@pytest.mark.anyio
+async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    auth_reads: list[tuple[bool, float | None]] = []
+
+    summary = BullpenAutoLiveSummary(
+        state=BullpenAutoLiveState(),
+        settings=BullpenAutoLiveSettings(),
+        bot_card=BullpenAutoLiveBotCardSummary(
+            status="stopped",
+            mode="analysis-only",
+            guardrails_summary="Ready",
+            strategy_summary="Ready",
+            risk_summary="Ready",
+        ),
+        generated_at="2026-07-26T10:00:00+00:00",
+        projection_version=1,
+    )
+
+    class FakeBot:
+        async def get_dashboard_summary(self):
+            return summary
+
+    async def fake_get_bot(_current_user):
+        return FakeBot()
+
+    async def fake_attach_auth(
+        value,
+        *,
+        refresh_if_stale=True,
+        timeout_seconds=None,
+    ):
+        auth_reads.append((refresh_if_stale, timeout_seconds))
+        return value
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._get_bot",
+        fake_get_bot,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._attach_latest_active_auth",
+        fake_attach_auth,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        first = await client.get("/polymarket/auto-live/summary/dashboard")
+        cached = await client.get(
+            "/polymarket/auto-live/summary/dashboard",
+            headers={"If-None-Match": first.headers["etag"]},
+        )
+
+    assert first.status_code == 200
+    assert int(first.headers["x-response-bytes"]) < 150_000
+    assert first.headers["cache-control"] == "private, no-cache"
+    assert first.headers["vary"] == "Authorization, Cookie"
+    assert "app;dur=" in first.headers["server-timing"]
+    assert cached.status_code == 304
+    assert auth_reads == [(False, 0.25), (False, 0.25)]
+
+
+def test_dashboard_summary_hard_bounds_oversized_optional_workflow_detail():
+    run = BullpenAutoLiveRun(
+        id="run-large",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=True,
+        started_at="2026-07-26T10:00:00+00:00",
+        summary="Working",
+        stage_results=[
+            BullpenAutoLiveStageResult(
+                stage_number=1,
+                stage_name="Stage 1",
+                status="pass",
+                reason="Complete",
+                outputs={"oversized": "x" * 250_000},
+                started_at="2026-07-26T10:00:00+00:00",
+            )
+        ],
+    )
+    summary = BullpenAutoLiveSummary(
+        state=BullpenAutoLiveState(),
+        settings=BullpenAutoLiveSettings(),
+        bot_card=BullpenAutoLiveBotCardSummary(
+            status="running",
+            mode="paper",
+            guardrails_summary="Ready",
+            strategy_summary="Ready",
+            risk_summary="Ready",
+        ),
+        latest_run=run,
+        recent_runs=[run],
+    )
+
+    bounded, serialized = _fit_dashboard_response_budget(summary)
+
+    assert len(serialized) <= 150_000
+    assert bounded.latest_run is not None
+    assert bounded.latest_run.stage_results == []
+    assert "workflow" in bounded.degraded_sections
+
+
+@pytest.mark.anyio
+async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    calls: list[tuple[object, ...]] = []
+
+    class FakeBot:
+        async def list_run_history(self, *, page: int, size: int):
+            calls.append(("history", page, size))
+            return BullpenAutoLiveHistoryPage(
+                items=[],
+                total=0,
+                page=page,
+                size=size,
+                pages=0,
+                generated_at="2026-07-26T10:00:00+00:00",
+            )
+
+        async def list_run_decisions(self, run_id: str):
+            calls.append(("decisions", run_id))
+            return []
+
+    async def fake_get_bot(_current_user):
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._get_bot",
+        fake_get_bot,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+    ) as client:
+        history = await client.get("/polymarket/auto-live/history?page=2&size=10")
+        assert calls == [("history", 2, 10)]
+        details = await client.get(
+            "/polymarket/auto-live/runs/run-1/decisions"
+        )
+
+    assert history.status_code == 200
+    assert history.json()["page"] == 2
+    assert history.headers["cache-control"] == "private, no-cache"
+    assert details.status_code == 200
+    assert calls == [("history", 2, 10), ("decisions", "run-1")]
+
+
 def test_polymarket_manual_invest_route_remains_available():
-    source = Path("app/domains/polymarket/router.py").read_text()
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app/domains/polymarket/router.py"
+    ).read_text()
     assert '@router.post("/manual-invest"' in source
     assert "execute_manual_investments" in source

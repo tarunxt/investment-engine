@@ -45,6 +45,21 @@ def _ready_app() -> FastAPI:
     return app
 
 
+def test_readiness_tracks_every_stage3_state_that_needs_ai_progress() -> None:
+    assert {
+        "PLANNED",
+        "READY",
+        "RETRY_WAIT",
+        "SUBMITTING",
+        "SUBMITTED",
+        "CONFIRMING",
+        "PARTIALLY_FILLED",
+        "SETTLEMENT_PENDING",
+        "WAITING_FOR_COLLATERAL",
+        "WAITING_FOR_EXIT",
+    }.issubset(set(health_router.PENDING_STAGE3_INTENT_STATUSES))
+
+
 def test_stage3_worker_diagnostics_use_configured_celery_app(
     monkeypatch: pytest.MonkeyPatch,
 ):

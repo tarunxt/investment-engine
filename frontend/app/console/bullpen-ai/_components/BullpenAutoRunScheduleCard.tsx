@@ -64,6 +64,8 @@ import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import { APIError, RequestTimeoutError, apiService } from "@/services/api";
 import type {
   BullpenAutoLiveDecision,
+  BullpenAutoLiveHistoryItem,
+  BullpenAutoLiveHistoryPage,
   BullpenAutoLiveOutcomeSide,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
@@ -736,15 +738,21 @@ function buildScanCandidateReturnsPerDayQuestion(
   } as BullpenQuestionRow;
 }
 
-const POLL_INTERVAL_MS = 10_000;
-// The run summary itself refreshes at 10 seconds. Updating this very large
+const POLL_INTERVAL_MS = 2_000;
+// The run summary refreshes quickly while a run is active. Updating this very large
 // card every second only changes elapsed labels, so a five-second cadence
 // avoids needless whole-card renders while retaining useful timing feedback.
 const RUN_TIMER_INTERVAL_MS = 5_000;
-const AUTO_RUN_STATUS_TIMEOUT_MS = 5_000;
+const AUTO_RUN_STATUS_TIMEOUT_MS = 2_000;
 const AUTO_RUN_AUTH_BOOTSTRAP_TIMEOUT_MS = 5_000;
 const AUTO_RUN_STATUS_IDLE_REVALIDATE_MS = 60_000;
 const AUTO_RUN_STATUS_MAX_AUTOMATIC_RETRIES = 3;
+
+function markBullpenAutoRunPerformance(name: string) {
+  if (typeof performance === "undefined") return;
+  if (performance.getEntriesByName(name, "mark").length > 0) return;
+  performance.mark(name);
+}
 
 // React Strict Mode may mount this card twice in development. Keep one
 // resource-level request for the lightweight endpoint so that neither a
@@ -5134,228 +5142,6 @@ function SubmittedExecutionEventsTable({
   );
 }
 
-type RunHistoryMetricTilesProps = {
-  run: BullpenAutoLiveRun;
-  decisions: BullpenAutoLiveDecision[];
-  onOpenMetricDetails: (kind: InvestMetricDialogKind) => void;
-};
-
-function getInvestFailureCode(decisions: BullpenAutoLiveDecision[]) {
-  const failureText = decisions
-    .map(
-      (decision) =>
-        `${decision.order_plan?.detail ?? ""}\n${decision.order_plan?.execution_response ?? ""}`,
-    )
-    .join("\n")
-    .trim();
-  if (!failureText) return null;
-  const quotedReason = failureText.match(
-    /reason\s*[:=]\s*["']([^"']+)["']/i,
-  )?.[1];
-  if (quotedReason) return quotedReason;
-  const snakeCode = failureText.match(
-    /\b([a-z][a-z0-9]+(?:_[a-z0-9]+)+)\b/i,
-  )?.[1];
-  return snakeCode ?? null;
-}
-
-function RunHistoryMetricButton({
-  label,
-  value,
-  onClick,
-  tone = "slate",
-}: {
-  label: string;
-  value: number;
-  onClick: () => void;
-  tone?: "slate" | "rose" | "blue" | "emerald" | "amber";
-}) {
-  const toneClass = {
-    slate:
-      "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
-    rose: "border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300 hover:bg-rose-100",
-    blue: "border-blue-200 bg-blue-50 text-blue-800 hover:border-blue-300 hover:bg-blue-100",
-    emerald:
-      "border-emerald-200 bg-emerald-50 text-emerald-800 hover:border-emerald-300 hover:bg-emerald-100",
-    amber:
-      "border-amber-200 bg-amber-50 text-amber-800 hover:border-amber-300 hover:bg-amber-100",
-  }[tone];
-
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      className={`rounded-xl border px-3 py-2 text-left text-xs font-semibold transition ${toneClass}`}
-    >
-      <span className="text-sm tabular-nums text-slate-950">
-        {value.toLocaleString("en-IN")}
-      </span>{" "}
-      {label}
-    </button>
-  );
-}
-
-function RunHistoryMetricTiles({
-  run,
-  decisions,
-  onOpenMetricDetails,
-}: RunHistoryMetricTilesProps) {
-  const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({
-    run,
-    decisions,
-  });
-  const availableForClaimCount = getInvestMetricRows(
-    "sell-redeem",
-    decisions,
-  ).length;
-  const eventOutOfTopTenCount = getInvestMetricRows(
-    "sell-ranking-llm",
-    decisions,
-  ).length;
-  const forcedExitCount = getInvestMetricRows(
-    "sell-forced-exit",
-    decisions,
-  ).length;
-  const newEventsToInvestCount =
-    (stage2InvestEventsState?.rows.length ?? 0) > 0
-      ? stage2InvestEventsState?.rows.length ?? 0
-      : getInvestMetricRows("buy-planned", decisions).length;
-  const newEventsInvestedCount = getInvestMetricRows(
-    "buy-submitted",
-    decisions,
-  ).length;
-  const investmentFailedRows = getInvestMetricRows(
-    "buy-planned",
-    decisions,
-  ).filter(
-    (decision) =>
-      decision.order_plan &&
-      !isSubmittedOrSuccessfulDecision(decision) &&
-      ["failed", "cancelled", "skipped"].includes(decision.order_plan.status),
-  );
-  const failureCode = getInvestFailureCode(investmentFailedRows);
-
-  return (
-    <div
-      className="mt-3 space-y-3 text-xs"
-      onClick={(event) => event.stopPropagation()}
-    >
-      <button
-        type="button"
-        onClick={() => onOpenMetricDetails("decisions")}
-        className="inline-flex rounded-full border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-800 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900"
-      >
-        {run.decisions_count.toLocaleString("en-IN")} decisions |
-      </button>
-
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3">
-          <RunHistoryMetricButton
-            label="Planned"
-            value={run.orders_planned}
-            onClick={() => onOpenMetricDetails("planned")}
-            tone="amber"
-          />
-          <div className="mt-3 grid gap-2">
-            <div className="rounded-xl border border-rose-100 bg-white/85 p-3">
-              <p className="font-semibold text-rose-900">
-                Step 1 of 2 Event Exits
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <RunHistoryMetricButton
-                  label="Available for Claim"
-                  value={availableForClaimCount}
-                  onClick={() => onOpenMetricDetails("sell-redeem")}
-                  tone="emerald"
-                />
-                <RunHistoryMetricButton
-                  label="Event out of Top 10"
-                  value={eventOutOfTopTenCount}
-                  onClick={() => onOpenMetricDetails("sell-ranking-llm")}
-                  tone="rose"
-                />
-                <RunHistoryMetricButton
-                  label="Forced Exit"
-                  value={forcedExitCount}
-                  onClick={() => onOpenMetricDetails("sell-forced-exit")}
-                  tone="rose"
-                />
-              </div>
-            </div>
-            <div className="rounded-xl border border-blue-100 bg-white/85 p-3">
-              <p className="font-semibold text-blue-900">Step 2</p>
-              <div className="mt-2">
-                <RunHistoryMetricButton
-                  label="New Events to Invest in"
-                  value={newEventsToInvestCount}
-                  onClick={() => onOpenMetricDetails("buy-planned")}
-                  tone="blue"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3">
-          <RunHistoryMetricButton
-            label="Submitted"
-            value={run.orders_submitted}
-            onClick={() => onOpenMetricDetails("submitted")}
-            tone="emerald"
-          />
-          <div className="mt-3 grid gap-2">
-            <div className="rounded-xl border border-rose-100 bg-white/85 p-3">
-              <p className="font-semibold text-rose-900">
-                Step 1 of 2 Event Exits
-              </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                <RunHistoryMetricButton
-                  label="Available for Claim"
-                  value={availableForClaimCount}
-                  onClick={() => onOpenMetricDetails("sell-redeem")}
-                  tone="emerald"
-                />
-                <RunHistoryMetricButton
-                  label="Event out of Top 10"
-                  value={eventOutOfTopTenCount}
-                  onClick={() => onOpenMetricDetails("sell-ranking-llm")}
-                  tone="rose"
-                />
-                <RunHistoryMetricButton
-                  label="Forced Exit"
-                  value={forcedExitCount}
-                  onClick={() => onOpenMetricDetails("sell-forced-exit")}
-                  tone="rose"
-                />
-              </div>
-            </div>
-            <div className="rounded-xl border border-blue-100 bg-white/85 p-3">
-              <p className="font-semibold text-blue-900">Step 2</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <RunHistoryMetricButton
-                  label="New Events Invested in"
-                  value={newEventsInvestedCount}
-                  onClick={() => onOpenMetricDetails("buy-submitted")}
-                  tone="blue"
-                />
-                <RunHistoryMetricButton
-                  label={`Investments failed${failureCode ? ` (${failureCode})` : ""}`}
-                  value={investmentFailedRows.length}
-                  onClick={() => onOpenMetricDetails("buy-planned")}
-                  tone="rose"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function readLlmContextString(
   record: Record<string, unknown> | null,
   key: string,
@@ -9156,6 +8942,7 @@ export function BullpenAutoRunScheduleCard({
   const startNowProgressTimeoutRef = useRef<number | null>(null);
   const startNowCancelledRef = useRef(false);
   const summaryLoadInFlightRef = useRef(false);
+  const summaryLastLoadedAtRef = useRef(0);
   const summaryAbortControllerRef = useRef<AbortController | null>(null);
   const portfolioLoadInFlightRef = useRef(false);
   const portfolioAbortControllerRef = useRef<AbortController | null>(null);
@@ -9175,19 +8962,20 @@ export function BullpenAutoRunScheduleCard({
   const [stage3PreviewDialog, setStage3PreviewDialog] =
     useState<Stage3PreviewDialogState | null>(null);
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
-  const [runHistoryRuns, setRunHistoryRuns] = useState<
-    BullpenAutoLiveRun[] | null
-  >(null);
-  const [runHistoryDecisions, setRunHistoryDecisions] = useState<
-    BullpenAutoLiveDecision[] | null
-  >(null);
+  const [runHistoryPage, setRunHistoryPage] =
+    useState<BullpenAutoLiveHistoryPage | null>(null);
   const [runHistoryLoading, setRunHistoryLoading] = useState(false);
+  const [runHistoryDetailLoadingId, setRunHistoryDetailLoadingId] = useState<
+    string | null
+  >(null);
   const [runHistoryError, setRunHistoryError] = useState<string | null>(null);
   const [runHistoryOwnerKey, setRunHistoryOwnerKey] = useState<string | null>(
     null,
   );
   const runHistoryOwnerKeyRef = useRef<string | null>(null);
   const runHistoryAbortControllerRef = useRef<AbortController | null>(null);
+  const runHistoryDetailAbortControllerRef =
+    useRef<AbortController | null>(null);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
   const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
@@ -9261,6 +9049,10 @@ export function BullpenAutoRunScheduleCard({
   const postCompletionPortfolioRefreshRunIdsRef = useRef<Set<string>>(
     new Set(),
   );
+
+  useEffect(() => {
+    markBullpenAutoRunPerformance("bullpen-controls-interactive");
+  }, []);
 
   function clearAutoRunStatusRetry() {
     if (autoRunStatusRetryTimerRef.current !== null) {
@@ -9852,10 +9644,17 @@ export function BullpenAutoRunScheduleCard({
   async function loadSummary(options?: {
     preserveLoading?: boolean;
     nextPendingRunId?: string | null;
+    skipIfFreshMs?: number;
   }) {
     // setInterval does not wait for an async callback. Do not pile up requests
     // if the API is slow (for example while Celery is reporting run status).
     if (summaryLoadInFlightRef.current) return null;
+    if (
+      options?.skipIfFreshMs &&
+      Date.now() - summaryLastLoadedAtRef.current < options.skipIfFreshMs
+    ) {
+      return summary;
+    }
     summaryLoadInFlightRef.current = true;
     const requestSignal = summaryAbortControllerRef.current?.signal;
 
@@ -9867,10 +9666,12 @@ export function BullpenAutoRunScheduleCard({
     try {
       const nextSummary = await apiService.getBullpenAutoLiveDashboardSummary({
         signal: requestSignal,
-        timeoutMs: 8_000,
+        timeoutMs: 4_000,
       });
       if (requestSignal?.aborted) return null;
       setSummary(nextSummary);
+      summaryLastLoadedAtRef.current = Date.now();
+      markBullpenAutoRunPerformance("bullpen-workflow-ready");
       setError(null);
       const nextTrackedRun = getVisibleRun(nextSummary, resolvedPendingRunId);
       onSummaryUpdated?.({
@@ -9897,7 +9698,7 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
-  const loadRunHistory = useCallback(async () => {
+  const loadRunHistory = useCallback(async (page = 1) => {
     runHistoryAbortControllerRef.current?.abort();
     const controller = new AbortController();
     const requestOwnerKey = autoRunStatusCacheKey;
@@ -9905,59 +9706,101 @@ export function BullpenAutoRunScheduleCard({
     if (runHistoryOwnerKeyRef.current !== requestOwnerKey) {
       runHistoryOwnerKeyRef.current = requestOwnerKey;
       setRunHistoryOwnerKey(requestOwnerKey);
-      setRunHistoryRuns(null);
-      setRunHistoryDecisions(null);
+      setRunHistoryPage(null);
     }
     setRunHistoryLoading(true);
     setRunHistoryError(null);
 
-    const [runsResult, decisionsResult] = await Promise.allSettled([
-      apiService.getBullpenAutoLiveRuns({
-        signal: controller.signal,
-        timeoutMs: 15_000,
-      }, true),
-      apiService.getBullpenAutoLiveDecisions({
-        signal: controller.signal,
-        timeoutMs: 15_000,
-      }),
-    ]);
-
-    if (controller.signal.aborted) return;
-
-    const errors: string[] = [];
-    if (runsResult.status === "fulfilled") {
-      setRunHistoryRuns(runsResult.value);
-    } else {
-      errors.push(
-        `Full run history could not be loaded. Showing recent runs instead. ${formatUnknownError(runsResult.reason)}`,
+    try {
+      const nextPage = await apiService.getBullpenAutoLiveHistory(
+        { page, size: 20 },
+        {
+          signal: controller.signal,
+          timeoutMs: 5_000,
+        },
       );
-    }
-
-    if (decisionsResult.status === "fulfilled") {
-      setRunHistoryDecisions(decisionsResult.value);
-    } else {
-      errors.push(
-        `Historical decision metrics could not be loaded. ${formatUnknownError(decisionsResult.reason)}`,
+      if (controller.signal.aborted) return;
+      setRunHistoryPage(nextPage);
+    } catch (nextError) {
+      if (controller.signal.aborted || isRequestAbort(nextError)) return;
+      setRunHistoryError(
+        `Run history is temporarily unavailable. ${formatUnknownError(nextError)}`,
       );
+    } finally {
+      if (!controller.signal.aborted) {
+        setRunHistoryLoading(false);
+      }
     }
-
-    setRunHistoryError(errors.length > 0 ? errors.join(" ") : null);
-    setRunHistoryLoading(false);
   }, [autoRunStatusCacheKey]);
+
+  async function openHistoryRunDetail(item: BullpenAutoLiveHistoryItem) {
+      runHistoryDetailAbortControllerRef.current?.abort();
+      const controller = new AbortController();
+      runHistoryDetailAbortControllerRef.current = controller;
+      setRunHistoryDetailLoadingId(item.id);
+      setRunHistoryError(null);
+      try {
+        const [run, decisions] = await Promise.all([
+          apiService.getBullpenAutoLiveRun(item.id, {
+            signal: controller.signal,
+            timeoutMs: 10_000,
+          }),
+          apiService.getBullpenAutoLiveRunDecisions(item.id, {
+            signal: controller.signal,
+            timeoutMs: 10_000,
+          }),
+        ]);
+        if (controller.signal.aborted) return;
+        const stage =
+          buildBullpenAutoRunWorkflowView(run).stages.find(
+            (workflowStage) => workflowStage.key === "invest",
+          ) ?? null;
+        setRunDetailDialog({
+          run,
+          decisions: mergeInvestStageDecisionRows({
+            stage,
+            persistedDecisions: decisions,
+          }),
+        });
+        closeRunHistoryDialog();
+      } catch (nextError) {
+        if (controller.signal.aborted || isRequestAbort(nextError)) return;
+        setRunHistoryError(
+          `Run ${item.id} details could not be loaded. ${formatUnknownError(nextError)}`,
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setRunHistoryDetailLoadingId(null);
+        }
+      }
+  }
+
+  function closeRunHistoryDialog() {
+    runHistoryAbortControllerRef.current?.abort();
+    runHistoryDetailAbortControllerRef.current?.abort();
+    setRunHistoryDetailLoadingId(null);
+    setIsRunHistoryDialogOpen(false);
+  }
 
   useEffect(() => {
     if (!isRunHistoryDialogOpen) {
       runHistoryAbortControllerRef.current?.abort();
       runHistoryAbortControllerRef.current = null;
+      runHistoryDetailAbortControllerRef.current?.abort();
+      runHistoryDetailAbortControllerRef.current = null;
       return;
     }
 
-    const timer = window.setTimeout(() => {
-      void loadRunHistory();
-    }, 0);
+    let cancelled = false;
+    window.queueMicrotask(() => {
+      if (!cancelled) {
+        void loadRunHistory();
+      }
+    });
     return () => {
-      window.clearTimeout(timer);
+      cancelled = true;
       runHistoryAbortControllerRef.current?.abort();
+      runHistoryDetailAbortControllerRef.current?.abort();
     };
   }, [autoRunStatusCacheKey, isRunHistoryDialogOpen, loadRunHistory]);
 
@@ -9967,7 +9810,7 @@ export function BullpenAutoRunScheduleCard({
     const idleCallbackId = window.requestIdleCallback?.(
       () => {
         if (!controller.signal.aborted) {
-          void loadSummary();
+          void loadSummary({ skipIfFreshMs: POLL_INTERVAL_MS - 100 });
         }
       },
       { timeout: 1_000 },
@@ -9975,7 +9818,7 @@ export function BullpenAutoRunScheduleCard({
     if (idleCallbackId === undefined) {
       window.queueMicrotask(() => {
         if (!controller.signal.aborted) {
-          void loadSummary();
+          void loadSummary({ skipIfFreshMs: POLL_INTERVAL_MS - 100 });
         }
       });
     }
@@ -10075,7 +9918,10 @@ export function BullpenAutoRunScheduleCard({
     if (!isBullpenAutoRunPageVisible(document.visibilityState)) {
       return;
     }
-    const nextSummary = await loadSummary({ preserveLoading: true });
+    const nextSummary = await loadSummary({
+      preserveLoading: true,
+      skipIfFreshMs: POLL_INTERVAL_MS - 100,
+    });
     if (!nextSummary) {
       return;
     }
@@ -11091,12 +10937,10 @@ export function BullpenAutoRunScheduleCard({
         : "Waiting for live portfolio data";
   const runHistoryBelongsToCurrentUser =
     runHistoryOwnerKey === autoRunStatusCacheKey;
-  const visibleRunHistoryRuns = runHistoryBelongsToCurrentUser
-    ? runHistoryRuns ?? summary?.recent_runs ?? []
-    : summary?.recent_runs ?? [];
-  const visibleRunHistoryDecisions = runHistoryBelongsToCurrentUser
-    ? runHistoryDecisions ?? summary?.recent_decisions ?? []
-    : summary?.recent_decisions ?? [];
+  const visibleRunHistoryPage = runHistoryBelongsToCurrentUser
+    ? runHistoryPage
+    : null;
+  const visibleRunHistoryItems = visibleRunHistoryPage?.items ?? [];
 
   useEffect(() => {
     return () => {
@@ -12414,7 +12258,7 @@ export function BullpenAutoRunScheduleCard({
             className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
             onMouseDown={(event) => {
               if (event.target === event.currentTarget)
-                setIsRunHistoryDialogOpen(false);
+                closeRunHistoryDialog();
             }}
           >
             <div
@@ -12436,8 +12280,10 @@ export function BullpenAutoRunScheduleCard({
                   </h2>
                   <p className="mt-1 text-xs text-slate-500">
                     {runHistoryLoading
-                      ? "Loading complete history…"
-                      : `${visibleRunHistoryRuns.length.toLocaleString("en-IN")} saved run${visibleRunHistoryRuns.length === 1 ? "" : "s"}`}
+                      ? "Loading compact history…"
+                      : visibleRunHistoryPage
+                        ? `${visibleRunHistoryPage.total.toLocaleString("en-IN")} saved run${visibleRunHistoryPage.total === 1 ? "" : "s"}`
+                        : "History has not been loaded"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -12455,7 +12301,7 @@ export function BullpenAutoRunScheduleCard({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setIsRunHistoryDialogOpen(false)}
+                    onClick={closeRunHistoryDialog}
                     className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
                     aria-label="Close Bullpen run history"
                   >
@@ -12469,80 +12315,141 @@ export function BullpenAutoRunScheduleCard({
                     {runHistoryError}
                   </div>
                 ) : null}
-                {runHistoryLoading && visibleRunHistoryRuns.length === 0 ? (
+                {runHistoryLoading && visibleRunHistoryItems.length === 0 ? (
                   <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-600">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading saved Bullpen runs…
                   </div>
-                ) : visibleRunHistoryRuns.length ? (
-                  <div className="space-y-3">
-                    {visibleRunHistoryRuns.map((run) => {
-                      const runKind =
-                        run.triggered_by === "scheduler"
-                          ? "Auto Run"
-                          : "Manual Run";
-                      const stage =
-                        buildBullpenAutoRunWorkflowView(run).stages.find(
-                          (workflowStage) => workflowStage.key === "invest",
-                        ) ?? null;
-                      const runDecisions = mergeInvestStageDecisionRows({
-                        stage,
-                        persistedDecisions:
-                          visibleRunHistoryDecisions.filter(
-                            (decision) => decision.run_id === run.id,
-                          ),
-                      });
-                      return (
-                        <div
-                          key={run.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => openRunDetailDialog(run)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter" || event.key === " ")
-                              openRunDetailDialog(run);
-                          }}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-                                  {runKind}
-                                </span>
-                                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
-                                  {run.status}
-                                </span>
-                                <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-900 shadow-sm">
-                                  {formatIstDateTime(run.started_at)}
-                                </span>
+                ) : visibleRunHistoryItems.length ? (
+                  <>
+                    <div className="space-y-3">
+                      {visibleRunHistoryItems.map((run) => {
+                        const runKind =
+                          run.triggered_by === "scheduler"
+                            ? "Auto Run"
+                            : "Manual Run";
+                        const detailLoading =
+                          runHistoryDetailLoadingId === run.id;
+                        return (
+                          <button
+                            key={run.id}
+                            type="button"
+                            onClick={() => void openHistoryRunDetail(run)}
+                            disabled={runHistoryDetailLoadingId !== null}
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40 disabled:cursor-wait disabled:opacity-70"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                                    {runKind}
+                                  </span>
+                                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
+                                    {run.status}
+                                  </span>
+                                  <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-900 shadow-sm">
+                                    {formatIstDateTime(run.started_at)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-950">
+                                  {run.summary || "Run summary unavailable."}
+                                </p>
+                                <p className="mt-1 truncate text-xs text-slate-600">
+                                  Run {run.id}
+                                </p>
                               </div>
-                              <p className="mt-2 text-sm font-semibold leading-5 text-slate-950 line-clamp-2">
-                                {run.summary || "Run summary unavailable."}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-600">
-                                Run {run.id}
-                              </p>
+                              <div className="grid shrink-0 grid-cols-3 gap-2 text-center">
+                                {[
+                                  ["Decisions", run.decisions_count],
+                                  ["Planned", run.orders_planned],
+                                  ["Submitted", run.orders_submitted],
+                                ].map(([label, value]) => (
+                                  <span
+                                    key={String(label)}
+                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                                  >
+                                    <span className="block text-sm font-bold text-slate-900">
+                                      {Number(value).toLocaleString("en-IN")}
+                                    </span>
+                                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                      {label}
+                                    </span>
+                                  </span>
+                                ))}
+                              </div>
                             </div>
-                            <RunHistoryMetricTiles
-                              run={run}
-                              decisions={runDecisions}
-                              onOpenMetricDetails={(kind) =>
-                                openRunInvestMetricDialog(run, kind)
-                              }
-                            />
-                          </div>
-                          {run.error_message ? (
-                            <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                              <ErrorCodeWithDetails
-                                detail={run.error_message}
-                                detailClassName="text-rose-800"
-                              />
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {run.stages.map((stage) => (
+                                <span
+                                  key={`${run.id}-${stage.key}`}
+                                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                                >
+                                  {stage.label}: {stage.status}
+                                </span>
+                              ))}
+                              {detailLoading ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800">
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Loading full details
+                                </span>
+                              ) : null}
                             </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                            {run.error_message ? (
+                              <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                                <ErrorCodeWithDetails
+                                  detail={run.error_message}
+                                  detailClassName="text-rose-800"
+                                />
+                              </div>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {visibleRunHistoryPage &&
+                    visibleRunHistoryPage.pages > 1 ? (
+                      <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={
+                            runHistoryLoading ||
+                            visibleRunHistoryPage.page <= 1
+                          }
+                          onClick={() =>
+                            void loadRunHistory(
+                              visibleRunHistoryPage.page - 1,
+                            )
+                          }
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-xs font-semibold text-slate-600">
+                          Page {visibleRunHistoryPage.page} of{" "}
+                          {visibleRunHistoryPage.pages}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={
+                            runHistoryLoading ||
+                            !visibleRunHistoryPage.has_next
+                          }
+                          onClick={() =>
+                            void loadRunHistory(
+                              visibleRunHistoryPage.page + 1,
+                            )
+                          }
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    ) : null}
+                  </>
+                ) : runHistoryError ? (
+                  <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-8 text-center text-sm text-amber-900">
+                    Saved run history could not be shown. Retry when the service
+                    is available.
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-600">

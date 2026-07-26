@@ -318,6 +318,7 @@ jobs:
             sudo systemctl show \
               investor-backend \
               investor-celery-worker \
+              investor-celery-email-worker \
               investor-celery-auto-live-worker \
               investor-celery-beat-worker \
               investor-celery-beat \

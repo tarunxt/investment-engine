@@ -376,8 +376,8 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
       end_date: "2026-06-26",
     },
     {
-      slug: "trump-netanyahu-july-24-2026",
-      market: "Will Trump meet with Netanyahu by July 24, 2026?",
+      slug: "trump-netanyahu-august-24-2026",
+      market: "Will Trump meet with Netanyahu by August 24, 2026?",
       outcome: "No",
       shares: 4.5,
       avg_price: 0.61,
@@ -399,7 +399,7 @@ test("Bullpen zero-payout residues are excluded from headline positions and pres
   assert.equal(visiblePositions.length, 1);
   assert.equal(
     visiblePositions[0].marketTitle,
-    "Will Trump meet with Netanyahu by July 24, 2026?",
+    "Will Trump meet with Netanyahu by August 24, 2026?",
   );
   assert.equal(visiblePositions[0].economicClassification, "active");
   assert.equal(summary.activeCount, 1);

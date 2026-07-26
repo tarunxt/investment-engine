@@ -53,6 +53,7 @@ import {
     BullpenAutoLiveSettings,
     BullpenAutoLiveSettingsUpdate,
     BullpenAutoLiveRun,
+    BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveDecision,
@@ -242,14 +243,22 @@ export interface IApiService {
     getBullpenAutoLiveSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveDashboardSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveState(): Promise<BullpenAutoLiveState>;
-    getBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
+    getBullpenAutoLiveSettings(options?: ApiRequestControl): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
     getBullpenAutoLiveRuns(
       options?: ApiRequestControl,
       includeDetails?: boolean,
     ): Promise<BullpenAutoLiveRun[]>;
+    getBullpenAutoLiveHistory(
+        params?: { page?: number; size?: number },
+        options?: ApiRequestControl,
+    ): Promise<BullpenAutoLiveHistoryPage>;
     getBullpenAutoLiveRun(runId: string, options?: ApiRequestControl): Promise<BullpenAutoLiveRun>;
+    getBullpenAutoLiveRunDecisions(
+        runId: string,
+        options?: ApiRequestControl,
+    ): Promise<BullpenAutoLiveDecision[]>;
     getBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     reconcileBullpenAutoLiveRunOrders(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;
     retryBullpenAutoLiveExitsAndContinueBuys(runId: string): Promise<BullpenAutoLiveRunOrdersResponse>;

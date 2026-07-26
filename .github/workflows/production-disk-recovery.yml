@@ -141,7 +141,7 @@ jobs:
             stop_app() {
               PREFIX="$(resolve_prefix)"
               local role unit
-              for role in frontend celery-auto-live-worker celery-worker \
+              for role in frontend celery-auto-live-worker celery-email-worker celery-worker \
                 celery-beat-worker celery-beat backend; do
                 unit="${PREFIX}-${role}"
                 sudo systemctl cat "$unit" >/dev/null 2>&1 &&
@@ -153,7 +153,7 @@ jobs:
             start_app() {
               [[ "$SERVICES_STOPPED" == true ]] || return 0
               local role unit
-              for role in backend celery-beat celery-beat-worker celery-worker \
+              for role in backend celery-beat celery-beat-worker celery-worker celery-email-worker \
                 celery-auto-live-worker frontend; do
                 unit="${PREFIX}-${role}"
                 sudo systemctl cat "$unit" >/dev/null 2>&1 &&

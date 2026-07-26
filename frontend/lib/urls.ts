@@ -237,12 +237,15 @@ const bullpenAutoLiveApiUrls = {
     `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard`,
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
+  history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
   runs: (includeDetail = false) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs${
       includeDetail ? "?include_detail=true" : ""
     }`,
   run: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}`,
+  runDecisions: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}/decisions`,
   runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
   reconcileRunOrders: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/reconcile`,

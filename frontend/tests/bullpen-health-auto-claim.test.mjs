@@ -82,6 +82,22 @@ async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
       };
     }
   `);
+  const backendSessionStubUrl = encodeModule(`
+    export async function createBackendSessionContext(request) {
+      return { request };
+    }
+    export async function fetchBackendJsonWithSession(_context, path, options = {}) {
+      return globalThis.__bullpenFetchBackendRuntimeJson(path, options);
+    }
+    export function backendSessionJson(_context, body, init = {}) {
+      return {
+        status: init.status ?? 200,
+        async json() {
+          return body;
+        },
+      };
+    }
+  `);
   const healthCoreStubUrl = encodeModule(`
     export function redactBullpenSensitiveText(value) {
       return typeof value === "string" ? value : null;
@@ -144,6 +160,10 @@ async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
       `from "${serverBackendSessionStubUrl}"`,
     )
     .replace(
+      /from "\.\.\/_lib\/serverBackendSession"/g,
+      `from "${backendSessionStubUrl}"`,
+    )
+    .replace(
       /from "\.\.\/_lib\/bullpenHealthCore\.ts"/g,
       `from "${healthCoreStubUrl}"`,
     )
@@ -183,6 +203,7 @@ test("frontend Bullpen routes proxy the backend runtime instead of spawning Bull
   );
 
   assert.match(positionsRouteSource, /fetchBackendJsonWithSession/);
+  assert.match(positionsRouteSource, /createBackendSessionContext/);
   assert.match(positionsRouteSource, /\/polymarket\/runtime\/positions/);
   assert.match(healthRouteSource, /\/polymarket\/runtime\/health/);
   assert.match(discoverRouteSource, /\/polymarket\/runtime\/discover/);

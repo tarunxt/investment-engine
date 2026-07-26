@@ -132,6 +132,7 @@ sudo -u investor -H /usr/local/bin/bullpen polymarket positions --output json
 sudo systemctl restart \
   investor-backend \
   investor-celery-worker \
+  investor-celery-email-worker \
   investor-celery-auto-live-worker \
   investor-celery-beat-worker
 ```

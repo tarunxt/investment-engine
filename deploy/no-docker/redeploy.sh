@@ -195,6 +195,9 @@ service_name_for_role() {
     celery-worker)
       printf '%s-celery-worker\n' "$prefix"
       ;;
+    celery-email-worker)
+      printf '%s-celery-email-worker\n' "$prefix"
+      ;;
     celery-auto-live-worker)
       printf '%s-celery-auto-live-worker\n' "$prefix"
       ;;
@@ -262,7 +265,7 @@ service_family_has_active_backend_member() {
   local prefix="$1"
   local role service_name
 
-  for role in backend celery-worker celery-auto-live-worker celery-beat celery-beat-worker; do
+  for role in backend celery-worker celery-email-worker celery-auto-live-worker celery-beat celery-beat-worker; do
     service_name="$(service_name_for_role "$prefix" "$role")"
     if service_is_active "$service_name"; then
       return 0
@@ -1219,6 +1222,7 @@ backup_target() {
 
 restart_services_after_restore() {
   local restart_failed=false
+  local service_name
 
   if [[ "$SYSTEMD_RELOAD_REQUIRED" == "true" ]]; then
     if ! sudo systemctl daemon-reload; then
@@ -1227,10 +1231,23 @@ restart_services_after_restore() {
     fi
   fi
   if [[ "$DEPLOY_BACKEND" == "true" ]]; then
-    if ! sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"; then
-      echo "Failed to restart one or more backend services after restoring configuration." >&2
-      restart_failed=true
-    fi
+    for service_name in \
+      "$BACKEND_SERVICE_NAME" \
+      "$WORKER_SERVICE_NAME" \
+      "$EMAIL_WORKER_SERVICE_NAME" \
+      "$AUTO_LIVE_WORKER_SERVICE_NAME" \
+      "$BEAT_SERVICE_NAME" \
+      "$BEAT_WORKER_SERVICE_NAME"; do
+      # A failed first deployment can restore the new email unit to "missing".
+      # Restart only units that still exist after rollback.
+      if ! sudo systemctl cat "$service_name" >/dev/null 2>&1; then
+        continue
+      fi
+      if ! sudo systemctl restart "$service_name"; then
+        echo "Failed to restart $service_name after restoring configuration." >&2
+        restart_failed=true
+      fi
+    done
   fi
   if [[ "$DEPLOY_FRONTEND" == "true" ]]; then
     if ! sudo systemctl restart "$FRONTEND_SERVICE_NAME"; then
@@ -1732,6 +1749,7 @@ trap handle_deploy_exit EXIT
 
 BACKEND_SERVICE_NAME=""
 WORKER_SERVICE_NAME=""
+EMAIL_WORKER_SERVICE_NAME=""
 AUTO_LIVE_WORKER_SERVICE_NAME=""
 BEAT_SERVICE_NAME=""
 BEAT_WORKER_SERVICE_NAME=""
@@ -1741,6 +1759,7 @@ if [[ "$DEPLOY_BACKEND" == "true" ]]; then
   validate_no_duplicate_backend_service_families
   BACKEND_SERVICE_NAME="$(resolve_role_service_name backend)"
   WORKER_SERVICE_NAME="$(resolve_role_service_name celery-worker)"
+  EMAIL_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-email-worker)"
   AUTO_LIVE_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-auto-live-worker)"
   BEAT_SERVICE_NAME="$(resolve_role_service_name celery-beat)"
   BEAT_WORKER_SERVICE_NAME="$(resolve_role_service_name celery-beat-worker)"
@@ -1755,6 +1774,7 @@ echo "==> App user: $APP_USER"
 if [[ "$DEPLOY_BACKEND" == "true" ]]; then
   echo "==> Backend service: $BACKEND_SERVICE_NAME"
   echo "==> Worker service: $WORKER_SERVICE_NAME"
+  echo "==> Email worker service: $EMAIL_WORKER_SERVICE_NAME"
   echo "==> Auto-Live planning worker service: $AUTO_LIVE_WORKER_SERVICE_NAME"
   echo "==> Beat service: $BEAT_SERVICE_NAME"
   echo "==> Beat queue worker service: $BEAT_WORKER_SERVICE_NAME"
@@ -1790,6 +1810,7 @@ echo "==> Install/update scoped systemd templates"
 if [[ "$DEPLOY_BACKEND" == "true" ]]; then
   install_systemd_unit "$BACKEND_SERVICE_NAME"
   install_systemd_unit "$WORKER_SERVICE_NAME"
+  install_systemd_unit "$EMAIL_WORKER_SERVICE_NAME"
   install_systemd_unit "$AUTO_LIVE_WORKER_SERVICE_NAME"
   install_systemd_unit "$BEAT_SERVICE_NAME"
   install_systemd_unit "$BEAT_WORKER_SERVICE_NAME"
@@ -1842,10 +1863,11 @@ if [[ "$DEPLOY_BACKEND" == "true" ]]; then
 
   start_phase "backend-service-restart"
   echo "==> Restart backend and Celery services"
-  sudo systemctl enable "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
-  sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
+  sudo systemctl enable "$EMAIL_WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
+  sudo systemctl restart "$BACKEND_SERVICE_NAME" "$WORKER_SERVICE_NAME" "$EMAIL_WORKER_SERVICE_NAME" "$AUTO_LIVE_WORKER_SERVICE_NAME" "$BEAT_SERVICE_NAME" "$BEAT_WORKER_SERVICE_NAME"
   verify_service_active "$BACKEND_SERVICE_NAME"
   verify_service_active "$WORKER_SERVICE_NAME"
+  verify_service_active "$EMAIL_WORKER_SERVICE_NAME"
   verify_service_active "$AUTO_LIVE_WORKER_SERVICE_NAME"
   verify_service_active "$BEAT_SERVICE_NAME"
   verify_service_active "$BEAT_WORKER_SERVICE_NAME"
@@ -1913,6 +1935,7 @@ echo "==> Service status"
 if [[ "$DEPLOY_BACKEND" == "true" ]]; then
   sudo systemctl status "$BACKEND_SERVICE_NAME" --no-pager
   sudo systemctl status "$WORKER_SERVICE_NAME" --no-pager
+  sudo systemctl status "$EMAIL_WORKER_SERVICE_NAME" --no-pager
   sudo systemctl status "$AUTO_LIVE_WORKER_SERVICE_NAME" --no-pager
   sudo systemctl status "$BEAT_SERVICE_NAME" --no-pager
   sudo systemctl status "$BEAT_WORKER_SERVICE_NAME" --no-pager

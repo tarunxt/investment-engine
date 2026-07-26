@@ -752,20 +752,43 @@ runtime and guardrail evidence.
 
 ## Console Run History Source
 
-The Bullpen console History dialog loads the authenticated user's complete,
-durable run and decision records from `GET /polymarket/auto-live/runs` and
-`GET /polymarket/auto-live/decisions` when the dialog opens. It must not treat
-`BullpenAutoLiveSummary.recent_runs` or `recent_decisions` as the authoritative
-history: those fields are intentionally bounded operational diagnostics for the
-live console. Recent summary rows remain only a visible fallback if a dedicated
-history request fails.
+The Bullpen console History dialog loads the authenticated user's database-
+paginated, compact records from `GET /polymarket/auto-live/history`. It must not
+treat `BullpenAutoLiveSummary.recent_runs` or `recent_decisions` as authoritative
+history. The first page reads scalar run columns plus the additive
+`console_projection`; it does not select the full run `payload` or all decision
+rows. Selecting one run lazily loads the compatible `GET /runs/{id}` detail and
+the additive `GET /runs/{id}/decisions` detail.
 
-History requests bypass browser caches, are cancelled when the dialog closes or
-the authenticated console is replaced, and can be retried from the dialog.
-This read-path change does not rewrite run records or frozen audit snapshots and
-does not change audit schema versions. Existing snapshots remain backward
-compatible; the modal renders their persisted Stage 1–3 evidence through the
-existing run-detail adapters.
+History requests bypass browser caches, preserve the current page if a refresh
+fails, and are cancelled when the dialog closes or the authenticated console is
+replaced. A legacy row with no projection is marked
+`projection_available=false`; scalar identity, status, times, summary, and
+durable counts remain visible, but the compact read does not invent missing
+stage evidence.
+
+Migration `x0y1z2a3b4c5` adds nullable JSON console projections beside run and
+decision payloads. Normal durable saves populate projection version 1 with
+bounded stage status, counters, diagnostics, funnels, and decision summaries.
+The migration deliberately performs no all-row backfill because production
+contains multi-gigabyte TOAST values and rewriting them during deploy would
+create CPU and lock pressure. Full historical detail remains available through
+existing payload adapters.
+
+The console projection is not part of the frozen audit snapshot, is never an
+input to ranking, sizing, guardrails, execution, retry, or reconciliation, and
+does not alter the algorithm registry or deterministic audit validators.
+Therefore the frozen snapshot schema remains version 2; historical snapshot
+facts and hashes are unchanged.
+
+The deterministic Stage 2 unit adapter used only when tests replace
+`run_llm_consensus` now derives selected, started, completed, usable, and failed
+provider-target counters from the configured provider/model identities and the
+adapter's usable outputs. This mirrors the production shared runner's existing
+fail-closed selected-target invariant; the normal worker runner, prompt,
+evidence fields, algorithm registry, and snapshot schema are unchanged. The
+adapter exists to validate the current target-accounting fields and does not
+backfill or reinterpret any frozen snapshot.
 
 ## Active Auth Recovery and Restart-Safe Stage 3
 
@@ -798,8 +821,10 @@ destructive stale-run sweep.
 
 Production launchers bound retained worker memory without changing Bullpen
 inputs, formulas, decisions, order identities, or evidence. The primary worker
-uses the canonical `ai,email` launcher with concurrency two, bounded child task
-count, and a post-task resident-memory limit. The dedicated planning child is
+uses a dedicated `ai` child and the low-priority email unit uses a dedicated
+`email` child. Each has concurrency one, preserving the former total of two
+children while preventing email work from reserving Stage 3 capacity. Both use
+prefetch one, bounded child task counts, and resident-memory limits. The dedicated planning child is
 replaced after every completed task so a large Stage 1 scan cannot retain its
 event payload into the next hourly cycle. Deploy removes the legacy hard-coded
 primary-worker `ExecStart` drop-in and verifies that the canonical launcher is
@@ -861,6 +886,14 @@ progress poll from hydrating and serializing ten multi-megabyte frozen Stage 1
 and Stage 2 snapshots. The projection changes no run inputs, evidence, formulas,
 decisions, execution state, frozen payload, audit schema, validator, or legacy
 backfill mapping.
+
+The dashboard enforces a 150,000-byte wire budget by first reducing optional
+decision rows and then optional expandable stage diagnostics. Section metadata
+marks every omission as degraded or unavailable, while scheduler/settings and
+durable identifiers remain authoritative. If even mandatory state cannot fit,
+the route fails closed with a sanitized `503` and operators can use the focused
+status and lazy detail resources. This response shaping is outside the frozen
+audit snapshot and never changes stored evidence.
 
 On worker recovery, persisted `running`/`confirming` work is reconciled only
 through those lifecycle and lease checks. Runs with a healthy worker heartbeat or
