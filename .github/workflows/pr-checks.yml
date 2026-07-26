@@ -222,7 +222,7 @@ jobs:
               build_outcome: $build_outcome,
               package_outcome: $package_outcome,
               runtime_outcome: $runtime_outcome,
-              compatibility:
+              compatibility: (
                 if (
                   $build_outcome == "success" and
                   $package_outcome == "success" and
@@ -230,7 +230,8 @@ jobs:
                 )
                 then "passed"
                 else "failed"
-                end,
+                end
+              ),
               seconds: $seconds,
               peak_rss_kb: $peak_rss_kb
             }' >"${RUNNER_TEMP}/frontend-${BUNDLER}-benchmark.json"
@@ -296,8 +297,8 @@ jobs:
             for result in "$webpack_result" "$turbopack_result"; do
               bundler="$(jq -r '.bundler' "$result")"
               outcome="$(jq -r '.compatibility' "$result")"
-              seconds="$(jq -r '.seconds | if . == \"\" then \"n/a\" else . + \"s\" end' "$result")"
-              peak_rss="$(jq -r '.peak_rss_kb | if . == \"\" then \"n/a\" else . + \" KiB\" end' "$result")"
+              seconds="$(jq -r '.seconds | if . == "" then "n/a" else . + "s" end' "$result")"
+              peak_rss="$(jq -r '.peak_rss_kb | if . == "" then "n/a" else . + " KiB" end' "$result")"
               if [[ "$bundler" == "webpack" ]]; then
                 selection="selected"
               else
