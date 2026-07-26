@@ -241,6 +241,14 @@ jobs:
             sudo nginx -T 2>/dev/null |
               grep -E '^(# configuration file /etc/nginx/(sites-enabled|conf.d)/|[[:space:]]*(listen|server_name|location|proxy_pass|proxy_hide_header|add_header)[[:space:]])' ||
               true
+            for nginx_site in \
+              /etc/nginx/sites-enabled/cred-x.in \
+              /etc/nginx/sites-enabled/api.cred-x.in; do
+              if sudo test -e "$nginx_site"; then
+                echo "-- $nginx_site -> $(sudo readlink -f "$nginx_site")"
+                sudo sed -n '1,260p' "$nginx_site"
+              fi
+            done
             echo "==> Systemd frontend command"
             sudo systemctl cat "$FRONTEND_SERVICE_NAME" || true
             echo "==> Processes listening on application ports"
