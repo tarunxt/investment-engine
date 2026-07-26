@@ -95,7 +95,16 @@ test("candidate preparation never removes or rebuilds the active slot", () => {
     artifactPreparation,
     /rm -rf -- '\$FRONTEND_CANDIDATE_BUILD_DIR'/,
   );
+  assert.match(
+    artifactPreparation,
+    /tar --no-same-owner -xzf '\$FRONTEND_ARTIFACT' -C '\$FRONTEND_CANDIDATE_BUILD_DIR'/,
+  );
+  assert.match(
+    artifactPreparation,
+    /validate-host[\s\S]*'\$FRONTEND_CANDIDATE_BUILD_DIR'/,
+  );
   assert.doesNotMatch(artifactPreparation, /rm -rf[^\n]*FRONTEND_LIVE_BUILD_DIR/);
+  assert.doesNotMatch(artifactPreparation, /FRONTEND_STAGING_DIR|\.frontend-stage|mv --/);
   assert.doesNotMatch(redeploy, /FRONTEND_RECOVERY_BUILD_IN_PLACE/);
   assert.match(artifactPreparation, /verify-frontend-artifact-runtime\.mjs/);
   assert.match(artifactPreparation, /\n\s+webpack\s*\\/);
