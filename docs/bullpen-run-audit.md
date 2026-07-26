@@ -527,9 +527,22 @@ Immediately before any live sell or redeem write, the durable intent forces a
 fetched-after-request wallet snapshot. A `redis-cache` result is accepted only
 when the broker marks it `fresh`, meaning another process completed the
 single-flight refresh after this request; cached or stale results fail closed.
-The intent compares non-null Stage 1 account, credential inode/`mtime_ns`/size,
-classifier version, and timestamp lineage against the pre-submit snapshot.
-Legacy intents without expected lineage record the comparison as unavailable.
+The intent requires complete Stage 1 account, credential
+inode/`mtime_ns`/size, classifier version, and timestamp lineage, then compares
+it against the pre-submit snapshot. Legacy intents without complete expected
+lineage fail closed before any external write. A changed credential artifact is
+accepted only when the latest healthy active-auth result attests that exact
+current artifact, the stable wallet identity matches both Stage 1 and the
+forced-fresh snapshot, and the auth check is no older than the Stage 1
+snapshot. The comparison records the old and new artifact fingerprints plus
+`auth_checked_at`; missing or stale attestation returns
+`POSITION_LINEAGE_UNAVAILABLE`, while an identity change returns
+`POSITION_LINEAGE_MISMATCH`.
+The post-exit buy planner may continue across that same-account rotation when
+the newer forced snapshot carries a newer authentication timestamp, but records
+that its planner-only acceptance is deferred to the durable pre-submit gate.
+This prevents benign credential refreshes from suppressing buy planning without
+allowing the planner comparison itself to authorize an external write.
 For current-version redeems, the forced snapshot and successful comparison are
 persisted under `execution_metadata_json.wallet_snapshot_lineage` and
 `wallet_lineage_comparison` before the scoped redeem function can write. An
@@ -764,7 +777,7 @@ history but are not reintroduced into current Stage 3 decisions or audit finding
 
 Defined in `AUDITED_ALGORITHM_REGISTRY`.
 The current registry version is
-`2026-07-27-stage3-stale-balance-buy-fence-v27`. The
+`2026-07-27-stage3-submission-evidence-v29`. The
 `bullpen_position_claimability` entry is algorithm version `v4`; historical
 frozen bundles retain their earlier registry provenance and child findings.
 
@@ -783,6 +796,8 @@ Current required keys:
 * `stage3_sell_live_exposure_preflight`
 * `stage3_buy_market_exposure_preflight`
 * `stage3_redeem_wallet_lineage_preflight`
+* `stage3_wallet_credential_rotation_attestation`
+* `stage3_post_exit_planner_credential_rotation`
 * `stage3_sell_alias_reconciliation`
 * `stage3_buy_reservation_terminal_release`
 * `stage3_active_reservation_cash_filter`
@@ -799,6 +814,8 @@ Current required keys:
 * `stage3_verified_remote_absence_retry`
 * `stage3_reconciliation_generation_guard`
 * `stage3_terminal_resume_preservation`
+* `stage3_terminal_doctor_blocker`
+* `stage3_submission_evidence_terminality`
 
 Materialized formula rows use the same provenance as the registry:
 `console_trade_amount_per_opportunity` is `v2`,
@@ -861,6 +878,39 @@ intents with persisted order, transaction, or submission evidence are moved into
 reconciliation, preventing a completed exchange write from regressing to
 `CONFIRMING` while retaining backward-compatible frozen snapshots.
 
+Bullpen doctor and Polymarket preflight failures now retain typed upstream
+fields including `error_code`, `safe_to_retry`, `support_required`, `terminal`,
+and `resolution_owner`. A known support-owned blocker such as
+`POLYMARKET_WALLET_ROUTE_UNCONFIRMED`, or any typed doctor response with
+`safe_to_retry=false`, becomes a non-retryable Stage 3 terminal failure before
+the remote write boundary. Untyped transport and doctor-read failures retain
+the historical retryable `DOCTOR_READ_FAILED` behavior. The deterministic
+validator emits `STAGE3_TERMINAL_DOCTOR_BLOCKER_RETRYABLE` when a known
+support-owned doctor blocker is flattened, scheduled for retry, or left
+outside `FAILED_PERMANENT`. Ordinary terminal exchange responses such as
+`MARKET_CLOSED` are not reclassified as doctor failures merely because they
+also carry `safe_to_retry=false`.
+
+Stage 3 terminal success is now evidence-fenced. `CONFIRMED` and `FILLED`
+durable intents count as submitted/executed only when a submission timestamp,
+remote order/transaction reference, or uncertain write-boundary marker was
+persisted. Attempt count and wallet absence alone are insufficient. Legacy
+evidence-free terminal rows remain readable, but current projections show them
+as unsubmitted/deferred, replacement capacity stays blocked, funnel rates remain
+bounded to 100%, and the validator emits
+`STAGE3_TERMINAL_SUCCESS_WITHOUT_SUBMISSION_EVIDENCE`.
+
+Current order-plan projections add
+`submission_evidence_present` and `submission_evidence_kind` so the workflow
+tiles, run details, shortlist outcomes, and Stage 3 counters consume the same
+durable-write contract. The kind identifies a remote order ID, transaction
+hash, submission timestamp, or uncertain-write-boundary marker. Frozen legacy
+plans leave these additive fields absent and may fall back only to their exact
+submission timestamp or remote identifiers, never success prose. An
+evidence-backed order that later becomes cancelled, rejected, timed out, or
+permanently failed remains counted as submitted and is rendered separately
+from orders that never crossed the remote-write boundary.
+
 If Bullpen logic adds or replaces critical formulas, the registry and tests must be
 updated in the same change.
 
@@ -869,7 +919,7 @@ updated in the same change.
 Defined in `validators.py` with `BULLPEN_RUN_AUDIT_RULE_VERSION`.
 
 Rule version
-`2026-07-27-stage3-stale-balance-buy-fence-v27` retains deterministic
+`2026-07-27-stage3-submission-evidence-v29` retains deterministic
 duplicate coalescing, buffered affordable-buy validation, verified-only Stage 1
 portfolio formulas, and remote-write-boundary sell-preflight validation. It also
 audits the v2 redeem wallet-lineage fence while registering alias-aware sell
@@ -889,9 +939,10 @@ buffered affordable allocation, or exceeds the initial free slots, emits
 `STAGE3_PRE_EXIT_FREE_SLOT_ALLOCATION_INVALID`. These additive
 rules are gated by the `auto-live:v2` intent identity so
 legacy rows without the newer evidence remain readable.
-It does not change the snapshot schema, rewrite frozen snapshots, or require a
-migration. Existing frozen findings retain the rule version and payload captured
-when they were materialized.
+The terminal-doctor and submission-evidence rules are additive and use already
+captured order and attempt fields. They do not change the v2 snapshot schema,
+rewrite frozen snapshots, or require a migration. Existing frozen findings
+retain the rule version and payload captured when they were materialized.
 
 Current deterministic checks include:
 

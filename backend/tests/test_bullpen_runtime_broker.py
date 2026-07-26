@@ -1466,6 +1466,45 @@ async def test_display_lkg_uses_long_lived_active_auth_identity_after_ready_cach
 
 
 @pytest.mark.anyio
+async def test_display_lkg_rejects_stale_active_auth_from_previous_credential(
+    monkeypatch,
+):
+    broker = _build_broker(monkeypatch)
+    previous_artifact = _credential_artifact(inode=11, mtime_ns=22, size=33)
+    current_artifact = _credential_artifact(inode=12, mtime_ns=23, size=34)
+    snapshot = _build_snapshot(
+        seconds_ago=600,
+        credential_artifact=previous_artifact,
+        account_identity="wallet-a",
+    )
+
+    monkeypatch.setattr(
+        runtime_broker_module,
+        "_stat_credential_artifact",
+        lambda _config: current_artifact,
+    )
+    await broker._write_active_auth_result(
+        BullpenRuntimeActiveAuthResult(
+            checked_at="2026-07-19T12:00:01+00:00",
+            auth_checked_at="2026-07-19T12:00:00+00:00",
+            healthy=True,
+            login_required=False,
+            doctor_refresh_succeeded=True,
+            account_identity="wallet-a",
+            credential_artifact=previous_artifact,
+        )
+    )
+    await broker._redis.set(
+        POSITIONS_DISPLAY_LKG_KEY,
+        snapshot.model_dump_json(),
+        ex=24 * 60 * 60,
+    )
+
+    assert await broker.read_display_positions_snapshot() is None
+    assert await broker._redis.get(POSITIONS_DISPLAY_LKG_KEY) is None
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     ("account_identity", "classifier_version"),
     [

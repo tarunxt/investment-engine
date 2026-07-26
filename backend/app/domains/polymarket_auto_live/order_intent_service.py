@@ -21,7 +21,11 @@ from app.domains.polymarket.bullpen import (
     BullpenRedeemedTradesReader,
     BullpenTradeHistoryReader,
 )
-from app.domains.polymarket.runtime_broker import run_with_bullpen_runtime_cleanup
+from app.domains.polymarket.doctor_errors import parse_bullpen_doctor_failure
+from app.domains.polymarket.runtime_broker import (
+    get_bullpen_runtime_broker,
+    run_with_bullpen_runtime_cleanup,
+)
 from app.domains.polymarket.redeem_coordinator import (
     REDEEM_ATTEMPT_ALREADY_REDEEMED,
     REDEEM_ATTEMPT_CONFIRMED,
@@ -72,6 +76,9 @@ from app.domains.polymarket_auto_live.order_intents import (
     classify_executor_error,
     compute_next_retry_at,
     derive_run_status_from_intents,
+    intent_has_persisted_submission_evidence,
+    intent_has_unverified_terminal_success,
+    intent_has_verified_terminal_success,
     intent_status_to_order_plan_status,
     oldest_pending_age_seconds,
     parse_datetime,
@@ -718,6 +725,7 @@ def _wallet_snapshot_lineage(snapshot: object) -> dict[str, object]:
             "position_classifier_version",
             None,
         ),
+        "auth_checked_at": getattr(snapshot, "auth_checked_at", None),
     }
 
 
@@ -762,6 +770,7 @@ def _expected_stage1_wallet_lineage(
                 "wallet_position_classifier_version",
                 outputs.get("position_classifier_version"),
             ),
+            "auth_checked_at": outputs.get("wallet_auth_checked_at"),
         }
         if any(
             value is not None
@@ -872,6 +881,220 @@ def _validate_force_fresh_wallet_snapshot(
     return lineage
 
 
+def _wallet_credential_artifacts_match(
+    left: object,
+    right: object,
+) -> bool:
+    left_artifact = _safe_wallet_credential_artifact(left)
+    right_artifact = _safe_wallet_credential_artifact(right)
+    return all(
+        left_artifact.get(field_name)
+        == right_artifact.get(field_name)
+        and left_artifact.get(field_name) is not None
+        for field_name in ("inode", "mtime_ns", "size")
+    )
+
+
+async def _attest_pre_submit_wallet_lineage(
+    *,
+    expected: object,
+    actual: dict[str, object],
+) -> dict[str, object]:
+    """Fail closed while allowing an explicitly attested credential rotation."""
+
+    comparison = _compare_wallet_snapshot_lineage(
+        expected=expected,
+        actual=actual,
+    )
+    expected_lineage = expected if isinstance(expected, dict) else {}
+    if (
+        not _wallet_identity_lineage_is_complete(expected_lineage)
+        or not _wallet_identity_lineage_is_complete(actual)
+    ):
+        return {
+            **comparison,
+            "status": "unavailable",
+            "credential_rotation_attestation": {
+                "status": "unavailable",
+                "reason": (
+                    "Complete Stage 1 and current account, credential-artifact, "
+                    "and classifier lineage is required."
+                ),
+            },
+        }
+
+    credential_mismatches = [
+        mismatch
+        for mismatch in comparison.get("mismatches", [])
+        if str(mismatch).startswith("credential_artifact.")
+    ]
+    noncredential_mismatches = [
+        mismatch
+        for mismatch in comparison.get("mismatches", [])
+        if not str(mismatch).startswith("credential_artifact.")
+    ]
+    if noncredential_mismatches:
+        return {
+            **comparison,
+            "credential_rotation_attestation": {
+                "status": "rejected",
+                "reason": "Account, classifier, or timestamp lineage changed.",
+            },
+        }
+
+    old_artifact = _safe_wallet_credential_artifact(
+        expected_lineage.get("credential_artifact")
+    )
+    new_artifact = _safe_wallet_credential_artifact(
+        actual.get("credential_artifact")
+    )
+    if not credential_mismatches:
+        return {
+            **comparison,
+            "credential_rotation_attestation": {
+                "status": "not_required",
+                "old_credential_artifact": old_artifact,
+                "new_credential_artifact": new_artifact,
+                "auth_checked_at": actual.get("auth_checked_at"),
+            },
+        }
+
+    active_auth = (
+        await get_bullpen_runtime_broker().read_latest_active_auth_result()
+    )
+    active_identity = (
+        getattr(active_auth, "account_identity", None)
+        if active_auth is not None
+        else None
+    )
+    active_artifact = _safe_wallet_credential_artifact(
+        getattr(active_auth, "credential_artifact", {})
+        if active_auth is not None
+        else {}
+    )
+    active_auth_checked_at = (
+        getattr(active_auth, "auth_checked_at", None)
+        if active_auth is not None
+        else None
+    )
+    expected_identity = expected_lineage.get("account_identity")
+    actual_identity = actual.get("account_identity")
+    actual_auth_checked_at = actual.get("auth_checked_at")
+    expected_fetched_at = parse_datetime(
+        str(expected_lineage.get("fetched_at"))
+        if expected_lineage.get("fetched_at")
+        else None
+    )
+    attested_at = parse_datetime(
+        str(actual_auth_checked_at)
+        if actual_auth_checked_at
+        else None
+    )
+
+    attestation = {
+        "status": "unavailable",
+        "old_credential_artifact": old_artifact,
+        "new_credential_artifact": new_artifact,
+        "active_auth_credential_artifact": active_artifact,
+        "account_identity": actual_identity,
+        "auth_checked_at": actual_auth_checked_at,
+    }
+    if (
+        active_auth is None
+        or getattr(active_auth, "healthy", False) is not True
+        or not active_auth_checked_at
+        or not actual_auth_checked_at
+        or active_auth_checked_at != actual_auth_checked_at
+        or not _wallet_credential_artifacts_match(
+            active_artifact,
+            new_artifact,
+        )
+        or attested_at is None
+        or (
+            expected_fetched_at is not None
+            and attested_at < expected_fetched_at
+        )
+    ):
+        attestation["reason"] = (
+            "The current active-auth result does not attest the current "
+            "credential artifact and refresh timestamp."
+        )
+        return {
+            **comparison,
+            "status": "unavailable",
+            "credential_rotation_attestation": attestation,
+        }
+    if (
+        not active_identity
+        or active_identity != expected_identity
+        or active_identity != actual_identity
+    ):
+        attestation.update(
+            {
+                "status": "rejected",
+                "reason": (
+                    "The active-auth wallet identity does not match both "
+                    "Stage 1 and the current forced-fresh snapshot."
+                ),
+            }
+        )
+        return {
+            **comparison,
+            "status": "mismatch",
+            "credential_rotation_attestation": attestation,
+        }
+
+    attestation.update(
+        {
+            "status": "attested_same_account_rotation",
+            "reason": (
+                "Bullpen active auth attested the new credential artifact "
+                "for the same stable wallet identity."
+            ),
+        }
+    )
+    return {
+        **comparison,
+        "status": "match",
+        "mismatches": [],
+        "credential_rotation_attestation": attestation,
+    }
+
+
+async def _require_pre_submit_wallet_lineage(
+    *,
+    action: str,
+    expected: object,
+    actual: dict[str, object],
+) -> dict[str, object]:
+    comparison = await _attest_pre_submit_wallet_lineage(
+        expected=expected,
+        actual=actual,
+    )
+    if comparison.get("status") == "mismatch":
+        raise AutoLiveExecutorError(
+            code="POSITION_LINEAGE_MISMATCH",
+            message=(
+                f"Stage 3 {action} pre-submit rejected wallet state from a "
+                "different account, credential, classifier, or older Stage 1 "
+                f"lineage; no external {action} write was issued."
+            ),
+            retryable=False,
+        )
+    if comparison.get("status") != "match":
+        raise AutoLiveExecutorError(
+            code="POSITION_LINEAGE_UNAVAILABLE",
+            message=(
+                f"Stage 3 {action} pre-submit requires complete matching "
+                "Stage 1 and forced-fresh account, credential-artifact, and "
+                f"position-classifier lineage; no external {action} write was "
+                "issued."
+            ),
+            retryable=True,
+        )
+    return comparison
+
+
 def _condition_id_for_decision(decision: BullpenAutoLiveDecision) -> str | None:
     for stage in reversed(decision.stage_results):
         value = stage.outputs.get("condition_id")
@@ -883,21 +1106,7 @@ def _condition_id_for_decision(decision: BullpenAutoLiveDecision) -> str | None:
 def _intent_has_persisted_submission_reference(intent: object) -> bool:
     """Return true when a retry could duplicate an already accepted write."""
 
-    if any(
-        bool(getattr(intent, field_name, None))
-        for field_name in (
-            "remote_order_id",
-            "remote_transaction_hash",
-            "first_submitted_at",
-            "last_submitted_at",
-        )
-    ):
-        return True
-    execution_metadata = getattr(intent, "execution_metadata_json", None)
-    return bool(
-        isinstance(execution_metadata, dict)
-        and execution_metadata.get("uncertain_remote_write_boundary")
-    )
+    return intent_has_persisted_submission_evidence(intent)
 
 
 def _intent_requires_operator_resume_reconciliation(intent: object) -> bool:
@@ -1111,8 +1320,9 @@ def _persisted_execution_step(
             "required; no order was automatically resubmitted."
         )
     elif planned == 0 or all(
-        intent.status
-        in INTENT_TERMINAL_SUCCESS_STATUSES | INTENT_TERMINAL_FAILURE_STATUSES
+        intent_has_verified_terminal_success(intent)
+        or intent_has_unverified_terminal_success(intent)
+        or intent.status in INTENT_TERMINAL_FAILURE_STATUSES
         for intent in intents
     ):
         status = "completed"
@@ -1662,7 +1872,10 @@ def summarize_run_orders_sync(
         ),
         partial_fill_count=sum(1 for intent in intents if intent.status == "PARTIALLY_FILLED"),
         permanent_failure_count=sum(
-            1 for intent in intents if intent.status == "FAILED_PERMANENT"
+            1
+            for intent in intents
+            if intent.status in {"FAILED_PERMANENT", "REJECTED", "TIMED_OUT"}
+            or intent_has_unverified_terminal_success(intent)
         ),
         transient_failure_count=sum(
             1
@@ -3625,6 +3838,16 @@ async def _read_post_submit_wallet_snapshot(
         snapshot=snapshot,
         request_started_at=request_started_at,
     )
+    if not _wallet_identity_lineage_is_complete(actual_lineage):
+        raise AutoLiveExecutorError(
+            code="POSITION_LINEAGE_UNAVAILABLE",
+            message=(
+                "Post-submit wallet reconciliation requires a complete "
+                "account, credential-artifact, and classifier lineage."
+            ),
+            retryable=True,
+            ambiguous_submission=True,
+        )
     submitted_at = parse_datetime(
         intent.last_submitted_at or intent.first_submitted_at
     )
@@ -3642,7 +3865,7 @@ async def _read_post_submit_wallet_snapshot(
             ambiguous_submission=True,
         )
     expected_lineage = _expected_reconciliation_wallet_lineage(intent)
-    comparison = _compare_wallet_snapshot_lineage(
+    comparison = await _attest_pre_submit_wallet_lineage(
         expected=expected_lineage,
         actual=actual_lineage,
     )
@@ -3720,10 +3943,41 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             retryable=False,
         )
     if not live_controls.doctor.ok:
+        doctor_failure = parse_bullpen_doctor_failure(
+            live_controls.doctor.message,
+            {
+                "error_code": getattr(
+                    live_controls.doctor,
+                    "error_code",
+                    None,
+                ),
+                "safe_to_retry": getattr(
+                    live_controls.doctor,
+                    "safe_to_retry",
+                    None,
+                ),
+                "support_required": getattr(
+                    live_controls.doctor,
+                    "support_required",
+                    None,
+                ),
+                "terminal": getattr(
+                    live_controls.doctor,
+                    "terminal",
+                    None,
+                ),
+                "resolution_owner": getattr(
+                    live_controls.doctor,
+                    "resolution_owner",
+                    None,
+                ),
+            },
+        )
         raise AutoLiveExecutorError(
-            code="DOCTOR_READ_FAILED",
+            code=doctor_failure.auto_live_error_code,
             message=live_controls.doctor.message or "Bullpen doctor failed.",
-            retryable=True,
+            retryable=doctor_failure.retryable,
+            upstream_error_code=doctor_failure.error_code,
         )
     if not live_controls.unlocked:
         raise AutoLiveExecutorError(
@@ -3769,47 +4023,11 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                 "expected_stage1_wallet_lineage"
             )
         )
-        wallet_lineage_comparison = _compare_wallet_snapshot_lineage(
+        wallet_lineage_comparison = await _require_pre_submit_wallet_lineage(
+            action="buy",
             expected=expected_stage1_wallet_lineage,
             actual=actual_lineage,
         )
-        if (
-            not _wallet_identity_lineage_is_complete(actual_lineage)
-            or not _wallet_identity_lineage_is_complete(
-                expected_stage1_wallet_lineage
-            )
-        ):
-            raise AutoLiveExecutorError(
-                code="POSITION_LINEAGE_UNAVAILABLE",
-                message=(
-                    "Stage 3 buy pre-submit requires complete matching Stage 1 "
-                    "and forced-fresh account, credential-artifact, and "
-                    "position-classifier lineage; no external buy write was "
-                    "issued."
-                ),
-                retryable=True,
-            )
-        if wallet_lineage_comparison["status"] == "mismatch":
-            raise AutoLiveExecutorError(
-                code="POSITION_LINEAGE_MISMATCH",
-                message=(
-                    "Stage 3 buy pre-submit rejected wallet state from a "
-                    "different account, credential, classifier, or older "
-                    "Stage 1 lineage; no external buy write was issued."
-                ),
-                retryable=False,
-            )
-        if wallet_lineage_comparison["status"] != "match":
-            raise AutoLiveExecutorError(
-                code="POSITION_LINEAGE_UNAVAILABLE",
-                message=(
-                    "Stage 3 buy pre-submit requires complete matching Stage 1 "
-                    "and forced-fresh account, credential-artifact, and "
-                    "position-classifier lineage; no external buy write was "
-                    "issued."
-                ),
-                retryable=True,
-            )
         exit_confirmed_at = parse_datetime(
             str(intent.dependency_metadata_json.get("exit_confirmed_at"))
             if intent.dependency_metadata_json.get("exit_confirmed_at")
@@ -4016,22 +4234,13 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             request_started_at=snapshot_request_started_at,
         )
         wallet_snapshot_lineage = actual_lineage
-        wallet_lineage_comparison = _compare_wallet_snapshot_lineage(
+        wallet_lineage_comparison = await _require_pre_submit_wallet_lineage(
+            action="sell",
             expected=intent.execution_metadata_json.get(
                 "expected_stage1_wallet_lineage"
             ),
             actual=actual_lineage,
         )
-        if wallet_lineage_comparison["status"] == "mismatch":
-            raise AutoLiveExecutorError(
-                code="POSITION_LINEAGE_MISMATCH",
-                message=(
-                    "Stage 3 sell pre-submit rejected wallet state from a "
-                    "different account, credential, classifier, or older "
-                    "Stage 1 lineage; no external sell write was issued."
-                ),
-                retryable=False,
-            )
         live_positions = live_snapshot.raw_positions or live_snapshot.positions
         matching_positions = [
             position
@@ -4167,22 +4376,13 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             request_started_at=snapshot_request_started_at,
         )
         wallet_snapshot_lineage = actual_lineage
-        wallet_lineage_comparison = _compare_wallet_snapshot_lineage(
+        wallet_lineage_comparison = await _require_pre_submit_wallet_lineage(
+            action="redeem",
             expected=intent.execution_metadata_json.get(
                 "expected_stage1_wallet_lineage"
             ),
             actual=actual_lineage,
         )
-        if wallet_lineage_comparison["status"] == "mismatch":
-            raise AutoLiveExecutorError(
-                code="POSITION_LINEAGE_MISMATCH",
-                message=(
-                    "Stage 3 redeem pre-submit rejected wallet state from a "
-                    "different account, credential, classifier, or older "
-                    "Stage 1 lineage; no external redeem write was issued."
-                ),
-                retryable=False,
-            )
         redeem_preflight_wallet_positions = tuple(
             live_snapshot.raw_positions or live_snapshot.positions
         )
@@ -4653,6 +4853,11 @@ def _apply_executor_error(
 
     now = utc_now()
     metadata = dict(record.execution_metadata_json or {})
+    if exc.upstream_error_code:
+        metadata["typed_upstream_error"] = {
+            "upstream_error_code": exc.upstream_error_code,
+            "persisted_error_code": exc.code,
+        }
     if exc.fallback_history:
         fallback_history = [dict(item) for item in exc.fallback_history]
         immediate_sell_audit = {
@@ -4684,6 +4889,16 @@ def _apply_executor_error(
         **dict(attempt.reconciliation_json or {}),
         "retryable": exc.retryable,
         "ambiguous_submission": exc.ambiguous_submission,
+        **(
+            {
+                "typed_upstream_error": {
+                    "upstream_error_code": exc.upstream_error_code,
+                    "persisted_error_code": exc.code,
+                }
+            }
+            if exc.upstream_error_code
+            else {}
+        ),
         "root_cause": sanitize_message("".join(traceback.format_exception_only(type(exc), exc))),
         "next_step": (
             "reconcile_remote_state_before_retry"
@@ -6286,7 +6501,7 @@ async def _reconcile_buy_intent_async(
             continue
         if not _wallet_identity_lineage_is_complete(expected_lineage):
             incomplete_lineages.append(lineage_name)
-        comparison = _compare_wallet_snapshot_lineage(
+        comparison = await _attest_pre_submit_wallet_lineage(
             expected=expected_lineage,
             actual=lineage,
         )
@@ -6515,6 +6730,18 @@ def _remaining_position_is_economic_dust(
 async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentSubmissionResult:
     if intent.action == "buy":
         return await _reconcile_buy_intent_async(intent)
+
+    if not _intent_has_persisted_submission_reference(intent):
+        return IntentSubmissionResult(
+            status="DEFERRED",
+            detail=(
+                "Stage 3 found no durable submission timestamp, remote order, "
+                "transaction reference, or uncertain write-boundary marker. "
+                "Wallet absence alone cannot prove that this exit executed."
+            ),
+            retryable=False,
+            last_error_code="SUBMISSION_EVIDENCE_MISSING",
+        )
 
     if intent.action == "sell" and intent.remote_order_id:
         try:
@@ -6886,13 +7113,63 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
     ]
 
     if intent.action == "sell":
+        sell_preflight = intent.execution_metadata_json.get(
+            "sell_live_preflight"
+        )
+        sell_preflight = (
+            sell_preflight if isinstance(sell_preflight, dict) else {}
+        )
+        sell_preflight_comparison = await _attest_pre_submit_wallet_lineage(
+            expected=sell_preflight,
+            actual=post_exit_lineage,
+        )
+        fallback_snapshot_metadata["sell_preflight_lineage_comparison"] = (
+            sell_preflight_comparison
+        )
+        preflight_submitted_shares = _safe_float(
+            sell_preflight.get("submitted_shares")
+        )
+        wallet_delta_anchor_ready = bool(
+            parse_datetime(
+                intent.last_submitted_at or intent.first_submitted_at
+            )
+            and _wallet_identity_lineage_is_complete(sell_preflight)
+            and sell_preflight_comparison.get("status") == "match"
+            and preflight_submitted_shares is not None
+            and preflight_submitted_shares > 0
+        )
+        has_remote_reference = bool(
+            intent.remote_order_id or intent.remote_transaction_hash
+        )
+        if not has_remote_reference and not wallet_delta_anchor_ready:
+            return IntentSubmissionResult(
+                status="SETTLEMENT_PENDING",
+                detail=(
+                    "Wallet-only sell reconciliation requires a persisted "
+                    "pre-submit share baseline and matching account, credential, "
+                    "classifier, and timestamp lineage. The replacement slot "
+                    "remains occupied."
+                ),
+                retryable=True,
+                next_attempt_at=_next_confirmation_attempt_at(intent),
+                last_error_code="POSITION_LINEAGE_UNAVAILABLE",
+                raw_response={
+                    "post_exit_snapshot": fallback_snapshot_metadata,
+                },
+            )
         current_shares = sum(
             max(0.0, float(getattr(position, "shares", 0.0) or 0.0))
             for position in blocking_positions
         )
         baseline_shares = max(
             0.0,
-            float(intent.current_shares or intent.requested_shares or 0.0),
+            float(
+                preflight_submitted_shares
+                if wallet_delta_anchor_ready
+                else intent.current_shares
+                or intent.requested_shares
+                or 0.0
+            ),
         )
         if not blocking_positions:
             return IntentSubmissionResult(
@@ -7132,6 +7409,7 @@ def reconcile_order_intent_sync(intent_id: str) -> str | None:
                     "REJECTED": "EXIT_FAILED_PERMANENTLY",
                     "CANCELLED": "EXIT_FAILED_PERMANENTLY",
                     "TIMED_OUT": "EXIT_FAILED_PERMANENTLY",
+                    "DEFERRED": "EXIT_NOT_SUBMITTED",
                 }.get(result.status, "POST_EXIT_REFRESH_PENDING"),
             }
         elif record.action == "buy" and result.status in {"SUBMITTED", "CONFIRMING"}:

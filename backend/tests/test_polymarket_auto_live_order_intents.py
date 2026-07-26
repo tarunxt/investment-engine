@@ -29,6 +29,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT,
     STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH,
     _automatic_attempt_budget_allows,
+    _apply_executor_error,
     _cancel_unsubmitted_intent_for_user,
     _compare_wallet_snapshot_lineage,
     _defer_buy_until_exit,
@@ -201,6 +202,9 @@ def _wallet_snapshot(
     *,
     source: str = "live-cli",
     freshness_state: str = "fresh",
+    credential_artifact: dict[str, int | None] | None = None,
+    account_identity: str | None = "wallet-a",
+    auth_checked_at: str | None = None,
 ) -> ConsoleWalletPositionsSnapshot:
     return ConsoleWalletPositionsSnapshot(
         positions=[position],
@@ -210,10 +214,31 @@ def _wallet_snapshot(
         fetched_at=(datetime.now(UTC) + timedelta(seconds=1)).isoformat(),
         raw_position_count=1,
         diagnostics={},
-        credential_artifact={"inode": 11, "mtime_ns": 22, "size": 33},
-        account_identity="wallet-a",
+        credential_artifact=(
+            credential_artifact
+            if credential_artifact is not None
+            else {"inode": 11, "mtime_ns": 22, "size": 33}
+        ),
+        account_identity=account_identity,
         position_classifier_version=3,
+        auth_checked_at=auth_checked_at,
     )
+
+
+def _expected_wallet_lineage() -> dict[str, object]:
+    return {
+        "source": "live-cli",
+        "fetched_at": "2026-07-20T00:00:00+00:00",
+        "freshness_state": "fresh",
+        "account_identity": "wallet-a",
+        "credential_artifact": {
+            "inode": 11,
+            "mtime_ns": 22,
+            "size": 33,
+        },
+        "position_classifier_version": 3,
+        "auth_checked_at": "2026-07-20T00:00:00+00:00",
+    }
 
 
 def _sell_intent(intent_id: str) -> BullpenAutoLiveOrderIntent:
@@ -226,6 +251,44 @@ def _sell_intent(intent_id: str) -> BullpenAutoLiveOrderIntent:
             "market_id": "legacy-numeric-market-id",
             "slug": "resolved-market-slug",
             "condition_id": "condition-1",
+            "execution_metadata_json": {
+                "expected_stage1_wallet_lineage": _expected_wallet_lineage(),
+            },
+        }
+    )
+
+
+def _submitted_sell_intent(
+    intent_id: str,
+    *,
+    submitted_at: datetime,
+    remote_order_id: str | None = None,
+) -> BullpenAutoLiveOrderIntent:
+    preflight_lineage = {
+        "source": "live-cli",
+        "fetched_at": (submitted_at - timedelta(seconds=1)).isoformat(),
+        "freshness_state": "fresh",
+        "account_identity": "wallet-a",
+        "credential_artifact": {
+            "inode": 11,
+            "mtime_ns": 22,
+            "size": 33,
+        },
+        "position_classifier_version": 3,
+        "submitted_shares": 6.25,
+        "verified_shares": 6.25,
+        "sellable": True,
+    }
+    return _sell_intent(intent_id).model_copy(
+        update={
+            "status": "CONFIRMING",
+            "first_submitted_at": submitted_at.isoformat(),
+            "last_submitted_at": submitted_at.isoformat(),
+            "remote_order_id": remote_order_id,
+            "execution_metadata_json": {
+                "wallet_snapshot_lineage": dict(preflight_lineage),
+                "sell_live_preflight": dict(preflight_lineage),
+            },
         }
     )
 
@@ -240,6 +303,9 @@ def _redeem_intent(intent_id: str) -> BullpenAutoLiveOrderIntent:
             "market_id": "legacy-numeric-market-id",
             "slug": "resolved-market-slug",
             "condition_id": "condition-1",
+            "execution_metadata_json": {
+                "expected_stage1_wallet_lineage": _expected_wallet_lineage(),
+            },
         }
     )
 
@@ -314,8 +380,32 @@ async def test_sell_preflight_surfaces_doctor_failure_before_dashboard_lock(
     with pytest.raises(AutoLiveExecutorError) as error:
         await _prepare_intent_submission(_sell_intent("doctor-blocked-sell"))
 
-    assert error.value.code == "DOCTOR_READ_FAILED"
+    assert error.value.code == "POLYMARKET_WALLET_ROUTE_UNCONFIRMED"
+    assert error.value.retryable is False
     assert "POLYMARKET_WALLET_ROUTE_UNCONFIRMED" in error.value.message
+
+
+@pytest.mark.anyio
+async def test_sell_preflight_keeps_untyped_doctor_read_failure_retryable(
+    monkeypatch,
+):
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        controls = _live_controls(doctor_ok=False)
+        controls.doctor.message = "Bullpen doctor failed during a transient read."
+        return controls
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+
+    with pytest.raises(AutoLiveExecutorError) as error:
+        await _prepare_intent_submission(_sell_intent("transient-doctor-sell"))
+
+    assert error.value.code == "DOCTOR_READ_FAILED"
+    assert error.value.retryable is True
 
 
 @pytest.mark.anyio
@@ -430,6 +520,238 @@ async def test_sell_preflight_active_open_market_overrides_stale_payout_flags(
     assert prepared.sell_preflight_metadata["sellable"] is True
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize("action", ["sell", "redeem"])
+@pytest.mark.parametrize(
+    "missing_lineage_field",
+    [
+        "stage1",
+        "account_identity",
+        "credential_artifact",
+        "position_classifier_version",
+    ],
+)
+async def test_sell_and_redeem_preflight_require_complete_stage1_and_current_lineage(
+    monkeypatch,
+    action,
+    missing_lineage_field,
+):
+    position = _wallet_position()
+
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        return _live_controls()
+
+    snapshot = _wallet_snapshot(position)
+    if missing_lineage_field == "account_identity":
+        snapshot = replace(snapshot, account_identity=None)
+    elif missing_lineage_field == "credential_artifact":
+        snapshot = replace(snapshot, credential_artifact={})
+    elif missing_lineage_field == "position_classifier_version":
+        snapshot = replace(snapshot, position_classifier_version=None)
+
+    async def read_snapshot(**_kwargs):
+        return snapshot
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+    intent = (
+        _sell_intent("complete-lineage-sell")
+        if action == "sell"
+        else _redeem_intent("complete-lineage-redeem")
+    )
+    if missing_lineage_field == "stage1":
+        intent = intent.model_copy(
+            update={"execution_metadata_json": {}}
+        )
+
+    with pytest.raises(AutoLiveExecutorError) as error:
+        await _prepare_intent_submission(intent)
+
+    assert error.value.code == "POSITION_LINEAGE_UNAVAILABLE"
+    assert error.value.retryable is True
+    assert f"no external {action} write was issued" in error.value.message
+
+
+@pytest.mark.anyio
+async def test_sell_preflight_accepts_attested_same_wallet_credential_rotation(
+    monkeypatch,
+):
+    position = _wallet_position()
+    new_artifact = {"inode": 44, "mtime_ns": 55, "size": 66}
+    auth_checked_at = "2026-07-27T00:01:00+00:00"
+    snapshot = _wallet_snapshot(
+        position,
+        credential_artifact=new_artifact,
+        auth_checked_at=auth_checked_at,
+    )
+
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        return _live_controls()
+
+    async def read_snapshot(**_kwargs):
+        return snapshot
+
+    async def enrich_positions(positions):
+        return list(positions), {"unresolved_position_count": 0}
+
+    class FakeBroker:
+        async def read_latest_active_auth_result(self):
+            return SimpleNamespace(
+                healthy=True,
+                account_identity="wallet-a",
+                credential_artifact=new_artifact,
+                auth_checked_at=auth_checked_at,
+            )
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "enrich_console_wallet_positions_authoritatively",
+        enrich_positions,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    prepared = await _prepare_intent_submission(
+        _sell_intent("attested-rotation-sell")
+    )
+
+    attestation = prepared.wallet_lineage_comparison[
+        "credential_rotation_attestation"
+    ]
+    assert prepared.wallet_lineage_comparison["status"] == "match"
+    assert attestation["status"] == "attested_same_account_rotation"
+    assert attestation["old_credential_artifact"] == {
+        "inode": 11,
+        "mtime_ns": 22,
+        "size": 33,
+    }
+    assert attestation["new_credential_artifact"] == new_artifact
+    assert attestation["auth_checked_at"] == auth_checked_at
+
+
+@pytest.mark.anyio
+async def test_sell_preflight_rejects_wallet_change_during_credential_rotation(
+    monkeypatch,
+):
+    position = _wallet_position()
+    new_artifact = {"inode": 44, "mtime_ns": 55, "size": 66}
+    auth_checked_at = "2026-07-27T00:01:00+00:00"
+    snapshot = _wallet_snapshot(
+        position,
+        credential_artifact=new_artifact,
+        account_identity="wallet-b",
+        auth_checked_at=auth_checked_at,
+    )
+
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        return _live_controls()
+
+    async def read_snapshot(**_kwargs):
+        return snapshot
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+
+    with pytest.raises(AutoLiveExecutorError) as error:
+        await _prepare_intent_submission(
+            _sell_intent("wallet-change-sell")
+        )
+
+    assert error.value.code == "POSITION_LINEAGE_MISMATCH"
+    assert error.value.retryable is False
+    assert "no external sell write was issued" in error.value.message
+
+
+@pytest.mark.anyio
+async def test_sell_preflight_rejects_unattested_current_credential_artifact(
+    monkeypatch,
+):
+    position = _wallet_position()
+    new_artifact = {"inode": 44, "mtime_ns": 55, "size": 66}
+    auth_checked_at = "2026-07-27T00:01:00+00:00"
+    snapshot = _wallet_snapshot(
+        position,
+        credential_artifact=new_artifact,
+        auth_checked_at=auth_checked_at,
+    )
+
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        return _live_controls()
+
+    async def read_snapshot(**_kwargs):
+        return snapshot
+
+    class FakeBroker:
+        async def read_latest_active_auth_result(self):
+            return SimpleNamespace(
+                healthy=True,
+                account_identity="wallet-a",
+                credential_artifact={
+                    "inode": 11,
+                    "mtime_ns": 22,
+                    "size": 33,
+                },
+                auth_checked_at=auth_checked_at,
+            )
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    with pytest.raises(AutoLiveExecutorError) as error:
+        await _prepare_intent_submission(
+            _sell_intent("unattested-rotation-sell")
+        )
+
+    assert error.value.code == "POSITION_LINEAGE_UNAVAILABLE"
+    assert error.value.retryable is True
+
+
 def test_active_position_classifier_overrides_stale_raw_resolution_status():
     position = replace(
         _wallet_position(classification="active"),
@@ -525,9 +847,35 @@ async def test_sell_reconciliation_keeps_numeric_id_slot_occupied_when_slug_posi
 
 
 @pytest.mark.anyio
-async def test_sell_reconciliation_fills_numeric_id_intent_only_after_slug_position_removed(
+async def test_sell_reconciliation_never_infers_fill_without_submission_evidence(
     monkeypatch,
 ):
+    async def read_snapshot(**_kwargs):
+        raise AssertionError(
+            "wallet absence must not be read as execution evidence"
+        )
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+
+    result = await order_intent_service._reconcile_intent_async(
+        _sell_intent("numeric-id-slug-removed")
+    )
+
+    assert result.status == "DEFERRED"
+    assert result.retryable is False
+    assert result.last_error_code == "SUBMISSION_EVIDENCE_MISSING"
+    assert "Wallet absence alone cannot prove" in result.detail
+
+
+@pytest.mark.anyio
+async def test_sell_reconciliation_accepts_anchored_same_lineage_wallet_delta(
+    monkeypatch,
+):
+    submitted_at = datetime.now(UTC) - timedelta(seconds=10)
     position = replace(
         _wallet_position(shares=6.25),
         condition_id=None,
@@ -542,9 +890,8 @@ async def test_sell_reconciliation_fills_numeric_id_intent_only_after_slug_posit
     async def read_snapshot(**_kwargs):
         return snapshot
 
-    class EmptyHistoryReader:
-        async def refresh(self):
-            return []
+    async def enrich_positions(positions):
+        return list(positions), {"unresolved_position_count": 0}
 
     monkeypatch.setattr(
         order_intent_service,
@@ -553,18 +900,15 @@ async def test_sell_reconciliation_fills_numeric_id_intent_only_after_slug_posit
     )
     monkeypatch.setattr(
         order_intent_service,
-        "BullpenTradeHistoryReader",
-        EmptyHistoryReader,
+        "enrich_console_wallet_positions_authoritatively",
+        enrich_positions,
     )
-    monkeypatch.setattr(
-        order_intent_service,
-        "BullpenRedeemedTradesReader",
-        EmptyHistoryReader,
+    intent = _submitted_sell_intent(
+        "anchored-wallet-delta",
+        submitted_at=submitted_at,
     )
 
-    result = await order_intent_service._reconcile_intent_async(
-        _sell_intent("numeric-id-slug-removed")
-    )
+    result = await order_intent_service._reconcile_intent_async(intent)
 
     assert result.status == "FILLED"
     assert result.remaining_shares == 0.0
@@ -696,11 +1040,9 @@ async def test_sell_history_cannot_terminalize_full_fresh_redis_exposure(
     )
 
     result = await order_intent_service._reconcile_intent_async(
-        _sell_intent("history-is-not-settlement").model_copy(
-            update={
-                "last_submitted_at": submitted_at.isoformat(),
-                "current_shares": 6.25,
-            }
+        _submitted_sell_intent(
+            "history-is-not-settlement",
+            submitted_at=submitted_at,
         )
     )
 
@@ -2052,7 +2394,7 @@ async def test_sell_preflight_caps_fresh_coalesced_redis_shares(
     assert prepared.sell_preflight_metadata["freshness_state"] == "fresh"
     assert prepared.sell_preflight_metadata["verified_shares"] == 2.25
     assert prepared.sell_preflight_metadata["submitted_shares"] == 2.25
-    assert prepared.wallet_lineage_comparison["status"] == "unavailable"
+    assert prepared.wallet_lineage_comparison["status"] == "match"
 
 
 @pytest.mark.anyio
@@ -2637,6 +2979,69 @@ def test_classify_executor_error_marks_write_timeout_as_ambiguous_submission():
     assert error.provider_alias == "rpc-1"
 
 
+def test_classify_executor_error_preserves_terminal_doctor_code():
+    error = classify_executor_error(
+        (
+            "Polymarket preflight failed: "
+            '{"code":"POLYMARKET_WALLET_ROUTE_UNCONFIRMED",'
+            '"safe_to_retry":false,"support_required":true}'
+        )
+    )
+
+    assert error.code == "POLYMARKET_WALLET_ROUTE_UNCONFIRMED"
+    assert error.retryable is False
+    assert error.ambiguous_submission is False
+
+
+def test_long_typed_doctor_code_is_bounded_and_retained_in_metadata():
+    upstream_code = f"POLYMARKET_{'X' * 70}"
+    error = classify_executor_error(
+        (
+            "Polymarket preflight failed: "
+            f'{{"code":"{upstream_code}","safe_to_retry":false}}'
+        )
+    )
+    record = SimpleNamespace(
+        execution_metadata_json={},
+        action="buy",
+        attempt_count=1,
+    )
+    attempt = SimpleNamespace(
+        reconciliation_json={},
+        sanitized_response_json={},
+        executor_path=None,
+    )
+
+    _apply_executor_error(
+        None,  # type: ignore[arg-type]
+        record=record,
+        attempt=attempt,
+        exc=error,
+    )
+
+    assert error.code == "BULLPEN_SUPPORT_REQUIRED"
+    assert len(error.code) <= 64
+    assert error.upstream_error_code == upstream_code
+    assert record.last_error_code == "BULLPEN_SUPPORT_REQUIRED"
+    assert record.execution_metadata_json["typed_upstream_error"] == {
+        "upstream_error_code": upstream_code,
+        "persisted_error_code": "BULLPEN_SUPPORT_REQUIRED",
+    }
+    assert attempt.reconciliation_json["typed_upstream_error"] == {
+        "upstream_error_code": upstream_code,
+        "persisted_error_code": "BULLPEN_SUPPORT_REQUIRED",
+    }
+
+
+def test_classify_executor_error_keeps_generic_doctor_failure_retryable():
+    error = classify_executor_error(
+        "Bullpen doctor failed while reading a transient upstream response."
+    )
+
+    assert error.code == "DOCTOR_READ_FAILED"
+    assert error.retryable is True
+
+
 def test_ambiguous_write_boundary_persists_timestamp_and_retry_fence():
     record = SimpleNamespace(
         action="buy",
@@ -2911,6 +3316,41 @@ def test_build_order_funnel_counts_all_definitive_failure_outcomes():
     assert funnel.cancelled == 1
 
 
+def test_evidence_free_terminal_rows_are_fail_closed_in_funnel_and_run_status():
+    intents = [
+        _intent(
+            intent_id=f"legacy-sell-{index}",
+            status="FILLED",
+            action="sell",
+            attempt_count=1,
+            retryable=False,
+            filled_shares=6.25,
+        )
+        for index in range(5)
+    ]
+    intents.append(
+        _intent(
+            intent_id="timed-out-buy",
+            status="TIMED_OUT",
+            action="buy",
+            attempt_count=2,
+            retryable=False,
+        )
+    )
+
+    funnel = build_order_funnel(intents)
+
+    assert funnel.planned == 6
+    assert funnel.attempted == 6
+    assert funnel.remotely_accepted == 0
+    assert funnel.confirmed == 0
+    assert funnel.filled == 0
+    assert funnel.permanently_failed == 6
+    assert 0 <= funnel.confirmation_rate <= 1
+    assert 0 <= funnel.fill_rate <= 1
+    assert derive_run_status_from_intents(intents) == "failed"
+
+
 def test_derive_run_status_from_intents_returns_partial_success_for_mixed_terminal_outcomes():
     intents = [
         _intent(
@@ -3031,6 +3471,86 @@ def test_build_order_plan_from_intent_carries_retry_and_fill_metadata():
     assert updated.latest_error_code == "QUOTE_STALE"
     assert updated.filled_shares == 2.5
     assert updated.remaining_shares == 3.75
+    assert updated.submission_evidence_present is True
+    assert updated.submission_evidence_kind == "submitted_at"
+    assert updated.executed_at == "2026-07-18T10:00:05+00:00"
+
+
+def test_build_order_plan_projects_evidence_free_fill_as_unsubmitted():
+    order_plan = BullpenAutoLiveOrderPlan(
+        id="legacy-exit",
+        action="sell",
+        side="YES",
+        status="filled",
+        stage3_status="EXIT_SUBMITTED",
+        market_id="market-1",
+        market_title="Legacy evidence-free exit",
+        order_size_usd=5.0,
+        shares=6.25,
+        limit_price_cents=80.0,
+        max_slippage_cents=2.0,
+        dry_run=False,
+        detail="Wallet state was empty.",
+        execution_response="Legacy inferred fill.",
+        created_at="2026-07-18T10:00:00+00:00",
+        executed_at="2026-07-18T10:00:05+00:00",
+    )
+    intent = _intent(
+        intent_id="legacy-exit",
+        status="FILLED",
+        action="sell",
+        attempt_count=1,
+        retryable=False,
+        filled_shares=6.25,
+    )
+
+    updated = build_order_plan_from_intent(order_plan, intent)
+
+    assert updated.status == "deferred"
+    assert updated.stage3_status == "EXIT_NOT_SUBMITTED"
+    assert updated.execution_response is None
+    assert updated.submission_evidence_present is False
+    assert updated.submission_evidence_kind is None
+    assert updated.executed_at is None
+    assert updated.confirmed_at is None
+    assert "no durable submission" in updated.detail
+
+
+def test_build_order_plan_projects_uncertain_write_marker_as_submission_evidence():
+    order_plan = BullpenAutoLiveOrderPlan(
+        id="ambiguous-buy",
+        action="buy",
+        side="YES",
+        status="planned",
+        market_id="market-1",
+        market_title="Ambiguous remote write",
+        order_size_usd=5.0,
+        shares=6.25,
+        limit_price_cents=80.0,
+        max_slippage_cents=2.0,
+        dry_run=False,
+        detail="Order planned.",
+        created_at="2026-07-18T10:00:00+00:00",
+    )
+    intent = _intent(
+        intent_id="ambiguous-buy",
+        status="CONFIRMING",
+        attempt_count=1,
+    ).model_copy(
+        update={
+            "execution_metadata_json": {
+                "uncertain_remote_write_boundary": {
+                    "recorded_at": "2026-07-18T10:00:05+00:00",
+                }
+            }
+        }
+    )
+
+    updated = build_order_plan_from_intent(order_plan, intent)
+
+    assert updated.status == "confirming"
+    assert updated.submission_evidence_present is True
+    assert updated.submission_evidence_kind == "uncertain_write_boundary"
 
 
 def test_stage3_counters_are_reconciled_from_persisted_order_intents():

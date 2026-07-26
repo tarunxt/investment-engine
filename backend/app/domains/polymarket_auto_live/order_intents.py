@@ -7,6 +7,7 @@ import math
 import os
 from typing import Iterable, Sequence
 
+from app.domains.polymarket.doctor_errors import parse_bullpen_doctor_failure
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket_auto_live.rpc_retry import (
     extract_retry_after_seconds,
@@ -152,6 +153,60 @@ def sanitize_json_payload(value: object) -> dict[str, object]:
     return redacted
 
 
+def intent_has_persisted_submission_evidence(
+    intent: object,
+) -> bool:
+    """Return whether an external write boundary is durably represented.
+
+    An attempt counter alone is preflight/worker activity, not proof that an
+    order reached Bullpen. Legacy rows that were terminalized only because a
+    wallet position was absent therefore remain unsubmitted.
+    """
+
+    return intent_submission_evidence_kind(intent) is not None
+
+
+def intent_submission_evidence_kind(intent: object) -> str | None:
+    """Return the strongest durable external-write evidence carried by an intent."""
+
+    if getattr(intent, "remote_order_id", None):
+        return "remote_order_id"
+    if getattr(intent, "remote_transaction_hash", None):
+        return "remote_transaction_hash"
+    if (
+        getattr(intent, "first_submitted_at", None)
+        or getattr(intent, "last_submitted_at", None)
+    ):
+        return "submitted_at"
+    execution_metadata = getattr(intent, "execution_metadata_json", None)
+    if (
+        isinstance(execution_metadata, dict)
+        and execution_metadata.get("uncertain_remote_write_boundary")
+    ):
+        return "uncertain_write_boundary"
+    return None
+
+
+def intent_has_verified_terminal_success(
+    intent: object,
+) -> bool:
+    return bool(
+        str(getattr(intent, "status", "") or "")
+        in INTENT_TERMINAL_SUCCESS_STATUSES
+        and intent_has_persisted_submission_evidence(intent)
+    )
+
+
+def intent_has_unverified_terminal_success(
+    intent: object,
+) -> bool:
+    return bool(
+        str(getattr(intent, "status", "") or "")
+        in INTENT_TERMINAL_SUCCESS_STATUSES
+        and not intent_has_persisted_submission_evidence(intent)
+    )
+
+
 @dataclass(frozen=True)
 class AutoLiveExecutorError(Exception):
     code: str
@@ -161,6 +216,7 @@ class AutoLiveExecutorError(Exception):
     ambiguous_submission: bool = False
     provider_alias: str | None = None
     fallback_history: tuple[dict[str, object], ...] = ()
+    upstream_error_code: str | None = None
 
     def __str__(self) -> str:
         return self.message
@@ -186,6 +242,7 @@ def classify_executor_error(
         retryable: bool,
         retry_after_seconds: int | None = None,
         ambiguous_submission: bool = False,
+        upstream_error_code: str | None = None,
     ) -> AutoLiveExecutorError:
         return AutoLiveExecutorError(
             code=code,
@@ -194,8 +251,16 @@ def classify_executor_error(
             retry_after_seconds=retry_after_seconds,
             ambiguous_submission=ambiguous_submission,
             provider_alias=provider_alias,
+            upstream_error_code=upstream_error_code,
         )
 
+    doctor_failure = parse_bullpen_doctor_failure(sanitized)
+    if doctor_failure.is_terminal:
+        return _error(
+            doctor_failure.auto_live_error_code,
+            retryable=False,
+            upstream_error_code=doctor_failure.error_code,
+        )
     if is_rpc_rate_limited(sanitized):
         retry_after = extract_retry_after_seconds(message)
         return _error(
@@ -356,6 +421,9 @@ def build_order_plan_from_intent(
     existing: BullpenAutoLiveOrderPlan,
     intent: BullpenAutoLiveOrderIntent,
 ) -> BullpenAutoLiveOrderPlan:
+    submission_evidence_kind = intent_submission_evidence_kind(intent)
+    has_submission_evidence = submission_evidence_kind is not None
+    unverified_terminal_success = intent_has_unverified_terminal_success(intent)
     immediate_sell_strategy = intent.execution_metadata_json.get(
         "immediate_sell_strategy"
     )
@@ -368,7 +436,11 @@ def build_order_plan_from_intent(
             ]
     return existing.model_copy(
         update={
-            "status": intent_status_to_order_plan_status(intent.status),
+            "status": (
+                "deferred"
+                if unverified_terminal_success
+                else intent_status_to_order_plan_status(intent.status)
+            ),
             "dependency_group": intent.dependency_group,
             "order_size_usd": intent.current_order_usd
             if intent.current_order_usd is not None
@@ -379,8 +451,13 @@ def build_order_plan_from_intent(
             "limit_price_cents": intent.current_limit_price_cents
             if intent.current_limit_price_cents is not None
             else existing.limit_price_cents,
-            "detail": intent.last_error_message
-            or existing.detail,
+            "detail": (
+                "The persisted terminal status has no durable submission, "
+                "remote-order, or transaction evidence. It is shown as "
+                "unsubmitted and requires operator reconciliation."
+                if unverified_terminal_success
+                else intent.last_error_message or existing.detail
+            ),
             "retryable": intent.retryable,
             "attempt_count": intent.attempt_count,
             "next_retry_at": intent.next_attempt_at,
@@ -417,15 +494,30 @@ def build_order_plan_from_intent(
                 )
                 else {}
             ),
-            "stage3_status": str(intent.execution_metadata_json.get("stage3_status"))
-            if intent.execution_metadata_json.get("stage3_status")
-            else existing.stage3_status,
+            "stage3_status": (
+                "EXIT_NOT_SUBMITTED"
+                if unverified_terminal_success
+                and intent.action in {"sell", "redeem"}
+                else "BUY_FAILED"
+                if unverified_terminal_success
+                else str(
+                    intent.execution_metadata_json.get("stage3_status")
+                )
+                if intent.execution_metadata_json.get("stage3_status")
+                else existing.stage3_status
+            ),
             "filled_shares": intent.filled_shares,
             "remaining_shares": intent.remaining_shares,
             "average_fill_price_cents": intent.average_fill_price_cents,
-            "execution_response": intent.remote_order_id
-            or intent.remote_transaction_hash
-            or existing.execution_response,
+            "execution_response": (
+                intent.remote_order_id
+                or intent.remote_transaction_hash
+                or existing.execution_response
+                if has_submission_evidence
+                else None
+            ),
+            "submission_evidence_present": has_submission_evidence,
+            "submission_evidence_kind": submission_evidence_kind,
             "current_blockage": (
                 str(intent.execution_metadata_json.get("current_blockage"))
                 if intent.execution_metadata_json.get("current_blockage")
@@ -440,9 +532,19 @@ def build_order_plan_from_intent(
                     else "Reconcile first if a remote write may have happened; otherwise cancel unsubmitted intents or fix the permanent validation error."
                 )
             ),
-            "executed_at": intent.last_submitted_at or existing.executed_at,
-            "confirmed_at": intent.confirmed_at,
-            "terminal_at": intent.terminal_at,
+            "executed_at": (
+                intent.last_submitted_at
+                or intent.first_submitted_at
+                or existing.executed_at
+                if has_submission_evidence
+                else None
+            ),
+            "confirmed_at": (
+                intent.confirmed_at if has_submission_evidence else None
+            ),
+            "terminal_at": (
+                intent.terminal_at if has_submission_evidence else None
+            ),
         }
     )
 
@@ -453,6 +555,12 @@ def build_order_funnel(intents: Iterable[BullpenAutoLiveOrderIntent]) -> Bullpen
     for intent in items:
         counts.planned += 1
         status = intent.status
+        has_submission_evidence = intent_has_persisted_submission_evidence(
+            intent
+        )
+        unverified_terminal_success = (
+            intent_has_unverified_terminal_success(intent)
+        )
         if status == "READY":
             counts.ready += 1
         elif status == "RETRY_WAIT":
@@ -469,33 +577,40 @@ def build_order_funnel(intents: Iterable[BullpenAutoLiveOrderIntent]) -> Bullpen
             counts.cancelled += 1
         elif status in {"FAILED_PERMANENT", "REJECTED", "TIMED_OUT"}:
             counts.permanently_failed += 1
+        elif unverified_terminal_success:
+            counts.permanently_failed += 1
 
         if intent.attempt_count > 0:
             counts.attempted += 1
-        if (
-            intent.first_submitted_at
-            or intent.remote_order_id
-            or intent.remote_transaction_hash
-        ):
+        if has_submission_evidence:
             counts.remotely_accepted += 1
         if status in {"SUBMITTED", "CONFIRMING"}:
             counts.submitted += 1
         if status in INTENT_REMOTE_CONFIRMATION_STATUSES:
             counts.confirming += 1
-        if status == "CONFIRMED":
+        if status == "CONFIRMED" and has_submission_evidence:
             counts.confirmed += 1
-        if status == "FILLED":
+        if status == "FILLED" and has_submission_evidence:
             counts.filled += 1
 
     planned = max(1, counts.planned)
     attempted = max(1, counts.attempted)
     accepted = max(1, counts.remotely_accepted)
     confirmed_or_filled = counts.confirmed + counts.filled
-    counts.attempt_rate = round(counts.attempted / planned, 4)
-    counts.acceptance_rate = round(counts.remotely_accepted / attempted, 4)
-    counts.confirmation_rate = round(confirmed_or_filled / accepted, 4)
-    counts.fill_rate = round(counts.filled / accepted, 4)
-    counts.terminal_success_rate = round(confirmed_or_filled / planned, 4)
+    counts.attempt_rate = round(min(1.0, counts.attempted / planned), 4)
+    counts.acceptance_rate = round(
+        min(1.0, counts.remotely_accepted / attempted),
+        4,
+    )
+    counts.confirmation_rate = round(
+        min(1.0, confirmed_or_filled / accepted),
+        4,
+    )
+    counts.fill_rate = round(min(1.0, counts.filled / accepted), 4)
+    counts.terminal_success_rate = round(
+        min(1.0, confirmed_or_filled / planned),
+        4,
+    )
     return counts
 
 
@@ -505,7 +620,7 @@ def derive_run_status_from_intents(intents: Sequence[BullpenAutoLiveOrderIntent]
     success_count = sum(
         1
         for intent in intents
-        if intent.status in INTENT_TERMINAL_SUCCESS_STATUSES
+        if intent_has_verified_terminal_success(intent)
     )
     pending_count = sum(
         1
@@ -528,6 +643,7 @@ def derive_run_status_from_intents(intents: Sequence[BullpenAutoLiveOrderIntent]
         1
         for intent in intents
         if intent.status in INTENT_TERMINAL_FAILURE_STATUSES
+        or intent_has_unverified_terminal_success(intent)
     )
 
     if pending_count > 0:

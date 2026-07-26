@@ -56,6 +56,13 @@ export type InvestStepCountsSummary = {
   forcedExitSubmittedOrders?: number;
 };
 
+export type InvestExecutionEvidenceGroups = {
+  submittedOrExecuted: BullpenAutoLiveDecision[];
+  submittedButUnsuccessful: BullpenAutoLiveDecision[];
+  completedWithoutSubmission: BullpenAutoLiveDecision[];
+  notSubmitted: BullpenAutoLiveDecision[];
+};
+
 const EVENT_EXIT_STATES = new Set(["EVENT_EXIT_PLANNED", "DUST_LOST"]);
 const RANKING_LLM_EXIT_STRATEGIES = new Set([
   "OUTSIDE_TOP_10_RETURNS_DAY",
@@ -63,6 +70,17 @@ const RANKING_LLM_EXIT_STRATEGIES = new Set([
 ]);
 const FORCED_EXIT_STRATEGIES = new Set(["CAPITAL_AWARE_FORCED_EXIT"]);
 const REDEEM_EXIT_STRATEGIES = new Set(["REDEEM_CLAIM"]);
+const SUBMITTED_TERMINAL_FAILURE_ORDER_STATUSES = new Set([
+  "cancelled",
+  "rejected",
+  "timed_out",
+  "failed_permanent",
+  "failed",
+]);
+const COMPLETED_WITHOUT_SUBMISSION_ORDER_STATUSES = new Set([
+  "already_redeemed",
+  "resolved_zero_payout",
+]);
 
 const STAGE2_TRANSFER_QUEUE_METRIC_INFO: Record<
   Stage2TransferQueueMetricInfoKind,
@@ -105,10 +123,10 @@ const STAGE2_TRANSFER_QUEUE_METRIC_INFO: Record<
   "submitted-buy-plans": {
     title: "Submitted",
     summary:
-      "Concrete buy plans whose Bullpen order submission actually went through.",
+      "Concrete buy plans with durable evidence that Bullpen crossed the remote submission boundary.",
     conditions: [
       "The row already had a concrete buy plan.",
-      "The buy order status advanced to a submitted or successful execution state.",
+      "The backend persisted a submission timestamp, remote order or transaction reference, or uncertain-write marker.",
     ],
     prerequisites: [
       "Bullpen order handling must accept the order without a blocker such as RPC, balance, or execution failure.",
@@ -116,7 +134,7 @@ const STAGE2_TRANSFER_QUEUE_METRIC_INFO: Record<
     ],
     workflow: [
       "Stage 3 submits concrete buy plans one at a time.",
-      "A submitted or confirmed response moves the row into the Submitted count.",
+      "Once durable write evidence exists, the row remains in Submitted even if later reconciliation ends rejected, timed out, or permanently failed.",
     ],
   },
   "waiting-blocked": {
@@ -158,32 +176,92 @@ export function isProcessedInvestOrderPlan(
   return Boolean(orderPlan && orderPlan.status !== "planned");
 }
 
+function hasNonEmptyExecutionValue(value: string | null | undefined) {
+  return typeof value === "string" && value.trim().length > 0;
+}
 
-export function isSubmittedOrSuccessfulInvestOrderPlan(
+export function hasInvestOrderSubmissionEvidence(
   orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
 ) {
-  if (!orderPlan) return false;
-  if (
-    orderPlan.status === "submitted" ||
-    orderPlan.status === "confirmed" ||
-    orderPlan.status === "filled" ||
-    orderPlan.status === "settlement_pending" ||
-    orderPlan.status === "already_redeemed" ||
-    orderPlan.status === "resolved_zero_payout"
-  ) {
-    return true;
+  if (!orderPlan || orderPlan.dry_run === true) return false;
+  if (typeof orderPlan.submission_evidence_present === "boolean") {
+    return orderPlan.submission_evidence_present;
   }
+  return [
+    orderPlan.executed_at,
+    orderPlan.remote_order_id,
+    orderPlan.remote_transaction_hash,
+  ].some(hasNonEmptyExecutionValue);
+}
 
-  const successText = `${orderPlan.detail ?? ""}
-${orderPlan.execution_response ?? ""}`;
+export function isCompletedWithoutSubmissionInvestOrderPlan(
+  orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
+) {
   return (
-    /successfully|submitted|filled|redeemed|claimed|executed/i.test(successText) &&
-    !/failed|refusing|cancelled|canceled|skipped|not submitted/i.test(successText)
+    orderPlan?.action === "redeem" &&
+    COMPLETED_WITHOUT_SUBMISSION_ORDER_STATUSES.has(orderPlan.status)
   );
 }
 
-function isSubmittedOrSuccessfulDecision(decision: BullpenAutoLiveDecision) {
-  return isSubmittedOrSuccessfulInvestOrderPlan(decision.order_plan);
+export function isSubmittedOrExecutedInvestOrderPlan(
+  orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
+) {
+  return hasInvestOrderSubmissionEvidence(orderPlan);
+}
+
+export function isSubmittedButUnsuccessfulInvestOrderPlan(
+  orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
+) {
+  return Boolean(
+    orderPlan &&
+      hasInvestOrderSubmissionEvidence(orderPlan) &&
+      SUBMITTED_TERMINAL_FAILURE_ORDER_STATUSES.has(orderPlan.status),
+  );
+}
+
+/**
+ * Backward-compatible export for existing callers. "Successful" here is now
+ * deliberately limited to evidence-backed submission/execution. Redeem rows
+ * that needed no new order are classified separately.
+ */
+export function isSubmittedOrSuccessfulInvestOrderPlan(
+  orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
+) {
+  return isSubmittedOrExecutedInvestOrderPlan(orderPlan);
+}
+
+function isSubmittedOrExecutedDecision(decision: BullpenAutoLiveDecision) {
+  return isSubmittedOrExecutedInvestOrderPlan(decision.order_plan);
+}
+
+export function partitionInvestDecisionsByExecutionEvidence(
+  decisions: BullpenAutoLiveDecision[],
+): InvestExecutionEvidenceGroups {
+  const groups: InvestExecutionEvidenceGroups = {
+    submittedOrExecuted: [],
+    submittedButUnsuccessful: [],
+    completedWithoutSubmission: [],
+    notSubmitted: [],
+  };
+
+  for (const decision of decisions) {
+    if (!decision.order_plan) continue;
+    if (isSubmittedOrExecutedDecision(decision)) {
+      if (isSubmittedButUnsuccessfulInvestOrderPlan(decision.order_plan)) {
+        groups.submittedButUnsuccessful.push(decision);
+      } else {
+        groups.submittedOrExecuted.push(decision);
+      }
+    } else if (
+      isCompletedWithoutSubmissionInvestOrderPlan(decision.order_plan)
+    ) {
+      groups.completedWithoutSubmission.push(decision);
+    } else {
+      groups.notSubmitted.push(decision);
+    }
+  }
+
+  return groups;
 }
 
 function isPlannedDecision(decision: BullpenAutoLiveDecision) {
@@ -202,7 +280,7 @@ export function summarizeInvestStepCountsFromDecisions(
         isProcessedInvestOrderPlan(decision.order_plan),
       ).length,
       submittedOrders: buyDecisions.filter((decision) =>
-        isSubmittedOrSuccessfulDecision(decision),
+        isSubmittedOrExecutedDecision(decision),
       ).length,
     };
   }
@@ -229,7 +307,7 @@ export function summarizeInvestStepCountsFromDecisions(
       isProcessedInvestOrderPlan(decision.order_plan),
     ).length,
     submittedOrders: sellDecisions.filter((decision) =>
-      isSubmittedOrSuccessfulDecision(decision),
+      isSubmittedOrExecutedDecision(decision),
     ).length,
     eventExitRows: decisions.filter((decision) =>
       EVENT_EXIT_STATES.has(decision.exit_state),
@@ -247,13 +325,13 @@ export function summarizeInvestStepCountsFromDecisions(
       isProcessedInvestOrderPlan(decision.order_plan),
     ).length,
     redeemSubmittedOrders: redeemDecisions.filter((decision) =>
-      isSubmittedOrSuccessfulDecision(decision),
+      isSubmittedOrExecutedDecision(decision),
     ).length,
     rankingLlmSubmittedOrders: rankingLlmDecisions.filter((decision) =>
-      isSubmittedOrSuccessfulDecision(decision),
+      isSubmittedOrExecutedDecision(decision),
     ).length,
     forcedExitSubmittedOrders: forcedExitDecisions.filter((decision) =>
-      isSubmittedOrSuccessfulDecision(decision),
+      isSubmittedOrExecutedDecision(decision),
     ).length,
   };
 }
@@ -319,8 +397,8 @@ export function getInvestMetricDialogDefinition(
       return {
         title: "Stage 3 submitted orders",
         description:
-          "Decision rows where the planned order reached submitted status.",
-        includes: (decision) => isSubmittedOrSuccessfulDecision(decision),
+          "Decision rows where the planned order has persisted remote submission or execution evidence.",
+        includes: (decision) => isSubmittedOrExecutedDecision(decision),
       };
     case "sell-planned":
       return {
@@ -342,10 +420,10 @@ export function getInvestMetricDialogDefinition(
       return {
         title: "Stage 3 Step 1 submitted exits",
         description:
-          "Event Exit sell rows whose order reached submitted or successful execution status. In-flight submitting rows stay in planned/processed details until Bullpen confirms submission.",
+          "Event Exit sell rows whose order reached submitted or successful execution status and has persisted submission evidence. In-flight submitting rows stay in planned/processed details until Bullpen confirms submission.",
         includes: (decision) =>
           hasOrderAction(decision, "sell") &&
-          isSubmittedOrSuccessfulDecision(decision),
+          isSubmittedOrExecutedDecision(decision),
       };
     case "buy-planned":
       return {
@@ -367,10 +445,10 @@ export function getInvestMetricDialogDefinition(
       return {
         title: "Stage 3 Step 2 submitted buys",
         description:
-          "Stage 3 buy rows whose order reached submitted status.",
+          "Stage 3 buy rows whose order reached submitted status and has persisted submission evidence.",
         includes: (decision) =>
           hasOrderAction(decision, "buy") &&
-          isSubmittedOrSuccessfulDecision(decision),
+          isSubmittedOrExecutedDecision(decision),
       };
     case "sell-exit-rows":
       return {
@@ -385,7 +463,7 @@ export function getInvestMetricDialogDefinition(
         description:
           "Event Exit rows triggered by the Event out of Top 10 exit logic whose order was submitted and confirmed by Bullpen.",
         includes: (decision) =>
-          isSubmittedOrSuccessfulDecision(decision) &&
+          isSubmittedOrExecutedDecision(decision) &&
           hasExitStrategy(decision, RANKING_LLM_EXIT_STRATEGIES),
       };
     case "sell-ranking-llm-planned":
@@ -403,7 +481,7 @@ export function getInvestMetricDialogDefinition(
         description:
           "Event Exit rows triggered by the capital-aware forced-exit guardrail whose order was submitted and confirmed by Bullpen.",
         includes: (decision) =>
-          isSubmittedOrSuccessfulDecision(decision) &&
+          isSubmittedOrExecutedDecision(decision) &&
           hasExitStrategy(decision, FORCED_EXIT_STRATEGIES),
       };
     case "sell-forced-exit-planned":
@@ -421,7 +499,7 @@ export function getInvestMetricDialogDefinition(
         description:
           "Resolved winning Bullpen positions whose redeem/claim order was submitted and confirmed by Bullpen.",
         includes: (decision) =>
-          isSubmittedOrSuccessfulDecision(decision) &&
+          isSubmittedOrExecutedDecision(decision) &&
           (decision.order_plan?.action === "redeem" ||
             hasExitStrategy(decision, REDEEM_EXIT_STRATEGIES)),
       };

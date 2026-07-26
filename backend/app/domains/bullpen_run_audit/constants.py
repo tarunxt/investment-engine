@@ -4,11 +4,11 @@ from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
 BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
-    "2026-07-27-stage3-stale-balance-buy-fence-v27"
+    "2026-07-27-stage3-submission-evidence-v29"
 )
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-27-stage3-stale-balance-buy-fence-v27"
+    "2026-07-27-stage3-submission-evidence-v29"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -199,10 +199,26 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "stage3_redeem_wallet_lineage_preflight",
         "stage": "stage-3",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.order_intent_service",
         "source_function": "_prepare_intent_submission",
-        "label": "Forced-fresh Stage 1 wallet-lineage fence before redeem",
+        "label": "Complete forced-fresh Stage 1 wallet-lineage fence before redeem",
+    },
+    {
+        "algorithm_key": "stage3_wallet_credential_rotation_attestation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_attest_pre_submit_wallet_lineage",
+        "label": "Same-wallet active-auth credential rotation attestation",
+    },
+    {
+        "algorithm_key": "stage3_post_exit_planner_credential_rotation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "_compare_console_wallet_snapshot_lineage",
+        "label": "Planner-only same-wallet credential rotation continuation",
     },
     {
         "algorithm_key": "stage3_sell_alias_reconciliation",
@@ -355,6 +371,22 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.order_intent_service",
         "source_function": "_intent_requires_operator_resume_reconciliation",
         "label": "Terminal Stage 3 success preservation during operator resume",
+    },
+    {
+        "algorithm_key": "stage3_terminal_doctor_blocker",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket.doctor_errors",
+        "source_function": "parse_bullpen_doctor_failure",
+        "label": "Typed terminal Bullpen doctor and support-required blocker",
+    },
+    {
+        "algorithm_key": "stage3_submission_evidence_terminality",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intents",
+        "source_function": "intent_has_verified_terminal_success",
+        "label": "Submission-evidence-fenced Stage 3 terminal success",
     },
 )
 

@@ -14,6 +14,7 @@ import {
   readBullpenStage2To3StrategyMetadata,
   readBullpenStage2UniverseStatus,
 } from "@/lib/bullpenStage2To3Strategy";
+import { isSubmittedOrExecutedInvestOrderPlan } from "./bullpenAutoRunInvestMetrics";
 
 export type BullpenStage3OnlyInvestPlan = {
   request: BullpenAutoLiveRunOnceRequest | null;
@@ -565,25 +566,17 @@ function shouldPreferTimestamp(next: string, current: string | null | undefined)
   return nextMs >= currentMs;
 }
 
-function isCompletedInvestOrderStatus(status: string | null | undefined) {
-  return (
-    status === "submitted" ||
-    status === "confirming" ||
-    status === "partially_filled" ||
-    status === "confirmed" ||
-    status === "filled"
-  );
-}
-
 function buildLatestSubmittedExitTimestampLookup(
   decisions: BullpenAutoLiveDecision[],
 ): Map<string, string> {
   const lookup = new Map<string, string>();
 
   for (const decision of decisions) {
+    const orderPlan = decision.order_plan;
     if (
-      !isCompletedInvestOrderStatus(decision.order_plan?.status) ||
-      !RECONCILING_EXIT_ACTIONS.has(decision.order_plan.action)
+      !orderPlan ||
+      !isSubmittedOrExecutedInvestOrderPlan(orderPlan) ||
+      !RECONCILING_EXIT_ACTIONS.has(orderPlan.action)
     ) {
       continue;
     }
@@ -613,10 +606,12 @@ function buildSubmittedBuyTimestampLookup(
     buildLatestSubmittedExitTimestampLookup(decisions);
 
   for (const decision of decisions) {
+    const orderPlan = decision.order_plan;
     if (
       decision.run_id !== run.id ||
-      !isCompletedInvestOrderStatus(decision.order_plan?.status) ||
-      decision.order_plan.action !== "buy"
+      !orderPlan ||
+      !isSubmittedOrExecutedInvestOrderPlan(orderPlan) ||
+      orderPlan.action !== "buy"
     ) {
       continue;
     }

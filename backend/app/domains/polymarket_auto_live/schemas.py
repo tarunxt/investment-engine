@@ -63,6 +63,12 @@ AutoLiveOrderPlanStatus = Literal[
 ]
 AutoLiveOrderAction = Literal["buy", "sell", "hold", "redeem"]
 AutoLiveOutcomeSide = Literal["YES", "NO"]
+AutoLiveSubmissionEvidenceKind = Literal[
+    "remote_order_id",
+    "remote_transaction_hash",
+    "submitted_at",
+    "uncertain_write_boundary",
+]
 AutoLiveTriggeredBy = Literal["manual", "scheduler", "start", "resume"]
 AutoLiveStrategyProfile = Literal["guardrail_kelly", "bullpen_console_top10"]
 AutoLiveExitStrategy = Literal[
@@ -140,6 +146,12 @@ AutoLiveExecutorErrorCode = Literal[
     "SESSION_INVALID",
     "LIVE_LOCKED",
     "DOCTOR_READ_FAILED",
+    "BULLPEN_SUPPORT_REQUIRED",
+    "L2_WALLET_DISAGREEMENT",
+    "PM_LEGACY_DEPOSIT_WALLET_PENDING_RECOVERY",
+    "POLYMARKET_RELAYER_WALLET_NOT_REGISTERED",
+    "POLYMARKET_WALLET_ROUTE_UNCONFIRMED",
+    "SUBMISSION_EVIDENCE_MISSING",
     "ORDER_WRITE_UNAVAILABLE",
     "BALANCE_UNAVAILABLE",
     "INSUFFICIENT_COLLATERAL",
@@ -743,6 +755,8 @@ class BullpenAutoLiveOrderPlan(BaseModel):
     remaining_shares: float = Field(default=0, ge=0)
     average_fill_price_cents: float | None = Field(default=None, ge=0, le=100)
     execution_response: str | None = None
+    submission_evidence_present: bool | None = None
+    submission_evidence_kind: AutoLiveSubmissionEvidenceKind | None = None
     current_blockage: str | None = None
     how_to_resolve: str | None = None
     created_at: str

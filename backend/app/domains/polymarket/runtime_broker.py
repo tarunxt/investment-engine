@@ -2470,11 +2470,22 @@ class BullpenRuntimeBroker:
         auth_cache = await self._read_auth_ready_cache(f"{_REDIS_PREFIX}:auth:ready")
         active_auth = await self.read_latest_active_auth_result()
         cached_account_identity = (
-            auth_cache.account_identity if auth_cache is not None else None
+            auth_cache.account_identity
+            if auth_cache is not None
+            and _credential_artifact_matches(
+                auth_cache.credential_artifact,
+                current_credential,
+            )
+            else None
         )
         active_account_identity = (
             active_auth.account_identity
-            if active_auth is not None and active_auth.healthy
+            if active_auth is not None
+            and active_auth.healthy
+            and _credential_artifact_matches(
+                active_auth.credential_artifact,
+                current_credential,
+            )
             else None
         )
         if (
