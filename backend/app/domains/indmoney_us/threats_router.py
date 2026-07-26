@@ -88,7 +88,7 @@ async def get_latest_threat_analysis(
 
 @router.get("/history", response_model=IndMoneyUsThreatHistoryResponse)
 async def get_threat_history(
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: int = Query(default=100, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):

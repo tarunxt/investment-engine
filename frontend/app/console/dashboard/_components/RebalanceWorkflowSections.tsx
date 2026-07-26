@@ -12,6 +12,10 @@ import {
   useState,
 } from "react";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
+import {
+  formatUsdAsVerifiedInr,
+  isVerifiedFxRate,
+} from "@/lib/fxPresentation";
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Info, Loader2, Pause, Play, X } from "lucide-react";
 
 import {
@@ -1764,7 +1768,13 @@ function uniqueRunsBySelectedCandidates(
 }
 
 function withInrCost(info: Partial<StageInfo>, usdInrRate: number) {
-  if (typeof info.costUsd !== "number" || info.costUsd <= 0) return info;
+  if (
+    typeof info.costUsd !== "number" ||
+    info.costUsd <= 0 ||
+    !isVerifiedFxRate(usdInrRate)
+  ) {
+    return info;
+  }
   return {
     ...info,
     costInr: info.costInr ?? info.costUsd * usdInrRate,
@@ -1889,7 +1899,11 @@ function formatInrCost(value?: number | null) {
 
 function getStageCostInr(info: StageInfo, usdInrRate: number) {
   if (typeof info.costInr === "number" && info.costInr > 0) return info.costInr;
-  if (typeof info.costUsd === "number" && info.costUsd > 0)
+  if (
+    typeof info.costUsd === "number" &&
+    info.costUsd > 0 &&
+    isVerifiedFxRate(usdInrRate)
+  )
     return info.costUsd * usdInrRate;
   return 0;
 }
@@ -2048,9 +2062,9 @@ function getActionablesStageTileRows(info: StageInfo): StageTileRow[] {
 
 function formatInrCostFromUsd(value: number | null | undefined, usdInrRate: number) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return "₹0.00";
+    return "Cost n/a";
   }
-  return `₹${(value * usdInrRate).toFixed(2)}`;
+  return formatUsdAsVerifiedInr(value, usdInrRate);
 }
 
 function getJobDuration(job?: JobResponse | null) {
@@ -2381,6 +2395,7 @@ function buildRunHistoricalCostMapInr(
   usdInrRate: number,
 ): HistoricalLlmCostMapInr {
   const costs: HistoricalLlmCostMapInr = {};
+  if (!isVerifiedFxRate(usdInrRate)) return costs;
   buildStageLlmHistoryEntries(runs, stage, portfolio).forEach((entry) => {
     const key = toHistoricalLlmCostKey(entry.provider, entry.model);
     if (!key || costs[key] !== undefined) return;
@@ -2400,6 +2415,7 @@ function buildThreatHistoricalCostMapInr(
   usdInrRate: number,
 ): HistoricalLlmCostMapInr {
   const costs: HistoricalLlmCostMapInr = {};
+  if (!isVerifiedFxRate(usdInrRate)) return costs;
   history
     .slice()
     .sort(
@@ -2421,6 +2437,7 @@ async function loadStageHistoricalCostMapInr(
   portfolio: WorkflowPortfolio,
   usdInrRate: number,
 ): Promise<HistoricalLlmCostMapInr> {
+  if (!isVerifiedFxRate(usdInrRate)) return {};
   if (stage === "sync" || stage === "actionables") return {};
   if (stage === "threats") {
     const response = portfolio === "zerodha"
@@ -4197,7 +4214,7 @@ function InputSelectionDialog({
                       </span>
                       <span className="text-sm capitalize text-slate-500">{statusSummary}</span>
                       <span className="ml-auto text-sm font-semibold text-slate-600">
-                        {totalCostUsd > 0 ? `₹${(totalCostUsd * usdInrRate).toFixed(2)}` : "Cost n/a"}
+                        {totalCostUsd > 0 ? formatUsdAsVerifiedInr(totalCostUsd, usdInrRate) : "Cost n/a"}
                       </span>
                     </div>
                     {expanded ? (
@@ -4242,7 +4259,9 @@ function InputSelectionDialog({
                                 </td>
                                 <td className="px-3 py-3 align-top text-slate-700">{candidate.label}</td>
                                 <td className="px-3 py-3 align-top text-slate-600">
-                                  {typeof candidate.costUsd === "number" ? `₹${(candidate.costUsd * usdInrRate).toFixed(2)}` : "n/a"}
+                                  {typeof candidate.costUsd === "number"
+                                    ? formatUsdAsVerifiedInr(candidate.costUsd, usdInrRate)
+                                    : "n/a"}
                                 </td>
                                 <td className="max-w-xs px-3 py-3 align-top text-xs text-red-700">{candidate.error || "—"}</td>
                               </tr>

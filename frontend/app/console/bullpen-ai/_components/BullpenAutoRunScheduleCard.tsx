@@ -9915,7 +9915,7 @@ export function BullpenAutoRunScheduleCard({
       apiService.getBullpenAutoLiveRuns({
         signal: controller.signal,
         timeoutMs: 15_000,
-      }),
+      }, true),
       apiService.getBullpenAutoLiveDecisions({
         signal: controller.signal,
         timeoutMs: 15_000,
@@ -9952,8 +9952,11 @@ export function BullpenAutoRunScheduleCard({
       return;
     }
 
-    void loadRunHistory();
+    const timer = window.setTimeout(() => {
+      void loadRunHistory();
+    }, 0);
     return () => {
+      window.clearTimeout(timer);
       runHistoryAbortControllerRef.current?.abort();
     };
   }, [autoRunStatusCacheKey, isRunHistoryDialogOpen, loadRunHistory]);

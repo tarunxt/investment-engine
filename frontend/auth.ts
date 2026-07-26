@@ -90,6 +90,9 @@ export const authConfig = {
         token.username = userObj.username as string;
         token.role = userObj.role as string;
         token.expiresIn = userObj.expiresIn as number;
+        token.accessTokenExpiresAt =
+          Date.now() + Number(userObj.expiresIn || 15 * 60) * 1_000;
+        token.sessionGeneration = crypto.randomUUID();
       }
 
       // Browser and server route refreshes both use Auth.js's update trigger so
@@ -114,6 +117,7 @@ export const authConfig = {
             expiresIn > 0
           ) {
             token.expiresIn = expiresIn;
+            token.accessTokenExpiresAt = Date.now() + expiresIn * 1_000;
           }
         }
       }
@@ -127,12 +131,13 @@ export const authConfig = {
         session.user.role = token.role as string;
       }
 
-      session.accessToken = token.accessToken;
-      session.refreshToken = token.refreshToken;
-      session.expiresIn = token.expiresIn;
       session.userData = token.userData
-        ? { ...token.userData, expiresIn: token.expiresIn }
+        ? { ...token.userData }
         : token.userData;
+      session.generation =
+        typeof token.sessionGeneration === "string"
+          ? token.sessionGeneration
+          : `${String(token.id || token.sub || "")}:${String(token.iat || "")}`;
 
       return session;
     },

@@ -36,7 +36,7 @@ function encodeModule(source) {
   return `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
 }
 
-async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
+async function loadBullpenPositionsRoute(fetchBackendJsonWithSessionImpl) {
   const routePath = path.join(BULLPEN_API_ROOT, "positions", "route.ts");
   const routeSource = readFileSync(routePath, "utf8");
 
@@ -66,9 +66,20 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
       },
     };
   `);
-  const backendStubUrl = encodeModule(`
-    export async function fetchBackendRuntimeJson(path, options = {}) {
-      return globalThis.__bullpenFetchBackendRuntimeJson(path, options);
+  const serverBackendSessionStubUrl = encodeModule(`
+    export async function createBackendSessionContext() {
+      return { responseCookies: [] };
+    }
+    export async function fetchBackendJsonWithSession(_context, path, options = {}) {
+      return globalThis.__bullpenFetchBackendJsonWithSession(path, options);
+    }
+    export function backendSessionJson(_context, body, init = {}) {
+      return {
+        status: init.status ?? 200,
+        async json() {
+          return body;
+        },
+      };
     }
   `);
   const healthCoreStubUrl = encodeModule(`
@@ -129,8 +140,8 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
   const rewrittenSource = routeSource
     .replace(/from "next\/server"/g, `from "${nextServerStubUrl}"`)
     .replace(
-      /from "\.\.\/_lib\/backendBullpenRuntime"/g,
-      `from "${backendStubUrl}"`,
+      /from "\.\.\/_lib\/serverBackendSession"/g,
+      `from "${serverBackendSessionStubUrl}"`,
     )
     .replace(
       /from "\.\.\/_lib\/bullpenHealthCore\.ts"/g,
@@ -152,7 +163,8 @@ async function loadBullpenPositionsRoute(fetchBackendRuntimeJsonImpl) {
     fileName: "route.ts",
   });
 
-  globalThis.__bullpenFetchBackendRuntimeJson = fetchBackendRuntimeJsonImpl;
+  globalThis.__bullpenFetchBackendJsonWithSession =
+    fetchBackendJsonWithSessionImpl;
   return import(encodeModule(outputText));
 }
 
@@ -170,7 +182,7 @@ test("frontend Bullpen routes proxy the backend runtime instead of spawning Bull
     "utf8",
   );
 
-  assert.match(positionsRouteSource, /fetchBackendRuntimeJson/);
+  assert.match(positionsRouteSource, /fetchBackendJsonWithSession/);
   assert.match(positionsRouteSource, /\/polymarket\/runtime\/positions/);
   assert.match(healthRouteSource, /\/polymarket\/runtime\/health/);
   assert.match(discoverRouteSource, /\/polymarket\/runtime\/discover/);
@@ -223,11 +235,11 @@ test("frontend positions polling calls only the backend positions runtime endpoi
   const payload = await response.json();
 
   assert.deepEqual(backendCalls, [
-    "/polymarket/runtime/positions?force_fresh=false&max_age_seconds=20",
+    "/polymarket/runtime/positions?force_fresh=false&max_age_seconds=20&caller_source=frontend-passive&passive=true",
   ]);
   assert.equal(payload.liveAvailable, true);
   assert.equal(payload.positionsSource, "live-cli");
-  assert.equal(payload.health?.message, "Cached broker health is ready.");
+  assert.equal(payload.health?.message, "Bullpen live wallet snapshot is ready.");
 });
 
 test("frontend source tree contains no Bullpen child_process or execFile runtime usage", () => {

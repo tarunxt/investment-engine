@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
+import { isVerifiedFxRate } from "@/lib/fxPresentation";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -107,7 +108,6 @@ import type {
   BullpenTableSortKey,
   BullpenTableSortState,
 } from "./BullpenQuestionsTable";
-import { BullpenAutoRunScheduleCard } from "./BullpenAutoRunScheduleCard";
 import {
   syncBullpenAutoRunActivePositionAnalyses,
   syncBullpenAutoRunSummarySnapshots,
@@ -158,6 +158,16 @@ const BullpenPromptEditorDialog = dynamic(
       (module) => module.BullpenPromptEditorDialog,
     ),
   { ssr: false },
+);
+const BullpenAutoRunScheduleCard = dynamic(
+  () =>
+    import("./BullpenAutoRunScheduleCard").then(
+      (module) => module.BullpenAutoRunScheduleCard,
+    ),
+  {
+    ssr: false,
+    loading: () => <div className="h-48 animate-pulse rounded-2xl bg-slate-100" />,
+  },
 );
 
 const TABS: {
@@ -795,6 +805,7 @@ function buildBullpenHistoricalCostMapInr(
   usdInrRate: number,
 ) {
   const costs: Record<string, number> = {};
+  if (!isVerifiedFxRate(usdInrRate)) return costs;
 
   runs
     .filter((run) => isBullpenLlmRun(run))
@@ -3010,6 +3021,7 @@ function BullpenAiPageContent() {
         );
       setHistoricalCostInrByTarget((current) => {
         const next = { ...current };
+        if (!isVerifiedFxRate(usdInrRate)) return next;
         for (const runJob of selectedRunJobs) {
           const key = toHistoricalCostKey(
             runJob.job.provider,

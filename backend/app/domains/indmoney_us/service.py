@@ -6,6 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
+from app.shared.portfolio_summary import build_persisted_portfolio_summary
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -79,6 +80,10 @@ class IndMoneyUsPortfolioService:
         derived = self._build_derived(holdings, summary)
         warnings = self._build_warnings(summary, holdings, derived)
         parse_status = self._build_parse_status(summary, holdings, market_indices, warnings)
+        dashboard_top_holdings, _ = build_persisted_portfolio_summary(
+            holdings,
+            total_value=summary.get("current_value"),
+        )
 
         return {
             "snapshot_date": captured.astimezone(IST).date(),
@@ -98,6 +103,7 @@ class IndMoneyUsPortfolioService:
             "total_return_value": summary.get("total_return_value"),
             "total_return_percent": summary.get("total_return_percent"),
             "market_indices": market_indices,
+            "dashboard_top_holdings": dashboard_top_holdings,
             "holdings": holdings,
         }
 

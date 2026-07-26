@@ -14,7 +14,7 @@ import {
 } from "@/lib/theme";
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => getStoredThemePreference() ?? "light");
 
   useEffect(() => {
@@ -30,7 +30,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     let cancelled = false;
 
-    if (status !== "authenticated" || !session?.accessToken) {
+    if (status !== "authenticated") {
       return () => {
         cancelled = true;
       };
@@ -58,7 +58,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [session?.accessToken, status]);
+  }, [status]);
 
   useEffect(() => {
     const handleThemeChanged = (event: Event) => {

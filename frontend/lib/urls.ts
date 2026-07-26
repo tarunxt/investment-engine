@@ -1,5 +1,4 @@
 import { UserResponse } from "@/types/api";
-import { sessionStorage } from '@/services/session';
 
 /**
  * API Base URL Configuration
@@ -105,15 +104,14 @@ function shouldUseBrowserApiProxy() {
     return false;
   }
 
-  if (process.env.NEXT_PUBLIC_DISABLE_API_PROXY === "true") {
+  if (
+    process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" &&
+    process.env.NEXT_PUBLIC_DISABLE_API_PROXY === "true"
+  ) {
     return false;
   }
 
-  if (resolveConfiguredClientApiBaseUrl()) {
-    return false;
-  }
-
-  return !LOCAL_HOSTNAMES.has(window.location.hostname);
+  return true;
 }
 
 function resolveApiBaseUrl() {
@@ -142,11 +140,9 @@ export type ApiReadTransportCandidate = {
 /**
  * Builds the bounded browser read path used by the API service.
  *
- * Production normally calls the public API directly. If that transport is
- * unreachable, the same request can travel through the frontend's server-side
- * proxy, which can reach the backend over the host-local/container network.
- * Local development stays on its configured API origin and does not add a
- * redundant proxy hop.
+ * Authenticated production reads begin at the same-origin BFF so bearer
+ * credentials never have to exist in browser memory. Auth-disabled local
+ * development may still use a configured direct API and one bounded fallback.
  */
 export function resolveApiReadTransportCandidates(
   primaryUrl: string,
@@ -169,6 +165,12 @@ export function resolveApiReadTransportCandidates(
     parsedPrimary.origin === window.location.origin &&
     (parsedPrimary.pathname === BROWSER_API_PROXY_BASE ||
       parsedPrimary.pathname.startsWith(`${BROWSER_API_PROXY_BASE}/`));
+
+  // Authenticated browser reads stay on the same-origin BFF. Falling back to
+  // the public API would require exposing a bearer token to browser code.
+  if (primaryUsesProxy && process.env.NEXT_PUBLIC_DISABLE_AUTH !== "true") {
+    return [primary];
+  }
 
   const secondaryUrl = primaryUsesProxy
     ? (() => {
@@ -235,7 +237,10 @@ const bullpenAutoLiveApiUrls = {
     `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard`,
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
-  runs: () => `${resolveApiBaseUrl()}/polymarket/auto-live/runs`,
+  runs: (includeDetail = false) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/runs${
+      includeDetail ? "?include_detail=true" : ""
+    }`,
   run: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${encodeURIComponent(runId)}`,
   runOrders: (runId: string) => `${resolveApiBaseUrl()}/polymarket/auto-live/runs/${runId}/orders`,
@@ -640,6 +645,11 @@ export const apiRequest = async (
   options: RequestOptions = {},
 ): Promise<Response> => {
   const { token, query, headers = {}, ...init } = options;
+  if (token) {
+    throw new Error(
+      "Browser Authorization headers are disabled; use the same-origin BFF.",
+    );
+  }
 
   // Build URL with query parameters
   let url = endpoint;
@@ -656,11 +666,6 @@ export const apiRequest = async (
     ...(headers as Record<string, string>),
   };
 
-  // Add authorization token if provided
-  if (token) {
-    requestHeaders.Authorization = `Bearer ${token}`;
-  }
-
   // Make request
   const response = await fetch(url, {
     ...init,
@@ -675,7 +680,7 @@ export const apiRequest = async (
  * Delegates to centralized session storage service
  */
 export const getAccessToken = (): string | null => {
-  return sessionStorage.getAccessToken();
+  return null;
 };
 
 /**
@@ -683,7 +688,7 @@ export const getAccessToken = (): string | null => {
  * Delegates to centralized session storage service
  */
 export const getRefreshToken = (): string | null => {
-  return sessionStorage.getRefreshToken();
+  return null;
 };
 
 /**
@@ -694,7 +699,9 @@ export const storeTokens = (
   accessToken: string,
   refreshToken: string,
 ): void => {
-  sessionStorage.setTokens(accessToken, refreshToken);
+  void accessToken;
+  void refreshToken;
+  throw new Error("Browser token storage is disabled; use the server session.");
 };
 
 /**
@@ -702,7 +709,7 @@ export const storeTokens = (
  * Delegates to centralized session storage service
  */
 export const clearTokens = (): void => {
-  sessionStorage.clearSession();
+  // Auth.js owns its encrypted HttpOnly session cookie.
 };
 
 /**
@@ -710,7 +717,7 @@ export const clearTokens = (): void => {
  * Delegates to centralized session storage service
  */
 export const storeUser = (user: UserResponse): void => {
-  sessionStorage.setUserData(user);
+  void user;
 };
 
 /**
@@ -718,7 +725,7 @@ export const storeUser = (user: UserResponse): void => {
  * Delegates to centralized session storage service
  */
 export const getUser = (): UserResponse | null => {
-  return sessionStorage.getUserData();
+  return null;
 };
 
 /**
@@ -726,5 +733,5 @@ export const getUser = (): UserResponse | null => {
  * Delegates to centralized session storage service
  */
 export const clearUser = (): void => {
-  sessionStorage.setUserData(null);
+  // User state is supplied by the server-validated Auth.js session.
 };

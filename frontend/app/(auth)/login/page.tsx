@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { isClientAuthBypassed, resolveAuthRedirectTarget } from "@/lib/authRedirect";
-import { URLs } from "@/lib/urls";
 import { AuthRedirect } from "@/components/AuthRedirect";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,7 +75,7 @@ export default function LoginPage() {
                   type="button"
                   variant="outline"
                   className="w-full border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100"
-                  onClick={() => router.replace(redirectTo || URLs.routes.console.dashboard())}
+                  onClick={() => router.replace(redirectTo || "/console/dashboard")}
                 >
                   Continue to Dashboard
                 </Button>
@@ -152,11 +151,11 @@ export default function LoginPage() {
               </div>
 
               <Button type="button" variant="outline" className="w-full" asChild>
-                <Link href={URLs.routes.register()}>Create Account</Link>
+                <Link href="/register">Create Account</Link>
               </Button>
 
               <div className="text-center mt-2">
-                <Link href={URLs.routes.forgotPassword()} className="text-sm text-purple-600 hover:text-purple-700">
+                <Link href="/forgot-password" className="text-sm text-purple-600 hover:text-purple-700">
                   Forgot password?
                 </Link>
               </div>

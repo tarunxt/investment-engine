@@ -27,25 +27,6 @@ function assertTypeScriptParses(relativePath) {
   );
 }
 
-test("Bullpen API resolves and rotates the server Auth.js session", () => {
-  const authSource = read("../auth.ts");
-  const sessionSource = read(
-    "../app/api/bullpen-ai/_lib/serverBackendSession.ts",
-  );
-  const authRouteSource = read("../app/api/auth/[...nextauth]/route.ts");
-
-  assert.match(authSource, /export const \{ handlers, auth, unstable_update \}/);
-  assert.match(authRouteSource, /import \{ handlers \} from "@\/auth"/);
-  assert.match(sessionSource, /session\?\.accessToken/);
-  assert.match(sessionSource, /request\.cookies\.get\("app_access_token"\)/);
-  assert.match(sessionSource, /sessionAccessToken \|\| legacyAccessToken/);
-  assert.match(sessionSource, /error\.status !== 401/);
-  assert.match(sessionSource, /"\/auth\/refresh"/);
-  assert.match(sessionSource, /await unstable_update\(\{ accessToken, refreshToken, expiresIn \}\)/);
-  assert.match(sessionSource, /response\.cookies\.set\("app_access_token"/);
-  assert.match(sessionSource, /response\.cookies\.set\("app_refresh_token"/);
-});
-
 test("Bullpen positions use one auth context and passive page-load reads", () => {
   const positionsSource = read("../app/api/bullpen-ai/positions/route.ts");
 

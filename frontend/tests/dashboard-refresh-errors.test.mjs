@@ -35,12 +35,12 @@ function transpileTypeScript(relativePath, moduleKind = ts.ModuleKind.ESNext) {
 
 function loadTypeScriptModule(relativePath) {
   const output = transpileTypeScript(relativePath, ts.ModuleKind.CommonJS);
-  const module = { exports: {} };
+  const loaded = { exports: {} };
   const evaluate = new Function("exports", "module", "require", output);
-  evaluate(module.exports, module, (specifier) => {
+  evaluate(loaded.exports, loaded, (specifier) => {
     throw new Error(`Unexpected runtime import while loading ${relativePath}: ${specifier}`);
   });
-  return module.exports;
+  return loaded.exports;
 }
 
 test("latest threat responses hydrate a bounded history with one snapshot query", () => {

@@ -231,7 +231,7 @@ jobs:
           started_at="$(date +%s)"
           set +e
           /usr/bin/time -v -o "${RUNNER_TEMP}/frontend-webpack-resources.txt" \
-            npm run build -- --webpack 2>&1 | tee "${RUNNER_TEMP}/frontend-webpack-build.log"
+            npm run build 2>&1 | tee "${RUNNER_TEMP}/frontend-webpack-build.log"
           build_status="${PIPESTATUS[0]}"
           set -e
           echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
@@ -280,6 +280,17 @@ jobs:
         id: upload-timing
         if: always() && env.UPLOAD_STARTED_AT != ''
         run: echo "seconds=$(( $(date +%s) - UPLOAD_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Upload raw frontend timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/frontend-webpack-build.log
+            ${{ runner.temp }}/frontend-webpack-resources.txt
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Frontend build timing summary
         if: always()
@@ -359,6 +370,7 @@ jobs:
         run: echo "REMOTE_DEPLOY_STARTED_AT=$(date +%s)" >>"${GITHUB_ENV}"
 
       - name: Deploy exact commit via SSH
+        id: deploy-ssh
         uses: appleboy/ssh-action@v1.2.0
         env:
           DEPLOY_COMMIT_SHA: ${{ github.sha }}
@@ -373,6 +385,7 @@ jobs:
           envs: DEPLOY_COMMIT_SHA,DEPLOY_SCOPE,REMOTE_ARTIFACT_DIR,REMOTE_ARTIFACT_FILE
           timeout: 3600s
           command_timeout: 3600s
+          capture_stdout: true
           script: |
             set -euo pipefail
             deploy_started_at="$(date +%s)"
@@ -520,6 +533,70 @@ jobs:
         id: remote-timing
         if: always() && env.REMOTE_DEPLOY_STARTED_AT != ''
         run: echo "seconds=$(( $(date +%s) - REMOTE_DEPLOY_STARTED_AT ))" >>"${GITHUB_OUTPUT}"
+
+      - name: Write machine-readable deployment timings
+        if: always()
+        env:
+          DEPLOY_STDOUT: ${{ steps.deploy-ssh.outputs.stdout }}
+          CHECKOUT_SECONDS: ${{ needs.build-frontend.outputs.checkout_seconds }}
+          DEPENDENCY_SECONDS: ${{ needs.build-frontend.outputs.dependency_seconds }}
+          BUILD_SECONDS: ${{ needs.build-frontend.outputs.build_seconds }}
+          PACKAGE_SECONDS: ${{ needs.build-frontend.outputs.package_seconds }}
+          UPLOAD_SECONDS: ${{ needs.build-frontend.outputs.upload_seconds }}
+          DOWNLOAD_SECONDS: ${{ steps.download-timing.outputs.seconds }}
+          TRANSFER_SECONDS: ${{ steps.transfer-timing.outputs.seconds }}
+          REMOTE_SECONDS: ${{ steps.remote-timing.outputs.seconds }}
+          DEPLOY_SCOPE: ${{ needs.detect-changes.outputs.scope }}
+        run: |
+          printf '%s\n' "$DEPLOY_STDOUT" >"${RUNNER_TEMP}/remote-deploy.log"
+          remote_phases="$(
+            awk -F '\t' '$1 == "INVESTOR_DEPLOY_TIMING" {
+              print $2 "\t" $3
+            }' "${RUNNER_TEMP}/remote-deploy.log" |
+              jq -Rn '
+                [inputs | split("\t") | {(.[0]): (.[1] | tonumber)}]
+                | add // {}
+              '
+          )"
+          jq -n \
+            --arg commit "$GITHUB_SHA" \
+            --arg scope "$DEPLOY_SCOPE" \
+            --arg checkout "${CHECKOUT_SECONDS:-}" \
+            --arg dependency_restore "${DEPENDENCY_SECONDS:-}" \
+            --arg frontend_build "${BUILD_SECONDS:-}" \
+            --arg packaging "${PACKAGE_SECONDS:-}" \
+            --arg artifact_upload "${UPLOAD_SECONDS:-}" \
+            --arg artifact_download "${DOWNLOAD_SECONDS:-}" \
+            --arg artifact_transfer "${TRANSFER_SECONDS:-}" \
+            --arg remote_deploy "${REMOTE_SECONDS:-}" \
+            --argjson remote_phases "$remote_phases" \
+            '{
+              schemaVersion: 1,
+              commit: $commit,
+              scope: $scope,
+              durationsSeconds: {
+                checkout: ($checkout | tonumber?),
+                dependencyRestore: ($dependency_restore | tonumber?),
+                frontendBuild: ($frontend_build | tonumber?),
+                packaging: ($packaging | tonumber?),
+                artifactUpload: ($artifact_upload | tonumber?),
+                artifactDownload: ($artifact_download | tonumber?),
+                artifactTransfer: ($artifact_transfer | tonumber?),
+                remoteDeploy: ($remote_deploy | tonumber?)
+              },
+              remotePhasesSeconds: $remote_phases
+            }' >"${RUNNER_TEMP}/deployment-timings.json"
+
+      - name: Upload raw deployment timing logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: deployment-timing-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/deployment-timings.json
+            ${{ runner.temp }}/remote-deploy.log
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Deployment timing summary
         if: always()

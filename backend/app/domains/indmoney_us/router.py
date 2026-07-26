@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -31,12 +31,12 @@ price_service = IndMoneyUsCurrentPriceService()
 
 @router.get("/portfolio", response_model=IndMoneyUsPortfolioOverviewResponse)
 async def get_portfolio_overview(
-    limit: int = 30,
+    limit: int = Query(default=30, ge=1, le=120),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     repo = IndMoneyUsPortfolioSnapshotRepository(db)
-    snapshots = await repo.list_by_user(current_user.id, limit=min(max(limit, 1), 120))
+    snapshots = await repo.list_by_user(current_user.id, limit=limit)
     latest = (
         IndMoneyUsPortfolioSnapshotDetailResponse(**service.serialize_detail(snapshots[0]))
         if snapshots

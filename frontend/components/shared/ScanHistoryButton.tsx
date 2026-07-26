@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { History, Loader2, RefreshCw, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import { cn } from '@/lib/utils';
 import { APIError } from '@/services/api';
 
@@ -66,7 +67,7 @@ function formatStatus(status: string) {
 }
 
 function formatKnownCost(costUsd: number, usdInrRate: number) {
-  return `₹${(costUsd * usdInrRate).toFixed(2)}`;
+  return formatUsdAsVerifiedInr(costUsd, usdInrRate);
 }
 
 function hasKnownCost(value: number | null | undefined): value is number {
@@ -153,9 +154,9 @@ export function ScanHistoryButton({
     };
   }, [open]);
 
-  const totalKnownCostInr = useMemo(
-    () => history.reduce((total, item) => total + ((item.estimated_cost ?? 0) * usdInrRate), 0),
-    [history, usdInrRate],
+  const totalKnownCostUsd = useMemo(
+    () => history.reduce((total, item) => total + (item.estimated_cost ?? 0), 0),
+    [history],
   );
 
   const handleOpenDetails = useCallback(
@@ -204,7 +205,7 @@ export function ScanHistoryButton({
                       {history.length} runs
                     </div>
                     <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                      Total known cost: ₹{totalKnownCostInr.toFixed(2)}
+                      Total known cost: {formatKnownCost(totalKnownCostUsd, usdInrRate)}
                     </div>
                   </div>
                 </div>

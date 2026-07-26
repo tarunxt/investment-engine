@@ -5,11 +5,7 @@ import {
   getApiReadAttemptBudget,
 } from "@/lib/apiReadCircuitBreaker";
 import { isBullpenTradeAnalysisListResponse } from "@/lib/bullpenTradeAnalysisFallback";
-import {
-  notifyAuthTokensRefreshed,
-  sessionStorage,
-} from "@/services/session";
-import { syncTokenToCookie } from "@/services/cookies";
+import { PrivateRequestDeduplicator } from "@/lib/privateRequestDeduplicator";
 import { signOut } from "next-auth/react";
 import {
   ApiUsageSummaryResponse,
@@ -83,7 +79,6 @@ import {
   ProviderInfo,
   PaginatedResponse,
   RegisterResponse,
-  RefreshTokenResponse,
   RunCreate,
   RunListItem,
   AutoRebalanceRunReservationResponse,
@@ -238,14 +233,7 @@ async function reconcileTimedOutAutoRebalanceStart<TResponse>(
   throw error;
 }
 
-// Helper function to get auth token
-async function getAuthToken(): Promise<string | null> {
-  return sessionStorage.getAccessToken();
-}
-
 type ApiRequestOptions = RequestInit & {
-  token?: string;
-  _retry?: boolean;
   skipAuth?: boolean;
   skipUnauthorizedRefresh?: boolean;
 } & ApiRequestControl;
@@ -283,27 +271,6 @@ function createRequestAbortContext(
       callerSignal?.removeEventListener("abort", abortForCaller);
     },
   };
-}
-
-function waitForRequestAbort<T>(promise: Promise<T>, signal: AbortSignal) {
-  if (signal.aborted) {
-    return Promise.reject(new DOMException("Request aborted", "AbortError"));
-  }
-
-  return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(new DOMException("Request aborted", "AbortError"));
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", onAbort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", onAbort);
-        reject(error);
-      },
-    );
-  });
 }
 
 function isRetryableReadError(error: unknown) {
@@ -473,16 +440,17 @@ function createCorrelationId() {
   return `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
-// Flag to prevent infinite refresh loops
-let isRefreshing = false;
-let refreshPromise: Promise<boolean> | null = null;
 const apiReadCircuitBreaker = new ApiReadCircuitBreaker();
 
 /**
  * API Service - Wrapper around URL resolver for making API calls
  */
 class apiServiceClass implements IApiService {
-  private readonly inFlightReads = new Map<string, Promise<unknown>>();
+  private readonly readDeduplicator = new PrivateRequestDeduplicator();
+
+  setSessionGeneration(generation: string) {
+    this.readDeduplicator.setSessionGeneration(generation);
+  }
 
   async parseErrorResponse(response: Response): Promise<unknown> {
     const text = await response.text();
@@ -514,26 +482,16 @@ class apiServiceClass implements IApiService {
     this.groupCollapsed(`🚀 API Request: ${method} ${url}`);
 
     try {
-      let token = options.token;
-      if (!token && !options.skipAuth) {
-        token = (await getAuthToken()) || undefined;
-      }
-
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
         ...((options.headers as Record<string, string>) || {}),
       };
 
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
       if (!hasHeader(headers, "X-Correlation-ID")) {
         headers["X-Correlation-ID"] = createCorrelationId();
       }
 
       const {
-        token: _token,
-        _retry: _retry,
         skipAuth: _skipAuth,
         skipUnauthorizedRefresh: _skipUnauthorizedRefresh,
         timeoutMs: _timeoutMs,
@@ -541,8 +499,6 @@ class apiServiceClass implements IApiService {
         signal: callerSignal,
         ...requestInit
       } = options;
-      void _token;
-      void _retry;
       void _skipAuth;
       void _skipUnauthorizedRefresh;
       void _timeoutMs;
@@ -553,7 +509,6 @@ class apiServiceClass implements IApiService {
         url,
         method,
         timeoutMs,
-        hasAuthToken: Boolean(token),
         hasBody: Boolean(options.body),
       });
 
@@ -564,46 +519,17 @@ class apiServiceClass implements IApiService {
       });
 
       if (!response.ok) {
-        // Handle 401 Unauthorized with Retry Logic
+        // The same-origin BFF already performed the one permitted server-side
+        // refresh within this request's absolute deadline. A remaining 401 is
+        // an expired/revoked Auth.js session, so redirect instead of exposing
+        // or refreshing a bearer credential in browser JavaScript.
         if (
           response.status === 401 &&
-          !options._retry &&
           !options.skipUnauthorizedRefresh &&
           !devAuthDisabled
         ) {
-          this.info("⚠️ 401 Unauthorized: Attempting token refresh...");
-
-          if (!isRefreshing) {
-            isRefreshing = true;
-            refreshPromise = this.refreshToken()
-              .then(() => {
-                this.log("✅ Token refreshed successfully");
-                return true;
-              })
-              .catch(async (err) => {
-                this.error("❌ Token refresh failed:", err);
-                if (typeof window !== "undefined") {
-                  sessionStorage.clearSession();
-                  await signOut({ redirect: true, callbackUrl: "/login" });
-                }
-                return false;
-              })
-              .finally(() => {
-                refreshPromise = null;
-                isRefreshing = false;
-              });
-          }
-
-          const pendingRefresh = refreshPromise;
-          if (!pendingRefresh) {
-            throw new Error("Token refresh did not start.");
-          }
-          const refreshed = await waitForRequestAbort(
-            pendingRefresh,
-            abortContext.signal,
-          );
-          if (refreshed) {
-            return this.fetch<T>(url, { ...options, _retry: true, token: undefined });
+          if (typeof window !== "undefined") {
+            await signOut({ redirect: true, callbackUrl: "/login" });
           }
         }
 
@@ -714,7 +640,7 @@ class apiServiceClass implements IApiService {
       const attemptBudgetMs = getApiReadAttemptBudget({
         startedAt,
         now,
-        index,
+        candidateStage: candidate.stage,
         candidateCount: candidates.length,
         totalBudgetMs,
         primaryAttemptBudgetMs: DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS,
@@ -765,18 +691,15 @@ class apiServiceClass implements IApiService {
       return this.getAcrossTransports<T>(url, options);
     }
 
-    const existing = this.inFlightReads.get(url);
-    if (existing) {
-      return existing as Promise<T>;
-    }
-
-    const request = this.getAcrossTransports<T>(url, options).finally(() => {
-      if (this.inFlightReads.get(url) === request) {
-        this.inFlightReads.delete(url);
-      }
-    });
-    this.inFlightReads.set(url, request);
-    return request;
+    return this.readDeduplicator.run(
+      {
+        method: "GET",
+        url,
+        headers: options.headers as Record<string, string> | undefined,
+        signal: options.signal,
+      },
+      () => this.getAcrossTransports<T>(url, options),
+    );
   }
 
   post<T>(
@@ -901,74 +824,6 @@ class apiServiceClass implements IApiService {
    */
   logout(): Promise<void> {
     return this.post<void>(URLs.auth.logout(), {});
-  }
-
-  /**
-   * Refresh access token
-   */
-  async refreshToken(
-    options?: ApiRequestControl,
-  ): Promise<RefreshTokenResponse> {
-    const refreshToken = sessionStorage.getRefreshToken();
-    if (!refreshToken) {
-      throw new Error("No refresh token available");
-    }
-
-    this.group("Refreshing access token");
-
-    // Make refresh call WITHOUT Authorization header since we're using refresh token in body
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "X-Correlation-ID": createCorrelationId(),
-    };
-    const abortContext = createRequestAbortContext(
-      options?.signal,
-      options?.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS,
-    );
-
-    try {
-      const response = await fetch(URLs.auth.refresh(), {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ refresh_token: refreshToken }),
-        signal: abortContext.signal,
-      });
-
-      if (!response.ok) {
-        const error = await this.parseErrorResponse(response);
-        const fallbackMessage =
-          response.statusText || `Request failed with status ${response.status}`;
-        const errorMessage = deriveApiErrorMessage(error, fallbackMessage);
-        this.error("Token refresh request failed.", { status: response.status });
-        throw new APIError(response.status, errorMessage, error);
-      }
-
-      const data = await response.json() as RefreshTokenResponse;
-
-      if (data.access_token && data.refresh_token) {
-        sessionStorage.setTokens(data.access_token, data.refresh_token);
-        syncTokenToCookie(data.access_token);
-        notifyAuthTokensRefreshed({
-          accessToken: data.access_token,
-          refreshToken: data.refresh_token,
-          expiresIn: data.expires_in,
-        });
-      }
-
-      return data;
-    } catch (error) {
-      if (abortContext.didTimeout()) {
-        throw new RequestTimeoutError(
-          "POST",
-          URLs.auth.refresh(),
-          options?.timeoutMs ?? DEFAULT_API_REQUEST_TIMEOUT_MS,
-        );
-      }
-      throw error;
-    } finally {
-      abortContext.cleanup();
-      this.groupEnd();
-    }
   }
 
   /**
@@ -1752,9 +1607,10 @@ class apiServiceClass implements IApiService {
 
   getBullpenAutoLiveRuns(
     options?: ApiRequestControl,
+    includeDetails = false,
   ): Promise<BullpenAutoLiveRun[]> {
     return this.get<BullpenAutoLiveRun[]>(
-      URLs.bullpenAutoLive.runs(),
+      URLs.bullpenAutoLive.runs(includeDetails),
       { cache: "no-store", ...options },
     );
   }

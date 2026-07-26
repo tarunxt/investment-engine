@@ -318,6 +318,7 @@ class ZerodhaPortfolioSnapshotSummaryResponse(BaseModel):
     net_positions_count: int
     day_positions_count: int
     holdings_market_value: float
+    holdings_invested_value: float | None = None
     holdings_pnl: float
     holdings_day_change_value: float
     available_margin: float = 0

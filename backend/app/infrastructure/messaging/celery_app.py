@@ -47,6 +47,7 @@ celery.conf.task_routes = {
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
     "app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history": {"queue": "ai"},
+    "app.domains.fx_rates.tasks.refresh_usd_inr_rate": {"queue": "beat"},
     "app.domains.zerodha.tasks.*": {"queue": "ai"},
     "app.infrastructure.database.outbox.tasks.*": {"queue": "beat"},
 }
@@ -59,6 +60,10 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "verified-usd-inr-rate-refresh": {
+        "task": "app.domains.fx_rates.tasks.refresh_usd_inr_rate",
+        "schedule": crontab(minute=7, hour="*/6"),
+    },
     # 10:40 UTC == 16:10 IST, shortly after Indian market close.
     "zerodha-daily-portfolio-sync": {
         "task": "app.domains.zerodha.tasks.enqueue_daily_portfolio_sync",
@@ -114,6 +119,7 @@ celery.autodiscover_tasks([
     "app.domains.google_sheets",
     "app.domains.bullpen_run_audit",
     "app.domains.bullpen_trade_analysis",
+    "app.domains.fx_rates",
     "app.domains.polymarket_auto_live",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",

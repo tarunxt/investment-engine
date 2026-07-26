@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 import ts from "typescript";
 
@@ -33,7 +32,7 @@ function transpileTypeScript(relativePath, moduleKind = ts.ModuleKind.ESNext) {
 
 function loadUrlsModule() {
   const output = transpileTypeScript("../lib/urls.ts", ts.ModuleKind.CommonJS);
-  const module = { exports: {} };
+  const loaded = { exports: {} };
   const evaluate = new Function(
     "exports",
     "module",
@@ -42,8 +41,8 @@ function loadUrlsModule() {
     output,
   );
   evaluate(
-    module.exports,
-    module,
+    loaded.exports,
+    loaded,
     (specifier) => {
       if (specifier === "@/services/session") {
         return { sessionStorage: { getUserData: () => null } };
@@ -57,10 +56,10 @@ function loadUrlsModule() {
       },
     },
   );
-  return module.exports;
+  return loaded.exports;
 }
 
-test("browser API reads use the public API before the same-origin proxy", () => {
+test("authenticated browser API reads stay on the same-origin BFF", () => {
   const originalWindow = globalThis.window;
   globalThis.window = {
     location: {
@@ -71,47 +70,19 @@ test("browser API reads use the public API before the same-origin proxy", () => 
   };
 
   try {
-    const { resolveApiReadTransportCandidates } = loadUrlsModule();
-    const candidates = resolveApiReadTransportCandidates(
-      "https://api.cred-x.in/runs?page=1&limit=100",
-    );
+    const { URLs, resolveApiReadTransportCandidates } = loadUrlsModule();
+    const runUrl = `${URLs.runs.list()}?page=1&limit=100`;
+    const candidates = resolveApiReadTransportCandidates(runUrl);
     assert.deepEqual(candidates, [
       {
-        url: "https://api.cred-x.in/runs?page=1&limit=100",
+        url: "/backend-api/runs?page=1&limit=100",
         stage: "primary",
-        transport: "configured-or-inferred-api",
-      },
-      {
-        url: "https://cred-x.in/backend-api/runs?page=1&limit=100",
-        stage: "secondary",
         transport: "same-origin-proxy",
       },
     ]);
   } finally {
     globalThis.window = originalWindow;
   }
-});
-
-test("server proxy fallbacks stay inside the browser read deadline and mutations execute once", () => {
-  const source = read("../app/backend-api/[...path]/route.ts");
-
-  assert.match(source, /stage: "primary"/);
-  assert.match(source, /stage: "secondary"/);
-  assert.match(source, /stage: "tertiary" as const/);
-  assert.match(source, /DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500/);
-  assert.match(source, /DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 5_250/);
-  assert.match(source, /BACKEND_PROXY_TOTAL_TIMEOUT_MS/);
-  assert.match(source, /remainingBudgetMs/);
-  assert.match(
-    source,
-    /Math\.min\(perAttemptTimeoutMs, remainingBudgetMs\)/,
-  );
-  assert.match(source, /SAFE_FALLBACK_METHODS = new Set\(\["GET", "HEAD"\]\)/);
-  assert.match(
-    source,
-    /SAFE_FALLBACK_METHODS\.has\(request\.method\)[\s\S]*resolvedCandidates[\s\S]*resolvedCandidates\.slice\(0, 1\)/,
-  );
-  assert.match(source, /backend_api_proxy_fallback_triggered/);
 });
 
 test("dashboard threat latest reads skip historical augmentation unless explicitly requested", () => {
@@ -164,17 +135,6 @@ test("the production frontend exposes an immutable build fingerprint", () => {
   assert.doesNotMatch(stampScript, /\.join\("\\\\n"\)/);
 });
 
-test("API reads validate payloads, deduplicate requests, and avoid retry loops", () => {
-  const source = read("../services/api.ts");
-
-  assert.match(source, /InvalidAPIResponseError/);
-  assert.match(source, /resolveApiReadTransportCandidates\(url\)/);
-  assert.match(source, /private readonly inFlightReads = new Map/);
-  assert.match(source, /api_read_fallback_triggered/);
-  assert.doesNotMatch(source, /READ_RETRY_DELAYS_MS/);
-  assert.doesNotMatch(source, /while \(true\)/);
-});
-
 test("Auto-Live start ambiguity uses two read-only reconciliations and never repeats the POST", () => {
   const source = read("../services/api.ts");
   const method = source.match(
@@ -196,7 +156,9 @@ test("Auto-Live start ambiguity uses two read-only reconciliations and never rep
 });
 
 test("dashboard tertiary fallbacks validate age-bounded saved data", () => {
-  const dashboardSource = read("../app/console/dashboard/page.tsx");
+  const dashboardSource = read(
+    "../app/console/dashboard/DashboardPageClient.tsx",
+  );
   const actionablesSource = read(
     "../app/console/_components/FinalActionablesConsole.tsx",
   );
@@ -218,7 +180,7 @@ test("changed fallback TypeScript modules parse", () => {
     "../app/api/runtime-fingerprint/route.ts",
     "../lib/generatedBuildInfo.ts",
     "../app/console/bullpen-ai/_components/bullpenAutoRunStatus.ts",
-    "../app/console/dashboard/page.tsx",
+    "../app/console/dashboard/DashboardPageClient.tsx",
     "../app/console/_components/FinalActionablesConsole.tsx",
   ]) {
     transpileTypeScript(relativePath);

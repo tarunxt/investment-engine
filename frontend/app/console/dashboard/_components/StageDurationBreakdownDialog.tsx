@@ -193,35 +193,39 @@ export function StageDurationBreakdownDialog({
 
   useEffect(() => {
     if (!open) return;
-    if (!runId) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (!runId) {
+        setRun(null);
+        setError(null);
+        setLoading(false);
+        return;
+      }
       setRun(null);
       setError(null);
-      setLoading(false);
-      return;
-    }
+      setLoading(true);
+      void apiService
+        .getRun(runId, { signal: controller.signal })
+        .then((response) => {
+          if (!controller.signal.aborted) setRun(response);
+        })
+        .catch((reason: unknown) => {
+          if (controller.signal.aborted) return;
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Detailed LLM timing could not be loaded.",
+          );
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false);
+        });
+    }, 0);
 
-    const controller = new AbortController();
-    setRun(null);
-    setError(null);
-    setLoading(true);
-    void apiService
-      .getRun(runId, { signal: controller.signal })
-      .then((response) => {
-        if (!controller.signal.aborted) setRun(response);
-      })
-      .catch((reason: unknown) => {
-        if (controller.signal.aborted) return;
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : "Detailed LLM timing could not be loaded.",
-        );
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-
-    return () => controller.abort();
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [open, runId]);
 
   const breakdown = useMemo(

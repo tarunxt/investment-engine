@@ -28,6 +28,7 @@ class Run(Base, TimestampMixin):
         ForeignKey("prompts.id", ondelete="SET NULL"), nullable=True
     )
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_preview: Mapped[str] = mapped_column(String(284), nullable=False)
     status: Mapped[JobStatus] = mapped_column(
         JobStatusType, default=JobStatus.PENDING, nullable=False, index=True
     )

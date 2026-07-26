@@ -199,8 +199,19 @@ function dashboardSummaryFixture() {
   return {
     schema_version: 1,
     generated_at: now,
-    usd_inr_rate: 83.5,
-    usd_inr_source: "bounded-fallback",
+    usd_inr_rate: 84.125,
+    usd_inr_source: "verified-performance-fixture",
+    usd_inr_as_of: now,
+    usd_inr_age_seconds: 0,
+    usd_inr_status: "valid",
+    fx: {
+      value: 84.125,
+      source: "verified-performance-fixture",
+      as_of: now,
+      age_seconds: 0,
+      stale_after_seconds: 129_600,
+      status: "valid",
+    },
     zerodha: {
       connected: true,
       login_time: now,
@@ -285,6 +296,7 @@ function dashboardSummaryFixture() {
       zerodha: { status: "ok", duration_ms: 4, fresh_at: now },
       indmoney_us: { status: "ok", duration_ms: 4, fresh_at: now },
       bullpen: { status: "ok", duration_ms: 2, fresh_at: now },
+      fx: { status: "ok", duration_ms: 1, fresh_at: now },
     },
   };
 }
@@ -347,7 +359,7 @@ function legacyDashboardFixture(pathname) {
     return { analysis: null };
   }
   if (pathname.endsWith("/api-usage/summary")) {
-    return { usd_inr_rate: 83.5 };
+    return { usd_inr_rate: null };
   }
   if (pathname.endsWith("/polymarket/state")) {
     return {

@@ -75,6 +75,17 @@ test("does not deploy documentation-only changes", () => {
   );
 });
 
+test("unknown and newly introduced shared paths fail closed to full-stack", () => {
+  for (const path of [
+    "packages/shared-auth/package.json",
+    "next.config.shared.mjs",
+    "config/runtime.json",
+    "new-root-tool.ts",
+  ]) {
+    assert.equal(classifyDeploymentScope([path]), "full-stack", path);
+  }
+});
+
 test("normalizes duplicate and platform-style paths", () => {
   assert.equal(
     classifyDeploymentScope([

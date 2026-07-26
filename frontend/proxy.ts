@@ -52,6 +52,14 @@ async function readSessionToken(req: NextRequest): Promise<JWT | null> {
   });
 }
 
+function attachAuthTiming(response: NextResponse, durationMs: number) {
+  response.headers.append(
+    "Server-Timing",
+    `authjs;dur=${durationMs.toFixed(1)};desc="Auth.js session resolution"`,
+  );
+  return response;
+}
+
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
   const isAuthRoute = isAuthPath(path);
@@ -81,16 +89,18 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next();
   }
 
+  const authStartedAt = performance.now();
   let token: JWT | null = null;
   try {
     token = await readSessionToken(req);
   } catch (error) {
     console.error("Authentication proxy failed to decode session token:", error);
   }
+  const authDurationMs = performance.now() - authStartedAt;
 
   if (!token) {
     if (isAuthRoute) {
-      return NextResponse.next();
+      return attachAuthTiming(NextResponse.next(), authDurationMs);
     }
 
     const loginHref = buildLoginRedirectHref(
@@ -100,21 +110,27 @@ export async function proxy(req: NextRequest) {
     const response = NextResponse.redirect(new URL(loginHref, req.url));
     response.cookies.delete("authjs.session-token");
     response.cookies.delete("__Secure-authjs.session-token");
-    return response;
+    return attachAuthTiming(response, authDurationMs);
   }
 
   if (isAuthRoute) {
     const redirectTo = resolveAuthRedirectTarget(
       req.nextUrl.searchParams.get("redirectTo"),
     );
-    return NextResponse.redirect(new URL(redirectTo, req.url));
+    return attachAuthTiming(
+      NextResponse.redirect(new URL(redirectTo, req.url)),
+      authDurationMs,
+    );
   }
 
   if (path.startsWith("/console/admin") && token.role !== "admin") {
-    return NextResponse.redirect(new URL("/console/dashboard", req.url));
+    return attachAuthTiming(
+      NextResponse.redirect(new URL("/console/dashboard", req.url)),
+      authDurationMs,
+    );
   }
 
-  return NextResponse.next();
+  return attachAuthTiming(NextResponse.next(), authDurationMs);
 }
 
 export const config = {

@@ -63,7 +63,7 @@ class LlmPerformanceResponse(BaseModel):
 class LlmCostHistoryDay(BaseModel):
     date: str
     estimated_cost: float
-    estimated_cost_inr: float
+    estimated_cost_inr: float | None
     requests: int
     tokens_in: int
     tokens_out: int
@@ -75,7 +75,7 @@ class LlmCostHistoryRun(BaseModel):
     status: str
     timestamp: datetime
     estimated_cost: float
-    estimated_cost_inr: float
+    estimated_cost_inr: float | None
     tokens_in: int | None = None
     tokens_out: int | None = None
 
@@ -84,7 +84,12 @@ class LlmCostHistoryResponse(BaseModel):
     provider: str
     name: str
     timezone: str
-    usd_inr_rate: float
+    usd_inr_rate: float | None
+    fx_source: str | None
+    fx_as_of: datetime | None
+    fx_age_seconds: int | None
+    fx_status: str
+    fx_stale_after_seconds: int
     generated_at: datetime
     day_limit: int
     run_limit: int

@@ -708,7 +708,7 @@ class PolymarketPaperCopyBot:
             tracked_accounts=self._active_tracked_accounts(),
             tracked_traders=self.tracked_traders,
             open_positions=open_positions,
-            trade_history=list(reversed(self.trade_history)),
+            trade_history=list(reversed(self.trade_history[-50:])),
             recent_activity=self.recent_activity[:20],
             metrics=self._metrics(),
             config=self.config,
@@ -2084,14 +2084,14 @@ class PolymarketPaperCopyBot:
             emergency_stopped=self.emergency_stopped,
             doctor=self.doctor_status,
             balance=self.balance_state,
-            redeemed_trades=self.bullpen_redeemed_trades,
+            redeemed_trades=self.bullpen_redeemed_trades[:50],
             source_status=self.live_source_status,
             max_live_trade_size=self.config.max_live_trade_size,
             live_trades_today=self.live_guard.live_trades_today(
                 self.live_trade_history
             ),
             pending_confirmations=self._pending_live_trades(),
-            recent_decisions=list(reversed(self.live_trade_history)),
+            recent_decisions=list(reversed(self.live_trade_history[-50:])),
         )
 
     def _finish_poll_unlocked(

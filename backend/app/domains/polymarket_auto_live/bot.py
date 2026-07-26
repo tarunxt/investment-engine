@@ -49,6 +49,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveRun,
+    BullpenAutoLiveRunDiagnostics,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveStageResult,
@@ -69,6 +70,25 @@ from app.infrastructure.messaging.task_registry import (
 )
 
 logger = get_logger(__name__)
+
+
+def _summarize_run_for_list(run: BullpenAutoLiveRun) -> BullpenAutoLiveRun:
+    """Preserve the response shape while keeping list rows lightweight."""
+
+    return run.model_copy(
+        update={
+            "summary": run.summary[:500],
+            "error_message": run.error_message[:500] if run.error_message else None,
+            "stage_results": [],
+            "guardrail_checks": [],
+            "decision_ids": [],
+            "order_intent_ids": [],
+            "diagnostics": BullpenAutoLiveRunDiagnostics(),
+            "stage2_llm_targets_snapshot": None,
+            "request_context": None,
+            "audit_metadata": {},
+        }
+    )
 
 
 def _freeze_cancelled_run_audit_sync(*, user_id: int, run_id: str) -> None:
@@ -631,14 +651,21 @@ class BullpenAutoLiveBot:
 
         return await self._get_summary_with_run_limit(run_limit=1)
 
-    async def list_runs(self) -> list[BullpenAutoLiveRun]:
+    async def list_runs(
+        self,
+        *,
+        limit: int = 25,
+        include_detail: bool = False,
+    ) -> list[BullpenAutoLiveRun]:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
-            runs = await repo.list_runs(self.user_id)
+            runs = await repo.list_runs(self.user_id, limit=limit)
             if await self._reconcile_terminal_stage3_decisions(repo, runs):
                 await session.commit()
-                return await repo.list_runs(self.user_id)
-            return runs
+                runs = await repo.list_runs(self.user_id, limit=limit)
+            if include_detail:
+                return runs
+            return [_summarize_run_for_list(run) for run in runs]
 
     async def get_run(self, run_id: str) -> BullpenAutoLiveRun:
         async with AsyncSessionLocal() as session:

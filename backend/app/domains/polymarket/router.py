@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.polymarket.access import require_singleton_bullpen_runtime_access
 from app.domains.polymarket.runtime_broker import (
     BullpenPositionsSnapshot,
     BullpenPositionsSnapshotMetadata,
@@ -19,6 +20,7 @@ from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
     PolymarketDiscoveryDebugRequest,
+    PolymarketHistoryResponse,
     PolymarketLiveRedeemRequest,
     PolymarketManualInvestRequest,
     PolymarketManualInvestResponse,
@@ -90,13 +92,28 @@ async def get_polymarket_state(current_user: User = Depends(get_current_user)):
     return await bot.get_state()
 
 
+@router.get("/history", response_model=PolymarketHistoryResponse)
+async def get_polymarket_history(
+    limit: int = Query(default=100, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+):
+    """Explicit bounded history; ordinary state responses include only 50 rows."""
+
+    bot = await _get_bot(current_user)
+    return PolymarketHistoryResponse(
+        paper_trades=list(reversed(bot.trade_history[-limit:])),
+        live_decisions=list(reversed(bot.live_trade_history[-limit:])),
+        redeemed_trades=bot.bullpen_redeemed_trades[:limit],
+    )
+
+
 @router.get("/runtime/positions", response_model=BullpenRuntimePositionsResponse)
 async def get_bullpen_runtime_positions(
     force_fresh: bool = Query(default=False),
     passive: bool = Query(default=False),
     caller_source: str | None = Query(default=None, max_length=80),
     max_age_seconds: int = Query(default=20, ge=0, le=300),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_singleton_bullpen_runtime_access),
 ):
     del current_user
     if passive and force_fresh:
@@ -141,7 +158,7 @@ async def get_bullpen_runtime_positions(
 
 @router.get("/runtime/health", response_model=BullpenRuntimeHealthResponse)
 async def get_bullpen_runtime_health(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_singleton_bullpen_runtime_access),
 ):
     del current_user
     broker = get_bullpen_runtime_broker()
@@ -165,7 +182,7 @@ async def get_bullpen_runtime_health(
 
 @router.get("/runtime/diagnostics", response_model=BullpenRuntimeDiagnosticsResponse)
 async def get_bullpen_runtime_diagnostics(
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_singleton_bullpen_runtime_access),
 ):
     bot = await _get_bot(current_user)
     broker = get_bullpen_runtime_broker()
@@ -194,7 +211,9 @@ async def get_bullpen_runtime_diagnostics(
 
 @router.get("/runtime/discover")
 async def get_bullpen_runtime_discover(
+    current_user: User = Depends(require_singleton_bullpen_runtime_access),
 ):
+    del current_user
     broker = get_bullpen_runtime_broker()
     return await broker.execute_first_json(
         [
@@ -228,7 +247,9 @@ async def get_bullpen_runtime_discover(
 @router.post("/runtime/search")
 async def search_bullpen_runtime_markets(
     request: BullpenRuntimeSearchRequest,
+    current_user: User = Depends(require_singleton_bullpen_runtime_access),
 ):
+    del current_user
     broker = get_bullpen_runtime_broker()
     return await broker.execute_json(
         ["polymarket", "search", request.query, "--output", "json"],

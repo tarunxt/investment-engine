@@ -3,6 +3,7 @@
 import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { realpathSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -11,22 +12,44 @@ import { validateArtifactDirectory } from "../deploy/no-docker/frontend-artifact
 
 const STARTUP_TIMEOUT_MS = 90_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const PRODUCTION_ROUTE_JAVASCRIPT_BUDGET_BYTES = {
-  login: 700_000,
-  dashboard: 1_100_000,
-  bullpen: 1_300_000,
-  automatedRebalance: 2_700_000,
+const PRODUCTION_ROUTE_JAVASCRIPT_BUDGETS = {
+  login: {
+    transferred: 250_000,
+    decoded: 700_000,
+    baselineTransferred: 176_454,
+    baselineDecoded: 567_671,
+  },
+  dashboard: {
+    transferred: 300_000,
+    decoded: 900_000,
+    baselineTransferred: 214_493,
+    baselineDecoded: 691_089,
+  },
+  bullpen: {
+    transferred: 450_000,
+    decoded: 1_400_000,
+    baselineTransferred: 353_360,
+    baselineDecoded: 1_217_035,
+  },
+  automatedRebalance: {
+    transferred: 900_000,
+    decoded: 2_700_000,
+  },
 };
-const TURBOPACK_BENCHMARK_ROUTE_JAVASCRIPT_BUDGET_BYTES = {
-  ...PRODUCTION_ROUTE_JAVASCRIPT_BUDGET_BYTES,
+const TURBOPACK_BENCHMARK_ROUTE_JAVASCRIPT_BUDGETS = {
+  ...PRODUCTION_ROUTE_JAVASCRIPT_BUDGETS,
   // Turbopack currently emits one additional shared chunk for this route. It is
   // benchmark-only; the selected production Webpack artifact retains 700 KB.
-  login: 800_000,
+  login: {
+    transferred: 300_000,
+    decoded: 800_000,
+  },
 };
-const ROUTE_JAVASCRIPT_BUDGET_BYTES =
+const ROUTE_JAVASCRIPT_BUDGETS =
   process.env.BUNDLER === "turbopack"
-    ? TURBOPACK_BENCHMARK_ROUTE_JAVASCRIPT_BUDGET_BYTES
-    : PRODUCTION_ROUTE_JAVASCRIPT_BUDGET_BYTES;
+    ? TURBOPACK_BENCHMARK_ROUTE_JAVASCRIPT_BUDGETS
+    : PRODUCTION_ROUTE_JAVASCRIPT_BUDGETS;
+const MAX_UNEXPLAINED_JAVASCRIPT_GROWTH = 1.1;
 
 function elapsedSeconds(startedAt) {
   return ((performance.now() - startedAt) / 1000).toFixed(2);
@@ -199,27 +222,60 @@ async function assertRouteJavaScriptBudget(
   baseUrl,
   html,
   label,
-  budgetBytes,
+  budget,
 ) {
   const javascriptPaths = extractStaticAssetPaths(html).filter((assetPath) =>
     assetPath.includes(".js"),
   );
-  let bytes = 0;
+  let transferredBytes = 0;
+  let decodedBytes = 0;
   for (const assetPath of javascriptPaths) {
     const response = await assertSuccessfulRoute(
       baseUrl,
       assetPath,
       `${label} JavaScript asset`,
+      { headers: { "accept-encoding": "gzip" } },
     );
-    bytes += (await response.arrayBuffer()).byteLength;
+    const body = await response.arrayBuffer();
+    decodedBytes += body.byteLength;
+    const rawContentLength = response.headers.get("content-length");
+    const contentLength =
+      rawContentLength === null ? null : Number(rawContentLength);
+    transferredBytes +=
+      contentLength !== null &&
+      Number.isFinite(contentLength) &&
+      contentLength > 0
+        ? contentLength
+        : gzipSync(Buffer.from(body)).byteLength;
   }
   console.log(
-    `${label} initial JavaScript: ${bytes} bytes (${javascriptPaths.length} files, budget ${budgetBytes})`,
+    `${label} initial JavaScript: ${transferredBytes} transferred bytes, ${decodedBytes} decoded bytes (${javascriptPaths.length} files)`,
   );
-  if (bytes > budgetBytes) {
+  if (transferredBytes > budget.transferred) {
     throw new Error(
-      `${label} initial JavaScript exceeded its ${budgetBytes}-byte budget: ${bytes}`,
+      `${label} transferred JavaScript exceeded its ${budget.transferred}-byte fixed budget: ${transferredBytes}`,
     );
+  }
+  if (decodedBytes > budget.decoded) {
+    throw new Error(
+      `${label} decoded JavaScript exceeded its ${budget.decoded}-byte fixed budget: ${decodedBytes}`,
+    );
+  }
+  if (
+    budget.baselineTransferred &&
+    transferredBytes >
+      Math.floor(
+        budget.baselineTransferred * MAX_UNEXPLAINED_JAVASCRIPT_GROWTH,
+      )
+  ) {
+    throw new Error(`${label} transferred JavaScript grew by more than 10%`);
+  }
+  if (
+    budget.baselineDecoded &&
+    decodedBytes >
+      Math.floor(budget.baselineDecoded * MAX_UNEXPLAINED_JAVASCRIPT_GROWTH)
+  ) {
+    throw new Error(`${label} decoded JavaScript grew by more than 10%`);
   }
 }
 
@@ -486,6 +542,7 @@ async function main() {
       normalRuntime.baseUrl,
       "/backend-api/health/live",
       "Same-origin backend proxy",
+      { headers: { cookie: authenticatedCookie } },
     );
     const proxyBody = await proxyHealth.json();
     if (proxyBody.status !== "ok") {
@@ -504,6 +561,20 @@ async function main() {
       "Bullpen AI route runtime",
       { headers: { cookie: authenticatedCookie } },
     );
+    for (const [label, html] of [
+      ["dashboard", dashboardHtml],
+      ["Bullpen", bullpenHtml],
+    ]) {
+      if (
+        html.includes("artifact-access-token") ||
+        html.includes("artifact-refresh-token")
+      ) {
+        throw new Error(`${label} HTML/RSC payload exposed a server session token`);
+      }
+      if (html.includes("Restoring your secure session")) {
+        throw new Error(`${label} HTML retained the client session render gate`);
+      }
+    }
     const automatedRebalanceHtml = await assertRenderedPage(
       normalRuntime.baseUrl,
       "/console/automated-rebalance",
@@ -514,25 +585,25 @@ async function main() {
       normalRuntime.baseUrl,
       loginHtml,
       "Login",
-      ROUTE_JAVASCRIPT_BUDGET_BYTES.login,
+      ROUTE_JAVASCRIPT_BUDGETS.login,
     );
     await assertRouteJavaScriptBudget(
       normalRuntime.baseUrl,
       dashboardHtml,
       "Dashboard",
-      ROUTE_JAVASCRIPT_BUDGET_BYTES.dashboard,
+      ROUTE_JAVASCRIPT_BUDGETS.dashboard,
     );
     await assertRouteJavaScriptBudget(
       normalRuntime.baseUrl,
       bullpenHtml,
       "Bullpen AI",
-      ROUTE_JAVASCRIPT_BUDGET_BYTES.bullpen,
+      ROUTE_JAVASCRIPT_BUDGETS.bullpen,
     );
     await assertRouteJavaScriptBudget(
       normalRuntime.baseUrl,
       automatedRebalanceHtml,
       "Automated rebalance",
-      ROUTE_JAVASCRIPT_BUDGET_BYTES.automatedRebalance,
+      ROUTE_JAVASCRIPT_BUDGETS.automatedRebalance,
     );
     const protectedAssetPaths = [
       ...new Set([

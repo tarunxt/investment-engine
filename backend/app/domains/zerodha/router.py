@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.auth.dependencies import get_current_user
@@ -240,6 +240,7 @@ def _snapshot_summary(
         net_positions_count=snapshot.net_positions_count,
         day_positions_count=snapshot.day_positions_count,
         holdings_market_value=snapshot.holdings_market_value,
+        holdings_invested_value=snapshot.holdings_invested_value,
         holdings_pnl=snapshot.holdings_pnl,
         holdings_day_change_value=snapshot.holdings_day_change_value,
         available_margin=snapshot.available_margin or 0.0,
@@ -373,13 +374,13 @@ async def get_status(
 
 @router.get("/portfolio", response_model=ZerodhaPortfolioOverviewResponse)
 async def get_portfolio_overview(
-    limit: int = 30,
+    limit: int = Query(default=30, ge=1, le=120),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     snapshot_repo = ZerodhaPortfolioSnapshotRepository(db)
     snapshots = await snapshot_repo.list_by_user(
-        current_user.id, limit=min(max(limit, 1), 120)
+        current_user.id, limit=limit
     )
     latest = _snapshot_detail(snapshots[0]) if snapshots else None
     return ZerodhaPortfolioOverviewResponse(

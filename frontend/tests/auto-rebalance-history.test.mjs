@@ -33,12 +33,3 @@ test("history routes and API methods expose summary and detail screens", () => {
   assert.match(history, /Stage timeline/);
   assert.match(history, /LLM diagnostics and saved output/);
 });
-
-test("read-only API calls use bounded transport failover without retry loops", () => {
-  assert.match(api, /DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000/);
-  assert.match(api, /DEFAULT_API_READ_TRANSPORT_TIMEOUT_MS = 6_000/);
-  assert.match(api, /resolveApiReadTransportCandidates\(url\)/);
-  assert.match(api, /api_read_fallback_triggered/);
-  assert.doesNotMatch(api, /READ_RETRY_DELAYS_MS/);
-  assert.doesNotMatch(api, /while \(true\)/);
-});

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { apiService } from '@/services/api';
 import { useUsdInrRate } from '@/hooks/useUsdInrRate';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 import type { LlmPerformanceGroup, LlmPerformanceResponse, LlmScanPerformanceItem } from '@/types/api';
 
 function formatDateTime(value?: string | null) {
@@ -29,16 +30,9 @@ function formatDuration(ms?: number | null) {
   return `${hours}h ${remainingMinutes}m`;
 }
 
-function formatCostInr(value?: number | null, usdInrRate = 83.5) {
+function formatCostInr(value?: number | null, usdInrRate = 0) {
   if (value === null || value === undefined) return '—';
-  const inrValue = value * usdInrRate;
-  if (inrValue === 0) return '₹0.00';
-  if (inrValue < 0.01) return `₹${inrValue.toExponential(2)}`;
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 2,
-  }).format(inrValue);
+  return formatUsdAsVerifiedInr(value, usdInrRate);
 }
 
 function passFailLabel(value?: boolean | null) {

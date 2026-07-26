@@ -490,6 +490,12 @@ class PolymarketBotState(BaseModel):
     live: PolymarketLiveControlState
 
 
+class PolymarketHistoryResponse(BaseModel):
+    paper_trades: list[PolymarketPaperTrade] = Field(default_factory=list)
+    live_decisions: list[PolymarketLiveTradeDecision] = Field(default_factory=list)
+    redeemed_trades: list[PolymarketBullpenRedeemedTrade] = Field(default_factory=list)
+
+
 class PolymarketDiscoveryDebugRequest(BaseModel):
     target: str = Field(default="swisstony", min_length=1, max_length=120)
 

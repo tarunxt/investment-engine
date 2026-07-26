@@ -11,6 +11,7 @@ from sqlalchemy import desc, select
 
 from app.domains.dashboard.schemas import (
     DashboardBullpenSection,
+    DashboardFxRate,
     DashboardHistoryPoint,
     DashboardHolding,
     DashboardIndMoneySection,
@@ -20,13 +21,13 @@ from app.domains.dashboard.schemas import (
     DashboardZerodhaSection,
     DashboardZerodhaSnapshot,
 )
+from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapshot
 from app.infrastructure.database.session import AsyncSessionLocal
 from app.core.request_timing import add_redis_duration
 
-USD_INR_BOUNDED_FALLBACK = 83.5
 DASHBOARD_HISTORY_LIMIT = 12
 DASHBOARD_TOP_HOLDINGS_LIMIT = 4
 
@@ -77,7 +78,9 @@ def _top_holdings(
         pnl_percent = _number(
             raw.get("pnl_percent", raw.get("total_pnl_percent")),
         )
-        weight = _optional_number(raw.get("portfolio_weight_percent"))
+        weight = _optional_number(
+            raw.get("weight_percent", raw.get("portfolio_weight_percent"))
+        )
         if weight is None and total_value > 0:
             weight = current_value / total_value * 100
         normalized.append(
@@ -121,7 +124,8 @@ async def _load_zerodha(user_id: int) -> DashboardZerodhaSection:
                     ZerodhaPortfolioSnapshot.holdings_pnl,
                     ZerodhaPortfolioSnapshot.holdings_day_change_value,
                     ZerodhaPortfolioSnapshot.available_margin,
-                    ZerodhaPortfolioSnapshot.holdings,
+                    ZerodhaPortfolioSnapshot.holdings_invested_value,
+                    ZerodhaPortfolioSnapshot.dashboard_top_holdings,
                 )
                 .where(ZerodhaPortfolioSnapshot.user_id == user_id)
                 .order_by(
@@ -156,12 +160,6 @@ async def _load_zerodha(user_id: int) -> DashboardZerodhaSection:
             expires_at=credential_row.expires_at if credential_row else None,
         )
 
-    holdings = latest.holdings if isinstance(latest.holdings, list) else []
-    invested_value = sum(
-        _number(item.get("invested_value"))
-        for item in holdings
-        if isinstance(item, dict)
-    )
     return DashboardZerodhaSection(
         connected=connected,
         login_time=credential_row.login_time if credential_row else None,
@@ -172,12 +170,12 @@ async def _load_zerodha(user_id: int) -> DashboardZerodhaSection:
             source=latest.source,
             holdings_count=latest.holdings_count,
             holdings_market_value=latest.holdings_market_value,
-            holdings_invested_value=invested_value,
+            holdings_invested_value=latest.holdings_invested_value,
             holdings_pnl=latest.holdings_pnl,
             holdings_day_change_value=latest.holdings_day_change_value,
             available_margin=latest.available_margin,
             top_holdings=_top_holdings(
-                holdings,
+                latest.dashboard_top_holdings,
                 total_value=latest.holdings_market_value,
             ),
             history=[
@@ -208,7 +206,7 @@ async def _load_indmoney(user_id: int) -> DashboardIndMoneySection:
                     IndMoneyUsPortfolioSnapshot.day_return_percent,
                     IndMoneyUsPortfolioSnapshot.total_return_value,
                     IndMoneyUsPortfolioSnapshot.total_return_percent,
-                    IndMoneyUsPortfolioSnapshot.holdings,
+                    IndMoneyUsPortfolioSnapshot.dashboard_top_holdings,
                 )
                 .where(IndMoneyUsPortfolioSnapshot.user_id == user_id)
                 .order_by(
@@ -252,7 +250,7 @@ async def _load_indmoney(user_id: int) -> DashboardIndMoneySection:
             total_return_value=latest.total_return_value,
             total_return_percent=latest.total_return_percent,
             top_holdings=_top_holdings(
-                latest.holdings,
+                latest.dashboard_top_holdings,
                 total_value=latest.current_value or 0,
             ),
             history=[
@@ -313,6 +311,18 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
     )
 
 
+async def _load_fx(_user_id: int) -> DashboardFxRate:
+    assessment = await load_persisted_usd_inr_rate()
+    return DashboardFxRate(
+        value=assessment.value,
+        source=assessment.source,
+        as_of=assessment.as_of,
+        age_seconds=assessment.age_seconds,
+        stale_after_seconds=assessment.stale_after_seconds,
+        status=assessment.status,
+    )
+
+
 async def _timed_section(
     name: str,
     loader: Callable[[int], Awaitable[T]],
@@ -327,6 +337,8 @@ async def _timed_section(
             fresh_at = getattr(snapshot, "captured_at", None)
         if isinstance(value, DashboardBullpenSection):
             fresh_at = value.fetched_at
+        if isinstance(value, DashboardFxRate):
+            fresh_at = value.as_of
         return (
             name,
             value,
@@ -349,17 +361,42 @@ async def _timed_section(
         )
 
 
-async def build_dashboard_summary(user_id: int) -> DashboardSummaryResponse:
-    results = await asyncio.gather(
+async def build_dashboard_summary(
+    user_id: int,
+    *,
+    include_singleton_bullpen: bool = True,
+) -> DashboardSummaryResponse:
+    loaders = [
         _timed_section("zerodha", _load_zerodha, user_id),
         _timed_section("indmoney_us", _load_indmoney, user_id),
-        _timed_section("bullpen", _load_bullpen, user_id),
-    )
+        _timed_section("fx", _load_fx, user_id),
+    ]
+    if include_singleton_bullpen:
+        loaders.append(_timed_section("bullpen", _load_bullpen, user_id))
+    results = await asyncio.gather(*loaders)
     values = {name: value for name, value, _meta in results}
     sections = {name: meta for name, _value, meta in results}
+    if not include_singleton_bullpen:
+        values["bullpen"] = None
+        sections["bullpen"] = DashboardSectionMeta(
+            status="unavailable",
+            duration_ms=0,
+            error="Bullpen runtime is restricted to the singleton system account.",
+        )
+    fx = values["fx"]
+    if not isinstance(fx, DashboardFxRate):
+        fx = DashboardFxRate(
+            stale_after_seconds=36 * 60 * 60,
+            status="unavailable",
+        )
     return DashboardSummaryResponse(
         generated_at=datetime.now(UTC),
-        usd_inr_rate=USD_INR_BOUNDED_FALLBACK,
+        usd_inr_rate=fx.value if fx.status == "valid" else None,
+        usd_inr_source=fx.source,
+        usd_inr_as_of=fx.as_of,
+        usd_inr_age_seconds=fx.age_seconds,
+        usd_inr_status=fx.status,
+        fx=fx,
         zerodha=values["zerodha"],
         indmoney_us=values["indmoney_us"],
         bullpen=values["bullpen"],

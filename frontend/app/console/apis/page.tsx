@@ -86,6 +86,22 @@ function formatInr(value: number) {
   return `₹${value.toFixed(4)}`;
 }
 
+function formatUsd(value: number) {
+  return `$${value.toFixed(value < 0.01 && value > 0 ? 6 : 2)}`;
+}
+
+function formatConvertedCost(inr: number | null, usd: number) {
+  return inr == null ? `${formatUsd(usd)} (FX unavailable)` : formatInr(inr);
+}
+
+function formatFxTimestamp(value: string | null | undefined) {
+  if (!value) return null;
+  const timestamp = new Date(value);
+  return Number.isFinite(timestamp.getTime())
+    ? timestamp.toLocaleString('en-IN', { timeZone: API_TIMEZONE })
+    : null;
+}
+
 function formatCompactInr(value: number) {
   if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`;
   if (value >= 1000) return `₹${(value / 1000).toFixed(1)}K`;
@@ -119,9 +135,12 @@ function CombinedLlmCostChart({
   const [selectedPointKey, setSelectedPointKey] = useState<{ provider: CombinedLlmProviderKey; date: string } | null>(null);
 
   const chart = useMemo(() => {
+    const historiesWithValidFx = Object.values(histories).filter(
+      (history) => history?.fx_status === 'valid' && history.usd_inr_rate != null,
+    );
     const dates = Array.from(
       new Set(
-        Object.values(histories)
+        historiesWithValidFx
           .flatMap((history) => history?.days.map((day) => day.date) ?? [])
       )
     ).sort();
@@ -129,7 +148,15 @@ function CombinedLlmCostChart({
     const valuesByProvider = COMBINED_LLM_PROVIDERS.reduce(
       (acc, provider) => {
         const history = histories[provider.key];
-        acc[provider.key] = new Map(history?.days.map((day) => [day.date, day.estimated_cost_inr]) ?? []);
+        acc[provider.key] = new Map(
+          history?.fx_status === 'valid'
+            ? history.days.flatMap((day) =>
+                day.estimated_cost_inr == null
+                  ? []
+                  : [[day.date, day.estimated_cost_inr] as const],
+              )
+            : [],
+        );
         return acc;
       },
       {} as Record<CombinedLlmProviderKey, Map<string, number>>
@@ -401,8 +428,15 @@ function LlmCostHistoryModal({
             <p className="text-sm text-gray-600">
               {history?.name ?? 'LLM'} cost history across Cred-X recorded runs (UTC days, matching provider console dates).
             </p>
-            {history ? (
-              <p className="text-xs text-gray-500">USD/INR: {history.usd_inr_rate.toFixed(4)}</p>
+            {history?.fx_status === 'valid' && history.usd_inr_rate != null ? (
+              <p className="text-xs text-gray-500">
+                USD/INR: {history.usd_inr_rate.toFixed(4)} · {history.fx_source ?? 'verified source'}
+                {formatFxTimestamp(history.fx_as_of) ? ` · as of ${formatFxTimestamp(history.fx_as_of)}` : ''}
+              </p>
+            ) : history ? (
+              <p className="text-xs font-medium text-amber-700">
+                INR conversion {history.fx_status}; native USD costs are shown.
+              </p>
             ) : null}
           </div>
           <button
@@ -471,7 +505,9 @@ function LlmCostHistoryModal({
                       <td className="px-4 py-3 text-gray-700">{day.requests}</td>
                       <td className="px-4 py-3 text-gray-700">{day.tokens_in}</td>
                       <td className="px-4 py-3 text-gray-700">{day.tokens_out}</td>
-                      <td className="px-4 py-3 font-semibold text-gray-900">{formatInr(day.estimated_cost_inr)}</td>
+                      <td className="px-4 py-3 font-semibold text-gray-900">
+                        {formatConvertedCost(day.estimated_cost_inr, day.estimated_cost)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -509,7 +545,9 @@ function LlmCostHistoryModal({
                         <td className="px-4 py-3 font-medium text-gray-900">#{run.job_id}</td>
                         <td className="px-4 py-3 text-gray-700">{run.model}</td>
                         <td className="px-4 py-3 text-gray-700">{run.status}</td>
-                        <td className="px-4 py-3 font-semibold text-gray-900">{formatInr(run.estimated_cost_inr)}</td>
+                        <td className="px-4 py-3 font-semibold text-gray-900">
+                          {formatConvertedCost(run.estimated_cost_inr, run.estimated_cost)}
+                        </td>
                       </tr>
                     ))
                   ) : (
@@ -710,9 +748,14 @@ export default function ApisPage() {
           <p className="text-sm text-gray-600">
             Per-API usage summary: {summaryLabel} in {data?.timezone ?? API_TIMEZONE}.
           </p>
-          {data?.usd_inr_rate ? (
+          {data?.fx_status === 'valid' && data.usd_inr_rate ? (
             <p className="text-xs text-gray-500">
-              USD/INR: {data.usd_inr_rate.toFixed(4)}
+              USD/INR: {data.usd_inr_rate.toFixed(4)} · {data.fx_source ?? 'verified source'}
+              {formatFxTimestamp(data.fx_as_of) ? ` · as of ${formatFxTimestamp(data.fx_as_of)}` : ''}
+            </p>
+          ) : data ? (
+            <p className="text-xs font-medium text-amber-700">
+              INR conversion {data.fx_status ?? 'unavailable'}; native USD costs are shown.
             </p>
           ) : null}
         </div>
@@ -874,10 +917,10 @@ export default function ApisPage() {
                         className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
                         title="Show LLM cost history"
                       >
-                        ₹{item.daily_estimated_cost_inr.toFixed(4)}
+                        {formatConvertedCost(item.daily_estimated_cost_inr, item.daily_estimated_cost)}
                       </button>
                     ) : (
-                      <>₹{item.daily_estimated_cost_inr.toFixed(4)}</>
+                      <>{formatConvertedCost(item.daily_estimated_cost_inr, item.daily_estimated_cost)}</>
                     )}
                   </td>
                   <td className="px-4 py-3 text-gray-600">{item.daily_limit_requests ?? 'Provider plan'}</td>

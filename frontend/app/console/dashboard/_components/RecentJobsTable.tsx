@@ -17,6 +17,7 @@ import {
 import { inferRebalanceMarketFromPrompt } from '@/lib/rebalance';
 import { INDIA_TIMEZONE, useDashboard, STATUS_ICONS, STATUS_STYLES } from '../_context';
 import { apiService } from '@/services/api';
+import { formatUsdAsVerifiedInr } from '@/lib/fxPresentation';
 
 const parseApiTimestamp = (value?: string | null) => {
   if (!value || typeof value !== 'string') return null;
@@ -47,7 +48,7 @@ const hasKnownCost = (value?: number | null): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
 const formatCostInr = (usd: number, usdInrRate: number) =>
-  `₹${(usd * usdInrRate).toFixed(2)}`;
+  formatUsdAsVerifiedInr(usd, usdInrRate);
 
 const formatNullableCostInr = (value: number | null | undefined, usdInrRate: number) =>
   hasKnownCost(value) ? formatCostInr(value, usdInrRate) : 'Not captured';
@@ -97,7 +98,7 @@ const PROVIDER_CONSOLE_URL: Record<string, string> = {
 export function RecentJobsTable() {
   const { runs, runsTotal, loadingRuns, lastUpdated, runScopeMarket, runScopeLabel, runScopeKind } = useDashboard();
   const router = useRouter();
-  const [usdInrRate, setUsdInrRate] = useState(83.5);
+  const [usdInrRate, setUsdInrRate] = useState(0);
   const [tickNow, setTickNow] = useState(() => Date.now());
   const [jobTimers, setJobTimers] = useState<Record<number, JobTimer>>({});
   const previousStatusesRef = useRef<Record<number, string>>({});
@@ -114,12 +115,14 @@ export function RecentJobsTable() {
     void apiService
       .getApiUsageSummary()
       .then((res) => {
-        if (mounted && Number(res.usd_inr_rate) > 0) {
+        if (mounted && res.fx_status === 'valid' && Number(res.usd_inr_rate) > 0) {
           setUsdInrRate(Number(res.usd_inr_rate));
+        } else if (mounted) {
+          setUsdInrRate(0);
         }
       })
       .catch(() => {
-        // keep fallback
+        if (mounted) setUsdInrRate(0);
       });
 
     return () => {
