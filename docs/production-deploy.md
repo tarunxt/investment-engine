@@ -24,32 +24,107 @@ Set these under GitHub repo settings → Secrets and variables → Actions → R
 - `EC2_HOST`: production EC2 public IP or hostname
 - `EC2_USER`: SSH user, normally `ubuntu`
 - `EC2_SSH_KEY`: private SSH key with access to the EC2 host
+- `EC2_SSH_FINGERPRINT`: optional but recommended SHA256 host-key fingerprint;
+  both artifact transfer and remote execution verify it when configured
 
 Do not commit the SSH key to the repo.
 
 ## Optional GitHub repository variables
 
-The deploy workflow now defaults to the current production layout, so `APP_PATH` is not required.
+The workflow first resolves `EC2_APP_PATH` / `EC2_APP_USER` when configured.
+For compatibility with older hosts it otherwise tries
+`/srv/investment-engine` / `investment-engine`, then falls back to the
+canonical `/srv/investor` / `investor` layout. Direct use of
+`deploy/no-docker/redeploy.sh` starts with the canonical layout and performs
+the inverse fallback.
 
-Set these only if the server layout changes:
+The CI frontend build also accepts these non-secret repository variables. The
+defaults match the current Cred-X production configuration:
 
-- `EC2_APP_PATH`: defaults to `/srv/investor`
-- `EC2_APP_USER`: defaults to `investor`
+- `PROD_NEXT_PUBLIC_API_URL`: defaults to `https://api.cred-x.in`
+- `PROD_NEXT_PUBLIC_FRONTEND_URL`: defaults to `https://cred-x.in`
+- `PROD_NEXT_PUBLIC_BRAND_PREFIX`: defaults to `Cred-X`
+- `PROD_NEXT_PUBLIC_BRAND_ACRONYM`: defaults to `TIE`
+- `PROD_NEXT_PUBLIC_BRAND_EXPANSION`: defaults to
+  `Tarun's Investment Engine`
+- `PROD_NEXT_PUBLIC_DISABLE_AUTH`: defaults to `false`
+- `PROD_NEXT_PUBLIC_DISABLE_API_PROXY`: defaults to `false`
+- `PROD_NEXT_PUBLIC_API_DEBUG`: defaults to `false`
+- `PROD_NEXTAUTH_URL`: defaults to `https://cred-x.in`
+
+All `PROD_NEXT_PUBLIC_*` values must match their effective
+`NEXT_PUBLIC_*` values in `/etc/investor/frontend.env`. The artifact records
+these public values, and EC2 rejects a mismatch before promotion so client
+bundles cannot silently drift from runtime configuration. Authentication
+secrets remain exclusively in `/etc/investor/frontend.env` and are loaded by
+systemd at runtime.
 
 ## How deploy works
 
-The workflow `.github/workflows/deploy.yml` runs on every push to `main` and can also be run manually.
+The workflow `.github/workflows/deploy.yml` runs on every push to `main` and
+can also be run manually from `main` with `auto`, `frontend`, `backend`, or
+`full` scope. A push following a failed, cancelled, or unverifiable deploy is
+forced to full-stack so a skipped deployment cannot leave backend migrations
+or services behind. A manually requested narrow scope is also broadened to
+full-stack unless the current `main` SHA already has a successful push
+deployment. `scripts/release-prod.sh --scope` adds a visible commit directive;
+the workflow combines it with detected changes and never lets it mask a broader
+required scope.
 
-On EC2 it does the following:
+Pushes are classified as:
 
-1. Verifies the app checkout exists.
-2. Syncs the server repo to `origin/main` using the app user.
-3. Runs `deploy/no-docker/redeploy.sh`.
-4. Restarts the relevant systemd services.
-5. Runs local smoke checks:
-   - `http://127.0.0.1:8000/health/live`
-   - `http://127.0.0.1:8000/health/ready`
-   - `http://127.0.0.1:3000/login` for full-stack deploys
+- `frontend-only`: every deployment-relevant change is under `frontend/`
+- `backend-only`: every deployment-relevant change is under `backend/`
+- `full-stack`: frontend and backend both changed, or a workflow, deployment
+  script, shared script, environment template, or root deployment file changed
+- `none`: documentation or other non-runtime files changed
+
+For frontend and full-stack scopes, GitHub Actions:
+
+1. Uses Node.js 22 on Ubuntu 22.04, restores the npm cache, and restores the
+   reusable Webpack build cache.
+2. Logs runner CPU, memory, swap, and disk diagnostics.
+3. Runs `npm ci` and the forced-Webpack production build under
+   `/usr/bin/time -v`.
+4. Packages a self-contained Next.js standalone runtime with its traced
+   dependencies, deduplicated `public` files, static assets, build fingerprint,
+   and a non-secret deployment manifest. Tests, build caches, and development
+   configuration files are excluded.
+5. Transfers the checksummed artifact to EC2.
+
+EC2 syncs the exact commit that produced the artifact, not whichever commit is
+newest when a queued deploy starts. The artifact is extracted and validated in
+a temporary sibling of the inactive `.next` / `.next-candidate` slot. Only the
+inactive slot can be replaced. EC2 validates the source lockfile, Node major,
+platform, architecture, glibc compatibility, public build configuration, and
+Webpack policy, then starts the candidate on isolated ports to exercise its
+fingerprint, authentication boundary, login, dashboard, Bullpen AI, route
+assets, and backend proxy before promotion. The active pointer changes
+atomically only after those checks, and the old active slot remains intact as
+the rollback target.
+The production host must run Node.js 22; exact-major validation rejects an
+artifact before promotion when the host runtime differs from the CI builder.
+
+After restarting `investor-frontend`, the deployment verifies service
+stability, the exact runtime fingerprint, Auth.js routes, login, authenticated
+dashboard and Bullpen redirect contracts, JavaScript and CSS assets, and the
+same-origin backend proxy. Any failure restores and re-reads the old pointer,
+restarts the previous frontend runtime, restores any changed service or Nginx
+configuration, and finally re-verifies its stability, login, Auth.js payloads,
+protected-route redirects, static assets, and backend proxy before reporting
+rollback success.
+Frontend-only deployments never install Python packages, run Alembic, install
+backend systemd templates, or restart backend/Celery services. Nginx reloads
+only when its rendered configuration actually changes.
+
+Backend-only and the backend half of full-stack deploys retain the existing
+dependency installation, migration, service restart, and live/ready health
+checks. Each CI and EC2 phase prints a timing summary. The PR workflow performs
+isolated Webpack and Turbopack cold-build/runtime benchmarks; Webpack remains
+the production artifact until Turbopack has repeatable compatibility evidence.
+Deploy workflows retain their GitHub concurrency guard. Disk recovery has its
+own queue so it cannot evict a pending real deployment, while both paths take
+the same host-level lock before changing the EC2 checkout or services.
 
 ## Celery topology and Auto-Live recovery
 
@@ -222,6 +297,7 @@ sudo journalctl -u investor-celery-worker --since '1 hour ago' --no-pager \
 
 From GitHub Actions, run **Deploy to Production** manually:
 
+- `frontend`: frontend artifact and frontend/proxy verification only
 - `backend`: backend-only deploy
 - `full`: backend + frontend deploy
 - `auto`: full deploy when run manually

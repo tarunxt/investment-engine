@@ -21,8 +21,8 @@ fi
 RELEASE_REMOTE="${RELEASE_REMOTE:-origin}"
 RELEASE_BRANCH="${RELEASE_BRANCH:-main}"
 DEPLOY_WORKFLOW="${DEPLOY_WORKFLOW:-deploy.yml}"
-DEPLOY_SCOPE="${DEPLOY_SCOPE:-full}"
-DEPLOY_WAIT_TIMEOUT_SECONDS="${DEPLOY_WAIT_TIMEOUT_SECONDS:-1800}"
+DEPLOY_SCOPE="${DEPLOY_SCOPE:-auto}"
+DEPLOY_WAIT_TIMEOUT_SECONDS="${DEPLOY_WAIT_TIMEOUT_SECONDS:-5400}"
 DEPLOY_POLL_INTERVAL_SECONDS="${DEPLOY_POLL_INTERVAL_SECONDS:-5}"
 SMOKE_TIMEOUT_SECONDS="${SMOKE_TIMEOUT_SECONDS:-20}"
 PROD_FRONTEND_URL="${PROD_FRONTEND_URL:-}"
@@ -36,7 +36,7 @@ declare -a FILES=()
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/release-prod.sh --message "commit message" [--scope full|backend] [--all] [--no-smoke] [--] [paths...]
+  scripts/release-prod.sh --message "commit message" [--scope auto|frontend|backend|full] [--all] [--no-smoke] [--] [paths...]
 
 Examples:
   scripts/release-prod.sh --message "Improve Zerodha onboarding" frontend/app/console/zerodha/page.tsx frontend/app/zerodha/callback/page.tsx
@@ -45,8 +45,11 @@ Examples:
 Behavior:
   - Stages the provided paths, or all files with --all, or uses already-staged files.
   - Creates a commit and pushes to origin/main by default.
-  - Dispatches the production deploy workflow with the chosen scope.
-  - Waits for the deploy to finish and optionally runs smoke checks.
+  - Lets the push workflow detect the production deployment scope.
+  - An explicit --scope adds a commit directive that is safely combined with
+    detected changes, so it can broaden but never mask the required scope.
+  - Waits for that push-triggered deploy to finish and optionally runs smoke checks.
+  - Manual workflow dispatch still supports auto, frontend, backend, and full.
 EOF
 }
 
@@ -146,7 +149,7 @@ if [[ -z "$MESSAGE" ]]; then
 fi
 
 case "$DEPLOY_SCOPE" in
-  full|backend)
+  auto|frontend|full|backend)
     ;;
   *)
     echo "Invalid deploy scope: $DEPLOY_SCOPE" >&2
@@ -190,20 +193,22 @@ fi
 REPO_SLUG="$(derive_repo_slug)"
 
 echo "==> Commit staged changes"
-git commit -m "$MESSAGE"
+if [[ "$DEPLOY_SCOPE" == "auto" ]]; then
+  git commit -m "$MESSAGE"
+else
+  git commit -m "$MESSAGE" -m "[deploy-scope:$DEPLOY_SCOPE]"
+fi
 
 HEAD_SHA="$(git rev-parse HEAD)"
 
 echo "==> Push commit $HEAD_SHA to $RELEASE_REMOTE/$RELEASE_BRANCH"
 git push "$RELEASE_REMOTE" "$RELEASE_BRANCH"
 
-echo "==> Dispatch production deploy workflow ($DEPLOY_SCOPE)"
-gh workflow run "$DEPLOY_WORKFLOW" \
-  --repo "$REPO_SLUG" \
-  --ref "$RELEASE_BRANCH" \
-  -f "scope=$DEPLOY_SCOPE"
+if [[ "$DEPLOY_SCOPE" != "auto" ]]; then
+  echo "==> Requested deployment scope: $DEPLOY_SCOPE (combined with detected changes)"
+fi
 
-echo "==> Waiting for workflow run to appear"
+echo "==> Waiting for push-triggered deployment workflow to appear"
 RUN_ID=""
 START_TIME="$(date +%s)"
 
@@ -221,7 +226,7 @@ while [[ -z "$RUN_ID" ]]; do
       --branch "$RELEASE_BRANCH" \
       --limit 20 \
       --json databaseId,event,headSha \
-      --jq "map(select(.headSha == \"$HEAD_SHA\" and .event == \"workflow_dispatch\"))[0].databaseId"
+      --jq "map(select(.headSha == \"$HEAD_SHA\" and .event == \"push\"))[0].databaseId"
   )"
 
   if [[ -z "$RUN_ID" || "$RUN_ID" == "null" ]]; then

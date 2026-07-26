@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+/.next-candidate/
+/.next-active-dir
+/.next-active-dir.next
+/.frontend-stage.*
 /out/
 
 # production

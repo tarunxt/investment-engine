@@ -1,9 +1,6 @@
 name: Recover Production Disk
 
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/production-disk-recovery.yml']
   workflow_dispatch:
     inputs:
       deploy_after_cleanup:
@@ -26,7 +23,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-deploy
+  group: production-recovery
   cancel-in-progress: false
 
 jobs:
@@ -41,6 +38,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
           timeout: 5400s
           command_timeout: 5400s
           script: |
@@ -54,6 +52,21 @@ jobs:
             APP_USER='${{ vars.EC2_APP_USER || 'investor' }}'
             [[ -d "$APP_ROOT/.git" ]] || APP_ROOT='/srv/investment-engine'
             id "$APP_USER" >/dev/null 2>&1 || APP_USER='investment-engine'
+            DEPLOY_LOCK_FILE='/run/investor-production-deploy.lock'
+
+            command -v flock >/dev/null
+            sudo touch "$DEPLOY_LOCK_FILE"
+            sudo chown "$(id -u):$(id -g)" "$DEPLOY_LOCK_FILE"
+            exec 9>"$DEPLOY_LOCK_FILE"
+            if [[ "$EVENT" == schedule ]]; then
+              if ! flock -n 9; then
+                echo '==> A production deployment is active; skipping scheduled recovery.'
+                exit 0
+              fi
+            elif ! flock -w 900 9; then
+              echo 'Timed out waiting for the production host deployment lock.' >&2
+              exit 1
+            fi
 
             TARGET_FREE_KB=4194304
             REQUIRED_FREE_KB=2097152
@@ -274,7 +287,7 @@ jobs:
             report
 
             deploy=false
-            [[ "$EVENT" == push || "$EVENT" == workflow_run ]] && deploy=true
+            [[ "$EVENT" == workflow_run ]] && deploy=true
             [[ "$EVENT" == workflow_dispatch && "$DEPLOY_INPUT" == true ]] && deploy=true
             [[ "$deploy" == true ]] || exit 0
             (( final >= REQUIRED_FREE_KB )) || {
@@ -285,6 +298,22 @@ jobs:
             sudo -u "$APP_USER" -H rm -f "$APP_ROOT/.git/index.lock"
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin main
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" reset --hard origin/main
-            SKIP_GIT_SYNC=true APP_ROOT="$APP_ROOT" APP_USER="$APP_USER" \
-              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full
+            EXPECTED_FRONTEND_SHA="$(
+              sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD
+            )"
+            BUILD_TIMESTAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            sudo -u "$APP_USER" -H node \
+              "$APP_ROOT/scripts/stamp-frontend-build.mjs" \
+              "$APP_ROOT/frontend/lib/generatedBuildInfo.ts" \
+              "$EXPECTED_FRONTEND_SHA" \
+              "$BUILD_TIMESTAMP"
+            # This guarded recovery workflow is the only supported exception to
+            # CI-built frontend artifacts because it may need to reconstruct a
+            # runtime after production disk repair.
+            SKIP_GIT_SYNC=true \
+            ALLOW_ON_HOST_FRONTEND_BUILD=true \
+            EXPECTED_FRONTEND_SHA="$EXPECTED_FRONTEND_SHA" \
+            APP_ROOT="$APP_ROOT" \
+            APP_USER="$APP_USER" \
+              bash "$APP_ROOT/deploy/no-docker/redeploy.sh" full-stack
             echo "==> Deployment complete; free: $(free_kb) KiB"

@@ -52,6 +52,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // GitHub Actions packages the traced standalone runtime so production never
+  // needs to install frontend dependencies or compile Next.js on EC2.
+  output:
+    process.env.NEXT_STANDALONE_BUILD === "true" ? "standalone" : undefined,
   // Production builds are assembled in the inactive slot and promoted only
   // after a successful build. The launcher reads the selected build directory
   // from the deployment pointer, so a failed build never removes live assets.
