@@ -13,6 +13,18 @@ run. It combines:
 The audit system is read-oriented. It must never alter live-trading behavior or
 recompute business decisions on page load.
 
+### Operator Stage 3 retries
+
+The Stage 3 worker card exposes an explicit retry control while Stage 3 is working.
+That action cancels the current run, preserves the scheduler's enabled state, and
+queues a new Stage 3 pass using the saved, complete Stage 2 handoff. Both Stage 3
+steps (Event Exits followed by Invest planned orders) execute again. The replacement
+run remains a separate immutable audit subject: its request context records
+`candidate_rows_prefiltered`, `reuse_saved_llm_outputs`, the Stage 2 candidate rows,
+and the source snapshot/run identifier. The cancelled run and its already persisted
+decisions or order intents are not rewritten, so historical snapshots and remote
+order reconciliation remain backward compatible.
+
 ## Architecture and Lifecycle
 
 1. A Bullpen auto-live run is created through the existing auto-live pipeline.

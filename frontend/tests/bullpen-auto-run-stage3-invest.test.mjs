@@ -6,6 +6,19 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
+test("Stage 3 working status exposes a retry that reuses Stage 2 output for both steps", () => {
+  const source = readFileSync(
+    new URL("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /aria-label="Retry Stage 3 from saved Stage 2 output"/);
+  assert.match(source, /handleStage3Retry\(\s*effectiveInvestOnlyRequest/);
+  assert.match(source, /await apiService\.stopBullpenAutoLive\(\)/);
+  assert.match(source, /await apiService\.runBullpenAutoLiveOnce\(request\)/);
+  assert.match(source, /Event Exits and Invest planned orders will both run again/);
+});
+
 function transpileModuleSource(source, fileName) {
   return ts.transpileModule(source, {
     compilerOptions: {

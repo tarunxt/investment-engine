@@ -231,6 +231,7 @@ type ActionState =
   | "pause-run"
   | "resume-run"
   | "kill-run"
+  | "retry-stage3"
   | null;
 type ErrorState = {
   message: string;
@@ -10491,6 +10492,39 @@ export function BullpenAutoRunScheduleCard({
     }
   }
 
+  async function handleStage3Retry(
+    request: BullpenAutoLiveRunOnceRequest,
+    schedulerWasEnabled: boolean,
+  ) {
+    if (!claimAction("retry-stage3")) return;
+    setNotice(null);
+    setError(null);
+
+    try {
+      // Cancel first so the backend's single-active-run guard cannot turn the
+      // replacement into a skipped run. Restore the scheduler before queueing.
+      await apiService.stopBullpenAutoLive();
+      if (schedulerWasEnabled) {
+        await apiService.startBullpenAutoLive();
+      }
+
+      const run = await apiService.runBullpenAutoLiveOnce(request);
+      setPendingRunId(run.id);
+      setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      setNotice(
+        "Stage 3 retry queued from the saved Stage 2 output. Event Exits and Invest planned orders will both run again.",
+      );
+      void refreshPersistedAutoRunStatus();
+      void loadSummary({ preserveLoading: true, nextPendingRunId: run.id });
+    } catch (nextError) {
+      setError(normalizeError(nextError));
+      void refreshPersistedAutoRunStatus();
+      void loadSummary({ preserveLoading: true });
+    } finally {
+      releaseClaimedAction("retry-stage3");
+    }
+  }
+
   function resetActiveAutoRunUi() {
     if (startNowProgressTimeoutRef.current !== null) {
       window.clearTimeout(startNowProgressTimeoutRef.current);
@@ -11861,28 +11895,57 @@ export function BullpenAutoRunScheduleCard({
                       ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-2">
-                      {stageTwoBypassed ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setStageTwoBypassDialog({
-                              reason: STAGE_TWO_BYPASS_REASON,
-                              steps: STAGE_TWO_BYPASS_RECTIFICATION_STEPS,
-                            })
-                          }
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 ${toneClasses.badge}`}
-                          aria-label="Open Stage 2 bypass reason"
-                          title="Stage 2 was bypassed for this Stage 3 run"
-                        >
-                          {stageStatusLabel}
-                        </button>
-                      ) : (
-                        <span
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
-                        >
-                          {stageStatusLabel}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {stageTwoBypassed ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setStageTwoBypassDialog({
+                                reason: STAGE_TWO_BYPASS_REASON,
+                                steps: STAGE_TWO_BYPASS_RECTIFICATION_STEPS,
+                              })
+                            }
+                            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] transition hover:-translate-y-0.5 hover:bg-white focus:outline-none focus:ring-2 focus:ring-sky-300 ${toneClasses.badge}`}
+                            aria-label="Open Stage 2 bypass reason"
+                            title="Stage 2 was bypassed for this Stage 3 run"
+                          >
+                            {stageStatusLabel}
+                          </button>
+                        ) : (
+                          <span
+                            className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}
+                          >
+                            {stageStatusLabel}
+                          </span>
+                        )}
+                        {stage.key === "invest" && stageStatusLabel === "Working" ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (effectiveInvestOnlyRequest) {
+                                void handleStage3Retry(
+                                  effectiveInvestOnlyRequest,
+                                  autoRunActive,
+                                );
+                              }
+                            }}
+                            disabled={!effectiveInvestOnlyRequest || action !== null}
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-full border bg-white/80 transition focus:outline-none focus:ring-2 focus:ring-amber-300 dark:bg-slate-950/80 ${
+                              !effectiveInvestOnlyRequest || action !== null
+                                ? "cursor-not-allowed opacity-45"
+                                : "hover:-translate-y-0.5 hover:bg-white dark:hover:bg-slate-900"
+                            } ${toneClasses.badge}`}
+                            aria-label="Retry Stage 3 from saved Stage 2 output"
+                            title="Retry both Stage 3 steps from the saved Stage 2 output"
+                          >
+                            <RefreshCw
+                              className={`h-3.5 w-3.5 ${
+                                action === "retry-stage3" ? "animate-spin" : ""
+                              }`}
+                            />
+                          </button>
+                        ) : null}
+                      </div>
                       <span
                         className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}
                         aria-label={`${stage.title} time taken`}
