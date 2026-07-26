@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -14,6 +17,12 @@ POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_PAGE_SIZE = 500
 SCAN_LIMIT = 1_500
+DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
+
+_SHARED_GAMMA_CLIENT: ContextVar[httpx.AsyncClient | None] = ContextVar(
+    "polymarket_shared_gamma_client",
+    default=None,
+)
 
 SPORTS_KEYWORDS = (
     "sports",
@@ -628,20 +637,128 @@ async def _fetch_gamma_page(
     return payload if isinstance(payload, list) else []
 
 
-async def fetch_market_by_slug(slug: str) -> ScannedMarket | None:
+@asynccontextmanager
+async def shared_gamma_market_client(
+    *,
+    timeout_seconds: float = DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS,
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Reuse one bounded HTTP client across a related group of Gamma lookups.
+
+    The context-local binding preserves the existing lookup function
+    signatures, including test and adapter monkeypatches, while ensuring a
+    portfolio enrichment does not create one connection pool per position.
+    """
+
+    existing_client = _SHARED_GAMMA_CLIENT.get()
+    if existing_client is not None:
+        yield existing_client
+        return
+
     async with httpx.AsyncClient(
-        timeout=20,
+        timeout=max(0.1, float(timeout_seconds)),
         headers=POLYMARKET_HTTP_HEADERS,
     ) as client:
-        response = await client.get(POLYMARKET_GAMMA_MARKETS_URL, params={"slug": slug})
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, list):
-            return None
-        for row in payload:
-            if isinstance(row, dict):
-                return _normalize_market(row, force_include=True)
+        token = _SHARED_GAMMA_CLIENT.set(client)
+        try:
+            yield client
+        finally:
+            _SHARED_GAMMA_CLIENT.reset(token)
+
+
+async def _fetch_market_by_slug_with_client(
+    client: httpx.AsyncClient,
+    slug: str,
+) -> ScannedMarket | None:
+    response = await client.get(
+        POLYMARKET_GAMMA_MARKETS_URL,
+        params={"slug": slug},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return None
+    requested_slug = slug.strip().lower()
+    for row in payload:
+        if not isinstance(row, dict):
+            continue
+        candidate_slug = row.get("slug")
+        if (
+            not isinstance(candidate_slug, str)
+            or candidate_slug.strip().lower() != requested_slug
+        ):
+            continue
+        normalized = _normalize_market(row, force_include=True)
+        if normalized is not None:
+            return normalized
     return None
+
+
+async def fetch_market_by_slug(slug: str) -> ScannedMarket | None:
+    shared_client = _SHARED_GAMMA_CLIENT.get()
+    if shared_client is not None:
+        return await _fetch_market_by_slug_with_client(shared_client, slug)
+    async with shared_gamma_market_client() as client:
+        return await _fetch_market_by_slug_with_client(client, slug)
+
+
+async def fetch_market_by_exact_identity(
+    *,
+    market_id: str | None,
+    condition_id: str | None,
+) -> ScannedMarket | None:
+    """Resolve legacy wallet rows that do not carry a market slug."""
+
+    query_plan: list[tuple[str, str, str]] = []
+    if isinstance(condition_id, str) and condition_id.strip():
+        query_plan.append(
+            ("conditionId", condition_id.strip(), "condition_id")
+        )
+    if isinstance(market_id, str) and market_id.strip():
+        query_plan.append(("id", market_id.strip(), "market_id"))
+    if not query_plan:
+        return None
+
+    async def fetch_with_client(
+        client: httpx.AsyncClient,
+    ) -> ScannedMarket | None:
+        for parameter, requested_value, match_kind in query_plan:
+            response = await client.get(
+                POLYMARKET_GAMMA_MARKETS_URL,
+                params={parameter: requested_value},
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                continue
+            requested_normalized = requested_value.strip().lower()
+            for row in payload:
+                if not isinstance(row, dict):
+                    continue
+                if match_kind == "condition_id":
+                    candidate = row.get("conditionId") or row.get(
+                        "condition_id"
+                    )
+                else:
+                    candidate = (
+                        row.get("id")
+                        or row.get("marketId")
+                        or row.get("market_id")
+                    )
+                if (
+                    str(candidate or "").strip().lower()
+                    != requested_normalized
+                ):
+                    continue
+                normalized = _normalize_market(row, force_include=True)
+                if normalized is not None:
+                    return normalized
+        return None
+
+    shared_client = _SHARED_GAMMA_CLIENT.get()
+    if shared_client is not None:
+        return await fetch_with_client(shared_client)
+    async with shared_gamma_market_client() as client:
+        return await fetch_with_client(client)
 
 
 async def scan_candidate_markets(

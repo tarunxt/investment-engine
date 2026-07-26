@@ -386,7 +386,9 @@ async def test_durable_submission_persists_selected_path_and_matched_fill(monkey
         )
     )
 
-    assert result.status == "FILLED"
+    assert result.status == "SETTLEMENT_PENDING"
+    assert result.retryable is True
+    assert result.next_attempt_at is not None
     assert result.execution_path == "market_sell_explicit"
     assert result.current_limit_price_cents == 1
     assert result.filled_shares == 12.345678

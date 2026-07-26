@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the Cred-X Bullpen wallet healthcheck every five minutes
+Description=Write the Cred-X passive Bullpen health report every five minutes
 
 [Timer]
 OnBootSec=2min

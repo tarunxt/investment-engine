@@ -1,6 +1,8 @@
 export type BullpenActivePositionView = {
   key: string;
   marketId: string;
+  marketSlug: string | null;
+  eventSlug: string | null;
   slug: string | null;
   conditionId: string | null;
   marketTitle: string;
@@ -89,6 +91,7 @@ export type BullpenLiveHealthClassification =
 
 export type BullpenPositionsSource =
   | "live-cli"
+  | "redis-cache"
   | "last-successful-live-snapshot"
   | "tracked-positions";
 
@@ -108,12 +111,33 @@ export type BullpenLiveHealth = {
   actionNeeded: string | null;
 };
 
+export type BullpenPositionsSnapshotLineage = {
+  accountIdentity: string | null;
+  credentialArtifact: {
+    inode: number | null;
+    mtimeNs: number | null;
+    size: number | null;
+  };
+  positionClassifierVersion: number | null;
+  source: string | null;
+  freshnessState: string | null;
+};
+
+export type BullpenPositionsLineageMismatchField =
+  | "lineage"
+  | "account-identity"
+  | "credential-inode"
+  | "credential-mtime"
+  | "credential-size"
+  | "position-classifier";
+
 export type BullpenLiveSnapshot = {
   positions: BullpenActivePositionView[];
   summary: BullpenPositionsSummary;
   diagnostics: BullpenPositionsDiagnostics;
   fetchedAt: string;
-  source: "live-cli";
+  source: "live-cli" | "redis-cache";
+  lineage?: BullpenPositionsSnapshotLineage | null;
 };
 
 export type BullpenPositionsFallback = {
@@ -131,6 +155,7 @@ export type BullpenPositionsResponse = {
   positionsSource?: BullpenPositionsSource | null;
   health?: BullpenLiveHealth | null;
   lastSuccessfulLiveSnapshot?: BullpenLiveSnapshot | null;
+  lineage?: BullpenPositionsSnapshotLineage | null;
   fallback?: BullpenPositionsFallback | null;
   error?: string;
 };
@@ -160,6 +185,8 @@ export type BullpenCliPosition = {
   isClaimable?: unknown;
   isRedeemable?: unknown;
   market?: unknown;
+  marketSlug?: unknown;
+  market_slug?: unknown;
   outcome?: unknown;
   pnlPercent?: unknown;
   pnl_percent?: unknown;
@@ -194,7 +221,11 @@ export type BullpenTrackedPositionInput = {
 };
 
 export type BullpenTrackedMarketRefresh = {
+  conditionId?: string | null;
+  marketSlug?: string | null;
+  eventSlug?: string | null;
   slug?: string | null;
+  authoritativeMarketOpen?: boolean | null;
   yesOdds?: number | null;
   noOdds?: number | null;
   bestBidPrice?: number | null;
@@ -501,7 +532,7 @@ function classifyBullpenPosition({
   claimableFlag,
   upstreamRedeemable,
   resolutionStatus,
-  authoritativeMarketOpen = false,
+  authoritativeMarketOpen = null,
   nowMs = Date.now(),
 }: {
   shares: number;
@@ -513,7 +544,7 @@ function classifyBullpenPosition({
   claimableFlag: boolean;
   upstreamRedeemable: boolean;
   resolutionStatus: string | null;
-  authoritativeMarketOpen?: boolean;
+  authoritativeMarketOpen?: boolean | null;
   nowMs?: number;
 }): {
   economicClassification: BullpenPositionEconomicClassification;
@@ -525,22 +556,23 @@ function classifyBullpenPosition({
 } {
   const pastCloseTime = hasPastCloseTime(closeTime, nowMs);
   const normalizedResolutionStatus = resolutionStatus?.trim().toLowerCase() || null;
+  const currentMarketIsOpen = authoritativeMarketOpen === true;
+  const currentMarketIsClosed = authoritativeMarketOpen === false;
   const resolvedByStatus =
     normalizedResolutionStatus !== null &&
     /won|resolved|closed|expired|settled|redeemed|claimable|redeemable|final/i.test(
       normalizedResolutionStatus,
     );
-  const openByStatus =
-    normalizedResolutionStatus !== null &&
-    /\bopen|active|live|trading|unresolved|pending\b/i.test(
-      normalizedResolutionStatus,
-    );
+  // Keep this in lockstep with backend classifier v4. A fresh authoritative
+  // open-market match is stronger than stale wallet redeemability or payout
+  // hints. Bullpen has emitted redeemable flags for still-open child markets.
   const positivePayoutVerified =
-    isPositiveValue(expectedPayoutUsd) ||
-    isPositiveValue(payoutValueUsd) ||
-    ((pastCloseTime === true || resolvedByStatus || claimableFlag || upstreamRedeemable) &&
-      isPositiveValue(currentValue));
-  const closeTimeIsPast = pastCloseTime === true && !authoritativeMarketOpen;
+    !currentMarketIsOpen &&
+    (isPositiveValue(expectedPayoutUsd) ||
+      isPositiveValue(payoutValueUsd) ||
+      ((pastCloseTime === true || resolvedByStatus) &&
+        isPositiveValue(currentValue)));
+  const closeTimeIsPast = pastCloseTime === true && !currentMarketIsOpen;
   const redeemabilityExists = claimableFlag || upstreamRedeemable;
 
   if (shares <= VALUE_EPSILON && !positivePayoutVerified) {
@@ -621,7 +653,7 @@ function classifyBullpenPosition({
     };
   }
 
-  if (resolvedByStatus && !authoritativeMarketOpen) {
+  if (resolvedByStatus && !currentMarketIsOpen) {
     return {
       economicClassification: "stale_or_unknown",
       classificationReason:
@@ -633,10 +665,24 @@ function classifyBullpenPosition({
     };
   }
 
+  if (currentMarketIsClosed) {
+    return {
+      economicClassification: "stale_or_unknown",
+      classificationReason:
+        "An authoritative market lookup confirmed that this market is not open, but no verified settlement payout is available.",
+      isClaimable: false,
+      claimableValue: null,
+      claimableSignal: claimableFlag,
+      upstreamRedeemable,
+    };
+  }
+
   return {
     economicClassification: "active",
     classificationReason:
-      "This row still looks like an economically active Bullpen position.",
+      currentMarketIsOpen
+        ? "An authoritative live market lookup confirmed that this position is still open."
+        : "This row still looks like an economically active Bullpen position.",
     isClaimable: false,
     claimableValue: null,
     claimableSignal: claimableFlag,
@@ -659,7 +705,7 @@ function applyBullpenPositionClassification(
     rawUpstreamRedeemable?: boolean;
     claimableValue: number | null;
     returnsPerDay?: number | null;
-    authoritativeMarketOpen?: boolean;
+    authoritativeMarketOpen?: boolean | null;
   },
 ) {
   const classification = classifyBullpenPosition({
@@ -672,7 +718,7 @@ function applyBullpenPositionClassification(
     claimableFlag: Boolean(position.rawClaimableFlag),
     upstreamRedeemable: Boolean(position.rawUpstreamRedeemable),
     resolutionStatus: position.resolutionStatus,
-    authoritativeMarketOpen: Boolean(position.authoritativeMarketOpen),
+    authoritativeMarketOpen: position.authoritativeMarketOpen,
   });
   const basePosition = { ...position };
   delete basePosition.rawClaimableFlag;
@@ -703,6 +749,7 @@ function isBullpenCliPositionRecord(value: unknown): value is BullpenCliPosition
   const record = value as Record<string, unknown>;
   const hasIdentifier = Boolean(
     readString(record.slug) ||
+      readString(record.market_slug ?? record.marketSlug) ||
       readString(record.condition_id ?? record.conditionId) ||
       readString(record.market) ||
       readString(record.title) ||
@@ -774,6 +821,7 @@ function buildBullpenCliAliases(position: BullpenCliPosition) {
   const market = readString(position.market) || readString(position.title);
   const aliases = [
     readString(position.slug),
+    readString(position.market_slug ?? position.marketSlug),
     readString(position.condition_id ?? position.conditionId),
     market,
   ].filter((value): value is string => Boolean(value));
@@ -805,7 +853,20 @@ function mergeBullpenCliPosition(
 
   return {
     ...existing,
-    slug: readString(existing.slug) ?? readString(incoming.slug) ?? existing.slug ?? incoming.slug,
+    slug:
+      readString(existing.slug) ??
+      readString(existing.market_slug ?? existing.marketSlug) ??
+      readString(incoming.slug) ??
+      readString(incoming.market_slug ?? incoming.marketSlug) ??
+      existing.slug ??
+      incoming.slug,
+    market_slug:
+      readString(existing.market_slug ?? existing.marketSlug) ??
+      readString(incoming.market_slug ?? incoming.marketSlug) ??
+      existing.market_slug ??
+      existing.marketSlug ??
+      incoming.market_slug ??
+      incoming.marketSlug,
     condition_id:
       readString(existing.condition_id ?? existing.conditionId) ??
       readString(incoming.condition_id ?? incoming.conditionId) ??
@@ -912,8 +973,11 @@ export function normalizeBullpenPosition(
   buildMarketUrl: (eventSlug: string | null) => string | null,
 ): BullpenActivePositionView {
   const rawConditionId = readString(value.condition_id ?? value.conditionId);
+  const marketSlug =
+    readString(value.market_slug ?? value.marketSlug) ??
+    readString(value.slug);
   const marketId =
-    readString(value.slug) ||
+    marketSlug ||
     rawConditionId ||
     readString(value.market) ||
     "unknown-market";
@@ -965,6 +1029,11 @@ export function normalizeBullpenPosition(
   return applyBullpenPositionClassification({
     key: `${marketId}::${outcome}`,
     marketId,
+    marketSlug,
+    eventSlug,
+    // Preserve the legacy raw-wallet alias while retaining both canonical
+    // identities explicitly. Successful market enrichment may update this
+    // compatibility field to the matched market slug, as it did previously.
     slug: eventSlug,
     conditionId,
     marketTitle,
@@ -999,6 +1068,8 @@ export function normalizeBullpenPosition(
 function buildBullpenPositionAliases(position: BullpenActivePositionView) {
   const aliases = [
     position.marketId,
+    position.marketSlug,
+    position.eventSlug,
     position.slug,
     position.conditionId,
     position.marketTitle,
@@ -1048,6 +1119,8 @@ function mergeBullpenPositionViews(
   return applyBullpenPositionClassification({
     ...existing,
     key: existing.key,
+    marketSlug: existing.marketSlug ?? incoming.marketSlug,
+    eventSlug: existing.eventSlug ?? incoming.eventSlug,
     slug: existing.slug ?? incoming.slug,
     conditionId: existing.conditionId ?? incoming.conditionId,
     marketTitle:
@@ -1141,7 +1214,17 @@ export function applyBullpenPositionMarketData(
 
   return applyBullpenPositionClassification({
     ...position,
-    slug: marketData.slug ?? position.slug,
+    conditionId: marketData.conditionId ?? position.conditionId,
+    marketSlug:
+      marketData.marketSlug ?? marketData.slug ?? position.marketSlug,
+    eventSlug: marketData.eventSlug ?? position.eventSlug,
+    slug:
+      marketData.marketSlug ??
+      marketData.slug ??
+      position.marketSlug ??
+      position.slug ??
+      marketData.eventSlug ??
+      position.eventSlug,
     yesOdds,
     noOdds,
     bestBidPrice: marketData.bestBidPrice ?? position.bestBidPrice,
@@ -1153,12 +1236,7 @@ export function applyBullpenPositionMarketData(
     marketUrl: marketData.marketUrl ?? position.marketUrl,
     rawClaimableFlag: position.claimableSignal,
     rawUpstreamRedeemable: position.upstreamRedeemable,
-    authoritativeMarketOpen: Boolean(
-      marketData.slug ||
-        marketData.marketUrl ||
-        marketData.yesOdds !== undefined ||
-        marketData.noOdds !== undefined,
-    ),
+    authoritativeMarketOpen: marketData.authoritativeMarketOpen,
     rules: marketData.rules ?? position.rules,
     marketContext: marketData.marketContext ?? position.marketContext,
     resolutionSource:
@@ -1180,7 +1258,13 @@ export function buildTrackedBullpenPositionViews(
       const basePosition = {
         key: position.key,
         marketId: position.market_id,
-        slug: marketUpdate?.slug ?? null,
+        marketSlug: marketUpdate?.marketSlug ?? marketUpdate?.slug ?? null,
+        eventSlug: marketUpdate?.eventSlug ?? null,
+        slug:
+          marketUpdate?.marketSlug ??
+          marketUpdate?.slug ??
+          marketUpdate?.eventSlug ??
+          null,
         conditionId: null,
         marketTitle: position.market_title,
         outcome: position.outcome,
@@ -1215,12 +1299,29 @@ export function buildTrackedBullpenPositionViews(
     });
 }
 
-function sumCurrentPositionValue(positions: BullpenActivePositionView[]) {
+export function sumCurrentPositionValue(positions: BullpenActivePositionView[]) {
   return round(
     positions.reduce(
       (total, position) => total + (position.currentValue ?? position.costBasis),
       0,
     ),
+    2,
+  );
+}
+
+export function sumBullpenPortfolioPositionValue(
+  positions: BullpenActivePositionView[],
+) {
+  return round(
+    positions.reduce((total, position) => {
+      const value = isClaimableBullpenPosition(position)
+        ? position.claimableValue ??
+          position.expectedPayoutUsd ??
+          position.currentValue ??
+          position.costBasis
+        : position.currentValue ?? position.costBasis;
+      return total + Math.max(0, value);
+    }, 0),
     2,
   );
 }
@@ -1386,6 +1487,242 @@ export function summarizeBullpenPositions(
       readNumber(summary?.unrealized_pnl) ?? sumUnrealizedPnl(positions),
     walletValue: readNumber(summary?.wallet_value),
   };
+}
+
+export function isUsableBullpenPositionsSnapshot({
+  positionsSource,
+  liveAvailable,
+}: {
+  positionsSource: BullpenPositionsSource | null | undefined;
+  liveAvailable: boolean | null | undefined;
+}) {
+  return Boolean(
+    liveAvailable ||
+      positionsSource === "live-cli" ||
+      positionsSource === "redis-cache" ||
+      positionsSource === "last-successful-live-snapshot",
+  );
+}
+
+function normalizeLineageAccountIdentity(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || null;
+}
+
+function hasKnownLineageValue(
+  value: number | string | null | undefined,
+): value is number | string {
+  return (
+    (typeof value === "number" && Number.isFinite(value)) ||
+    (typeof value === "string" && Boolean(value.trim()))
+  );
+}
+
+/**
+ * Detects whether a newly fetched wallet snapshot can safely replace the
+ * verified snapshot already displayed in the tab. Source and freshness are
+ * intentionally excluded: live-cli/redis-cache and fresh/stale are delivery
+ * properties, while account, credential artifact and classifier identify the
+ * evidence lineage itself.
+ *
+ * A missing incoming value is incompatible when the verified baseline knew
+ * that value. This prevents a lineage downgrade from silently bypassing the
+ * comparison while still allowing legacy snapshots with no lineage to be
+ * upgraded by the first fully identified response.
+ */
+export function getBullpenPositionsLineageMismatchFields({
+  current,
+  incoming,
+}: {
+  current: BullpenPositionsSnapshotLineage | null | undefined;
+  incoming: BullpenPositionsSnapshotLineage | null | undefined;
+}): BullpenPositionsLineageMismatchField[] {
+  if (!current) return [];
+  if (!incoming) return ["lineage"];
+
+  const mismatches: BullpenPositionsLineageMismatchField[] = [];
+  const currentAccountIdentity = normalizeLineageAccountIdentity(
+    current.accountIdentity,
+  );
+  const incomingAccountIdentity = normalizeLineageAccountIdentity(
+    incoming.accountIdentity,
+  );
+  if (
+    currentAccountIdentity &&
+    currentAccountIdentity !== incomingAccountIdentity
+  ) {
+    mismatches.push("account-identity");
+  }
+
+  const credentialComparisons = [
+    [
+      "credential-inode",
+      current.credentialArtifact?.inode,
+      incoming.credentialArtifact?.inode,
+    ],
+    [
+      "credential-mtime",
+      current.credentialArtifact?.mtimeNs,
+      incoming.credentialArtifact?.mtimeNs,
+    ],
+    [
+      "credential-size",
+      current.credentialArtifact?.size,
+      incoming.credentialArtifact?.size,
+    ],
+  ] as const;
+  for (const [field, currentValue, incomingValue] of credentialComparisons) {
+    if (
+      hasKnownLineageValue(currentValue) &&
+      currentValue !== incomingValue
+    ) {
+      mismatches.push(field);
+    }
+  }
+
+  if (
+    hasKnownLineageValue(current.positionClassifierVersion) &&
+    current.positionClassifierVersion !== incoming.positionClassifierVersion
+  ) {
+    mismatches.push("position-classifier");
+  }
+
+  return mismatches;
+}
+
+export function canAutoRebaselineBullpenPositionsLineage({
+  current,
+  incoming,
+  incomingIsFreshLive,
+}: {
+  current: BullpenPositionsSnapshotLineage | null | undefined;
+  incoming: BullpenPositionsSnapshotLineage | null | undefined;
+  incomingIsFreshLive: boolean;
+}) {
+  if (!incomingIsFreshLive || !current || !incoming) return false;
+  const currentAccountIdentity = normalizeLineageAccountIdentity(
+    current.accountIdentity,
+  );
+  const incomingAccountIdentity = normalizeLineageAccountIdentity(
+    incoming.accountIdentity,
+  );
+  const incomingFreshness = incoming.freshnessState?.trim().toLowerCase();
+  const incomingSource = incoming.source?.trim().toLowerCase();
+  const preservesKnownLineage = (
+    currentValue: number | string | null | undefined,
+    incomingValue: number | string | null | undefined,
+  ) => !hasKnownLineageValue(currentValue) || hasKnownLineageValue(incomingValue);
+
+  return Boolean(
+    currentAccountIdentity &&
+      incomingAccountIdentity &&
+      currentAccountIdentity === incomingAccountIdentity &&
+      incomingFreshness === "fresh" &&
+      incomingSource === "live-cli" &&
+      preservesKnownLineage(
+        current.credentialArtifact?.inode,
+        incoming.credentialArtifact?.inode,
+      ) &&
+      preservesKnownLineage(
+        current.credentialArtifact?.mtimeNs,
+        incoming.credentialArtifact?.mtimeNs,
+      ) &&
+      preservesKnownLineage(
+        current.credentialArtifact?.size,
+        incoming.credentialArtifact?.size,
+      ) &&
+      preservesKnownLineage(
+        current.positionClassifierVersion,
+        incoming.positionClassifierVersion,
+      ),
+  );
+}
+
+export function shouldPreserveBullpenPositionsOnRefresh({
+  incomingPositions,
+  incomingSource,
+  liveAvailable,
+  currentPositions,
+  currentSource,
+  lastSuccessfulLiveSnapshot,
+}: {
+  incomingPositions: BullpenActivePositionView[];
+  incomingSource: BullpenPositionsSource | null | undefined;
+  liveAvailable: boolean | null | undefined;
+  currentPositions: BullpenActivePositionView[];
+  currentSource: BullpenPositionsSource | null | undefined;
+  lastSuccessfulLiveSnapshot: BullpenLiveSnapshot | null | undefined;
+}) {
+  const hasVerifiedCurrentSnapshot =
+    currentSource === "live-cli" ||
+    currentSource === "last-successful-live-snapshot";
+  return Boolean(
+    !liveAvailable &&
+      incomingSource === "tracked-positions" &&
+      (lastSuccessfulLiveSnapshot ||
+        hasVerifiedCurrentSnapshot ||
+        (incomingPositions.length === 0 && currentPositions.length > 0)),
+  );
+}
+
+export function resolveBullpenPreferredPortfolioValue(
+  values: Array<number | null | undefined>,
+) {
+  // Callers provide values in source-authority order. A verified zero is a
+  // real value after spending cash or closing the final position; searching
+  // for any later positive value would resurrect stale portfolio state.
+  const knownValue = values.find(
+    (value): value is number =>
+      typeof value === "number" && Number.isFinite(value),
+  );
+  return knownValue === undefined ? null : round(knownValue, 2);
+}
+
+/**
+ * Reconciles independent wallet and position reads without letting a known
+ * zero from one degraded source mask a verified non-zero account or cash
+ * value. Stage 1 callers may prefer their worker-verified component sum.
+ */
+export function resolveBullpenTotalPortfolioValue({
+  walletValue,
+  accountValue,
+  summaryTotalValue,
+  cashBalance,
+  positionsValue,
+  hasPositionsSnapshot,
+  preferVerifiedComponents = false,
+}: {
+  walletValue: number | null | undefined;
+  accountValue: number | null | undefined;
+  summaryTotalValue: number | null | undefined;
+  cashBalance: number | null | undefined;
+  positionsValue: number | null | undefined;
+  hasPositionsSnapshot: boolean;
+  preferVerifiedComponents?: boolean;
+}) {
+  const hasKnownCash =
+    typeof cashBalance === "number" && Number.isFinite(cashBalance);
+  const hasKnownPositionsValue =
+    typeof positionsValue === "number" && Number.isFinite(positionsValue);
+  const componentTotal =
+    hasPositionsSnapshot &&
+    hasKnownCash &&
+    hasKnownPositionsValue
+      ? round((cashBalance ?? 0) + (positionsValue ?? 0), 2)
+      : null;
+
+  if ((preferVerifiedComponents || hasPositionsSnapshot) && componentTotal !== null) {
+    return componentTotal;
+  }
+
+  return resolveBullpenPreferredPortfolioValue([
+    walletValue,
+    accountValue,
+    summaryTotalValue,
+    componentTotal,
+    cashBalance,
+    positionsValue,
+  ]);
 }
 
 export function buildClaimableBullpenSignature(

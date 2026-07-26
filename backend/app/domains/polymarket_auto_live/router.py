@@ -21,7 +21,11 @@ from app.domains.auth.dependencies import (
 )
 from app.domains.auth.models import User
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
+from app.domains.polymarket_auto_live.console_projection import (
+    build_minimal_workflow_stage_results,
+)
 from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
@@ -57,6 +61,7 @@ DASHBOARD_SUMMARY_CACHE_CONTROL = "private, no-cache"
 DASHBOARD_SUMMARY_MAX_BYTES = 150_000
 DASHBOARD_SUMMARY_SLOW_THRESHOLD_MS = 1_500.0
 HISTORY_TIMEOUT_SECONDS = 4.0
+CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 4.0
 
 
 async def _get_bot(current_user: User):
@@ -319,7 +324,12 @@ def _fit_dashboard_response_budget(
     if latest_run is not None:
         latest_run = latest_run.model_copy(
             update={
-                "stage_results": [],
+                # Preserve the canonical three-stage identity and durable
+                # lifecycle even when expandable diagnostics are omitted.
+                # An empty list made the browser invent Stage 1 as current.
+                "stage_results": build_minimal_workflow_stage_results(
+                    latest_run.stage_results
+                ),
                 "guardrail_checks": [],
                 "decision_ids": [],
                 "order_intent_ids": [],
@@ -695,6 +705,40 @@ async def get_auto_live_run(
         return await bot.get_run(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+
+@router.get(
+    "/runs/{run_id}/console",
+    response_model=BullpenAutoLiveConsoleRunDetail,
+)
+async def get_auto_live_console_run_detail(
+    run_id: str,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Return one bounded exact-run projection for live dialog polling."""
+
+    started_at = time.perf_counter()
+    bot = await _get_bot(current_user)
+    try:
+        detail = await asyncio.wait_for(
+            bot.get_console_run_detail(run_id),
+            timeout=CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Auto-Live run detail is temporarily delayed. Retry shortly.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.headers["Vary"] = "Authorization, Cookie"
+    response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}, app;dur={elapsed_ms:.1f}"
+    return detail
 
 
 @router.get(

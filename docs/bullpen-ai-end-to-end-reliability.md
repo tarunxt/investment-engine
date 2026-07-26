@@ -1,6 +1,6 @@
 # Bullpen X AI reliability map
 
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 
 This document is the route, ownership, performance, and rollback record for the
 Bullpen X AI Auto-Live console. Frozen run-audit facts remain governed by
@@ -14,6 +14,7 @@ Bullpen X AI Auto-Live console. Frozen run-audit facts remain governed by
 | `GET /polymarket/auto-live/summary/dashboard` | same active-workflow controller | initial idle callback; 2 s only while active and visible; browser/server 4 s | private/no-cache, ETag, GET single-flight where request signals permit | settings/state plus latest run and decision `console_projection`; cached auth verdict only | read-only; no recovery, commit, CLI, LLM, provider, audit materialization, or full run payload |
 | `GET /polymarket/auto-live/history?page=&size=` | History dialog only | on open, retry, or page navigation; browser 5 s, server 4 s | private/no-cache; superseded and closed-dialog requests abort | database `COUNT`, `LIMIT`, and `OFFSET`; scalar run columns plus compact projection | read-only |
 | `GET /polymarket/auto-live/runs/{id}` | selected history detail or ambiguous Start recovery | on selection/recovery; 10 s in history | no-store; selected request aborts with dialog | one user-owned full run payload | read-only; never used to repeat Start |
+| `GET /polymarket/auto-live/runs/{id}/console` | selected History detail, then its active-run dialog | once on History selection; every 2 s only while that exact run remains active and the page is visible; browser 5 s, server 4 s | private/no-cache; one abortable request owned by the dialog | exact user-owned run projection, at most 32 decision projections, and at most 200 current decision IDs; no full payload | read-only; authoritative empty guardrails/IDs and the current decision identity set clear recovered or superseded state |
 | `GET /polymarket/auto-live/runs/{id}/decisions` | selected history detail only | on selection; 10 s | no-store; selected request aborts with dialog | ownership scalar plus at most 200 full decisions for that run | read-only |
 | `GET /polymarket/state` | Auto-Live portfolio cash/state owner | mount and every 30 s while visible | no-store; in-flight guard | persisted Polymarket bot state; no forced wallet command | read-only |
 | `GET /api/bullpen-ai/positions?passive=true` | `BullpenAiPageClient`, the live position owner | mount and every 60 s while visible | server session; distributed runtime snapshot cache; in-flight guard | passive centralized-broker snapshot read plus bounded enrichment/fallback | passive read; explicit manual refresh alone requests fresh runtime work |
@@ -50,6 +51,47 @@ legacy summary; the active dashboard intentionally omits prompt text.
 The projection is display-only. It cannot feed Stage 1 filtering, Stage 2
 ranking, Stage 3 sizing, guardrails, duplicate detection, order submission,
 retry, reconciliation, or audit hashing.
+
+The scheduler state also retains one small Stage 1-only verified portfolio DTO.
+It is not a second execution source: it is a last-known-good console fallback
+containing at most ten rows per active, claimable, settlement-pending, and
+excluded partition plus exact pre-truncation active-row total, truncation,
+occupancy, cash, slot, account-lineage, credential-artifact, classifier,
+source, and freshness metadata. Both wallet status and freshness must
+explicitly be `fresh`; the canonical Stage 1 row must be completed with
+`pass`/`warning` and have neither a wallet-refresh nor market-enrichment
+error. A newer candidate-only, cached, degraded, missing-lineage, or failed
+Stage 1 snapshot cannot replace the prior verified snapshot.
+
+The browser applies the same lineage boundary to its last verified live wallet
+snapshot. A background, post-run, preflight, or manual refresh may
+automatically re-baseline rotated credential-artifact or position-classifier
+lineage only when the response is a complete, fresh, usable live snapshot for
+the same explicit account. Account identity changes and missing-lineage,
+cached, degraded, or error-bearing responses remain blocked from replacing
+the prior verified baseline or triggering auto-claim. The previous verified
+snapshot remains visible with a sanitized warning. The portfolio card renders
+the non-secret abbreviated account identity, snapshot source, and classifier
+version for live and Stage 1 fallback snapshots; it never renders credential
+paths or credential contents.
+
+Exact wallet-market enrichment uses one shared Gamma HTTP client, a fixed
+lookup cap, bounded concurrency, per-request timeout, and an overall deadline.
+Diagnostics retain exact totals with bounded samples. Any positive exposure
+whose exact identity or tri-state open/closed status remains unknown is
+quarantined as stale, remains conservatively occupied, and blocks execution.
+
+Stage 3 also fences unresolved durable BUYs independently of the wallet view.
+Under one singleton Bullpen-account PostgreSQL lock, reservation checks match
+market ID, condition ID, and slug across runs and outcome sides. An ambiguous
+or unknown-fill terminal BUY remains in the Top-10 denylist and pre-write
+database fence until explicit definitive-zero-fill reconciliation; terminal
+run status and a later exit cannot silently make an unresolved remote order
+safe. The per-intent and per-attempt audit proof records a zero-conflict result
+before any live BUY write. A separate v2 singleton-cash proof also preserves
+the balance timestamp and counts consumed fills newer than that balance, so a
+different-market BUY cannot spend collateral already consumed by a concurrent
+fill.
 
 ## Queue topology
 

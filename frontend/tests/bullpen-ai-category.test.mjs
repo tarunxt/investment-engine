@@ -130,6 +130,24 @@ function createQuestion(overrides = {}) {
   };
 }
 
+test("Polymarket market resolution preserves open, closed, and unknown states", () => {
+  const { resolveAuthoritativeMarketOpenState } =
+    loadPolymarketMarketUrlsModule();
+
+  assert.equal(
+    resolveAuthoritativeMarketOpenState({ active: true, closed: false }),
+    true,
+  );
+  assert.equal(
+    resolveAuthoritativeMarketOpenState({ active: false, closed: false }),
+    false,
+  );
+  assert.equal(
+    resolveAuthoritativeMarketOpenState({ active: null, closed: null }),
+    null,
+  );
+});
+
 test("collectPolymarketCategoryLabels extracts ordered nested event labels and skips Uncategorized", () => {
   const { collectPolymarketCategoryLabels } = loadCategoryModule();
 

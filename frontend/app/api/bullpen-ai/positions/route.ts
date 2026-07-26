@@ -22,6 +22,7 @@ import {
   type BullpenLiveHealth,
   type BullpenLiveSnapshot,
   type BullpenPositionsResponse,
+  type BullpenPositionsSnapshotLineage,
 } from "@/lib/bullpenPositions";
 import type { PolymarketBotState } from "@/types/api";
 
@@ -78,11 +79,36 @@ type BackendBullpenPositionsSnapshot = {
   payload: BullpenCliPositionsPayload | Record<string, unknown> | null;
   fetched_at: string;
   cli_version?: string | null;
+  credential_artifact?: BackendBullpenCredentialArtifact | null;
+  account_identity?: string | null;
+  position_classifier_version?: number | null;
   auth_checked_at?: string | null;
   source?: string | null;
   freshness_state?: string | null;
   diagnostics?: BackendBullpenCommandDiagnostics | null;
 };
+
+function buildSnapshotLineage(
+  snapshot: BackendBullpenPositionsSnapshot,
+): BullpenPositionsSnapshotLineage {
+  const credentialArtifact =
+    snapshot.credential_artifact ?? snapshot.diagnostics?.credential_artifact;
+  return {
+    accountIdentity: snapshot.account_identity?.trim() || null,
+    credentialArtifact: {
+      inode: credentialArtifact?.inode ?? null,
+      mtimeNs: credentialArtifact?.mtime_ns ?? null,
+      size: credentialArtifact?.size ?? null,
+    },
+    positionClassifierVersion:
+      typeof snapshot.position_classifier_version === "number" &&
+      Number.isFinite(snapshot.position_classifier_version)
+        ? snapshot.position_classifier_version
+        : null,
+    source: snapshot.source?.trim() || null,
+    freshnessState: snapshot.freshness_state?.trim() || null,
+  };
+}
 
 type BackendBullpenRuntimePositionsResponse = {
   ok: boolean;
@@ -155,6 +181,12 @@ async function loadTrackedPositionsFallback(context: BackendSessionContext) {
         marketUrl: null,
         question: position.market_title,
       })),
+      {
+        backendAccessToken: context.accessToken,
+        allowRuntimeQuestionFallback: false,
+        runtimeSearch: (path, options) =>
+          fetchBackendJsonWithSession(context, path, options),
+      },
     );
   } catch {
     // Keep tracked positions usable even if Polymarket enrichment fails.
@@ -185,6 +217,10 @@ function buildFallbackResponse({
 
 async function enrichPositionsWithPolymarketData(
   positions: BullpenActivePositionView[] | undefined,
+  context: BackendSessionContext,
+  options: {
+    allowRuntimeQuestionFallback: boolean;
+  },
 ) {
   const normalizedPositions = Array.isArray(positions) ? positions : [];
   if (normalizedPositions.length === 0) {
@@ -195,10 +231,19 @@ async function enrichPositionsWithPolymarketData(
     const marketUpdates = await resolvePolymarketMarketsWithQuestionFallback(
       normalizedPositions.map((position) => ({
         id: position.key,
-        slug: position.slug,
+        conditionId: position.conditionId,
+        slug: position.marketSlug ?? position.slug,
         marketUrl: position.marketUrl,
         question: position.marketTitle,
       })),
+      {
+        backendAccessToken: context.accessToken,
+        allowRuntimeQuestionFallback:
+          options.allowRuntimeQuestionFallback,
+        maxRuntimeQuestionFallbacks: 1,
+        runtimeSearch: (path, options) =>
+          fetchBackendJsonWithSession(context, path, options),
+      },
     );
 
     return normalizedPositions.map((position) =>
@@ -340,6 +385,10 @@ function buildLiveHealth(
 
 async function buildLiveSnapshotFromBackend(
   snapshot: BackendBullpenPositionsSnapshot | null | undefined,
+  context: BackendSessionContext,
+  options: {
+    allowRuntimeQuestionFallback: boolean;
+  },
 ): Promise<BullpenLiveSnapshot | null> {
   if (!snapshot || !snapshot.payload) {
     return null;
@@ -353,6 +402,8 @@ async function buildLiveSnapshotFromBackend(
   );
   const enrichedPositions = await enrichPositionsWithPolymarketData(
     normalizedPositions,
+    context,
+    options,
   );
   const filteredPositions = filterDisplayBullpenPositions(enrichedPositions);
 
@@ -361,7 +412,8 @@ async function buildLiveSnapshotFromBackend(
     summary: summarizeBullpenPositions(filteredPositions, payload.summary || {}),
     diagnostics: buildBullpenPositionsDiagnostics(enrichedPositions),
     fetchedAt: snapshot.fetched_at,
-    source: "live-cli",
+    source: snapshot.source === "redis-cache" ? "redis-cache" : "live-cli",
+    lineage: buildSnapshotLineage(snapshot),
   } satisfies BullpenLiveSnapshot;
 }
 
@@ -443,6 +495,7 @@ export async function GET(request: NextRequest) {
         positionsSource: "tracked-positions",
         health: fallbackHealth,
         lastSuccessfulLiveSnapshot: null,
+        lineage: null,
         fallback: buildFallbackResponse({
           source: "tracked-positions",
           message:
@@ -469,6 +522,7 @@ export async function GET(request: NextRequest) {
           positionsSource: null,
           health: fallbackHealth,
           lastSuccessfulLiveSnapshot: null,
+          lineage: null,
           fallback: buildFallbackResponse({ source: null, message: null }),
           error: `${sanitizedMessage} Tracked-position fallback also failed: ${fallbackMessage}`,
         } satisfies BullpenPositionsResponse,
@@ -479,43 +533,53 @@ export async function GET(request: NextRequest) {
 
   const liveSnapshot = await buildLiveSnapshotFromBackend(
     backendPositions?.snapshot || null,
+    backendSession,
+    { allowRuntimeQuestionFallback: !passive },
   );
   const staleSnapshot = await buildLiveSnapshotFromBackend(
     backendPositions?.stale_snapshot || null,
+    backendSession,
+    { allowRuntimeQuestionFallback: false },
   );
   const health = buildLiveHealth(
     backendPositions,
     backendPositions?.snapshot || backendPositions?.stale_snapshot || null,
   );
 
-  if (backendPositions?.ok && liveSnapshot) {
+  const backendSnapshotIsFresh =
+    backendPositions?.snapshot?.freshness_state === "fresh";
+  if (backendPositions?.ok && liveSnapshot && backendSnapshotIsFresh) {
     return backendSessionJson(backendSession, {
       positions: liveSnapshot.positions,
       summary: liveSnapshot.summary,
       diagnostics: liveSnapshot.diagnostics,
       fetchedAt: liveSnapshot.fetchedAt,
       liveAvailable: true,
-      positionsSource: "live-cli",
+      positionsSource: liveSnapshot.source,
       health,
       lastSuccessfulLiveSnapshot: liveSnapshot,
+      lineage: liveSnapshot.lineage ?? null,
       fallback: buildFallbackResponse({ source: null, message: null }),
     } satisfies BullpenPositionsResponse);
   }
 
-  if (staleSnapshot) {
+  const lastVerifiedSnapshot = liveSnapshot ?? staleSnapshot;
+  if (lastVerifiedSnapshot) {
     return backendSessionJson(backendSession, {
-      positions: staleSnapshot.positions,
-      summary: staleSnapshot.summary,
-      diagnostics: staleSnapshot.diagnostics,
-      fetchedAt: staleSnapshot.fetchedAt,
+      positions: lastVerifiedSnapshot.positions,
+      summary: lastVerifiedSnapshot.summary,
+      diagnostics: lastVerifiedSnapshot.diagnostics,
+      fetchedAt: lastVerifiedSnapshot.fetchedAt,
       liveAvailable: false,
       positionsSource: "last-successful-live-snapshot",
       health,
-      lastSuccessfulLiveSnapshot: staleSnapshot,
+      lastSuccessfulLiveSnapshot: lastVerifiedSnapshot,
+      lineage: lastVerifiedSnapshot.lineage ?? null,
       fallback: buildFallbackResponse({
         source: "last-successful-live-snapshot",
-        message:
-          "Live Bullpen runtime is unavailable, so Cred-X is showing the shared last successful wallet snapshot. Do not auto-trade or auto-claim from stale fallback data.",
+        message: liveSnapshot
+          ? "The shared Bullpen wallet snapshot is cached rather than fresh, so Cred-X is preserving it for display only. Do not auto-trade or auto-claim from cached data."
+          : "Live Bullpen runtime is unavailable, so Cred-X is showing the shared last successful wallet snapshot. Do not auto-trade or auto-claim from stale fallback data.",
       }),
       error: coerceErrorMessage(backendPositions?.error) || undefined,
     } satisfies BullpenPositionsResponse);
@@ -532,6 +596,7 @@ export async function GET(request: NextRequest) {
       positionsSource: "tracked-positions",
       health,
       lastSuccessfulLiveSnapshot: null,
+      lineage: null,
       fallback: buildFallbackResponse({
         source: "tracked-positions",
         message:
@@ -556,6 +621,7 @@ export async function GET(request: NextRequest) {
         positionsSource: null,
         health,
         lastSuccessfulLiveSnapshot: null,
+        lineage: null,
         fallback: buildFallbackResponse({ source: null, message: null }),
         error: `${coerceErrorMessage(backendPositions?.error) || "Bullpen runtime is unavailable."} Tracked-position fallback also failed: ${fallbackMessage}`,
       } satisfies BullpenPositionsResponse,

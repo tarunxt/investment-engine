@@ -2768,7 +2768,22 @@ export interface BullpenAutoLiveRun {
   guardrail_checks: BullpenAutoLiveGuardrailCheck[];
   decision_ids: string[];
   order_intent_ids?: string[];
+  request_context?: BullpenAutoLiveRunOnceRequest | null;
+  audit_metadata?: Record<string, unknown>;
   task_lifecycle?: BullpenAutoLiveTaskLifecycle | null;
+}
+
+export interface BullpenAutoLiveConsoleRunDetail {
+  run: BullpenAutoLiveRun;
+  decisions: BullpenAutoLiveDecision[];
+  visible_decision_ids: string[];
+  visible_decision_ids_truncated: boolean;
+  generated_at: string;
+  as_of: string;
+  projection_version: number;
+  projection_available: boolean;
+  decisions_limit: number;
+  decisions_truncated: boolean;
 }
 
 export interface BullpenAutoLiveRunOrdersResponse {
@@ -2784,6 +2799,30 @@ export interface BullpenAutoLiveRunOrdersResponse {
   partial_fill_count: number;
   permanent_failure_count: number;
   transient_failure_count: number;
+}
+
+export interface BullpenAutoLiveVerifiedPortfolioSnapshot {
+  run_id: string;
+  verified_at: string;
+  active_positions: Record<string, unknown>[];
+  active_positions_total?: number;
+  active_positions_truncated?: boolean;
+  claimable_positions?: Record<string, unknown>[];
+  settlement_pending_positions?: Record<string, unknown>[];
+  excluded_positions?: Record<string, unknown>[];
+  cash_in_hand_usd?: number | null;
+  occupied_positions: number;
+  available_slots?: number | null;
+  max_positions?: number | null;
+  trade_amount_usd?: number | null;
+  wallet_source?: string | null;
+  wallet_snapshot_fetched_at?: string | null;
+  wallet_freshness_state?: string | null;
+  wallet_account_identity?: string | null;
+  wallet_credential_artifact_inode?: number | null;
+  wallet_credential_artifact_mtime_ns?: number | null;
+  wallet_credential_artifact_size?: number | null;
+  position_classifier_version?: string | null;
 }
 
 export interface BullpenAutoLiveState {
@@ -2820,6 +2859,7 @@ export interface BullpenAutoLiveState {
   last_console_trade_active_positions?: number | null;
   last_console_trade_available_slots?: number | null;
   last_console_trade_max_positions?: number | null;
+  verified_portfolio_snapshot?: BullpenAutoLiveVerifiedPortfolioSnapshot | null;
   trades_today: number;
   consecutive_failed_orders: number;
   today_executed_orders: number;

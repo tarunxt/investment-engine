@@ -4,11 +4,11 @@ from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
 BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
-    "2026-07-26-stage3-immediate-sell-fallback-v18"
+    "2026-07-27-stage3-stale-balance-buy-fence-v27"
 )
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-26-stage3-immediate-sell-fallback-v18"
+    "2026-07-27-stage3-stale-balance-buy-fence-v27"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -47,7 +47,7 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "run_execution_handoff_fallback",
         "stage": "overview",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.tasks",
         "source_function": "dispatch_stalled_auto_live_run_fallbacks_sync",
         "label": "Bounded primary, secondary, and fail-closed run handoff",
@@ -79,7 +79,7 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "bullpen_position_claimability",
         "stage": "stage-1",
-        "algorithm_version": "v3",
+        "algorithm_version": "v4",
         "source_module": "app.domains.polymarket.position_classification",
         "source_function": "classify_bullpen_position",
         "label": "Authoritative Bullpen position claimability classification",
@@ -128,17 +128,17 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "algorithm_key": "position_returns_per_day",
         "stage": "stage-3",
         "algorithm_version": "v1",
-        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "position_returns_per_day",
         "label": "Active position returns per day",
     },
     {
         "algorithm_key": "stage3_rank_and_selection",
         "stage": "stage-3",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.engine",
-        "source_function": "_serialize_stage3_decision_row",
-        "label": "Stage 3 ranking and selection",
+        "source_function": "BullpenAutoLiveEngine._execute_console_top10",
+        "label": "Post-exit Stage 3 ranking, selection, and buy-queue handoff",
     },
     {
         "algorithm_key": "stage3_economic_slot_allocation",
@@ -147,6 +147,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.stage3_slots",
         "source_function": "classify_economic_slots",
         "label": "Stage 3 economic slot allocation and deduplication",
+    },
+    {
+        "algorithm_key": "stage3_affordable_ranked_buy_allocation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "build_console_affordable_buy_allocation",
+        "label": "Stage 3 buffered highest-ranked affordable buy allocation",
     },
     {
         "algorithm_key": "order_funnel_aggregation",
@@ -171,6 +179,102 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.order_intent_service",
         "source_function": "stage3_execution_market_reference",
         "label": "Bullpen CLI Stage 3 market-reference selection",
+    },
+    {
+        "algorithm_key": "stage3_sell_live_exposure_preflight",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_prepare_intent_submission",
+        "label": "Fresh live sell-exposure classification and share cap",
+    },
+    {
+        "algorithm_key": "stage3_buy_market_exposure_preflight",
+        "stage": "stage-3",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_reserve_buy_if_possible",
+        "label": "Forced-fresh wallet and singleton durable-intent duplicate BUY fence",
+    },
+    {
+        "algorithm_key": "stage3_redeem_wallet_lineage_preflight",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_prepare_intent_submission",
+        "label": "Forced-fresh Stage 1 wallet-lineage fence before redeem",
+    },
+    {
+        "algorithm_key": "stage3_sell_alias_reconciliation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_position_matches_intent",
+        "label": "Alias-aware sell position reconciliation",
+    },
+    {
+        "algorithm_key": "stage3_buy_reservation_terminal_release",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_release_buy_reservation_if_no_remote_evidence",
+        "label": "Terminal no-write buy reservation release",
+    },
+    {
+        "algorithm_key": "stage3_active_reservation_cash_filter",
+        "stage": "stage-3",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_active_reserved_cash",
+        "label": "Active and post-balance consumed reservation cash filter",
+    },
+    {
+        "algorithm_key": "stage3_buy_post_submit_reconciliation",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_reconcile_buy_intent_async",
+        "label": "Bounded remote, wallet-lineage, and history buy reconciliation",
+    },
+    {
+        "algorithm_key": "stage3_ambiguous_write_boundary_fence",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_apply_executor_error",
+        "label": "Ambiguous remote-write timestamp and resubmission fence",
+    },
+    {
+        "algorithm_key": "stage3_terminal_buy_portfolio_refresh",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_terminal_buy_wallet_refresh_metadata",
+        "label": "Forced-fresh terminal-buy portfolio publication",
+    },
+    {
+        "algorithm_key": "stage3_dependency_exit_handoff",
+        "stage": "stage-3",
+        "algorithm_version": "v3",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "_defer_buy_until_exit",
+        "label": "Serialized and legacy-repairable exit-to-replacement-buy dependency handoff",
+    },
+    {
+        "algorithm_key": "stage3_waiting_exit_watchdog_recovery",
+        "stage": "stage-3",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.order_intent_service",
+        "source_function": "watchdog_requeue_stale_order_intents_sync",
+        "label": "Lost exit-wake recovery from committed terminal dependency",
+    },
+    {
+        "algorithm_key": "stage3_deferred_replacement_sizing",
+        "stage": "stage-3",
+        "algorithm_version": "v2",
+        "source_module": "app.domains.polymarket_auto_live.engine",
+        "source_function": "BullpenAutoLiveEngine._execute_console_top10",
+        "label": "Free-slot-aware deferred post-exit replacement sizing and reservation",
     },
     {
         "algorithm_key": "stage3_immediate_sell_fallback",

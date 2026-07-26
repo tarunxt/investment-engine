@@ -42,6 +42,25 @@ test("detail client keeps the shared single-select model picker and three sectio
   assert.match(source, /handoff_checkpoint/);
 });
 
+test("detail client distinguishes verified, degraded, and unavailable Stage 1 portfolios", async () => {
+  const source = await read(
+    "app/console/bullpen-ai/analyse-runs/_components/RunAuditDetailClient.tsx",
+  );
+
+  assert.match(source, /typeof verifiedPortfolio\.verified === "boolean"/);
+  assert.match(source, /portfolioSnapshotAvailable/);
+  assert.match(source, /verifiedPortfolio\.verification_reason/);
+  assert.match(source, /portfolioSnapshotStatus/);
+  assert.match(source, /portfolioSnapshotVerificationReason/);
+  assert.match(source, /Unverified/);
+  assert.match(source, /Unavailable/);
+  assert.match(
+    source,
+    /title=\{`\$\{portfolioSnapshotStatus\} Stage 1 Portfolio Snapshot`\}/,
+  );
+  assert.doesNotMatch(source, /title="Verified Stage 1 Portfolio Snapshot"/);
+});
+
 test("list client loads paginated summaries instead of raw detail bundles", async () => {
   const source = await read(
     "app/console/bullpen-ai/analyse-runs/_components/RunAuditListClient.tsx",

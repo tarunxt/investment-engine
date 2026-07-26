@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
+from datetime import UTC, datetime
+import hashlib
+import json
 from typing import Any
 
-from app.domains.bullpen_run_audit.constants import BULLPEN_RUN_AUDIT_RULE_VERSION
+from app.domains.bullpen_run_audit.constants import (
+    BULLPEN_RUN_AUDIT_RULE_VERSION,
+    FINDING_SEVERITIES,
+)
+from app.domains.polymarket.position_classification import (
+    BULLPEN_POSITION_CLASSIFIER_VERSION,
+)
 
 
 def _finding(
@@ -40,6 +50,291 @@ def _finding(
     }
 
 
+_MAX_COALESCED_OCCURRENCES = 50
+_MAX_COALESCED_EVIDENCE_POINTERS = 50
+_MAX_OCCURRENCE_VALUE_ITEMS = 50
+_MAX_OCCURRENCE_VALUE_NODES = 250
+_MAX_OCCURRENCE_VALUE_DEPTH = 6
+_MAX_OCCURRENCE_STRING_LENGTH = 1_000
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+
+def _stable_json_hash(value: object) -> str:
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _bounded_occurrence_value(
+    value: object,
+    *,
+    depth: int = 0,
+    remaining_nodes: list[int] | None = None,
+) -> tuple[object, bool]:
+    """Return deterministic JSON evidence with a strict per-value size bound."""
+
+    node_budget = (
+        remaining_nodes
+        if remaining_nodes is not None
+        else [_MAX_OCCURRENCE_VALUE_NODES]
+    )
+    if node_budget[0] <= 0:
+        return None, True
+    node_budget[0] -= 1
+
+    if value is None or isinstance(value, (bool, int, float)):
+        return value, False
+    if isinstance(value, str):
+        if len(value) <= _MAX_OCCURRENCE_STRING_LENGTH:
+            return value, False
+        return f"{value[:_MAX_OCCURRENCE_STRING_LENGTH]}…", True
+    if depth >= _MAX_OCCURRENCE_VALUE_DEPTH and isinstance(
+        value,
+        (dict, list, tuple),
+    ):
+        return None, True
+    if isinstance(value, dict):
+        bounded: dict[str, object] = {}
+        truncated = len(value) > _MAX_OCCURRENCE_VALUE_ITEMS
+        for raw_key, raw_value in list(value.items())[
+            :_MAX_OCCURRENCE_VALUE_ITEMS
+        ]:
+            if node_budget[0] <= 0:
+                truncated = True
+                break
+            key = str(raw_key)
+            if len(key) > _MAX_OCCURRENCE_STRING_LENGTH:
+                key = f"{key[:_MAX_OCCURRENCE_STRING_LENGTH]}…"
+                truncated = True
+            bounded_value, value_truncated = _bounded_occurrence_value(
+                raw_value,
+                depth=depth + 1,
+                remaining_nodes=node_budget,
+            )
+            bounded[key] = bounded_value
+            truncated = truncated or value_truncated
+        return bounded, truncated
+    if isinstance(value, (list, tuple)):
+        bounded_items: list[object] = []
+        truncated = len(value) > _MAX_OCCURRENCE_VALUE_ITEMS
+        for item in value[:_MAX_OCCURRENCE_VALUE_ITEMS]:
+            if node_budget[0] <= 0:
+                truncated = True
+                break
+            bounded_item, item_truncated = _bounded_occurrence_value(
+                item,
+                depth=depth + 1,
+                remaining_nodes=node_budget,
+            )
+            bounded_items.append(bounded_item)
+            truncated = truncated or item_truncated
+        return bounded_items, truncated
+
+    normalized = str(value)
+    if len(normalized) <= _MAX_OCCURRENCE_STRING_LENGTH:
+        return normalized, True
+    return f"{normalized[:_MAX_OCCURRENCE_STRING_LENGTH]}…", True
+
+
+def _finding_occurrence_identity(
+    finding: dict[str, object],
+) -> dict[str, object]:
+    """Return the complete JSON identity used by the occurrence stream hash."""
+
+    return {
+        "severity": finding.get("severity"),
+        "stage": finding.get("stage"),
+        "category": finding.get("category"),
+        "title": finding.get("title"),
+        "explanation": finding.get("explanation"),
+        "observed_value": finding.get("observed_value"),
+        "expected_value": finding.get("expected_value"),
+        "blocking": bool(finding.get("blocking")),
+        "classification": finding.get("classification"),
+        "suggested_remediation": finding.get("suggested_remediation"),
+        "evidence_pointers": list(finding.get("evidence_pointers") or []),
+        "detection_metadata": dict(finding.get("detection_metadata") or {}),
+    }
+
+
+def _occurrence_stream_hash(
+    occurrences: list[dict[str, object]],
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(b"[")
+    for index, occurrence in enumerate(occurrences):
+        if index:
+            digest.update(b",")
+        digest.update(
+            _canonical_json_bytes(_finding_occurrence_identity(occurrence))
+        )
+    digest.update(b"]")
+    return digest.hexdigest()
+
+
+def _finding_occurrence(finding: dict[str, object]) -> dict[str, object]:
+    """Preserve a bounded sample of evidence hidden by one-row storage."""
+
+    raw_evidence = list(finding.get("evidence_pointers") or [])
+    evidence_sample: list[object] = []
+    evidence_value_truncated = False
+    for pointer in raw_evidence[:_MAX_COALESCED_EVIDENCE_POINTERS]:
+        bounded_pointer, pointer_truncated = _bounded_occurrence_value(pointer)
+        evidence_sample.append(bounded_pointer)
+        evidence_value_truncated = (
+            evidence_value_truncated or pointer_truncated
+        )
+    raw_metadata = dict(finding.get("detection_metadata") or {})
+    bounded_metadata, metadata_truncated = _bounded_occurrence_value(
+        raw_metadata
+    )
+
+    return {
+        "severity": finding.get("severity"),
+        "stage": finding.get("stage"),
+        "category": finding.get("category"),
+        "title": finding.get("title"),
+        "explanation": finding.get("explanation"),
+        "observed_value": finding.get("observed_value"),
+        "expected_value": finding.get("expected_value"),
+        "blocking": bool(finding.get("blocking")),
+        "classification": finding.get("classification"),
+        "suggested_remediation": finding.get("suggested_remediation"),
+        "evidence_pointers": evidence_sample,
+        "evidence_pointer_count": len(raw_evidence),
+        "evidence_pointers_truncated": bool(
+            len(raw_evidence) > _MAX_COALESCED_EVIDENCE_POINTERS
+            or evidence_value_truncated
+        ),
+        "evidence_pointers_hash": _stable_json_hash(raw_evidence),
+        "detection_metadata": bounded_metadata,
+        "detection_metadata_truncated": metadata_truncated,
+        "detection_metadata_hash": _stable_json_hash(raw_metadata),
+    }
+
+
+def coalesce_deterministic_findings(
+    findings: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Return one deterministic row for each persisted finding identity.
+
+    The findings table intentionally has a unique constraint on
+    ``(snapshot_id, rule_version, code)``. Some validators evaluate repeated
+    entities, so the same rule can fire more than once in one snapshot.
+    Coalescing retains that database contract while preserving an ordered,
+    deterministic sample plus a hash of the complete occurrence identity
+    stream. Persisted samples are bounded independently from exact counts.
+    """
+
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for finding in findings:
+        key = (
+            str(finding.get("rule_version") or ""),
+            str(finding.get("code") or ""),
+        )
+        grouped.setdefault(key, []).append(finding)
+
+    severity_rank = {
+        severity: index for index, severity in enumerate(FINDING_SEVERITIES)
+    }
+    coalesced: list[dict[str, object]] = []
+    for occurrences in grouped.values():
+        if len(occurrences) == 1:
+            coalesced.append(occurrences[0])
+            continue
+
+        merged = deepcopy(occurrences[0])
+        merged_evidence: list[object] = []
+        evidence_pointer_count = 0
+        evidence_value_truncated = False
+        evidence_seen: set[str] = set()
+        evidence_digest = hashlib.sha256()
+        evidence_digest.update(b"[")
+        for occurrence in occurrences:
+            for pointer in list(occurrence.get("evidence_pointers") or []):
+                pointer_bytes = _canonical_json_bytes(pointer)
+                pointer_identity = hashlib.sha256(pointer_bytes).hexdigest()
+                if pointer_identity in evidence_seen:
+                    continue
+                evidence_seen.add(pointer_identity)
+                if evidence_pointer_count:
+                    evidence_digest.update(b",")
+                evidence_digest.update(pointer_bytes)
+                evidence_pointer_count += 1
+                if (
+                    len(merged_evidence)
+                    < _MAX_COALESCED_EVIDENCE_POINTERS
+                ):
+                    bounded_pointer, pointer_truncated = (
+                        _bounded_occurrence_value(pointer)
+                    )
+                    merged_evidence.append(bounded_pointer)
+                    evidence_value_truncated = (
+                        evidence_value_truncated or pointer_truncated
+                    )
+        evidence_digest.update(b"]")
+        merged["evidence_pointers"] = merged_evidence
+        merged["blocking"] = any(
+            bool(occurrence.get("blocking")) for occurrence in occurrences
+        )
+        merged["severity"] = min(
+            (str(occurrence.get("severity") or "") for occurrence in occurrences),
+            key=lambda severity: severity_rank.get(
+                severity,
+                len(severity_rank),
+            ),
+        )
+
+        raw_source_detection_metadata = dict(
+            merged.get("detection_metadata") or {}
+        )
+        bounded_source_detection_metadata, source_metadata_truncated = (
+            _bounded_occurrence_value(raw_source_detection_metadata)
+        )
+        detection_metadata = (
+            bounded_source_detection_metadata
+            if isinstance(bounded_source_detection_metadata, dict)
+            else {}
+        )
+        detection_metadata["source_detection_metadata_truncated"] = (
+            source_metadata_truncated
+        )
+        detection_metadata["source_detection_metadata_hash"] = (
+            _stable_json_hash(raw_source_detection_metadata)
+        )
+        detection_metadata["occurrence_count"] = len(occurrences)
+        detection_metadata["occurrences"] = [
+            _finding_occurrence(occurrence) for occurrence in occurrences
+            [:_MAX_COALESCED_OCCURRENCES]
+        ]
+        detection_metadata["occurrences_truncated"] = bool(
+            len(occurrences) > _MAX_COALESCED_OCCURRENCES
+        )
+        detection_metadata["occurrences_hash"] = _occurrence_stream_hash(
+            occurrences
+        )
+        detection_metadata["evidence_pointer_count"] = (
+            evidence_pointer_count
+        )
+        detection_metadata["evidence_pointers_truncated"] = bool(
+            evidence_pointer_count > _MAX_COALESCED_EVIDENCE_POINTERS
+            or evidence_value_truncated
+        )
+        detection_metadata["evidence_pointers_hash"] = (
+            evidence_digest.hexdigest()
+        )
+        merged["detection_metadata"] = detection_metadata
+        coalesced.append(merged)
+
+    return coalesced
+
+
 def _float(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
@@ -53,6 +348,58 @@ def _int(value: Any) -> int | None:
     if numeric is None or not numeric.is_integer():
         return None
     return int(numeric)
+
+
+def _timestamp(value: object) -> float | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp()
+
+
+def _terminal_buy_refresh_is_valid(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    status = str(value.get("status") or "").strip().lower()
+    if status == "refresh_failed":
+        return bool(
+            str(value.get("caller_source") or "").strip()
+            and str(value.get("error_code") or "").strip()
+            and _timestamp(value.get("refreshed_at")) is not None
+        )
+    if status == "published":
+        comparison = value.get("lineage_comparison")
+        return bool(
+            str(value.get("caller_source") or "").strip()
+            and value.get("source") in {"live-cli", "redis-cache"}
+            and value.get("freshness_state") == "fresh"
+            and _timestamp(value.get("fetched_at")) is not None
+            and _timestamp(value.get("published_at")) is not None
+            and isinstance(comparison, dict)
+            and comparison.get("status") == "match"
+        )
+
+    # A forced-fresh reconciliation result predates the publication wrapper
+    # but remains valid only with both direct and expected-lineage matches.
+    comparison = value.get("lineage_comparison")
+    lineage_checks = value.get("lineage_checks")
+    return bool(
+        value.get("source") in {"live-cli", "redis-cache"}
+        and _timestamp(value.get("fetched_at")) is not None
+        and isinstance(comparison, dict)
+        and comparison.get("status") == "match"
+        and isinstance(lineage_checks, dict)
+        and lineage_checks
+        and all(
+            isinstance(check, dict) and check.get("status") == "match"
+            for check in lineage_checks.values()
+        )
+    )
 
 
 _IMMEDIATE_SELL_LAYERS = ("primary", "secondary", "tertiary")
@@ -705,7 +1052,94 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         if isinstance(verified_portfolio.get("active_positions_found"), list)
         else []
     )
-    if verified_portfolio:
+    canonical_stage1_lifecycle = (
+        verified_portfolio.get("canonical_stage_lifecycle")
+        if isinstance(
+            verified_portfolio.get("canonical_stage_lifecycle"),
+            dict,
+        )
+        else None
+    )
+    verified_portfolio_lifecycle_valid = True
+    if (
+        verified_portfolio.get("verified") is True
+        and canonical_stage1_lifecycle is not None
+    ):
+        lifecycle_status = str(
+            canonical_stage1_lifecycle.get("status") or ""
+        ).strip().lower()
+        raw_phase_status = canonical_stage1_lifecycle.get("phase_status")
+        lifecycle_phase_status = (
+            str(raw_phase_status).strip().lower()
+            if raw_phase_status is not None
+            else None
+        )
+        lifecycle_completed_at = canonical_stage1_lifecycle.get(
+            "completed_at"
+        )
+        verified_portfolio_lifecycle_valid = bool(
+            lifecycle_status in {"pass", "warning"}
+            and lifecycle_phase_status
+            in {None, "", "completed", "partial"}
+            and _timestamp(lifecycle_completed_at) is not None
+            and not bool(canonical_stage1_lifecycle.get("hard_block"))
+            and str(
+                verified_portfolio.get("wallet_snapshot_status") or ""
+            ).strip().lower()
+            == "fresh"
+            and str(
+                verified_portfolio.get("freshness_state") or ""
+            ).strip().lower()
+            == "fresh"
+            and not verified_portfolio.get("wallet_refresh_error")
+            and not verified_portfolio.get(
+                "wallet_market_enrichment_error"
+            )
+            and not bool(verified_portfolio.get("stage2_candidate_only"))
+            and not bool(
+                verified_portfolio.get(
+                    "blocked_by_stage1_wallet_refresh"
+                )
+            )
+        )
+        if not verified_portfolio_lifecycle_valid:
+            findings.append(
+                _finding(
+                    code="STAGE1_VERIFIED_PORTFOLIO_LIFECYCLE_INVALID",
+                    severity="critical",
+                    stage="stage-1",
+                    category="portfolio-verification",
+                    title="Stage 1 portfolio verification contradicts its lifecycle",
+                    explanation=(
+                        "A verified Stage 1 portfolio requires a pass/warning "
+                        "canonical stage, a completed/partial (or legacy absent) "
+                        "phase, a valid completion timestamp, fresh wallet "
+                        "lineage, and no wallet error or block flags."
+                    ),
+                    observed_value=(
+                        f"status={lifecycle_status or 'missing'}; "
+                        f"phase={lifecycle_phase_status or 'missing'}; "
+                        f"completed_at={lifecycle_completed_at}"
+                    ),
+                    expected_value=(
+                        "pass/warning + completed/partial + valid completed_at "
+                        "+ fresh wallet without error/block flags"
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/verified_portfolio_snapshot/"
+                        "canonical_stage_lifecycle",
+                        "/stage_1/verified_portfolio_snapshot/"
+                        "wallet_snapshot_status",
+                        "/stage_1/verified_portfolio_snapshot/"
+                        "freshness_state",
+                    ],
+                )
+            )
+    if (
+        verified_portfolio.get("verified") is True
+        and verified_portfolio_lifecycle_valid
+    ):
         verified_count = len(verified_positions)
         recorded_count = _float(
             verified_portfolio.get("recorded_occupied_positions")
@@ -1218,8 +1652,22 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     )
     if slot_diagnostics:
         snapshot_source = slot_diagnostics.get("post_exit_snapshot_source")
+        snapshot_freshness_state = slot_diagnostics.get(
+            "post_exit_snapshot_freshness_state"
+        )
         planned_exits = slot_diagnostics.get("planned_exit_market_ids")
-        if planned_exits and snapshot_source not in {"live-cli", "stage1_snapshot_simulation"}:
+        valid_snapshot_source = bool(
+            snapshot_source == "stage1_snapshot_simulation"
+            or (
+                snapshot_source == "live-cli"
+                and snapshot_freshness_state in {None, "fresh"}
+            )
+            or (
+                snapshot_source == "redis-cache"
+                and snapshot_freshness_state == "fresh"
+            )
+        )
+        if planned_exits and not valid_snapshot_source:
             findings.append(
                 _finding(
                     code="STAGE3_POST_EXIT_SNAPSHOT_SOURCE_INVALID",
@@ -1229,7 +1677,10 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     title="Stage 3 post-exit snapshot source is not auditable",
                     explanation="A run planned Event Exit orders but did not record a live-cli or explicitly simulated post-exit snapshot source.",
                     observed_value=str(snapshot_source),
-                    expected_value="live-cli for live execution; stage1_snapshot_simulation for dry-run",
+                    expected_value=(
+                        "fresh live-cli/redis-cache lineage for live execution; "
+                        "stage1_snapshot_simulation for dry-run"
+                    ),
                     blocking=True,
                     evidence_pointers=["/stage_3/stage3_slot_diagnostics/post_exit_snapshot_source"],
                 )
@@ -1239,6 +1690,71 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         economically_active = _float(
             slot_diagnostics.get("economically_active_position_count")
         )
+        initial_free_slots = _int(
+            slot_diagnostics.get("initial_free_slots_before_exit")
+        )
+        pre_exit_immediate_buy_count = _int(
+            slot_diagnostics.get("pre_exit_immediate_buy_count")
+        )
+        pre_exit_free_slot_allocation = (
+            slot_diagnostics.get("pre_exit_free_slot_allocation")
+            if isinstance(
+                slot_diagnostics.get("pre_exit_free_slot_allocation"),
+                dict,
+            )
+            else None
+        )
+        if (
+            pre_exit_free_slot_allocation is not None
+            and pre_exit_immediate_buy_count is not None
+        ):
+            allocation_affordable_count = _int(
+                pre_exit_free_slot_allocation.get("affordable_buy_count")
+            )
+            if (
+                allocation_affordable_count
+                != pre_exit_immediate_buy_count
+                or (
+                    initial_free_slots is not None
+                    and pre_exit_immediate_buy_count > initial_free_slots
+                )
+            ):
+                findings.append(
+                    _finding(
+                        code="STAGE3_PRE_EXIT_FREE_SLOT_ALLOCATION_INVALID",
+                        severity="high",
+                        stage="stage-3",
+                        category="slot-allocation",
+                        title=(
+                            "Pre-exit immediate buys contradict free-slot allocation"
+                        ),
+                        explanation=(
+                            "Only the highest-ranked candidates affordable from "
+                            "already-free slots may bypass a replacement EXIT "
+                            "dependency."
+                        ),
+                        observed_value=(
+                            "pre_exit_immediate_buy_count="
+                            f"{pre_exit_immediate_buy_count}; "
+                            "allocation_affordable_buy_count="
+                            f"{allocation_affordable_count}; "
+                            f"initial_free_slots={initial_free_slots}"
+                        ),
+                        expected_value=(
+                            "immediate count equals affordable allocation and "
+                            "does not exceed initial free slots"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "pre_exit_immediate_buy_count",
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "pre_exit_free_slot_allocation",
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "initial_free_slots_before_exit",
+                        ],
+                    )
+                )
         if slot_limit is not None and economically_active is not None and economically_active > slot_limit:
             findings.append(
                 _finding(
@@ -1319,6 +1835,172 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                         ],
                     )
                 )
+        affordable_allocation_version = slot_diagnostics.get(
+            "affordable_allocation_version"
+        )
+        if affordable_allocation_version in {"v1", "v2"}:
+            eligible_buy_count = _int(
+                slot_diagnostics.get("eligible_ranked_buy_count")
+            )
+            cash_affordable_count = _int(
+                slot_diagnostics.get("cash_affordable_buy_count")
+            )
+            capacity_slot_budget = _int(
+                slot_diagnostics.get("affordable_capacity_slot_budget")
+            )
+            affordable_buy_count = _int(
+                slot_diagnostics.get("affordable_buy_count")
+            )
+            affordable_planned_count = _int(
+                slot_diagnostics.get("affordable_planned_buy_count")
+            )
+            buffer_allocation_valid = True
+            if affordable_allocation_version == "v2":
+                gross_cash = _float(
+                    slot_diagnostics.get(
+                        "affordable_buy_gross_cash_in_hand_usd"
+                    )
+                )
+                balance_buffer = _float(
+                    slot_diagnostics.get(
+                        "affordable_buy_balance_buffer_usd"
+                    )
+                )
+                spendable_cash = _float(
+                    slot_diagnostics.get(
+                        "affordable_buy_spendable_cash_usd"
+                    )
+                )
+                minimum_order = _float(
+                    slot_diagnostics.get(
+                        "affordable_buy_min_order_usd"
+                    )
+                )
+                expected_spendable_cash = (
+                    round(max(0.0, gross_cash - balance_buffer), 2)
+                    if gross_cash is not None and balance_buffer is not None
+                    else None
+                )
+                expected_cash_affordable_count = (
+                    int(
+                        (expected_spendable_cash + 1e-9)
+                        // minimum_order
+                    )
+                    if expected_spendable_cash is not None
+                    and minimum_order is not None
+                    and minimum_order > 0
+                    else None
+                )
+                buffer_allocation_valid = bool(
+                    expected_spendable_cash is not None
+                    and spendable_cash is not None
+                    and abs(spendable_cash - expected_spendable_cash)
+                    <= 0.001
+                    and expected_cash_affordable_count is not None
+                    and cash_affordable_count
+                    == expected_cash_affordable_count
+                )
+            expected_affordable_count = (
+                min(
+                    eligible_buy_count,
+                    cash_affordable_count,
+                    capacity_slot_budget,
+                )
+                if None
+                not in {
+                    eligible_buy_count,
+                    cash_affordable_count,
+                    capacity_slot_budget,
+                }
+                else None
+            )
+            if (
+                expected_affordable_count is None
+                or not buffer_allocation_valid
+                or affordable_buy_count != expected_affordable_count
+                or affordable_planned_count is None
+                or (
+                    affordable_buy_count is not None
+                    and affordable_planned_count > affordable_buy_count
+                )
+            ):
+                findings.append(
+                    _finding(
+                        code="STAGE3_AFFORDABLE_BUY_ALLOCATION_INVALID",
+                        severity="high",
+                        stage="stage-3",
+                        category="capital-sizing",
+                        title="Stage 3 affordable ranked-buy allocation is inconsistent",
+                        explanation=(
+                            "The allocation must preserve the configured cash "
+                            "buffer and select no more than the "
+                            "minimum of eligible ranked rows, cash-funded minimum "
+                            "orders, and available capacity slots."
+                        ),
+                        observed_value=(
+                            f"version={affordable_allocation_version}; "
+                            f"eligible={eligible_buy_count}; cash={cash_affordable_count}; "
+                            f"capacity={capacity_slot_budget}; affordable={affordable_buy_count}; "
+                            f"planned={affordable_planned_count}"
+                        ),
+                        expected_value=(
+                            f"affordable={expected_affordable_count}; "
+                            "planned <= affordable"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "affordable_allocation_version",
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "affordable_buy_count",
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "affordable_planned_buy_count",
+                            "/stage_3/stage3_slot_diagnostics/"
+                            "affordable_buy_spendable_cash_usd",
+                        ],
+                    )
+                )
+            free_slots_after_buys = _int(
+                slot_diagnostics.get("free_slots_after_planned_buys")
+            )
+            allocation_sizing_count = _int(
+                slot_diagnostics.get("capacity_sizing_occupied_market_count")
+            )
+            if (
+                not override_enabled
+                and slot_limit is not None
+                and allocation_sizing_count is not None
+                and affordable_planned_count is not None
+            ):
+                expected_free_slots = max(
+                    0,
+                    int(slot_limit)
+                    - allocation_sizing_count
+                    - affordable_planned_count,
+                )
+                if free_slots_after_buys != expected_free_slots:
+                    findings.append(
+                        _finding(
+                            code="STAGE3_POST_BUY_FREE_SLOT_COUNT_INVALID",
+                            severity="medium",
+                            stage="stage-3",
+                            category="slot-allocation",
+                            title="Stage 3 post-buy free-slot count uses the wrong basis",
+                            explanation=(
+                                "Post-buy free slots must use the live economic "
+                                "sizing basis and concrete planned buys, not the "
+                                "historical duplicate-market denylist."
+                            ),
+                            observed_value=str(free_slots_after_buys),
+                            expected_value=str(expected_free_slots),
+                            evidence_pointers=[
+                                "/stage_3/stage3_slot_diagnostics/"
+                                "free_slots_after_planned_buys",
+                                "/stage_3/stage3_slot_diagnostics/"
+                                "capacity_sizing_occupied_market_count",
+                            ],
+                        )
+                    )
 
     orders = stage_3.get("order_intents") if isinstance(stage_3.get("order_intents"), list) else []
     auth_recovery = (
@@ -1365,6 +2047,24 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     submitted_without_attempt = 0
     orphan_intents = 0
     oversized_idempotency_keys: list[tuple[int, int]] = []
+    dependency_exit_indexes_by_group: dict[str, list[int]] = {}
+    for exit_index, exit_order in enumerate(orders):
+        if (
+            not isinstance(exit_order, dict)
+            or str(exit_order.get("action") or "").lower()
+            not in {"sell", "redeem"}
+        ):
+            continue
+        exit_dependency_group = exit_order.get("dependency_group")
+        if not isinstance(exit_dependency_group, str):
+            continue
+        normalized_exit_dependency_group = exit_dependency_group.strip()
+        if not normalized_exit_dependency_group:
+            continue
+        dependency_exit_indexes_by_group.setdefault(
+            normalized_exit_dependency_group,
+            [],
+        ).append(exit_index)
     for index, order in enumerate(orders):
         if not isinstance(order, dict):
             continue
@@ -1379,6 +2079,1231 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         idempotency_key = order.get("idempotency_key")
         if isinstance(idempotency_key, str) and len(idempotency_key) > 128:
             oversized_idempotency_keys.append((index, len(idempotency_key)))
+        execution_metadata = (
+            order.get("execution_metadata_json")
+            if isinstance(order.get("execution_metadata_json"), dict)
+            else {}
+        )
+        sell_preflight = (
+            execution_metadata.get("sell_live_preflight")
+            if isinstance(execution_metadata.get("sell_live_preflight"), dict)
+            else None
+        )
+        wallet_snapshot_lineage = (
+            execution_metadata.get("wallet_snapshot_lineage")
+            if isinstance(
+                execution_metadata.get("wallet_snapshot_lineage"),
+                dict,
+            )
+            else None
+        )
+        wallet_lineage_comparison = (
+            execution_metadata.get("wallet_lineage_comparison")
+            if isinstance(
+                execution_metadata.get("wallet_lineage_comparison"),
+                dict,
+            )
+            else None
+        )
+        current_intent_format = bool(
+            str(order.get("idempotency_key") or "").startswith("auto-live:v2:")
+            or execution_metadata.get("idempotency_key_format")
+            == "auto-live:v2"
+        )
+        reservations = (
+            order.get("reservations")
+            if isinstance(order.get("reservations"), list)
+            else []
+        )
+        active_reservation_rows = [
+            reservation
+            for reservation in reservations
+            if isinstance(reservation, dict)
+            and str(reservation.get("status") or "").lower() == "active"
+            and (_float(reservation.get("amount_usd")) or 0) > 0
+        ]
+        consumed_reservation_rows = [
+            reservation
+            for reservation in reservations
+            if isinstance(reservation, dict)
+            and str(reservation.get("status") or "").lower() == "consumed"
+        ]
+        reservation_state = str(
+            execution_metadata.get("reservation_state") or ""
+        ).lower()
+        active_reservation = bool(
+            (_float(order.get("reserved_cash_usd")) or 0) > 0
+            or reservation_state == "active"
+            or active_reservation_rows
+        )
+        consumed_reservation = bool(
+            reservation_state == "consumed"
+            or consumed_reservation_rows
+        )
+        action = str(order.get("action") or "").lower()
+        definitive_no_fill_status = status in {
+            "DEFERRED",
+            "FAILED_PERMANENT",
+            "REJECTED",
+            "CANCELLED",
+        }
+        fill_evidence = (
+            execution_metadata.get("reconciliation_fill_evidence")
+            if isinstance(
+                execution_metadata.get("reconciliation_fill_evidence"),
+                dict,
+            )
+            else {}
+        )
+        persisted_write_evidence = bool(
+            any(
+                order.get(key)
+                for key in (
+                    "remote_order_id",
+                    "remote_transaction_hash",
+                    "first_submitted_at",
+                    "last_submitted_at",
+                )
+            )
+            or execution_metadata.get(
+                "uncertain_remote_write_boundary"
+            )
+        )
+        reservation_should_be_released = bool(
+            status == "WAITING_FOR_EXIT"
+            or (
+                definitive_no_fill_status
+                and (
+                    fill_evidence.get("definitive_zero_fill") is True
+                    or not persisted_write_evidence
+                )
+            )
+        )
+        raw_dependency_group = order.get("dependency_group")
+        dependency_group = (
+            raw_dependency_group.strip()
+            if isinstance(raw_dependency_group, str)
+            and raw_dependency_group.strip()
+            else None
+        )
+        dependency_metadata = (
+            order.get("dependency_metadata_json")
+            if isinstance(order.get("dependency_metadata_json"), dict)
+            else {}
+        )
+        matching_dependency_exit_indexes = (
+            dependency_exit_indexes_by_group.get(dependency_group, [])
+            if dependency_group
+            else []
+        )
+        if (
+            current_intent_format
+            and action == "buy"
+            and dependency_group
+            and not matching_dependency_exit_indexes
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_REPLACEMENT_EXIT_DEPENDENCY_MISSING",
+                    severity="critical",
+                    stage="stage-3",
+                    category="dependency-guardrail",
+                    title=(
+                        "A replacement buy has no exit with the same dependency group"
+                    ),
+                    explanation=(
+                        "The durable replacement BUY and its paired EXIT must "
+                        "persist the same deterministic dependency_group. "
+                        "Without that shared identity, exit confirmation cannot "
+                        "safely wake or recover the waiting buy."
+                    ),
+                    observed_value=str(dependency_group),
+                    expected_value=(
+                        "one sell or redeem intent with the same dependency_group"
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/dependency_group",
+                        "/stage_3/order_intents",
+                    ],
+                )
+            )
+        post_exit_sizing = (
+            execution_metadata.get("post_exit_sizing")
+            if isinstance(execution_metadata.get("post_exit_sizing"), dict)
+            else None
+        )
+        if (
+            current_intent_format
+            and action == "buy"
+            and active_reservation
+            and reservation_should_be_released
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_BUY_RESERVATION_NOT_RELEASED",
+                    severity="critical",
+                    stage="stage-3",
+                    category="capital-reservation",
+                    title=(
+                        "A deferred or definitive no-fill buy still reserves cash"
+                    ),
+                    explanation=(
+                        "Current-version replacement buys waiting for an exit, "
+                        "and buys that definitively ended without a fill, must "
+                        "have zero reserved cash and no active reservation row."
+                    ),
+                    observed_value=(
+                        f"status={status}; reserved_cash_usd="
+                        f"{order.get('reserved_cash_usd')}; "
+                        f"reservation_state={reservation_state or 'missing'}"
+                    ),
+                    expected_value=(
+                        "reserved_cash_usd=0 and no active reservation"
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/reserved_cash_usd",
+                        f"/stage_3/order_intents/{index}/reservations",
+                        f"/stage_3/order_intents/{index}/"
+                        "execution_metadata_json/reservation_state",
+                    ],
+                )
+            )
+        if (
+            current_intent_format
+            and consumed_reservation
+            and status not in {"CONFIRMED", "FILLED"}
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_RESERVATION_CONSUMED_WITHOUT_SUCCESS",
+                    severity="critical",
+                    stage="stage-3",
+                    category="capital-reservation",
+                    title=(
+                        "A reservation was consumed before terminal order success"
+                    ),
+                    explanation=(
+                        "Only a CONFIRMED or FILLED durable intent may consume "
+                        "capital. Pending, deferred, failed, or cancelled intents "
+                        "must retain or release it according to their evidence."
+                    ),
+                    observed_value=f"status={status}",
+                    expected_value="CONFIRMED or FILLED",
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/status",
+                        f"/stage_3/order_intents/{index}/reservations",
+                        f"/stage_3/order_intents/{index}/"
+                        "execution_metadata_json/reservation_state",
+                    ],
+                )
+            )
+        attempt_reached_remote_write_boundary = any(
+            isinstance(attempt, dict)
+            and bool(
+                attempt.get("remote_order_id")
+                or attempt.get("remote_transaction_hash")
+                or attempt.get("rpc_provider")
+                or (
+                    isinstance(
+                        attempt.get("sanitized_response_json"),
+                        dict,
+                    )
+                    and (
+                        attempt.get("sanitized_response_json") or {}
+                    ).get("_stage3_immediate_sell")
+                )
+            )
+            for attempt in attempts
+        )
+        remote_write_boundary_reached = bool(
+            any(
+                order.get(key)
+                for key in (
+                    "remote_order_id",
+                    "remote_transaction_hash",
+                    "first_submitted_at",
+                    "last_submitted_at",
+                )
+            )
+            or status
+            in {
+                "SUBMITTED",
+                "CONFIRMING",
+                "PARTIALLY_FILLED",
+                "SETTLEMENT_PENDING",
+                "CONFIRMED",
+                "FILLED",
+            }
+            or attempt_reached_remote_write_boundary
+        )
+        buy_market_preflight = (
+            execution_metadata.get("buy_market_exposure_preflight")
+            if isinstance(
+                execution_metadata.get(
+                    "buy_market_exposure_preflight"
+                ),
+                dict,
+            )
+            else None
+        )
+        if (
+            current_intent_format
+            and action == "buy"
+            and remote_write_boundary_reached
+            and buy_market_preflight is None
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_BUY_MARKET_PREFLIGHT_MISSING",
+                    severity="critical",
+                    stage="stage-3",
+                    category="duplicate-prevention",
+                    title=(
+                        "A BUY crossed the remote-write boundary without its "
+                        "singleton market fence"
+                    ),
+                    explanation=(
+                        "Every current-format BUY must retain the forced-fresh "
+                        "wallet lineage and the serialized singleton-account "
+                        "durable-intent conflict check performed before its "
+                        "cash reservation and external write."
+                    ),
+                    expected_value=(
+                        "v1 market-wide singleton preflight with zero conflicts"
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/"
+                        "execution_metadata_json/"
+                        "buy_market_exposure_preflight",
+                        f"/stage_3/order_intents/{index}/attempts",
+                    ],
+                )
+            )
+        if (
+            current_intent_format
+            and action == "buy"
+            and buy_market_preflight is not None
+        ):
+            conflict_count = _int(
+                buy_market_preflight.get("conflict_count")
+            )
+            conflicts = (
+                buy_market_preflight.get("conflicts")
+                if isinstance(
+                    buy_market_preflight.get("conflicts"),
+                    list,
+                )
+                else []
+            )
+            target_aliases = (
+                buy_market_preflight.get("target_aliases")
+                if isinstance(
+                    buy_market_preflight.get("target_aliases"),
+                    list,
+                )
+                else []
+            )
+            normalized_target_aliases = {
+                alias.strip().lower()
+                for alias in target_aliases
+                if isinstance(alias, str) and alias.strip()
+            }
+            order_aliases = {
+                alias.strip().lower()
+                for alias in (
+                    order.get("market_id"),
+                    order.get("condition_id"),
+                    order.get("slug"),
+                )
+                if isinstance(alias, str) and alias.strip()
+            }
+            checked_at = _timestamp(
+                buy_market_preflight.get("checked_at")
+            )
+            first_submitted_at = _timestamp(
+                order.get("first_submitted_at")
+            )
+            attempt_preflight_mirrored = any(
+                isinstance(attempt, dict)
+                and isinstance(
+                    attempt.get("sanitized_request_json"),
+                    dict,
+                )
+                and attempt["sanitized_request_json"].get(
+                    "_stage3_buy_market_exposure_preflight"
+                )
+                == buy_market_preflight
+                for attempt in attempts
+            )
+            expected_visible_conflicts = min(
+                conflict_count or 0,
+                16,
+            )
+            conflict_rows_valid = bool(
+                all(
+                    isinstance(conflict, dict)
+                    and conflict.get("intent_id")
+                    and conflict.get("status")
+                    and conflict.get("definitive_zero_fill") is False
+                    and (
+                        conflict.get("persisted_write_evidence") is True
+                        or conflict.get("active_reservation") is True
+                    )
+                    for conflict in conflicts
+                )
+            )
+            structural_preflight_valid = bool(
+                buy_market_preflight.get("version") == "v1"
+                and buy_market_preflight.get("market_wide") is True
+                and buy_market_preflight.get("scope")
+                == "singleton_bullpen_runtime"
+                and checked_at is not None
+                and 1 <= len(normalized_target_aliases) <= 3
+                and bool(
+                    normalized_target_aliases & order_aliases
+                )
+                and conflict_count is not None
+                and conflict_count >= 0
+                and len(conflicts) == expected_visible_conflicts
+                and conflict_rows_valid
+                and buy_market_preflight.get("conflicts_truncated")
+                == (conflict_count > 16)
+                and buy_market_preflight.get("result")
+                == ("blocked" if conflict_count else "pass")
+                and (
+                    not remote_write_boundary_reached
+                    or first_submitted_at is not None
+                    and checked_at <= first_submitted_at
+                )
+                and attempt_preflight_mirrored
+            )
+            if not structural_preflight_valid:
+                findings.append(
+                    _finding(
+                        code="STAGE3_BUY_MARKET_PREFLIGHT_INVALID",
+                        severity="critical",
+                        stage="stage-3",
+                        category="duplicate-prevention",
+                        title=(
+                            "The durable BUY market fence proof is invalid"
+                        ),
+                        explanation=(
+                            "The pre-write proof must identify the exact "
+                            "economic market, singleton account scope, bounded "
+                            "conflicts, timestamp, result, and identical durable "
+                            "attempt mirror."
+                        ),
+                        expected_value=(
+                            "valid v1 singleton market-wide preflight evidence"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "buy_market_exposure_preflight",
+                            f"/stage_3/order_intents/{index}/attempts",
+                        ],
+                    )
+                )
+            if remote_write_boundary_reached and (conflict_count or 0) > 0:
+                findings.append(
+                    _finding(
+                        code=(
+                            "STAGE3_BUY_MARKET_CONFLICT_CROSSED_WRITE_BOUNDARY"
+                        ),
+                        severity="critical",
+                        stage="stage-3",
+                        category="duplicate-prevention",
+                        title=(
+                            "A BUY crossed the write boundary with an unresolved "
+                            "same-market intent"
+                        ),
+                        explanation=(
+                            "A nonzero durable-intent conflict count must block "
+                            "the BUY before any external write, regardless of "
+                            "side or available collateral."
+                        ),
+                        observed_value=str(conflict_count),
+                        expected_value="0",
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "buy_market_exposure_preflight/conflicts",
+                            f"/stage_3/order_intents/{index}/"
+                            "first_submitted_at",
+                        ],
+                    )
+                )
+            buy_cash_preflight = (
+                execution_metadata.get(
+                    "buy_cash_reservation_preflight"
+                )
+                if isinstance(
+                    execution_metadata.get(
+                        "buy_cash_reservation_preflight"
+                    ),
+                    dict,
+                )
+                else None
+            )
+            if (
+                remote_write_boundary_reached
+                and buy_cash_preflight is None
+            ):
+                findings.append(
+                    _finding(
+                        code="STAGE3_BUY_CASH_PREFLIGHT_MISSING",
+                        severity="critical",
+                        stage="stage-3",
+                        category="capital-reservation",
+                        title=(
+                            "A BUY crossed the remote-write boundary without "
+                            "its singleton cash proof"
+                        ),
+                        explanation=(
+                            "Every current-format BUY must preserve the exact "
+                            "fresh balance timestamp, buffer, active or unseen "
+                            "consumed reservations, and unreserved collateral "
+                            "calculation made under the singleton account lock."
+                        ),
+                        expected_value=(
+                            "valid v2 singleton cash preflight with result=pass"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "buy_cash_reservation_preflight",
+                            f"/stage_3/order_intents/{index}/attempts",
+                        ],
+                    )
+                )
+            if buy_cash_preflight is not None:
+                cash_checked_at = _timestamp(
+                    buy_cash_preflight.get("checked_at")
+                )
+                balance_checked_at = _timestamp(
+                    buy_cash_preflight.get(
+                        "balance_checked_at"
+                    )
+                )
+                available_balance = _float(
+                    buy_cash_preflight.get(
+                        "available_balance_usd"
+                    )
+                )
+                balance_buffer = _float(
+                    buy_cash_preflight.get("balance_buffer_usd")
+                )
+                spendable_cash = _float(
+                    buy_cash_preflight.get("spendable_cash_usd")
+                )
+                held_reservations = _float(
+                    buy_cash_preflight.get(
+                        "held_reservation_usd"
+                    )
+                )
+                requested_order = _float(
+                    buy_cash_preflight.get("requested_order_usd")
+                )
+                unreserved_cash = _float(
+                    buy_cash_preflight.get(
+                        "unreserved_cash_usd"
+                    )
+                )
+                cash_attempt_mirrored = any(
+                    isinstance(attempt, dict)
+                    and isinstance(
+                        attempt.get("sanitized_request_json"),
+                        dict,
+                    )
+                    and attempt["sanitized_request_json"].get(
+                        "_stage3_buy_cash_reservation_preflight"
+                    )
+                    == buy_cash_preflight
+                    for attempt in attempts
+                )
+                numeric_values = (
+                    available_balance,
+                    balance_buffer,
+                    spendable_cash,
+                    held_reservations,
+                    requested_order,
+                    unreserved_cash,
+                )
+                numbers_valid = all(
+                    value is not None and value >= 0
+                    for value in numeric_values
+                )
+                expected_spendable = (
+                    max(
+                        0.0,
+                        (available_balance or 0)
+                        - (balance_buffer or 0),
+                    )
+                    if numbers_valid
+                    else None
+                )
+                expected_unreserved = (
+                    max(
+                        0.0,
+                        (spendable_cash or 0)
+                        - (held_reservations or 0),
+                    )
+                    if numbers_valid
+                    else None
+                )
+                proof_result_should_pass = bool(
+                    numbers_valid
+                    and (requested_order or 0) > 0
+                    and (unreserved_cash or 0)
+                    + 0.000001
+                    >= (requested_order or 0)
+                )
+                cash_preflight_valid = bool(
+                    buy_cash_preflight.get("version") == "v2"
+                    and buy_cash_preflight.get("scope")
+                    == "singleton_bullpen_runtime"
+                    and buy_cash_preflight.get(
+                        "includes_unseen_consumed_reservations"
+                    )
+                    is True
+                    and cash_checked_at is not None
+                    and balance_checked_at is not None
+                    and balance_checked_at <= cash_checked_at
+                    and numbers_valid
+                    and (requested_order or 0) > 0
+                    and abs(
+                        (spendable_cash or 0)
+                        - (expected_spendable or 0)
+                    )
+                    <= 0.011
+                    and abs(
+                        (unreserved_cash or 0)
+                        - (expected_unreserved or 0)
+                    )
+                    <= 0.011
+                    and buy_cash_preflight.get("result")
+                    == (
+                        "pass"
+                        if proof_result_should_pass
+                        else "blocked"
+                    )
+                    and (
+                        not remote_write_boundary_reached
+                        or first_submitted_at is not None
+                        and cash_checked_at <= first_submitted_at
+                        and buy_cash_preflight.get("result")
+                        == "pass"
+                    )
+                    and cash_attempt_mirrored
+                )
+                if not cash_preflight_valid:
+                    findings.append(
+                        _finding(
+                            code="STAGE3_BUY_CASH_PREFLIGHT_INVALID",
+                            severity="critical",
+                            stage="stage-3",
+                            category="capital-reservation",
+                            title=(
+                                "The durable BUY singleton cash proof is "
+                                "invalid"
+                            ),
+                            explanation=(
+                                "The pre-write proof must reproduce the fresh "
+                                "balance, buffer, held debit, unreserved cash, "
+                                "request, timestamp order, pass result, and "
+                                "identical attempt mirror."
+                            ),
+                            expected_value=(
+                                "valid v2 singleton cash reservation preflight"
+                            ),
+                            blocking=True,
+                            evidence_pointers=[
+                                f"/stage_3/order_intents/{index}/"
+                                "execution_metadata_json/"
+                                "buy_cash_reservation_preflight",
+                                f"/stage_3/order_intents/{index}/attempts",
+                            ],
+                        )
+                    )
+            credential_artifact = (
+                wallet_snapshot_lineage.get("credential_artifact")
+                if isinstance(wallet_snapshot_lineage, dict)
+                and isinstance(
+                    wallet_snapshot_lineage.get("credential_artifact"),
+                    dict,
+                )
+                else {}
+            )
+            buy_wallet_lineage_valid = bool(
+                isinstance(wallet_snapshot_lineage, dict)
+                and wallet_snapshot_lineage.get("source")
+                in {"live-cli", "redis-cache"}
+                and wallet_snapshot_lineage.get("freshness_state")
+                == "fresh"
+                and _timestamp(
+                    wallet_snapshot_lineage.get("fetched_at")
+                )
+                is not None
+                and wallet_snapshot_lineage.get(
+                    "position_classifier_version"
+                )
+                == BULLPEN_POSITION_CLASSIFIER_VERSION
+                and wallet_snapshot_lineage.get("account_identity")
+                and all(
+                    credential_artifact.get(field_name) is not None
+                    for field_name in ("inode", "mtime_ns", "size")
+                )
+                and isinstance(wallet_lineage_comparison, dict)
+                and wallet_lineage_comparison.get("status") == "match"
+                and not wallet_lineage_comparison.get("mismatches")
+            )
+            if remote_write_boundary_reached and not buy_wallet_lineage_valid:
+                findings.append(
+                    _finding(
+                        code="STAGE3_BUY_WALLET_LINEAGE_PREFLIGHT_INVALID",
+                        severity="critical",
+                        stage="stage-3",
+                        category="execution-guardrail",
+                        title=(
+                            "A BUY lacks valid forced-fresh wallet lineage"
+                        ),
+                        explanation=(
+                            "The market fence must accompany a fresh Bullpen "
+                            "wallet snapshot from the same account, credential "
+                            "artifact, and current position classifier."
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "wallet_snapshot_lineage",
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "wallet_lineage_comparison",
+                        ],
+                    )
+                )
+        uncertain_write_boundary = execution_metadata.get(
+            "uncertain_remote_write_boundary"
+        )
+        if (
+            current_intent_format
+            and uncertain_write_boundary is not None
+        ):
+            boundary_recorded_at = (
+                uncertain_write_boundary.get("recorded_at")
+                if isinstance(uncertain_write_boundary, dict)
+                else None
+            )
+            boundary_timestamp = _timestamp(boundary_recorded_at)
+            first_submitted_timestamp = _timestamp(
+                order.get("first_submitted_at")
+            )
+            last_submitted_timestamp = _timestamp(
+                order.get("last_submitted_at")
+            )
+            attempt_boundary_mirrored = any(
+                isinstance(attempt, dict)
+                and isinstance(
+                    attempt.get("reconciliation_json"),
+                    dict,
+                )
+                and isinstance(
+                    attempt["reconciliation_json"].get(
+                        "uncertain_remote_write_boundary"
+                    ),
+                    dict,
+                )
+                and attempt["reconciliation_json"][
+                    "uncertain_remote_write_boundary"
+                ].get("recorded_at")
+                == boundary_recorded_at
+                for attempt in attempts
+            )
+            boundary_valid = bool(
+                isinstance(uncertain_write_boundary, dict)
+                and _int(
+                    uncertain_write_boundary.get("attempt_number")
+                )
+                is not None
+                and uncertain_write_boundary.get(
+                    "ambiguous_submission"
+                )
+                is True
+                and uncertain_write_boundary.get(
+                    "automatic_resubmission"
+                )
+                is False
+                and execution_metadata.get(
+                    "automatic_resubmission"
+                )
+                is False
+                and boundary_timestamp is not None
+                and first_submitted_timestamp is not None
+                and last_submitted_timestamp is not None
+                and first_submitted_timestamp
+                <= boundary_timestamp
+                <= last_submitted_timestamp
+                and attempt_boundary_mirrored
+            )
+            if not boundary_valid:
+                findings.append(
+                    _finding(
+                        code=(
+                            "STAGE3_AMBIGUOUS_WRITE_BOUNDARY_EVIDENCE_INVALID"
+                        ),
+                        severity="critical",
+                        stage="stage-3",
+                        category="execution-reconciliation",
+                        title=(
+                            "An ambiguous write boundary lacks its durable fence"
+                        ),
+                        explanation=(
+                            "An uncertain exchange write must retain matching "
+                            "first/last submission timestamps, the boundary "
+                            "timestamp and attempt mirror, and an explicit "
+                            "automatic-resubmission prohibition."
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "first_submitted_at",
+                            f"/stage_3/order_intents/{index}/"
+                            "last_submitted_at",
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "uncertain_remote_write_boundary",
+                            f"/stage_3/order_intents/{index}/attempts",
+                        ],
+                    )
+                )
+        if (
+            current_intent_format
+            and action == "buy"
+            and status in {"CONFIRMED", "FILLED"}
+            and remote_write_boundary_reached
+            and not _terminal_buy_refresh_is_valid(
+                execution_metadata.get(
+                    "post_buy_terminal_wallet_refresh"
+                )
+            )
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_TERMINAL_BUY_PORTFOLIO_REFRESH_MISSING",
+                    severity="high",
+                    stage="stage-3",
+                    category="portfolio-publication",
+                    title=(
+                        "A terminal buy lacks its post-submit portfolio refresh"
+                    ),
+                    explanation=(
+                        "Every current-version terminal buy must retain either "
+                        "a bounded publication result or forced-fresh wallet "
+                        "evidence with matching account, credential, and "
+                        "classifier lineage."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/"
+                        "execution_metadata_json/"
+                        "post_buy_terminal_wallet_refresh",
+                    ],
+                )
+            )
+        operator_block = execution_metadata.get(
+            "buy_reconciliation_operator_block"
+        )
+        operator_block_required = bool(
+            current_intent_format
+            and action == "buy"
+            and status == "TIMED_OUT"
+            and "BUY_RECONCILIATION_OPERATOR_BLOCKED"
+            in str(order.get("last_error_message") or "")
+        )
+        if operator_block_required or operator_block is not None:
+            blocked_at = (
+                operator_block.get("blocked_at")
+                if isinstance(operator_block, dict)
+                else None
+            )
+            max_age_seconds = (
+                _int(operator_block.get("max_age_seconds"))
+                if isinstance(operator_block, dict)
+                else None
+            )
+            age_seconds = (
+                _int(operator_block.get("age_seconds"))
+                if isinstance(operator_block, dict)
+                else None
+            )
+            operator_block_valid = bool(
+                current_intent_format
+                and action == "buy"
+                and status == "TIMED_OUT"
+                and isinstance(operator_block, dict)
+                and operator_block.get("version") == "v1"
+                and _timestamp(blocked_at) is not None
+                and max_age_seconds is not None
+                and 30 <= max_age_seconds <= 24 * 60 * 60
+                and age_seconds is not None
+                and age_seconds >= max_age_seconds
+                and operator_block.get(
+                    "automatic_resubmission"
+                )
+                is False
+                and operator_block.get(
+                    "support_verification_required"
+                )
+                is True
+                and execution_metadata.get(
+                    "automatic_resubmission"
+                )
+                is False
+                and order.get("retryable") is False
+                and order.get("next_attempt_at") is None
+                and "BUY_RECONCILIATION_OPERATOR_BLOCKED"
+                in str(order.get("last_error_message") or "")
+            )
+            if not operator_block_valid:
+                findings.append(
+                    _finding(
+                        code="STAGE3_BUY_OPERATOR_BLOCK_INVALID",
+                        severity="critical",
+                        stage="stage-3",
+                        category="execution-reconciliation",
+                        title=(
+                            "Aged ambiguous buy lacks its terminal operator fence"
+                        ),
+                        explanation=(
+                            "After the bounded reconciliation window, the buy "
+                            "must be non-retryable, retain its remote evidence, "
+                            "and require Bullpen support verification before "
+                            "manual recovery."
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/status",
+                            f"/stage_3/order_intents/{index}/retryable",
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/"
+                            "buy_reconciliation_operator_block",
+                        ],
+                    )
+                )
+        dependent_buy_crossed_sizing_or_execution = bool(
+            action == "buy"
+            and dependency_group
+            and (
+                post_exit_sizing is not None
+                or active_reservation
+                or status
+                in {
+                    "SUBMITTING",
+                    "SUBMITTED",
+                    "CONFIRMING",
+                    "PARTIALLY_FILLED",
+                    "SETTLEMENT_PENDING",
+                    "CONFIRMED",
+                    "FILLED",
+                }
+                or remote_write_boundary_reached
+            )
+        )
+        if (
+            current_intent_format
+            and dependent_buy_crossed_sizing_or_execution
+        ):
+            exit_confirmed_at = dependency_metadata.get(
+                "exit_confirmed_at"
+            )
+            if not exit_confirmed_at:
+                findings.append(
+                    _finding(
+                        code="STAGE3_DEPENDENT_BUY_EXIT_PROOF_MISSING",
+                        severity="critical",
+                        stage="stage-3",
+                        category="dependency-guardrail",
+                        title=(
+                            "A dependent buy advanced without confirmed exit proof"
+                        ),
+                        explanation=(
+                            "A replacement buy may not be dynamically sized, "
+                            "reserve cash, or cross the write boundary until its "
+                            "matching exit has a durable confirmation timestamp."
+                        ),
+                        expected_value=(
+                            "dependency_metadata_json.exit_confirmed_at"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "dependency_metadata_json/exit_confirmed_at",
+                            f"/stage_3/order_intents/{index}/status",
+                        ],
+                    )
+                )
+
+            wallet_fetched_at = (
+                wallet_snapshot_lineage.get("fetched_at")
+                if wallet_snapshot_lineage is not None
+                else None
+            )
+            sizing_valid = bool(
+                post_exit_sizing is not None
+                and post_exit_sizing.get("version") == "v1"
+                and post_exit_sizing.get("source")
+                == "forced_fresh_post_exit_balance"
+                and post_exit_sizing.get("applied_at")
+                and (_float(post_exit_sizing.get("order_usd")) or 0) > 0
+                and wallet_snapshot_lineage is not None
+                and wallet_snapshot_lineage.get("source")
+                in {"live-cli", "redis-cache"}
+                and wallet_snapshot_lineage.get("freshness_state") == "fresh"
+                and _timestamp(wallet_fetched_at) is not None
+                and _timestamp(exit_confirmed_at) is not None
+                and _timestamp(wallet_fetched_at)
+                > _timestamp(exit_confirmed_at)
+            )
+            if not sizing_valid:
+                findings.append(
+                    _finding(
+                        code=(
+                            "STAGE3_DEPENDENT_BUY_POST_EXIT_SIZING_PROOF_INVALID"
+                        ),
+                        severity="critical",
+                        stage="stage-3",
+                        category="capital-sizing",
+                        title=(
+                            "A dependent buy lacks fresh post-exit sizing proof"
+                        ),
+                        explanation=(
+                            "Before a replacement buy reserves cash or reaches "
+                            "execution, v1 sizing must use a force-fresh wallet "
+                            "snapshot fetched after the confirmed exit and the "
+                            "fresh post-exit balance."
+                        ),
+                        expected_value=(
+                            "v1 forced_fresh_post_exit_balance sizing and a "
+                            "fresh wallet lineage fetched after exit_confirmed_at"
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/post_exit_sizing",
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/wallet_snapshot_lineage",
+                            f"/stage_3/order_intents/{index}/"
+                            "dependency_metadata_json/exit_confirmed_at",
+                        ],
+                    )
+                )
+        if (
+            order.get("action") == "redeem"
+            and current_intent_format
+            and remote_write_boundary_reached
+        ):
+            if (
+                wallet_snapshot_lineage is None
+                or wallet_lineage_comparison is None
+            ):
+                findings.append(
+                    _finding(
+                        code="STAGE3_REDEEM_LINEAGE_PREFLIGHT_MISSING",
+                        severity="critical",
+                        stage="stage-3",
+                        category="execution-guardrail",
+                        title=(
+                            "Stage 3 redeem crossed the remote-write boundary "
+                            "without wallet-lineage proof"
+                        ),
+                        explanation=(
+                            "Current-version redeems that reached an external "
+                            "provider must retain the forced-fresh wallet "
+                            "snapshot and Stage 1 lineage comparison captured "
+                            "before that write."
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/wallet_snapshot_lineage",
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/wallet_lineage_comparison",
+                        ],
+                    )
+                )
+            else:
+                compared_fields = set(
+                    wallet_lineage_comparison.get("compared_fields")
+                    if isinstance(
+                        wallet_lineage_comparison.get("compared_fields"),
+                        list,
+                    )
+                    else []
+                )
+                required_compared_fields = {
+                    "account_identity",
+                    "position_classifier_version",
+                    "credential_artifact.inode",
+                    "credential_artifact.mtime_ns",
+                    "credential_artifact.size",
+                    "fetched_at_not_older",
+                }
+                credential_artifact = (
+                    wallet_snapshot_lineage.get("credential_artifact")
+                    if isinstance(
+                        wallet_snapshot_lineage.get("credential_artifact"),
+                        dict,
+                    )
+                    else {}
+                )
+                redeem_lineage_valid = bool(
+                    wallet_snapshot_lineage.get("source")
+                    in {"live-cli", "redis-cache"}
+                    and wallet_snapshot_lineage.get("freshness_state")
+                    == "fresh"
+                    and wallet_snapshot_lineage.get(
+                        "position_classifier_version"
+                    )
+                    == BULLPEN_POSITION_CLASSIFIER_VERSION
+                    and wallet_snapshot_lineage.get("account_identity")
+                    and all(
+                        credential_artifact.get(field_name) is not None
+                        for field_name in ("inode", "mtime_ns", "size")
+                    )
+                    and wallet_lineage_comparison.get("status") == "match"
+                    and not wallet_lineage_comparison.get("mismatches")
+                    and required_compared_fields.issubset(compared_fields)
+                )
+                if not redeem_lineage_valid:
+                    findings.append(
+                        _finding(
+                            code="STAGE3_REDEEM_LINEAGE_PREFLIGHT_INVALID",
+                            severity="critical",
+                            stage="stage-3",
+                            category="execution-guardrail",
+                            title=(
+                                "Stage 3 redeem lacks valid wallet-lineage proof"
+                            ),
+                            explanation=(
+                                "Versioned redeem preflight must prove a fresh "
+                                "wallet snapshot from the same Stage 1 account, "
+                                "credential artifact, classifier version, and "
+                                "non-older snapshot lineage."
+                            ),
+                            blocking=True,
+                            evidence_pointers=[
+                                f"/stage_3/order_intents/{index}/"
+                                "execution_metadata_json/"
+                                "wallet_snapshot_lineage",
+                                f"/stage_3/order_intents/{index}/"
+                                "execution_metadata_json/"
+                                "wallet_lineage_comparison",
+                            ],
+                        )
+                    )
+        if (
+            order.get("action") == "sell"
+            and current_intent_format
+            and remote_write_boundary_reached
+            and sell_preflight is None
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_SELL_LIVE_PREFLIGHT_MISSING",
+                    severity="critical",
+                    stage="stage-3",
+                    category="execution-guardrail",
+                    title="Stage 3 sell crossed the remote-write boundary without live preflight proof",
+                    explanation=(
+                        "Current-version sells that reached an external provider "
+                        "or persisted remote submission evidence must retain the "
+                        "fresh exposure, market, share-cap, and lineage proof "
+                        "captured before that write."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}/"
+                        "execution_metadata_json/sell_live_preflight"
+                    ],
+                )
+            )
+        if order.get("action") == "sell" and sell_preflight is not None:
+            verified_shares = _float(sell_preflight.get("verified_shares"))
+            submitted_shares = _float(sell_preflight.get("submitted_shares"))
+            classification = str(
+                sell_preflight.get("classification") or ""
+            ).lower()
+            preflight_valid = bool(
+                sell_preflight.get("version") == "v1"
+                and sell_preflight.get("source")
+                in {"live-cli", "redis-cache"}
+                and sell_preflight.get("freshness_state") == "fresh"
+                and sell_preflight.get("sellable") is True
+                and sell_preflight.get("position_classifier_version")
+                == BULLPEN_POSITION_CLASSIFIER_VERSION
+                and verified_shares is not None
+                and submitted_shares is not None
+                and 0 < submitted_shares <= verified_shares
+                and classification == "active"
+            )
+            if not preflight_valid:
+                findings.append(
+                    _finding(
+                        code="STAGE3_SELL_LIVE_PREFLIGHT_INVALID",
+                        severity="critical",
+                        stage="stage-3",
+                        category="execution-guardrail",
+                        title="Stage 3 sell lacks valid fresh exposure proof",
+                        explanation=(
+                            "Versioned sell preflight must prove a fresh, "
+                            "lineage-fenced active position and cap submitted "
+                            "shares at the verified wallet amount."
+                        ),
+                        blocking=True,
+                        evidence_pointers=[
+                            f"/stage_3/order_intents/{index}/"
+                            "execution_metadata_json/sell_live_preflight"
+                        ],
+                    )
+                )
+        if (
+            order.get("action") == "sell"
+            and order.get("last_error_code")
+            in {"SELL_REQUIRES_REDEEM", "NO_SELLABLE_EXPOSURE"}
+            and any(
+                order.get(key)
+                for key in (
+                    "remote_order_id",
+                    "remote_transaction_hash",
+                    "first_submitted_at",
+                )
+            )
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE3_BLOCKED_SELL_HAS_REMOTE_WRITE_REFERENCE",
+                    severity="critical",
+                    stage="stage-3",
+                    category="execution-guardrail",
+                    title="A non-sellable position has a remote sell reference",
+                    explanation=(
+                        "Claimable, resolved, or otherwise non-tradable exposure "
+                        "must be blocked before any external sell write."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        f"/stage_3/order_intents/{index}"
+                    ],
+                )
+            )
         findings.extend(
             _immediate_sell_strategy_findings(
                 order=order,
@@ -1614,4 +3539,4 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     )
                 )
 
-    return findings
+    return coalesce_deterministic_findings(findings)

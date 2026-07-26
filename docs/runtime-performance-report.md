@@ -334,3 +334,74 @@ credit balance remains at the floor. The evidence-backed next infrastructure
 action is to move latency-sensitive workers off the web host or migrate to a
 non-burstable instance after sizing from p75/p95 CPU. That change requires
 operator approval and is not performed by this task.
+
+## 2026-07-27 exact-run and portfolio consistency follow-up
+
+The active History detail previously refreshed a complete run and then a
+separate decision collection. That could show an older Stage 3 decision set
+beside a newer workflow summary, and it repeatedly selected large frozen
+payloads while the run was active. The active dialog now owns one abortable
+request to:
+
+`GET /polymarket/auto-live/runs/{run_id}/console`
+
+The route selects the exact user-owned run projection, at most 32 decision
+projections, and a payload-free current decision-ID set capped at 200. It has a
+four-second server deadline and never selects the full run or decision payload.
+The browser polls only while that exact run is
+`running`/`confirming` and the page is visible. Expandable frozen evidence
+already loaded for the dialog is retained; authoritative empty guardrails,
+intent IDs, and cleared blocker fields remove stale recovery state. When the
+identity set is complete, it also removes a row that durable reconciliation
+marked superseded even if the row falls outside the newest 32 projections. A
+regression fixture keeps all 39 current previously loaded decisions while
+updating the newest bounded 32, and a second replaces one of 40 without
+displaying 41 rows. Terminal History detail performs the same exact-run read
+once when opened, so a frozen Stage 3 row superseded by durable reconciliation
+cannot reappear merely because the run no longer needs active polling.
+
+The portfolio fallback no longer searches or hydrates a collection of complete
+runs. Stage 1 persists a small normalized last-known-good DTO in the existing
+state JSON. A legacy fallback query selects one matching console projection
+with `LIMIT 1`; it does not select `polymarket_auto_live_runs.payload`.
+
+The fallback is bounded as follows:
+
+| Partition | Maximum retained rows |
+| --- | ---: |
+| Active | 10 |
+| Positive-payout claimable | 10 |
+| Settlement pending | 5 |
+| Excluded/diagnostic | 5 |
+
+Only an allowlisted normalized field set is retained, strings are capped, and
+raw wallet/provider fields are dropped. The adversarial unit fixture containing
+large raw fields serializes this DTO below 50,000 bytes. The dashboard retains
+its existing 150,000-byte hard response ceiling. These are deterministic local
+response-budget checks; post-deploy `Server-Timing` and response bytes remain
+the production latency evidence.
+
+Active, claimable, settlement, and excluded rows retain separate economic
+classifications. Only active rows consume the ten-position capacity used by
+the trade-amount preview. The portfolio total values claimable rows from the
+same snapshot using claimable value, expected payout, current value, then cost
+basis in that order. When the Stage 1 fallback is displayed, an unrelated
+balance-snapshot PnL is not mixed into the card. For a live positions snapshot,
+any cash or realized-PnL value that must come from the separate balance read is
+explicitly labeled with that balance snapshot timestamp; the card separately
+labels the wallet-position refresh time.
+
+Browser refreshes now compare account identity, credential artifact metadata,
+and classifier version against the last verified wallet snapshot in the tab.
+Passive, run-completion, preflight, and operator refreshes may automatically
+re-baseline credential or classifier rotation only when the response is a
+complete, fresh, usable live snapshot for the same explicit account. Account
+changes and missing-lineage, cached, degraded, or error-bearing responses
+preserve the existing rows and avoid auto-claim. The card shows only the
+abbreviated non-secret account, source, and classifier version. This comparison
+is in-memory and adds no network request.
+
+The read-path fixes do not change the infrastructure conclusion above. The
+latest read-only production evidence still shows a `t3.large` at the CPU-credit
+floor, so intermittent host scheduling latency is an independent remaining
+constraint and is not masked with longer UI timeouts.

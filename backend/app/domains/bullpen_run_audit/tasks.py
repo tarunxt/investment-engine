@@ -18,7 +18,10 @@ from app.domains.bullpen_run_audit.prompt_builder import (
     parse_feedback_report,
     plan_feedback_chunks,
 )
-from app.domains.bullpen_run_audit.repository import BullpenRunAuditRepository
+from app.domains.bullpen_run_audit.repository import (
+    BullpenRunAuditRepository,
+    sanitize_audit_evidence,
+)
 from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
 from app.domains.polymarket.bullpen_llm_execution import prompt_budget_chars_for_provider
 from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -38,6 +41,17 @@ _RENEW_IF_OWNER_SCRIPT = (
     "if redis.call('get', KEYS[1]) == ARGV[1] "
     "then return redis.call('expire', KEYS[1], ARGV[2]) "
     "else return 0 end"
+)
+_COMPLETE_IF_GENERATION_CURRENT_SCRIPT = (
+    "if redis.call('get', KEYS[1]) ~= ARGV[1] then return -1 end "
+    "local generation = redis.call('get', KEYS[2]) "
+    "if not generation then return 2 end "
+    "if generation == ARGV[2] then "
+    "redis.call('del', KEYS[1]) "
+    "redis.call('del', KEYS[2]) "
+    "return 0 "
+    "end "
+    "return 1"
 )
 
 
@@ -114,6 +128,34 @@ def _renew_if_owner(
     return int(renewed or 0) == 1
 
 
+def _complete_if_generation_current(
+    redis_client: sync_redis.Redis,
+    *,
+    pending_key: str,
+    generation_key: str,
+    token: str,
+    generation: str,
+) -> int:
+    """Atomically finish a refresh only if no later request dirtied the run.
+
+    ``0`` means the current generation was complete and both coalescing keys
+    were released, ``1`` means a newer generation requires another rebuild,
+    ``2`` means the generation watermark disappeared and requires a fail-safe
+    trailing rebuild, and ``-1`` means this worker no longer owns the pending
+    marker.
+    """
+
+    outcome = redis_client.eval(
+        _COMPLETE_IF_GENERATION_CURRENT_SCRIPT,
+        2,
+        pending_key,
+        generation_key,
+        token,
+        generation,
+    )
+    return int(outcome or 0)
+
+
 class _AuditRefreshLeaseHeartbeat:
     """Keep a long force-materialization coalesced behind its Redis token.
 
@@ -129,6 +171,8 @@ class _AuditRefreshLeaseHeartbeat:
         redis_client: sync_redis.Redis,
         pending_key: str,
         lease_key: str,
+        generation_key: str,
+        freeze_key: str,
         token: str,
         lease_ttl_seconds: int,
         pending_ttl_seconds: int,
@@ -136,6 +180,8 @@ class _AuditRefreshLeaseHeartbeat:
         self._redis_client = redis_client
         self._pending_key = pending_key
         self._lease_key = lease_key
+        self._generation_key = generation_key
+        self._freeze_key = freeze_key
         self._token = token
         self._lease_ttl_seconds = lease_ttl_seconds
         self._pending_ttl_seconds = pending_ttl_seconds
@@ -174,6 +220,19 @@ class _AuditRefreshLeaseHeartbeat:
                     token=self._token,
                     ttl_seconds=self._pending_ttl_seconds,
                 )
+                # Generation and freeze are monotonic metadata within the
+                # pending token's coalescing window. They do not carry an
+                # owner token themselves, so extending a newer value is safe
+                # and prevents an allowed ten-minute rebuild from silently
+                # outliving its dirty/freeze watermark.
+                self._redis_client.expire(
+                    self._generation_key,
+                    self._pending_ttl_seconds,
+                )
+                self._redis_client.expire(
+                    self._freeze_key,
+                    self._pending_ttl_seconds,
+                )
             except Exception:
                 logger.warning(
                     "Could not renew coalesced Bullpen run-audit refresh lease for %s",
@@ -207,7 +266,9 @@ def request_bullpen_run_audit_refresh_sync(
 
     Returns ``True`` only for the caller that created the pending marker and
     therefore enqueued the single Celery refresh task.  Later requests for the
-    same run during the debounce/active window cheaply return ``False``.
+    same run during the debounce/active window cheaply return ``False`` after
+    advancing the dirty generation.  The active worker must observe that
+    generation before atomically releasing its marker.
     """
 
     normalized_run_id = str(run_id).strip()
@@ -216,8 +277,11 @@ def request_bullpen_run_audit_refresh_sync(
 
     pending_key = _audit_refresh_key("pending", normalized_run_id)
     freeze_key = _audit_refresh_key("freeze", normalized_run_id)
+    generation_key = _audit_refresh_key("generation", normalized_run_id)
     token = str(uuid4())
+    generation = str(uuid4())
     redis_client: sync_redis.Redis | None = None
+    acquired = False
     try:
         redis_client = _audit_refresh_redis_client()
         if freeze:
@@ -229,12 +293,20 @@ def request_bullpen_run_audit_refresh_sync(
                 "1",
                 ex=_audit_refresh_pending_ttl_seconds(),
             )
-        acquired = redis_client.set(
+        # Publish the dirty generation only after monotonic request metadata
+        # such as ``freeze`` is durable, so observing this watermark implies
+        # the worker can observe all state attached to the request.
+        redis_client.set(
+            generation_key,
+            generation,
+            ex=_audit_refresh_pending_ttl_seconds(),
+        )
+        acquired = bool(redis_client.set(
             pending_key,
             token,
             nx=True,
             ex=_audit_refresh_pending_ttl_seconds(),
-        )
+        ))
         if not acquired:
             return False
 
@@ -243,6 +315,7 @@ def request_bullpen_run_audit_refresh_sync(
                 "user_id": int(user_id),
                 "run_id": normalized_run_id,
                 "request_token": token,
+                "request_generation": generation,
                 "freeze_requested": bool(freeze),
             },
             queue="ai",
@@ -260,6 +333,12 @@ def request_bullpen_run_audit_refresh_sync(
         if redis_client is not None:
             try:
                 _delete_if_owner(redis_client, key=pending_key, token=token)
+                if acquired:
+                    _delete_if_owner(
+                        redis_client,
+                        key=generation_key,
+                        token=generation,
+                    )
             except Exception:
                 logger.warning(
                     "Unable to clear failed Bullpen run-audit refresh marker for run %s",
@@ -345,6 +424,8 @@ def prune_unreferenced_bullpen_run_audit_blobs(self) -> int:
 @celery.task(
     bind=True,
     max_retries=0,
+    acks_late=True,
+    reject_on_worker_lost=True,
     soft_time_limit=60 * 10,
     time_limit=(60 * 10) + 30,
     name="app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot",
@@ -356,14 +437,17 @@ def refresh_bullpen_run_audit_snapshot(
     user_id: int,
     run_id: str,
     request_token: str,
+    request_generation: str | None = None,
     freeze_requested: bool = False,
 ) -> str:
-    """Materialize one coalesced, current audit view for a run.
+    """Materialize the coalesced current audit view, including trailing dirties.
 
     The Redis pending marker deduplicates scheduling and the per-run lease
     makes duplicate/redelivered Celery messages a cheap no-op.  Database
     serialization in ``materialize_run_audit_snapshot_sync`` remains the
     correctness boundary, including if Redis loses state or a lease expires.
+    The dirty generation is drained in this task so a request that races after
+    the materializer read cannot be erased by pending-marker cleanup.
     """
 
     normalized_run_id = str(run_id).strip()
@@ -375,9 +459,15 @@ def refresh_bullpen_run_audit_snapshot(
     pending_key = _audit_refresh_key("pending", normalized_run_id)
     lease_key = _audit_refresh_key("lease", normalized_run_id)
     freeze_key = _audit_refresh_key("freeze", normalized_run_id)
+    generation_key = _audit_refresh_key("generation", normalized_run_id)
+    redelivery_key = _audit_refresh_key(
+        f"redelivery:{token}",
+        normalized_run_id,
+    )
     redis_client: sync_redis.Redis | None = None
     lease_acquired = False
     lease_heartbeat: _AuditRefreshLeaseHeartbeat | None = None
+    release_pending_on_exit = False
     try:
         redis_client = _audit_refresh_redis_client()
         if redis_client.get(pending_key) != token:
@@ -396,16 +486,106 @@ def refresh_bullpen_run_audit_snapshot(
             )
         )
         if not lease_acquired:
+            lease_owner = redis_client.get(lease_key)
+            if lease_owner == token:
+                # With late acknowledgement a worker-loss redelivery can
+                # arrive before the dead worker's same-token Redis lease
+                # expires. Schedule exactly one delayed recovery for this
+                # token; duplicate deliveries share the marker and cannot
+                # create unbounded fan-out. The pending TTL intentionally
+                # exceeds this delay.
+                remaining_lease_seconds = redis_client.ttl(lease_key)
+                recovery_delay_seconds = (
+                    max(1, int(remaining_lease_seconds))
+                    if int(remaining_lease_seconds) >= 0
+                    else audit_refresh_lease_seconds()
+                ) + 2
+                recovery_window_seconds = max(
+                    _audit_refresh_pending_ttl_seconds(),
+                    recovery_delay_seconds
+                    + audit_refresh_lease_seconds()
+                    + 60,
+                )
+                recovery_scheduled = bool(
+                    redis_client.set(
+                        redelivery_key,
+                        token,
+                        nx=True,
+                        ex=recovery_window_seconds,
+                    )
+                )
+                if recovery_scheduled:
+                    # The original pending marker may be much older than the
+                    # lease observed by this late redelivery. Keep it alive
+                    # through the remaining lease, delayed takeover, and one
+                    # complete materialization window; scheduling against the
+                    # full configured lease without this renewal can otherwise
+                    # wake only after the pending owner has expired.
+                    pending_renewed = _renew_if_owner(
+                        redis_client,
+                        key=pending_key,
+                        token=token,
+                        ttl_seconds=recovery_window_seconds,
+                    )
+                    if not pending_renewed:
+                        _delete_if_owner(
+                            redis_client,
+                            key=redelivery_key,
+                            token=token,
+                        )
+                        logger.info(
+                            "Skipping superseded Bullpen run-audit redelivery recovery for run %s",
+                            normalized_run_id,
+                        )
+                        return "superseded"
+                    # Preserve the current dirty watermark and monotonic freeze
+                    # request for the same recovery window when those keys are
+                    # still present. Missing keys remain safe: request_generation
+                    # and the durable terminal run state are fallback evidence.
+                    redis_client.expire(
+                        generation_key,
+                        recovery_window_seconds,
+                    )
+                    redis_client.expire(
+                        freeze_key,
+                        recovery_window_seconds,
+                    )
+                    refresh_bullpen_run_audit_snapshot.apply_async(  # type: ignore[attr-defined]
+                        kwargs={
+                            "user_id": int(user_id),
+                            "run_id": normalized_run_id,
+                            "request_token": token,
+                            "request_generation": request_generation,
+                            "freeze_requested": bool(freeze_requested),
+                        },
+                        queue="ai",
+                        countdown=recovery_delay_seconds,
+                    )
+                    logger.info(
+                        "Scheduled same-token Bullpen run-audit redelivery after stale lease expiry for run %s",
+                        normalized_run_id,
+                    )
+                    return "redelivery-scheduled"
             logger.info(
                 "Skipping duplicate Bullpen run-audit refresh while lease is active for run %s",
                 normalized_run_id,
             )
             return "duplicate"
+        # The task that successfully takes over a stale lease owns the next
+        # recovery epoch. Clear the token-scoped scheduling marker so another
+        # worker loss can schedule one (and only one) later recovery.
+        _delete_if_owner(
+            redis_client,
+            key=redelivery_key,
+            token=token,
+        )
 
         lease_heartbeat = _AuditRefreshLeaseHeartbeat(
             redis_client=redis_client,
             pending_key=pending_key,
             lease_key=lease_key,
+            generation_key=generation_key,
+            freeze_key=freeze_key,
             token=token,
             lease_ttl_seconds=audit_refresh_lease_seconds(),
             pending_ttl_seconds=_audit_refresh_pending_ttl_seconds(),
@@ -418,23 +598,65 @@ def refresh_bullpen_run_audit_snapshot(
         # persisted run unless a cancellation request explicitly requires it.
         # Passing ``False`` here would incorrectly override a run that became
         # terminal while this debounced task was waiting for its row lock.
-        freeze = (
-            True
-            if (freeze_requested or redis_client.get(freeze_key) == "1")
-            else None
-        )
-        with SyncSessionLocal() as session:
-            materialize_run_audit_snapshot_sync(
-                session,
-                user_id=int(user_id),
-                run_id=normalized_run_id,
-                force=True,
-                freeze=freeze,
+        materialization_count = 0
+        while True:
+            freeze = (
+                True
+                if (freeze_requested or redis_client.get(freeze_key) == "1")
+                else None
             )
-            session.commit()
+            # This is the watermark immediately before the materializer reads
+            # the locked durable run state.  Any request that arrives after
+            # this read changes the key and forces a trailing rebuild.
+            observed_generation = (
+                redis_client.get(generation_key)
+                or str(request_generation or "").strip()
+                or token
+            )
+            with SyncSessionLocal() as session:
+                materialize_run_audit_snapshot_sync(
+                    session,
+                    user_id=int(user_id),
+                    run_id=normalized_run_id,
+                    force=True,
+                    freeze=freeze,
+                )
+                session.commit()
+            materialization_count += 1
+            completion = _complete_if_generation_current(
+                redis_client,
+                pending_key=pending_key,
+                generation_key=generation_key,
+                token=token,
+                generation=observed_generation,
+            )
+            if completion == 0:
+                break
+            if completion < 0:
+                logger.info(
+                    "Stopping superseded Bullpen run-audit refresh after materialization for run %s",
+                    normalized_run_id,
+                )
+                return "superseded"
+            if completion == 2:
+                # Missing is not evidence that no later request arrived: a
+                # long materialization can outlive the Redis generation TTL.
+                # Install a fresh watermark only if another caller has not
+                # already published one, then perform one trailing rebuild.
+                redis_client.set(
+                    generation_key,
+                    str(uuid4()),
+                    nx=True,
+                    ex=_audit_refresh_pending_ttl_seconds(),
+                )
+            logger.debug(
+                "Bullpen run-audit refresh observed a newer generation; rebuilding trailing state for run %s",
+                normalized_run_id,
+            )
         logger.debug(
-            "Coalesced Bullpen run-audit refresh completed for run %s",
+            "Coalesced Bullpen run-audit refresh completed for run %s in %s materialization(s)",
             normalized_run_id,
+            materialization_count,
         )
         return "materialized"
     except Exception:
@@ -445,6 +667,7 @@ def refresh_bullpen_run_audit_snapshot(
             "Coalesced Bullpen run-audit refresh failed for run %s",
             normalized_run_id,
         )
+        release_pending_on_exit = True
         return "failed"
     finally:
         if lease_heartbeat is not None:
@@ -453,7 +676,8 @@ def refresh_bullpen_run_audit_snapshot(
             try:
                 if lease_acquired:
                     _delete_if_owner(redis_client, key=lease_key, token=token)
-                    _delete_if_owner(redis_client, key=pending_key, token=token)
+                    if release_pending_on_exit:
+                        _delete_if_owner(redis_client, key=pending_key, token=token)
             except Exception:
                 logger.warning(
                     "Unable to release Bullpen run-audit refresh lease for run %s",
@@ -534,7 +758,13 @@ def generate_bullpen_run_audit_feedback(
                     payload=response.content,
                     content_type="text/plain",
                 )
-                parsed = parse_feedback_report(response.content)
+                parsed = sanitize_audit_evidence(
+                    parse_feedback_report(response.content)
+                )
+                if not isinstance(parsed, dict):
+                    raise RuntimeError(
+                        "Sanitized Bullpen run-audit feedback must be an object"
+                    )
                 elapsed = round(time.perf_counter() - started, 3)
                 total_tokens_in += int(response.tokens_in or 0)
                 total_tokens_out += int(response.tokens_out or 0)
@@ -586,7 +816,13 @@ def generate_bullpen_run_audit_feedback(
                     payload=response.content,
                     content_type="text/plain",
                 )
-                final_report = parse_feedback_report(response.content)
+                final_report = sanitize_audit_evidence(
+                    parse_feedback_report(response.content)
+                )
+                if not isinstance(final_report, dict):
+                    raise RuntimeError(
+                        "Sanitized Bullpen run-audit synthesis must be an object"
+                    )
                 elapsed = round(time.perf_counter() - started, 3)
                 total_tokens_in += int(response.tokens_in or 0)
                 total_tokens_out += int(response.tokens_out or 0)
@@ -623,8 +859,15 @@ def generate_bullpen_run_audit_feedback(
             feedback.estimated_cost = total_cost
             feedback.latency_seconds = total_latency
             feedback.error_message = None
-            feedback.report_json = final_report
-            feedback.codex_prompt = str(final_report.get("codex_prompt") or "")
+            safe_final_report = sanitize_audit_evidence(final_report)
+            if not isinstance(safe_final_report, dict):
+                raise RuntimeError(
+                    "Sanitized Bullpen run-audit report must be an object"
+                )
+            feedback.report_json = safe_final_report
+            feedback.codex_prompt = str(
+                safe_final_report.get("codex_prompt") or ""
+            )
             feedback.completed_at = _utc_now()
             if final_raw_output:
                 feedback.raw_output_blob_id = repo.create_blob(
@@ -644,11 +887,15 @@ def generate_bullpen_run_audit_feedback(
         except Exception as exc:
             logger.exception("Run audit feedback generation failed for %s", feedback_id)
             if int(getattr(self.request, "retries", 0) or 0) < int(self.max_retries or 0):
-                feedback.error_message = str(exc)
+                feedback.error_message = str(
+                    sanitize_audit_evidence(str(exc))
+                )
                 session.commit()
                 raise self.retry(exc=exc)
             feedback.status = "failed"
-            feedback.error_message = str(exc)
+            feedback.error_message = str(
+                sanitize_audit_evidence(str(exc))
+            )
             feedback.completed_at = _utc_now()
             feedback.chunk_coverage_pct = min(feedback.chunk_coverage_pct or 0, 100.0)
             if feedback.snapshot is not None:

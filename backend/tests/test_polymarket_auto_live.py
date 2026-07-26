@@ -32,6 +32,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_PROFILE_ID,
     ConsoleWalletPosition,
     candidate_returns_per_day,
+    enrich_console_wallet_positions_authoritatively,
     llm_returns_per_day,
     console_market_filter_reasons,
     next_console_schedule_time,
@@ -50,12 +51,17 @@ from app.domains.polymarket_auto_live.engine import (
     _apply_next_cycle_schedule,
     _manual_console_market,
     _summarize_stage3_step2_buy_queue,
+    _pending_submitted_buy_market_ids,
     _stage3_capacity_sizing_market_ids,
     build_console_trade_amount_breakdown,
     build_workflow_stage_result,
     reset_workflow_stage_results,
     _reconcile_historical_pending_exit_keys,
     _auto_live_record_id,
+)
+from app.domains.polymarket_auto_live.event_exit import (
+    EventExitEvaluation,
+    ExitSignal,
 )
 from app.domains.polymarket_auto_live.llm import (
     resolve_auto_live_llm_targets,
@@ -95,6 +101,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSettings,
     BullpenAutoLiveState,
     BullpenAutoLiveSummary,
+    BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
 from app.domains.runs.schemas import (
     BullpenLlmExecutionOptions,
@@ -188,10 +195,20 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
             observed_calls.append("get_state_record")
             return None
 
+        async def get_active_run_identity(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("get_active_run_identity")
+            return None
+
         async def get_latest_projected_run(self, user_id: int):
             assert user_id == 7
             observed_calls.append("get_latest_projected_run")
             return latest_run, True, latest_run.completed_at
+
+        async def get_latest_verified_portfolio_snapshot(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("get_latest_verified_portfolio_snapshot")
+            return None
 
         async def list_projected_decisions_for_run(
             self,
@@ -254,7 +271,9 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
     assert observed_calls == [
         "get_settings_record",
         "get_state_record",
+        "get_active_run_identity",
         "get_latest_projected_run",
+        "get_latest_verified_portfolio_snapshot",
         "list_projected_decisions_for_run",
     ]
 
@@ -278,6 +297,111 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
         "list_decisions",
         "save_state",
         "commit",
+    ]
+
+
+@pytest.mark.anyio
+async def test_dashboard_summary_prefers_exact_active_run_over_newer_terminal_projection(
+    monkeypatch,
+):
+    active_run = BullpenAutoLiveRun(
+        id="run-active",
+        triggered_by="scheduler",
+        status="confirming",
+        dry_run=False,
+        started_at="2026-07-25T13:02:00+00:00",
+        summary="Stage 3 is confirming durable intents.",
+    )
+    prior_verified_snapshot = BullpenAutoLiveVerifiedPortfolioSnapshot(
+        run_id="run-prior-verified",
+        verified_at="2026-07-25T12:05:00+00:00",
+        active_positions=[
+            {
+                "market_id": f"market-{index}",
+                "market_title": f"Market {index}",
+                "classification": "active",
+            }
+            for index in range(7)
+        ],
+        occupied_positions=7,
+        available_slots=3,
+        max_positions=10,
+        wallet_freshness_state="fresh",
+    )
+    observed_calls: list[str] = []
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeRepo:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def get_settings_record(self, user_id: int):
+            assert user_id == 7
+            return None
+
+        async def get_state_record(self, user_id: int):
+            assert user_id == 7
+            return None
+
+        async def get_active_run_identity(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("active-identity")
+            return active_run.id, active_run.status
+
+        async def get_projected_run_for_user(self, user_id: int, run_id: str):
+            assert (user_id, run_id) == (7, active_run.id)
+            observed_calls.append("exact-active-projection")
+            return active_run, True, active_run.started_at
+
+        async def get_latest_projected_run(self, user_id: int):
+            raise AssertionError("newest terminal projection must not hide active run")
+
+        async def get_latest_verified_portfolio_snapshot(self, user_id: int):
+            assert user_id == 7
+            observed_calls.append("prior-verified-portfolio")
+            return prior_verified_snapshot
+
+        async def list_projected_decisions_for_run(
+            self,
+            user_id: int,
+            run_id: str,
+            *,
+            limit: int,
+        ):
+            assert (user_id, run_id, limit) == (7, active_run.id, 25)
+            observed_calls.append("active-decisions")
+            return []
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        _FakeSession,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _FakeRepo,
+    )
+
+    summary = await BullpenAutoLiveBot(user_id=7).get_dashboard_summary()
+
+    assert summary.latest_run is not None
+    assert summary.latest_run.id == active_run.id
+    assert summary.state.verified_portfolio_snapshot is not None
+    assert (
+        summary.state.verified_portfolio_snapshot.run_id
+        == prior_verified_snapshot.run_id
+    )
+    assert len(summary.state.verified_portfolio_snapshot.active_positions) == 7
+    assert observed_calls == [
+        "active-identity",
+        "exact-active-projection",
+        "prior-verified-portfolio",
+        "active-decisions",
     ]
 
 
@@ -2228,6 +2352,373 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
 
 
 @pytest.mark.anyio
+async def test_authoritative_wallet_enrichment_resolves_condition_only_rows(
+    monkeypatch,
+):
+    condition_id = "0x" + ("a" * 64)
+    position = ConsoleWalletPosition(
+        market_id="123456",
+        slug=None,
+        condition_id=condition_id,
+        market_title="Condition-only wallet position",
+        market_url=None,
+        side="NO",
+        shares=2,
+        average_price_cents=40,
+        exposure_usd=0.8,
+        current_price_cents=70,
+        current_value_usd=1.4,
+        current_yes_odds=30,
+        current_no_odds=70,
+        close_time="2026-06-20T00:00:00+00:00",
+        theme="Politics",
+        is_claimable=True,
+        raw_claimable_flag=True,
+        upstream_redeemable=True,
+        classification="positive_payout_claimable",
+        classification_reason="Stale upstream claim hint.",
+        expected_payout_usdc=1.4,
+    )
+    market = ScannedMarket(
+        market_id="123456",
+        question="Will the condition-only market remain open?",
+        slug="condition-only-market",
+        market_url="https://polymarket.com/event/condition-only-market",
+        close_time="2026-08-01T00:00:00+00:00",
+        theme="Politics",
+        current_yes_odds=30,
+        current_no_odds=70,
+        liquidity_usd=1000,
+        volume_usd=5000,
+        description="Exact Gamma match.",
+        outcome_labels=["Yes", "No"],
+        event_slug="condition-only-market",
+        best_bid_cents=69,
+        best_ask_cents=71,
+        spread_cents=2,
+        raw={
+            "id": "123456",
+            "conditionId": condition_id,
+            "active": True,
+            "closed": False,
+            "archived": False,
+        },
+    )
+
+    async def exact_lookup(*, market_id, condition_id):
+        assert market_id == "123456"
+        assert condition_id == "0x" + ("a" * 64)
+        return market
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_exact_identity",
+        exact_lookup,
+    )
+
+    enriched, diagnostics = (
+        await enrich_console_wallet_positions_authoritatively([position])
+    )
+
+    assert len(enriched) == 1
+    assert enriched[0].classification == "active"
+    assert enriched[0].slug == "condition-only-market"
+    assert diagnostics["authoritative_open_position_count"] == 1
+    assert diagnostics["unresolved_position_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_authoritative_wallet_enrichment_caps_one_thousand_rows_and_bounds_in_flight(
+    monkeypatch,
+):
+    positions = [
+        ConsoleWalletPosition(
+            market_id=f"market-{index}",
+            slug=f"market-{index}",
+            condition_id=f"condition-{index}",
+            market_title=f"Market {index}",
+            market_url=None,
+            side="NO",
+            shares=1,
+            average_price_cents=50,
+            exposure_usd=0.5,
+            current_price_cents=60,
+            current_value_usd=0.6,
+            current_yes_odds=40,
+            current_no_odds=60,
+            close_time="2026-08-01T00:00:00+00:00",
+            theme="Politics",
+            is_claimable=False,
+        )
+        for index in range(1_000)
+    ]
+    in_flight = 0
+    max_in_flight = 0
+    lookup_calls = 0
+
+    async def unresolved_slug_lookup(_slug):
+        nonlocal in_flight, max_in_flight, lookup_calls
+        lookup_calls += 1
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.001)
+            return None
+        finally:
+            in_flight -= 1
+
+    async def unexpected_identity_lookup(**_kwargs):
+        raise AssertionError("the lookup cap must be exhausted by slug lookups")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile."
+        "CONSOLE_POSITION_ENRICHMENT_MAX_LOOKUPS",
+        64,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile."
+        "CONSOLE_POSITION_ENRICHMENT_MAX_CONCURRENCY",
+        6,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
+        unresolved_slug_lookup,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile."
+        "fetch_market_by_exact_identity",
+        unexpected_identity_lookup,
+    )
+
+    enriched, diagnostics = (
+        await enrich_console_wallet_positions_authoritatively(positions)
+    )
+
+    assert lookup_calls == 64
+    assert max_in_flight <= 6
+    assert diagnostics["lookup_max_in_flight"] <= 6
+    assert diagnostics["lookup_scheduled_count"] == 64
+    assert diagnostics["lookup_cap_reached"] is True
+    assert diagnostics["lookup_skipped_due_to_cap_count"] == 1_936
+    assert diagnostics["unresolved_position_count"] == 1_000
+    assert len(diagnostics["unresolved_position_keys"]) == 50
+    assert diagnostics["unresolved_position_keys_truncated"] is True
+    assert len(diagnostics["unresolved_position_diagnostics"]) == 50
+    assert diagnostics["unresolved_position_diagnostics_total"] == 1_000
+    assert diagnostics["unresolved_position_diagnostics_truncated"] is True
+    assert {
+        position.classification for position in enriched
+    } == {"stale_or_unknown"}
+
+
+@pytest.mark.anyio
+async def test_authoritative_wallet_enrichment_times_out_and_quarantines_unresolved_row(
+    monkeypatch,
+):
+    position = ConsoleWalletPosition(
+        market_id="slow-market",
+        slug="slow-market",
+        condition_id="slow-condition",
+        market_title="Slow market",
+        market_url=None,
+        side="YES",
+        shares=1,
+        average_price_cents=50,
+        exposure_usd=0.5,
+        current_price_cents=60,
+        current_value_usd=0.6,
+        current_yes_odds=60,
+        current_no_odds=40,
+        close_time="2026-08-01T00:00:00+00:00",
+        theme="Politics",
+        is_claimable=False,
+    )
+
+    async def slow_lookup(_slug):
+        await asyncio.sleep(1)
+        return None
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile."
+        "CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile."
+        "CONSOLE_POSITION_ENRICHMENT_MAX_LOOKUPS",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
+        slow_lookup,
+    )
+
+    enriched, diagnostics = (
+        await enrich_console_wallet_positions_authoritatively([position])
+    )
+
+    assert enriched[0].classification == "stale_or_unknown"
+    assert diagnostics["lookup_request_timeout_count"] == 1
+    assert diagnostics["unresolved_position_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_unresolved_positive_wallet_rows_degrade_stage1_and_block_stage3(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    candidate_market = _market(
+        question="Will unresolved exposure fail closed before new buys?",
+        slug="unresolved-wallet-exposure-candidate",
+        current_yes_odds=12,
+        current_no_odds=88,
+    )
+    unresolved_positions = [
+        _console_wallet_position(
+            slug=f"unresolved-wallet-position-{index}",
+            market_title=f"Unresolved wallet position {index}",
+            current_price_cents=99,
+            shares=1.0,
+            exposure_usd=0.5,
+            current_value_usd=0.99,
+            close_time="2026-06-20T00:00:00+00:00",
+            is_claimable=True,
+            condition_id=f"unresolved-condition-{index}",
+        )
+        for index in range(7)
+    ]
+    for position in unresolved_positions:
+        position.classification = "positive_payout_claimable"
+        position.classification_reason = "Stale upstream redeem flag."
+        position.raw_claimable_flag = True
+        position.upstream_redeemable = True
+        position.expected_payout_usdc = 0.99
+
+    async def fake_read_console_wallet_positions():
+        return unresolved_positions
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="test",
+            source_url="https://example.com",
+            accepted=[candidate_market],
+            rejected=[],
+            total_candidates=1,
+        )
+
+    async def unresolved_market_lookup(_slug):
+        return None
+
+    async def unresolved_identity_lookup(**_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
+        unresolved_market_lookup,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_exact_identity",
+        unresolved_identity_lookup,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.resolve_auto_live_llm_targets",
+        lambda _settings: [("openai", "gpt-4o-mini")],
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        _fake_ready_balance,
+    )
+    prior_verified_snapshot = BullpenAutoLiveVerifiedPortfolioSnapshot(
+        run_id="prior-verified-run",
+        verified_at="2026-06-20T00:00:00+00:00",
+        active_positions=[
+            {"market_id": f"prior-market-{index}"} for index in range(7)
+        ],
+        occupied_positions=7,
+        available_slots=3,
+        max_positions=10,
+    )
+    state = BullpenAutoLiveState(
+        running=True,
+        verified_portfolio_snapshot=prior_verified_snapshot,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(
+                    provider="openai",
+                    model="gpt-4o-mini",
+                )
+            ],
+        ),
+        state=state,
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    stage1 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "scan"
+    )
+    stage3 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+
+    assert result.run.status == "partial_success"
+    assert result.decisions == []
+    assert stage1.outputs["wallet_snapshot_status"] == "degraded"
+    assert stage1.outputs["stage2_candidate_only"] is True
+    assert (
+        stage1.outputs["unresolved_positive_exposure_position_count"]
+        == 7
+    )
+    assert stage1.outputs["active_positions_found"] == []
+    assert stage1.outputs["console_trade_occupied_positions"] == 7
+    assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+    assert result.state.verified_portfolio_snapshot is not None
+    assert (
+        result.state.verified_portfolio_snapshot.run_id
+        == "prior-verified-run"
+    )
+
+
+@pytest.mark.anyio
 async def test_console_profile_stage_2_keeps_provider_and_parsing_failures_attributed_to_the_correct_model(
     monkeypatch,
 ):
@@ -2849,6 +3340,19 @@ async def test_console_profile_sizes_new_buys_from_cash_and_active_positions(
         current_yes_odds=12,
         current_no_odds=88,
     )
+    existing_market = _market(
+        question="Existing active position",
+        slug="existing-active-position",
+        current_yes_odds=39,
+        current_no_odds=61,
+    )
+    existing_market.raw.update(
+        {
+            "active": True,
+            "closed": False,
+            "archived": False,
+        }
+    )
 
     async def fake_read_console_wallet_positions():
         return [
@@ -2876,6 +3380,10 @@ async def test_console_profile_sizes_new_buys_from_cash_and_active_positions(
             total_candidates=1,
         )
 
+    async def fake_fetch_market_by_slug(slug: str):
+        assert slug == existing_market.slug
+        return existing_market
+
     async def fake_refresh_execution_quote(*, slug: str | None, side: str):
         assert slug == candidate_market.slug
         assert side == "NO"
@@ -2900,6 +3408,10 @@ async def test_console_profile_sizes_new_buys_from_cash_and_active_positions(
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
         fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
+        fake_fetch_market_by_slug,
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
@@ -2947,16 +3459,16 @@ async def test_console_profile_sizes_new_buys_from_cash_and_active_positions(
         stage for stage in buy_decision.stage_results if stage.stage_number == 5
     )
 
-    assert stage5.outputs["order_usd"] == 1.64
+    assert stage5.outputs["order_usd"] == 1.53
     assert stage5.outputs["cash_in_hand_usd"] == 14.77
     assert stage5.outputs["active_positions"] == 1
     assert stage5.outputs["available_slots"] == 9
     assert stage5.reason == (
         "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
     )
-    assert buy_decision.target_exposure_usd == 1.64
+    assert buy_decision.target_exposure_usd == 1.53
     assert buy_decision.order_plan is not None
-    assert buy_decision.order_plan.order_size_usd == 1.64
+    assert buy_decision.order_plan.order_size_usd == 1.53
     assert result.state.last_console_trade_amount_usd == 1.64
 
 
@@ -3367,6 +3879,430 @@ async def test_console_profile_stage_3_sells_before_buys_and_reports_step_counte
 
 
 @pytest.mark.anyio
+async def test_durable_replacement_is_planned_when_pre_exit_cash_is_below_minimum(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will the funded position exit before replacement?",
+        slug="durable-low-cash-exit",
+        current_yes_odds=21,
+        current_no_odds=79,
+    )
+    candidate_market = _market(
+        question="Will exit proceeds fund the durable replacement?",
+        slug="durable-low-cash-replacement",
+        current_yes_odds=16,
+        current_no_odds=84,
+    )
+    live_positions = [
+        _console_wallet_position(
+            slug=active_market.slug,
+            market_title=active_market.question,
+            current_price_cents=79,
+            exposure_usd=6,
+            shares=7.5,
+            side="NO",
+        )
+    ]
+
+    async def fake_read_console_wallet_positions():
+        return live_positions
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen console",
+            source_url="https://example.com/bullpen",
+            accepted=[active_market, candidate_market],
+            rejected=[],
+            total_candidates=2,
+        )
+
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=0.5,
+            account_value_usd=6.5,
+            message="Pre-exit cash is below the minimum.",
+        )
+
+    def forced_exit_evaluation(*_args, **_kwargs):
+        return EventExitEvaluation(
+            exit_signals=[
+                ExitSignal(
+                    strategy="CAPITAL_AWARE_FORCED_EXIT",
+                    severity="IMMEDIATE_EXIT",
+                    reasonCode="ADVERSE_MARKET_99",
+                    label="Forced exit for replacement regression",
+                    description=(
+                        "A non-ranking safety signal requires this active "
+                        "position to exit."
+                    ),
+                    createdAt=fixed_now.isoformat(),
+                )
+            ],
+            exit_state="EVENT_EXIT_PLANNED",
+        )
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.CONSOLE_RANKED_EVENT_LIMIT",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.position_returns_per_day",
+        lambda position, now: 10.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda market, now: (
+            9.0 if market.slug == candidate_market.slug else 0.5
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_event_exits",
+        forced_exit_evaluation,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+            min_order_usd=1,
+            max_order_usd=25,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(
+                    provider="openai",
+                    model="gpt-4o-mini",
+                )
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+        durable_execution=True,
+    )
+
+    exit_decision = next(
+        decision
+        for decision in result.decisions
+        if decision.order_plan is not None
+        and decision.order_plan.action == "sell"
+    )
+    replacement = next(
+        decision
+        for decision in result.decisions
+        if decision.market_id == candidate_market.market_id
+    )
+
+    assert replacement.order_plan is not None
+    assert replacement.order_plan.action == "buy"
+    assert replacement.order_plan.order_size_usd == 1
+    assert replacement.order_plan.stage3_status == "REPLACEMENT_SLOT_RESERVED"
+    assert replacement.order_plan.dependency_group == (
+        f"stage3-replacement:{result.run.id}:{exit_decision.market_id}"
+    )
+    assert (
+        exit_decision.order_plan.dependency_group
+        == replacement.order_plan.dependency_group
+    )
+    assert {
+        signal.strategy for signal in exit_decision.exit_signals
+    } == {"CAPITAL_AWARE_FORCED_EXIT"}
+    assert replacement.stage3_final_rank == 1
+    assert result.run.diagnostics.top_candidate_market_ids == [
+        candidate_market.market_id
+    ]
+    invest_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert invest_stage.outputs["buy_queue_planned"] == 1
+    assert (
+        invest_stage.outputs["stage3_slot_diagnostics"][
+            "pre_exit_immediate_buy_count"
+        ]
+        == 0
+    )
+    assert any(
+        stage.outputs.get("deferred_post_exit_sizing") is True
+        for stage in replacement.stage_results
+    )
+    assert result.run.orders_planned == 2
+    assert result.run.orders_submitted == 0
+
+
+@pytest.mark.anyio
+async def test_durable_replacement_uses_initial_free_slot_before_pairing_exit(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will the forced exit release only the second candidate slot?",
+        slug="partial-capacity-forced-exit",
+        current_yes_odds=21,
+        current_no_odds=79,
+    )
+    higher_candidate = _market(
+        question="Will the existing free slot fund the higher ranked candidate?",
+        slug="partial-capacity-higher-candidate",
+        current_yes_odds=16,
+        current_no_odds=84,
+    )
+    lower_candidate = _market(
+        question="Will the exit reserve only the lower ranked replacement?",
+        slug="partial-capacity-lower-candidate",
+        current_yes_odds=17,
+        current_no_odds=83,
+    )
+    live_positions = [
+        _console_wallet_position(
+            slug=active_market.slug,
+            market_title=active_market.question,
+            current_price_cents=79,
+            exposure_usd=6,
+            shares=7.5,
+            side="NO",
+        )
+    ]
+
+    async def fake_read_console_wallet_positions():
+        return live_positions
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen console",
+            source_url="https://example.com/bullpen",
+            accepted=[
+                active_market,
+                higher_candidate,
+                lower_candidate,
+            ],
+            rejected=[],
+            total_candidates=3,
+        )
+
+    async def fake_refresh_balance():
+        return SimpleNamespace(
+            status="ready",
+            available_balance_usd=4,
+            account_value_usd=10,
+            message="One immediately affordable slot is available.",
+        )
+
+    def forced_exit_evaluation(*_args, **_kwargs):
+        return EventExitEvaluation(
+            exit_signals=[
+                ExitSignal(
+                    strategy="CAPITAL_AWARE_FORCED_EXIT",
+                    severity="IMMEDIATE_EXIT",
+                    reasonCode="ADVERSE_MARKET_99",
+                    label="Forced exit for partial-capacity regression",
+                    description=(
+                        "The safety strategy exits this otherwise top-ranked "
+                        "active position."
+                    ),
+                    createdAt=fixed_now.isoformat(),
+                )
+            ],
+            exit_state="EVENT_EXIT_PLANNED",
+        )
+
+    monkeypatch.setenv("BULLPEN_AUTO_LIVE_ALLOW_EXECUTION", "true")
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.CONSOLE_RANKED_EVENT_LIMIT",
+        2,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.position_returns_per_day",
+        lambda *_args, **_kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda market, now: (
+            9.0 if market.slug == higher_candidate.slug else 8.0
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.llm_returns_per_day",
+        lambda **kwargs: (
+            9.0
+            if kwargs.get("current_no_odds")
+            == higher_candidate.current_no_odds
+            else 8.0
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_event_exits",
+        forced_exit_evaluation,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *_args, **_kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *_args, **_kwargs: _fake_llm_consensus(
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.refresh_balance",
+        fake_refresh_balance,
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=False,
+            allow_live_execution=True,
+            require_manual_confirmation=False,
+            min_order_usd=1,
+            max_order_usd=25,
+            console_llm_targets=[
+                BullpenAutoLiveLlmTarget(
+                    provider="openai",
+                    model="gpt-4o-mini",
+                )
+            ],
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(dry_run=False),
+        positions=[],
+        historical_decisions=[],
+        durable_execution=True,
+    )
+
+    by_market = {
+        decision.market_id: decision
+        for decision in result.decisions
+    }
+    exit_decision = by_market[active_market.market_id]
+    immediate_buy = by_market[higher_candidate.market_id]
+    replacement_buy = by_market[lower_candidate.market_id]
+
+    assert exit_decision.order_plan is not None
+    assert exit_decision.order_plan.action == "sell"
+    assert immediate_buy.order_plan is not None
+    assert immediate_buy.order_plan.action == "buy"
+    assert immediate_buy.order_plan.stage3_status == "BUY_READY"
+    assert immediate_buy.order_plan.dependency_group is None
+    assert replacement_buy.order_plan is not None
+    assert replacement_buy.order_plan.stage3_status == "REPLACEMENT_SLOT_RESERVED"
+    assert replacement_buy.order_plan.dependency_group == (
+        exit_decision.order_plan.dependency_group
+    )
+    assert replacement_buy.order_plan.dependency_group == (
+        f"stage3-replacement:{result.run.id}:{active_market.market_id}"
+    )
+    assert immediate_buy.stage3_final_rank == 1
+    assert replacement_buy.stage3_final_rank == 2
+    assert result.run.diagnostics.top_candidate_market_ids == [
+        higher_candidate.market_id,
+        lower_candidate.market_id,
+    ]
+    invest_stage = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    slot_diagnostics = invest_stage.outputs["stage3_slot_diagnostics"]
+    assert slot_diagnostics["initial_free_slots_before_exit"] == 1
+    assert slot_diagnostics["pre_exit_immediate_buy_count"] == 1
+    assert slot_diagnostics["slot_releasing_exit_market_ids"] == [
+        active_market.market_id
+    ]
+    assert invest_stage.outputs["buy_queue_planned"] == 2
+    assert result.run.orders_planned == 3
+    assert result.run.orders_submitted == 0
+
+
+@pytest.mark.anyio
 async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is_not_submitted(
     monkeypatch,
 ):
@@ -3734,11 +4670,29 @@ async def test_console_profile_redeems_claimable_positions_without_llm(monkeypat
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.run_llm_consensus", fail_llm
     )
-    async def fake_fetch_market_by_slug(_slug):
-        return None
+    async def fake_fetch_market_by_slug(slug):
+        assert slug == long_market_slug
+        market = _market(
+            question="GPT-5.6 released by July 7, 2026?",
+            slug=long_market_slug,
+            close_time="2026-07-07T00:00:00+00:00",
+            current_yes_odds=0,
+            current_no_odds=100,
+        )
+        market.raw = {
+            "active": False,
+            "closed": True,
+            "archived": False,
+            "conditionId": "condition-123",
+        }
+        return market
 
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.fetch_market_by_slug",
+        fake_fetch_market_by_slug,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
         fake_fetch_market_by_slug,
     )
     monkeypatch.setattr(
@@ -3953,13 +4907,21 @@ async def test_console_profile_stage1_keeps_only_open_trump_row_active_from_v011
     async def fake_read_console_wallet_positions():
         return parsed_positions
 
+    open_trump_market = _market(
+        question="Will Trump meet with Netanyahu by August 24, 2026?",
+        slug="trump-netanyahu-august-24-2026",
+        close_time="2026-08-24T23:59:59+00:00",
+        current_yes_odds=36,
+        current_no_odds=64,
+    )
+
     async def fake_scan_console_profile_markets(**_kwargs):
         return SimpleNamespace(
             source_label="test",
             source_url="https://example.com",
-            accepted=[],
+            accepted=[open_trump_market],
             rejected=[],
-            total_candidates=0,
+            total_candidates=1,
         )
 
     monkeypatch.setattr(
@@ -4848,6 +5810,13 @@ async def test_console_profile_stage_2_hydrates_missing_active_position_markets_
             "Otherwise, it resolves to No."
         ),
     )
+    active_market.raw.update(
+        {
+            "active": True,
+            "closed": False,
+            "archived": False,
+        }
+    )
     active_position = _console_wallet_position(
         slug=active_market.slug or "norway-win-2026-06-26",
         market_title=active_market.question,
@@ -4899,6 +5868,10 @@ async def test_console_profile_stage_2_hydrates_missing_active_position_markets_
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.fetch_market_by_slug",
+        fake_fetch_market_by_slug,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
         fake_fetch_market_by_slug,
     )
     monkeypatch.setattr(
@@ -5854,6 +6827,7 @@ def _market(
     outcome_labels: list[str] | None = None,
     current_yes_odds: float | None = 54,
     current_no_odds: float | None = 46,
+    raw: dict[str, object] | None = None,
 ) -> ScannedMarket:
     if close_time is None:
         close_time = (datetime.now(UTC) + timedelta(days=7)).isoformat()
@@ -5874,7 +6848,7 @@ def _market(
         best_bid_cents=53,
         best_ask_cents=55,
         spread_cents=2,
-        raw={},
+        raw=raw or {},
     )
 
 
@@ -6495,7 +7469,7 @@ async def test_console_profile_plans_formula_sized_top10_buys_and_exits_lower_ra
     planned_order_sizes = {
         decision.order_plan.order_size_usd for decision in planned_buy_decisions
     }
-    assert planned_order_sizes == {5.62, 5.63}
+    assert planned_order_sizes == {5.5}
     assert all(decision.order_plan.side == "NO" for decision in planned_buy_decisions)
     assert all(
         decision.order_plan.status == "skipped"
@@ -6607,7 +7581,7 @@ async def test_console_profile_manual_row_with_conflicting_evidence_normalizes_a
     assert buy_decisions[0].evidence_status == "Moderate"
     assert buy_decisions[0].confidence == "High"
     assert buy_decisions[0].order_plan is not None
-    assert buy_decisions[0].order_plan.order_size_usd == 5
+    assert buy_decisions[0].order_plan.order_size_usd == 4.9
     assert buy_decisions[0].order_plan.status == "skipped"
     assert buy_decisions[0].stage_results[2].outputs["evidence_status"] == "Moderate"
     assert result.run.orders_planned == 1
@@ -6734,7 +7708,10 @@ async def test_console_profile_manual_table_rows_create_two_fixed_buy_new_decisi
     }
     assert first_stage3_rows["candidate-market-1"] is False
     assert sum(decision.order_plan is not None for decision in buy_decisions) == 2
-    assert all(decision.order_plan.order_size_usd == 5 for decision in buy_decisions)
+    assert all(
+        decision.order_plan.order_size_usd == 4.9
+        for decision in buy_decisions
+    )
     assert sorted(decision.order_plan.side for decision in buy_decisions) == [
         "NO",
         "YES",
@@ -7855,12 +8832,16 @@ async def test_console_profile_saved_manual_llm_rows_fall_back_to_a_full_review_
             close_time=active_position.close_time,
             current_yes_odds=active_position.current_yes_odds,
             current_no_odds=active_position.current_no_odds,
+            raw={"active": True, "closed": False},
         ),
     }
     llm_calls: list[str] = []
 
     async def fake_read_console_wallet_positions():
         return [active_position]
+
+    async def fake_authoritative_market_lookup(slug: str):
+        return market_lookup.get(slug)
 
     async def fake_refresh_execution_quote(*, slug: str | None, side: str):
         market = market_lookup[slug]
@@ -7893,6 +8874,10 @@ async def test_console_profile_saved_manual_llm_rows_fall_back_to_a_full_review_
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
         fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.fetch_market_by_slug",
+        fake_authoritative_market_lookup,
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.refresh_execution_quote",
@@ -8831,6 +9816,132 @@ def test_stage3_capacity_sizing_uses_live_and_current_run_markets_only():
         available_balance_usd=8.51,
         occupied_position_count=len(override_ids),
     )["order_usd"] == 1.42
+
+
+def _historical_buy_fence_decision(
+    *,
+    market_id: str,
+    slug: str,
+    status: str,
+    timestamp: str,
+    remote_order_id: str | None = "remote-buy",
+    fill_evidence: dict[str, object] | None = None,
+) -> BullpenAutoLiveDecision:
+    return BullpenAutoLiveDecision.model_construct(
+        id=f"{market_id}-{status}-decision",
+        run_id="historical-run",
+        created_at=timestamp,
+        updated_at=timestamp,
+        market_id=market_id,
+        slug=slug,
+        market_title=market_id,
+        side="YES",
+        decision="BUY_NEW",
+        reason="Historical BUY fence.",
+        summary="Historical BUY fence.",
+        stage_results=[],
+        order_plan=BullpenAutoLiveOrderPlan.model_construct(
+            id=f"{market_id}-{status}-order",
+            action="buy",
+            side="YES",
+            status=status,
+            market_id=market_id,
+            market_title=market_id,
+            order_size_usd=1,
+            shares=2,
+            limit_price_cents=50,
+            max_slippage_cents=2,
+            dry_run=False,
+            detail="Historical BUY fence.",
+            remote_order_id=remote_order_id,
+            reconciliation_fill_evidence=fill_evidence or {},
+            created_at=timestamp,
+            executed_at=timestamp,
+        ),
+    )
+
+
+def test_historical_buy_denylist_keeps_unknown_fill_terminal_market_aliases():
+    timestamp = "2026-07-27T10:00:00+00:00"
+    unresolved = [
+        _historical_buy_fence_decision(
+            market_id=f"market-{status.lower()}",
+            slug=f"slug-{status.lower()}",
+            status=status,
+            timestamp=timestamp,
+        )
+        for status in ("timed_out", "cancelled", "rejected")
+    ]
+    definitive_zero_fill = _historical_buy_fence_decision(
+        market_id="market-definitive-zero",
+        slug="slug-definitive-zero",
+        status="cancelled",
+        timestamp=timestamp,
+        fill_evidence={
+            "version": "v1",
+            "quantity_known": True,
+            "filled_shares": 0.0,
+            "definitive_zero_fill": True,
+        },
+    )
+
+    pending = _pending_submitted_buy_market_ids(
+        [*unresolved, definitive_zero_fill],
+        visible_active_market_ids=set(),
+    )
+
+    assert pending == {
+        "market-timed_out",
+        "slug-timed_out",
+        "market-cancelled",
+        "slug-cancelled",
+        "market-rejected",
+        "slug-rejected",
+    }
+    assert "market-definitive-zero" not in pending
+    assert "slug-definitive-zero" not in pending
+
+
+def test_later_exit_does_not_clear_an_unresolved_buy_order():
+    buy = _historical_buy_fence_decision(
+        market_id="market-unresolved-after-exit",
+        slug="slug-unresolved-after-exit",
+        status="timed_out",
+        timestamp="2026-07-27T10:00:00+00:00",
+    )
+    exit_decision = buy.model_copy(
+        update={
+            "id": "later-exit-decision",
+            "decision": "EXIT",
+            "updated_at": "2026-07-27T10:05:00+00:00",
+            "order_plan": BullpenAutoLiveOrderPlan.model_construct(
+                id="later-exit-order",
+                action="sell",
+                side="YES",
+                status="filled",
+                market_id=buy.market_id,
+                market_title=buy.market_title,
+                order_size_usd=0,
+                shares=2,
+                limit_price_cents=1,
+                max_slippage_cents=2,
+                dry_run=False,
+                detail="Later exit.",
+                created_at="2026-07-27T10:05:00+00:00",
+                executed_at="2026-07-27T10:05:00+00:00",
+            ),
+        }
+    )
+
+    pending = _pending_submitted_buy_market_ids(
+        [buy, exit_decision],
+        visible_active_market_ids=set(),
+    )
+
+    assert pending == {
+        "market-unresolved-after-exit",
+        "slug-unresolved-after-exit",
+    }
 
 
 @pytest.mark.anyio

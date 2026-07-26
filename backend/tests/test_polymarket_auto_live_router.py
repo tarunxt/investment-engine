@@ -401,7 +401,11 @@ def test_dashboard_summary_hard_bounds_oversized_optional_workflow_detail():
 
     assert len(serialized) <= 150_000
     assert bounded.latest_run is not None
-    assert bounded.latest_run.stage_results == []
+    assert len(bounded.latest_run.stage_results) == 1
+    compact_stage = bounded.latest_run.stage_results[0]
+    assert compact_stage.stage_number == 1
+    assert compact_stage.status == "pass"
+    assert compact_stage.outputs == {"workflow_stage_key": "scan"}
     assert "workflow" in bounded.degraded_sections
 
 

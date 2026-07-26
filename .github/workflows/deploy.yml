@@ -393,6 +393,7 @@ jobs:
             LEGACY_APP_ROOT="/srv/investor"
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             LEGACY_APP_USER="investor"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
             FRONTEND_ENV_FILE="/etc/investor/frontend.env"
             DEPLOY_LOCK_FILE="/run/investor-production-deploy.lock"
             remote_artifact=""
@@ -520,10 +521,10 @@ jobs:
               bash "$APP_ROOT/deploy/no-docker/redeploy.sh" "$DEPLOY_SCOPE"
 
             if [[ "$DEPLOY_SCOPE" == "full-stack" ]]; then
-              echo "==> Install/update Bullpen wallet healthcheck timer"
+              echo "==> Install/update passive Bullpen runtime health timer"
               APP_ROOT="$APP_ROOT" \
                 APP_USER="$APP_USER" \
-                FRONTEND_ENV_FILE="$FRONTEND_ENV_FILE" \
+                BACKEND_ENV_FILE="$BACKEND_ENV_FILE" \
                 bash "$APP_ROOT/deploy/no-docker/install-bullpen-healthcheck.sh"
             fi
 

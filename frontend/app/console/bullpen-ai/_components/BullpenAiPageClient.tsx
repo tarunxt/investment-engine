@@ -124,7 +124,11 @@ import {
   type BullpenPositionsResponse,
   type BullpenPositionsSource,
   type BullpenPositionsSummary,
+  canAutoRebaselineBullpenPositionsLineage,
+  getBullpenPositionsLineageMismatchFields,
+  isUsableBullpenPositionsSnapshot,
   isActiveBullpenPosition,
+  shouldPreserveBullpenPositionsOnRefresh,
 } from "@/lib/bullpenPositions";
 
 const BullpenQuestionsTable = dynamic(
@@ -352,6 +356,11 @@ type RefreshBullpenPositionsOptions = {
   suppressAutoClaim?: boolean;
   refreshMode?: BullpenPositionsRefreshMode;
   callerSource?: string;
+};
+
+type QueuedManualBullpenPositionsRefresh = {
+  options: RefreshBullpenPositionsOptions;
+  waiters: Array<(result: RefreshBullpenPositionsResult) => void>;
 };
 
 const MONTH_INDEX_BY_NAME: Record<string, string> = {
@@ -1648,6 +1657,8 @@ function BullpenAiPageContent() {
   const [activePositionAnalysesByKey, setActivePositionAnalysesByKey] =
     useState<Record<string, BullpenActivePositionLlmAnalysis>>({});
   const [hasLoadedPositions, setHasLoadedPositions] = useState(false);
+  const [hasUsablePositionsSnapshot, setHasUsablePositionsSnapshot] =
+    useState(false);
   const [isLoadingPositions, setIsLoadingPositions] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
   const [positionsFallback, setPositionsFallback] =
@@ -1723,7 +1734,7 @@ function BullpenAiPageContent() {
   const claimPositionsTaskRef = useRef<Promise<void> | null>(null);
   const positionsRequestInFlightRef = useRef(false);
   const queuedManualPositionsRefreshRef =
-    useRef<RefreshBullpenPositionsOptions | null>(null);
+    useRef<QueuedManualBullpenPositionsRefresh | null>(null);
   const positionsAbortControllerRef = useRef<AbortController | null>(null);
   const pageRequestAbortControllerRef = useRef<AbortController | null>(null);
   const lastAutoClaimAttemptRef = useRef<BullpenAutoClaimAttempt | null>(null);
@@ -2661,7 +2672,18 @@ function BullpenAiPageContent() {
       // behind a passive mount/interval poll. Queue one forced refresh after
       // the in-flight request instead of creating a concurrent Bullpen read.
       if (options?.refreshMode === "manual") {
-        queuedManualPositionsRefreshRef.current = options;
+        return new Promise<RefreshBullpenPositionsResult>((resolve) => {
+          const queuedRefresh = queuedManualPositionsRefreshRef.current;
+          if (queuedRefresh) {
+            queuedRefresh.options = options;
+            queuedRefresh.waiters.push(resolve);
+            return;
+          }
+          queuedManualPositionsRefreshRef.current = {
+            options,
+            waiters: [resolve],
+          };
+        });
       }
       return { positions: activePositions, error: null };
     }
@@ -2707,32 +2729,149 @@ function BullpenAiPageContent() {
       const livePositions = (livePositionsPayload.positions || []).map(
         applyResolvedPositionCloseTime,
       );
-
-      setActivePositions(livePositions);
-      setActivePositionsSummary(livePositionsPayload.summary || null);
-      setHasLoadedPositions(true);
-      setPositionsFallback(livePositionsPayload.fallback || null);
-      setPositionsDiagnostics(livePositionsPayload.diagnostics || null);
-      setPositionsHealth(livePositionsPayload.health || null);
-      setPositionsSource(livePositionsPayload.positionsSource || null);
-      setLastSuccessfulLiveSnapshot(normalizedLiveSnapshot);
-      setPositionsLastUpdatedAt(
-        livePositionsPayload.fetchedAt ||
-          normalizedLiveSnapshot?.fetchedAt ||
-          new Date().toISOString(),
+      const incomingSnapshotUsable = isUsableBullpenPositionsSnapshot({
+        positionsSource: livePositionsPayload.positionsSource,
+        liveAvailable: livePositionsPayload.liveAvailable,
+      });
+      const previousLiveSnapshot = lastSuccessfulLiveSnapshot;
+      const incomingLineage =
+        livePositionsPayload.lineage ?? normalizedLiveSnapshot?.lineage ?? null;
+      const incomingIsFreshUsableLive = Boolean(
+        incomingSnapshotUsable &&
+          livePositionsPayload.liveAvailable === true &&
+          livePositionsPayload.positionsSource === "live-cli" &&
+          !livePositionsPayload.error?.trim() &&
+          livePositionsPayload.fallback?.active !== true &&
+          normalizedLiveSnapshot?.source === "live-cli" &&
+          incomingLineage?.source?.trim().toLowerCase() === "live-cli" &&
+          incomingLineage.freshnessState?.trim().toLowerCase() === "fresh",
       );
+      const lineageMismatchFields =
+        getBullpenPositionsLineageMismatchFields({
+          current: previousLiveSnapshot?.lineage,
+          incoming: incomingLineage,
+        });
+      const accountIdentityChanged = lineageMismatchFields.includes(
+        "account-identity",
+      );
+      const canEstablishFreshLineageBaseline = Boolean(
+        incomingIsFreshUsableLive &&
+          normalizedLiveSnapshot &&
+          canAutoRebaselineBullpenPositionsLineage({
+            current: previousLiveSnapshot?.lineage,
+            incoming: incomingLineage,
+            incomingIsFreshLive: incomingIsFreshUsableLive,
+          }),
+      );
+      const preservingForLineageMismatch =
+        lineageMismatchFields.length > 0 &&
+        !canEstablishFreshLineageBaseline &&
+        Boolean(previousLiveSnapshot);
+      const preserveForDegradedFallback =
+        Boolean(previousLiveSnapshot && !incomingIsFreshUsableLive) ||
+        shouldPreserveBullpenPositionsOnRefresh({
+          incomingPositions: livePositions,
+          incomingSource: livePositionsPayload.positionsSource,
+          liveAvailable: livePositionsPayload.liveAvailable,
+          currentPositions: activePositions,
+          currentSource: positionsSource,
+          lastSuccessfulLiveSnapshot: previousLiveSnapshot,
+        });
+      const preserveLastGoodPositions =
+        preservingForLineageMismatch || preserveForDegradedFallback;
+      const preservedLiveSnapshot =
+        preserveLastGoodPositions
+          ? previousLiveSnapshot
+          : normalizedLiveSnapshot ?? previousLiveSnapshot;
+      const preservingVerifiedSnapshot = Boolean(
+        preserveLastGoodPositions &&
+          (preservedLiveSnapshot ||
+            positionsSource === "live-cli" ||
+            positionsSource === "redis-cache" ||
+            positionsSource === "last-successful-live-snapshot"),
+      );
+      const displayedPositions = preserveLastGoodPositions
+        ? (preservedLiveSnapshot?.positions ?? activePositions)
+        : livePositions;
+      const displayedSummary = preserveLastGoodPositions
+        ? (preservedLiveSnapshot?.summary ?? activePositionsSummary)
+        : (livePositionsPayload.summary ?? null);
+      const displayedDiagnostics = preserveLastGoodPositions
+        ? (preservedLiveSnapshot?.diagnostics ?? positionsDiagnostics)
+        : (livePositionsPayload.diagnostics ?? null);
+      const displayedFallback = preserveLastGoodPositions
+        ? {
+            active: true,
+            source: preservingVerifiedSnapshot
+              ? ("last-successful-live-snapshot" as const)
+              : ("tracked-positions" as const),
+            message: preservingForLineageMismatch
+              ? accountIdentityChanged
+                ? "The wallet refresh belongs to a different account. Cred-X preserved the verified snapshot and will not re-baseline an account change automatically."
+                : "The wallet refresh did not match the credential or classifier lineage of the verified snapshot already displayed. Cred-X preserved the verified snapshot; use Refresh to establish a fresh same-account baseline."
+              : preservingVerifiedSnapshot
+                ? "The tracked-position fallback is degraded, so Cred-X is preserving the most recent verified wallet snapshot in this tab."
+              : "The tracked-position fallback returned no rows, so Cred-X is preserving the last read-only tracked rows in this tab.",
+          }
+        : (livePositionsPayload.fallback ?? null);
+
+      setActivePositions(displayedPositions);
+      setActivePositionsSummary(displayedSummary);
+      setHasLoadedPositions(true);
+      setHasUsablePositionsSnapshot(
+        incomingSnapshotUsable || preservingVerifiedSnapshot,
+      );
+      setPositionsFallback(displayedFallback);
+      setPositionsDiagnostics(displayedDiagnostics);
+      setPositionsHealth(livePositionsPayload.health || null);
+      setPositionsSource(
+        preserveLastGoodPositions
+          ? preservingVerifiedSnapshot
+            ? "last-successful-live-snapshot"
+            : (positionsSource ?? "tracked-positions")
+          : (livePositionsPayload.positionsSource ?? null),
+      );
+      setLastSuccessfulLiveSnapshot(
+        preserveLastGoodPositions
+          ? previousLiveSnapshot
+          : normalizedLiveSnapshot ?? previousLiveSnapshot,
+      );
+      if (!preserveLastGoodPositions) {
+        setPositionsLastUpdatedAt(
+          livePositionsPayload.fetchedAt ||
+            normalizedLiveSnapshot?.fetchedAt ||
+            new Date().toISOString(),
+        );
+      }
       setPositionsError(
-        livePositionsPayload.error ||
-          (!livePositionsPayload.liveAvailable && livePositions.length === 0
+        (preservingForLineageMismatch
+          ? `Bullpen wallet snapshot lineage changed (${lineageMismatchFields.join(
+              ", ",
+            )}). The last verified wallet snapshot remains displayed${
+              accountIdentityChanged
+                ? "; account changes require an explicit session/account correction"
+                : " until you deliberately refresh the same account"
+            }.`
+          : livePositionsPayload.error) ||
+          (!livePositionsPayload.liveAvailable && displayedPositions.length === 0
             ? livePositionsPayload.health?.message ||
               "Live Bullpen wallet positions are unavailable right now."
             : null),
       );
 
+      if (preservingForLineageMismatch) {
+        lastAutoClaimAttemptRef.current = null;
+        return {
+          positions: displayedPositions,
+          error:
+            "Bullpen wallet snapshot lineage changed. The previous verified wallet snapshot remains displayed.",
+        };
+      }
+
       if (!livePositionsPayload.liveAvailable) {
         lastAutoClaimAttemptRef.current = null;
         return {
-          positions: livePositions,
+          positions: displayedPositions,
           error: livePositionsPayload.error || null,
         };
       }
@@ -2778,15 +2917,26 @@ function BullpenAiPageContent() {
       };
     } finally {
       positionsRequestInFlightRef.current = false;
+      const queuedManualRefresh = queuedManualPositionsRefreshRef.current;
+      queuedManualPositionsRefreshRef.current = null;
       if (!requestSignal?.aborted) {
         setIsLoadingPositions(false);
-        const queuedManualRefresh = queuedManualPositionsRefreshRef.current;
-        queuedManualPositionsRefreshRef.current = null;
         if (queuedManualRefresh) {
           window.queueMicrotask(() => {
-            void refreshBullpenPositions(queuedManualRefresh);
+            void refreshBullpenPositions(queuedManualRefresh.options).then(
+              (result) => {
+                queuedManualRefresh.waiters.forEach((resolve) =>
+                  resolve(result),
+                );
+              },
+            );
           });
         }
+      } else if (queuedManualRefresh) {
+        const abortedResult = { positions: activePositions, error: null };
+        queuedManualRefresh.waiters.forEach((resolve) =>
+          resolve(abortedResult),
+        );
       }
     }
   }
@@ -4076,8 +4226,11 @@ function BullpenAiPageContent() {
         buildRunNowRequest={buildRunNowRequest}
         activePositions={openActivePositions}
         activePositionsSummary={activePositionsSummary}
+        positionsSource={positionsSource}
+        positionsUpdatedAt={positionsLastUpdatedAt}
+        positionsLineage={lastSuccessfulLiveSnapshot?.lineage ?? null}
         activePositionQuestions={activePositionQuestionsForLlm}
-        hasActivePositionsSnapshot={Boolean(positionsLastUpdatedAt)}
+        hasActivePositionsSnapshot={hasUsablePositionsSnapshot}
         recentDecisions={recentAutoRunDecisions}
         onSummaryUpdated={({ summary, run }) => {
           const serverTargets = normalizeServerBullpenLlmTargets(
@@ -4126,6 +4279,13 @@ function BullpenAiPageContent() {
         onOpenScanFilters={() => {
           setIsScanSectionExpanded(true);
           setIsScanFiltersOpen(true);
+        }}
+        onRefreshPortfolioPositions={async () => {
+          await refreshBullpenPositions({
+            suppressAutoClaim: true,
+            refreshMode: "manual",
+            callerSource: "ui-portfolio-refresh",
+          });
         }}
         onRunCompleted={() => {
           void refreshBullpenPositions({

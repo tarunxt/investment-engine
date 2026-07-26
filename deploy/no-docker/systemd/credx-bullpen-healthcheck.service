@@ -1,18 +1,24 @@
 [Unit]
-Description=Cred-X Bullpen live wallet healthcheck
+Description=Cred-X passive Bullpen runtime health snapshot
+After=network-online.target redis-server.service
 Wants=network-online.target
-After=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=__APP_ROOT__
-EnvironmentFile=__FRONTEND_ENV_FILE__
+WorkingDirectory=__APP_ROOT__/backend
+EnvironmentFile=__BACKEND_ENV_FILE__
 Environment=HOME=/home/__APP_USER__
-ExecStart=/usr/bin/node __APP_ROOT__/scripts/bullpen-healthcheck.ts
+ExecStart=__APP_ROOT__/backend/.venv/bin/python -m app.domains.polymarket.passive_healthcheck
 User=__APP_USER__
 Group=__APP_USER__
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+UMask=0077
 
 [Install]
 WantedBy=multi-user.target

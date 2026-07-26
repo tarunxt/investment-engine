@@ -104,6 +104,10 @@ class RuleEvaluation:
     ambiguous: bool
     fail_reason: str | None
     rule_quality_status: Literal["complete", "partial", "missing", "contradictory"] = "missing"
+    # Optional Gamma resolution-source text is already consumed by the
+    # evidence-query builder. Keep it on the normalized rule object so markets
+    # without that metadata do not fail Stage 2 with AttributeError.
+    resolution_source_description: str | None = None
     resolution_timezone_name: str | None = None
     resolution_timezone_iana: str | None = None
     resolution_date_window: str | None = None

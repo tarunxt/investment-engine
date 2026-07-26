@@ -10,6 +10,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveOrderFunnel,
     BullpenAutoLiveRun,
     BullpenAutoLiveStageResult,
+    BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
 
 CONSOLE_PROJECTION_VERSION = 1
@@ -85,17 +86,41 @@ _STAGE_OUTPUT_KEYS = {
     "stage1_accepted_candidate_count",
     "active_position_rows",
     "active_positions_found",
+    "active_positions_total",
+    "active_positions_truncated",
     "available_for_claim",
     "settlement_pending_positions",
     "excluded_position_diagnostics",
     "wallet_snapshot_status",
     "wallet_source",
     "wallet_snapshot_fetched_at",
+    "wallet_snapshot_freshness_state",
+    "wallet_freshness_state",
+    "wallet_account_identity",
+    "wallet_position_classifier_version",
+    "wallet_credential_artifact_inode",
+    "wallet_credential_artifact_mtime_ns",
+    "wallet_credential_artifact_size",
+    "wallet_credential_artifact",
+    "wallet_snapshot_diagnostics",
+    "position_classifier_version",
+    "wallet_market_enrichment",
+    "wallet_market_enrichment_error",
+    "unresolved_positive_exposure_position_count",
+    "conservatively_occupied_market_ids",
     "wallet_refresh_error",
     "wallet_lock_wait_ms",
     "wallet_command_duration_ms",
     "stage2_candidate_only",
     "blocked_by_stage1_wallet_refresh",
+    "console_trade_amount_usd",
+    "console_trade_amount_source",
+    "console_trade_last_calculated_usd",
+    "console_trade_cash_in_hand_usd",
+    "console_trade_occupied_positions",
+    "console_trade_active_positions",
+    "console_trade_available_slots",
+    "console_trade_max_positions",
     "llm_candidate_count",
     "llm_reviewed_candidates",
     "llm_provider_target_count",
@@ -147,6 +172,144 @@ _STAGE_OUTPUT_KEYS = {
     "slot_allocation",
 }
 
+_WORKFLOW_STAGE_NUMBERS = {
+    "scan": 1,
+    "llm": 2,
+    "invest": 3,
+}
+
+_PORTFOLIO_POSITION_KEYS = (
+    "position_key",
+    "market_id",
+    "market_slug",
+    "event_slug",
+    "slug",
+    "condition_id",
+    "market_title",
+    "market_url",
+    "side",
+    "shares",
+    "average_price_cents",
+    "exposure_usd",
+    "current_price_cents",
+    "current_value_usd",
+    "current_yes_odds",
+    "current_no_odds",
+    "close_time",
+    "theme",
+    "is_claimable",
+    "classification",
+    "classification_reason",
+    "claimable_value_usd",
+    "expected_payout_usdc",
+    "resolution_status",
+    "upstream_redeemable",
+)
+
+
+def workflow_stage_key(
+    stage: BullpenAutoLiveStageResult,
+) -> str | None:
+    """Return the canonical three-stage key without reclassifying substages.
+
+    Historical payloads can contain internal stages numbered above three.
+    Treating every unknown number as Stage 3 made History render duplicate
+    Stage 3 rows and could cause React row-key collisions. Explicit workflow
+    metadata wins; only the exact legacy stage numbers 1, 2 and 3 are inferred.
+    """
+
+    explicit = stage.outputs.get("workflow_stage_key")
+    if explicit in _WORKFLOW_STAGE_NUMBERS:
+        return str(explicit)
+    for key, stage_number in _WORKFLOW_STAGE_NUMBERS.items():
+        if stage.stage_number == stage_number:
+            return key
+    return None
+
+
+def canonical_workflow_stage_results(
+    stages: Iterable[BullpenAutoLiveStageResult],
+) -> list[BullpenAutoLiveStageResult]:
+    """Select at most one durable row for each user-facing workflow stage."""
+
+    selected: dict[str, tuple[BullpenAutoLiveStageResult, bool]] = {}
+    for stage in stages:
+        key = workflow_stage_key(stage)
+        if key is None:
+            continue
+        is_exact_stage = stage.stage_number == _WORKFLOW_STAGE_NUMBERS[key]
+        current = selected.get(key)
+        if current is None or (is_exact_stage and not current[1]):
+            selected[key] = (stage, is_exact_stage)
+    return [
+        selected[key][0]
+        for key in ("scan", "llm", "invest")
+        if key in selected
+    ]
+
+
+def has_verified_stage1_portfolio(run: BullpenAutoLiveRun) -> bool:
+    """Return whether a run contains a completed, usable wallet snapshot.
+
+    A candidate-only Stage 1 can legitimately persist an empty position list
+    when its wallet refresh fails.  That is useful workflow evidence, but it
+    must never replace the last verified portfolio in the console.
+    """
+
+    for stage in canonical_workflow_stage_results(run.stage_results):
+        if workflow_stage_key(stage) != "scan":
+            continue
+        outputs = stage.outputs
+        phase_status = str(outputs.get("phase_status") or "").strip().lower()
+        completed = bool(stage.completed_at) or phase_status == "completed"
+        if not completed or stage.status not in {"pass", "warning"}:
+            return False
+        if not isinstance(outputs.get("active_positions_found"), list):
+            return False
+        if bool(outputs.get("stage2_candidate_only")) or bool(
+            outputs.get("blocked_by_stage1_wallet_refresh")
+        ):
+            return False
+        wallet_refresh_error = outputs.get("wallet_refresh_error")
+        if (
+            isinstance(wallet_refresh_error, str)
+            and wallet_refresh_error.strip()
+        ) or (
+            wallet_refresh_error is not None
+            and not isinstance(wallet_refresh_error, str)
+            and wallet_refresh_error is not False
+        ):
+            return False
+        wallet_market_enrichment_error = outputs.get(
+            "wallet_market_enrichment_error"
+        )
+        if (
+            isinstance(wallet_market_enrichment_error, str)
+            and wallet_market_enrichment_error.strip()
+        ) or (
+            wallet_market_enrichment_error is not None
+            and not isinstance(wallet_market_enrichment_error, str)
+            and wallet_market_enrichment_error is not False
+        ):
+            return False
+        snapshot_status = str(
+            outputs.get("wallet_snapshot_status") or ""
+        ).strip().lower()
+        # Missing lineage is not proof of a fresh wallet. Older projections
+        # without these fields remain readable, but cannot replace the last
+        # explicitly verified portfolio with a fabricated empty snapshot.
+        if snapshot_status != "fresh":
+            return False
+        freshness = str(
+            outputs.get("wallet_snapshot_freshness_state")
+            or outputs.get("wallet_freshness_state")
+            or ""
+        ).strip().lower()
+        if freshness != "fresh":
+            return False
+        return True
+    return False
+
 
 def _bounded_value(
     value: Any,
@@ -187,6 +350,165 @@ def _bounded_value(
             is not None
         ]
     return _bounded_value(str(value), key=key, depth=depth + 1)
+
+
+def _optional_number(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_integer(value: object) -> int | None:
+    number = _optional_number(value)
+    if number is None:
+        return None
+    return max(0, int(number))
+
+
+def build_verified_stage1_portfolio_snapshot(
+    run: BullpenAutoLiveRun,
+) -> BullpenAutoLiveVerifiedPortfolioSnapshot | None:
+    """Extract the Stage 1-only portfolio payload needed by the console."""
+
+    if not has_verified_stage1_portfolio(run):
+        return None
+    stage = next(
+        (
+            candidate
+            for candidate in canonical_workflow_stage_results(run.stage_results)
+            if workflow_stage_key(candidate) == "scan"
+        ),
+        None,
+    )
+    if stage is None:
+        return None
+    outputs = stage.outputs
+    def compact_position_rows(
+        key: str,
+        *,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        source_rows = outputs.get(key)
+        if not isinstance(source_rows, list):
+            return []
+        compact_rows: list[dict[str, object]] = []
+        for source_row in source_rows[:limit]:
+            if not isinstance(source_row, dict):
+                continue
+            compact_row: dict[str, object] = {}
+            for field in _PORTFOLIO_POSITION_KEYS:
+                if field not in source_row:
+                    continue
+                value = _bounded_value(source_row[field], key=field)
+                if isinstance(value, str) and len(value) > 200:
+                    value = f"{value[:200]}…"
+                if value is not None:
+                    compact_row[field] = value
+            compact_rows.append(compact_row)
+        return compact_rows
+
+    source_active_positions = outputs.get("active_positions_found")
+    source_active_position_count = (
+        sum(1 for row in source_active_positions if isinstance(row, dict))
+        if isinstance(source_active_positions, list)
+        else 0
+    )
+    active_positions = compact_position_rows(
+        "active_positions_found",
+        limit=10,
+    )
+
+    max_positions = _optional_integer(
+        outputs.get("console_trade_max_positions")
+    )
+    active_positions_total = max(
+        source_active_position_count,
+        _optional_integer(outputs.get("active_positions_total")) or 0,
+        _optional_integer(outputs.get("console_trade_active_positions"))
+        or 0,
+    )
+    occupied_positions = max(
+        active_positions_total,
+        _optional_integer(outputs.get("console_trade_occupied_positions"))
+        or 0,
+    )
+    available_slots = (
+        max(0, max_positions - occupied_positions)
+        if max_positions is not None
+        else _optional_integer(outputs.get("console_trade_available_slots"))
+    )
+
+    def optional_text(value: object) -> str | None:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(value)
+        return None
+
+    return BullpenAutoLiveVerifiedPortfolioSnapshot(
+        run_id=run.id,
+        verified_at=(
+            stage.completed_at
+            or run.completed_at
+            or stage.started_at
+            or run.started_at
+        ),
+        active_positions=active_positions,
+        active_positions_total=active_positions_total,
+        active_positions_truncated=active_positions_total > len(active_positions),
+        claimable_positions=compact_position_rows(
+            "available_for_claim",
+            limit=10,
+        ),
+        settlement_pending_positions=compact_position_rows(
+            "settlement_pending_positions",
+            limit=5,
+        ),
+        excluded_positions=compact_position_rows(
+            "excluded_position_diagnostics",
+            limit=5,
+        ),
+        cash_in_hand_usd=_optional_number(
+            outputs.get("console_trade_cash_in_hand_usd")
+        ),
+        occupied_positions=occupied_positions,
+        available_slots=available_slots,
+        max_positions=max_positions,
+        trade_amount_usd=_optional_number(
+            outputs.get("console_trade_amount_usd")
+        ),
+        wallet_source=optional_text(outputs.get("wallet_source")),
+        wallet_snapshot_fetched_at=optional_text(
+            outputs.get("wallet_snapshot_fetched_at")
+        ),
+        wallet_freshness_state=optional_text(
+            outputs.get("wallet_snapshot_freshness_state")
+            or outputs.get("wallet_freshness_state")
+        ),
+        wallet_account_identity=optional_text(
+            outputs.get("wallet_account_identity")
+        ),
+        wallet_credential_artifact_inode=_optional_integer(
+            outputs.get("wallet_credential_artifact_inode")
+        ),
+        wallet_credential_artifact_mtime_ns=_optional_integer(
+            outputs.get("wallet_credential_artifact_mtime_ns")
+        ),
+        wallet_credential_artifact_size=_optional_integer(
+            outputs.get("wallet_credential_artifact_size")
+        ),
+        position_classifier_version=optional_text(
+            outputs.get("wallet_position_classifier_version")
+            or outputs.get("position_classifier_version")
+        ),
+    )
 
 
 def _select_keys(
@@ -234,7 +556,10 @@ def build_run_console_projection(run: BullpenAutoLiveRun) -> dict[str, Any]:
         "partial_fill_count": run.partial_fill_count,
         "permanent_failure_count": run.permanent_failure_count,
         "transient_failure_count": run.transient_failure_count,
-        "stage_results": [_compact_stage(stage) for stage in run.stage_results],
+        "stage_results": [
+            _compact_stage(stage)
+            for stage in canonical_workflow_stage_results(run.stage_results)
+        ],
         "guardrail_checks": _bounded_value(
             [
                 guardrail.model_dump(mode="json")
@@ -257,6 +582,45 @@ def build_run_console_projection(run: BullpenAutoLiveRun) -> dict[str, Any]:
             else None
         ),
     }
+
+
+def build_minimal_workflow_stage_results(
+    stages: Iterable[BullpenAutoLiveStageResult],
+) -> list[BullpenAutoLiveStageResult]:
+    """Keep exact stage identity/status when optional diagnostics are dropped."""
+
+    compact: list[BullpenAutoLiveStageResult] = []
+    for stage in canonical_workflow_stage_results(stages):
+        key = workflow_stage_key(stage)
+        if key is None:
+            continue
+        outputs = _select_keys(
+            stage.outputs,
+            (
+                "phase_status",
+                "completed_items",
+                "total_items",
+                "orders_planned",
+                "orders_processed",
+                "orders_submitted",
+                "persisted_execution_counters",
+                "current_blockage",
+                "next_action",
+                "next_retry_at",
+                "next_reconciliation_at",
+            ),
+        )
+        outputs["workflow_stage_key"] = key
+        compact.append(
+            stage.model_copy(
+                update={
+                    "inputs": {},
+                    "outputs": outputs,
+                    "guardrails_checked": [],
+                }
+            )
+        )
+    return compact
 
 
 def build_decision_console_projection(
@@ -338,20 +702,11 @@ def _read_count(outputs: dict[str, Any], *keys: str) -> int | None:
     return None
 
 
-def _stage_key(stage: BullpenAutoLiveStageResult) -> str:
-    explicit = stage.outputs.get("workflow_stage_key")
-    if explicit in {"scan", "llm", "invest"}:
-        return str(explicit)
-    if stage.stage_number == 1:
-        return "scan"
-    if stage.stage_number == 2:
-        return "llm"
-    return "invest"
-
-
 def _stage_history(stage: BullpenAutoLiveStageResult) -> BullpenAutoLiveHistoryStage:
     outputs = stage.outputs
-    key = _stage_key(stage)
+    key = workflow_stage_key(stage)
+    if key is None:
+        raise ValueError("non-workflow stage cannot be projected into console history")
     input_count: int | None
     processed_count: int | None
     succeeded_count: int | None
@@ -442,7 +797,10 @@ def build_history_item(
         if started_at is not None and completed_at is not None
         else None
     )
-    stages = [_stage_history(stage) for stage in run.stage_results]
+    stages = [
+        _stage_history(stage)
+        for stage in canonical_workflow_stage_results(run.stage_results)
+    ]
     blocker = run.error_message or next(
         (stage.blocker_preview for stage in reversed(stages) if stage.blocker_preview),
         None,

@@ -36,6 +36,7 @@ import {
   BullpenAutoLiveSettings,
   BullpenAutoLiveSettingsUpdate,
   BullpenAutoLiveRun,
+  BullpenAutoLiveConsoleRunDetail,
   BullpenAutoLiveHistoryPage,
   BullpenAutoLiveRunOrdersResponse,
   BullpenAutoLiveRunOnceRequest,
@@ -1641,6 +1642,16 @@ class apiServiceClass implements IApiService {
   ): Promise<BullpenAutoLiveRun> {
     return this.get<BullpenAutoLiveRun>(
       URLs.bullpenAutoLive.run(runId),
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveRunConsole(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveConsoleRunDetail> {
+    return this.get<BullpenAutoLiveConsoleRunDetail>(
+      URLs.bullpenAutoLive.runConsole(runId),
       { cache: "no-store", ...options },
     );
   }
