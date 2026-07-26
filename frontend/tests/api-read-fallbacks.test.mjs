@@ -85,6 +85,15 @@ test("authenticated browser API reads stay on the same-origin BFF", () => {
   }
 });
 
+test("same-origin backend health checks remain public", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+
+  assert.match(source, /const PUBLIC_BACKEND_PATHS = new Set\(\[/);
+  assert.match(source, /"health\/live"/);
+  assert.match(source, /"health\/ready"/);
+  assert.match(source, /PUBLIC_BACKEND_PATHS\.has\(path\)/);
+});
+
 test("dashboard threat latest reads skip historical augmentation unless explicitly requested", () => {
   const routerSources = [
     read("../../backend/app/domains/zerodha/threats_router.py"),

@@ -32,11 +32,13 @@ const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
-const PUBLIC_AUTH_PATHS = new Set([
+const PUBLIC_BACKEND_PATHS = new Set([
   "auth/register",
   "auth/forgot-password",
   "auth/reset-password",
   "auth/verify-email",
+  "health/live",
+  "health/ready",
 ]);
 const originCircuit = new ApiOriginCircuitBreaker(2, 30_000);
 
@@ -273,7 +275,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   let outcome = "unreachable";
   let responseStatus: number | undefined;
   const resolvedCandidates = resolveBackendApiCandidates(request);
-  const isPublicRequest = PUBLIC_AUTH_PATHS.has(path);
+  const isPublicRequest = PUBLIC_BACKEND_PATHS.has(path);
   const backendSession = isPublicRequest
     ? null
     : await createBackendSessionContext(request);
