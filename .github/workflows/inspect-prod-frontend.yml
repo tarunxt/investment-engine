@@ -62,6 +62,8 @@ jobs:
             echo "==> App root"
             sudo test -d "$APP/frontend"
             echo "$APP"
+            printf 'canonical_app_root='
+            sudo readlink -f -- "$APP"
 
             echo "==> Frontend build slots"
             if sudo test -f "$APP/frontend/.next-active-dir"; then
@@ -77,6 +79,18 @@ jobs:
             else
               echo "frontend/server.js=missing"
             fi
+            for manifest in \
+              "$APP/frontend/deployment-manifest.json" \
+              "$APP/frontend/.next/deployment-manifest.json" \
+              "$APP/frontend/.next-candidate/deployment-manifest.json"; do
+              if sudo test -f "$manifest"; then
+                sudo -u "$APP_SERVICE_USER" -H node -e '
+                  const fs = require("node:fs");
+                  const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                  console.log(`${process.argv[1]} build_sha=${value.build_sha || "<missing>"} bundler=${value.bundler || "<missing>"}`);
+                ' "$manifest"
+              fi
+            done
             for slot in .next .next-candidate; do
               slot_path="$APP/frontend/$slot"
               if sudo test -d "$slot_path"; then
@@ -91,6 +105,22 @@ jobs:
                 echo "$slot=<missing>"
               fi
             done
+
+            echo "==> Root recovery overlay guards"
+            sensitive_entries="$(
+              sudo find "$APP/frontend" -xdev \
+                \( -name '.git' -o -name '.env*' -o -name '*.pem' -o -name '*.key' \) \
+                -printf '%P\n'
+            )"
+            if [[ -n "$sensitive_entries" ]]; then
+              printf 'guarded_entries=%s\n' "$sensitive_entries"
+            else
+              echo "guarded_entries=<none>"
+            fi
+            dangling_symlink_count="$(
+              sudo find "$APP/frontend" -xdev -xtype l -printf '.\n' | wc -l
+            )"
+            echo "dangling_symlinks=$dangling_symlink_count"
 
             echo "==> Filesystem capacity"
             df -h "$APP"

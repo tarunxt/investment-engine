@@ -111,6 +111,54 @@ test("candidate preparation never removes or rebuilds the active slot", () => {
   assert.match(artifactPreparation, /package-lock\.json/);
 });
 
+test("slot selection is fail-closed and promotion revalidates the exact candidate", () => {
+  const selection = section(
+    "select_frontend_build_slots() {",
+    "frontend_slot_is_valid() {",
+  );
+  assert.match(selection, /\$'\.next\\t\.next-candidate'/);
+  assert.match(selection, /\$'\.next-candidate\\t\.next'/);
+  assert.match(selection, /Frontend slots escaped their allowed roots/);
+  assert.doesNotMatch(selection, /IFS=.*read/);
+
+  const promotion = section(
+    "promote_frontend_candidate_build() {",
+    "verify_restored_frontend_build() {",
+  );
+  assert.match(
+    promotion,
+    /validate-host[\s\S]*'\$FRONTEND_CANDIDATE_BUILD_DIR'/,
+  );
+  assert.match(promotion, /Frontend promotion pointer mismatch/);
+  assert.match(
+    promotion,
+    /test -f '\$FRONTEND_CANDIDATE_BUILD_DIR\/server\.js'/,
+  );
+  assert.ok(
+    promotion.indexOf("frontend_root_standalone_is_valid") <
+      promotion.indexOf('frontend_slot_is_valid "$FRONTEND_LIVE_BUILD_DIR"'),
+    "pointerless root recovery must be classified before legacy .next",
+  );
+  assert.match(
+    promotion,
+    /Refusing frontend promotion because no validated rollback runtime is available/,
+  );
+  const pointerMutation = promotion.indexOf(" point ");
+  const rollbackArmed = promotion.indexOf("FRONTEND_PROMOTED=true");
+  const pointerAssertion = promotion.indexOf(
+    "Frontend promotion pointer mismatch",
+  );
+  assert.ok(
+    promotion.indexOf("no validated rollback runtime") < pointerMutation,
+    "promotion must prove rollback availability before pointer mutation",
+  );
+  assert.ok(pointerMutation >= 0, "promotion must mutate the pointer");
+  assert.ok(
+    pointerMutation < rollbackArmed && rollbackArmed < pointerAssertion,
+    "rollback must be armed immediately after pointer mutation",
+  );
+});
+
 test("failed frontend verification requires a checked rollback", () => {
   const rollback = section(
     "verify_restored_frontend_build() {",
@@ -126,6 +174,8 @@ test("failed frontend verification requires a checked rollback", () => {
   assert.match(rollback, /restored same-origin backend proxy/);
   assert.match(rollback, /return 1/);
   assert.doesNotMatch(rollback, /systemctl restart[^\n]*\|\| true/);
+  assert.match(rollback, /rm -f -- '\$FRONTEND_ACTIVE_BUILD_POINTER'/);
+  assert.match(rollback, /FRONTEND_ACTIVE_POINTER_PRESENT/);
 
   const exitHandler = section(
     "handle_deploy_exit() {",
@@ -183,8 +233,12 @@ test("configuration rollback is scoped away from backend during frontend-only de
 });
 
 test("frontend launcher supports standalone slots and legacy rollback slots", () => {
-  assert.match(launcher, /ACTIVE_RUNTIME_ROOT=.*ACTIVE_BUILD_DIRECTORY/);
-  assert.match(launcher, /unset NEXT_DIST_DIR[\s\S]*node "\$ACTIVE_RUNTIME_ROOT\/server\.js"/);
+  assert.match(launcher, /resolve-launch/);
+  assert.match(launcher, /standalone-slot\|standalone-root-recovery/);
+  assert.match(
+    launcher,
+    /unset NEXT_DIST_DIR[\s\S]*node "\$ACTIVE_RUNTIME_ROOT\/server\.js"/,
+  );
   assert.ok(
     launcher.indexOf("unset NEXT_DIST_DIR") <
       launcher.indexOf('export NEXT_DIST_DIR="$ACTIVE_BUILD_DIRECTORY"'),
