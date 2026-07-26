@@ -10,6 +10,14 @@ const launcher = await readFile(
   new URL("./scripts/run-frontend.sh", import.meta.url),
   "utf8",
 );
+const frontendNginx = await readFile(
+  new URL("./nginx/frontend-site.conf", import.meta.url),
+  "utf8",
+);
+const apiNginx = await readFile(
+  new URL("./nginx/api-site.conf", import.meta.url),
+  "utf8",
+);
 
 function section(start, end) {
   const startIndex = redeploy.indexOf(start);
@@ -18,6 +26,33 @@ function section(start, end) {
   assert.notEqual(endIndex, -1, `missing section end: ${end}`);
   return redeploy.slice(startIndex, endIndex);
 }
+
+test("deployment updates the host-named Nginx sites that are actually enabled", () => {
+  const nginxInstaller = section(
+    "install_rendered_nginx_site() {",
+    "ensure_bullpen_runtime_links() {",
+  );
+
+  assert.match(nginxInstaller, /sites-enabled\/\$frontend_host/);
+  assert.match(nginxInstaller, /sites-enabled\/\$api_host/);
+  assert.match(nginxInstaller, /readlink -f "\$frontend_enabled"/);
+  assert.match(nginxInstaller, /backup_target "\$target"/);
+  assert.match(nginxInstaller, /NGINX_RELOAD_REQUIRED=true/);
+  assert.match(nginxInstaller, /frontend-site\.conf/);
+  assert.match(nginxInstaller, /api-site\.conf/);
+});
+
+test("active Nginx templates enforce public and private cache boundaries", () => {
+  assert.match(frontendNginx, /listen 443 ssl;\s+listen \[::\]:443 ssl;\s+http2 on;/);
+  assert.match(frontendNginx, /location \/_next\/static\/[\s\S]*max-age=31536000, immutable/);
+  assert.match(frontendNginx, /location \^~ \/console\/[\s\S]*private, no-store/);
+  assert.match(frontendNginx, /location \^~ \/api\/auth\/[\s\S]*private, no-store/);
+  assert.match(frontendNginx, /location \^~ \/backend-api\/[\s\S]*private, no-store/);
+  assert.match(frontendNginx, /upstream investor_frontend[\s\S]*keepalive 16/);
+  assert.match(apiNginx, /upstream investor_backend[\s\S]*keepalive 32/);
+  assert.match(apiNginx, /location \/ws\/[\s\S]*proxy_buffering off/);
+  assert.match(apiNginx, /location \/\s*\{[\s\S]*proxy_buffering on/);
+});
 
 test("frontend-only deployment cannot install or restart backend services", () => {
   const frontendTransaction = section(
