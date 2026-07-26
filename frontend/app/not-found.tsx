@@ -5,11 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertCircle } from "lucide-react";
 import { URLs } from "@/lib/urls";
-import { useAuth } from "@/hooks/useAuth";
 
 export default function NotFound() {
-    const { isAuthenticated, loading } = useAuth();
-
     return (
         <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-slate-900 via-purple-900 to-slate-900 p-4">
             <Card className="w-full max-w-md shadow-xl">
@@ -33,21 +30,17 @@ export default function NotFound() {
                     </div>
 
                     <div className="space-y-2">
-                        <Link href={isAuthenticated ? URLs.routes.console.dashboard() : URLs.routes.home()}>
+                        <Link href={URLs.routes.home()}>
                             <Button className="w-full bg-purple-600 hover:bg-purple-700">
-                                {
-                                    loading ? "Loading..." : (isAuthenticated ? "Go to Dashboard" : "Go to Home")
-                                }
+                                Go to Home
                             </Button>
                         </Link>
 
-                        {!isAuthenticated && loading && (
-                            <Link href={URLs.routes.login()}>
-                                <Button variant="outline" className="w-full">
-                                    Sign In
-                                </Button>
-                            </Link>
-                        )}
+                        <Link href={URLs.routes.login()}>
+                            <Button variant="outline" className="w-full">
+                                Sign In
+                            </Button>
+                        </Link>
                     </div>
 
                     <div className="pt-4 border-t border-slate-200">

@@ -1,7 +1,13 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   Clock,
@@ -16,13 +22,15 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useUsdInrRate } from "@/hooks/useUsdInrRate";
+import { LazyMount } from "@/components/shared/LazyMount";
+import { useAuth } from "@/hooks/useAuth";
 import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 import type {
   IndMoneyUsPortfolioOverviewResponse,
   IndMoneyUsPortfolioSnapshotSummary,
+  DashboardSummaryResponse,
   IndMoneyUsThreatAnalysis,
   PolymarketBotState,
   ZerodhaPortfolioOverviewResponse,
@@ -32,11 +40,9 @@ import type {
 } from "@/types/api";
 
 import {
-  DashboardFinalActionablesSkeleton,
   DashboardHeroSkeleton,
   DashboardMarketCardSkeleton,
   DashboardThreatCardSkeleton,
-  DashboardWorkflowSkeleton,
 } from "./_components/DashboardSkeletons";
 import {
   MarketPortfolioCard,
@@ -46,7 +52,7 @@ import { ThreatMarketCard } from "./_components/ThreatMarketCard";
 import {
   INDMONEY_DASHBOARD_SYNC_NOW_EVENT,
   ZERODHA_DASHBOARD_SYNC_NOW_EVENT,
-} from "./_components/RebalanceWorkflowSections";
+} from "./_components/dashboardEvents";
 import {
   countThreatSeverities,
   extractUrgentActionRows,
@@ -81,10 +87,8 @@ const INITIAL_STATE: DashboardState = {
   bullpenPositions: null,
 };
 
-const DASHBOARD_OVERVIEW_CACHE_KEY =
-  "investment-engine:dashboard-overview-cache:v2";
-const LEGACY_DASHBOARD_OVERVIEW_CACHE_KEY =
-  "investment-engine:dashboard-overview-cache:v1";
+const DASHBOARD_OVERVIEW_CACHE_KEY_PREFIX =
+  "investment-engine:dashboard-overview-cache:v3:user:";
 const DASHBOARD_OVERVIEW_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const DASHBOARD_SECTION_KEYS = [
   "zerodhaStatus",
@@ -114,28 +118,6 @@ type DashboardOverviewCachePayload = {
   version: 2;
   entries: Partial<Record<DashboardSectionKey, DashboardCacheEntry>>;
 };
-
-const DeferredRebalanceWorkflowSections = dynamic(
-  () =>
-    import("./_components/RebalanceWorkflowSections").then(
-      (mod) => mod.RebalanceWorkflowSections,
-    ),
-  {
-    loading: () => <DashboardWorkflowSkeleton />,
-    ssr: false,
-  },
-);
-
-const DeferredDashboardFinalActionablesTables = dynamic(
-  () =>
-    import("@/app/console/_components/FinalActionablesConsole").then(
-      (mod) => mod.DashboardFinalActionablesTables,
-    ),
-  {
-    loading: () => <DashboardFinalActionablesSkeleton />,
-    ssr: false,
-  },
-);
 
 function createPendingSectionsState(isPending: boolean): DashboardPendingState {
   return {
@@ -203,15 +185,21 @@ function sanitizeDashboardCacheValue(
   return value;
 }
 
-function readDashboardOverviewCachePayload(): DashboardOverviewCachePayload {
+function dashboardOverviewCacheKey(userId: number) {
+  return `${DASHBOARD_OVERVIEW_CACHE_KEY_PREFIX}${userId}`;
+}
+
+function readDashboardOverviewCachePayload(
+  userId: number | null | undefined,
+): DashboardOverviewCachePayload {
   const emptyPayload: DashboardOverviewCachePayload = {
     version: 2,
     entries: {},
   };
-  if (typeof window === "undefined") return emptyPayload;
+  if (typeof window === "undefined" || !userId) return emptyPayload;
 
   try {
-    const raw = window.localStorage.getItem(DASHBOARD_OVERVIEW_CACHE_KEY);
+    const raw = window.localStorage.getItem(dashboardOverviewCacheKey(userId));
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<DashboardOverviewCachePayload>;
       if (parsed.version === 2 && isRecord(parsed.entries)) {
@@ -222,35 +210,18 @@ function readDashboardOverviewCachePayload(): DashboardOverviewCachePayload {
       }
     }
 
-    const legacyRaw = window.localStorage.getItem(
-      LEGACY_DASHBOARD_OVERVIEW_CACHE_KEY,
-    );
-    if (!legacyRaw) return emptyPayload;
-    const legacy = JSON.parse(legacyRaw) as Record<string, unknown>;
-    const legacyCachedAt = Date.parse(
-      typeof legacy.cachedAt === "string" ? legacy.cachedAt : "",
-    );
-    if (!Number.isFinite(legacyCachedAt)) return emptyPayload;
-
-    const entries: DashboardOverviewCachePayload["entries"] = {};
-    for (const key of DASHBOARD_SECTION_KEYS) {
-      if (isValidDashboardCacheValue(key, legacy[key])) {
-        entries[key] = {
-          cachedAt: legacyCachedAt,
-          value: legacy[key],
-        };
-      }
-    }
-    return { version: 2, entries };
+    return emptyPayload;
   } catch {
     return emptyPayload;
   }
 }
 
-function readDashboardOverviewCache(): Partial<DashboardState> | null {
+function readDashboardOverviewCache(
+  userId: number | null | undefined,
+): Partial<DashboardState> | null {
   if (typeof window === "undefined") return null;
 
-  const payload = readDashboardOverviewCachePayload();
+  const payload = readDashboardOverviewCachePayload(userId);
   const result: Partial<DashboardState> = {};
   for (const key of DASHBOARD_SECTION_KEYS) {
     const entry = payload.entries[key];
@@ -268,20 +239,21 @@ function readDashboardOverviewCache(): Partial<DashboardState> | null {
 }
 
 function writeDashboardOverviewCacheEntry(
+  userId: number | null | undefined,
   key: DashboardSectionKey,
   value: DashboardState[DashboardSectionKey],
 ) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !userId) return;
   if (!isValidDashboardCacheValue(key, value)) return;
 
   try {
-    const payload = readDashboardOverviewCachePayload();
+    const payload = readDashboardOverviewCachePayload(userId);
     payload.entries[key] = {
       cachedAt: Date.now(),
       value: sanitizeDashboardCacheValue(key, value),
     };
     window.localStorage.setItem(
-      DASHBOARD_OVERVIEW_CACHE_KEY,
+      dashboardOverviewCacheKey(userId),
       JSON.stringify(payload),
     );
   } catch {
@@ -1159,9 +1131,183 @@ function parseBullpenAccountValueUsd(message?: string | null) {
   return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
 }
 
+function dashboardSummaryToState(
+  summary: DashboardSummaryResponse,
+): Partial<DashboardState> {
+  const zerodhaSnapshot = summary.zerodha?.snapshot;
+  const indmoneySnapshot = summary.indmoney_us?.snapshot;
+
+  const zerodhaOverview: ZerodhaPortfolioOverviewResponse = {
+    latest: zerodhaSnapshot
+      ? {
+          snapshot_date: zerodhaSnapshot.snapshot_date,
+          captured_at: zerodhaSnapshot.captured_at,
+          source: zerodhaSnapshot.source,
+          holdings_count: zerodhaSnapshot.holdings_count,
+          net_positions_count: 0,
+          day_positions_count: 0,
+          holdings_market_value: zerodhaSnapshot.holdings_market_value,
+          holdings_pnl: zerodhaSnapshot.holdings_pnl,
+          holdings_day_change_value:
+            zerodhaSnapshot.holdings_day_change_value,
+          available_margin: zerodhaSnapshot.available_margin,
+          positions_pnl: 0,
+          positions_m2m: 0,
+          holdings: zerodhaSnapshot.top_holdings.map((holding) => ({
+            tradingsymbol: holding.symbol,
+            exchange: "NSE",
+            instrument_token: null,
+            isin: null,
+            product: null,
+            quantity: 0,
+            used_quantity: 0,
+            t1_quantity: 0,
+            realised_quantity: 0,
+            authorised_quantity: 0,
+            authorised_date: null,
+            opening_quantity: 0,
+            short_quantity: 0,
+            collateral_quantity: 0,
+            collateral_type: null,
+            discrepancy: false,
+            average_price: 0,
+            last_price: 0,
+            close_price: 0,
+            pnl: holding.pnl,
+            day_change: 0,
+            day_change_percentage: 0,
+            market_value: holding.current_value,
+            invested_value: holding.invested_value,
+            day_change_value: 0,
+          })),
+          positions: { net: [], day: [] },
+        }
+      : null,
+    history:
+      zerodhaSnapshot?.history.map((point) => ({
+        snapshot_date: point.captured_at.slice(0, 10),
+        captured_at: point.captured_at,
+        source: "dashboard-summary",
+        holdings_count: 0,
+        net_positions_count: 0,
+        day_positions_count: 0,
+        holdings_market_value: point.value,
+        holdings_pnl: 0,
+        holdings_day_change_value: 0,
+        available_margin: 0,
+        positions_pnl: 0,
+        positions_m2m: 0,
+      })) ?? [],
+  };
+
+  const indmoneyOverview: IndMoneyUsPortfolioOverviewResponse = {
+    latest: indmoneySnapshot
+      ? {
+          id: 0,
+          snapshot_date: indmoneySnapshot.snapshot_date,
+          captured_at: indmoneySnapshot.captured_at,
+          source: indmoneySnapshot.source,
+          parse_status: indmoneySnapshot.parse_status,
+          parse_warnings: [],
+          holdings_count: indmoneySnapshot.holdings_count,
+          reported_holdings_count: null,
+          indices_count: 0,
+          wallet_balance: indmoneySnapshot.wallet_balance,
+          current_value: indmoneySnapshot.current_value,
+          invested_value: indmoneySnapshot.invested_value,
+          day_return_value: indmoneySnapshot.day_return_value,
+          day_return_percent: indmoneySnapshot.day_return_percent,
+          total_return_value: indmoneySnapshot.total_return_value,
+          total_return_percent: indmoneySnapshot.total_return_percent,
+          raw_text: "",
+          market_indices: [],
+          holdings: indmoneySnapshot.top_holdings.map((holding) => ({
+            company_name: holding.company_name ?? holding.symbol,
+            symbol: holding.symbol,
+            market_price: null,
+            market_change_percent: null,
+            invested_value: holding.invested_value,
+            quantity: null,
+            average_price: null,
+            current_value: holding.current_value,
+            total_pnl: holding.pnl,
+            total_pnl_percent: holding.pnl_percent,
+            portfolio_weight_percent: holding.weight_percent,
+            price_vs_average_percent: null,
+          })),
+          derived: {
+            parsed_holdings_current_value: indmoneySnapshot.current_value ?? 0,
+            parsed_holdings_invested_value:
+              indmoneySnapshot.invested_value ?? 0,
+            parsed_holdings_total_pnl:
+              indmoneySnapshot.total_return_value ?? 0,
+            profitable_holdings_count: 0,
+            loss_making_holdings_count: 0,
+            top_allocations: [],
+            top_gainers: [],
+            top_laggards: [],
+            reconciliation: [],
+          },
+        }
+      : null,
+    history:
+      indmoneySnapshot?.history.map((point) => ({
+        id: 0,
+        snapshot_date: point.captured_at.slice(0, 10),
+        captured_at: point.captured_at,
+        source: "dashboard-summary",
+        parse_status: "parsed",
+        parse_warnings: [],
+        holdings_count: 0,
+        reported_holdings_count: null,
+        indices_count: 0,
+        wallet_balance: 0,
+        current_value: point.value,
+        invested_value: null,
+        day_return_value: null,
+        day_return_percent: null,
+        total_return_value: null,
+        total_return_percent: null,
+      })) ?? [],
+  };
+
+  return {
+    zerodhaStatus: summary.zerodha
+      ? {
+          connected: summary.zerodha.connected,
+          login_time: summary.zerodha.login_time,
+          expires_at: summary.zerodha.expires_at,
+          last_portfolio_sync_at:
+            summary.zerodha.snapshot?.captured_at ?? null,
+          last_portfolio_snapshot_date:
+            summary.zerodha.snapshot?.snapshot_date ?? null,
+        }
+      : null,
+    zerodhaOverview,
+    indmoneyOverview,
+    bullpenPositions: summary.bullpen
+      ? {
+          summary: {
+            activeCount: summary.bullpen.active_count,
+            claimableCount: summary.bullpen.claimable_count,
+            claimableValue: summary.bullpen.claimable_value,
+            cashBalance: summary.bullpen.cash_balance,
+            totalValue: summary.bullpen.total_value,
+            unrealizedPnl: summary.bullpen.unrealized_pnl,
+            walletValue: summary.bullpen.wallet_value,
+          },
+          fetchedAt: summary.bullpen.fetched_at ?? undefined,
+          positionsSource: "last-successful-live-snapshot",
+        }
+      : null,
+  };
+}
+
 export default function DashboardPage() {
+  const { user } = useAuth();
+  const userId = user?.id;
   const [dashboard, setDashboard] = useState<DashboardState>(() => {
-    const cachedOverview = readDashboardOverviewCache();
+    const cachedOverview = readDashboardOverviewCache(userId);
     return cachedOverview
       ? { ...INITIAL_STATE, ...cachedOverview }
       : INITIAL_STATE;
@@ -1174,9 +1320,10 @@ export default function DashboardPage() {
   const [errorsBySection, setErrorsBySection] = useState<DashboardErrorsState>(
     {},
   );
-  const usdInrRate = useUsdInrRate();
+  const [usdInrRate, setUsdInrRate] = useState(83.5);
   const requestIdRef = useRef(0);
   const loadDashboardPromiseRef = useRef<Promise<void> | null>(null);
+  const loadThreatsPromiseRef = useRef<Promise<void> | null>(null);
 
   const refreshZerodhaTile = useCallback(() => {
     window.dispatchEvent(new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT));
@@ -1208,133 +1355,151 @@ export default function DashboardPage() {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
-    setPendingSections(createPendingSectionsState(true));
+    setPendingSections((current) => ({
+      ...current,
+      zerodhaStatus: true,
+      zerodhaOverview: true,
+      indmoneyOverview: true,
+      polymarketState: true,
+      bullpenPositions: true,
+    }));
     setErrorsBySection({});
     if (!initialLoad) {
       setRefreshing(true);
     }
 
-    let remainingSections = DASHBOARD_SECTION_KEYS.length;
-
-    const finishSection = (key: DashboardSectionKey) => {
-      if (requestId !== requestIdRef.current) return;
-
-      remainingSections -= 1;
-      setPendingSections((current) => ({ ...current, [key]: false }));
-
-      if (remainingSections === 0) {
-        setRefreshing(false);
-      }
-    };
-
-    const runRequest = <T,>(
-      key: DashboardSectionKey,
-      label: string,
-      loader: () => Promise<T>,
-      toValue: (value: T) => DashboardState[DashboardSectionKey],
-    ) => {
-      return loader()
-        .then((value) => {
-          if (requestId !== requestIdRef.current) return;
-
-          setDashboard((current) => {
-            const nextState = {
-              ...current,
-              [key]: toValue(value),
-            };
-            writeDashboardOverviewCacheEntry(key, nextState[key]);
-            return nextState;
-          });
-
-          setErrorsBySection((current) => {
-            if (!current[key]) return current;
-            const nextErrors = { ...current };
-            delete nextErrors[key];
-            return nextErrors;
-          });
-        })
-        .catch((error) => {
-          if (requestId !== requestIdRef.current) return;
-
-          const cachedValue = readDashboardOverviewCache()?.[key];
-          if (isValidDashboardCacheValue(key, cachedValue)) {
-            logDashboardCacheFallback(key, error);
-            setDashboard((current) => ({
-              ...current,
-              [key]: cachedValue,
-            }));
-            setErrorsBySection((current) => ({
-              ...current,
-              [key]: `${label}: Live refresh failed; showing last saved data.`,
-            }));
-            return;
+    const loadPromise = apiService
+      .getDashboardSummary()
+      .then((summary) => {
+        if (requestId !== requestIdRef.current) return;
+        const update = dashboardSummaryToState(summary);
+        setUsdInrRate(summary.usd_inr_rate);
+        setDashboard((current) => {
+          const nextState = { ...current, ...update };
+          for (const key of DASHBOARD_CRITICAL_KEYS) {
+            writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
           }
-
-          setErrorsBySection((current) => ({
-            ...current,
-            [key]: `${label}: ${normalizeError(error)}`,
-          }));
-        })
-        .finally(() => {
-          finishSection(key);
+          return nextState;
         });
-    };
-
-    const requests = [
-      runRequest(
-        "zerodhaStatus",
-        "India connection status",
-        () => apiService.zerodhaStatus(),
-        (value) => value,
-      ),
-      runRequest(
-        "zerodhaOverview",
-        "India portfolio",
-        () => apiService.zerodhaPortfolioOverview(),
-        (value) => value,
-      ),
-      runRequest(
-        "indmoneyOverview",
-        "US portfolio",
-        () => apiService.indmoneyUsPortfolioOverview(),
-        (value) => value,
-      ),
-      runRequest(
-        "polymarketState",
-        "Bullpen bot state",
-        () => apiService.polymarketState(),
-        (value) => value,
-      ),
-      runRequest(
-        "bullpenPositions",
-        "Bullpen wallet",
-        () => fetchBullpenPositions(),
-        (value) => value,
-      ),
-      runRequest(
-        "zerodhaThreat",
-        "India threats",
-        () => apiService.zerodhaThreatsLatest(),
-        (value) => value.analysis,
-      ),
-      runRequest(
-        "indmoneyThreat",
-        "US threats",
-        () => apiService.indmoneyUsThreatsLatest(),
-        (value) => value.analysis,
-      ),
-    ];
-
-    const loadPromise = Promise.allSettled(requests)
-      .then(() => undefined)
+        const sectionErrors: DashboardErrorsState = {};
+        if (summary.sections.zerodha?.status === "unavailable") {
+          sectionErrors.zerodhaOverview =
+            "India portfolio: temporarily unavailable.";
+        }
+        if (summary.sections.indmoney_us?.status === "unavailable") {
+          sectionErrors.indmoneyOverview =
+            "US portfolio: temporarily unavailable.";
+        }
+        if (summary.sections.bullpen?.status === "unavailable") {
+          sectionErrors.bullpenPositions =
+            "Bullpen wallet: no passive cached snapshot is available.";
+        }
+        setErrorsBySection(sectionErrors);
+      })
+      .catch((error) => {
+        if (requestId !== requestIdRef.current) return;
+        const cached = readDashboardOverviewCache(userId);
+        if (cached) {
+          logDashboardCacheFallback("zerodhaOverview", error);
+          setDashboard((current) => ({ ...current, ...cached }));
+          setErrorsBySection({
+            zerodhaOverview:
+              "Dashboard summary: live refresh failed; showing last saved data.",
+          });
+          return;
+        }
+        setErrorsBySection({
+          zerodhaOverview: `Dashboard summary: ${normalizeError(error)}`,
+        });
+      })
       .finally(() => {
+        if (requestId === requestIdRef.current) {
+          setPendingSections((current) => ({
+            ...current,
+            zerodhaStatus: false,
+            zerodhaOverview: false,
+            indmoneyOverview: false,
+            polymarketState: false,
+            bullpenPositions: false,
+          }));
+          setRefreshing(false);
+        }
         if (loadDashboardPromiseRef.current === loadPromise) {
           loadDashboardPromiseRef.current = null;
         }
       });
     loadDashboardPromiseRef.current = loadPromise;
     return loadPromise;
-  }, []);
+  }, [userId]);
+
+  const loadThreats = useCallback(() => {
+    if (loadThreatsPromiseRef.current) return loadThreatsPromiseRef.current;
+    setPendingSections((current) => ({
+      ...current,
+      zerodhaThreat: true,
+      indmoneyThreat: true,
+    }));
+
+    const loaders = [
+      apiService
+        .zerodhaThreatsLatest()
+        .then(({ analysis }) => {
+          setDashboard((current) => {
+            const nextState = { ...current, zerodhaThreat: analysis };
+            writeDashboardOverviewCacheEntry(
+              userId,
+              "zerodhaThreat",
+              nextState.zerodhaThreat,
+            );
+            return nextState;
+          });
+        })
+        .catch((error) => {
+          setErrorsBySection((current) => ({
+            ...current,
+            zerodhaThreat: `India threats: ${normalizeError(error)}`,
+          }));
+        })
+        .finally(() =>
+          setPendingSections((current) => ({
+            ...current,
+            zerodhaThreat: false,
+          })),
+        ),
+      apiService
+        .indmoneyUsThreatsLatest()
+        .then(({ analysis }) => {
+          setDashboard((current) => {
+            const nextState = { ...current, indmoneyThreat: analysis };
+            writeDashboardOverviewCacheEntry(
+              userId,
+              "indmoneyThreat",
+              nextState.indmoneyThreat,
+            );
+            return nextState;
+          });
+        })
+        .catch((error) => {
+          setErrorsBySection((current) => ({
+            ...current,
+            indmoneyThreat: `US threats: ${normalizeError(error)}`,
+          }));
+        })
+        .finally(() =>
+          setPendingSections((current) => ({
+            ...current,
+            indmoneyThreat: false,
+          })),
+        ),
+    ];
+    const request = Promise.allSettled(loaders)
+      .then(() => undefined)
+      .finally(() => {
+        loadThreatsPromiseRef.current = null;
+      });
+    loadThreatsPromiseRef.current = request;
+    return request;
+  }, [userId]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -1442,6 +1607,7 @@ export default function DashboardPage() {
       setDashboard((current) => {
         const nextState = { ...current, bullpenPositions: positions };
         writeDashboardOverviewCacheEntry(
+          userId,
           "bullpenPositions",
           nextState.bullpenPositions,
         );
@@ -1464,7 +1630,12 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="mx-auto flex flex-col gap-6">
+    <div
+      className="mx-auto flex flex-col gap-6"
+      data-performance-usable={
+        showHeroSkeleton ? undefined : "dashboard-summary"
+      }
+    >
       {showHeroSkeleton ? (
         <DashboardHeroSkeleton />
       ) : (
@@ -1542,10 +1713,6 @@ export default function DashboardPage() {
           </span>
         </div>
       ) : null}
-
-      <DeferredRebalanceWorkflowSections
-        onDashboardRefresh={() => loadDashboard(false)}
-      />
 
       <section className="grid gap-6 xl:grid-cols-2">
         {showIndiaPortfolioSkeleton ? (
@@ -1744,9 +1911,91 @@ export default function DashboardPage() {
         )}
       </section>
 
-      <DeferredDashboardFinalActionablesTables />
+      <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Portfolio workflow
+        </p>
+        <h2 className="mt-2 text-xl font-semibold text-slate-950">
+          Automated Rebalance
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          Start and monitor the complete multi-stage workflow in its dedicated
+          console. Its histories, editors, polling, and model output stay out
+          of the dashboard runtime.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Button asChild className="rounded-full">
+            <Link
+              href={URLs.routes.console.automatedRebalance()}
+              prefetch={false}
+            >
+              Open automated workflow
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link
+              href={URLs.routes.console.autoRebalanceRuns("zerodha")}
+              prefetch={false}
+            >
+              India run history
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link
+              href={URLs.routes.console.autoRebalanceRuns("indmoneyUs")}
+              prefetch={false}
+            >
+              US run history
+            </Link>
+          </Button>
+        </div>
+      </section>
 
-      <section className="grid gap-6 xl:grid-cols-2">
+      <section className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+          Detailed reports
+        </p>
+        <h2 className="mt-2 text-xl font-semibold text-slate-950">
+          Final Actionables
+        </h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+          Full histories, model evidence, and action tables load only when you
+          open the market-specific report.
+        </p>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <Button asChild variant="outline" className="rounded-full">
+            <Link
+              href={URLs.routes.console.zerodhaFinalActionables()}
+              prefetch={false}
+            >
+              India actionables
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="rounded-full">
+            <Link
+              href={URLs.routes.console.indmoneyUsFinalActionables()}
+              prefetch={false}
+            >
+              US actionables
+            </Link>
+          </Button>
+        </div>
+      </section>
+
+      <LazyMount
+        deferUntilScroll
+        minHeight={360}
+        fallback={
+          <section className="grid gap-6 xl:grid-cols-2">
+            <DashboardThreatCardSkeleton />
+            <DashboardThreatCardSkeleton />
+          </section>
+        }
+        onVisible={() => {
+          void loadThreats();
+        }}
+      >
+        <section className="grid gap-6 xl:grid-cols-2">
         {showIndiaThreatSkeleton ? (
           <DashboardThreatCardSkeleton />
         ) : (
@@ -1794,7 +2043,8 @@ export default function DashboardPage() {
             }
           />
         )}
-      </section>
+        </section>
+      </LazyMount>
     </div>
   );
 }

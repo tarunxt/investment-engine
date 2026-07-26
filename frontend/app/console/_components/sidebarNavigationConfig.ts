@@ -96,6 +96,13 @@ export const SIDEBAR_SECTIONS = [
                         matchMode: 'prefix',
                         title: 'US Portfolio — Connected through INDmoney',
                     },
+                    {
+                        type: 'item',
+                        id: 'automated-rebalance',
+                        name: 'Automated Rebalance',
+                        href: URLs.routes.console.automatedRebalance(),
+                        matchMode: 'exact',
+                    },
                 ],
             },
             {

@@ -320,6 +320,7 @@ function NavigationLeafLink({
     return (
         <Link
             href={leaf.href}
+            prefetch={false}
             onClick={onNavigate}
             aria-current={active ? 'page' : undefined}
             title={leaf.title ?? leaf.name}

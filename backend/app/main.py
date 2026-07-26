@@ -1,3 +1,4 @@
+import json
 import time
 from contextlib import asynccontextmanager
 from os import getenv
@@ -10,6 +11,12 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
+from app.core.request_timing import (
+    add_serialization_duration,
+    begin_request_timing,
+    current_request_timing,
+    end_request_timing,
+)
 from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
@@ -19,6 +26,7 @@ from app.domains.bullpen_trade_analysis.router import (
     router as bullpen_trade_analysis_router,
 )
 from app.domains.cost_drivers.router import router as cost_drivers_router
+from app.domains.dashboard.router import router as dashboard_router
 from app.domains.google_sheets.router import router as google_sheets_router
 from app.domains.indmoney_us.events_router import router as indmoney_us_events_router
 from app.domains.indmoney_us.router import router as indmoney_us_router
@@ -161,7 +169,21 @@ async def lifespan(app: FastAPI):
     logger.info("Shutdown complete")
 
 
-app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
+class TimedJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        started_at = time.monotonic()
+        try:
+            return super().render(content)
+        finally:
+            add_serialization_duration((time.monotonic() - started_at) * 1000)
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version=settings.version,
+    lifespan=lifespan,
+    default_response_class=TimedJSONResponse,
+)
 
 
 # ── Exception handlers ────────────────────────────────────────────────────────
@@ -223,18 +245,53 @@ async def correlation_id_middleware(request: Request, call_next):
     corr_id = request.headers.get("X-Correlation-ID", str(uuid4()))
     request.state.correlation_id = corr_id
     start = time.monotonic()
-    response = await call_next(request)
-    duration_ms = (time.monotonic() - start) * 1000
-    logger.debug(
-        "%s %s %s %.2fms corr=%s",
-        request.method,
-        request.url.path,
-        response.status_code,
-        duration_ms,
-        corr_id,
-    )
-    response.headers["X-Correlation-ID"] = corr_id
-    return response
+    timing_token = begin_request_timing()
+    try:
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - start) * 1000
+        timing = current_request_timing()
+        if timing is not None:
+            response.headers["Server-Timing"] = ", ".join(
+                (
+                    f'app;dur={duration_ms:.2f}',
+                    f'auth;dur={timing.auth_ms:.2f}',
+                    f'db;dur={timing.db_ms:.2f};desc="{timing.db_queries} queries"',
+                    f'redis;dur={timing.redis_ms:.2f}',
+                    f'external;dur={timing.external_ms:.2f}',
+                    f'serialize;dur={timing.serialization_ms:.2f}',
+                )
+            )
+        response.headers["X-Correlation-ID"] = corr_id
+        response_bytes = response.headers.get("content-length")
+        logger.info(
+            "request_performance %s",
+            json.dumps(
+                {
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "correlation_id": corr_id,
+                    "total_ms": round(duration_ms, 2),
+                    "auth_ms": round(timing.auth_ms, 2) if timing else 0,
+                    "db_query_count": timing.db_queries if timing else 0,
+                    "db_ms": round(timing.db_ms, 2) if timing else 0,
+                    "redis_ms": round(timing.redis_ms, 2) if timing else 0,
+                    "external_ms": round(timing.external_ms, 2) if timing else 0,
+                    "serialization_ms": (
+                        round(timing.serialization_ms, 2) if timing else 0
+                    ),
+                    "response_bytes": (
+                        int(response_bytes)
+                        if response_bytes and response_bytes.isdigit()
+                        else None
+                    ),
+                },
+                separators=(",", ":"),
+            ),
+        )
+        return response
+    finally:
+        end_request_timing(timing_token)
 
 
 app.add_middleware(
@@ -243,6 +300,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Server-Timing", "X-Correlation-ID", "ETag"],
 )
 
 
@@ -253,6 +311,7 @@ app.include_router(auth_router)
 app.include_router(bullpen_run_audit_router)
 app.include_router(bullpen_trade_analysis_router)
 app.include_router(cost_drivers_router)
+app.include_router(dashboard_router)
 app.include_router(google_sheets_router)
 app.include_router(indmoney_us_events_router)
 app.include_router(indmoney_us_router)

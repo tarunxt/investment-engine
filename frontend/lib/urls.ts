@@ -308,6 +308,10 @@ export const URLs = {
     },
   },
 
+  dashboard: {
+    summary: () => `${resolveApiBaseUrl()}/dashboard/summary`,
+  },
+
   // Health Check endpoints
   health: {
     ping: () => `${resolveApiBaseUrl()}/health`,
@@ -554,6 +558,7 @@ export const URLs = {
       indmoneyUsEvents: () => "/console/indmoney-us/events",
       indmoneyUsRebalance: () => "/console/indmoney-us/rebalance",
       indmoneyUsFinalActionables: () => "/console/indmoney-us/final-actionables",
+      automatedRebalance: () => "/console/automated-rebalance",
       autoRebalanceRuns: (portfolio: 'zerodha' | 'indmoneyUs') =>
         `/console/auto-rebalance-runs/${portfolio}`,
       autoRebalanceRunDetail: (

@@ -176,6 +176,8 @@ const TABS: {
     href: URLs.routes.console.bullpenAiEndOfMonth(),
   },
 ];
+const RENDER_LEGACY_SCAN_CONTROLS =
+  process.env.NEXT_PUBLIC_RENDER_LEGACY_BULLPEN_SCAN === "true";
 
 type BullpenSnapshotSource = "manual" | "auto";
 
@@ -3785,7 +3787,10 @@ function BullpenAiPageContent() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
+    <div
+      className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6"
+      data-performance-usable="bullpen-runtime"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-[0.22em] text-purple-600">
@@ -3950,7 +3955,10 @@ function BullpenAiPageContent() {
             ) : null}
           </div>
           <Button asChild>
-            <Link href={URLs.routes.console.bullpenAiAnalyseEvents()}>
+            <Link
+              href={URLs.routes.console.bullpenAiAnalyseEvents()}
+              prefetch={false}
+            >
               Trade Analysis
             </Link>
           </Button>
@@ -4063,19 +4071,8 @@ function BullpenAiPageContent() {
         }}
       />
 
-      <div className="hidden">
-        {TABS.map((tab) => (
-          <Link
-            key={tab.mode}
-            href={tab.href}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${activeMode === tab.mode ? "bg-slate-950 text-white" : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"}`}
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </div>
-
-      <Card className="hidden">
+      {RENDER_LEGACY_SCAN_CONTROLS ? (
+      <Card>
         <CardHeader className="gap-2">
           <div className="flex items-start justify-between gap-3">
             <div className="space-y-2">
@@ -4682,6 +4679,7 @@ function BullpenAiPageContent() {
         </CardContent>
         ) : null}
       </Card>
+      ) : null}
 
       <BullpenQuestionsTable
             snapshot={activeVisibleSnapshot}

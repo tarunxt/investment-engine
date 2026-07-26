@@ -252,7 +252,9 @@ export function MarketPortfolioCard({
                   : 'border-slate-300 bg-white/80',
               )}
             >
-              <Link href={link.href}>{link.label}</Link>
+              <Link href={link.href} prefetch={false}>
+                {link.label}
+              </Link>
             </Button>
           ))}
         </div>

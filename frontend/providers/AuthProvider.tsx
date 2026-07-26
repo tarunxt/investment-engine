@@ -16,6 +16,7 @@ import { URLs } from "@/lib/urls";
 const devAuthDisabled =
   process.env.NEXT_PUBLIC_DISABLE_AUTH === "true" ||
   process.env.NODE_ENV === "development";
+let sessionBootstrapPromise: Promise<unknown> | null = null;
 
 const devUser: UserResponse = {
   id: 1,
@@ -40,10 +41,20 @@ const devUser: UserResponse = {
   },
 };
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export function AuthProvider({
+  children,
+  initialUser = null,
+}: {
+  children: React.ReactNode;
+  initialUser?: UserResponse | null;
+}) {
   const { data: session, status, update } = useSession();
-  const [user, setUser] = useState<UserResponse | null>(devAuthDisabled ? devUser : null);
-  const [loading, setLoading] = useState(!devAuthDisabled);
+  const [user, setUser] = useState<UserResponse | null>(
+    devAuthDisabled ? devUser : initialUser,
+  );
+  const [loading, setLoading] = useState(
+    !devAuthDisabled,
+  );
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
 
@@ -152,7 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearAuthCookies();
       setUser(null);
     }
-  }, [update]);
+  }, []);
 
   // Sync NextAuth session with custom storage
   useEffect(() => {
@@ -167,12 +178,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Sync authenticated session
     if (status === "authenticated" && session) {
-      // Get user data from session
-      const userData = session.userData || session.user;
+      const userData = session.userData as unknown as UserResponse | undefined;
 
       if (userData) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
-        setUser(userData as UserResponse);
+        setUser(userData);
 
         // Sync to existing session storage for backward compatibility
         if (session.accessToken) {
@@ -180,7 +190,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             session.accessToken as string,
             session.refreshToken as string || ""
           );
-          customSessionStorage.setUserData(userData as UserResponse);
+          customSessionStorage.setUserData(userData);
 
           // setSessionExpiry accepts a duration in seconds, not an absolute
           // timestamp. Passing a timestamp kept expired tokens looking valid
@@ -190,6 +200,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           syncTokenToCookie(session.accessToken as string);
         }
       }
+      if (!session.accessToken) return;
     }
     // Clear session when unauthenticated
     else if (status === "unauthenticated") {
@@ -201,6 +212,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Always ensure loading is false when status is not "loading"
     setLoading(false);
   }, [session, status]);
+
+  useEffect(() => {
+    if (
+      devAuthDisabled ||
+      status !== "authenticated" ||
+      session?.accessToken
+    ) {
+      return;
+    }
+
+    if (!sessionBootstrapPromise) {
+      sessionBootstrapPromise = update().finally(() => {
+        sessionBootstrapPromise = null;
+      });
+    }
+
+    void sessionBootstrapPromise.catch((bootstrapError) => {
+      console.error("Session token bootstrap failed:", bootstrapError);
+      setStructuredError(
+        "Your secure session could not be restored. Please sign in again.",
+      );
+      setUser(null);
+      setLoading(false);
+    });
+  }, [session?.accessToken, setStructuredError, status, update]);
 
   // Keep Auth.js's cookie-backed JWT aligned with credentials refreshed by
   // apiService. This prevents a hard navigation from restoring a stale token
@@ -227,12 +263,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (user && isTokenExpired()) {
+    // A server-resolved user can render the shell before SessionProvider has
+    // copied the encrypted session's token expiry into compatibility storage.
+    // Do not interpret that brief, expected gap as an expired token.
+    if (
+      status === "authenticated" &&
+      session?.accessToken &&
+      user &&
+      isTokenExpired()
+    ) {
       queueMicrotask(() => {
         handleTokenExpiry();
       });
     }
-  }, [user, isTokenExpired, handleTokenExpiry]);
+  }, [handleTokenExpiry, isTokenExpired, session?.accessToken, status, user]);
 
   // Set up visibility change listener to check token on tab focus
   useEffect(() => {

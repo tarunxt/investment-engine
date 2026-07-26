@@ -1187,6 +1187,83 @@ export interface IndMoneyUsPortfolioOverviewResponse {
   history: IndMoneyUsPortfolioSnapshotSummary[];
 }
 
+export interface DashboardSectionMeta {
+  status: 'ok' | 'unavailable';
+  duration_ms: number;
+  fresh_at: string | null;
+  error: string | null;
+}
+
+export interface DashboardHistoryPoint {
+  captured_at: string;
+  value: number;
+}
+
+export interface DashboardHolding {
+  symbol: string;
+  company_name: string | null;
+  current_value: number;
+  invested_value: number;
+  pnl: number;
+  pnl_percent: number;
+  weight_percent: number | null;
+}
+
+export interface DashboardSummaryResponse {
+  schema_version: 1;
+  generated_at: string;
+  usd_inr_rate: number;
+  usd_inr_source: 'bounded-fallback';
+  zerodha: {
+    connected: boolean;
+    login_time: string | null;
+    expires_at: string | null;
+    snapshot: {
+      snapshot_date: string;
+      captured_at: string;
+      source: string;
+      holdings_count: number;
+      holdings_market_value: number;
+      holdings_invested_value: number;
+      holdings_pnl: number;
+      holdings_day_change_value: number;
+      available_margin: number;
+      top_holdings: DashboardHolding[];
+      history: DashboardHistoryPoint[];
+    } | null;
+  } | null;
+  indmoney_us: {
+    snapshot: {
+      snapshot_date: string;
+      captured_at: string;
+      source: string;
+      parse_status: string;
+      holdings_count: number;
+      wallet_balance: number | null;
+      current_value: number | null;
+      invested_value: number | null;
+      day_return_value: number | null;
+      day_return_percent: number | null;
+      total_return_value: number | null;
+      total_return_percent: number | null;
+      top_holdings: DashboardHolding[];
+      history: DashboardHistoryPoint[];
+    } | null;
+  } | null;
+  bullpen: {
+    active_count: number;
+    claimable_count: number;
+    claimable_value: number;
+    cash_balance: number | null;
+    total_value: number | null;
+    unrealized_pnl: number | null;
+    wallet_value: number | null;
+    fetched_at: string | null;
+    source: 'redis-cache';
+  } | null;
+  sections: Record<string, DashboardSectionMeta>;
+}
+
 export interface IndMoneyUsCurrentPriceQuoteRequest {
   exchange: string;
   symbol: string;
