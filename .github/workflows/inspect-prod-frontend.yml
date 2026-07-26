@@ -72,6 +72,11 @@ jobs:
             else
               echo "active_pointer=<missing>"
             fi
+            if sudo test -f "$APP/frontend/server.js"; then
+              echo "frontend/server.js=present"
+            else
+              echo "frontend/server.js=missing"
+            fi
             for slot in .next .next-candidate; do
               slot_path="$APP/frontend/$slot"
               if sudo test -d "$slot_path"; then
