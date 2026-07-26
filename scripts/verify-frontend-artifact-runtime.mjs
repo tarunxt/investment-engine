@@ -11,12 +11,22 @@ import { validateArtifactDirectory } from "../deploy/no-docker/frontend-artifact
 
 const STARTUP_TIMEOUT_MS = 90_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const ROUTE_JAVASCRIPT_BUDGET_BYTES = {
+const PRODUCTION_ROUTE_JAVASCRIPT_BUDGET_BYTES = {
   login: 700_000,
   dashboard: 1_100_000,
   bullpen: 1_300_000,
   automatedRebalance: 2_700_000,
 };
+const TURBOPACK_BENCHMARK_ROUTE_JAVASCRIPT_BUDGET_BYTES = {
+  ...PRODUCTION_ROUTE_JAVASCRIPT_BUDGET_BYTES,
+  // Turbopack currently emits one additional shared chunk for this route. It is
+  // benchmark-only; the selected production Webpack artifact retains 700 KB.
+  login: 800_000,
+};
+const ROUTE_JAVASCRIPT_BUDGET_BYTES =
+  process.env.BUNDLER === "turbopack"
+    ? TURBOPACK_BENCHMARK_ROUTE_JAVASCRIPT_BUDGET_BYTES
+    : PRODUCTION_ROUTE_JAVASCRIPT_BUDGET_BYTES;
 
 function elapsedSeconds(startedAt) {
   return ((performance.now() - startedAt) / 1000).toFixed(2);

@@ -188,6 +188,9 @@ The same-origin proxy remains the fallback. A per-origin circuit now:
 - CI regression contracts for response size, bounded collections, partial
   dashboard failure, circuit behavior/recovery, deduplication, server auth,
   hidden-control mounting, Nginx policies, and per-route JavaScript budgets.
+  The selected production Webpack login budget remains 700 KB; the benchmark-only
+  Turbopack build has an explicit 800 KB allowance for its additional shared
+  chunk.
 
 ## Response-size audit
 
