@@ -13,7 +13,10 @@ test("Stage 3 working status exposes a retry that reuses Stage 2 output for both
   );
 
   assert.match(source, /aria-label="Retry Stage 3 from saved Stage 2 output"/);
-  assert.match(source, /handleStage3Retry\(\s*effectiveInvestOnlyRequest/);
+  assert.match(source, /effectiveInvestOnlyRequest \?\? investOnlySource\.plan\.request/);
+  assert.match(source, /handleStage3Retry\(\s*stage3RetryRequest/);
+  assert.match(source, /action === "retry-stage3"/);
+  assert.doesNotMatch(source, /disabled=\{!effectiveInvestOnlyRequest \|\| action !== null\}/);
   assert.match(source, /await apiService\.stopBullpenAutoLive\(\)/);
   assert.match(source, /await apiService\.runBullpenAutoLiveOnce\(request\)/);
   assert.match(source, /Event Exits and Invest planned orders will both run again/);
