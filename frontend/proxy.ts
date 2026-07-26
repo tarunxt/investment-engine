@@ -4,6 +4,7 @@ import {
   resolveAuthRedirectTarget,
   stripRedirectToFromCurrentUrl,
 } from "@/lib/authRedirect";
+import { resolveSessionCookieSecurity } from "@/lib/authSessionCookie";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import type { JWT } from "next-auth/jwt";
@@ -45,10 +46,20 @@ function isAuthBypassed() {
 }
 
 async function readSessionToken(req: NextRequest): Promise<JWT | null> {
+  const secureCookie = resolveSessionCookieSecurity({
+    cookieNames: req.cookies.getAll().map(({ name }) => name),
+    forwardedProtocol: req.headers.get("x-forwarded-proto"),
+    requestProtocol: req.nextUrl.protocol,
+    configuredAuthUrl:
+      process.env.NEXTAUTH_URL ||
+      process.env.AUTH_URL ||
+      process.env.NEXT_PUBLIC_FRONTEND_URL,
+  });
+
   return getToken({
     req,
     secret: resolveNextAuthSecret(),
-    secureCookie: req.nextUrl.protocol === "https:",
+    secureCookie,
   });
 }
 
