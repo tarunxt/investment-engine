@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveSessionCookieSecurity } from "../lib/authSessionCookie.ts";
+import {
+  readCookieNames,
+  resolveSessionCookieSecurity,
+} from "../lib/authSessionCookie.ts";
 
 function resolve(overrides = {}) {
   return resolveSessionCookieSecurity({
@@ -50,4 +53,17 @@ test("forwarded and canonical protocols cover requests without a session cookie"
     true,
   );
   assert.equal(resolve({ requestProtocol: "https:" }), true);
+});
+
+test("cookie headers expose secure and chunked Auth.js cookie names to server routes", () => {
+  assert.deepEqual(
+    readCookieNames(
+      "theme=dark; __Secure-authjs.session-token.0=first; __Secure-authjs.session-token.1=second",
+    ),
+    [
+      "theme",
+      "__Secure-authjs.session-token.0",
+      "__Secure-authjs.session-token.1",
+    ],
+  );
 });

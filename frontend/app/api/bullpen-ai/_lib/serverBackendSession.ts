@@ -4,6 +4,10 @@ import { getToken } from "@auth/core/jwt";
 import { NextResponse } from "next/server";
 
 import { resolveNextAuthSecret, unstable_update } from "@/auth";
+import {
+  readCookieNames,
+  resolveSessionCookieSecurity,
+} from "@/lib/authSessionCookie";
 import { SingleFlightByKey } from "@/lib/singleFlight";
 
 import {
@@ -63,11 +67,28 @@ function waitIndependently<T>(promise: Promise<T>, signal?: AbortSignal) {
 export async function createBackendSessionContext(
   request: Request | { headers: Headers | Record<string, string> },
 ): Promise<BackendSessionContext> {
+  const requestHeaders =
+    request.headers instanceof Headers
+      ? request.headers
+      : new Headers(request.headers);
+  const requestProtocol =
+    request instanceof Request ? new URL(request.url).protocol : "http:";
+  const secureCookie = resolveSessionCookieSecurity({
+    cookieNames: readCookieNames(requestHeaders.get("cookie")),
+    forwardedProtocol: requestHeaders.get("x-forwarded-proto"),
+    requestProtocol,
+    configuredAuthUrl:
+      process.env.NEXTAUTH_URL ||
+      process.env.AUTH_URL ||
+      process.env.NEXT_PUBLIC_FRONTEND_URL,
+  });
+
   let token = null;
   try {
     token = await getToken({
       req: request,
       secret: resolveNextAuthSecret(),
+      secureCookie,
     });
   } catch (error) {
     // Treat malformed, expired, or undecryptable Auth.js cookies as

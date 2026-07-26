@@ -7,6 +7,15 @@ function containsCookieFamily(cookieNames: readonly string[], baseName: string) 
   );
 }
 
+export function readCookieNames(cookieHeader: string | null | undefined) {
+  if (!cookieHeader) return [];
+
+  return cookieHeader
+    .split(";")
+    .map((entry) => entry.trim().split("=", 1)[0]?.trim())
+    .filter((name): name is string => Boolean(name));
+}
+
 function configuredAuthUsesHttps(configuredAuthUrl: string | undefined) {
   if (!configuredAuthUrl) return null;
 

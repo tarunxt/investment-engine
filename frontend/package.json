@@ -8,6 +8,7 @@
     "build": "next build --webpack",
     "build:turbopack-benchmark": "next build --turbopack",
     "test:playwright-hardening": "node scripts/auth-rendering-playwright.mjs",
+    "test:secure-auth-bff": "node scripts/verify-secure-auth-bff.mjs",
     "start": "next start",
     "lint": "eslint",
     "postbuild": "node ../deploy/no-docker/repair-next-runtime-artifacts.mjs . \"${NEXT_DIST_DIR:-.next}\""
