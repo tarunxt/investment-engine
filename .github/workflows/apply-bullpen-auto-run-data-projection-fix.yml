@@ -20,6 +20,8 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   apply:
@@ -51,14 +53,33 @@ jobs:
           git diff --check
 
       - name: Run focused frontend regressions
+        id: frontend
+        continue-on-error: true
         working-directory: frontend
         run: |
-          set -euo pipefail
-          npm ci
-          node --test \
-            tests/bullpen-auto-run-sync.test.mjs \
-            tests/bullpen-ai-compatibility.test.mjs
-          npx tsc --noEmit
+          set -o pipefail
+          {
+            npm ci &&
+            node --test \
+              tests/bullpen-auto-run-sync.test.mjs \
+              tests/bullpen-ai-compatibility.test.mjs &&
+            npx tsc --noEmit
+          } 2>&1 | tee ../bullpen-auto-run-frontend.log
+
+      - name: Report frontend regression failure
+        if: steps.frontend.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'Generated Bullpen data-projection patch failed focused frontend verification:'
+            echo
+            echo '```text'
+            tail -n 180 bullpen-auto-run-frontend.log
+            echo '```'
+          } > /tmp/bullpen-auto-run-comment.md
+          gh pr comment 687 --body-file /tmp/bullpen-auto-run-comment.md
+          exit 1
 
       - name: Remove one-shot helper files
         run: |
