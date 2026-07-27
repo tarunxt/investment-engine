@@ -16,6 +16,20 @@ const bridgeSource = readFileSync(
   ),
   "utf8",
 );
+const recoverySource = readFileSync(
+  new URL(
+    "../app/console/automated-rebalance/_components/automatedRebalanceStartRecovery.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+const clientSource = readFileSync(
+  new URL(
+    "../app/console/automated-rebalance/_components/AutomatedRebalanceClient.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("auto-rebalance keeps polling active jobs until they reach a terminal status", () => {
   assert.match(
@@ -100,4 +114,14 @@ test("automated-rebalance LLM detail loading has threat and recent-run fallbacks
   assert.match(bridgeSource, /loadRecentRunFallback\(context\)/);
   assert.match(bridgeSource, /setError\(normalizeError\(reason\)\)/);
   assert.doesNotMatch(bridgeSource, /window\.alert|globalThis\.alert/);
+});
+
+test("ambiguous threat starts reconcile against durable history instead of producing Error null", () => {
+  assert.match(clientSource, /installAutomatedRebalanceStartRecovery\(\);/);
+  assert.match(recoverySource, /RECONCILIATION_DELAYS_MS/);
+  assert.match(recoverySource, /zerodhaThreatsHistory\(\{ limit: 50 \}\)/);
+  assert.match(recoverySource, /indmoneyUsThreatsHistory\(\{ limit: 50 \}\)/);
+  assert.match(recoverySource, /matchesAutoRebalanceAnalysis/);
+  assert.match(recoverySource, /normalizeStartError/);
+  assert.match(recoverySource, /\^\(null\|undefined\)\$/i);
 });
