@@ -66,24 +66,37 @@ jobs:
                           print(f"{line_no + 1:05d}: {lines[line_no]}")
           PY
           cat stage3-actionables-context.txt
-          tar -czf stage3-actionables-source.tar.gz \
-            backend/app/domains/polymarket_auto_live/engine.py \
-            backend/app/domains/polymarket_auto_live/schemas.py \
-            backend/app/domains/polymarket_auto_live/tasks.py \
-            backend/app/domains/polymarket_auto_live/order_intent_service.py \
-            backend/app/domains/polymarket_auto_live/repository.py \
-            backend/tests/test_stage3_slot_allocation.py \
-            backend/tests/test_polymarket_auto_live_order_intents.py \
-            backend/tests/test_polymarket_auto_live_tasks.py \
-            frontend/app/console/bullpen-ai/_components/bullpenAutoRunStage3Invest.ts \
-            frontend/app/console/bullpen-ai/_components/bullpenStage2Actionables.ts \
-            frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx \
-            frontend/types/api.ts \
-            frontend/tests/bullpen-auto-run-stage3-invest.test.mjs \
-            frontend/tests/bullpen-stage2-actionables.test.mjs \
-            frontend/package.json \
-            backend/pyproject.toml \
-            backend/requirements.txt
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+
+          candidates = [
+              "backend/app/domains/polymarket_auto_live/engine.py",
+              "backend/app/domains/polymarket_auto_live/schemas.py",
+              "backend/app/domains/polymarket_auto_live/tasks.py",
+              "backend/app/domains/polymarket_auto_live/order_intent_service.py",
+              "backend/app/domains/polymarket_auto_live/repository.py",
+              "backend/tests/test_stage3_slot_allocation.py",
+              "backend/tests/test_polymarket_auto_live_order_intents.py",
+              "backend/tests/test_polymarket_auto_live_tasks.py",
+              "frontend/app/console/bullpen-ai/_components/bullpenAutoRunStage3Invest.ts",
+              "frontend/app/console/bullpen-ai/_components/bullpenStage2Actionables.ts",
+              "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+              "frontend/types/api.ts",
+              "frontend/tests/bullpen-auto-run-stage3-invest.test.mjs",
+              "frontend/tests/bullpen-stage2-actionables.test.mjs",
+              "frontend/package.json",
+              "backend/pyproject.toml",
+              "backend/requirements.txt",
+          ]
+          with tarfile.open("stage3-actionables-source.tar.gz", "w:gz") as archive:
+              for candidate in candidates:
+                  path = Path(candidate)
+                  if path.exists():
+                      archive.add(path, arcname=candidate)
+                  else:
+                      print(f"Skipping unavailable source file: {candidate}")
+          PY
       - name: Upload inspection context
         uses: actions/upload-artifact@v4
         with:
