@@ -24,11 +24,7 @@ async function loadActionablesModule() {
   );
 }
 
-function activePosition({
-  marketId,
-  title,
-  claimable = false,
-}) {
+function activePosition({ marketId, title, claimable = false }) {
   return {
     positionKey: `${marketId}::YES`,
     marketId,
@@ -165,4 +161,21 @@ test("the actionables dialog keeps the required red, green, and yellow sections"
   assert.match(dialogSource, /title="Hold"/);
   assert.match(dialogSource, /tone="hold"/);
   assert.match(dialogSource, /Active Bullpen positions not included in Event Exits/);
+});
+
+test("the Stage 2 monitor renders the clickable Actionables line below New Events", () => {
+  const scheduleCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  const newEventsIndex = scheduleCardSource.indexOf("New Events to Invest in:");
+  const actionablesIndex = scheduleCardSource.indexOf("Actionables: Exit=");
+  assert.ok(newEventsIndex >= 0, "New Events line must remain present");
+  assert.ok(actionablesIndex > newEventsIndex, "Actionables must render below New Events");
+  assert.match(scheduleCardSource, /BullpenStage2ActionablesDialog/);
+  assert.match(scheduleCardSource, /setIsActionablesDialogOpen\(true\)/);
 });
