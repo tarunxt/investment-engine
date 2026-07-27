@@ -38,7 +38,13 @@ function normalizeKey(value: string | null | undefined) {
 }
 
 function uniqueKeys(values: Array<string | null | undefined>) {
-  return [...new Set(values.map(normalizeKey).filter((value): value is string => Boolean(value)))];
+  return [
+    ...new Set(
+      values
+        .map(normalizeKey)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
 }
 
 function activePositionKeys(position: BullpenAutoRunActivePositionView) {
@@ -87,7 +93,9 @@ function findMatchingDecisions(
   keys: string[],
   decisions: BullpenAutoLiveDecision[],
 ) {
-  return decisions.filter((decision) => sharesAnyKey(keys, decisionKeys(decision)));
+  return decisions.filter((decision) =>
+    sharesAnyKey(keys, decisionKeys(decision)),
+  );
 }
 
 function buildActivePositionItem({
@@ -131,7 +139,7 @@ function buildSelectedRowItem({
 }): BullpenStage2ActionableItem {
   return {
     id: row.marketId ?? row.id,
-    marketId: row.marketId,
+    marketId: row.marketId ?? null,
     title: row.question,
     marketUrl: row.marketUrl,
     slug: row.slug,
@@ -162,8 +170,8 @@ function buildDecisionItem(
     id: decision.id,
     marketId: decision.market_id,
     title: decision.market_title,
-    marketUrl: decision.market_url,
-    slug: decision.slug,
+    marketUrl: decision.market_url ?? null,
+    slug: decision.slug ?? null,
     theme: decision.theme,
     side: decision.side,
     reason:
@@ -172,15 +180,16 @@ function buildDecisionItem(
     rank: decision.stage3_final_rank ?? null,
     currentExposureUsd: decision.current_exposure_usd,
     targetExposureUsd: decision.target_exposure_usd,
-    llmYesOdds: decision.fair_yes_probability_pct,
-    llmNoOdds: decision.fair_no_probability_pct,
+    llmYesOdds: decision.fair_yes_probability_pct ?? null,
+    llmNoOdds: decision.fair_no_probability_pct ?? null,
     returnsPerDay: null,
   };
 }
 
 function actionableIdentity(item: BullpenStage2ActionableItem) {
   return (
-    uniqueKeys([item.marketId, item.slug, item.marketUrl, item.title])[0] ?? item.id
+    uniqueKeys([item.marketId, item.slug, item.marketUrl, item.title])[0] ??
+    item.id
   );
 }
 
@@ -259,7 +268,9 @@ export function buildBullpenStage2Actionables({
   const buyNew: BullpenStage2ActionableItem[] = selectedEntries
     .filter(
       (entry) =>
-        !activeKeySets.some((activeKeys) => sharesAnyKey(activeKeys, entry.keys)),
+        !activeKeySets.some((activeKeys) =>
+          sharesAnyKey(activeKeys, entry.keys),
+        ),
     )
     .map((entry) => {
       const decision = findMatchingDecisions(entry.keys, decisions).find(
