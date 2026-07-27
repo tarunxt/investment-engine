@@ -1,9 +1,13 @@
 name: Apply Bullpen auto-run dashboard fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/fix-bullpen-auto-run-dashboard-timeout
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
     paths:
       - .github/scripts/apply_bullpen_auto_run_dashboard_fix.py
       - .github/workflows/apply-bullpen-auto-run-dashboard-fix.yml
@@ -13,11 +17,10 @@ permissions:
 
 jobs:
   apply:
-    if: github.event.head_commit.message != 'Fix Bullpen auto-run dashboard polling'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout branch
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: codex/fix-bullpen-auto-run-dashboard-timeout
