@@ -40,10 +40,7 @@ jobs:
           display_anchor = '''  const displayStat = (value: number) => (hideNumbers ? "—" : value);
 
             return ('''
-          closing_anchor = '''      </div>
-            </div>
-          );
-          }'''
+          closing_anchor = "      </div>\n    </div>\n  );\n}"
 
           lines = [
               f"import_anchor={text.count(import_anchor)}",
@@ -128,10 +125,7 @@ jobs:
               1,
           )
 
-          closing_anchor = '''      </div>
-            </div>
-          );
-          }'''
+          closing_anchor = "      </div>\n    </div>\n  );\n}"
           closing_index = stage.rfind(closing_anchor)
           if closing_index < 0:
               raise SystemExit("StageTwoRunStats closing anchor was not found")
