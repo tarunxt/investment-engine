@@ -9,6 +9,13 @@ const source = readFileSync(
   ),
   "utf8",
 );
+const bridgeSource = readFileSync(
+  new URL(
+    "../app/console/automated-rebalance/_components/AutomatedRebalanceReliabilityBridge.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("auto-rebalance keeps polling active jobs until they reach a terminal status", () => {
   assert.match(
@@ -76,4 +83,21 @@ test("each auto-rebalance stage writes a durable audit update", () => {
   assert.match(source, /activeAutoRebalanceMetadata/);
   assert.match(source, /"interrupted"/);
   assert.match(source, /"cancelled"/);
+});
+
+test("automated-rebalance history loading respects the backend limit and never fans out forever", () => {
+  assert.match(bridgeSource, /const BACKEND_RUN_PAGE_LIMIT = 100;/);
+  assert.match(bridgeSource, /const MAX_FULL_RUN_HYDRATION = 48;/);
+  assert.match(bridgeSource, /limit: BACKEND_RUN_PAGE_LIMIT/);
+  assert.match(bridgeSource, /selectRecentRunSummaries\(summaryPage\.items\)/);
+  assert.match(bridgeSource, /return toFallbackRun\(item\)/);
+  assert.match(bridgeSource, /pages: 1/);
+  assert.doesNotMatch(bridgeSource, /limit: params\?\.limit/);
+});
+
+test("automated-rebalance LLM detail loading has threat and recent-run fallbacks without alerts", () => {
+  assert.match(bridgeSource, /loadThreatFallback\(context\)/);
+  assert.match(bridgeSource, /loadRecentRunFallback\(context\)/);
+  assert.match(bridgeSource, /setError\(normalizeError\(reason\)\)/);
+  assert.doesNotMatch(bridgeSource, /window\.alert|globalThis\.alert/);
 });
