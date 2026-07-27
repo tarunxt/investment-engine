@@ -148,10 +148,11 @@ export default function LlmUsageBreakdown() {
         | LlmUsageBreakdownResponse
         | { detail?: string; message?: string };
       if (!response.ok) {
+        const errorPayload = payload as { detail?: string; message?: string };
         throw new Error(
-          'detail' in payload
-            ? payload.detail || 'Failed to load LLM usage breakdown.'
-            : payload.message || 'Failed to load LLM usage breakdown.',
+          errorPayload.detail
+          || errorPayload.message
+          || 'Failed to load LLM usage breakdown.',
         );
       }
       setData(payload as LlmUsageBreakdownResponse);
