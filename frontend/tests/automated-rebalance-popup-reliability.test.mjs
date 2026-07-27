@@ -34,7 +34,7 @@ test("the dedicated automated-rebalance route installs the reliability bridge", 
 
 test("LLMs completed opens a keyboard-accessible provider/model details dialog", () => {
   assert.match(bridgeSource, /\^LLMs completed\\s\*:/);
-  assert.match(bridgeSource, /data-auto-rebalance-llm-metric/);
+  assert.match(bridgeSource, /autoRebalanceLlmMetric/);
   assert.match(bridgeSource, /onClickCapture=\{handleClickCapture\}/);
   assert.match(bridgeSource, /onKeyDownCapture=\{handleKeyDownCapture\}/);
   assert.match(bridgeSource, /apiService\.getAutoRebalanceHistoryDetail\(/);
