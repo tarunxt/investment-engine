@@ -1,0 +1,87 @@
+name: Verify deployment 1f368852
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-production-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TARGET_SHA: 1f368852fa1ff41b33b4d9dee775f474fd12ce8a
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Wait for matching production deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 60); do
+            payload="$(
+              gh api \
+                "/repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${TARGET_SHA}&event=push&per_page=100"
+            )"
+            run="$({
+              jq -c '
+                .workflow_runs
+                | map(select(.name == "Deploy to Production"))
+                | sort_by(.created_at)
+                | last // empty
+              ' <<<"${payload}"
+            } || true)"
+
+            if [[ -z "${run}" ]]; then
+              echo "Attempt ${attempt}: deployment run not visible yet."
+              sleep 15
+              continue
+            fi
+
+            run_id="$(jq -r '.id' <<<"${run}")"
+            run_url="$(jq -r '.html_url' <<<"${run}")"
+            status="$(jq -r '.status' <<<"${run}")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"${run}")"
+            echo "Attempt ${attempt}: run ${run_id} is ${status}/${conclusion:-pending}."
+
+            if [[ "${status}" != "completed" ]]; then
+              sleep 15
+              continue
+            fi
+
+            jobs="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")"
+            {
+              echo "### Production deployment verification"
+              echo
+              echo "- Commit: \`${TARGET_SHA}\`"
+              echo "- Workflow run: ${run_url}"
+              echo "- Conclusion: \`${conclusion}\`"
+              echo
+              echo "| Job | Status | Conclusion |"
+              echo "| --- | --- | --- |"
+              jq -r '.jobs[] | "| \(.name) | \(.status) | \(.conclusion // "pending") |"' <<<"${jobs}"
+            } >>"${GITHUB_STEP_SUMMARY}"
+
+            if [[ "${conclusion}" != "success" ]]; then
+              echo "Production deployment failed: ${run_url}" >&2
+              exit 1
+            fi
+
+            curl --fail --silent --show-error --location \
+              --max-time 30 \
+              --output /dev/null \
+              https://cred-x.in/login
+            echo "Production login route returned successfully."
+            exit 0
+          done
+
+          echo "Timed out waiting for the production deployment for ${TARGET_SHA}." >&2
+          exit 1
