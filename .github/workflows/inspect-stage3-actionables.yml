@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/fix-stage2-actionables-stage3-handoff
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
