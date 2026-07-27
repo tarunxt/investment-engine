@@ -178,4 +178,5 @@ test("the Stage 2 monitor renders the clickable Actionables line below New Event
   assert.ok(actionablesIndex > newEventsIndex, "Actionables must render below New Events");
   assert.match(scheduleCardSource, /BullpenStage2ActionablesDialog/);
   assert.match(scheduleCardSource, /setIsActionablesDialogOpen\(true\)/);
+  assert.match(scheduleCardSource, /aria-haspopup="dialog"/);
 });
