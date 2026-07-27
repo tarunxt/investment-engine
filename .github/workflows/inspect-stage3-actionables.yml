@@ -1,111 +1,62 @@
-name: Inspect Stage 2 actionables handoff
+name: Apply Stage 2 actionables handoff
 
 on:
   push:
     branches:
       - codex/fix-stage2-actionables-stage3-handoff
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: apply-stage2-actionables-handoff
+  cancel-in-progress: false
 
 jobs:
-  inspect:
+  apply-and-test:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Capture relevant engine and frontend contexts
+        with:
+          ref: codex/fix-stage2-actionables-stage3-handoff
+          fetch-depth: 0
+
+      - name: Apply implementation patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PATCH_BLOB_SHA: bbe0c184c56a526355dadc6d2c9441e9fe2efcf0
         run: |
-          python - <<'PY' > stage3-actionables-context.txt
-          from pathlib import Path
+          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/${PATCH_BLOB_SHA}" --jq .content \
+            | tr -d '\n' \
+            | base64 -d > /tmp/stage2-actionables-handoff.patch
+          git apply --check /tmp/stage2-actionables-handoff.patch
+          git apply /tmp/stage2-actionables-handoff.patch
+          git diff --check
 
-          targets = {
-              "backend/app/domains/polymarket_auto_live/engine.py": [
-                  "candidate_rows",
-                  "reuse_saved_llm_outputs",
-                  "console_profile",
-                  "event_exit_rows",
-                  "qualified_candidate_market_ids",
-                  "ranking_top_candidate_market_id_order",
-                  "request_context",
-                  "ranking_exit_active_keys",
-                  "stage3_buy_queue_market_ids",
-                  "EVENT_EXIT_PLANNED",
-                  "BUY_NEW",
-              ],
-              "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx": [
-                  "buildBullpenStage3OnlyInvestExecutionPlan",
-                  "effectiveInvestOnlyRequest",
-                  "handleStage3Retry",
-                  "runBullpenAutoLiveOnce",
-              ],
-              "frontend/types/api.ts": [
-                  "BullpenAutoLiveConsoleRunContext",
-                  "candidate_rows_prefiltered",
-              ],
-          }
-          for file_name, needles in targets.items():
-              path = Path(file_name)
-              lines = path.read_text().splitlines()
-              print(f"\n===== {file_name} ({len(lines)} lines) =====")
-              emitted = set()
-              for needle in needles:
-                  matches = [i for i, line in enumerate(lines) if needle in line]
-                  print(f"\n--- {needle}: {matches} ---")
-                  for index in matches:
-                      start = max(0, index - 30)
-                      end = min(len(lines), index + 55)
-                      key = (start, end)
-                      if key in emitted:
-                          continue
-                      emitted.add(key)
-                      print(f"\n### lines {start + 1}-{end}")
-                      for line_no in range(start, end):
-                          print(f"{line_no + 1:05d}: {lines[line_no]}")
-          PY
-          cat stage3-actionables-context.txt
-          python - <<'PY'
-          from pathlib import Path
-          import tarfile
+      - name: Validate backend syntax
+        run: |
+          python -m py_compile \
+            backend/app/domains/polymarket_auto_live/engine.py \
+            backend/app/domains/polymarket_auto_live/schemas.py \
+            backend/tests/test_stage2_actionable_handoff.py
 
-          candidates = [
-              "backend/app/domains/polymarket_auto_live/engine.py",
-              "backend/app/domains/polymarket_auto_live/schemas.py",
-              "backend/app/domains/polymarket_auto_live/tasks.py",
-              "backend/app/domains/polymarket_auto_live/order_intent_service.py",
-              "backend/app/domains/polymarket_auto_live/repository.py",
-              "backend/tests/test_stage3_slot_allocation.py",
-              "backend/tests/test_polymarket_auto_live_order_intents.py",
-              "backend/tests/test_polymarket_auto_live_tasks.py",
-              "frontend/app/console/bullpen-ai/_components/bullpenAutoRunStage3Invest.ts",
-              "frontend/app/console/bullpen-ai/_components/bullpenStage2Actionables.ts",
-              "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
-              "frontend/types/api.ts",
-              "frontend/tests/bullpen-auto-run-stage3-invest.test.mjs",
-              "frontend/tests/bullpen-stage2-actionables.test.mjs",
-              "frontend/package.json",
-              "backend/pyproject.toml",
-              "backend/requirements.txt",
-          ]
-          with tarfile.open("stage3-actionables-source.tar.gz", "w:gz") as archive:
-              for candidate in candidates:
-                  path = Path(candidate)
-                  if path.exists():
-                      archive.add(path, arcname=candidate)
-                  else:
-                      print(f"Skipping unavailable source file: {candidate}")
-          PY
-      - name: Upload inspection context
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage3-actionables-context
-          path: stage3-actionables-context.txt
-          if-no-files-found: error
-      - name: Upload relevant source files
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage3-actionables-source
-          path: stage3-actionables-source.tar.gz
-          if-no-files-found: error
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run focused frontend tests
+        working-directory: frontend
+        run: |
+          node --test \
+            tests/bullpen-auto-run-stage3-invest.test.mjs \
+            tests/bullpen-stage2-actionables.test.mjs
+
+      - name: Commit implementation
+        run: |
+          git rm .github/workflows/inspect-stage3-actionables.yml
+          git config user.name "OpenAI Codex"
+          git config user.email "codex@openai.com"
+          git add backend frontend
+          git commit -m "fix: preserve Stage 2 actionables in Stage 3"
+          git push origin HEAD:codex/fix-stage2-actionables-stage3-handoff
