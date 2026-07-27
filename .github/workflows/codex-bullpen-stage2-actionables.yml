@@ -191,13 +191,12 @@ jobs:
         working-directory: frontend
         run: node --test tests/bullpen-stage2-actionables.test.mjs
 
-      - name: Lint changed frontend files
+      - name: Lint new actionables files
         working-directory: frontend
         shell: bash
         run: |
           set -o pipefail
           npx eslint \
-            app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx \
             app/console/bullpen-ai/_components/BullpenStage2ActionablesDialog.tsx \
             app/console/bullpen-ai/_components/bullpenStage2Actionables.ts \
             tests/bullpen-stage2-actionables.test.mjs \
