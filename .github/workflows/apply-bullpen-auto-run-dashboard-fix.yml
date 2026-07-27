@@ -26,6 +26,56 @@ jobs:
           fetch-depth: 0
           ref: codex/fix-bullpen-auto-run-dashboard-timeout
 
+      - name: Refine applicator for current test fixture
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/apply_bullpen_auto_run_dashboard_fix.py')
+          text = path.read_text(encoding='utf-8')
+          old = """    text = replace_once(
+              text,
+              '''    monkeypatch.setattr(
+                  "app.domains.polymarket_auto_live.router._get_bot",
+                  fake_get_bot,
+              )
+          ''',
+              '''    monkeypatch.setattr(
+                  "app.domains.polymarket_auto_live.router._read_dashboard_summary",
+                  fake_read_dashboard_summary,
+              )
+          ''',
+              label="dashboard route reader monkeypatch",
+          )
+          """
+          new = """    text = replace_once(
+              text,
+              '''    monkeypatch.setattr(
+                  "app.domains.polymarket_auto_live.router._get_bot",
+                  fake_get_bot,
+              )
+              monkeypatch.setattr(
+                  "app.domains.polymarket_auto_live.router._attach_latest_active_auth",
+                  fake_attach_auth,
+              )
+          ''',
+              '''    monkeypatch.setattr(
+                  "app.domains.polymarket_auto_live.router._read_dashboard_summary",
+                  fake_read_dashboard_summary,
+              )
+              monkeypatch.setattr(
+                  "app.domains.polymarket_auto_live.router._attach_latest_active_auth",
+                  fake_attach_auth,
+              )
+          ''',
+              label="dashboard route reader monkeypatch",
+          )
+          """
+          if text.count(old) != 1:
+              raise SystemExit(f'applicator refinement expected one match, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
       - name: Apply source and regression-test changes
         env:
           GH_TOKEN: ${{ github.token }}
