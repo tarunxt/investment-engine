@@ -15,6 +15,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  CheckCircle2,
   ExternalLink,
   Info,
   X,
@@ -586,6 +587,7 @@ function renderBullpenTableCell({
   setShortlistReasonQuestion,
   setReturnsPerDayQuestion,
   rowHighlight,
+  isActivePosition,
 }: {
   columnId: BullpenTableColumnId;
   question: BullpenQuestionRow;
@@ -599,6 +601,7 @@ function renderBullpenTableCell({
   setShortlistReasonQuestion: (question: BullpenQuestionRow) => void;
   setReturnsPerDayQuestion: (question: BullpenQuestionRow) => void;
   rowHighlight?: BullpenEventSummarySectionKind;
+  isActivePosition: boolean;
 }) {
   const isCompact = displayDensity === "compact";
   const cellPaddingClass = isCompact ? "px-4 py-2" : "px-4 py-3";
@@ -649,6 +652,15 @@ function renderBullpenTableCell({
           className={cn(cellPaddingClass, "font-medium text-slate-900")}
         >
           <div className="flex items-start gap-2">
+            {isActivePosition ? (
+              <span
+                className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-emerald-300 bg-emerald-100 text-emerald-700 shadow-sm"
+                aria-label="Current active Bullpen position"
+                title="Current active Bullpen position"
+              >
+                <CheckCircle2 className="h-5 w-5 stroke-[3]" aria-hidden="true" />
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={() => setShortlistReasonQuestion(question)}
@@ -856,6 +868,7 @@ export function BullpenQuestionsTable({
   snapshot,
   rowsOverride,
   rowHighlightById,
+  activePositionQuestionIds,
   emptyMessage,
   headerContent,
   updatedAt,
@@ -883,6 +896,7 @@ export function BullpenQuestionsTable({
     string,
     "active-retained" | "event-exit" | "new-opportunity"
   >;
+  activePositionQuestionIds?: ReadonlySet<string>;
   emptyMessage: string;
   headerContent?: ReactNode;
   updatedAt?: string | null;
@@ -1453,6 +1467,8 @@ export function BullpenQuestionsTable({
                             setShortlistReasonQuestion,
                             setReturnsPerDayQuestion,
                             rowHighlight,
+                            isActivePosition:
+                              activePositionQuestionIds?.has(question.id) ?? false,
                           }),
                         )}
                         {extraColumns.map((column) => (

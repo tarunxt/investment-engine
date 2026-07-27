@@ -5273,6 +5273,38 @@ function buildStageTwoEventsSummaryRows(
   });
 }
 
+function buildStageTwoActivePositionQuestionIds({
+  rows,
+  activePositions,
+}: {
+  rows: BullpenQuestionRow[];
+  activePositions: BullpenActivePositionView[];
+}) {
+  const activeQuestionIds = new Set<string>();
+  const unmatchedRows = [...rows];
+
+  activePositions
+    .filter(isActiveBullpenPosition)
+    .forEach((position) => {
+      const result = BullpenEventIdentityResolver.resolveMatch({
+        target: buildBullpenEventIdentityFromPosition(position),
+        candidates: unmatchedRows,
+        getIdentity: BullpenEventIdentityResolver.fromQuestion,
+      });
+      const matchedRow =
+        result.status === "matched" ? (result.match?.item ?? null) : null;
+      if (!matchedRow) return;
+
+      activeQuestionIds.add(matchedRow.id);
+      const matchedIndex = unmatchedRows.findIndex(
+        (row) => row.id === matchedRow.id,
+      );
+      if (matchedIndex >= 0) unmatchedRows.splice(matchedIndex, 1);
+    });
+
+  return activeQuestionIds;
+}
+
 function getRunWorkflowStageResult(
   run: BullpenAutoLiveRun | null | undefined,
   workflowStageKey: "scan" | "llm" | "invest",
@@ -5859,9 +5891,11 @@ function getStageTwoRunSummaryStatusLabel(status: StageTwoRunSummaryStatus) {
 
 export function StageTwoLlmRunDetailsDialog({
   state,
+  activePositions = [],
   onClose,
 }: {
   state: StageTwoLlmRunDialogState;
+  activePositions?: BullpenActivePositionView[];
   onClose: () => void;
 }) {
   const [breakupKind, setBreakupKind] =
@@ -5918,6 +5952,10 @@ export function StageTwoLlmRunDetailsDialog({
     state.run?.id ?? null,
     eventsSummaryAsOfTimestamp,
   );
+  const activePositionQuestionIds = buildStageTwoActivePositionQuestionIds({
+    rows: eventsSummaryRows,
+    activePositions,
+  });
   const availableLlmDecisionRows = llmTableRows.filter(
     (row) => row.output && !readLlmContextString(row.output, "error"),
   );
@@ -6182,6 +6220,7 @@ export function StageTwoLlmRunDetailsDialog({
               <BullpenQuestionsTable
                 snapshot={null}
                 rowsOverride={eventsSummaryRows}
+                activePositionQuestionIds={activePositionQuestionIds}
                 emptyMessage="No Events Summary rows were returned for this Stage 2 run."
                 headerContent={null}
                 updatedAt={eventsSummaryUpdatedAt}
@@ -13167,6 +13206,7 @@ export function BullpenAutoRunScheduleCard({
         {refreshedStageTwoLlmRunDialog ? (
           <StageTwoLlmRunDetailsDialog
             state={refreshedStageTwoLlmRunDialog}
+            activePositions={activePositions}
             onClose={() => setStageTwoLlmRunDialog(null)}
           />
         ) : null}
