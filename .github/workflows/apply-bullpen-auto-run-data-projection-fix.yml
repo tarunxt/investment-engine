@@ -35,7 +35,22 @@ jobs:
           ref: codex/fix-bullpen-auto-run-data-projection
 
       - name: Apply permanent source and test changes
-        run: python .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('frontend/tests/bullpen-ai-compatibility.test.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = r'''const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 4_000,\s*\}\);'''
+          new = r'''const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 5_000,\s*\}\);'''
+          if text.count(old) != 1:
+              raise RuntimeError(
+                  f'dashboard timeout assertion: expected one match, found {text.count(old)}'
+              )
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Record generated-source diagnostics
         continue-on-error: true
