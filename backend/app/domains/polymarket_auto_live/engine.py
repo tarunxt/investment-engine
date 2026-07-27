@@ -288,6 +288,49 @@ def round_money(value: float | None) -> float | None:
     return round(value, 2)
 
 
+def _normalize_stage2_actionable_market_id_order(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        market_id = str(value or "").strip()
+        if not market_id or market_id in seen:
+            continue
+        seen.add(market_id)
+        normalized.append(market_id)
+    return normalized
+
+
+def _filter_stage2_actionable_market_id_order(
+    requested_market_ids: list[str],
+    available_market_ids: set[str],
+) -> tuple[list[str], list[str]]:
+    accepted = [
+        market_id
+        for market_id in requested_market_ids
+        if market_id in available_market_ids
+    ]
+    accepted_set = set(accepted)
+    missing = [
+        market_id
+        for market_id in requested_market_ids
+        if market_id not in accepted_set
+    ]
+    return accepted, missing
+
+
+def _stage2_actionable_hold_position_keys(
+    positions: list[ConsoleWalletPosition],
+    actionable_exit_market_ids: set[str],
+) -> set[str]:
+    return {
+        f"{position.market_id}::{position.side}"
+        for position in positions
+        if position.market_id not in actionable_exit_market_ids
+    }
+
+
 def console_order_usd(settings: BullpenAutoLiveSettings) -> float:
     return round(settings.console_order_usd or DEFAULT_CONSOLE_ORDER_USD, 2)
 
@@ -5350,6 +5393,28 @@ class BullpenAutoLiveEngine:
             if manual_console_context is not None
             else True
         )
+        manual_stage2_actionable_exit_market_id_order = (
+            _normalize_stage2_actionable_market_id_order(
+                manual_console_context.stage2_actionable_exit_market_ids
+            )
+            if manual_console_context is not None
+            else []
+        )
+        manual_stage2_actionable_buy_market_id_order = (
+            _normalize_stage2_actionable_market_id_order(
+                manual_console_context.stage2_actionable_buy_market_ids
+            )
+            if manual_console_context is not None
+            else []
+        )
+        manual_stage2_actionable_handoff_used = bool(
+            manual_stage2_actionable_exit_market_id_order
+            or manual_stage2_actionable_buy_market_id_order
+        )
+        accepted_stage2_actionable_exit_market_id_order: list[str] = []
+        missing_stage2_actionable_exit_market_id_order: list[str] = []
+        accepted_stage2_actionable_buy_market_id_order: list[str] = []
+        missing_stage2_actionable_buy_market_id_order: list[str] = []
         console_llm_targets = _resolve_stage2_llm_target_pairs(run, settings)
         stage2_settings = settings.model_copy(
             update={
@@ -5519,8 +5584,6 @@ class BullpenAutoLiveEngine:
             def _manual_row_has_reusable_llm_outputs(
                 row: BullpenAutoLiveConsoleCandidateInput,
             ) -> bool:
-                if not selected_console_llm_target_keys:
-                    return False
                 if row.llm_yes_odds is None and row.llm_no_odds is None:
                     return False
                 row_output_target_keys = {
@@ -5535,6 +5598,10 @@ class BullpenAutoLiveEngine:
                         or output.llm_no_odds is not None
                     )
                 }
+                if manual_stage2_actionable_handoff_used:
+                    return bool(row_output_target_keys)
+                if not selected_console_llm_target_keys:
+                    return False
                 return selected_console_llm_target_keys.issubset(row_output_target_keys)
 
             manual_console_rows_have_reusable_llm = (
@@ -6232,7 +6299,10 @@ class BullpenAutoLiveEngine:
                 max(1, settings.max_llm_candidates_per_run),
                 eligible_row_total,
             )
-            if manual_active_positions_without_reusable_llm:
+            if (
+                manual_active_positions_without_reusable_llm
+                and not manual_stage2_actionable_handoff_used
+            ):
                 manual_console_rows_have_reusable_llm = False
                 active_position_contexts = []
                 candidate_contexts = []
@@ -6260,11 +6330,21 @@ class BullpenAutoLiveEngine:
                 )
                 llm_candidate_count = eligible_row_total
             else:
+                effective_reviewed_active_position_count = (
+                    reviewable_active_position_count
+                    if manual_stage2_actionable_handoff_used
+                    else reviewed_active_position_count
+                )
+                effective_reviewed_row_total = (
+                    eligible_row_total
+                    if manual_stage2_actionable_handoff_used
+                    else reviewed_row_total
+                )
                 stage2_universe_status = build_console_stage2_universe_status(
                     eligible_rows_total=eligible_row_total,
-                    reviewed_rows=reviewed_row_total,
+                    reviewed_rows=effective_reviewed_row_total,
                     max_llm_candidates_per_run=manual_reusable_llm_limit,
-                    active_rows_reviewed=reviewed_active_position_count,
+                    active_rows_reviewed=effective_reviewed_active_position_count,
                     fresh_candidate_rows_total=candidate_rows_before_llm,
                     reviewed_fresh_candidate_rows=candidate_rows_before_llm,
                     llm_rows_skipped_by_cap=0,
@@ -6276,11 +6356,15 @@ class BullpenAutoLiveEngine:
                 stage2_strategy_metadata = build_console_strategy_metadata(
                     stage2_universe_complete=True,
                     eligible_rows_total=eligible_row_total,
-                    reviewed_rows=reviewed_row_total,
+                    reviewed_rows=effective_reviewed_row_total,
                     skipped_rows=0,
                     max_llm_candidates_per_run=manual_reusable_llm_limit,
                 )
-                llm_candidate_count = reviewed_row_total
+                llm_candidate_count = (
+                    candidate_rows_before_llm
+                    if manual_stage2_actionable_handoff_used
+                    else reviewed_row_total
+                )
         last_calculated_console_order_usd = round_money(
             state.last_console_trade_amount_usd
         )
@@ -6628,7 +6712,11 @@ class BullpenAutoLiveEngine:
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
 
         if manual_console_rows_have_reusable_llm:
-            if llm_candidate_count > 0 and len(console_llm_targets) == 0:
+            if (
+                llm_candidate_count > 0
+                and len(console_llm_targets) == 0
+                and not manual_stage2_actionable_handoff_used
+            ):
                 return fail_stage_two_for_missing_targets()
             report_llm_stage_progress(
                 phase_status="running",
@@ -7955,15 +8043,11 @@ class BullpenAutoLiveEngine:
             for row in ranking_top_rows
             if row["kind"] == "candidate"
         ]
-        stage3_buy_queue_market_ids = set(ranking_top_candidate_market_id_order)
         candidate_final_rank_by_market_id = {
             str(row["market_id"]): index
             for index, row in enumerate(combined_rank_rows, start=1)
             if row["kind"] == "candidate"
         }
-        top_rows = ranking_top_rows
-        top_active_keys = ranking_top_active_keys
-        top_candidate_market_ids = ranking_top_candidate_market_ids
         ranking_exit_active_keys = (
             ranking_top_active_keys
             if stage2_universe_complete
@@ -7973,6 +8057,50 @@ class BullpenAutoLiveEngine:
                 if row["kind"] == "active"
             }
         )
+        if manual_stage2_actionable_handoff_used:
+            available_buy_market_ids = {
+                str(row["market_id"]) for row in candidate_rank_rows
+            }
+            (
+                accepted_stage2_actionable_buy_market_id_order,
+                missing_stage2_actionable_buy_market_id_order,
+            ) = _filter_stage2_actionable_market_id_order(
+                manual_stage2_actionable_buy_market_id_order,
+                available_buy_market_ids,
+            )
+            active_wallet_market_ids = {
+                position.market_id
+                for position in active_bullpen_wallet_positions
+                if position.market_id
+            }
+            (
+                accepted_stage2_actionable_exit_market_id_order,
+                missing_stage2_actionable_exit_market_id_order,
+            ) = _filter_stage2_actionable_market_id_order(
+                manual_stage2_actionable_exit_market_id_order,
+                active_wallet_market_ids,
+            )
+            ranking_top_candidate_market_id_order = list(
+                accepted_stage2_actionable_buy_market_id_order
+            )
+            ranking_top_candidate_market_ids = set(
+                accepted_stage2_actionable_buy_market_id_order
+            )
+            candidate_final_rank_by_market_id = {
+                market_id: index
+                for index, market_id in enumerate(
+                    accepted_stage2_actionable_buy_market_id_order,
+                    start=1,
+                )
+            }
+            ranking_exit_active_keys = _stage2_actionable_hold_position_keys(
+                active_bullpen_wallet_positions,
+                set(accepted_stage2_actionable_exit_market_id_order),
+            )
+        stage3_buy_queue_market_ids = set(ranking_top_candidate_market_id_order)
+        top_rows = ranking_top_rows
+        top_active_keys = ranking_top_active_keys
+        top_candidate_market_ids = ranking_top_candidate_market_ids
 
         run.stage_results.append(
             build_stage_result(
@@ -7998,6 +8126,19 @@ class BullpenAutoLiveEngine:
                     ),
                     "selected_qualified_candidate_market_ids": sorted(selected_qualified_candidate_market_ids),
                     "top_active_keys": sorted(ranking_top_active_keys),
+                    "stage2_actionable_handoff_used": manual_stage2_actionable_handoff_used,
+                    "stage2_actionable_exit_market_ids": list(
+                        accepted_stage2_actionable_exit_market_id_order
+                    ),
+                    "stage2_actionable_buy_market_ids": list(
+                        accepted_stage2_actionable_buy_market_id_order
+                    ),
+                    "missing_stage2_actionable_exit_market_ids": list(
+                        missing_stage2_actionable_exit_market_id_order
+                    ),
+                    "missing_stage2_actionable_buy_market_ids": list(
+                        missing_stage2_actionable_buy_market_id_order
+                    ),
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                     "rejected_candidates": [
@@ -8042,6 +8183,19 @@ class BullpenAutoLiveEngine:
             "received_at": invest_stage_started_at,
             "candidate_market_ids": list(ranking_top_candidate_market_id_order),
             "candidate_count": len(ranking_top_candidate_market_id_order),
+            "actionable_handoff_used": manual_stage2_actionable_handoff_used,
+            "actionable_exit_market_ids": list(
+                accepted_stage2_actionable_exit_market_id_order
+            ),
+            "actionable_buy_market_ids": list(
+                accepted_stage2_actionable_buy_market_id_order
+            ),
+            "missing_actionable_exit_market_ids": list(
+                missing_stage2_actionable_exit_market_id_order
+            ),
+            "missing_actionable_buy_market_ids": list(
+                missing_stage2_actionable_buy_market_id_order
+            ),
             "decision_rows_persisted": 0,
         }
         set_run_stage_result(
@@ -8963,6 +9117,26 @@ class BullpenAutoLiveEngine:
         # dependency pairing, final ranks, and queue/UI counters.  Retaining
         # the pre-exit handoff order made promoted candidates fall back to
         # market-id sorting and disappear from the Step 2 counters.
+        if manual_stage2_actionable_handoff_used:
+            ranked_post_exit_candidate_market_id_order = list(
+                accepted_stage2_actionable_buy_market_id_order
+            )
+            ranked_post_exit_candidate_market_ids = set(
+                accepted_stage2_actionable_buy_market_id_order
+            )
+            candidate_final_rank_by_market_id = {
+                market_id: index
+                for index, market_id in enumerate(
+                    accepted_stage2_actionable_buy_market_id_order,
+                    start=1,
+                )
+            }
+        else:
+            candidate_final_rank_by_market_id = {
+                str(row["market_id"]): index
+                for index, row in enumerate(post_exit_rank_rows, start=1)
+                if row["kind"] == "candidate"
+            }
         ranking_top_candidate_market_ids = set(
             ranked_post_exit_candidate_market_ids
         )
@@ -8972,11 +9146,6 @@ class BullpenAutoLiveEngine:
         stage3_buy_queue_market_ids = set(
             ranked_post_exit_candidate_market_ids
         )
-        candidate_final_rank_by_market_id = {
-            str(row["market_id"]): index
-            for index, row in enumerate(post_exit_rank_rows, start=1)
-            if row["kind"] == "candidate"
-        }
         top_candidate_market_ids = ranked_post_exit_candidate_market_ids
         run.diagnostics.top_candidate_market_ids = list(
             ranked_post_exit_candidate_market_id_order

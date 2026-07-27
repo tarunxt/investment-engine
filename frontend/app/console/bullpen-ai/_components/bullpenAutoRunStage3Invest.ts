@@ -111,6 +111,35 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
+function normalizeIdentityKey(value: unknown): string | null {
+  const normalized = readString(value)?.toLowerCase();
+  return normalized || null;
+}
+
+function buildIdentityKeys(values: unknown[]): string[] {
+  return [
+    ...new Set(
+      values
+        .map((value) => normalizeIdentityKey(value))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
+}
+
+function sharesIdentityKey(keys: string[], identityKeys: Set<string>): boolean {
+  return keys.some((key) => identityKeys.has(key));
+}
+
+function candidateIdentityKeys(candidate: BullpenAutoLiveConsoleCandidateInput): string[] {
+  return buildIdentityKeys([
+    candidate.market_id,
+    candidate.slug,
+    candidate.market_url,
+    candidate.market_title,
+    candidate.question_id,
+  ]);
+}
+
 function readNumber(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -487,6 +516,8 @@ export function buildBullpenStage3OnlyInvestPlan(
         total_candidates: candidateRows.length,
         candidate_rows_prefiltered: true,
         reuse_saved_llm_outputs: true,
+        stage2_actionable_exit_market_ids: [],
+        stage2_actionable_buy_market_ids: candidateRows.map((row) => row.market_id),
         candidate_rows: candidateRows,
       },
     },
@@ -495,33 +526,64 @@ export function buildBullpenStage3OnlyInvestPlan(
   };
 }
 
-function buildSavedRunActivePositionMarketIdSet(
+function buildSavedRunActivePositionRecords(
   run: BullpenAutoLiveRun | null,
-): Set<string> {
-  if (!run) return new Set<string>();
+): Record<string, unknown>[] {
+  if (!run) return [];
 
   const scanOutputs = workflowStageOutputs(run, "scan");
-  const marketIds = asArray(scanOutputs?.active_positions_found)
+  return asArray(scanOutputs?.active_positions_found)
     .map((item) => asRecord(item))
-    .filter((record) => {
-      const classification = readString(record?.classification);
+    .filter((record): record is Record<string, unknown> => {
+      if (!record) return false;
+      const classification = readString(record.classification);
       if (classification) {
         return classification === "active";
       }
       return (
-        !readBoolean(record?.is_claimable) &&
-        !readBoolean(record?.isClaimable) &&
+        !readBoolean(record.is_claimable) &&
+        !readBoolean(record.isClaimable) &&
         !(
-          readString(record?.economic_classification) &&
+          readString(record.economic_classification) &&
           SAVED_RUN_NON_ACTIVE_CLASSIFICATIONS.has(
-            readString(record?.economic_classification) ?? "",
+            readString(record.economic_classification) ?? "",
           )
         )
       );
-    })
-    .map((record) => readString(record?.market_id))
-    .filter((marketId): marketId is string => Boolean(marketId));
-  return new Set(marketIds);
+    });
+}
+
+function buildSavedRunActivePositionMarketIdSet(
+  run: BullpenAutoLiveRun | null,
+): Set<string> {
+  return new Set(
+    buildSavedRunActivePositionRecords(run)
+      .map((record) => readString(record.market_id))
+      .filter((marketId): marketId is string => Boolean(marketId)),
+  );
+}
+
+function buildSavedRunActivePositionIdentityKeySet(
+  run: BullpenAutoLiveRun | null,
+): Set<string> {
+  return new Set(
+    buildSavedRunActivePositionRecords(run).flatMap((record) =>
+      buildIdentityKeys([
+        record.market_id,
+        record.marketId,
+        record.slug,
+        record.market_slug,
+        record.marketSlug,
+        record.event_slug,
+        record.eventSlug,
+        record.market_url,
+        record.marketUrl,
+        record.market_title,
+        record.marketTitle,
+        record.title,
+      ]),
+    ),
+  );
 }
 
 function buildLiveActivePositionMarketIdSet(
@@ -532,6 +594,26 @@ function buildLiveActivePositionMarketIdSet(
       .filter(isActiveBullpenPosition)
       .map((position) => readString(position.marketId))
       .filter((marketId): marketId is string => Boolean(marketId)),
+  );
+}
+
+function buildLiveActivePositionIdentityKeySet(
+  activePositions: BullpenActivePositionView[],
+): Set<string> {
+  return new Set(
+    activePositions
+      .filter(isActiveBullpenPosition)
+      .flatMap((position) =>
+        buildIdentityKeys([
+          position.key,
+          position.marketId,
+          position.marketSlug,
+          position.eventSlug,
+          position.slug,
+          position.marketUrl,
+          position.marketTitle,
+        ]),
+      ),
   );
 }
 
@@ -677,11 +759,19 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
     hasActivePositionsSnapshot = false,
   } = options;
   const savedRunActivePositionMarketIds = buildSavedRunActivePositionMarketIdSet(run);
+  const savedRunActivePositionIdentityKeys =
+    buildSavedRunActivePositionIdentityKeySet(run);
   const liveActivePositionMarketIds = buildLiveActivePositionMarketIdSet(activePositions);
-  const activePositionMarketIds =
-    liveActivePositionMarketIds.size > 0 || hasActivePositionsSnapshot
-      ? liveActivePositionMarketIds
-      : savedRunActivePositionMarketIds;
+  const liveActivePositionIdentityKeys =
+    buildLiveActivePositionIdentityKeySet(activePositions);
+  const useLiveActivePositionSnapshot =
+    liveActivePositionMarketIds.size > 0 || hasActivePositionsSnapshot;
+  const activePositionMarketIds = useLiveActivePositionSnapshot
+    ? liveActivePositionMarketIds
+    : savedRunActivePositionMarketIds;
+  const activePositionIdentityKeys = useLiveActivePositionSnapshot
+    ? liveActivePositionIdentityKeys
+    : savedRunActivePositionIdentityKeys;
   const submittedBuyMarketIds = buildSubmittedBuyMarketIdSet(run, decisions);
   const latestSubmittedBuyTimestampByMarketId =
     buildLatestSubmittedBuyTimestampLookup(run, decisions);
@@ -691,8 +781,11 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
   ]);
 
   const candidatePreviews = plan.request.console_profile.candidate_rows.map((candidate) => {
-    const alreadyActive = activePositionMarketIds.has(candidate.market_id);
-    const alreadyActiveFromLive = liveActivePositionMarketIds.has(candidate.market_id);
+    const identityKeys = candidateIdentityKeys(candidate);
+    const alreadyActive = sharesIdentityKey(identityKeys, activePositionIdentityKeys);
+    const alreadyActiveFromLive =
+      useLiveActivePositionSnapshot &&
+      sharesIdentityKey(identityKeys, liveActivePositionIdentityKeys);
     const alreadySubmitted = submittedBuyMarketIds.has(candidate.market_id);
     const investedAt =
       latestSubmittedBuyTimestampByMarketId.get(candidate.market_id) ?? null;
@@ -746,6 +839,7 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
               console_profile: {
                 ...plan.request.console_profile,
                 total_candidates: 0,
+                stage2_actionable_buy_market_ids: [],
                 candidate_rows: [],
               },
             }
@@ -766,6 +860,7 @@ export function buildBullpenStage3OnlyInvestExecutionPlan(
       console_profile: {
         ...plan.request.console_profile,
         total_candidates: readyCandidateCount,
+        stage2_actionable_buy_market_ids: readyRows.map((row) => row.market_id),
         candidate_rows: readyRows,
       },
     },
@@ -810,8 +905,8 @@ export function buildBullpenStage3InvestPreviewSteps(
       : plan.blockedReason ??
         (plan.readyCandidateCount > 0
           ? [
-              `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} in the transfer queue.`,
-              "Concrete buy plans are created only after post-exit sizing, when Step 1 settles and the worker refreshes live cash plus occupied slots.",
+              `${plan.readyCandidateCount} Stage 2-qualified ${readyLabel} now in the Stage 3 Planned list.`,
+              "Executable sizes are finalized after Step 1 settles and the worker refreshes live cash plus occupied slots.",
             ].join(" ")
           : "Stage 3 will invest the planned orders after Step 1 settles and live state refreshes.");
 
@@ -835,7 +930,7 @@ export function buildBullpenStage3InvestPreviewSteps(
       label: "Prepare investment queue",
       status: buyStatus,
       detail: buyDetail,
-      plannedOrders: 0,
+      plannedOrders: plan.readyCandidateCount,
       processedOrders: 0,
       submittedOrders: 0,
     },

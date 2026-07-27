@@ -538,9 +538,30 @@ class BullpenAutoLiveConsoleRunContext(BaseModel):
     total_candidates: int = Field(default=0, ge=0)
     candidate_rows_prefiltered: bool = False
     reuse_saved_llm_outputs: bool = True
+    stage2_actionable_exit_market_ids: list[str] = Field(default_factory=list)
+    stage2_actionable_buy_market_ids: list[str] = Field(default_factory=list)
     candidate_rows: list[BullpenAutoLiveConsoleCandidateInput] = Field(
         default_factory=list
     )
+
+    @field_validator(
+        "stage2_actionable_exit_market_ids",
+        "stage2_actionable_buy_market_ids",
+        mode="before",
+    )
+    @classmethod
+    def normalize_stage2_actionable_market_ids(cls, value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            market_id = str(item or "").strip()
+            if not market_id or market_id in seen:
+                continue
+            seen.add(market_id)
+            normalized.append(market_id)
+        return normalized[:50]
 
 
 class BullpenAutoLiveRunOnceRequest(BaseModel):

@@ -624,7 +624,7 @@ function buildStage3PreviewDialogState({
     return null;
   }
 
-  const request =
+  const baseRequest =
     plan.request ??
     (allowExitOnlyFallback
       ? {
@@ -638,10 +638,26 @@ function buildStage3PreviewDialogState({
             total_candidates: 0,
             candidate_rows_prefiltered: true,
             reuse_saved_llm_outputs: true,
+            stage2_actionable_exit_market_ids: [],
+            stage2_actionable_buy_market_ids: [],
             candidate_rows: [],
           },
         }
       : null);
+  const request = baseRequest
+    ? {
+        ...baseRequest,
+        console_profile: {
+          ...baseRequest.console_profile,
+          stage2_actionable_exit_market_ids: [
+            ...new Set(previewSellDecisions.map((decision) => decision.market_id)),
+          ],
+          stage2_actionable_buy_market_ids: [
+            ...new Set(previewBuyDecisions.map((decision) => decision.market_id)),
+          ],
+        },
+      }
+    : null;
 
   return {
     sourceRun,
@@ -12364,12 +12380,14 @@ export function BullpenAutoRunScheduleCard({
                       : step.key === "buy"
                         ? {
                             ...step,
-                            plannedOrders: 0,
+                            plannedOrders:
+                              stage3PreviewDialogState?.buyPlannedOrders ??
+                              step.plannedOrders,
                             detail:
                               stage3PreviewDialogState?.buyPlannedOrders
                                 ? [
-                                    `${stage3PreviewDialogState.buyPlannedOrders} Stage 2-qualified row${stage3PreviewDialogState.buyPlannedOrders === 1 ? " is" : "s are"} in the transfer queue.`,
-                                    "Concrete buy plans are created only after Step 1 settles and the worker refreshes live cash plus occupied slots.",
+                                    `${stage3PreviewDialogState.buyPlannedOrders} Stage 2-qualified row${stage3PreviewDialogState.buyPlannedOrders === 1 ? " is" : "s are"} now in the Stage 3 Planned list.`,
+                                    "Executable sizes are finalized after Step 1 settles and the worker refreshes live cash plus occupied slots.",
                                   ].join(" ")
                                 : step.detail,
                           }
