@@ -23,6 +23,52 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.head_ref }}
 
+      - name: Diagnose source anchors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx")
+          text = path.read_text()
+          import_anchor = '''import {
+            formatElapsedRunTime,
+            formatStageElapsedTime,
+          } from "./bullpenAutoRunTimers";'''
+          state_anchor = '''}) {
+            const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({'''
+          display_anchor = '''  const displayStat = (value: number) => (hideNumbers ? "—" : value);
+
+            return ('''
+          closing_anchor = '''      </div>
+            </div>
+          );
+          }'''
+
+          lines = [
+              f"import_anchor={text.count(import_anchor)}",
+              f"stage_function={text.count('function StageTwoRunStats({')}",
+              f"state_anchor={text.count(state_anchor)}",
+              f"display_anchor={text.count(display_anchor)}",
+              f"closing_anchor_global={text.count(closing_anchor)}",
+          ]
+          if "function StageTwoRunStats({" in text:
+              stage_start = text.index("function StageTwoRunStats({")
+              stage_end = text.index("\nfunction readStageOutputString", stage_start)
+              stage = text[stage_start:stage_end]
+              lines.extend(
+                  [
+                      f"stage_length={len(stage)}",
+                      f"stage_state_anchor={stage.count(state_anchor)}",
+                      f"stage_display_anchor={stage.count(display_anchor)}",
+                      f"stage_closing_anchor={stage.count(closing_anchor)}",
+                      "stage_tail_repr=" + repr(stage[-240:]),
+                  ]
+              )
+          Path("bullpen-actionables-patch-diagnostics.txt").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+
       - name: Patch Stage 2 monitor
         shell: bash
         run: |
@@ -127,6 +173,15 @@ jobs:
           path.write_text(text)
           print("Patched BullpenAutoRunScheduleCard.tsx successfully")
           PY
+
+      - name: Upload patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bullpen-actionables-patch-diagnostics
+          path: bullpen-actionables-patch-diagnostics.txt
+          if-no-files-found: error
+          retention-days: 2
 
       - uses: actions/setup-node@v7
         with:
