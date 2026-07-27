@@ -256,6 +256,9 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunCardSource, /Background execution monitor/);
   assert.match(autoRunCardSource, /Worker stages/);
   assert.doesNotMatch(autoRunCardSource, /refreshes every 4 seconds/);
+  assert.match(autoRunCardSource, /timeoutMs: 5_000/);
+  assert.match(autoRunCardSource, /bullpen_auto_run_dashboard_poll_degraded/);
+  assert.match(autoRunCardSource, /nextPendingRunId: resolvedPendingRunId/);
   assert.match(autoRunCardSource, /Pause/);
   assert.match(autoRunCardSource, /Kill/);
   assert.match(autoRunCardSource, /Open .* output/);
