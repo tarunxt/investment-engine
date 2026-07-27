@@ -1221,10 +1221,14 @@ function getStageActivePositionCounts(stage: WorkflowStageView) {
   const claimableFromSnapshot = stage.activePositionsFound.filter(
     (position) => position.isClaimable,
   ).length;
+  const openFromOutputs =
+    readStageOutputNumber(stage.outputs.active_position_rows_before_llm) ??
+    readStageOutputNumber(stage.outputs.active_position_rows) ??
+    readStageOutputNumber(stage.outputs.active_positions_total);
   const openFromSnapshot = stage.activePositionsFound.length;
 
   return {
-    open: openFromSnapshot,
+    open: openFromOutputs ?? openFromSnapshot,
     claimable: claimableFromOutputs ?? claimableFromSnapshot,
   };
 }
@@ -1251,15 +1255,20 @@ function getStageTwoStats(
 ) {
   const { open: activePositions, claimable: claimablePositions } =
     getStageActivePositionCounts(stage);
-  const newOpportunities =
+  const explicitNewOpportunities =
     readStageOutputNumber(stage.outputs.stage1_accepted_candidate_count) ??
     readStageOutputNumber(stage.outputs.candidate_rows_before_llm) ??
     readStageOutputNumber(stage.inputs.candidate_rows_before_llm) ??
-    stage.scanCandidates.length;
+    (stage.scanCandidates.length > 0 ? stage.scanCandidates.length : null);
   const llmRanOn =
     readStageOutputNumber(stage.outputs.llm_candidate_count) ??
     readStageOutputNumber(stage.outputs.total_items) ??
-    activePositions + newOpportunities;
+    activePositions + (explicitNewOpportunities ?? 0);
+  // A compact or legacy run can retain the authoritative LLM total while its
+  // Stage 1 row arrays/count aliases are absent. Keep the displayed equation
+  // internally consistent instead of reporting “44 unique rows (0 + 0)”.
+  const newOpportunities =
+    explicitNewOpportunities ?? Math.max(0, llmRanOn - activePositions);
 
   const llmsCompleted = getStageTwoCompletedLlmCount(stage);
   const llmOutcomeCounts = getStageTwoLlmOutcomeCounts(stage, llmsCompleted);
@@ -9186,6 +9195,16 @@ export function BullpenAutoRunScheduleCard({
   const summaryLoadInFlightRef = useRef(false);
   const summaryLastLoadedAtRef = useRef(0);
   const summaryAbortControllerRef = useRef<AbortController | null>(null);
+  const terminalRunEvidenceRef = useRef(
+    new Map<
+      string,
+      { run: BullpenAutoLiveRun; decisions: BullpenAutoLiveDecision[] }
+    >(),
+  );
+  const terminalRunHydrationInFlightRef = useRef(
+    new Map<string, Promise<void>>(),
+  );
+  const terminalRunHydrationRetryAtRef = useRef(new Map<string, number>());
   const portfolioLoadInFlightRef = useRef(false);
   const portfolioAbortControllerRef = useRef<AbortController | null>(null);
   const onRefreshPortfolioPositionsRef = useRef(onRefreshPortfolioPositions);
@@ -9890,6 +9909,150 @@ export function BullpenAutoRunScheduleCard({
     setLlmExecutionFieldError(null);
   }
 
+  function mergeTerminalRunEvidence(
+    nextSummary: BullpenAutoLiveSummaryResponse,
+    trackedRun: BullpenAutoLiveRun | null,
+  ): {
+    summary: BullpenAutoLiveSummaryResponse;
+    run: BullpenAutoLiveRun | null;
+  } {
+    if (!trackedRun) return { summary: nextSummary, run: null };
+    const cachedEvidence = terminalRunEvidenceRef.current.get(trackedRun.id);
+    if (!cachedEvidence) return { summary: nextSummary, run: trackedRun };
+
+    const mergedRun = mergeBullpenConsoleRunProjection({
+      existing: cachedEvidence.run,
+      projected: trackedRun,
+      projectionAvailable: true,
+    });
+    const projectedDecisions = nextSummary.recent_decisions.filter(
+      (decision) => decision.run_id === trackedRun.id,
+    );
+    const mergedDecisions = mergeBullpenConsoleDecisionProjection({
+      existing: cachedEvidence.decisions,
+      projected: projectedDecisions,
+      truncated: true,
+    });
+    terminalRunEvidenceRef.current.set(trackedRun.id, {
+      run: mergedRun,
+      decisions: mergedDecisions,
+    });
+
+    const recentRuns = nextSummary.recent_runs.some(
+      (recentRun) => recentRun.id === trackedRun.id,
+    )
+      ? nextSummary.recent_runs.map((recentRun) =>
+          recentRun.id === trackedRun.id ? mergedRun : recentRun,
+        )
+      : [mergedRun, ...nextSummary.recent_runs];
+    const otherDecisions = nextSummary.recent_decisions.filter(
+      (decision) => decision.run_id !== trackedRun.id,
+    );
+
+    return {
+      summary: {
+        ...nextSummary,
+        latest_run:
+          nextSummary.latest_run?.id === trackedRun.id
+            ? mergedRun
+            : nextSummary.latest_run,
+        recent_runs: recentRuns,
+        recent_decisions: [...mergedDecisions, ...otherDecisions],
+      },
+      run: mergedRun,
+    };
+  }
+
+  async function hydrateTerminalRunEvidence({
+    summary: nextSummary,
+    run,
+    pendingRunId: resolvedPendingRunId,
+    signal,
+  }: {
+    summary: BullpenAutoLiveSummaryResponse;
+    run: BullpenAutoLiveRun | null;
+    pendingRunId: string | null;
+    signal?: AbortSignal;
+  }) {
+    if (!run) return;
+    if (!isBullpenAutoRunWorkflowSettled(buildBullpenAutoRunWorkflowView(run))) {
+      return;
+    }
+    if (terminalRunEvidenceRef.current.has(run.id)) return;
+    const retryAt = terminalRunHydrationRetryAtRef.current.get(run.id) ?? 0;
+    if (retryAt > Date.now()) return;
+
+    const existingTask = terminalRunHydrationInFlightRef.current.get(run.id);
+    if (existingTask) return existingTask;
+
+    const task = (async () => {
+      try {
+        const [fullRun, fullDecisions] = await Promise.all([
+          apiService.getBullpenAutoLiveRun(run.id, {
+            signal,
+            timeoutMs: 15_000,
+          }),
+          apiService.getBullpenAutoLiveRunDecisions(run.id, {
+            signal,
+            timeoutMs: 15_000,
+          }),
+        ]);
+        if (signal?.aborted) return;
+
+        const mergedRun = mergeBullpenConsoleRunProjection({
+          existing: fullRun,
+          projected: run,
+          projectionAvailable: true,
+        });
+        const projectedDecisions = nextSummary.recent_decisions.filter(
+          (decision) => decision.run_id === run.id,
+        );
+        const mergedDecisions = mergeBullpenConsoleDecisionProjection({
+          existing: fullDecisions,
+          projected: projectedDecisions,
+          truncated: true,
+        });
+        terminalRunEvidenceRef.current.set(run.id, {
+          run: mergedRun,
+          decisions: mergedDecisions,
+        });
+        terminalRunHydrationRetryAtRef.current.delete(run.id);
+        while (terminalRunEvidenceRef.current.size > 5) {
+          const oldestRunId = terminalRunEvidenceRef.current.keys().next().value;
+          if (typeof oldestRunId !== "string") break;
+          terminalRunEvidenceRef.current.delete(oldestRunId);
+        }
+
+        const hydrated = mergeTerminalRunEvidence(nextSummary, mergedRun);
+        if (signal?.aborted) return;
+        setSummary(hydrated.summary);
+        onSummaryUpdated?.({
+          summary: hydrated.summary,
+          run: hydrated.run,
+          pendingRunId: resolvedPendingRunId,
+        });
+      } catch (nextError) {
+        if (signal?.aborted || isRequestAbort(nextError)) return;
+        terminalRunHydrationRetryAtRef.current.set(
+          run.id,
+          Date.now() + 15_000,
+        );
+        console.warn(
+          JSON.stringify({
+            event: "bullpen_auto_run_terminal_evidence_hydration_failed",
+            run_id: run.id,
+            error: formatUnknownError(nextError),
+          }),
+        );
+      } finally {
+        terminalRunHydrationInFlightRef.current.delete(run.id);
+      }
+    })();
+
+    terminalRunHydrationInFlightRef.current.set(run.id, task);
+    return task;
+  }
+
   async function loadSummary(options?: {
     preserveLoading?: boolean;
     nextPendingRunId?: string | null;
@@ -9918,21 +10081,34 @@ export function BullpenAutoRunScheduleCard({
         timeoutMs: 5_000,
       });
       if (requestSignal?.aborted) return null;
-      setSummary(nextSummary);
+      const projectedTrackedRun = getVisibleRun(
+        nextSummary,
+        resolvedPendingRunId,
+      );
+      const visiblePayload = mergeTerminalRunEvidence(
+        nextSummary,
+        projectedTrackedRun,
+      );
+      setSummary(visiblePayload.summary);
       summaryLastLoadedAtRef.current = Date.now();
       markBullpenAutoRunPerformance("bullpen-workflow-ready");
       setError(null);
-      const nextTrackedRun = getVisibleRun(nextSummary, resolvedPendingRunId);
       onSummaryUpdated?.({
-        summary: nextSummary,
-        run: nextTrackedRun,
+        summary: visiblePayload.summary,
+        run: visiblePayload.run,
         pendingRunId: resolvedPendingRunId,
+      });
+      void hydrateTerminalRunEvidence({
+        summary: visiblePayload.summary,
+        run: visiblePayload.run,
+        pendingRunId: resolvedPendingRunId,
+        signal: requestSignal,
       });
       if (!loadingCleared) {
         setLoading(false);
         loadingCleared = true;
       }
-      return nextSummary;
+      return visiblePayload.summary;
     } catch (nextError) {
       if (requestSignal?.aborted || isRequestAbort(nextError)) {
         return null;

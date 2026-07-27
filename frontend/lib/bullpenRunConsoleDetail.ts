@@ -42,6 +42,7 @@ const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
   "candidate_rows_before_llm",
   "stage1_accepted_candidate_count",
   "active_position_rows",
+  "active_position_rows_before_llm",
   "wallet_snapshot_status",
   "wallet_source",
   "wallet_snapshot_fetched_at",
@@ -114,6 +115,7 @@ const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
 // evidence with a ten-row projection or erase it merely because it was
 // omitted from a recovered generation.
 const FROZEN_EVIDENCE_OUTPUT_KEYS = [
+  "accepted_candidates",
   "active_positions_found",
   "available_for_claim",
   "settlement_pending_positions",

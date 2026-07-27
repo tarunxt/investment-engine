@@ -13,7 +13,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
 
-CONSOLE_PROJECTION_VERSION = 1
+CONSOLE_PROJECTION_VERSION = 2
 CONSOLE_HISTORY_DEFAULT_SIZE = 20
 CONSOLE_HISTORY_MAX_SIZE = 50
 
@@ -21,6 +21,10 @@ _MAX_STRING_LENGTH = 500
 _DEFAULT_LIST_LIMIT = 10
 _MAX_DICT_ITEMS = 50
 _LIST_LIMITS = {
+    # Candidate identity rows are required to repopulate the Auto Scan table.
+    # Keep the list bounded, while allowing the normal 30-day/EOM scan universe
+    # to survive the lightweight dashboard projection without an extra read.
+    "accepted_candidates": 100,
     "active_positions_found": 10,
     "available_for_claim": 10,
     "settlement_pending_positions": 10,
@@ -82,9 +86,11 @@ _STAGE_OUTPUT_KEYS = {
     "completed_items",
     "failed_items",
     "accepted_candidates_count",
+    "accepted_candidates",
     "candidate_rows_before_llm",
     "stage1_accepted_candidate_count",
     "active_position_rows",
+    "active_position_rows_before_llm",
     "active_positions_found",
     "active_positions_total",
     "active_positions_truncated",
@@ -123,6 +129,7 @@ _STAGE_OUTPUT_KEYS = {
     "console_trade_max_positions",
     "llm_candidate_count",
     "llm_reviewed_candidates",
+    "llm_started_provider_target_count",
     "llm_provider_target_count",
     "llm_selected_target_count",
     "llm_target_count",

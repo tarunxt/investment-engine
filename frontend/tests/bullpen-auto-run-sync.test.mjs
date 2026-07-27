@@ -849,3 +849,36 @@ test("Bullpen auto-run sync reconciliation is idempotent", async () => {
 
   assert.deepEqual(second, first);
 });
+
+test("Bullpen auto-run sync rebuilds Auto Scan from Stage 2 when compact Stage 1 rows are absent", async () => {
+  const { syncBullpenAutoRunSummarySnapshots } =
+    await loadBullpenAutoRunSyncModule();
+
+  const run = createRun({
+    acceptedCandidates: [],
+    reviewedCandidates: [
+      createReviewedCandidate({
+        source_kind: "candidate",
+        question_id: "question-1",
+        slug: "market-1",
+        current_yes_odds: 46,
+        current_no_odds: 54,
+      }),
+    ],
+  });
+  run.stage_results[0].outputs.scanned_candidates = 44;
+
+  const nextSnapshots = syncBullpenAutoRunSummarySnapshots({
+    snapshotsByMode: createEmptySnapshots(),
+    summary: { recent_decisions: [] },
+    run,
+  });
+
+  assert.equal(nextSnapshots["30-days"].current?.totalCandidates, 44);
+  assert.equal(nextSnapshots["30-days"].current?.questions.length, 1);
+  assert.equal(
+    nextSnapshots["30-days"].current?.questions[0]?.llmNoOdds,
+    88,
+  );
+});
+

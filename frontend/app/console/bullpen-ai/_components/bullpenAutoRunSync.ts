@@ -1056,7 +1056,26 @@ export function syncBullpenAutoRunSummarySnapshots({
   if (!mode) return snapshotsByMode;
 
   const acceptedCandidates = readAcceptedCandidates(stage1);
-  if (acceptedCandidates.length === 0) return snapshotsByMode;
+  const stage2 = findWorkflowStage(run, "llm", 2);
+  const reviewedCandidateFallback = readReviewedCandidates(stage2).filter(
+    (candidate) => {
+      if (!isRecord(candidate)) return false;
+      const sourceKind = readString(candidate.source_kind);
+      return (
+        sourceKind === "candidate" ||
+        (sourceKind !== "active_position" && !readString(candidate.position_key))
+      );
+    },
+  );
+  // Older or aggressively compacted projections may omit Stage 1's candidate
+  // rows while retaining Stage 2's reviewed candidate identities. Never leave
+  // Auto Scan pinned to an old snapshot when the completed run still contains
+  // enough durable evidence to rebuild the table.
+  const snapshotCandidates =
+    acceptedCandidates.length > 0
+      ? acceptedCandidates
+      : reviewedCandidateFallback;
+  if (snapshotCandidates.length === 0) return snapshotsByMode;
 
   const currentHistory = snapshotsByMode[mode];
   const currentSnapshot = currentHistory.current;
@@ -1075,7 +1094,7 @@ export function syncBullpenAutoRunSummarySnapshots({
   const scannedAt =
     stage1?.completed_at ?? readString(stage1Outputs.scanned_at) ?? run.completed_at ?? run.started_at;
   const totalCandidates =
-    readNumber(stage1Outputs.scanned_candidates) ?? acceptedCandidates.length;
+    readNumber(stage1Outputs.scanned_candidates) ?? snapshotCandidates.length;
   const existingQuestionById = new Map(
     (currentSnapshot?.questions ?? []).map((question) => [question.id, question] as const),
   );
@@ -1090,7 +1109,7 @@ export function syncBullpenAutoRunSummarySnapshots({
       ...createBullpenScanFilters(mode),
     },
     totalCandidates,
-    questions: acceptedCandidates.map((candidate) => {
+    questions: snapshotCandidates.map((candidate) => {
       const record = isRecord(candidate) ? candidate : {};
       const questionId =
         readString(record.question_id) ??
