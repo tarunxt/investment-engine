@@ -1,9 +1,13 @@
 name: Apply Stage 2 active-position ticks
 
 on:
-  push:
+  pull_request:
     branches:
-      - codex/active-position-ticks-stage2
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
