@@ -1,0 +1,56 @@
+name: Apply Bullpen projection test count
+
+on:
+  push:
+    branches:
+      - codex/fix-bullpen-auto-run-data-projection
+    paths:
+      - .github/scripts/fix_bullpen_projection_test_count.py
+      - .github/workflows/apply-bullpen-projection-test-count.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message != 'Align Bullpen projection history count'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: codex/fix-bullpen-auto-run-data-projection
+
+      - name: Apply test correction
+        run: python .github/scripts/fix_bullpen_projection_test_count.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+
+      - name: Run Bullpen projection and router contracts
+        env:
+          PYTHONPATH: backend
+        run: |
+          pytest -q \
+            backend/tests/test_polymarket_auto_live_console_projection.py \
+            backend/tests/test_polymarket_auto_live_router.py
+
+      - name: Commit correction
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/tests/test_polymarket_auto_live_console_projection.py
+          git commit -m 'Align Bullpen projection history count'
+          git push origin HEAD:codex/fix-bullpen-auto-run-data-projection
