@@ -43,13 +43,25 @@ jobs:
 
           path = Path('frontend/tests/bullpen-ai-compatibility.test.mjs')
           text = path.read_text(encoding='utf-8')
-          old = r'''const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 4_000,\s*\}\);'''
-          new = r'''const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 5_000,\s*\}\);'''
-          if text.count(old) != 1:
-              raise RuntimeError(
-                  f'dashboard timeout assertion: expected one match, found {text.count(old)}'
-              )
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          replacements = [
+              (
+                  r'''const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 4_000,\s*\}\);''',
+                  r'''const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 5_000,\s*\}\);''',
+                  'dashboard timeout assertion',
+              ),
+              (
+                  r'''assert.match(autoRunCardSource, /setSummary\(nextSummary\);/);''',
+                  r'''assert.match(autoRunCardSource, /setSummary\(visiblePayload\.summary\);/);''',
+                  'terminal evidence summary assertion',
+              ),
+          ]
+          for old, new, label in replacements:
+              if text.count(old) != 1:
+                  raise RuntimeError(
+                      f'{label}: expected one match, found {text.count(old)}'
+                  )
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
           PY
 
       - name: Record generated-source diagnostics
