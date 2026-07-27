@@ -4,6 +4,7 @@ import { useCallback } from "react";
 
 import { RebalanceWorkflowSections } from "@/app/console/dashboard/_components/RebalanceWorkflowSections";
 import { apiService } from "@/services/api";
+import { AutomatedRebalanceReliabilityBridge } from "./AutomatedRebalanceReliabilityBridge";
 
 export function AutomatedRebalanceClient() {
   const refreshSummary = useCallback(async () => {
@@ -13,5 +14,9 @@ export function AutomatedRebalanceClient() {
     await apiService.getDashboardSummary();
   }, []);
 
-  return <RebalanceWorkflowSections onDashboardRefresh={refreshSummary} />;
+  return (
+    <AutomatedRebalanceReliabilityBridge>
+      <RebalanceWorkflowSections onDashboardRefresh={refreshSummary} />
+    </AutomatedRebalanceReliabilityBridge>
+  );
 }
