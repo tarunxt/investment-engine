@@ -85,6 +85,12 @@ function parseTimestamp(value: string | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as object) }
+    : null;
+}
+
 async function mapWithConcurrency<TInput, TOutput>(
   items: TInput[],
   concurrency: number,
@@ -251,15 +257,6 @@ function toFallbackJob(job: RunListItem["run_jobs"][number]["job"]): JobResponse
     tokens_in: job.tokens_in ?? null,
     tokens_out: job.tokens_out ?? null,
     estimated_cost: job.estimated_cost ?? null,
-    request_context_json: job.request_context_json ?? null,
-    export_status: job.export_status ?? null,
-    export_error: job.export_error ?? null,
-    exported_at: job.exported_at ?? null,
-    exported_sheet_url: job.exported_sheet_url ?? null,
-    auto_rebalance_portfolio: job.auto_rebalance_portfolio ?? null,
-    auto_rebalance_sequence: job.auto_rebalance_sequence ?? null,
-    auto_rebalance_label: job.auto_rebalance_label ?? null,
-    scheduled_at: job.scheduled_at ?? null,
     created_at: job.created_at,
     updated_at: job.updated_at,
   };
@@ -328,8 +325,6 @@ async function buildBoundedFullRunPage(options?: ApiRequestControl) {
       try {
         return await getCachedRunDetail(item.id, options);
       } catch (error) {
-        // A single oversized or temporarily unavailable historic run must not
-        // block provider selection, later-stage inputs, or the current workflow.
         console.warn(
           `Using compact fallback for run #${item.id}: ${normalizeError(error)}`,
         );
@@ -349,18 +344,13 @@ async function buildBoundedFullRunPage(options?: ApiRequestControl) {
 }
 
 /**
- * The legacy helper asks for every full run page (historically with limit=200),
- * then downloads every prompt and model response. That request grows forever,
- * exceeds the backend limit, and lets one slow old run fail the current stage.
- * On the dedicated automated-rebalance route, replace it with a bounded recent
- * summary selection and hydrate only the runs needed by current stage inputs,
- * cost history, output dialogs, and order previews. Failed historic details are
- * represented by compact summaries rather than rejecting the entire operation.
+ * Replace the legacy all-history full-run fan-out with a bounded recent window.
+ * This keeps historical cost/input helpers compatible while respecting the
+ * backend limit and preventing one slow old run from blocking the live workflow.
  */
 function installSafeFullRunAdapter() {
   if (safeFullRunAdapterInstalled) return;
   safeFullRunAdapterInstalled = true;
-
   apiService.getFullRuns = async (_params, options) =>
     buildBoundedFullRunPage(options);
 }
@@ -409,7 +399,6 @@ function inferMetricContext(
   while (element && element !== root.parentElement) {
     const text = compactText(element.textContent);
     stage ||= inferStageFromText(text);
-
     const hasZerodha = text.includes("Run Zerodha Auto-Rebalance");
     const hasIndMoney = text.includes("Run Indmoney Auto-Rebalance");
     if (hasZerodha !== hasIndMoney) {
@@ -497,7 +486,7 @@ function toStageJob(job: JobResponse): AutoRebalanceJobDetailResponse {
     web_search_used: job.web_search_used ?? null,
     web_search_queries: job.web_search_queries ?? null,
     web_sources: job.web_sources ?? null,
-    runtime_metadata_json: job.runtime_metadata_json ?? null,
+    runtime_metadata_json: asRecord(job.runtime_metadata_json),
     created_at: job.created_at,
     updated_at: job.updated_at,
   };
@@ -540,6 +529,15 @@ function collectStageJobsFromRuns(
         .filter(Boolean)
         .map(toStageJob)
     : [];
+}
+
+function stageLabel(stage: LlmStage) {
+  return {
+    threats: "Threats Scan",
+    swing: "Swing Scan",
+    rebalance: "Rebalance",
+    technical: "Technical Scan",
+  }[stage];
 }
 
 async function loadThreatFallback(
@@ -610,7 +608,7 @@ async function loadSavedStageJobs(
     const history = await retryRead(() =>
       apiService.getAutoRebalanceHistory(context.portfolio, { limit: 25 }),
     );
-    const withExactCount = history.items.find((item) =>
+    const exact = history.items.find((item) =>
       item.stages.some(
         (stage) =>
           stage.stage === context.stage &&
@@ -619,7 +617,7 @@ async function loadSavedStageJobs(
       ),
     );
     const selected =
-      withExactCount ||
+      exact ||
       history.items.find((item) =>
         item.stages.some((stage) => stage.stage === context.stage),
       );
@@ -711,15 +709,6 @@ function formatCost(value?: number | null) {
     minimumFractionDigits: value < 0.01 ? 4 : 2,
     maximumFractionDigits: 4,
   }).format(value);
-}
-
-function stageLabel(stage: LlmStage) {
-  return {
-    threats: "Threats Scan",
-    swing: "Swing Scan",
-    rebalance: "Rebalance",
-    technical: "Technical Scan",
-  }[stage];
 }
 
 function statusTone(status: string) {
