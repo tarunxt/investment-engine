@@ -1,4 +1,4 @@
-name: Diagnose Stage 2 actionables handoff patch
+name: Apply Stage 2 actionables handoff
 
 on:
   push:
@@ -9,10 +9,14 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: apply-stage2-actionables-handoff
+  cancel-in-progress: false
 
 jobs:
-  diagnose:
+  apply-and-test:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -21,33 +25,42 @@ jobs:
           ref: codex/fix-stage2-actionables-stage3-handoff
           fetch-depth: 0
 
-      - name: Capture patch diagnostics
+      - name: Expand and verify implementation patch
         run: |
-          set +e
-          {
-            echo '== branch =='
-            git status --short --branch
-            echo '== patch stat =='
-            git apply --stat .github/patches/stage2-actionables-stage3-handoff.patch
-            echo '== patch summary =='
-            git apply --summary .github/patches/stage2-actionables-stage3-handoff.patch
-            echo '== verbose check =='
-            git apply --check --verbose .github/patches/stage2-actionables-stage3-handoff.patch
-            echo "apply_status=$?"
-            echo '== relevant file hashes =='
-            git hash-object \
-              backend/app/domains/polymarket_auto_live/engine.py \
-              backend/app/domains/polymarket_auto_live/schemas.py \
-              frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx \
-              frontend/app/console/bullpen-ai/_components/bullpenAutoRunStage3Invest.ts \
-              frontend/tests/bullpen-auto-run-stage3-invest.test.mjs \
-              frontend/types/api.ts
-          } > stage3-patch-diagnostics.txt 2>&1
-          cat stage3-patch-diagnostics.txt
+          gzip -dc .github/patches/stage2-actionables-stage3-handoff.patch.gz \
+            > /tmp/stage2-actionables-stage3-handoff.patch
+          echo "f42ca5a3db36485ba852fd6d6b71f07186c5ece80da8c7bff65e837abc9e4ca2  /tmp/stage2-actionables-stage3-handoff.patch" \
+            | sha256sum --check
+          git apply --check /tmp/stage2-actionables-stage3-handoff.patch
+          git apply /tmp/stage2-actionables-stage3-handoff.patch
+          git diff --check
 
-      - name: Upload diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: stage3-patch-diagnostics
-          path: stage3-patch-diagnostics.txt
-          if-no-files-found: error
+      - name: Validate backend syntax
+        run: |
+          python -m py_compile \
+            backend/app/domains/polymarket_auto_live/engine.py \
+            backend/app/domains/polymarket_auto_live/schemas.py \
+            backend/tests/test_stage2_actionable_handoff.py
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run focused frontend tests
+        working-directory: frontend
+        run: |
+          node --test \
+            tests/bullpen-auto-run-stage3-invest.test.mjs \
+            tests/bullpen-stage2-actionables.test.mjs
+
+      - name: Commit implementation
+        run: |
+          git rm \
+            .github/workflows/inspect-stage3-actionables.yml \
+            .github/patches/stage2-actionables-stage3-handoff.patch \
+            .github/patches/stage2-actionables-stage3-handoff.patch.gz
+          git config user.name "OpenAI Codex"
+          git config user.email "codex@openai.com"
+          git add backend frontend
+          git commit -m "fix: preserve Stage 2 actionables in Stage 3"
+          git push origin HEAD:codex/fix-stage2-actionables-stage3-handoff
