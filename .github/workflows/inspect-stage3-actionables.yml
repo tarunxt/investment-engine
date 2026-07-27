@@ -1,0 +1,54 @@
+name: Diagnose compressed Stage 2 handoff patch
+
+on:
+  push:
+    branches:
+      - codex/fix-stage2-actionables-stage3-handoff
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/fix-stage2-actionables-stage3-handoff
+          fetch-depth: 0
+
+      - name: Capture compressed patch diagnostics
+        run: |
+          set +e
+          {
+            echo '== branch =='
+            git status --short --branch
+            echo '== compressed file =='
+            ls -l .github/patches/stage2-actionables-stage3-handoff.patch.gz
+            sha256sum .github/patches/stage2-actionables-stage3-handoff.patch.gz
+            git hash-object .github/patches/stage2-actionables-stage3-handoff.patch.gz
+            gzip -t .github/patches/stage2-actionables-stage3-handoff.patch.gz
+            echo "gzip_status=$?"
+            gzip -dc .github/patches/stage2-actionables-stage3-handoff.patch.gz > /tmp/stage2-handoff.patch
+            echo "expand_status=$?"
+            wc -c /tmp/stage2-handoff.patch
+            sha256sum /tmp/stage2-handoff.patch
+            git hash-object /tmp/stage2-handoff.patch
+            echo '== patch check =='
+            git apply --check --verbose /tmp/stage2-handoff.patch
+            echo "apply_status=$?"
+            echo '== patch around line 173 =='
+            nl -ba /tmp/stage2-handoff.patch | sed -n '165,180p'
+          } > compressed-patch-diagnostics.txt 2>&1
+          cat compressed-patch-diagnostics.txt
+
+      - name: Upload diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: compressed-stage3-patch-diagnostics
+          path: compressed-patch-diagnostics.txt
+          if-no-files-found: error
