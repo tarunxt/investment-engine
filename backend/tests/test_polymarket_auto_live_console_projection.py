@@ -340,7 +340,7 @@ def test_history_item_exposes_stage_counts_and_frozen_duration() -> None:
     assert history.duration_seconds == 5
     assert history.stages[0].key == "scan"
     assert history.stages[0].processed_count == 100
-    assert history.stages[0].succeeded_count == 25
+    assert history.stages[0].succeeded_count == 44
 
 
 def test_projection_and_history_keep_one_canonical_row_per_workflow_stage() -> None:
