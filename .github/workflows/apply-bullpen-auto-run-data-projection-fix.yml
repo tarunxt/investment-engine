@@ -78,7 +78,10 @@ jobs:
             grep -n -B 12 -A 30 -E '^(not ok|.*AssertionError|.*error TS[0-9]+)' bullpen-auto-run-frontend.log | head -n 240 || true
             echo '```'
           } > /tmp/bullpen-auto-run-comment.md
-          gh pr comment 687 --body-file /tmp/bullpen-auto-run-comment.md
+          gh api \
+            --method PATCH \
+            repos/${GITHUB_REPOSITORY}/issues/comments/5090904168 \
+            -F body=@/tmp/bullpen-auto-run-comment.md
           exit 1
 
       - name: Remove one-shot helper files
