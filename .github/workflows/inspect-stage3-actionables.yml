@@ -16,9 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Print relevant engine and frontend contexts
+      - name: Capture relevant engine and frontend contexts
         run: |
-          python - <<'PY'
+          python - <<'PY' > stage3-actionables-context.txt
           from pathlib import Path
 
           targets = {
@@ -61,3 +61,10 @@ jobs:
                       for line_no in range(start, end):
                           print(f"{line_no + 1:05d}: {lines[line_no]}")
           PY
+          cat stage3-actionables-context.txt
+      - name: Upload inspection context
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage3-actionables-context
+          path: stage3-actionables-context.txt
+          if-no-files-found: error
