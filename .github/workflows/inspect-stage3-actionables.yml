@@ -26,15 +26,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply implementation patch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PATCH_BLOB_SHA: bbe0c184c56a526355dadc6d2c9441e9fe2efcf0
         run: |
-          gh api "repos/${GITHUB_REPOSITORY}/git/blobs/${PATCH_BLOB_SHA}" --jq .content \
-            | tr -d '\n' \
-            | base64 -d > /tmp/stage2-actionables-handoff.patch
-          git apply --check /tmp/stage2-actionables-handoff.patch
-          git apply /tmp/stage2-actionables-handoff.patch
+          git apply --check .github/patches/stage2-actionables-stage3-handoff.patch
+          git apply .github/patches/stage2-actionables-stage3-handoff.patch
           git diff --check
 
       - name: Validate backend syntax
@@ -57,7 +51,9 @@ jobs:
 
       - name: Commit implementation
         run: |
-          git rm .github/workflows/inspect-stage3-actionables.yml
+          git rm \
+            .github/workflows/inspect-stage3-actionables.yml \
+            .github/patches/stage2-actionables-stage3-handoff.patch
           git config user.name "OpenAI Codex"
           git config user.email "codex@openai.com"
           git add backend frontend
