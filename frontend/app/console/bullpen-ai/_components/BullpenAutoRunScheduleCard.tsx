@@ -161,6 +161,8 @@ import {
   formatElapsedRunTime,
   formatStageElapsedTime,
 } from "./bullpenAutoRunTimers";
+import { BullpenStage2ActionablesDialog } from "./BullpenStage2ActionablesDialog";
+import { buildBullpenStage2Actionables } from "./bullpenStage2Actionables";
 import {
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
   DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MIN_LLM_SIDE_ODDS,
@@ -1930,6 +1932,8 @@ function StageTwoRunStats({
     mode: ScanCandidateDialogMode,
   ) => void;
 }) {
+  const [isActionablesDialogOpen, setIsActionablesDialogOpen] =
+    useState(false);
   const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({
     run,
     decisions,
@@ -1947,6 +1951,11 @@ function StageTwoRunStats({
     positionStats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
+  const actionables = buildBullpenStage2Actionables({
+    activePositions: positionDialogStage.activePositionsFound,
+    decisions,
+    selectedRows: stage2InvestEventsState?.rows ?? [],
+  });
 
   return (
     <div className="space-y-0.5 pt-2">
@@ -2141,6 +2150,31 @@ function StageTwoRunStats({
           </>
         )}
       </div>
+      <div>
+        <button
+          type="button"
+          onClick={() => setIsActionablesDialogOpen(true)}
+          className="text-left font-medium text-slate-950 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+          aria-label={`Open actionables with ${actionables.eventExits.length} exits and ${actionables.buyNew.length} buys`}
+          aria-haspopup="dialog"
+          aria-expanded={isActionablesDialogOpen}
+        >
+          Actionables: Exit=
+          <span className="font-semibold tabular-nums">
+            {displayStat(actionables.eventExits.length)}
+          </span>
+          {" | Buy="}
+          <span className="font-semibold tabular-nums">
+            {displayStat(actionables.buyNew.length)}
+          </span>
+        </button>
+      </div>
+      {isActionablesDialogOpen ? (
+        <BullpenStage2ActionablesDialog
+          actionables={actionables}
+          onClose={() => setIsActionablesDialogOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
