@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   backend-projection:
@@ -32,9 +34,28 @@ jobs:
           python -m pip install --disable-pip-version-check pytest
 
       - name: Run Bullpen projection and dashboard route contracts
+        id: tests
+        continue-on-error: true
         env:
           PYTHONPATH: backend
         run: |
+          set -o pipefail
           pytest -q \
             backend/tests/test_polymarket_auto_live_console_projection.py \
-            backend/tests/test_polymarket_auto_live_router.py
+            backend/tests/test_polymarket_auto_live_router.py \
+            2>&1 | tee bullpen-backend-verification.log
+
+      - name: Report verification failure
+        if: steps.tests.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'Bullpen projection backend verification failed:'
+            echo
+            echo '```text'
+            tail -n 220 bullpen-backend-verification.log
+            echo '```'
+          } > /tmp/bullpen-verification-comment.md
+          gh pr comment 688 --body-file /tmp/bullpen-verification-comment.md
+          exit 1
