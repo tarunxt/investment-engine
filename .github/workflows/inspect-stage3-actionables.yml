@@ -1,4 +1,4 @@
-name: Diagnose compressed Stage 2 handoff patch
+name: Apply Stage 2 actionables handoff
 
 on:
   push:
@@ -9,10 +9,14 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: apply-stage2-actionables-handoff
+  cancel-in-progress: false
 
 jobs:
-  diagnose:
+  apply-and-test:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -21,34 +25,42 @@ jobs:
           ref: codex/fix-stage2-actionables-stage3-handoff
           fetch-depth: 0
 
-      - name: Capture compressed patch diagnostics
+      - name: Expand and verify implementation patch
         run: |
-          set +e
-          {
-            echo '== branch =='
-            git status --short --branch
-            echo '== compressed file =='
-            ls -l .github/patches/stage2-actionables-stage3-handoff.patch.gz
-            sha256sum .github/patches/stage2-actionables-stage3-handoff.patch.gz
-            git hash-object .github/patches/stage2-actionables-stage3-handoff.patch.gz
-            gzip -t .github/patches/stage2-actionables-stage3-handoff.patch.gz
-            echo "gzip_status=$?"
-            gzip -dc .github/patches/stage2-actionables-stage3-handoff.patch.gz > /tmp/stage2-handoff.patch
-            echo "expand_status=$?"
-            wc -c /tmp/stage2-handoff.patch
-            sha256sum /tmp/stage2-handoff.patch
-            git hash-object /tmp/stage2-handoff.patch
-            echo '== patch check =='
-            git apply --check --verbose /tmp/stage2-handoff.patch
-            echo "apply_status=$?"
-            echo '== patch around line 173 =='
-            nl -ba /tmp/stage2-handoff.patch | sed -n '165,180p'
-          } > compressed-patch-diagnostics.txt 2>&1
-          cat compressed-patch-diagnostics.txt
+          gzip -dc .github/patches/stage2-actionables-stage3-handoff.patch.gz \
+            > /tmp/stage2-actionables-stage3-handoff.patch
+          echo "f42ca5a3db36485ba852fd6d6b71f07186c5ece80da8c7bff65e837abc9e4ca2  /tmp/stage2-actionables-stage3-handoff.patch" \
+            | sha256sum --check
+          git apply --check /tmp/stage2-actionables-stage3-handoff.patch
+          git apply /tmp/stage2-actionables-stage3-handoff.patch
+          git diff --check
 
-      - name: Upload diagnostics
-        uses: actions/upload-artifact@v4
-        with:
-          name: compressed-stage3-patch-diagnostics
-          path: compressed-patch-diagnostics.txt
-          if-no-files-found: error
+      - name: Validate backend syntax
+        run: |
+          python -m py_compile \
+            backend/app/domains/polymarket_auto_live/engine.py \
+            backend/app/domains/polymarket_auto_live/schemas.py \
+            backend/tests/test_stage2_actionable_handoff.py
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run focused frontend tests
+        working-directory: frontend
+        run: |
+          node --test \
+            tests/bullpen-auto-run-stage3-invest.test.mjs \
+            tests/bullpen-stage2-actionables.test.mjs
+
+      - name: Commit implementation
+        run: |
+          git rm \
+            .github/workflows/inspect-stage3-actionables.yml \
+            .github/patches/stage2-actionables-stage3-handoff.patch \
+            .github/patches/stage2-actionables-stage3-handoff.patch.gz
+          git config user.name "OpenAI Codex"
+          git config user.email "codex@openai.com"
+          git add backend frontend
+          git commit -m "fix: preserve Stage 2 actionables in Stage 3"
+          git push origin HEAD:codex/fix-stage2-actionables-stage3-handoff
