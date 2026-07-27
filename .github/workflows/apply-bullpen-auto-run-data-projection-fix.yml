@@ -75,7 +75,7 @@ jobs:
             echo 'Generated Bullpen data-projection patch failed focused frontend verification:'
             echo
             echo '```text'
-            tail -n 180 bullpen-auto-run-frontend.log
+            grep -n -B 12 -A 30 -E '^(not ok|.*AssertionError|.*error TS[0-9]+)' bullpen-auto-run-frontend.log | head -n 240 || true
             echo '```'
           } > /tmp/bullpen-auto-run-comment.md
           gh pr comment 687 --body-file /tmp/bullpen-auto-run-comment.md
