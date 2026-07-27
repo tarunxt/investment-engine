@@ -1,0 +1,60 @@
+name: Inspect Stage 2 actionables handoff
+
+on:
+  push:
+    branches:
+      - codex/fix-stage2-actionables-stage3-handoff
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print relevant engine and frontend contexts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          targets = {
+              "backend/app/domains/polymarket_auto_live/engine.py": [
+                  "candidate_rows",
+                  "reuse_saved_llm_outputs",
+                  "console_profile",
+                  "event_exit_rows",
+                  "qualified_candidate_market_ids",
+                  "ranking_top_candidate_market_id_order",
+                  "request_context",
+              ],
+              "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx": [
+                  "buildBullpenStage3OnlyInvestExecutionPlan",
+                  "effectiveInvestOnlyRequest",
+                  "handleStage3Retry",
+                  "runBullpenAutoLiveOnce",
+              ],
+              "frontend/types/api.ts": [
+                  "BullpenAutoLiveConsoleRunContext",
+                  "candidate_rows_prefiltered",
+              ],
+          }
+          for file_name, needles in targets.items():
+              path = Path(file_name)
+              lines = path.read_text().splitlines()
+              print(f"\n===== {file_name} ({len(lines)} lines) =====")
+              emitted = set()
+              for needle in needles:
+                  matches = [i for i, line in enumerate(lines) if needle in line]
+                  print(f"\n--- {needle}: {matches} ---")
+                  for index in matches:
+                      start = max(0, index - 24)
+                      end = min(len(lines), index + 40)
+                      key = (start, end)
+                      if key in emitted:
+                          continue
+                      emitted.add(key)
+                      print(f"\n### lines {start + 1}-{end}")
+                      for line_no in range(start, end):
+                          print(f"{line_no + 1:05d}: {lines[line_no]}")
+          PY
