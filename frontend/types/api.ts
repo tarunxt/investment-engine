@@ -2463,6 +2463,8 @@ export interface BullpenAutoLiveConsoleRunContext {
   total_candidates: number;
   candidate_rows_prefiltered: boolean;
   reuse_saved_llm_outputs: boolean;
+  stage2_actionable_exit_market_ids?: string[];
+  stage2_actionable_buy_market_ids?: string[];
   candidate_rows: BullpenAutoLiveConsoleCandidateInput[];
 }
 

@@ -391,6 +391,10 @@ test("Stage 3 invest plan reuses only Stage 2-qualified candidate rows", async (
   assert.equal(plan.qualifiedCandidateCount, 1);
   assert.ok(plan.request?.console_profile);
   assert.equal(plan.request.console_profile.reuse_saved_llm_outputs, true);
+  assert.deepEqual(plan.request.console_profile.stage2_actionable_exit_market_ids, []);
+  assert.deepEqual(plan.request.console_profile.stage2_actionable_buy_market_ids, [
+    "market-1",
+  ]);
   assert.equal(plan.request.console_profile.source_label, "Bullpen Auto-Run");
   assert.equal(plan.request.console_profile.snapshot_id, "snapshot-9");
   assert.equal(plan.request.console_profile.candidate_rows.length, 1);
@@ -974,6 +978,10 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
     executionPlan.request?.console_profile?.candidate_rows[0]?.market_id,
     "market-2",
   );
+  assert.deepEqual(
+    executionPlan.request?.console_profile?.stage2_actionable_buy_market_ids,
+    ["market-2"],
+  );
   assert.equal(
     executionPlan.candidatePreviews.find(
       (preview) => preview.candidate.market_id === "market-1",
@@ -992,6 +1000,96 @@ test("Stage 3 invest execution plan keeps reuse enabled while skipping already i
     )?.investedSource,
     "live-position",
   );
+});
+
+test("Stage 3 invest execution plan removes a candidate that matches a live position by slug even when market IDs differ", async () => {
+  const { buildBullpenStage3OnlyInvestExecutionPlan } = await loadStage3InvestModule();
+  const run = createRun({
+    id: "run-stage3-alias-match",
+    stageResults: [
+      createStage(1, "scan", {
+        accepted_candidates: [
+          {
+            question_id: "question-1",
+            market_id: "market-new-id",
+            question: "Will event one happen?",
+            market_title: "Will event one happen?",
+            market_url: "https://example.com/event-one",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            current_yes_odds: 43,
+            current_no_odds: 57,
+          },
+        ],
+      }),
+      createStage(2, "llm", {
+        llm_reviewed_candidates: [
+          {
+            market_id: "market-new-id",
+            question: "Will event one happen?",
+            market_url: "https://example.com/event-one",
+            slug: "event-one",
+            close_time: "2026-07-07T12:00:00Z",
+            returns_per_day: 1.7,
+            qualified: true,
+            fair_yes_probability_pct: 18,
+            fair_no_probability_pct: 82,
+            confidence: "High",
+            evidence_status: "Strong",
+            event_state: "Watching",
+          },
+        ],
+      }),
+    ],
+  });
+
+  const executionPlan = buildBullpenStage3OnlyInvestExecutionPlan(run, [], {
+    activePositions: [
+      {
+        key: "market-old-id::NO",
+        marketId: "market-old-id",
+        marketSlug: "event-one",
+        eventSlug: "event-one",
+        slug: "event-one",
+        conditionId: null,
+        marketTitle: "Will event one happen?",
+        outcome: "No",
+        heldSide: "NO",
+        shares: 6,
+        averagePrice: 0.82,
+        costBasis: 5,
+        yesOdds: 18,
+        noOdds: 82,
+        currentPrice: 0.82,
+        currentValue: 5,
+        expectedPayoutUsd: null,
+        unrealizedPnl: 0,
+        unrealizedPnlPercent: 0,
+        marketUrl: "https://example.com/event-one",
+        closeTime: "2026-07-07T12:00:00Z",
+        resolutionStatus: null,
+        economicClassification: "active",
+        classificationReason: "Open Bullpen position.",
+        isClaimable: false,
+        claimableSignal: false,
+        upstreamRedeemable: false,
+        claimableValue: null,
+        returnsPerDay: 1.7,
+        rules: null,
+        marketContext: null,
+        resolutionSource: null,
+      },
+    ],
+    hasActivePositionsSnapshot: true,
+  });
+
+  assert.equal(executionPlan.readyCandidateCount, 0);
+  assert.equal(executionPlan.alreadyInvestedCandidateCount, 1);
+  assert.deepEqual(
+    executionPlan.request?.console_profile?.stage2_actionable_buy_market_ids,
+    [],
+  );
+  assert.equal(executionPlan.candidatePreviews[0]?.investedSource, "live-position");
 });
 
 test("Stage 3 invest reuse does not treat a legacy FILLED row without submission evidence as already invested", async () => {
@@ -1261,6 +1359,8 @@ test("Stage 3 schedule card distinguishes its transfer queue from persisted plan
   assert.match(source, /Current Stage 3 buy and sell queue/);
   assert.match(source, /current Event Exits list with the saved\s+Stage 2 top-10 transfer queue/);
   assert.match(source, /Queue Stage 3 Exit and Invest/);
+  assert.match(source, /stage2_actionable_exit_market_ids/);
+  assert.match(source, /stage2_actionable_buy_market_ids/);
   assert.match(source, /NO_STAGE2_QUALIFIED_EVENTS_REASON/);
 });
 
@@ -1280,6 +1380,8 @@ test("Stage 3 preview steps summarize the sell-first then invest flow before exe
         total_candidates: 2,
         candidate_rows_prefiltered: true,
         reuse_saved_llm_outputs: true,
+        stage2_actionable_exit_market_ids: [],
+        stage2_actionable_buy_market_ids: ["market-1", "market-2"],
         candidate_rows: [],
       },
     },
@@ -1305,12 +1407,12 @@ test("Stage 3 preview steps summarize the sell-first then invest flow before exe
     ],
   );
   assert.equal(previewSteps[0].plannedOrders, null);
-  assert.equal(previewSteps[1].plannedOrders, 0);
+  assert.equal(previewSteps[1].plannedOrders, 2);
   assert.match(previewSteps[0].detail, /Event Exits, waits for settlement/i);
   assert.match(previewSteps[0].detail, /refreshes live cash plus occupied slots/i);
   assert.match(previewSteps[1].detail, /Stage 2-qualified/);
-  assert.match(previewSteps[1].detail, /transfer queue/i);
-  assert.match(previewSteps[1].detail, /post-exit sizing/i);
+  assert.match(previewSteps[1].detail, /Planned list/i);
+  assert.match(previewSteps[1].detail, /Executable sizes/i);
 });
 
 test("Stage 3 preview steps mark the no-work case as finished instead of pending", async () => {
