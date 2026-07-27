@@ -259,6 +259,14 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunCardSource, /timeoutMs: 5_000/);
   assert.match(autoRunCardSource, /bullpen_auto_run_dashboard_poll_degraded/);
   assert.match(autoRunCardSource, /nextPendingRunId: resolvedPendingRunId/);
+  assert.match(autoRunCardSource, /active_position_rows_before_llm/);
+  assert.match(autoRunCardSource, /Math\.max\(0, llmRanOn - activePositions\)/);
+  assert.match(autoRunCardSource, /terminalRunEvidenceRef/);
+  assert.match(autoRunCardSource, /getBullpenAutoLiveRun\(run\.id/);
+  assert.match(
+    autoRunCardSource,
+    /bullpen_auto_run_terminal_evidence_hydration_failed/,
+  );
   assert.match(autoRunCardSource, /Pause/);
   assert.match(autoRunCardSource, /Kill/);
   assert.match(autoRunCardSource, /Open .* output/);
@@ -323,11 +331,11 @@ test("Bullpen x AI auto-run card defers bounded summary hydration behind fast st
   assert.match(autoRunCardSource, /summaryLoadInFlightRef/);
   assert.match(
     autoRunCardSource,
-    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 4_000,\s*\}\);/,
+    /const nextSummary = await apiService\.getBullpenAutoLiveDashboardSummary\(\{\s*signal: requestSignal,\s*timeoutMs: 5_000,\s*\}\);/,
   );
   assert.match(autoRunCardSource, /getPersistedAutoRunStatus\(/);
   assert.match(autoRunCardSource, /AUTO_RUN_STATUS_TIMEOUT_MS/);
-  assert.match(autoRunCardSource, /setSummary\(nextSummary\);/);
+  assert.match(autoRunCardSource, /setSummary\(visiblePayload\.summary\);/);
   assert.doesNotMatch(autoRunCardSource, /summaryPromise/);
   assert.match(
     overviewSource,

@@ -31,7 +31,21 @@ def _large_run() -> BullpenAutoLiveRun:
             "workflow_stage_key": "scan",
             "phase_status": "completed",
             "scanned_candidates": 100,
-            "accepted_candidates_count": 25,
+            "accepted_candidates_count": 44,
+            "accepted_candidates": [
+                {
+                    "question_id": f"question-{index}",
+                    "market_id": f"market-{index}",
+                    "question": f"Will event {index} happen?",
+                    "slug": f"market-{index}",
+                    "close_time": "2026-08-01T10:00:00+00:00",
+                    "current_yes_odds": 40,
+                    "current_no_odds": 60,
+                    "rules": "Expandable rules are omitted from the live projection.",
+                }
+                for index in range(44)
+            ],
+            "active_position_rows_before_llm": 3,
             "console_trade_cash_in_hand_usd": 3.44,
             "console_trade_available_slots": 3,
             "console_trade_max_positions": 10,
@@ -69,6 +83,15 @@ def test_console_projection_is_bounded_and_does_not_mutate_frozen_run() -> None:
     assert len(
         projection["stage_results"][0]["outputs"]["llm_reviewed_candidates"]
     ) == 10
+    assert len(
+        projection["stage_results"][0]["outputs"]["accepted_candidates"]
+    ) == 44
+    assert (
+        projection["stage_results"][0]["outputs"][
+            "active_position_rows_before_llm"
+        ]
+        == 3
+    )
     assert (
         projection["stage_results"][0]["outputs"][
             "console_trade_cash_in_hand_usd"
