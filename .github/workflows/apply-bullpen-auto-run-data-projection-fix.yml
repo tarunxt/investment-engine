@@ -1,0 +1,70 @@
+name: Apply Bullpen auto-run data projection fix
+
+on:
+  push:
+    branches:
+      - codex/fix-bullpen-auto-run-data-projection
+    paths:
+      - .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
+      - .github/workflows/apply-bullpen-auto-run-data-projection-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.head_commit.message != 'Fix Bullpen auto-run data propagation permanently'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: codex/fix-bullpen-auto-run-data-projection
+
+      - name: Apply permanent source and test changes
+        run: python .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
+
+      - name: Validate transformed sources
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          for path in (
+              Path('backend/app/domains/polymarket_auto_live/console_projection.py'),
+              Path('backend/tests/test_polymarket_auto_live_console_projection.py'),
+          ):
+              ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+          PY
+          grep -q 'CONSOLE_PROJECTION_VERSION = 2' backend/app/domains/polymarket_auto_live/console_projection.py
+          grep -q '"accepted_candidates": 100' backend/app/domains/polymarket_auto_live/console_projection.py
+          grep -q 'active_position_rows_before_llm' frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
+          grep -q 'bullpen_auto_run_terminal_evidence_hydration_failed' frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
+          grep -q 'reviewedCandidateFallback' frontend/app/console/bullpen-ai/_components/bullpenAutoRunSync.ts
+          git diff --check
+
+      - name: Run focused frontend regressions
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          node --test \
+            tests/bullpen-auto-run-sync.test.mjs \
+            tests/bullpen-ai-compatibility.test.mjs
+          npx tsc --noEmit
+
+      - name: Remove one-shot helper files
+        run: |
+          rm .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
+          rm .github/workflows/apply-bullpen-auto-run-data-projection-fix.yml
+
+      - name: Commit implementation
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix Bullpen auto-run data propagation permanently'
+          git push origin HEAD:codex/fix-bullpen-auto-run-data-projection
