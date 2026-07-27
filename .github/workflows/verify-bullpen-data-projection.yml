@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - codex/verify-bullpen-data-projection
+  pull_request:
+    branches:
+      - codex/fix-bullpen-auto-run-data-projection
 
 permissions:
   contents: read
