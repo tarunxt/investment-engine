@@ -10,6 +10,7 @@ import {
 } from "react";
 import { Loader2, X } from "lucide-react";
 
+import { normalizeError } from "@/app/console/dashboard/_components/dashboardOverviewUtils";
 import { apiService } from "@/services/api";
 import type { ApiRequestControl } from "@/services/api.types";
 import type {
@@ -17,6 +18,8 @@ import type {
   AutoRebalanceJobDetailResponse,
   AutoRebalancePortfolioKey,
   AutoRebalanceStageKey,
+  JobResponse,
+  RunListItem,
   RunResponse,
 } from "@/types/api";
 
@@ -30,13 +33,22 @@ type StageJobRow = {
   job: AutoRebalanceJobDetailResponse;
   runtime: string;
 };
-
 type CachedRun = {
   expiresAt: number;
   promise: Promise<RunResponse>;
 };
+type LoadedStageJobs = {
+  label: string;
+  jobs: AutoRebalanceJobDetailResponse[];
+};
 
-const RUN_DETAIL_CONCURRENCY = 8;
+const BACKEND_RUN_PAGE_LIMIT = 100;
+const MAX_FULL_RUN_HYDRATION = 48;
+const MAX_AUTO_REBALANCE_SEQUENCES_PER_PORTFOLIO = 4;
+const MAX_RELEVANT_MANUAL_RUNS = 12;
+const MAX_OTHER_MANUAL_RUNS = 4;
+const RUN_DETAIL_CONCURRENCY = 6;
+const RUN_DETAIL_TIMEOUT_MS = 15_000;
 const ACTIVE_RUN_CACHE_MS = 2_500;
 const TERMINAL_RUN_CACHE_MS = 60_000;
 const runDetailCache = new Map<number, CachedRun>();
@@ -50,6 +62,13 @@ const TERMINAL_RUN_STATUSES = new Set([
   "interrupted",
   "skipped",
 ]);
+const ACTIVE_RUN_STATUSES = new Set([
+  "queued",
+  "pending",
+  "processing",
+  "running",
+  "scheduled",
+]);
 
 function abortError() {
   const error = new Error("Request aborted");
@@ -59,6 +78,11 @@ function abortError() {
 
 function wait(delayMs: number) {
   return new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
+}
+
+function parseTimestamp(value: string | null | undefined) {
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function mapWithConcurrency<TInput, TOutput>(
@@ -101,12 +125,16 @@ async function loadRunDetailWithRetry(
   options?: ApiRequestControl,
 ): Promise<RunResponse> {
   if (options?.signal?.aborted) throw abortError();
+  const requestOptions: ApiRequestControl = {
+    ...options,
+    timeoutMs: Math.max(options?.timeoutMs ?? 0, RUN_DETAIL_TIMEOUT_MS),
+  };
   try {
-    return await apiService.getRun(runId, options);
+    return await apiService.getRun(runId, requestOptions);
   } catch (error) {
     if (options?.signal?.aborted) throw abortError();
-    await wait(150);
-    return apiService.getRun(runId, options);
+    await wait(250);
+    return apiService.getRun(runId, requestOptions);
   }
 }
 
@@ -138,37 +166,203 @@ function getCachedRunDetail(runId: number, options?: ApiRequestControl) {
   return entry.promise;
 }
 
+function hasAutoRebalanceMetadata(item: RunListItem) {
+  return Boolean(
+    item.auto_rebalance_portfolio &&
+      typeof item.auto_rebalance_sequence === "number" &&
+      Number.isFinite(item.auto_rebalance_sequence),
+  );
+}
+
+function looksRelevantToRebalance(item: RunListItem) {
+  const text = `${item.auto_rebalance_label || ""}\n${item.prompt_preview || ""}`;
+  return /(auto[- ]?rebalance|rebalance|swing scan|swing trade|technical scan|technical validation|portfolio)/i.test(
+    text,
+  );
+}
+
+function selectRecentRunSummaries(items: RunListItem[]) {
+  const selectedSequences = new Map<AutoRebalancePortfolioKey, Set<number>>();
+  for (const portfolio of ["india", "indmoney_us"] as const) {
+    const sequences = Array.from(
+      new Set(
+        items
+          .filter(
+            (item) =>
+              item.auto_rebalance_portfolio === portfolio &&
+              typeof item.auto_rebalance_sequence === "number",
+          )
+          .map((item) => item.auto_rebalance_sequence as number),
+      ),
+    )
+      .sort((left, right) => right - left)
+      .slice(0, MAX_AUTO_REBALANCE_SEQUENCES_PER_PORTFOLIO);
+    selectedSequences.set(portfolio, new Set(sequences));
+  }
+
+  const active = items.filter((item) =>
+    ACTIVE_RUN_STATUSES.has((item.status || "").toLowerCase()),
+  );
+  const autoRebalance = items.filter((item) => {
+    const portfolio = item.auto_rebalance_portfolio;
+    const sequence = item.auto_rebalance_sequence;
+    return Boolean(
+      portfolio &&
+        typeof sequence === "number" &&
+        selectedSequences.get(portfolio)?.has(sequence),
+    );
+  });
+  const manualRuns = items.filter((item) => !hasAutoRebalanceMetadata(item));
+  const relevantManual = manualRuns
+    .filter(looksRelevantToRebalance)
+    .slice(0, MAX_RELEVANT_MANUAL_RUNS);
+  const otherManual = manualRuns
+    .filter((item) => !looksRelevantToRebalance(item))
+    .slice(0, MAX_OTHER_MANUAL_RUNS);
+
+  const unique = new Map<number, RunListItem>();
+  for (const item of [
+    ...active,
+    ...autoRebalance,
+    ...relevantManual,
+    ...otherManual,
+  ]) {
+    unique.set(item.id, item);
+  }
+
+  return Array.from(unique.values())
+    .sort(
+      (left, right) =>
+        parseTimestamp(right.created_at) - parseTimestamp(left.created_at) ||
+        right.id - left.id,
+    )
+    .slice(0, MAX_FULL_RUN_HYDRATION);
+}
+
+function toFallbackJob(job: RunListItem["run_jobs"][number]["job"]): JobResponse {
+  return {
+    id: job.id,
+    prompt: "",
+    response: null,
+    error_message: job.error_message ?? null,
+    provider: job.provider,
+    model: job.model,
+    status: job.status,
+    tokens_in: job.tokens_in ?? null,
+    tokens_out: job.tokens_out ?? null,
+    estimated_cost: job.estimated_cost ?? null,
+    request_context_json: job.request_context_json ?? null,
+    export_status: job.export_status ?? null,
+    export_error: job.export_error ?? null,
+    exported_at: job.exported_at ?? null,
+    exported_sheet_url: job.exported_sheet_url ?? null,
+    auto_rebalance_portfolio: job.auto_rebalance_portfolio ?? null,
+    auto_rebalance_sequence: job.auto_rebalance_sequence ?? null,
+    auto_rebalance_label: job.auto_rebalance_label ?? null,
+    scheduled_at: job.scheduled_at ?? null,
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+  };
+}
+
+function toFallbackRun(item: RunListItem): RunResponse {
+  return {
+    id: item.id,
+    prompt: item.prompt_preview || "",
+    prompt_id: item.prompt_id,
+    status: item.status,
+    current_stage: item.current_stage,
+    run_jobs: item.run_jobs.map((link) => ({
+      id: link.id,
+      run_id: link.run_id,
+      job_id: link.job_id,
+      stage: link.stage,
+      job: toFallbackJob(link.job),
+    })),
+    synthesis_response: null,
+    decision_response: null,
+    auto_export_enabled: item.auto_export_enabled,
+    export_spreadsheet_url: null,
+    export_sheet_name: null,
+    export_investment_amount: null,
+    export_title: null,
+    export_status: item.export_status,
+    export_error: item.export_error,
+    exported_at: item.exported_at,
+    exported_sheet_url: item.exported_sheet_url,
+    auto_rebalance_portfolio: item.auto_rebalance_portfolio ?? null,
+    auto_rebalance_sequence: item.auto_rebalance_sequence ?? null,
+    auto_rebalance_label: item.auto_rebalance_label ?? null,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  };
+}
+
+async function loadSummaryPageWithRetry(options?: ApiRequestControl) {
+  if (options?.signal?.aborted) throw abortError();
+  try {
+    return await apiService.getRuns({
+      page: 1,
+      limit: BACKEND_RUN_PAGE_LIMIT,
+      summary: true,
+    });
+  } catch (error) {
+    if (options?.signal?.aborted) throw abortError();
+    await wait(250);
+    return apiService.getRuns({
+      page: 1,
+      limit: BACKEND_RUN_PAGE_LIMIT,
+      summary: true,
+    });
+  }
+}
+
+async function buildBoundedFullRunPage(options?: ApiRequestControl) {
+  const summaryPage = await loadSummaryPageWithRetry(options);
+  if (options?.signal?.aborted) throw abortError();
+  const selected = selectRecentRunSummaries(summaryPage.items);
+  const items = await mapWithConcurrency(
+    selected,
+    RUN_DETAIL_CONCURRENCY,
+    async (item) => {
+      try {
+        return await getCachedRunDetail(item.id, options);
+      } catch (error) {
+        // A single oversized or temporarily unavailable historic run must not
+        // block provider selection, later-stage inputs, or the current workflow.
+        console.warn(
+          `Using compact fallback for run #${item.id}: ${normalizeError(error)}`,
+        );
+        return toFallbackRun(item);
+      }
+    },
+  );
+
+  return {
+    items,
+    total: items.length,
+    page: 1,
+    limit: BACKEND_RUN_PAGE_LIMIT,
+    size: items.length,
+    pages: 1,
+  };
+}
+
 /**
- * The full /runs collection can exceed the backend response budget because every
- * prompt and model response is embedded in one payload. Keep the existing caller
- * contract, but load the lightweight summary page first and hydrate only those
- * selected run IDs through /runs/{id}. This fixes the LLM, Inputs and Outputs
- * dialogs without re-introducing an unbounded collection response.
+ * The legacy helper asks for every full run page (historically with limit=200),
+ * then downloads every prompt and model response. That request grows forever,
+ * exceeds the backend limit, and lets one slow old run fail the current stage.
+ * On the dedicated automated-rebalance route, replace it with a bounded recent
+ * summary selection and hydrate only the runs needed by current stage inputs,
+ * cost history, output dialogs, and order previews. Failed historic details are
+ * represented by compact summaries rather than rejecting the entire operation.
  */
 function installSafeFullRunAdapter() {
   if (safeFullRunAdapterInstalled) return;
   safeFullRunAdapterInstalled = true;
 
-  apiService.getFullRuns = async (params, options) => {
-    if (options?.signal?.aborted) throw abortError();
-    const summaryPage = await apiService.getRuns({
-      page: params?.page,
-      limit: params?.limit,
-      summary: true,
-    });
-    if (options?.signal?.aborted) throw abortError();
-
-    const items = await mapWithConcurrency(
-      summaryPage.items,
-      RUN_DETAIL_CONCURRENCY,
-      (item) => getCachedRunDetail(item.id, options),
-    );
-
-    return {
-      ...summaryPage,
-      items,
-    };
-  };
+  apiService.getFullRuns = async (_params, options) =>
+    buildBoundedFullRunPage(options);
 }
 
 installSafeFullRunAdapter();
@@ -285,7 +479,180 @@ function collectStageJobs(
   );
   const unique = new Map<number, AutoRebalanceJobDetailResponse>();
   for (const { job } of matching) unique.set(job.id, job);
-  return [...unique.values()].sort((a, b) => a.id - b.id);
+  return [...unique.values()].sort((left, right) => left.id - right.id);
+}
+
+function toStageJob(job: JobResponse): AutoRebalanceJobDetailResponse {
+  return {
+    id: job.id,
+    provider: job.provider,
+    model: job.model,
+    status: job.status,
+    prompt: job.prompt,
+    response: job.response,
+    error_message: job.error_message ?? null,
+    tokens_in: job.tokens_in ?? null,
+    tokens_out: job.tokens_out ?? null,
+    estimated_cost: job.estimated_cost ?? null,
+    web_search_used: job.web_search_used ?? null,
+    web_search_queries: job.web_search_queries ?? null,
+    web_sources: job.web_sources ?? null,
+    runtime_metadata_json: job.runtime_metadata_json ?? null,
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+  };
+}
+
+function runMatchesPortfolio(run: RunResponse, portfolio: AutoRebalancePortfolioKey) {
+  if (run.auto_rebalance_portfolio) {
+    return run.auto_rebalance_portfolio === portfolio;
+  }
+  const text = `${run.auto_rebalance_label || ""}\n${run.prompt || ""}`.toLowerCase();
+  return portfolio === "india"
+    ? /zerodha|india equities|market:\s*india/.test(text)
+    : /indmoney|us equities|market:\s*us/.test(text);
+}
+
+function collectStageJobsFromRuns(
+  runs: RunResponse[],
+  context: LlmMetricContext,
+) {
+  const matchingRuns = runs
+    .filter((run) => runMatchesPortfolio(run, context.portfolio))
+    .filter(
+      (run) =>
+        inferStageFromPrompt(`${run.auto_rebalance_label || ""}\n${run.prompt}`) ===
+        context.stage,
+    )
+    .sort(
+      (left, right) =>
+        parseTimestamp(right.created_at) - parseTimestamp(left.created_at),
+    );
+  const exact = matchingRuns.find(
+    (run) =>
+      context.expectedTotal === null ||
+      run.run_jobs.length === context.expectedTotal,
+  );
+  const selected = exact || matchingRuns[0];
+  return selected
+    ? selected.run_jobs
+        .map((link) => link.job)
+        .filter(Boolean)
+        .map(toStageJob)
+    : [];
+}
+
+async function loadThreatFallback(
+  context: LlmMetricContext,
+): Promise<LoadedStageJobs | null> {
+  if (context.stage !== "threats") return null;
+  const latest =
+    context.portfolio === "india"
+      ? await apiService.zerodhaThreatsLatest()
+      : await apiService.indmoneyUsThreatsLatest();
+  const analysis = latest.analysis;
+  if (!analysis) return null;
+  return {
+    label: `Latest saved ${stageLabel(context.stage)}`,
+    jobs: [
+      {
+        id: analysis.job_id,
+        provider: analysis.provider,
+        model: analysis.model,
+        status: analysis.status,
+        prompt: "",
+        response: analysis.report?.raw_markdown ?? null,
+        error_message: analysis.error_message ?? null,
+        tokens_in: analysis.tokens_in ?? null,
+        tokens_out: analysis.tokens_out ?? null,
+        estimated_cost: analysis.estimated_cost ?? null,
+        web_search_used: null,
+        web_search_queries: null,
+        web_sources: null,
+        runtime_metadata_json: null,
+        created_at: analysis.created_at,
+        updated_at: analysis.updated_at,
+      },
+    ],
+  };
+}
+
+async function loadRecentRunFallback(
+  context: LlmMetricContext,
+): Promise<LoadedStageJobs | null> {
+  const page = await buildBoundedFullRunPage();
+  const jobs = collectStageJobsFromRuns(page.items, context);
+  if (!jobs.length) return null;
+  return {
+    label: `Recent saved ${stageLabel(context.stage)}`,
+    jobs,
+  };
+}
+
+async function retryRead<T>(reader: () => Promise<T>) {
+  try {
+    return await reader();
+  } catch (error) {
+    await wait(250);
+    try {
+      return await reader();
+    } catch {
+      throw error;
+    }
+  }
+}
+
+async function loadSavedStageJobs(
+  context: LlmMetricContext,
+): Promise<LoadedStageJobs> {
+  let primaryError: unknown = null;
+  try {
+    const history = await retryRead(() =>
+      apiService.getAutoRebalanceHistory(context.portfolio, { limit: 25 }),
+    );
+    const withExactCount = history.items.find((item) =>
+      item.stages.some(
+        (stage) =>
+          stage.stage === context.stage &&
+          (context.expectedTotal === null ||
+            stage.provider_count === context.expectedTotal),
+      ),
+    );
+    const selected =
+      withExactCount ||
+      history.items.find((item) =>
+        item.stages.some((stage) => stage.stage === context.stage),
+      );
+    if (selected) {
+      const detail = await retryRead(() =>
+        apiService.getAutoRebalanceHistoryDetail(
+          context.portfolio,
+          selected.sequence,
+        ),
+      );
+      const jobs = collectStageJobs(detail, context.stage);
+      if (jobs.length) return { label: detail.label, jobs };
+    }
+  } catch (error) {
+    primaryError = error;
+  }
+
+  try {
+    const threatFallback = await loadThreatFallback(context);
+    if (threatFallback) return threatFallback;
+  } catch (error) {
+    primaryError ||= error;
+  }
+
+  try {
+    const runFallback = await loadRecentRunFallback(context);
+    if (runFallback) return runFallback;
+  } catch (error) {
+    primaryError ||= error;
+  }
+
+  if (primaryError) throw primaryError;
+  throw new Error(`No saved ${stageLabel(context.stage)} run was found.`);
 }
 
 function metadataNumber(
@@ -386,46 +753,17 @@ function LlmDetailsDialog({
       setLoading(true);
       setError(null);
       try {
-        const history = await apiService.getAutoRebalanceHistory(context.portfolio, {
-          limit: 25,
-        });
-        const withExactCount = history.items.find((item) =>
-          item.stages.some(
-            (stage) =>
-              stage.stage === context.stage &&
-              (context.expectedTotal === null ||
-                stage.provider_count === context.expectedTotal),
-          ),
-        );
-        const selected =
-          withExactCount ||
-          history.items.find((item) =>
-            item.stages.some((stage) => stage.stage === context.stage),
-          );
-        if (!selected) {
-          throw new Error(`No saved ${stageLabel(context.stage)} run was found.`);
-        }
-
-        const detail = await apiService.getAutoRebalanceHistoryDetail(
-          context.portfolio,
-          selected.sequence,
-        );
-        const jobs = collectStageJobs(detail, context.stage).map((job) => ({
+        const loaded = await loadSavedStageJobs(context);
+        const jobs = loaded.jobs.map((job) => ({
           job,
           runtime: getJobRuntime(job),
         }));
         if (!cancelled) {
-          setRunLabel(detail.label);
+          setRunLabel(loaded.label);
           setRows(jobs);
         }
       } catch (reason) {
-        if (!cancelled) {
-          setError(
-            reason instanceof Error
-              ? reason.message
-              : "Could not load the saved LLM details.",
-          );
-        }
+        if (!cancelled) setError(normalizeError(reason));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -613,7 +951,7 @@ export function AutomatedRebalanceReliabilityBridge({
   };
 
   const handleKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (!(["Enter", " "].includes(event.key))) return;
+    if (!["Enter", " "].includes(event.key)) return;
     if (!(event.target instanceof HTMLElement)) return;
     if (event.target.dataset.autoRebalanceLlmMetric !== "true") return;
     if (openFromElement(event.target)) {
