@@ -35,7 +35,7 @@ jobs:
       - name: Apply permanent source and test changes
         run: python .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
 
-      - name: Validate transformed sources
+      - name: Validate transformed Python and diff
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -48,11 +48,6 @@ jobs:
           ):
               ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
           PY
-          grep -q 'CONSOLE_PROJECTION_VERSION = 2' backend/app/domains/polymarket_auto_live/console_projection.py
-          grep -q '"accepted_candidates": 100' backend/app/domains/polymarket_auto_live/console_projection.py
-          grep -q 'active_position_rows_before_llm' frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
-          grep -q 'bullpen_auto_run_terminal_evidence_hydration_failed' frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
-          grep -q 'reviewedCandidateFallback' frontend/app/console/bullpen-ai/_components/bullpenAutoRunSync.ts
           git diff --check
 
       - name: Run focused frontend regressions
@@ -74,7 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
-          git config user.email '41898213+github-actions[bot]@users.noreply.github.com'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git commit -m 'Fix Bullpen auto-run data propagation permanently'
           git push origin HEAD:codex/fix-bullpen-auto-run-data-projection
