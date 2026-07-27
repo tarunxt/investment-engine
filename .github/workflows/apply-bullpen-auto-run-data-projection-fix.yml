@@ -39,6 +39,7 @@ jobs:
           set -euo pipefail
           python .github/scripts/apply_bullpen_auto_run_data_projection_fix.py
           python - <<'PY'
+          import re
           from pathlib import Path
 
           test_path = Path('frontend/tests/bullpen-ai-compatibility.test.mjs')
@@ -67,19 +68,18 @@ jobs:
               'frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx'
           )
           card_text = card_path.read_text(encoding='utf-8')
-          unsupported_snapshot_fallback = '''    (run?.stage2_llm_targets_snapshot?.length
-              ? run.stage2_llm_targets_snapshot.length
-              : null) ??
-          '''
-          if card_text.count(unsupported_snapshot_fallback) != 1:
-              raise RuntimeError(
-                  'unsupported run target snapshot fallback: expected one match, '
-                  f'found {card_text.count(unsupported_snapshot_fallback)}'
-              )
-          card_path.write_text(
-              card_text.replace(unsupported_snapshot_fallback, '', 1),
-              encoding='utf-8',
+          pattern = re.compile(
+              r'^\s*\(run\?\.stage2_llm_targets_snapshot\?\.length\n'
+              r'\s*\? run\.stage2_llm_targets_snapshot\.length\n'
+              r'\s*: null\) \?\?\n',
+              flags=re.MULTILINE,
           )
+          card_text, count = pattern.subn('', card_text, count=1)
+          if count != 1:
+              raise RuntimeError(
+                  f'unsupported run target snapshot fallback: expected one match, found {count}'
+              )
+          card_path.write_text(card_text, encoding='utf-8')
           PY
 
       - name: Record generated-source diagnostics
