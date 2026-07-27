@@ -644,11 +644,12 @@ function buildStage3PreviewDialogState({
           },
         }
       : null);
-  const request = baseRequest
+  const baseConsoleProfile = baseRequest?.console_profile ?? null;
+  const request: BullpenAutoLiveRunOnceRequest | null = baseConsoleProfile
     ? {
         ...baseRequest,
         console_profile: {
-          ...baseRequest.console_profile,
+          ...baseConsoleProfile,
           stage2_actionable_exit_market_ids: [
             ...new Set(previewSellDecisions.map((decision) => decision.market_id)),
           ],
