@@ -5,10 +5,28 @@ const INSTALL_MARKER = Symbol.for(
   "investment-engine:automated-rebalance-threat-start-recovery",
 );
 const RECONCILIATION_DELAYS_MS = [0, 750, 1_500, 3_000, 6_000] as const;
+const BACKEND_THREAT_HISTORY_MAX_LIMIT = 100;
 
 type MarkedApiService = typeof apiService & {
   [INSTALL_MARKER]?: boolean;
 };
+type ThreatHistoryParams = { limit?: number } | undefined;
+
+function clampThreatHistoryParams(
+  params: ThreatHistoryParams,
+): ThreatHistoryParams {
+  if (params?.limit === undefined) return params;
+  const normalizedLimit = Number.isFinite(params.limit)
+    ? Math.trunc(params.limit)
+    : BACKEND_THREAT_HISTORY_MAX_LIMIT;
+  return {
+    ...params,
+    limit: Math.min(
+      BACKEND_THREAT_HISTORY_MAX_LIMIT,
+      Math.max(1, normalizedLimit),
+    ),
+  };
+}
 
 function wait(delayMs: number) {
   return new Promise<void>((resolve) => globalThis.setTimeout(resolve, delayMs));
@@ -115,8 +133,17 @@ export function installAutomatedRebalanceStartRecovery() {
   if (service[INSTALL_MARKER]) return;
   service[INSTALL_MARKER] = true;
 
+  const originalZerodhaThreatsHistory =
+    apiService.zerodhaThreatsHistory.bind(apiService);
+  const originalIndmoneyUsThreatsHistory =
+    apiService.indmoneyUsThreatsHistory.bind(apiService);
   const originalZerodhaRunThreats = apiService.zerodhaRunThreats.bind(apiService);
   const originalIndmoneyRunThreats = apiService.indmoneyUsRunThreats.bind(apiService);
+
+  apiService.zerodhaThreatsHistory = (params) =>
+    originalZerodhaThreatsHistory(clampThreatHistoryParams(params));
+  apiService.indmoneyUsThreatsHistory = (params) =>
+    originalIndmoneyUsThreatsHistory(clampThreatHistoryParams(params));
 
   apiService.zerodhaRunThreats = async (data) => {
     try {
