@@ -4,7 +4,10 @@ import { useCallback } from "react";
 
 import { RebalanceWorkflowSections } from "@/app/console/dashboard/_components/RebalanceWorkflowSections";
 import { apiService } from "@/services/api";
+import { installAutomatedRebalanceStartRecovery } from "./automatedRebalanceStartRecovery";
 import { AutomatedRebalanceReliabilityBridge } from "./AutomatedRebalanceReliabilityBridge";
+
+installAutomatedRebalanceStartRecovery();
 
 export function AutomatedRebalanceClient() {
   const refreshSummary = useCallback(async () => {
