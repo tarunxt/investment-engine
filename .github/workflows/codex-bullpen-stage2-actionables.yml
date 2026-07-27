@@ -1,0 +1,161 @@
+name: Apply Bullpen Stage 2 actionables
+
+on:
+  push:
+    branches:
+      - codex/bullpen-stage2-actionables
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    if: ${{ !contains(github.event.head_commit.message, '[actionables-applied]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch Stage 2 monitor
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx")
+          text = path.read_text()
+
+          def replace_once(source: str, replacement: str, label: str) -> None:
+              global text
+              count = text.count(source)
+              if count != 1:
+                  raise SystemExit(f"Expected one {label} anchor, found {count}")
+              text = text.replace(source, replacement, 1)
+
+          import_anchor = '''import {
+            formatElapsedRunTime,
+            formatStageElapsedTime,
+          } from "./bullpenAutoRunTimers";'''
+          replace_once(
+              import_anchor,
+              import_anchor
+              + '''
+          import { BullpenStage2ActionablesDialog } from "./BullpenStage2ActionablesDialog";
+          import { buildBullpenStage2Actionables } from "./bullpenStage2Actionables";''',
+              "imports",
+          )
+
+          function_anchor = '''}) {
+            const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({'''
+          replace_once(
+              function_anchor,
+              '''}) {
+            const [isActionablesDialogOpen, setIsActionablesDialogOpen] =
+              useState(false);
+            const stage2InvestEventsState = buildStageTwoInvestEventsDialogState({''',
+              "StageTwoRunStats state",
+          )
+
+          stats_anchor = '''  const displayStat = (value: number) => (hideNumbers ? "—" : value);
+
+            return (
+              <div className="space-y-0.5 pt-2">'''
+          replace_once(
+              stats_anchor,
+              '''  const displayStat = (value: number) => (hideNumbers ? "—" : value);
+            const actionables = buildBullpenStage2Actionables({
+              activePositions: positionDialogStage.activePositionsFound,
+              decisions,
+              selectedRows: stage2InvestEventsState?.rows ?? [],
+            });
+
+            return (
+              <div className="space-y-0.5 pt-2">''',
+              "StageTwoRunStats actionables",
+          )
+
+          tail_anchor = '''      </div>
+            </div>
+          );
+          }
+
+          function readStageOutputString(value: unknown) {'''
+          actionables_markup = '''      </div>
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setIsActionablesDialogOpen(true)}
+                  className="text-left font-medium text-slate-950 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+                  aria-label={`Open actionables with ${actionables.eventExits.length} exits and ${actionables.buyNew.length} buys`}
+                  aria-haspopup="dialog"
+                  aria-expanded={isActionablesDialogOpen}
+                >
+                  Actionables: Exit=
+                  <span className="font-semibold tabular-nums">
+                    {displayStat(actionables.eventExits.length)}
+                  </span>
+                  {" | Buy="}
+                  <span className="font-semibold tabular-nums">
+                    {displayStat(actionables.buyNew.length)}
+                  </span>
+                </button>
+              </div>
+              {isActionablesDialogOpen ? (
+                <BullpenStage2ActionablesDialog
+                  actionables={actionables}
+                  onClose={() => setIsActionablesDialogOpen(false)}
+                />
+              ) : null}
+            </div>
+          );
+          }
+
+          function readStageOutputString(value: unknown) {'''
+          replace_once(tail_anchor, actionables_markup, "StageTwoRunStats footer")
+
+          path.write_text(text)
+          PY
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Run targeted tests
+        working-directory: frontend
+        run: node --test tests/bullpen-stage2-actionables.test.mjs
+
+      - name: Lint changed frontend files
+        working-directory: frontend
+        run: >-
+          npx eslint
+          app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx
+          app/console/bullpen-ai/_components/BullpenStage2ActionablesDialog.tsx
+          app/console/bullpen-ai/_components/bullpenStage2Actionables.ts
+          tests/bullpen-stage2-actionables.test.mjs
+
+      - name: Type-check frontend
+        working-directory: frontend
+        run: npx tsc --noEmit --pretty false
+
+      - name: Commit verified integration
+        shell: bash
+        run: |
+          rm .github/workflows/codex-bullpen-stage2-actionables.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx \
+            frontend/app/console/bullpen-ai/_components/BullpenStage2ActionablesDialog.tsx \
+            frontend/app/console/bullpen-ai/_components/bullpenStage2Actionables.ts \
+            frontend/tests/bullpen-stage2-actionables.test.mjs \
+            .github/workflows/codex-bullpen-stage2-actionables.yml
+          git commit -m "feat: add Stage 2 actionables popup [actionables-applied]"
+          git push origin HEAD:${GITHUB_REF_NAME}
