@@ -681,7 +681,10 @@ class BullpenAutoLiveBot:
 
         return await self._get_summary_with_run_limit(run_limit=10)
 
-    async def get_dashboard_summary(self) -> BullpenAutoLiveSummary:
+    async def get_dashboard_summary(
+        self,
+        session: AsyncSession | None = None,
+    ) -> BullpenAutoLiveSummary:
         """Return a read-only, bounded projection for the live console.
 
         Unlike the legacy summary this path never creates scheduler rows,
@@ -689,70 +692,73 @@ class BullpenAutoLiveBot:
         selects the full run/decision payload columns.
         """
 
+        if session is None:
+            async with AsyncSessionLocal() as owned_session:
+                return await self.get_dashboard_summary(session=owned_session)
+
         query_started_at = perf_counter()
-        async with AsyncSessionLocal() as session:
-            repo = AsyncPolymarketAutoLiveRepository(session)
-            settings_record = await repo.get_settings_record(self.user_id)
-            state_record = await repo.get_state_record(self.user_id)
-            settings = record_to_settings(settings_record)
-            state = self._synchronize_persisted_scheduler_state(
-                settings,
-                record_to_state(state_record),
+        repo = AsyncPolymarketAutoLiveRepository(session)
+        settings_record = await repo.get_settings_record(self.user_id)
+        state_record = await repo.get_state_record(self.user_id)
+        settings = record_to_settings(settings_record)
+        state = self._synchronize_persisted_scheduler_state(
+            settings,
+            record_to_state(state_record),
+        )
+        active_identity = await repo.get_active_run_identity(self.user_id)
+        latest_projection = (
+            await repo.get_projected_run_for_user(
+                self.user_id,
+                active_identity[0],
             )
-            active_identity = await repo.get_active_run_identity(self.user_id)
-            latest_projection = (
-                await repo.get_projected_run_for_user(
-                    self.user_id,
-                    active_identity[0],
-                )
-                if active_identity is not None
-                else None
+            if active_identity is not None
+            else None
+        )
+        if latest_projection is None:
+            latest_projection = await repo.get_latest_projected_run(self.user_id)
+        latest_run = latest_projection[0] if latest_projection else None
+        verified_portfolio_snapshot = state.verified_portfolio_snapshot
+        if verified_portfolio_snapshot is None and latest_run is not None:
+            verified_portfolio_snapshot = (
+                build_verified_stage1_portfolio_snapshot(latest_run)
             )
-            if latest_projection is None:
-                latest_projection = await repo.get_latest_projected_run(self.user_id)
-            latest_run = latest_projection[0] if latest_projection else None
-            verified_portfolio_snapshot = state.verified_portfolio_snapshot
-            if verified_portfolio_snapshot is None and latest_run is not None:
-                verified_portfolio_snapshot = (
-                    build_verified_stage1_portfolio_snapshot(latest_run)
+        if verified_portfolio_snapshot is None:
+            verified_portfolio_snapshot = (
+                await repo.get_latest_verified_portfolio_snapshot(
+                    self.user_id
                 )
-            if verified_portfolio_snapshot is None:
-                verified_portfolio_snapshot = (
-                    await repo.get_latest_verified_portfolio_snapshot(
-                        self.user_id
+            )
+        if verified_portfolio_snapshot is not None:
+            # This copy is response-only for legacy state rows. A fresh
+            # Stage 1 progress write persists the same small DTO.
+            state = state.model_copy(
+                update={
+                    "verified_portfolio_snapshot": (
+                        verified_portfolio_snapshot
                     )
-                )
-            if verified_portfolio_snapshot is not None:
-                # This copy is response-only for legacy state rows. A fresh
-                # Stage 1 progress write persists the same small DTO.
-                state = state.model_copy(
-                    update={
-                        "verified_portfolio_snapshot": (
-                            verified_portfolio_snapshot
-                        )
-                    }
-                )
-            projection_available = (
-                latest_projection[1] if latest_projection else True
+                }
             )
-            workflow_as_of = (
-                latest_projection[2]
-                if latest_projection
-                else (
-                    state_record.updated_at.isoformat()
-                    if state_record is not None and state_record.updated_at is not None
-                    else utc_now()
-                )
+        projection_available = (
+            latest_projection[1] if latest_projection else True
+        )
+        workflow_as_of = (
+            latest_projection[2]
+            if latest_projection
+            else (
+                state_record.updated_at.isoformat()
+                if state_record is not None and state_record.updated_at is not None
+                else utc_now()
             )
-            decisions = (
-                await repo.list_projected_decisions_for_run(
-                    self.user_id,
-                    latest_run.id,
-                    limit=25,
-                )
-                if latest_run is not None
-                else []
+        )
+        decisions = (
+            await repo.list_projected_decisions_for_run(
+                self.user_id,
+                latest_run.id,
+                limit=25,
             )
+            if latest_run is not None
+            else []
+        )
 
         database_duration_ms = (perf_counter() - query_started_at) * 1000
         # Prompt text belongs to the explicit settings/editor read, not the

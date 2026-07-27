@@ -13,7 +13,10 @@ from fastapi import FastAPI
 from types import SimpleNamespace
 
 from app.domains.auth.dependencies import get_current_user
-from app.domains.polymarket_auto_live.router import _fit_dashboard_response_budget
+from app.domains.polymarket_auto_live.router import (
+    _fit_dashboard_response_budget,
+    _read_dashboard_summary,
+)
 from app.domains.polymarket_auto_live.router import router as auto_live_router
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveBotCardSummary,
@@ -301,6 +304,70 @@ async def test_auto_live_exact_run_route_supports_idempotent_start_recovery(
 
 
 @pytest.mark.anyio
+async def test_dashboard_summary_reader_reuses_single_database_session(monkeypatch):
+    shared_session = object()
+    events: list[tuple[str, object]] = []
+    summary = BullpenAutoLiveSummary(
+        state=BullpenAutoLiveState(),
+        settings=BullpenAutoLiveSettings(),
+        bot_card=BullpenAutoLiveBotCardSummary(
+            status="stopped",
+            mode="analysis-only",
+            guardrails_summary="Ready",
+            strategy_summary="Ready",
+            risk_summary="Ready",
+        ),
+    )
+
+    class FakeSessionContext:
+        async def __aenter__(self):
+            events.append(("enter", shared_session))
+            return shared_session
+
+        async def __aexit__(self, _exc_type, _exc, _traceback):
+            events.append(("exit", shared_session))
+            return False
+
+    class FakeBot:
+        async def get_dashboard_summary(self, session=None):
+            events.append(("summary", session))
+            return summary
+
+    async def fake_resolve_user(_credentials, session):
+        events.append(("auth", session))
+        return 7
+
+    async def fake_get_bot(user_id: int):
+        events.append(("bot", user_id))
+        return FakeBot()
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.AsyncSessionLocal",
+        FakeSessionContext,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router._resolve_persisted_status_user_id",
+        fake_resolve_user,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    result, user_id = await _read_dashboard_summary(None)
+
+    assert result == summary
+    assert user_id == 7
+    assert events == [
+        ("enter", shared_session),
+        ("auth", shared_session),
+        ("bot", 7),
+        ("summary", shared_session),
+        ("exit", shared_session),
+    ]
+
+
+@pytest.mark.anyio
 async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch):
     app = _build_test_app(auto_live_router)
     auth_reads: list[tuple[bool, float | None]] = []
@@ -319,12 +386,11 @@ async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch)
         projection_version=1,
     )
 
-    class FakeBot:
-        async def get_dashboard_summary(self):
-            return summary
+    summary_reads: list[bool] = []
 
-    async def fake_get_bot(_current_user):
-        return FakeBot()
+    async def fake_read_dashboard_summary(_credentials):
+        summary_reads.append(True)
+        return summary, 7
 
     async def fake_attach_auth(
         value,
@@ -336,8 +402,8 @@ async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch)
         return value
 
     monkeypatch.setattr(
-        "app.domains.polymarket_auto_live.router._get_bot",
-        fake_get_bot,
+        "app.domains.polymarket_auto_live.router._read_dashboard_summary",
+        fake_read_dashboard_summary,
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.router._attach_latest_active_auth",
@@ -361,6 +427,7 @@ async def test_dashboard_summary_uses_cached_auth_and_supports_etag(monkeypatch)
     assert first.headers["vary"] == "Authorization, Cookie"
     assert "app;dur=" in first.headers["server-timing"]
     assert cached.status_code == 304
+    assert summary_reads == [True, True]
     assert auth_reads == [(False, 0.25), (False, 0.25)]
 
 

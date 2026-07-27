@@ -128,6 +128,27 @@ async def _read_persisted_status(
     return snapshot, user_id, database_duration_ms
 
 
+async def _read_dashboard_summary(
+    credentials: HTTPAuthorizationCredentials | None,
+) -> tuple[BullpenAutoLiveSummary, int]:
+    """Read auth and the dashboard projection through one database session.
+
+    The dashboard used to resolve ``get_current_user`` in one session and then
+    open another session inside ``get_dashboard_summary``. Under pool pressure
+    that second checkout could consume the entire four-second browser budget,
+    leaving a completed run displayed as queued. Reusing the authenticated
+    session keeps the read bounded and prevents the stage monitor from going
+    stale while workers continue successfully in the background.
+    """
+
+    async with AsyncSessionLocal() as session:
+        user_id = await _resolve_persisted_status_user_id(credentials, session)
+        bot = await polymarket_auto_live_bot_manager.get_bot(user_id)
+        summary = await bot.get_dashboard_summary(session=session)
+        summary = BullpenAutoLiveSummary.model_validate(summary)
+    return summary, user_id
+
+
 def _http_error_detail(exc: Exception) -> str:
     message = str(exc).strip()
     if message and message.lower() != "none":
@@ -561,15 +582,15 @@ async def get_auto_live_summary(current_user: User = Depends(get_current_user)):
 async def get_auto_live_dashboard_summary(
     request: Request,
     response: Response,
-    current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Load persisted console projections without worker or runtime work."""
 
     started_at = time.perf_counter()
-    bot = await _get_bot(current_user)
+    user_id: int | None = None
     try:
-        summary = await asyncio.wait_for(
-            bot.get_dashboard_summary(),
+        summary, user_id = await asyncio.wait_for(
+            _read_dashboard_summary(credentials),
             timeout=DASHBOARD_SUMMARY_TIMEOUT_SECONDS,
         )
         summary = await _attach_latest_active_auth(
@@ -638,7 +659,7 @@ async def get_auto_live_dashboard_summary(
                         if database_duration_ms is not None
                         else None
                     ),
-                    "user_id": current_user.id,
+                    "user_id": user_id,
                     "correlation_id": getattr(request.state, "correlation_id", None),
                 },
                 sort_keys=True,

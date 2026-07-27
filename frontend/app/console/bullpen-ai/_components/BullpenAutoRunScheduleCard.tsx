@@ -9915,7 +9915,7 @@ export function BullpenAutoRunScheduleCard({
     try {
       const nextSummary = await apiService.getBullpenAutoLiveDashboardSummary({
         signal: requestSignal,
-        timeoutMs: 4_000,
+        timeoutMs: 5_000,
       });
       if (requestSignal?.aborted) return null;
       setSummary(nextSummary);
@@ -9936,6 +9936,31 @@ export function BullpenAutoRunScheduleCard({
     } catch (nextError) {
       if (requestSignal?.aborted || isRequestAbort(nextError)) {
         return null;
+      }
+      const isTransientDashboardRead =
+        nextError instanceof RequestTimeoutError ||
+        (nextError instanceof APIError && nextError.status >= 500);
+      if (isTransientDashboardRead && visiblePersistedAutoRunStatus) {
+        console.warn(
+          JSON.stringify({
+            event: "bullpen_auto_run_dashboard_poll_degraded",
+            reason:
+              nextError instanceof RequestTimeoutError
+                ? "timeout"
+                : nextError instanceof APIError
+                  ? `http_${nextError.status}`
+                  : "unavailable",
+          }),
+        );
+        window.setTimeout(() => {
+          if (!requestSignal?.aborted) {
+            void loadSummary({
+              preserveLoading: true,
+              nextPendingRunId: resolvedPendingRunId,
+            });
+          }
+        }, POLL_INTERVAL_MS);
+        return summary;
       }
       setError(normalizeError(nextError));
       return null;
