@@ -33,22 +33,13 @@ jobs:
 
           path = Path('.github/scripts/apply_bullpen_auto_run_dashboard_fix.py')
           text = path.read_text(encoding='utf-8')
-          old = """    text = replace_once(
-              text,
-              '''    monkeypatch.setattr(
-                  "app.domains.polymarket_auto_live.router._get_bot",
-                  fake_get_bot,
-              )
-          ''',
-              '''    monkeypatch.setattr(
-                  "app.domains.polymarket_auto_live.router._read_dashboard_summary",
-                  fake_read_dashboard_summary,
-              )
-          ''',
-              label="dashboard route reader monkeypatch",
-          )
-          """
-          new = """    text = replace_once(
+          label = '        label="dashboard route reader monkeypatch",\n    )'
+          label_start = text.index(label)
+          block_start = text.rfind('    text = replace_once(', 0, label_start)
+          block_end = label_start + len(label)
+          if block_start < 0:
+              raise SystemExit('could not locate dashboard reader monkeypatch replacement')
+          replacement = """    text = replace_once(
               text,
               '''    monkeypatch.setattr(
                   "app.domains.polymarket_auto_live.router._get_bot",
@@ -69,11 +60,11 @@ jobs:
               )
           ''',
               label="dashboard route reader monkeypatch",
+          )"""
+          path.write_text(
+              text[:block_start] + replacement + text[block_end:],
+              encoding='utf-8',
           )
-          """
-          if text.count(old) != 1:
-              raise SystemExit(f'applicator refinement expected one match, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Apply source and regression-test changes
