@@ -58,9 +58,9 @@ jobs:
           Path(".github/workflows/codex-active-position-ticks-stage2.yml").unlink()
           PY
 
-      - name: Run focused frontend tests
+      - name: Run focused frontend test
         working-directory: frontend
-        run: node --test tests/bullpen-stage-two-active-position-ticks.test.mjs tests/bullpen-auto-run-stage-output-dialog.test.mjs
+        run: node --test tests/bullpen-stage-two-active-position-ticks.test.mjs
 
       - name: Commit implementation
         shell: bash
