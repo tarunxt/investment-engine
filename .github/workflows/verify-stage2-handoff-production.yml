@@ -4,45 +4,13 @@ on:
   pull_request:
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
   verify-production:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
-      - name: Checkout diagnostics
-        uses: actions/checkout@v7
-
-      - name: Show recent production deployment runs
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          echo 'Recent Deploy to Production runs on main:'
-          gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?branch=main&per_page=5" \
-            --jq '.workflow_runs[] | [.id, .event, .status, (.conclusion // ""), .head_sha, .created_at, .updated_at] | @tsv'
-
-      - name: Read production frontend fingerprint
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --location --max-time 20 \
-            https://cred-x.in/api/runtime-fingerprint | jq .
-
-      - name: Upload compact inspector to production host
-        uses: appleboy/scp-action@v1.0.0
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          source: scripts/inspect-production-stage2-handoff.py
-          target: /tmp/credx-stage2-diagnostic-${{ github.run_id }}
-          strip_components: 1
-          timeout: 120s
-          command_timeout: 120s
-
       - name: Inspect latest production Bullpen run handoff
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -58,7 +26,9 @@ jobs:
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
             id "$APP_USER" >/dev/null 2>&1 || APP_USER=investor
-            INSPECTOR=/tmp/credx-stage2-diagnostic-${{ github.run_id }}/inspect-production-stage2-handoff.py
+            INSPECTOR=/tmp/inspect-production-stage2-handoff-${{ github.run_id }}.py
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin codex/verify-stage2-handoff-production
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" show FETCH_HEAD:scripts/inspect-production-stage2-handoff.py > "$INSPECTOR"
             echo "PRODUCTION_GIT_SHA=$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
             set -a
             source /etc/investor/backend.env
@@ -66,4 +36,4 @@ jobs:
             export PYTHONPATH="$APP_ROOT/backend"
             cd "$APP_ROOT/backend"
             "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
-            rm -rf /tmp/credx-stage2-diagnostic-${{ github.run_id }}
+            rm -f "$INSPECTOR"
