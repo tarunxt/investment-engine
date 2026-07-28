@@ -1,0 +1,42 @@
+name: Verify production Stage 2 handoff deployment
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect latest production Bullpen run handoff
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 180s
+          script: |
+            set -euo pipefail
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
+            id "$APP_USER" >/dev/null 2>&1 || APP_USER=investor
+            INSPECTOR=/tmp/inspect-production-stage2-handoff-${{ github.run_id }}.py
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin codex/verify-stage2-handoff-production
+            sudo -u "$APP_USER" -H git -C "$APP_ROOT" show FETCH_HEAD:scripts/inspect-production-stage2-handoff.py > "$INSPECTOR"
+            echo "PRODUCTION_GIT_SHA=$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+            sudo env APP_ROOT="$APP_ROOT" INSPECTOR="$INSPECTOR" bash -lc '
+              set -euo pipefail
+              set -a
+              source /etc/investor/backend.env
+              set +a
+              export PYTHONPATH="$APP_ROOT/backend"
+              cd "$APP_ROOT/backend"
+              "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
+            '
+            rm -f "$INSPECTOR"
