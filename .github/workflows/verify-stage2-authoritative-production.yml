@@ -1,0 +1,115 @@
+name: Verify authoritative Stage 2 production deployment
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      EXPECTED_SHA: 17d608baeaf0bfb18cc0cc19482556f7172a1a1c
+
+    steps:
+      - name: Wait for exact production deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          for attempt in $(seq 1 80); do
+            payload="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${EXPECTED_SHA}&per_page=20")"
+            run_id="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .id // empty' <<<"$payload")"
+            status="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .status // empty' <<<"$payload")"
+            conclusion="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .conclusion // empty' <<<"$payload")"
+            echo "attempt=${attempt} run_id=${run_id:-missing} status=${status:-missing} conclusion=${conclusion:-pending}"
+            if [[ -n "$run_id" && "$status" == "completed" ]]; then
+              if [[ "$conclusion" != "success" ]]; then
+                echo "Production deployment failed with conclusion=${conclusion}." >&2
+                gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" --jq '.jobs[] | [.name,.status,(.conclusion // "")] | @tsv' || true
+                exit 1
+              fi
+              echo "run_id=$run_id" >>"$GITHUB_OUTPUT"
+              echo "Production deployment completed successfully."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for production deployment of ${EXPECTED_SHA}." >&2
+          exit 1
+
+      - name: Show production deployment jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.deployment.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+            --jq '.jobs[] | [.name,.status,(.conclusion // "")] | @tsv'
+
+      - name: Verify deployed frontend fingerprint
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 40); do
+            response="$(curl --fail --silent --show-error --location --max-time 20 https://cred-x.in/api/runtime-fingerprint || true)"
+            actual="$(jq -r '.build_sha // empty' <<<"${response:-{}}" 2>/dev/null || true)"
+            timestamp="$(jq -r '.build_timestamp // empty' <<<"${response:-{}}" 2>/dev/null || true)"
+            echo "attempt=${attempt} build_sha=${actual:-missing} build_timestamp=${timestamp:-missing}"
+            if [[ "$actual" == "$EXPECTED_SHA" ]]; then
+              jq . <<<"$response"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Production frontend did not report expected SHA ${EXPECTED_SHA}." >&2
+          exit 1
+
+      - name: Verify public backend health
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --location --max-time 20 https://api.cred-x.in/health)"
+          echo "$response" | jq .
+          [[ "$(jq -r '.status // empty' <<<"$response")" == "ok" ]]
+
+      - name: Verify production checkout, source and services
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          EXPECTED_SHA: ${{ env.EXPECTED_SHA }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          envs: EXPECTED_SHA
+          timeout: 120s
+          command_timeout: 300s
+          script: |
+            set -euo pipefail
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            if [[ ! -d "$APP_ROOT/.git" && -d /srv/investor/.git ]]; then APP_ROOT=/srv/investor; fi
+            actual_sha="$(git -C "$APP_ROOT" rev-parse HEAD)"
+            echo "PRODUCTION_GIT_SHA=$actual_sha"
+            [[ "$actual_sha" == "$EXPECTED_SHA" ]]
+            grep -q 'stage2_actionable_contract_version' "$APP_ROOT/backend/app/domains/polymarket_auto_live/engine.py"
+            grep -q 'unresolved_positive_exposure_market_ids' "$APP_ROOT/backend/app/domains/polymarket_auto_live/order_intent_service.py"
+            grep -q 'authoritativeActionables' "$APP_ROOT/frontend/app/console/bullpen-ai/_components/bullpenStage2Actionables.ts"
+            for service in \
+              investor-backend \
+              investor-celery-worker \
+              investor-celery-auto-live-worker \
+              investor-celery-beat \
+              investor-celery-beat-worker \
+              investor-frontend \
+              nginx \
+              postgresql \
+              redis-server; do
+              state="$(systemctl is-active "$service" 2>/dev/null || true)"
+              echo "$service=$state"
+              [[ "$state" == "active" ]]
+            done
