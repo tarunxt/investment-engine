@@ -5,6 +5,9 @@ import traceback
 
 from sqlalchemy import func, select
 
+# Import the auth model before configuring polymarket relationships whose
+# SQLAlchemy registry resolves the string relationship target "User".
+from app.domains.auth.models import User  # noqa: F401
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
     PolymarketAutoLiveOrderIntentRecord,
