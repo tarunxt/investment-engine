@@ -62,7 +62,7 @@ jobs:
             echo '8c654132e270b055431a7c21e1495ff0cb223d317df2d7de317dfcb75f68917e  /tmp/stage2-authoritative-single-source.patch.gz.b64' | sha256sum -c -
             base64 -d /tmp/stage2-authoritative-single-source.patch.gz.b64 \
               > /tmp/stage2-authoritative-single-source.patch.gz
-            echo '3f5b82db5b07b0bdb84d7b008a0bd0137fd7f4c1ed401f2d44caa969e5158aa9  /tmp/stage2-authoritative-single-source.patch.gz' | sha256sum -c -
+            echo '84972db008a9b92d827c6f3b879f7c1c518cf2b7c1a70a92d3f59d236218ee59  /tmp/stage2-authoritative-single-source.patch.gz' | sha256sum -c -
             gzip -d -c /tmp/stage2-authoritative-single-source.patch.gz \
               > /tmp/stage2-authoritative-single-source.patch
             echo '354765f816c3d9e84033cbaa74ed95d54e43242e219102e47935be5a6a5e6910  /tmp/stage2-authoritative-single-source.patch' | sha256sum -c -
