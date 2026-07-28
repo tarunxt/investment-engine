@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout diagnostic branch
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Load production SSH key
         uses: webfactory/ssh-agent@v0.9.1
@@ -73,10 +75,25 @@ jobs:
           REMOTE
           wc -c stage3-latest-14-failures.txt
 
+      - name: Package current source
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output=stage3-latest-source.tar.gz HEAD
+          test -s stage3-latest-source.tar.gz
+
       - name: Upload production diagnostics
         uses: actions/upload-artifact@v7
         with:
           name: stage3-latest-14-failures
           path: stage3-latest-14-failures.txt
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Upload current source
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-latest-source
+          path: stage3-latest-source.tar.gz
+          compression-level: 0
           retention-days: 2
           if-no-files-found: error
