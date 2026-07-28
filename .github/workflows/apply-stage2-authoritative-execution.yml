@@ -41,31 +41,21 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Reassemble and apply Stage 2 authoritative source patch
+      - name: Decode and apply authoritative Stage 2 implementation
         id: apply_patch
         continue-on-error: true
         run: |
           set -o pipefail
           {
             set -euo pipefail
-            cat \
-              scripts/.stage2-patch.part00 \
-              scripts/.stage2-patch.part01 \
-              scripts/.stage2-patch.part02 \
-              scripts/.stage2-patch.part03 \
-              scripts/.stage2-patch.part04 \
-              scripts/.stage2-patch.part05 \
-              scripts/.stage2-patch.part06 \
-              scripts/.stage2-patch.part07 \
-              > /tmp/stage2-authoritative-single-source.patch.gz.b64
-            test "$(wc -c < /tmp/stage2-authoritative-single-source.patch.gz.b64)" -eq 21084
-            echo '8c654132e270b055431a7c21e1495ff0cb223d317df2d7de317dfcb75f68917e  /tmp/stage2-authoritative-single-source.patch.gz.b64' | sha256sum -c -
-            base64 -d /tmp/stage2-authoritative-single-source.patch.gz.b64 \
+            test "$(wc -c < scripts/.stage2-authoritative-single-source.patch.gz.b64)" -eq 24512
+            echo 'de9dbc790a2161d28b878bb3450572b9bc11c4c63e5aaa89b4c16cd8e0c73dd1  scripts/.stage2-authoritative-single-source.patch.gz.b64' | sha256sum -c -
+            base64 -d scripts/.stage2-authoritative-single-source.patch.gz.b64 \
               > /tmp/stage2-authoritative-single-source.patch.gz
-            echo '84972db008a9b92d827c6f3b879f7c1c518cf2b7c1a70a92d3f59d236218ee59  /tmp/stage2-authoritative-single-source.patch.gz' | sha256sum -c -
+            echo 'cfd1005e24946e0f67fd9c7837ad2fe6835abb2af96effafd69a4c8a72a16eb3  /tmp/stage2-authoritative-single-source.patch.gz' | sha256sum -c -
             gzip -d -c /tmp/stage2-authoritative-single-source.patch.gz \
               > /tmp/stage2-authoritative-single-source.patch
-            echo '354765f816c3d9e84033cbaa74ed95d54e43242e219102e47935be5a6a5e6910  /tmp/stage2-authoritative-single-source.patch' | sha256sum -c -
+            echo '83f0fb70946dd8ae498b25fd7c7a0ae7b7678b4de07eb23df03ea94ba706243e  /tmp/stage2-authoritative-single-source.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage2-authoritative-single-source.patch
             git apply --verbose /tmp/stage2-authoritative-single-source.patch
             git diff --check
@@ -127,12 +117,30 @@ jobs:
         run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
 
       - name: Run focused frontend regression suite
+        id: frontend_tests
+        continue-on-error: true
         working-directory: frontend
         run: |
-          node --test tests/bullpen-stage2-actionables.test.mjs
-          node --test tests/bullpen-auto-run-stage3-invest.test.mjs
-          node --test tests/bullpen-auto-run-progress.test.mjs
-          node --test tests/bullpen-auto-run-status.test.mjs
+          set -o pipefail
+          {
+            node --test tests/bullpen-stage2-actionables.test.mjs
+            node --test tests/bullpen-auto-run-stage3-invest.test.mjs
+            node --test tests/bullpen-auto-run-progress.test.mjs
+            node --test tests/bullpen-auto-run-status.test.mjs
+          } 2>&1 | tee /tmp/stage2-authoritative-frontend-tests.log
+
+      - name: Upload frontend regression diagnostics
+        if: steps.frontend_tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage2-authoritative-frontend-test-diagnostics
+          path: /tmp/stage2-authoritative-frontend-tests.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Stop after frontend regression failure
+        if: steps.frontend_tests.outcome == 'failure'
+        run: exit 1
 
       - name: Build production frontend
         working-directory: frontend
