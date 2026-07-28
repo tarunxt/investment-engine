@@ -5,6 +5,9 @@ from app.domains.polymarket_auto_live.engine import (
     _stage2_actionable_hold_position_keys,
 )
 from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveConsoleRunContext
+from app.domains.polymarket_auto_live.stage3_slots import (
+    unresolved_positive_exposure_market_ids,
+)
 
 
 class _Position:
@@ -48,6 +51,20 @@ def test_actionable_exit_handoff_holds_every_non_exit_position() -> None:
         "hold-2::NO",
     }
 
+
+def test_unresolved_positive_exposure_markets_remain_conservatively_occupied() -> None:
+    position = _Position("unresolved-1", "YES")
+    position.exposure_usd = 0.0
+    position.current_value_usd = 0.0
+    position.claimable_value_usd = None
+    position.expected_payout_usdc = None
+    position.shares = 1.0
+
+    assert unresolved_positive_exposure_market_ids(
+        [position],
+        dust_threshold_usd=0.01,
+    ) == {"unresolved-1"}
+
 def test_full_run_derives_exact_exit_and_buy_actionable_order() -> None:
     positions = [
         _Position("hold-1", "YES"),
@@ -72,6 +89,7 @@ def test_full_run_source_persists_actionables_and_stage3_queue_counts() -> None:
 
     source = Path(engine.__file__).read_text(encoding="utf-8")
 
+    assert '"stage2_actionable_contract_authoritative"' in source
     assert '"stage2_actionable_handoff_source"' in source
     assert '"stage2_actionable_exit_count"' in source
     assert '"stage2_actionable_buy_count"' in source
@@ -79,3 +97,4 @@ def test_full_run_source_persists_actionables_and_stage3_queue_counts() -> None:
     assert "initial_stage3_planned_exit_count" in source
     assert "initial_stage3_planned_buy_count" in source
     assert "async def recover_stage1_wallet_snapshot" in source
+    assert '"execution_policy": "conservative-occupied"' in source

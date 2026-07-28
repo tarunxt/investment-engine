@@ -96,6 +96,7 @@ from app.domains.polymarket_auto_live.stage3_slots import (
     auto_live_buy_balance_buffer_usd,
     classify_economic_slots,
     spendable_buy_cash_usd,
+    unresolved_positive_exposure_market_ids,
 )
 from app.domains.polymarket_auto_live.repository import (
     apply_decision_to_record,
@@ -4048,20 +4049,23 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
         ) = await enrich_console_wallet_positions_authoritatively(
             live_snapshot.raw_positions or live_snapshot.positions
         )
-        if buy_market_enrichment.get("unresolved_position_count"):
-            raise AutoLiveExecutorError(
-                code="POSITION_UNAVAILABLE",
-                message=(
-                    "Stage 3 buy pre-submit could not establish authoritative "
-                    "market identity and open/closed state for every wallet row; "
-                    "no external buy write was issued."
-                ),
-                retryable=True,
-            )
         allocation = classify_economic_slots(
             enriched_buy_positions,
             dust_threshold_usd=dust_threshold,
         )
+        unresolved_buy_market_ids = unresolved_positive_exposure_market_ids(
+            enriched_buy_positions,
+            dust_threshold_usd=dust_threshold,
+        )
+        conservative_occupied_market_ids = (
+            set(allocation.occupied_market_ids) | unresolved_buy_market_ids
+        )
+        unresolved_buy_positions = [
+            position
+            for position in enriched_buy_positions
+            if str(getattr(position, "market_id", "") or "").strip()
+            in unresolved_buy_market_ids
+        ]
         if any(
             _position_matches_intent(
                 position,
@@ -4070,7 +4074,7 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                 side=None,
                 slug=intent.slug,
             )
-            for position in allocation.active_positions
+            for position in [*allocation.active_positions, *unresolved_buy_positions]
         ):
             raise AutoLiveExecutorError(
                 code="PERMANENT_REJECTION",
@@ -4089,7 +4093,7 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                     condition_id=None,
                     side=None,
                 )
-                for position in allocation.active_positions
+                for position in [*allocation.active_positions, *unresolved_buy_positions]
             ):
                 raise AutoLiveExecutorError(
                     code="CAPACITY_BLOCKED",
@@ -4112,7 +4116,7 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             post_exit_sizing = _post_exit_replacement_sizing(
                 available_balance_usd=live_controls.balance.available_balance_usd,
                 economically_active_position_count=(
-                    allocation.economically_active_position_count
+                    len(conservative_occupied_market_ids)
                 ),
                 slot_limit=int(capacity_policy.get("slot_limit", 10) or 10),
                 min_order_usd=float(
@@ -4157,6 +4161,18 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                     **post_exit_sizing,
                 },
             }
+        intent.execution_metadata_json = {
+            **dict(intent.execution_metadata_json or {}),
+            "stage2_authoritative_capacity": {
+                "policy": "conservative-unresolved-occupancy",
+                "unresolved_occupied_market_ids": sorted(
+                    unresolved_buy_market_ids
+                ),
+                "economically_active_market_ids": sorted(
+                    conservative_occupied_market_ids
+                ),
+            },
+        }
         override_enabled = bool(capacity_policy.get("capacity_override", False))
         slot_limit = int(capacity_policy.get("slot_limit", 10) or 10)
         planned_capacity_override = bool(
@@ -4170,13 +4186,13 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                 override_enabled
                 and (
                     planned_capacity_override
-                    or allocation.economically_active_position_count >= slot_limit
+                    or len(conservative_occupied_market_ids) >= slot_limit
                 )
                 and not replacement_confirmed
             ),
         }
         if (
-            allocation.economically_active_position_count >= slot_limit
+            len(conservative_occupied_market_ids) >= slot_limit
             and not replacement_confirmed
             and not override_enabled
         ):
@@ -4184,7 +4200,7 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                 code="CAPACITY_BLOCKED",
                 message=(
                     "Stage 3 buy pre-submit found genuine economic capacity at "
-                    f"{allocation.economically_active_position_count}/{slot_limit}; "
+                    f"{len(conservative_occupied_market_ids)}/{slot_limit}; "
                     "the saved buy remains blocked until an exit is confirmed or the audited operator override is enabled."
                 ),
                 retryable=False,
@@ -4268,16 +4284,13 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
         ) = await enrich_console_wallet_positions_authoritatively(
             matching_positions
         )
-        if sell_market_enrichment.get("unresolved_position_count"):
-            raise AutoLiveExecutorError(
-                code="POSITION_UNAVAILABLE",
-                message=(
-                    "Stage 3 sell pre-submit could not establish the exact "
-                    "authoritative market identity and open/closed state; no "
-                    "external sell write was issued."
-                ),
-                retryable=True,
-            )
+        unresolved_sell_market_ids = unresolved_positive_exposure_market_ids(
+            matching_positions,
+            dust_threshold_usd=dust_threshold,
+        )
+        stage2_authoritative_unresolved_sell = bool(
+            unresolved_sell_market_ids
+        )
         if any(
             _position_requires_redeem(
                 position,
@@ -4294,11 +4307,28 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
                 ),
                 retryable=False,
             )
-        if any(_position_is_non_tradable(position) for position in matching_positions):
+        explicitly_non_tradable_positions = [
+            position
+            for position in matching_positions
+            if _position_is_non_tradable(position)
+            and not (
+                stage2_authoritative_unresolved_sell
+                and str(
+                    getattr(position, "classification", "") or ""
+                ).lower()
+                == "stale_or_unknown"
+                and float(getattr(position, "shares", 0.0) or 0.0) > 0
+                and str(
+                    getattr(position, "resolution_status", "") or ""
+                ).lower()
+                not in {"closed", "resolved", "redeemed", "settled", "finalized"}
+            )
+        ]
+        if explicitly_non_tradable_positions:
             classifications = sorted(
                 {
                     str(getattr(position, "classification", "unknown") or "unknown")
-                    for position in matching_positions
+                    for position in explicitly_non_tradable_positions
                 }
             )
             raise AutoLiveExecutorError(
@@ -4316,7 +4346,11 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
         )
         verified_positions = [
             position
-            for position in allocation.active_positions
+            for position in (
+                matching_positions
+                if stage2_authoritative_unresolved_sell
+                else allocation.active_positions
+            )
             if float(getattr(position, "shares", 0.0) or 0.0) > 0
         ]
         if not verified_positions:
@@ -4351,6 +4385,10 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             **actual_lineage,
             "lineage_comparison": wallet_lineage_comparison,
             "market_enrichment": sell_market_enrichment,
+            "stage2_authoritative_execution": True,
+            "unresolved_market_identity_accepted_for_risk_reducing_sell": (
+                stage2_authoritative_unresolved_sell
+            ),
             "classification": str(
                 getattr(verified_position, "classification", "active") or "active"
             ),
@@ -6827,40 +6865,38 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
                 snapshot_metadata["market_enrichment"] = (
                     post_exit_market_enrichment
                 )
-                if post_exit_market_enrichment.get("unresolved_position_count"):
-                    return IntentSubmissionResult(
-                        status="SETTLEMENT_PENDING",
-                        detail=(
-                            "Bullpen marked the Event Exit filled, but positive "
-                            "wallet exposure could not be authoritatively classified; "
-                            "the replacement slot remains occupied."
-                        ),
-                        retryable=True,
-                        next_attempt_at=_next_confirmation_attempt_at(intent),
-                        last_error_code="POSITION_UNAVAILABLE",
-                        raw_response={
-                            "post_exit_snapshot": snapshot_metadata,
-                        },
-                    )
                 allocation = classify_economic_slots(
                     enriched_post_exit_positions,
                     dust_threshold_usd=dust_threshold,
                 )
+                unresolved_post_exit_market_ids = (
+                    unresolved_positive_exposure_market_ids(
+                        enriched_post_exit_positions,
+                        dust_threshold_usd=dust_threshold,
+                    )
+                )
+                conservative_post_exit_market_ids = (
+                    set(allocation.occupied_market_ids)
+                    | unresolved_post_exit_market_ids
+                )
                 snapshot_metadata.update(
                     {
-                        "economically_active_position_count": (
-                            allocation.economically_active_position_count
+                        "execution_policy": "stage2-authoritative-conservative-occupancy",
+                        "unresolved_occupied_market_ids": sorted(
+                            unresolved_post_exit_market_ids
+                        ),
+                        "economically_active_position_count": len(
+                            conservative_post_exit_market_ids
                         ),
                         "excluded_position_records": (
                             allocation.excluded_position_records
                         ),
-                        "deduplicated_occupied_market_ids": (
-                            allocation.deduplicated_occupied_market_ids
+                        "deduplicated_occupied_market_ids": sorted(
+                            conservative_post_exit_market_ids
                         ),
                         "free_slots_after_refresh": max(
                             0,
-                            10
-                            - allocation.economically_active_position_count,
+                            10 - len(conservative_post_exit_market_ids),
                         ),
                     }
                 )
@@ -6890,10 +6926,17 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
                 active_position_ids = {
                     id(position) for position in allocation.active_positions
                 }
+                unresolved_position_ids = {
+                    id(position)
+                    for position in enriched_post_exit_positions
+                    if str(getattr(position, "market_id", "") or "").strip()
+                    in unresolved_post_exit_market_ids
+                }
                 remaining_positions = [
                     position
                     for position in matching_post_exit_positions
                     if id(position) in active_position_ids
+                    or id(position) in unresolved_position_ids
                     or _position_requires_redeem(
                         position,
                         dust_threshold_usd=dust_threshold,
@@ -7050,6 +7093,13 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
         wallet_positions,
         dust_threshold_usd=dust_threshold,
     )
+    unresolved_post_exit_market_ids = unresolved_positive_exposure_market_ids(
+        wallet_positions,
+        dust_threshold_usd=dust_threshold,
+    )
+    conservative_post_exit_market_ids = (
+        set(allocation.occupied_market_ids) | unresolved_post_exit_market_ids
+    )
     fallback_snapshot_metadata = _post_exit_snapshot_metadata(
         live_snapshot,
         dust_threshold_usd=dust_threshold,
@@ -7059,34 +7109,23 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
             "wallet_snapshot_lineage": post_exit_lineage,
             "wallet_lineage_comparison": post_exit_lineage_comparison,
             "market_enrichment": post_exit_market_enrichment,
-            "economically_active_position_count": (
-                allocation.economically_active_position_count
+            "execution_policy": "stage2-authoritative-conservative-occupancy",
+            "unresolved_occupied_market_ids": sorted(
+                unresolved_post_exit_market_ids
+            ),
+            "economically_active_position_count": len(
+                conservative_post_exit_market_ids
             ),
             "excluded_position_records": allocation.excluded_position_records,
-            "deduplicated_occupied_market_ids": (
-                allocation.deduplicated_occupied_market_ids
+            "deduplicated_occupied_market_ids": sorted(
+                conservative_post_exit_market_ids
             ),
             "free_slots_after_refresh": max(
                 0,
-                10 - allocation.economically_active_position_count,
+                10 - len(conservative_post_exit_market_ids),
             ),
         }
     )
-    if post_exit_market_enrichment.get("unresolved_position_count"):
-        return IntentSubmissionResult(
-            status="SETTLEMENT_PENDING",
-            detail=(
-                "The post-exit wallet still contains positive exposure that "
-                "could not be authoritatively classified; the replacement buy "
-                "remains blocked."
-            ),
-            retryable=True,
-            next_attempt_at=_next_confirmation_attempt_at(intent),
-            last_error_code="POSITION_UNAVAILABLE",
-            raw_response={
-                "post_exit_snapshot": fallback_snapshot_metadata,
-            },
-        )
 
     matching_positions = [
         position
@@ -7102,10 +7141,17 @@ async def _reconcile_intent_async(intent: BullpenAutoLiveOrderIntent) -> IntentS
     active_position_ids = {
         id(position) for position in allocation.active_positions
     }
+    unresolved_position_ids = {
+        id(position)
+        for position in wallet_positions
+        if str(getattr(position, "market_id", "") or "").strip()
+        in unresolved_post_exit_market_ids
+    }
     blocking_positions = [
         position
         for position in matching_positions
         if id(position) in active_position_ids
+        or id(position) in unresolved_position_ids
         or _position_requires_redeem(
             position,
             dust_threshold_usd=dust_threshold,

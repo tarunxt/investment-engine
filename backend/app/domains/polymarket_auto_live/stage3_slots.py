@@ -81,6 +81,50 @@ def economic_exposure_usd(position: ConsoleWalletPosition) -> float:
     return max(0.0, float(position.exposure_usd or 0.0))
 
 
+
+def unresolved_positive_exposure_market_ids(
+    positions: Iterable[ConsoleWalletPosition],
+    *,
+    dust_threshold_usd: float = 0.0,
+) -> set[str]:
+    """Return unresolved wallet markets that must still consume capacity.
+
+    A live Bullpen row can have positive shares/value while exact Gamma
+    enrichment cannot prove its open/closed state.  Such a row must not vanish
+    from capacity accounting, but an unrelated unresolved row must also not
+    block every Stage 2 order.
+    """
+
+    occupied: set[str] = set()
+    threshold = max(0.0, float(dust_threshold_usd))
+    for position in positions:
+        market_id = str(position.market_id or "").strip()
+        if not market_id:
+            continue
+        normalized_state = str(getattr(position, "classification", None) or "").strip().lower()
+        authoritative_state = str(
+            getattr(position, "authoritative_market_state", None) or ""
+        ).strip().lower()
+        unresolved = (
+            authoritative_state in {"", "unknown"}
+            and normalized_state
+            not in {"active", "open", "closed", "resolved_zero_payout", "fully_redeemed"}
+        ) or normalized_state in {"stale_or_unknown", "unknown", "unclassified"}
+        if not unresolved:
+            continue
+        if normalized_state in {"closed", "resolved_zero_payout", "fully_redeemed"}:
+            continue
+        has_positive_exposure = (
+            float(position.shares or 0.0) > 0
+            or economic_exposure_usd(position) > threshold
+            or float(getattr(position, "claimable_value_usd", None) or 0.0) > threshold
+            or float(getattr(position, "expected_payout_usdc", None) or 0.0) > threshold
+        )
+        if has_positive_exposure:
+            occupied.add(market_id)
+    return occupied
+
+
 def _position_record(
     position: ConsoleWalletPosition,
     *,

@@ -26,10 +26,16 @@ export type BullpenStage2ActionablesView = {
   hold: BullpenStage2ActionableItem[];
 };
 
+export type BullpenStage2AuthoritativeActionables = {
+  exitMarketIds: string[];
+  buyMarketIds: string[];
+};
+
 type BuildBullpenStage2ActionablesInput = {
   activePositions: BullpenAutoRunActivePositionView[];
   decisions: BullpenAutoLiveDecision[];
   selectedRows: BullpenQuestionRow[];
+  authoritativeActionables?: BullpenStage2AuthoritativeActionables | null;
 };
 
 function normalizeKey(value: string | null | undefined) {
@@ -203,17 +209,164 @@ function dedupeItems(items: BullpenStage2ActionableItem[]) {
   });
 }
 
+function normalizeAuthoritativeMarketIds(values: string[]) {
+  const seen = new Set<string>();
+  return values
+    .map((value) => value.trim())
+    .filter((value) => {
+      const key = normalizeKey(value);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildAuthoritativePlaceholderItem({
+  marketId,
+  reason,
+}: {
+  marketId: string;
+  reason: string;
+}): BullpenStage2ActionableItem {
+  return {
+    id: marketId,
+    marketId,
+    title: marketId,
+    marketUrl: null,
+    slug: null,
+    theme: null,
+    side: null,
+    reason,
+    rank: null,
+    currentExposureUsd: null,
+    targetExposureUsd: null,
+    llmYesOdds: null,
+    llmNoOdds: null,
+    returnsPerDay: null,
+  };
+}
+
+function buildAuthoritativeActionables({
+  activePositions,
+  decisions,
+  selectedRows,
+  authoritativeActionables,
+}: BuildBullpenStage2ActionablesInput & {
+  authoritativeActionables: BullpenStage2AuthoritativeActionables;
+}): BullpenStage2ActionablesView {
+  const liveActivePositions = activePositions.filter(isActivePosition);
+  const exitMarketIds = normalizeAuthoritativeMarketIds(
+    authoritativeActionables.exitMarketIds,
+  );
+  const buyMarketIds = normalizeAuthoritativeMarketIds(
+    authoritativeActionables.buyMarketIds,
+  );
+  const selectedEntries = selectedRows.map((row, index) => ({
+    row,
+    rank: index + 1,
+    keys: selectedRowKeys(row),
+  }));
+
+  const eventExits = exitMarketIds.map((marketId) => {
+    const authoritativeKeys = uniqueKeys([marketId]);
+    const position = liveActivePositions.find((candidate) =>
+      sharesAnyKey(authoritativeKeys, activePositionKeys(candidate)),
+    );
+    const decision = decisions.find((candidate) =>
+      sharesAnyKey(authoritativeKeys, decisionKeys(candidate)),
+    );
+    if (position) {
+      return buildActivePositionItem({
+        position,
+        decision,
+        rank: decision?.stage3_final_rank ?? null,
+        reason:
+          decision?.reason?.trim() ||
+          "Persisted by Stage 2 as an authoritative Event Exit actionable.",
+      });
+    }
+    if (decision) return buildDecisionItem(decision);
+    return buildAuthoritativePlaceholderItem({
+      marketId,
+      reason:
+        "Persisted by Stage 2 as an authoritative Event Exit actionable; display metadata is unavailable.",
+    });
+  });
+
+  const buyNew = buyMarketIds.map((marketId, index) => {
+    const authoritativeKeys = uniqueKeys([marketId]);
+    const selectedEntry = selectedEntries.find((entry) =>
+      sharesAnyKey(authoritativeKeys, entry.keys),
+    );
+    const decision = decisions.find((candidate) =>
+      sharesAnyKey(authoritativeKeys, decisionKeys(candidate)),
+    );
+    if (selectedEntry) {
+      return buildSelectedRowItem({
+        row: selectedEntry.row,
+        rank: index + 1,
+        decision,
+      });
+    }
+    if (decision) return buildDecisionItem(decision);
+    return buildAuthoritativePlaceholderItem({
+      marketId,
+      reason:
+        "Persisted by Stage 2 as an authoritative Buy actionable; display metadata is unavailable.",
+    });
+  });
+
+  const exitKeySet = new Set(
+    exitMarketIds
+      .map(normalizeKey)
+      .filter((key): key is string => key !== null),
+  );
+  const hold = liveActivePositions
+    .filter((position) =>
+      !activePositionKeys(position).some((key) => exitKeySet.has(key)),
+    )
+    .map((position) => {
+      const matchingDecision = findMatchingDecisions(
+        activePositionKeys(position),
+        decisions,
+      ).find((decision) => !isExitDecision(decision));
+      return buildActivePositionItem({
+        position,
+        decision: matchingDecision,
+        rank: matchingDecision?.stage3_final_rank ?? null,
+        reason:
+          matchingDecision?.reason?.trim() ||
+          "Not included in the authoritative Stage 2 Event Exit list.",
+      });
+    });
+
+  return {
+    eventExits,
+    buyNew,
+    hold: dedupeItems(hold),
+  };
+}
+
 /**
  * Build the post-LLM Stage 2 action summary without inventing new trading facts.
- * Explicit EXIT/BUY_NEW decisions take priority. When Stage 2 has a selected
- * portfolio, active positions omitted from it are displaced exits and selected
- * non-active rows are new buys. Every remaining active position is a hold.
+ * The persisted Stage 2 Exit/Buy contract is authoritative whenever present.
+ * Local inference is retained only for legacy historical runs that predate that
+ * contract. Every remaining active position is a hold.
  */
 export function buildBullpenStage2Actionables({
   activePositions,
   decisions,
   selectedRows,
+  authoritativeActionables = null,
 }: BuildBullpenStage2ActionablesInput): BullpenStage2ActionablesView {
+  if (authoritativeActionables) {
+    return buildAuthoritativeActionables({
+      activePositions,
+      decisions,
+      selectedRows,
+      authoritativeActionables,
+    });
+  }
   const liveActivePositions = activePositions.filter(isActivePosition);
   const selectedEntries = selectedRows.map((row, index) => ({
     row,

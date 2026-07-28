@@ -1368,6 +1368,65 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         for market_id in (stage_2.get("stage3_handoff_candidate_market_ids") or [])
         if str(market_id or "").strip()
     }
+    raw_actionable_contract = stage_2.get("actionable_contract")
+    actionable_contract = (
+        raw_actionable_contract
+        if isinstance(raw_actionable_contract, dict)
+        else {}
+    )
+    authoritative_actionables = bool(
+        actionable_contract.get("authoritative")
+    )
+    actionable_exit_market_ids = [
+        str(market_id)
+        for market_id in (actionable_contract.get("exit_market_ids") or [])
+        if str(market_id or "").strip()
+    ]
+    actionable_buy_market_ids = [
+        str(market_id)
+        for market_id in (actionable_contract.get("buy_market_ids") or [])
+        if str(market_id or "").strip()
+    ]
+    actionable_exit_market_id_set = set(actionable_exit_market_ids)
+    actionable_buy_market_id_set = set(actionable_buy_market_ids)
+    if authoritative_actionables:
+        expected_exit_count = len(actionable_exit_market_ids)
+        expected_buy_count = len(actionable_buy_market_ids)
+        if _int(actionable_contract.get("exit_count")) != expected_exit_count:
+            findings.append(
+                _finding(
+                    code="STAGE2_ACTIONABLE_EXIT_COUNT_MISMATCH",
+                    severity="high",
+                    stage="stage-2",
+                    category="handoff",
+                    title="Stage 2 Exit actionable count is inconsistent",
+                    explanation=(
+                        "The authoritative Stage 2 Exit count does not equal its "
+                        "persisted market-ID list."
+                    ),
+                    observed_value=str(actionable_contract.get("exit_count")),
+                    expected_value=str(expected_exit_count),
+                    evidence_pointers=["/stage_2/actionable_contract"],
+                )
+            )
+        if _int(actionable_contract.get("buy_count")) != expected_buy_count:
+            findings.append(
+                _finding(
+                    code="STAGE2_ACTIONABLE_BUY_COUNT_MISMATCH",
+                    severity="high",
+                    stage="stage-2",
+                    category="handoff",
+                    title="Stage 2 Buy actionable count is inconsistent",
+                    explanation=(
+                        "The authoritative Stage 2 Buy count does not equal its "
+                        "persisted market-ID list."
+                    ),
+                    observed_value=str(actionable_contract.get("buy_count")),
+                    expected_value=str(expected_buy_count),
+                    evidence_pointers=["/stage_2/actionable_contract"],
+                )
+            )
+
     raw_handoff_checkpoint = stage_3.get("handoff_checkpoint")
     handoff_checkpoint = (
         raw_handoff_checkpoint
@@ -1436,6 +1495,64 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                     evidence_pointers=["/stage_3/handoff_checkpoint"],
                 )
             )
+        if authoritative_actionables:
+            checkpoint_exit_market_ids = [
+                str(market_id)
+                for market_id in (
+                    handoff_checkpoint.get("actionable_exit_market_ids") or []
+                )
+                if str(market_id or "").strip()
+            ]
+            checkpoint_buy_market_ids = [
+                str(market_id)
+                for market_id in (
+                    handoff_checkpoint.get("actionable_buy_market_ids") or []
+                )
+                if str(market_id or "").strip()
+            ]
+            if checkpoint_exit_market_ids != actionable_exit_market_ids:
+                findings.append(
+                    _finding(
+                        code="STAGE2_EXIT_ACTIONABLE_CHECKPOINT_MISMATCH",
+                        severity="critical",
+                        stage="stage-3",
+                        category="handoff",
+                        title="Stage 3 changed the Stage 2 Exit actionable list",
+                        explanation=(
+                            "Stage 3 must consume the exact ordered Exit list "
+                            "persisted by Stage 2."
+                        ),
+                        observed_value=str(checkpoint_exit_market_ids),
+                        expected_value=str(actionable_exit_market_ids),
+                        blocking=True,
+                        evidence_pointers=[
+                            "/stage_2/actionable_contract/exit_market_ids",
+                            "/stage_3/handoff_checkpoint/actionable_exit_market_ids",
+                        ],
+                    )
+                )
+            if checkpoint_buy_market_ids != actionable_buy_market_ids:
+                findings.append(
+                    _finding(
+                        code="STAGE2_BUY_ACTIONABLE_CHECKPOINT_MISMATCH",
+                        severity="critical",
+                        stage="stage-3",
+                        category="handoff",
+                        title="Stage 3 changed the Stage 2 Buy actionable list",
+                        explanation=(
+                            "Stage 3 must consume the exact ordered Buy list "
+                            "persisted by Stage 2."
+                        ),
+                        observed_value=str(checkpoint_buy_market_ids),
+                        expected_value=str(actionable_buy_market_ids),
+                        blocking=True,
+                        evidence_pointers=[
+                            "/stage_2/actionable_contract/buy_market_ids",
+                            "/stage_3/handoff_checkpoint/actionable_buy_market_ids",
+                        ],
+                    )
+                )
+
         if (
             checkpoint_status == "received"
             and handoff_market_ids
@@ -1532,6 +1649,93 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
                 ],
             )
         )
+
+    if authoritative_actionables and not stage2_candidate_only:
+        execution_steps = (
+            stage_3.get("execution_steps")
+            if isinstance(stage_3.get("execution_steps"), list)
+            else []
+        )
+        sell_step = next(
+            (
+                step
+                for step in execution_steps
+                if isinstance(step, dict) and step.get("key") == "sell"
+            ),
+            {},
+        )
+        buy_step = next(
+            (
+                step
+                for step in execution_steps
+                if isinstance(step, dict) and step.get("key") == "buy"
+            ),
+            {},
+        )
+        if _int(sell_step.get("planned_orders")) != len(
+            actionable_exit_market_ids
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE2_EXIT_ACTIONABLES_NOT_RECORDED_AS_PLANNED",
+                    severity="critical",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 2 Exit actionables were not preserved in Planned",
+                    explanation=(
+                        "Stage 3 Step 1 Planned must equal the authoritative "
+                        "Stage 2 Exit list, irrespective of later execution state."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_2/actionable_contract/exit_market_ids",
+                        "/stage_3/execution_steps",
+                    ],
+                )
+            )
+        if _int(buy_step.get("planned_orders")) != len(
+            actionable_buy_market_ids
+        ):
+            findings.append(
+                _finding(
+                    code="STAGE2_BUY_ACTIONABLES_NOT_RECORDED_AS_PLANNED",
+                    severity="critical",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Stage 2 Buy actionables were not preserved in Planned",
+                    explanation=(
+                        "Stage 3 Step 2 Planned must equal the authoritative "
+                        "Stage 2 Buy list, irrespective of later execution state."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_2/actionable_contract/buy_market_ids",
+                        "/stage_3/execution_steps",
+                    ],
+                )
+            )
+        authoritative_market_ids = (
+            actionable_exit_market_id_set | actionable_buy_market_id_set
+        )
+        for market_id in sorted(authoritative_market_ids - stage3_market_ids):
+            findings.append(
+                _finding(
+                    code="STAGE2_ACTIONABLE_MISSING_STAGE3_DECISION",
+                    severity="critical",
+                    stage="stage-3",
+                    category="handoff",
+                    title="Authoritative Stage 2 actionable has no Stage 3 decision",
+                    explanation=(
+                        "Every persisted Stage 2 Exit or Buy actionable must create "
+                        "a Stage 3 decision and enter durable execution preflight."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_2/actionable_contract",
+                        "/stage_3/decisions",
+                    ],
+                )
+            )
 
     if not stage2_candidate_only:
         for market_id in sorted(qualified_market_ids - stage3_market_ids):
