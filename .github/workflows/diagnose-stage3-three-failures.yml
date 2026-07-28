@@ -1,9 +1,6 @@
 name: Diagnose Stage 3 three failures
 
 on:
-  push:
-    branches:
-      - codex/diagnose-stage3-three-failures
   pull_request:
 
 permissions:
@@ -11,54 +8,63 @@ permissions:
 
 jobs:
   diagnose:
-    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'codex/diagnose-stage3-three-failures'
+    if: github.event.pull_request.head.ref == 'codex/diagnose-stage3-three-failures'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Inspect production run and worker logs
-        id: inspect
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Load production SSH key
+        uses: webfactory/ssh-agent@v0.9.1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
-          timeout: 120s
-          command_timeout: 240s
-          capture_stdout: true
-          script: |
-            set -euo pipefail
-            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
-            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
-            [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
-            id "$APP_USER" >/dev/null 2>&1 || APP_USER=investor
-            INSPECTOR=/tmp/inspect-stage3-three-failures-${{ github.run_id }}.py
-            sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin codex/diagnose-stage3-three-failures
-            sudo -u "$APP_USER" -H git -C "$APP_ROOT" show FETCH_HEAD:scripts/inspect-stage3-three-failures.py > "$INSPECTOR"
-            echo '=== PRODUCTION RUN JSON ==='
-            sudo env APP_ROOT="$APP_ROOT" INSPECTOR="$INSPECTOR" bash -lc '
-              set -euo pipefail
-              set -a
-              source /etc/investor/backend.env
-              set +a
-              export PYTHONPATH="$APP_ROOT/backend"
-              cd "$APP_ROOT/backend"
-              "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
-            '
-            echo '=== RELEVANT WORKER LOGS ==='
-            sudo journalctl --no-pager --since '2026-07-28 15:20:00' --until '2026-07-28 15:40:00' \
-              -u investor-celery-auto-live-worker \
-              -u investor-celery-worker \
-              -u investor-backend \
-              | grep -E -i '211488a5-1233-4088-9118-21fe22ff074c|Stage 3|order intent|PERMANENT_REJECTION|CAPACITY_BLOCKED|POSITION_UNAVAILABLE|failed|error' \
-              | tail -n 500 || true
-            rm -f "$INSPECTOR"
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Save diagnostic output
+      - name: Verify production host key
         env:
-          DIAGNOSTIC_STDOUT: ${{ steps.inspect.outputs.stdout }}
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_FINGERPRINT: ${{ secrets.EC2_SSH_FINGERPRINT }}
         run: |
-          printf '%s\n' "$DIAGNOSTIC_STDOUT" > stage3-three-failures.txt
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          ssh-keyscan -T 20 -t ed25519,rsa "$SSH_HOST" > ~/.ssh/known_hosts
+          if [[ -n "${SSH_FINGERPRINT:-}" ]]; then
+            ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' > /tmp/host-fingerprints
+            grep -Fxq "$SSH_FINGERPRINT" /tmp/host-fingerprints
+          fi
+
+      - name: Capture production run and worker logs
+        env:
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_USER: ${{ secrets.EC2_USER }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'bash -s' > stage3-three-failures.txt <<'REMOTE'
+          set -euo pipefail
+          APP_ROOT=/srv/investment-engine
+          APP_USER=investment-engine
+          [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
+          id "$APP_USER" >/dev/null 2>&1 || APP_USER=investor
+          INSPECTOR=/tmp/inspect-stage3-three-failures.py
+          sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin codex/diagnose-stage3-three-failures
+          sudo -u "$APP_USER" -H git -C "$APP_ROOT" show FETCH_HEAD:scripts/inspect-stage3-three-failures.py > "$INSPECTOR"
+          echo '=== PRODUCTION RUN JSON ==='
+          sudo env APP_ROOT="$APP_ROOT" INSPECTOR="$INSPECTOR" bash -lc '
+            set -euo pipefail
+            set -a
+            source /etc/investor/backend.env
+            set +a
+            export PYTHONPATH="$APP_ROOT/backend"
+            cd "$APP_ROOT/backend"
+            "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
+          '
+          echo '=== RELEVANT WORKER LOGS ==='
+          sudo journalctl --no-pager --since '2026-07-28 15:20:00' --until '2026-07-28 15:40:00' \
+            -u investor-celery-auto-live-worker \
+            -u investor-celery-worker \
+            -u investor-backend \
+            | grep -E -i '211488a5-1233-4088-9118-21fe22ff074c|Stage 3|order intent|PERMANENT_REJECTION|CAPACITY_BLOCKED|POSITION_UNAVAILABLE|failed|error' \
+            | tail -n 500 || true
+          rm -f "$INSPECTOR"
+          REMOTE
           wc -c stage3-three-failures.txt
 
       - name: Upload diagnostic output
