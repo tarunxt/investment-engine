@@ -41,17 +41,23 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Decode and apply authoritative Stage 2 implementation
+      - name: Reassemble and apply authoritative Stage 2 implementation
         id: apply_patch
         continue-on-error: true
         run: |
           set -o pipefail
           {
             set -euo pipefail
-            tr -d '\r\n' < scripts/.stage2-authoritative-single-source.patch.gz.b64 \
+            cat \
+              scripts/.stage2-patch.part00 \
+              scripts/.stage2-patch.part01 \
+              scripts/.stage2-patch.part02 \
+              scripts/.stage2-patch.part03 \
+              scripts/.stage2-patch.part04 \
+              scripts/.stage2-patch.part05 \
+              scripts/.stage2-patch.part06 \
+              scripts/.stage2-patch.part07 \
               > /tmp/stage2-authoritative-single-source.patch.gz.b64
-            echo "encoded_bytes=$(wc -c < /tmp/stage2-authoritative-single-source.patch.gz.b64)"
-            sha256sum /tmp/stage2-authoritative-single-source.patch.gz.b64
             test "$(wc -c < /tmp/stage2-authoritative-single-source.patch.gz.b64)" -eq 24512
             echo 'de9dbc790a2161d28b878bb3450572b9bc11c4c63e5aaa89b4c16cd8e0c73dd1  /tmp/stage2-authoritative-single-source.patch.gz.b64' | sha256sum -c -
             base64 -d /tmp/stage2-authoritative-single-source.patch.gz.b64 \
