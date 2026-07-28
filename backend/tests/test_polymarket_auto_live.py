@@ -40,6 +40,9 @@ from app.domains.polymarket_auto_live.console_profile import (
     position_returns_per_day,
     read_console_wallet_positions,
 )
+from app.domains.polymarket_auto_live.console_projection import (
+    CONSOLE_PROJECTION_VERSION,
+)
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
     auto_live_backend_execution_env_detail,
@@ -353,7 +356,7 @@ async def test_dashboard_summary_is_projection_only_without_changing_legacy_summ
 
     assert dashboard_summary.latest_run == latest_run
     assert dashboard_summary.recent_runs == [latest_run]
-    assert dashboard_summary.projection_version == 1
+    assert dashboard_summary.projection_version == CONSOLE_PROJECTION_VERSION
     assert dashboard_summary.settings.console_llm_prompt_template is None
     assert dashboard_summary.sections["workflow"].source == (
         "postgresql_console_projection"
@@ -2634,7 +2637,7 @@ async def test_authoritative_wallet_enrichment_times_out_and_quarantines_unresol
 
 
 @pytest.mark.anyio
-async def test_unresolved_positive_wallet_rows_degrade_stage1_and_block_stage3(
+async def test_unresolved_positive_wallet_rows_keep_stage2_authoritative_and_plan_stage3(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
@@ -2772,17 +2775,33 @@ async def test_unresolved_positive_wallet_rows_degrade_stage1_and_block_stage3(
         if stage.outputs.get("workflow_stage_key") == "invest"
     )
 
-    assert result.run.status == "partial_success"
-    assert result.decisions == []
+    assert result.run.status == "completed"
+    assert len(result.decisions) == 1
+    assert result.decisions[0].decision == "BUY_NEW"
+    assert result.decisions[0].market_id == candidate_market.market_id
+    assert result.decisions[0].order_plan is not None
     assert stage1.outputs["wallet_snapshot_status"] == "degraded"
-    assert stage1.outputs["stage2_candidate_only"] is True
+    assert stage1.outputs["stage2_candidate_only"] is False
+    assert stage1.outputs["stage2_actionables_authoritative"] is True
     assert (
         stage1.outputs["unresolved_positive_exposure_position_count"]
         == 7
     )
     assert stage1.outputs["active_positions_found"] == []
     assert stage1.outputs["console_trade_occupied_positions"] == 7
-    assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+    assert stage3.outputs["stage2_actionable_contract_authoritative"] is True
+    assert stage3.outputs["stage2_actionable_buy_market_ids"] == [
+        candidate_market.market_id
+    ]
+    assert stage3.outputs["buy_queue_planned"] == 1
+    assert stage3.outputs["orders_planned"] == 1
+    assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is not True
+    assert (
+        stage3.outputs["stage3_slot_diagnostics"][
+            "unresolved_occupied_market_ids"
+        ]
+        == sorted(position.market_id for position in unresolved_positions)
+    )
     assert result.state.verified_portfolio_snapshot is not None
     assert (
         result.state.verified_portfolio_snapshot.run_id
@@ -4528,7 +4547,9 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
 
     assert executor_calls == ["sell_limit"]
     assert result.run.status == "failed"
-    assert result.run.orders_planned == 1
+    # The exact Stage 2 Exit + Buy contract remains Planned even when the
+    # first live sell is rejected and the dependent buy cannot be submitted.
+    assert result.run.orders_planned == 2
     assert result.run.orders_submitted == 0
     assert "Will the active position fail to exit first?" in result.run.summary
     assert "was not confirmed" in result.run.summary
@@ -7547,8 +7568,35 @@ async def test_console_profile_plans_formula_sized_top10_buys_and_exits_lower_ra
         decision.order_plan.status == "skipped"
         for decision in planned_buy_decisions
     )
+    stage2 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    stage3 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert stage2.outputs["stage2_actionable_exit_market_ids"] == [
+        active_low_slug
+    ]
+    assert stage2.outputs["stage2_actionable_buy_market_ids"] == [
+        decision.market_id for decision in buy_decisions
+    ]
+    assert stage3.outputs["stage2_actionable_exit_market_ids"] == [
+        active_low_slug
+    ]
+    assert stage3.outputs["stage2_actionable_buy_market_ids"] == [
+        decision.market_id for decision in buy_decisions
+    ]
+    execution_steps = {
+        step["key"]: step for step in stage3.outputs["execution_steps"]
+    }
+    assert execution_steps["sell"]["planned_orders"] == 1
+    assert execution_steps["buy"]["planned_orders"] == 9
     assert result.run.summary.startswith("Console schedule simulated")
-    assert result.run.orders_planned == 9
+    assert result.run.orders_planned == 10
     assert result.state.next_run_at == "2026-06-21T00:30:00+00:00"
 
 

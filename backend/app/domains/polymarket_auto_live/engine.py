@@ -121,6 +121,7 @@ from app.domains.polymarket_auto_live.stage3_slots import (
     auto_live_buy_balance_buffer_usd,
     classify_economic_slots,
     spendable_buy_cash_usd,
+    unresolved_positive_exposure_market_ids,
 )
 from app.domains.polymarket_auto_live.rpc_retry import (
     compute_rpc_retry_delay_seconds,
@@ -6211,15 +6212,13 @@ class BullpenAutoLiveEngine:
                 "position row(s) whose exact market identity and open/closed "
                 "state could not be verified authoritatively."
             )
-            stage1_wallet_refresh_error = stage1_wallet_enrichment_error
             stage1_scan_status = "warning"
             stage1_scan_reason = (
-                f"{stage1_wallet_enrichment_error} Stage 2 will remain "
-                "candidate-only and Stage 3 is blocked, so no buys or sells "
-                "can be planned from an incomplete portfolio."
+                f"{stage1_wallet_enrichment_error} Stage 2 remains the authoritative "
+                "source of Exit and Buy actionables. Unresolved positive-exposure "
+                "rows remain conservatively occupied while Stage 3 transfers the "
+                "exact Stage 2 contract through fresh live execution preflight."
             )
-            _cancel_background_task(console_balance_task)
-            console_balance_task = None
         for position in live_wallet_positions:
             if (
                 position.slug in market_by_slug
@@ -6386,11 +6385,12 @@ class BullpenAutoLiveEngine:
             historical_decisions,
             bullpen_wallet_positions,
         )
-        conservatively_occupied_market_ids = {
-            position.market_id
-            for position in unresolved_positive_exposure_positions
-            if position.market_id
-        }
+        conservatively_occupied_market_ids = (
+            unresolved_positive_exposure_market_ids(
+                unresolved_positive_exposure_positions,
+                dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
+            )
+        )
         active_position_market_count = len(
             {
                 position.market_id
@@ -6572,6 +6572,15 @@ class BullpenAutoLiveEngine:
             "live_wallet_positions": len(enriched_wallet_positions),
             "wallet_market_enrichment": stage1_market_enrichment_diagnostics,
             "wallet_market_enrichment_error": (
+                stage1_wallet_enrichment_error
+            ),
+            "wallet_market_enrichment_degraded": bool(
+                stage1_wallet_enrichment_error
+            ),
+            "stage2_actionables_authoritative": not bool(
+                stage1_wallet_snapshot_was_unavailable
+            ),
+            "stage3_execution_uses_conservative_occupancy": bool(
                 stage1_wallet_enrichment_error
             ),
             "unresolved_positive_exposure_position_count": len(
@@ -8264,6 +8273,16 @@ class BullpenAutoLiveEngine:
             )
 
         stage2_actionable_outputs: dict[str, object] = {
+            "stage2_actionable_contract_version": 2,
+            "stage2_actionable_contract_authoritative": (
+                stage2_actionable_handoff_used
+            ),
+            "stage2_actionable_contract_execution_mode": (
+                "durable-live-preflight"
+            ),
+            "stage2_actionable_wallet_enrichment_degraded": bool(
+                stage1_wallet_enrichment_error
+            ),
             "stage2_actionable_handoff_used": stage2_actionable_handoff_used,
             "stage2_actionable_handoff_source": stage2_actionable_handoff_source,
             "stage2_actionable_exit_market_ids": list(
@@ -8292,6 +8311,9 @@ class BullpenAutoLiveEngine:
             accepted_stage2_actionable_buy_market_id_order
             if stage2_actionable_handoff_used
             else ranking_top_candidate_market_id_order
+        )
+        authoritative_stage2_exit_market_ids = set(
+            accepted_stage2_actionable_exit_market_id_order
         )
         top_rows = ranking_top_rows
         top_active_keys = ranking_top_active_keys
@@ -8368,6 +8390,14 @@ class BullpenAutoLiveEngine:
             "candidate_count": len(ranking_top_candidate_market_id_order),
             "actionable_handoff_used": stage2_actionable_handoff_used,
             "actionable_handoff_source": stage2_actionable_handoff_source,
+            "actionable_contract_version": 2,
+            "actionable_contract_authoritative": (
+                stage2_actionable_handoff_used
+            ),
+            "actionable_contract_execution_mode": "durable-live-preflight",
+            "wallet_enrichment_degraded": bool(
+                stage1_wallet_enrichment_error
+            ),
             "actionable_exit_market_ids": list(
                 accepted_stage2_actionable_exit_market_id_order
             ),
@@ -8460,8 +8490,10 @@ class BullpenAutoLiveEngine:
                         ranking_top_candidate_market_id_order
                     ),
                     "top_active_keys": sorted(ranking_top_active_keys),
+                    **stage2_actionable_outputs,
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
+                    "blocked_by_stage1_wallet_refresh": False,
                     "active_position_rows": len(position_snapshots),
                     "candidate_decision_rows": len(candidate_contexts),
                     "decisions_count": 0,
@@ -8491,17 +8523,30 @@ class BullpenAutoLiveEngine:
             active_bullpen_wallet_positions,
             dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
         )
+        initial_conservative_occupied_market_ids = (
+            set(initial_slot_allocation.occupied_market_ids)
+            | conservatively_occupied_market_ids
+        )
         stage3_slot_diagnostics: dict[str, object] = {
             "slot_limit": CONSOLE_RANKED_EVENT_LIMIT,
-            "occupied_slots_before_exit": initial_slot_allocation.economically_active_position_count,
+            "occupied_slots_before_exit": len(
+                initial_conservative_occupied_market_ids
+            ),
             "planned_exit_market_ids": [],
             "exit_order_ids_and_statuses": [],
             "post_exit_snapshot_source": None,
             "post_exit_snapshot_fetched_at": None,
             "raw_position_count": initial_slot_allocation.raw_position_count,
-            "economically_active_position_count": initial_slot_allocation.economically_active_position_count,
+            "economically_active_position_count": len(
+                initial_conservative_occupied_market_ids
+            ),
             "excluded_position_records": initial_slot_allocation.excluded_position_records,
-            "deduplicated_occupied_market_ids": initial_slot_allocation.deduplicated_occupied_market_ids,
+            "deduplicated_occupied_market_ids": sorted(
+                initial_conservative_occupied_market_ids
+            ),
+            "unresolved_occupied_market_ids": sorted(
+                conservatively_occupied_market_ids
+            ),
             "available_cash_before_exit_usd": None,
             "available_cash_after_refresh_usd": None,
             "free_slots_after_refresh": None,
@@ -8812,8 +8857,10 @@ class BullpenAutoLiveEngine:
                     ranked_post_exit_candidate_market_id_order
                 ),
                 "top_active_keys": sorted(top_active_keys),
+                **stage2_actionable_outputs,
                 **stage2_universe_status,
                 **stage2_strategy_metadata,
+                "blocked_by_stage1_wallet_refresh": False,
                 "active_position_rows": len(position_snapshots),
                 "candidate_decision_rows": len(candidate_contexts),
                 "decisions_count": len(decisions),
@@ -9333,6 +9380,85 @@ class BullpenAutoLiveEngine:
                 }
             )
 
+        # Finalize the sole Stage 2 selection contract only after Event Exit
+        # evaluation. Ranking-displaced positions and independent safety exits
+        # must both be represented in the saved Stage 2 Exit list; otherwise
+        # Stage 3 would either invent a sell or silently discard a required
+        # safety exit. Manual Stage 3 retries retain the exact saved contract.
+        if stage2_actionable_handoff_used:
+            if not manual_stage2_actionable_handoff_used:
+                provisional_exit_market_ids = set(
+                    accepted_stage2_actionable_exit_market_id_order
+                )
+                finalized_exit_market_ids: list[str] = []
+                seen_finalized_exit_market_ids: set[str] = set()
+                for entry in evaluated_active_positions:
+                    wallet_position = entry.get("position")
+                    current_position = entry.get("current_position")
+                    market_id = str(
+                        getattr(wallet_position, "market_id", None) or ""
+                    ).strip()
+                    if not market_id or market_id in seen_finalized_exit_market_ids:
+                        continue
+                    safety_exit_planned = (
+                        isinstance(current_position, PositionSnapshot)
+                        and current_position.exit_state
+                        in {"EVENT_EXIT_PLANNED", "DUST_LOST"}
+                    )
+                    if (
+                        market_id not in provisional_exit_market_ids
+                        and not safety_exit_planned
+                    ):
+                        continue
+                    seen_finalized_exit_market_ids.add(market_id)
+                    finalized_exit_market_ids.append(market_id)
+                accepted_stage2_actionable_exit_market_id_order = (
+                    finalized_exit_market_ids
+                )
+
+            authoritative_stage2_exit_market_ids = set(
+                accepted_stage2_actionable_exit_market_id_order
+            )
+            for entry in evaluated_active_positions:
+                wallet_position = entry.get("position")
+                current_position = entry.get("current_position")
+                if not isinstance(current_position, PositionSnapshot):
+                    continue
+                market_id = str(
+                    getattr(wallet_position, "market_id", None) or ""
+                ).strip()
+                if market_id in authoritative_stage2_exit_market_ids:
+                    if current_position.exit_state not in {
+                        "EVENT_EXIT_PLANNED",
+                        "DUST_LOST",
+                    }:
+                        current_position.exit_signals.append(
+                            ExitSignal(
+                                strategy="OUTSIDE_TOP_10_RETURNS_DAY",
+                                severity="PLANNED_EXIT",
+                                reasonCode="OUTSIDE_TOP_10_BY_RETURNS_DAY",
+                                label="Stage 2 authoritative Event Exit",
+                                description=(
+                                    "Stage 2 persisted this position in its exact "
+                                    "Exit actionable contract. Stage 3 must plan and "
+                                    "execute this sell before processing the saved Buy list."
+                                ),
+                                score=100,
+                                createdAt=utc_now_iso(),
+                            )
+                        )
+                        current_position.exit_state = "EVENT_EXIT_PLANNED"
+                    continue
+                if (
+                    manual_stage2_actionable_handoff_used
+                    and current_position.exit_state
+                    in {"EVENT_EXIT_PLANNED", "DUST_LOST"}
+                ):
+                    # A retry must execute the exact saved Stage 2 contract and
+                    # cannot append a newly evaluated sell to that immutable list.
+                    current_position.exit_signals = []
+                    current_position.exit_state = "ACTIVE"
+
         investable_active_rank_rows = [
             {
                 "kind": "active",
@@ -9371,44 +9497,212 @@ class BullpenAutoLiveEngine:
             if row["kind"] == "candidate"
         ]
         # Event Exit evaluation can remove a previously top-ranked active row
-        # and promote a candidate into the investable Top 10.  From this point
-        # onward Stage 3 must use that recomputed order for affordability,
-        # dependency pairing, final ranks, and queue/UI counters.  Retaining
-        # the pre-exit handoff order made promoted candidates fall back to
-        # market-id sorting and disappear from the Step 2 counters.
-        if stage2_actionable_handoff_used:
+        # and promote a candidate into the investable Top 10. The finalized
+        # post-exit ranking is therefore the authoritative Stage 2 Buy list for
+        # normal full runs. A Stage 3 retry keeps the exact previously saved
+        # list, but rank metadata for non-selected rows is still preserved.
+        candidate_final_rank_by_market_id = {
+            str(row["market_id"]): index
+            for index, row in enumerate(post_exit_rank_rows, start=1)
+            if row["kind"] == "candidate"
+        }
+        if manual_stage2_actionable_handoff_used:
             ranked_post_exit_candidate_market_id_order = list(
                 accepted_stage2_actionable_buy_market_id_order
             )
             ranked_post_exit_candidate_market_ids = set(
                 accepted_stage2_actionable_buy_market_id_order
             )
-            candidate_final_rank_by_market_id = {
-                market_id: index
-                for index, market_id in enumerate(
-                    accepted_stage2_actionable_buy_market_id_order,
-                    start=1,
-                )
-            }
-        else:
-            candidate_final_rank_by_market_id = {
-                str(row["market_id"]): index
-                for index, row in enumerate(post_exit_rank_rows, start=1)
-                if row["kind"] == "candidate"
-            }
+            candidate_final_rank_by_market_id.update(
+                {
+                    market_id: index
+                    for index, market_id in enumerate(
+                        accepted_stage2_actionable_buy_market_id_order,
+                        start=1,
+                    )
+                }
+            )
+        elif stage2_universe_complete:
+            accepted_stage2_actionable_buy_market_id_order = list(
+                ranked_post_exit_candidate_market_id_order
+            )
+            stage2_actionable_handoff_source = (
+                "backend-stage2-finalized-ranking"
+            )
+
         ranking_top_candidate_market_ids = set(
-            ranked_post_exit_candidate_market_ids
+            accepted_stage2_actionable_buy_market_id_order
+            if stage2_actionable_handoff_used
+            else ranked_post_exit_candidate_market_ids
         )
         ranking_top_candidate_market_id_order = list(
-            ranked_post_exit_candidate_market_id_order
+            accepted_stage2_actionable_buy_market_id_order
+            if stage2_actionable_handoff_used
+            else ranked_post_exit_candidate_market_id_order
+        )
+        ranked_post_exit_candidate_market_ids = set(
+            ranking_top_candidate_market_ids
+        )
+        ranked_post_exit_candidate_market_id_order = list(
+            ranking_top_candidate_market_id_order
         )
         stage3_buy_queue_market_ids = set(
-            ranked_post_exit_candidate_market_ids
+            ranking_top_candidate_market_ids
         )
-        top_candidate_market_ids = ranked_post_exit_candidate_market_ids
+        top_candidate_market_ids = set(ranking_top_candidate_market_ids)
         run.diagnostics.top_candidate_market_ids = list(
-            ranked_post_exit_candidate_market_id_order
+            ranking_top_candidate_market_id_order
         )
+
+        # Persist the finalized Stage 2 contract back into every consumer. This
+        # occurs before the first Stage 3 decision/order is created, so Planned
+        # can never be reduced to zero by later cash, quote, capacity, or wallet
+        # checks. Those checks may change row status, not the selected markets.
+        stage2_actionable_outputs.update(
+            {
+                "stage2_actionable_handoff_source": (
+                    stage2_actionable_handoff_source
+                ),
+                "stage2_actionable_exit_market_ids": list(
+                    accepted_stage2_actionable_exit_market_id_order
+                ),
+                "stage2_actionable_buy_market_ids": list(
+                    accepted_stage2_actionable_buy_market_id_order
+                ),
+                "stage2_actionable_exit_count": len(
+                    accepted_stage2_actionable_exit_market_id_order
+                ),
+                "stage2_actionable_buy_count": len(
+                    accepted_stage2_actionable_buy_market_id_order
+                ),
+            }
+        )
+        finalized_stage2_ranking_outputs: dict[str, object] = {
+            **stage2_actionable_outputs,
+            "top_candidate_market_ids": list(
+                ranking_top_candidate_market_id_order
+            ),
+            "ranked_top_candidate_market_ids": list(
+                ranking_top_candidate_market_id_order
+            ),
+            "ranking_top_candidate_market_id_order": list(
+                ranking_top_candidate_market_id_order
+            ),
+            "top_active_keys": sorted(top_active_keys),
+        }
+        _merge_workflow_stage_outputs(
+            run,
+            "llm",
+            finalized_stage2_ranking_outputs,
+        )
+        for stage_result in run.stage_results:
+            if (
+                stage_result.stage_number == 6
+                and "stage2_actionable_contract_version"
+                in stage_result.outputs
+            ):
+                stage_result.outputs.update(
+                    finalized_stage2_ranking_outputs
+                )
+
+        stage2_handoff_checkpoint.update(
+            {
+                "candidate_market_ids": list(
+                    ranking_top_candidate_market_id_order
+                ),
+                "candidate_count": len(
+                    ranking_top_candidate_market_id_order
+                ),
+                "actionable_handoff_source": (
+                    stage2_actionable_handoff_source
+                ),
+                "actionable_exit_market_ids": list(
+                    accepted_stage2_actionable_exit_market_id_order
+                ),
+                "actionable_buy_market_ids": list(
+                    accepted_stage2_actionable_buy_market_id_order
+                ),
+            }
+        )
+        finalized_stage3_planned_exit_count = len(
+            accepted_stage2_actionable_exit_market_id_order
+        )
+        finalized_stage3_planned_buy_count = len(
+            accepted_stage2_actionable_buy_market_id_order
+        )
+        finalized_stage3_execution_steps = [
+            {
+                "key": "sell",
+                "step_number": 1,
+                "step_total": 2,
+                "label": "Event Exits",
+                "status": (
+                    "pending"
+                    if finalized_stage3_planned_exit_count > 0
+                    else "completed"
+                ),
+                "detail": (
+                    f"{finalized_stage3_planned_exit_count} exact Stage 2 Exit "
+                    "actionable(s) are in the Stage 3 Planned list."
+                    if finalized_stage3_planned_exit_count > 0
+                    else "No Stage 2 Exit actionables were transferred."
+                ),
+                "planned_orders": finalized_stage3_planned_exit_count,
+                "processed_orders": 0,
+                "submitted_orders": 0,
+                "event_exit_rows": finalized_stage3_planned_exit_count,
+                "ranking_llm_planned_orders": (
+                    finalized_stage3_planned_exit_count
+                ),
+                "forced_exit_planned_orders": 0,
+                "redeem_planned_orders": 0,
+                "redeem_processed_orders": 0,
+                "redeem_submitted_orders": 0,
+            },
+            {
+                "key": "buy",
+                "step_number": 2,
+                "step_total": 2,
+                "label": "Invest planned orders",
+                "status": (
+                    "pending"
+                    if finalized_stage3_planned_buy_count > 0
+                    else "completed"
+                ),
+                "detail": (
+                    f"{finalized_stage3_planned_buy_count} exact Stage 2 Buy "
+                    "actionable(s) are in the Stage 3 Planned list; executable "
+                    "sizing follows Step 1."
+                    if finalized_stage3_planned_buy_count > 0
+                    else "No Stage 2 Buy actionables were transferred."
+                ),
+                "planned_orders": finalized_stage3_planned_buy_count,
+                "processed_orders": 0,
+                "submitted_orders": 0,
+            },
+        ]
+        _merge_workflow_stage_outputs(
+            run,
+            "invest",
+            {
+                **finalized_stage2_ranking_outputs,
+                "blocked_by_stage1_wallet_refresh": False,
+                "orders_planned": (
+                    finalized_stage3_planned_exit_count
+                    + finalized_stage3_planned_buy_count
+                ),
+                "orders_processed": 0,
+                "orders_submitted": 0,
+                "event_exit_rows": finalized_stage3_planned_exit_count,
+                "event_exit_planned": finalized_stage3_planned_exit_count,
+                "sell_orders_planned": finalized_stage3_planned_exit_count,
+                "buy_queue_planned": finalized_stage3_planned_buy_count,
+                "buy_orders_planned": finalized_stage3_planned_buy_count,
+                "execution_steps": finalized_stage3_execution_steps,
+                "stage2_handoff_checkpoint": stage2_handoff_checkpoint,
+            },
+        )
+        self._report_progress(progress_callback, run, state)
 
         report_invest_stage_progress(
             phase_status="running",
@@ -9540,6 +9834,15 @@ class BullpenAutoLiveEngine:
                 continue
             if not isinstance(stage_results, list):
                 stage_results = []
+            is_authoritative_stage2_exit = bool(
+                stage2_actionable_handoff_used
+                and position.market_id in authoritative_stage2_exit_market_ids
+            )
+            authoritative_exit_order_usd = max(
+                0.0,
+                float(position.current_value_usd or 0.0),
+                float(position.exposure_usd or 0.0),
+            )
 
             if (
                 isinstance(current_position, PositionSnapshot)
@@ -9566,15 +9869,25 @@ class BullpenAutoLiveEngine:
                         shares=current_position.shares,
                         held_best_bid=held_best_bid,
                     )
-                actionable_exit = (
-                    estimated_freeable_value_usd is not None
-                    and estimated_freeable_value_usd >= DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+                actionable_exit = bool(
+                    (is_authoritative_stage2_exit and position.shares > 0)
+                    or (
+                        estimated_freeable_value_usd is not None
+                        and estimated_freeable_value_usd
+                        >= DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+                    )
                 )
                 reason = (
                     "Position was already in Event Exits and will be processed before new investments."
                 )
                 if exit_signals:
                     reason = f"{_event_exit_reason(exit_signals, reason)}. {reason}"
+                if is_authoritative_stage2_exit:
+                    reason = (
+                        f"{reason.rstrip('.')} Stage 2 is the sole action authority; "
+                        "the durable executor will refresh the live wallet and submit "
+                        "the sell using the guarded marketable limit fallback."
+                    )
                 if not actionable_exit:
                     reason = (
                         f"{reason.rstrip('.')} It has no meaningful executable bid right now, so it "
@@ -9603,7 +9916,10 @@ class BullpenAutoLiveEngine:
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
                         target_exposure_usd=0,
-                        order_usd=estimated_freeable_value_usd or 0,
+                        order_usd=(
+                            estimated_freeable_value_usd
+                            or authoritative_exit_order_usd
+                        ),
                         order_shares=position.shares,
                         llm_outputs=llm_outputs,
                         llm_consensus=llm_consensus,
@@ -9643,9 +9959,13 @@ class BullpenAutoLiveEngine:
             exit_labels = [signal.label for signal in exit_signals]
             exit_reason_codes = [signal.reasonCode for signal in exit_signals]
             estimated_freeable_value_usd = current_position.estimated_freeable_value_usd
-            actionable_exit = (
-                estimated_freeable_value_usd is not None
-                and estimated_freeable_value_usd >= DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+            actionable_exit = bool(
+                (is_authoritative_stage2_exit and position.shares > 0)
+                or (
+                    estimated_freeable_value_usd is not None
+                    and estimated_freeable_value_usd
+                    >= DEFAULT_FORCED_EXIT_CONFIG.min_net_proceeds
+                )
             )
 
             if current_position.exit_state == "DUST_LOST":
@@ -9695,6 +10015,12 @@ class BullpenAutoLiveEngine:
                 )
                 if exit_signals:
                     reason = f"{_event_exit_reason(exit_signals, reason)}. {reason}"
+                if is_authoritative_stage2_exit:
+                    reason = (
+                        f"{reason.rstrip('.')} Stage 2 is the sole action authority; "
+                        "the durable executor will refresh the live wallet and submit "
+                        "the sell using the guarded marketable limit fallback."
+                    )
                 if not actionable_exit:
                     reason = (
                         f"{reason.rstrip('.')} It has no meaningful executable bid right now, so it "
@@ -9723,7 +10049,10 @@ class BullpenAutoLiveEngine:
                         current_position=current_position,
                         current_exposure_usd=position.exposure_usd,
                         target_exposure_usd=0,
-                        order_usd=estimated_freeable_value_usd or 0,
+                        order_usd=(
+                            estimated_freeable_value_usd
+                            or authoritative_exit_order_usd
+                        ),
                         order_shares=position.shares,
                         llm_outputs=llm_outputs,
                         llm_consensus=llm_consensus,
@@ -10102,7 +10431,7 @@ class BullpenAutoLiveEngine:
             )
         ]
         initial_occupied_market_ids = set(
-            initial_slot_allocation.occupied_market_ids
+            initial_conservative_occupied_market_ids
         )
         initial_position_count_by_market_id: dict[str, int] = {}
         for initial_position in initial_slot_allocation.active_positions:
@@ -10503,9 +10832,16 @@ class BullpenAutoLiveEngine:
                     position.market_id
                     for position in position_snapshots
                     if position.exposure_usd > settings.bullpen_economic_dust_threshold_usd
-                }
+                } | conservatively_occupied_market_ids
                 economically_active_position_count = len(visible_active_market_ids)
                 deduplicated_occupied_market_ids = sorted(visible_active_market_ids)
+                if conservatively_occupied_market_ids:
+                    snapshot_market_enrichment = {
+                        "execution_policy": "conservative-occupied",
+                        "unresolved_occupied_market_ids": sorted(
+                            conservatively_occupied_market_ids
+                        ),
+                    }
             else:
                 refresh_requested_at = datetime.now(UTC)
                 live_snapshot = await _read_stage3_live_positions_snapshot()
@@ -10545,23 +10881,48 @@ class BullpenAutoLiveEngine:
                     market_by_slug=market_by_slug,
                     market_by_id=market_by_id,
                 )
-                if snapshot_market_enrichment.get(
-                    "unresolved_position_count"
-                ):
-                    raise RuntimeError(
-                        "post-exit Bullpen positions refresh could not establish "
-                        "authoritative market identity and open/closed state for "
-                        "every wallet row"
+                unresolved_stage3_positions = [
+                    position
+                    for position in enriched_stage3_positions
+                    if position.authoritative_market_state == "unknown"
+                ]
+                unresolved_stage3_occupied_market_ids = (
+                    unresolved_positive_exposure_market_ids(
+                        unresolved_stage3_positions,
+                        dust_threshold_usd=(
+                            settings.bullpen_economic_dust_threshold_usd
+                        ),
                     )
+                )
                 allocation = classify_economic_slots(
                     enriched_stage3_positions,
                     dust_threshold_usd=settings.bullpen_economic_dust_threshold_usd,
                 )
-                visible_active_market_ids = set(allocation.occupied_market_ids)
+                visible_active_market_ids = (
+                    set(allocation.occupied_market_ids)
+                    | unresolved_stage3_occupied_market_ids
+                )
+                if unresolved_stage3_occupied_market_ids:
+                    snapshot_market_enrichment = {
+                        **snapshot_market_enrichment,
+                        "execution_policy": "conservative-occupied",
+                        "unresolved_occupied_market_ids": sorted(
+                            unresolved_stage3_occupied_market_ids
+                        ),
+                        "execution_warning": (
+                            "Unresolved positive-exposure wallet rows were retained "
+                            "as occupied slots; the exact Stage 2 Buy list remained "
+                            "authoritative."
+                        ),
+                    }
                 raw_position_count = live_snapshot.raw_position_count
-                economically_active_position_count = allocation.economically_active_position_count
+                economically_active_position_count = len(
+                    visible_active_market_ids
+                )
                 excluded_position_records = allocation.excluded_position_records
-                deduplicated_occupied_market_ids = allocation.deduplicated_occupied_market_ids
+                deduplicated_occupied_market_ids = sorted(
+                    visible_active_market_ids
+                )
 
             stage3_slot_diagnostics.update(
                 {
@@ -12421,8 +12782,10 @@ class BullpenAutoLiveEngine:
                         ranked_post_exit_candidate_market_id_order
                     ),
                     "top_active_keys": sorted(top_active_keys),
+                    **stage2_actionable_outputs,
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
+                    "blocked_by_stage1_wallet_refresh": False,
                     "active_position_rows": active_position_rows_before_llm,
                     "claimable_position_rows": len(claimable_wallet_positions),
                     "candidate_decision_rows": len(candidate_contexts),
@@ -12491,6 +12854,7 @@ class BullpenAutoLiveEngine:
                     "decision_rows": [
                         _serialize_stage3_decision_row(decision) for decision in decisions
                     ],
+                    "stage2_handoff_checkpoint": stage2_handoff_checkpoint,
                     "execution_gate_reason": execution_pause_reason,
                     "execution_failure_message": execution_issue_summary,
                     "execution_mode_reason": simulation_reason if state.dry_run else None,

@@ -2427,6 +2427,73 @@ def test_build_bundle_captures_stage2_universe_status_and_blocker_details():
     }
 
 
+def test_degraded_wallet_keeps_authoritative_stage2_actionables_in_stage3_planned():
+    bundle = {
+        "metadata": {"run_id": "run-degraded-authoritative-actionables"},
+        "overview": {
+            "run_status": "completed",
+            "started_at": "2026-07-28T04:00:00+00:00",
+            "completed_at": "2026-07-28T04:02:00+00:00",
+            "duration_seconds": 120,
+            "code_provenance": {"backend_commit_sha": "abc123"},
+            "missing_fields": [],
+        },
+        "stage_1": {
+            "scan_context": {
+                "stage2_candidate_only": False,
+                "wallet_market_enrichment_degraded": True,
+                "stage2_actionables_authoritative": True,
+                "stage3_execution_uses_conservative_occupancy": True,
+            }
+        },
+        "stage_2": {
+            "candidate_only": False,
+            "candidate_reviews": [],
+            "stage3_handoff_candidate_market_ids": ["buy-1"],
+            "actionable_contract": {
+                "version": 2,
+                "authoritative": True,
+                "execution_mode": "durable-live-preflight",
+                "source": "backend-stage2-ranking",
+                "wallet_enrichment_degraded": True,
+                "exit_market_ids": ["exit-1"],
+                "buy_market_ids": ["buy-1"],
+                "exit_count": 1,
+                "buy_count": 1,
+            },
+        },
+        "stage_3": {
+            "blocked_by_stage1_wallet_refresh": False,
+            "handoff_checkpoint": {
+                "status": "received",
+                "candidate_market_ids": ["buy-1"],
+                "candidate_count": 1,
+                "actionable_exit_market_ids": ["exit-1"],
+                "actionable_buy_market_ids": ["buy-1"],
+            },
+            "execution_steps": [
+                {"key": "sell", "planned_orders": 1},
+                {"key": "buy", "planned_orders": 1},
+            ],
+            "decisions": [
+                {"market_id": "exit-1", "stage3_result": "SELECTED"},
+                {"market_id": "buy-1", "stage3_result": "SELECTED"},
+            ],
+            "order_intents": [],
+        },
+        "raw": {},
+    }
+
+    codes = {finding["code"] for finding in build_deterministic_findings(bundle)}
+
+    assert "STAGE1_WALLET_TIMEOUT_CANDIDATE_ONLY_REVIEW" not in codes
+    assert "STAGE2_EXIT_ACTIONABLE_CHECKPOINT_MISMATCH" not in codes
+    assert "STAGE2_BUY_ACTIONABLE_CHECKPOINT_MISMATCH" not in codes
+    assert "STAGE2_EXIT_ACTIONABLES_NOT_RECORDED_AS_PLANNED" not in codes
+    assert "STAGE2_BUY_ACTIONABLES_NOT_RECORDED_AS_PLANNED" not in codes
+    assert "STAGE2_ACTIONABLE_MISSING_STAGE3_DECISION" not in codes
+
+
 def test_candidate_only_stage2_wallet_timeout_is_audited_without_stage3_handoff_failure():
     bundle = {
         "metadata": {"run_id": "run-wallet-handoff-timeout"},

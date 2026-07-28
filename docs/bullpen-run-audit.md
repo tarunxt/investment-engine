@@ -330,6 +330,17 @@ result is explicitly blocked with `blocked_by_stage1_wallet_refresh=true`; it
 must plan or submit no orders and the run ends as `partial_success`. This keeps a
 slow shared wallet refresh from indefinitely preventing LLM review while
 preserving the fresh-wallet safety gate for execution.
+
+A fresh wallet snapshot that is present but contains unresolved positive-exposure
+rows is not the same as a missing wallet snapshot. In that degraded-enrichment
+case, Stage 2 remains the sole authoritative source of the exact ordered Exit and
+Buy lists. The audit records `stage2_actionable_contract_version=2`, the exact
+market IDs and counts, and `wallet_market_enrichment_degraded=true`. Stage 3 must
+copy those exact lists into its handoff checkpoint and Planned counters, retain
+unresolved positive-exposure markets as conservatively occupied slots, and then
+run the normal fresh wallet, balance, credential-lineage, capacity, quote, and
+durable order-intent preflight. Later blocking or exchange rejection may prevent
+submission, but it must not erase or replace the Stage 2 Planned list.
 If a user cancels the run while those reads are in flight, the audit
 must preserve the cancelled lifecycle instead of letting a late worker progress
 write revert the run back to an in-progress state. Cancellation takes a durable

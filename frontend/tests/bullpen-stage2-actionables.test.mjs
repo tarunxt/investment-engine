@@ -145,6 +145,69 @@ test("explicit sell and buy decisions remain actionable when no selected portfol
   assert.deepEqual(result.hold.map((item) => item.marketId), ["default-hold"]);
 });
 
+
+test("persisted Stage 2 Exit and Buy IDs override all frontend inference", async () => {
+  const { buildBullpenStage2Actionables } = await loadActionablesModule();
+  const result = buildBullpenStage2Actionables({
+    activePositions: [
+      activePosition({ marketId: "active-exit", title: "Active Exit" }),
+      activePosition({ marketId: "active-hold", title: "Active Hold" }),
+    ],
+    decisions: [
+      decision({
+        marketId: "non-authoritative-buy",
+        title: "Ignored Buy Decision",
+        decision: "BUY_NEW",
+        action: "buy",
+      }),
+    ],
+    selectedRows: [
+      selectedRow({ marketId: "active-hold", title: "Active Hold" }),
+      selectedRow({ marketId: "authoritative-buy-2", title: "Buy Two" }),
+      selectedRow({ marketId: "authoritative-buy-1", title: "Buy One" }),
+      selectedRow({ marketId: "inferred-only-buy", title: "Ignored Inferred Buy" }),
+    ],
+    authoritativeActionables: {
+      exitMarketIds: ["active-exit"],
+      buyMarketIds: ["authoritative-buy-1", "authoritative-buy-2"],
+    },
+  });
+
+  assert.deepEqual(result.eventExits.map((item) => item.marketId), [
+    "active-exit",
+  ]);
+  assert.deepEqual(result.buyNew.map((item) => item.marketId), [
+    "authoritative-buy-1",
+    "authoritative-buy-2",
+  ]);
+  assert.deepEqual(result.hold.map((item) => item.marketId), ["active-hold"]);
+  assert.doesNotMatch(JSON.stringify(result), /inferred-only-buy/);
+  assert.doesNotMatch(JSON.stringify(result), /non-authoritative-buy/);
+});
+
+test("explicit empty Stage 2 contract never invents exits or buys", async () => {
+  const { buildBullpenStage2Actionables } = await loadActionablesModule();
+  const result = buildBullpenStage2Actionables({
+    activePositions: [
+      activePosition({ marketId: "active-hold", title: "Active Hold" }),
+    ],
+    decisions: [
+      decision({
+        marketId: "legacy-buy",
+        title: "Legacy Buy",
+        decision: "BUY_NEW",
+        action: "buy",
+      }),
+    ],
+    selectedRows: [selectedRow({ marketId: "legacy-buy", title: "Legacy Buy" })],
+    authoritativeActionables: { exitMarketIds: [], buyMarketIds: [] },
+  });
+
+  assert.deepEqual(result.eventExits, []);
+  assert.deepEqual(result.buyNew, []);
+  assert.deepEqual(result.hold.map((item) => item.marketId), ["active-hold"]);
+});
+
 test("the actionables dialog keeps the required red, green, and yellow sections", () => {
   const dialogSource = readFileSync(
     new URL(
@@ -179,4 +242,10 @@ test("the Stage 2 monitor renders the clickable Actionables line below New Event
   assert.match(scheduleCardSource, /BullpenStage2ActionablesDialog/);
   assert.match(scheduleCardSource, /setIsActionablesDialogOpen\(true\)/);
   assert.match(scheduleCardSource, /aria-haspopup="dialog"/);
+  assert.match(
+    scheduleCardSource,
+    /stage2_actionable_contract_authoritative/,
+  );
+  assert.match(scheduleCardSource, /stage2_actionable_exit_market_ids/);
+  assert.match(scheduleCardSource, /stage2_actionable_buy_market_ids/);
 });

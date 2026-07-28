@@ -1306,8 +1306,18 @@ function getStageTwoStats(
   const stage2TopInvestRowCount = run
     ? buildStageTwoInvestEventsDialogState({ run, decisions })?.rows.length ?? 0
     : 0;
-  const newEventsToInvestIn =
-    stage2TopInvestRowCount > 0
+  const authoritativeBuyMarketIds = readStageOutputStringList(
+    stage.outputs.stage2_actionable_buy_market_ids,
+  );
+  const hasAuthoritativeActionables =
+    readStageOutputBoolean(
+      stage.outputs.stage2_actionable_contract_authoritative,
+    ) ||
+    (Array.isArray(stage.outputs.stage2_actionable_exit_market_ids) &&
+      Array.isArray(stage.outputs.stage2_actionable_buy_market_ids));
+  const newEventsToInvestIn = hasAuthoritativeActionables
+    ? authoritativeBuyMarketIds.length
+    : stage2TopInvestRowCount > 0
       ? stage2TopInvestRowCount
       : getStageTwoInvestableDecisions(decisions).length;
 
@@ -1380,13 +1390,40 @@ function buildStageTwoInvestEventsDialogState({
       scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
   });
 
+  const authoritativeBuyMarketIds = readStageOutputStringList(
+    llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
+  );
+  const hasAuthoritativeActionables =
+    readStageOutputBoolean(
+      llmWorkflowStage.outputs.stage2_actionable_contract_authoritative,
+    ) ||
+    (Array.isArray(
+      llmWorkflowStage.outputs.stage2_actionable_exit_market_ids,
+    ) &&
+      Array.isArray(
+        llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
+      ));
+  const authoritativeBuyRows = authoritativeBuyMarketIds
+    .map((marketId) => {
+      const normalizedMarketId = normalizeMatchKey(marketId);
+      if (!normalizedMarketId) return null;
+      return (
+        eventsSummaryRows.find((row) =>
+          getStageTwoSummaryRowMatchKeys(row).includes(normalizedMarketId),
+        ) ?? null
+      );
+    })
+    .filter((row): row is BullpenQuestionRow => row !== null);
+
   return {
     stage: llmWorkflowStage,
     decisions,
-    rows: getBullpenTopTenStrongestLlmOddsRows(
-      eventsSummaryRows,
-      DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
-    ),
+    rows: hasAuthoritativeActionables
+      ? authoritativeBuyRows
+      : getBullpenTopTenStrongestLlmOddsRows(
+          eventsSummaryRows,
+          DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
+        ),
     updatedAt,
     updateUnavailableReason: updatedAt
       ? undefined
@@ -1968,10 +2005,28 @@ function StageTwoRunStats({
     positionStats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
+  const authoritativeExitMarketIds = readStageOutputStringList(
+    stage.outputs.stage2_actionable_exit_market_ids,
+  );
+  const authoritativeBuyMarketIds = readStageOutputStringList(
+    stage.outputs.stage2_actionable_buy_market_ids,
+  );
+  const hasAuthoritativeActionables =
+    readStageOutputBoolean(
+      stage.outputs.stage2_actionable_contract_authoritative,
+    ) ||
+    (Array.isArray(stage.outputs.stage2_actionable_exit_market_ids) &&
+      Array.isArray(stage.outputs.stage2_actionable_buy_market_ids));
   const actionables = buildBullpenStage2Actionables({
     activePositions: positionDialogStage.activePositionsFound,
     decisions,
     selectedRows: stage2InvestEventsState?.rows ?? [],
+    authoritativeActionables: hasAuthoritativeActionables
+      ? {
+          exitMarketIds: authoritativeExitMarketIds,
+          buyMarketIds: authoritativeBuyMarketIds,
+        }
+      : null,
   });
 
   return (
@@ -2210,6 +2265,20 @@ function readStageOutputBoolean(value: unknown) {
     if (normalized === "false") return false;
   }
   return false;
+}
+
+function readStageOutputStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((item) => readStageOutputString(item))
+    .filter((item): item is string => {
+      if (!item) return false;
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

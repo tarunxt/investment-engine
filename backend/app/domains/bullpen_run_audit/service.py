@@ -1167,6 +1167,20 @@ def _build_bundle(
                     "wallet_refresh_timeout_seconds"
                 ),
                 "wallet_refresh_error": stage1_outputs.get("wallet_refresh_error"),
+                "wallet_market_enrichment_error": stage1_outputs.get(
+                    "wallet_market_enrichment_error"
+                ),
+                "wallet_market_enrichment_degraded": _strict_boolean(
+                    stage1_outputs.get("wallet_market_enrichment_degraded")
+                ),
+                "stage2_actionables_authoritative": _strict_boolean(
+                    stage1_outputs.get("stage2_actionables_authoritative")
+                ),
+                "stage3_execution_uses_conservative_occupancy": _strict_boolean(
+                    stage1_outputs.get(
+                        "stage3_execution_uses_conservative_occupancy"
+                    )
+                ),
                 "stage2_candidate_only": _strict_boolean(
                     stage1_outputs.get("stage2_candidate_only")
                 ),
@@ -1214,6 +1228,49 @@ def _build_bundle(
             "stage1_wallet_refresh_error": stage2_outputs.get(
                 "stage1_wallet_refresh_error"
             ),
+            "actionable_contract": {
+                "version": stage2_outputs.get(
+                    "stage2_actionable_contract_version"
+                ),
+                "authoritative": _strict_boolean(
+                    stage2_outputs.get(
+                        "stage2_actionable_contract_authoritative"
+                    )
+                ),
+                "execution_mode": stage2_outputs.get(
+                    "stage2_actionable_contract_execution_mode"
+                ),
+                "source": stage2_outputs.get(
+                    "stage2_actionable_handoff_source"
+                ),
+                "wallet_enrichment_degraded": _strict_boolean(
+                    stage2_outputs.get(
+                        "stage2_actionable_wallet_enrichment_degraded"
+                    )
+                ),
+                "exit_market_ids": stage2_outputs.get(
+                    "stage2_actionable_exit_market_ids"
+                )
+                or [],
+                "buy_market_ids": stage2_outputs.get(
+                    "stage2_actionable_buy_market_ids"
+                )
+                or [],
+                "exit_count": stage2_outputs.get(
+                    "stage2_actionable_exit_count"
+                ),
+                "buy_count": stage2_outputs.get(
+                    "stage2_actionable_buy_count"
+                ),
+                "missing_exit_market_ids": stage2_outputs.get(
+                    "missing_stage2_actionable_exit_market_ids"
+                )
+                or [],
+                "missing_buy_market_ids": stage2_outputs.get(
+                    "missing_stage2_actionable_buy_market_ids"
+                )
+                or [],
+            },
             "llm_runtime": {
                 key: value
                 for key, value in stage2_outputs.items()

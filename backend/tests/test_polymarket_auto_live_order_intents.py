@@ -2501,6 +2501,134 @@ async def test_buy_preflight_rejects_opposite_side_exposure_in_same_market(
 
 
 @pytest.mark.anyio
+async def test_buy_preflight_keeps_unresolved_other_markets_as_capacity_not_global_block(
+    monkeypatch,
+):
+    unresolved_position = replace(
+        _wallet_position(),
+        market_id="unresolved-other-market",
+        slug="unresolved-other-market",
+        condition_id="unresolved-condition",
+        classification="stale_or_unknown",
+        classification_reason="Exact open/closed state unavailable.",
+        authoritative_market_state="unknown",
+    )
+
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        return _live_controls()
+
+    async def read_snapshot(**_kwargs):
+        return _wallet_snapshot(unresolved_position)
+
+    async def enrich_positions(positions):
+        assert positions == [unresolved_position]
+        return [unresolved_position], {"unresolved_position_count": 1}
+
+    async def refresh_quote(*, slug: str | None, side: str):
+        assert slug == "authoritative-buy-target"
+        assert side == "YES"
+        return SimpleNamespace(market=object(), current_price_cents=80.0)
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "enrich_console_wallet_positions_authoritatively",
+        enrich_positions,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_execution_quote",
+        refresh_quote,
+    )
+    intent = _intent(
+        intent_id="authoritative-buy-with-unresolved-capacity",
+        status="READY",
+    ).model_copy(
+        update={
+            "slug": "authoritative-buy-target",
+            "execution_metadata_json": {
+                "expected_stage1_wallet_lineage": _expected_wallet_lineage(),
+                "stage3_capacity_policy": {
+                    "slot_limit": 10,
+                    "dust_threshold_usd": 0.01,
+                },
+            },
+        }
+    )
+
+    prepared = await _prepare_intent_submission(intent)
+
+    assert prepared.order_usd == 5.0
+    capacity = intent.execution_metadata_json["stage2_authoritative_capacity"]
+    assert capacity["policy"] == "conservative-unresolved-occupancy"
+    assert capacity["unresolved_occupied_market_ids"] == [
+        "unresolved-other-market"
+    ]
+
+
+@pytest.mark.anyio
+async def test_sell_preflight_executes_exact_stage2_exit_with_unresolved_open_state(
+    monkeypatch,
+):
+    unresolved_position = replace(
+        _wallet_position(shares=2.25),
+        classification="stale_or_unknown",
+        classification_reason="Exact open/closed state unavailable.",
+        authoritative_market_state="unknown",
+        resolution_status=None,
+    )
+
+    async def refresh_controls(*, user_id: int):
+        assert user_id == 1
+        return _live_controls()
+
+    async def read_snapshot(**_kwargs):
+        return _wallet_snapshot(unresolved_position)
+
+    async def enrich_positions(positions):
+        assert positions == [unresolved_position]
+        return [unresolved_position], {"unresolved_position_count": 1}
+
+    monkeypatch.setattr(
+        order_intent_service,
+        "refresh_live_controls",
+        refresh_controls,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "read_console_wallet_positions_snapshot",
+        read_snapshot,
+    )
+    monkeypatch.setattr(
+        order_intent_service,
+        "enrich_console_wallet_positions_authoritatively",
+        enrich_positions,
+    )
+
+    prepared = await _prepare_intent_submission(
+        _sell_intent("authoritative-unresolved-exit")
+    )
+
+    assert prepared.shares == 2.25
+    assert prepared.sell_preflight_metadata[
+        "stage2_authoritative_execution"
+    ] is True
+    assert prepared.sell_preflight_metadata[
+        "unresolved_market_identity_accepted_for_risk_reducing_sell"
+    ] is True
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "missing_lineage_field",
     [
