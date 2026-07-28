@@ -30,10 +30,13 @@ jobs:
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin codex/verify-stage2-handoff-production
             sudo -u "$APP_USER" -H git -C "$APP_ROOT" show FETCH_HEAD:scripts/inspect-production-stage2-handoff.py > "$INSPECTOR"
             echo "PRODUCTION_GIT_SHA=$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
-            set -a
-            source /etc/investor/backend.env
-            set +a
-            export PYTHONPATH="$APP_ROOT/backend"
-            cd "$APP_ROOT/backend"
-            "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
+            sudo env APP_ROOT="$APP_ROOT" INSPECTOR="$INSPECTOR" bash -lc '
+              set -euo pipefail
+              set -a
+              source /etc/investor/backend.env
+              set +a
+              export PYTHONPATH="$APP_ROOT/backend"
+              cd "$APP_ROOT/backend"
+              "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
+            '
             rm -f "$INSPECTOR"
