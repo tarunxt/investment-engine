@@ -81,6 +81,15 @@ jobs:
             echo '3aa369e18ed6fb0f96d5ce5d3ce8f0b1d4f622977727e1aefe5695f786485720  /tmp/stage3-authoritative-incremental-v4-debug.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage3-authoritative-incremental-v4-debug.patch
             git apply --verbose /tmp/stage3-authoritative-incremental-v4-debug.patch
+
+            test "$(wc -c < scripts/.stage3-followup-v5-test-contract.gz.b64)" -eq 1068
+            echo '7f5519488b97399a5d563e04dcaa6610972d4d2a952144353483db365d1bd3b8  scripts/.stage3-followup-v5-test-contract.gz.b64' | sha256sum -c -
+            base64 -d scripts/.stage3-followup-v5-test-contract.gz.b64 > /tmp/stage3-authoritative-incremental-v5-test-contract.patch.gz
+            echo '25cbede62f209bf00049d6a4bfbf2e12f90e70a425023975eb3a2329770c05f5  /tmp/stage3-authoritative-incremental-v5-test-contract.patch.gz' | sha256sum -c -
+            gzip -d -c /tmp/stage3-authoritative-incremental-v5-test-contract.patch.gz > /tmp/stage3-authoritative-incremental-v5-test-contract.patch
+            echo '65fbdfcda88c2a5179d5ce708c619fdc81059acfd9b20883a986dcefb4dac821  /tmp/stage3-authoritative-incremental-v5-test-contract.patch' | sha256sum -c -
+            git apply --check --verbose /tmp/stage3-authoritative-incremental-v5-test-contract.patch
+            git apply --verbose /tmp/stage3-authoritative-incremental-v5-test-contract.patch
             git diff --check
           } 2>&1 | tee /tmp/stage3-authoritative-apply.log
 
@@ -105,16 +114,20 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest
 
-      - name: Run remaining backend regressions
+      - name: Run focused backend regressions
         id: backend_tests
         continue-on-error: true
         env:
           PYTHONPATH: backend
         run: |
           set -o pipefail
-          pytest -q --tb=long \
+          pytest -q --tb=long --maxfail=20 \
             backend/tests/test_polymarket_auto_live.py \
-            -k 'submits_buys_even_while_exit_settlement_is_pending or plans_formula_sized_top10_buys_and_exits_lower_ranked_positions' \
+            backend/tests/test_polymarket_auto_live_order_intents.py \
+            backend/tests/test_polymarket_auto_live_repository_safety.py \
+            backend/tests/test_stage2_actionable_handoff.py \
+            backend/tests/test_bullpen_run_audit.py \
+            backend/tests/test_stage3_slot_allocation.py \
             2>&1 | tee /tmp/stage3-authoritative-backend-tests.log
 
       - name: Upload backend test diagnostics
@@ -187,6 +200,7 @@ jobs:
           rm -f scripts/.stage3-followup.part*
           rm -f scripts/.stage3-followup-v3.incremental.gz.b64
           rm -f scripts/.stage3-followup-v4-debug.gz.b64
+          rm -f scripts/.stage3-followup-v5-test-contract.gz.b64
           rm -f .github/workflows/apply-stage3-authoritative-final.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
