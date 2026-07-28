@@ -95,15 +95,32 @@ jobs:
           python -m pip install --disable-pip-version-check pytest
 
       - name: Run focused backend regression suite
+        id: backend_tests
+        continue-on-error: true
         env:
           PYTHONPATH: backend
         run: |
-          pytest -q \
+          set -o pipefail
+          pytest -vv --tb=long --maxfail=20 \
             backend/tests/test_stage2_actionable_handoff.py \
             backend/tests/test_polymarket_auto_live_order_intents.py \
             backend/tests/test_bullpen_run_audit.py \
             backend/tests/test_polymarket_auto_live.py \
-            backend/tests/test_stage3_slot_allocation.py
+            backend/tests/test_stage3_slot_allocation.py \
+            2>&1 | tee /tmp/stage2-authoritative-backend-tests.log
+
+      - name: Upload backend regression diagnostics
+        if: steps.backend_tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage2-authoritative-backend-test-diagnostics
+          path: /tmp/stage2-authoritative-backend-tests.log
+          if-no-files-found: error
+          retention-days: 2
+
+      - name: Stop after backend regression failure
+        if: steps.backend_tests.outcome == 'failure'
+        run: exit 1
 
       - name: Install frontend dependencies
         working-directory: frontend
