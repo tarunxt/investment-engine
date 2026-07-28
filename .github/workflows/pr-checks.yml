@@ -1,132 +1,351 @@
-name: Apply and verify Stage 2 actionables full-pipeline fix
+name: Pull Request Checks
 
 on:
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-and-verify:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'codex/fix-stage2-actionables-full-pipeline'
+  backend-syntax:
+    name: Backend Python syntax checks
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout the PR head branch
+      - name: Checkout
         uses: actions/checkout@v7
-        with:
-          ref: codex/fix-stage2-actionables-full-pipeline
-          fetch-depth: 0
+
+      - name: Compile backend Python sources
+        run: python3 -m compileall -q backend/app
+
+  backend-performance-regressions:
+    name: Backend dashboard performance contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.13'
+          python-version: "3.13"
           cache: pip
           cache-dependency-path: backend/requirements.txt
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Decode and apply the permanent source patch
-        run: |
-          set -o pipefail
-          : > /tmp/stage2-actionables-patch-error.log
-          {
-            base64 -d scripts/.stage2-actionables-fix.py.gz.b64 | gzip -d > /tmp/apply_stage2_actionables_stage3_fix.py
-            python - <<'PY'
-          from pathlib import Path
-          path = Path('/tmp/apply_stage2_actionables_stage3_fix.py')
-          source = path.read_text(encoding='utf-8')
-          old = """    '        set_run_stage_result(\\n            run,\\n            build_workflow_stage_result(\\n                stage_number=3,\\n',
-              '        initial_stage3_planned_exit_count = len(\\n"""
-          new = """    '            \"decision_rows_persisted\": 0,\\n        }\\n        set_run_stage_result(\\n            run,\\n            build_workflow_stage_result(\\n                stage_number=3,\\n',
-              '            \"decision_rows_persisted\": 0,\\n        }\\n        initial_stage3_planned_exit_count = len(\\n"""
-          if old not in source:
-              raise SystemExit('Runtime patch anchor for Stage 3 initial checkpoint was not found')
-          path.write_text(source.replace(old, new, 1), encoding='utf-8')
-          PY
-            python /tmp/apply_stage2_actionables_stage3_fix.py
-          } 2>&1 | tee /tmp/stage2-actionables-patch-error.log
-
-      - name: Upload patch diagnostics on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: stage2-actionables-patch-diagnostics
-          path: |
-            /tmp/stage2-actionables-patch-error.log
-            /tmp/apply_stage2_actionables_stage3_fix.py
-          if-no-files-found: error
-          retention-days: 2
-
-      - name: Compile backend sources
-        run: python -m compileall -q backend/app
 
       - name: Install backend test dependencies
         run: |
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest
 
-      - name: Run focused backend regression tests
+      - name: Run compact dashboard response and degradation tests
         env:
           PYTHONPATH: backend
+        run: pytest -q backend/tests/test_dashboard_summary.py
+
+  deployment-contracts:
+    name: Deployment scope, artifact, slot, and rollback tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check deployment shell syntax
         run: |
-          pytest -q \
-            backend/tests/test_stage2_actionable_handoff.py \
-            backend/tests/test_polymarket_auto_live_stage1_runtime.py \
-            backend/tests/test_stage3_slot_allocation.py
+          bash -n \
+            deploy/no-docker/redeploy.sh \
+            deploy/no-docker/package-frontend-artifact.sh \
+            deploy/no-docker/scripts/run-frontend.sh \
+            scripts/release-prod.sh
+
+      - name: Run deployment contract tests
+        run: |
+          node --test \
+            scripts/detect-deploy-scope.test.mjs \
+            scripts/check-javascript-budgets.test.mjs \
+            scripts/high-traffic-response-inventory.test.mjs \
+            deploy/no-docker/frontend-artifact.test.mjs \
+            deploy/no-docker/redeploy-contract.test.mjs \
+            deploy/no-docker/redeploy-transaction.test.mjs \
+            deploy/no-docker/repair-next-runtime-artifacts.test.mjs
+
+  frontend-regressions:
+    name: Frontend dashboard regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Run dashboard regression tests
+        run: >-
+          node --test
+          tests/api-read-fallbacks.test.mjs
+          tests/runtime-performance-regressions.test.mjs
+          tests/bullpen-server-auth.test.mjs
+          tests/dashboard-refresh-errors.test.mjs
+          tests/rebalance-workflow-resilience.test.mjs
+          tests/auto-rebalance-provider-errors-ist.test.mjs
+          tests/bullpen-auto-run-status.test.mjs
+
+  frontend-build-benchmark:
+    name: Frontend ${{ matrix.bundler }} cold build and runtime verification
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    continue-on-error: ${{ matrix.bundler == 'turbopack' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bundler:
+          - webpack
+          - turbopack
+
+    env:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_STANDALONE_BUILD: "true"
+      NEXT_PUBLIC_API_URL: https://api.cred-x.in
+      NEXT_PUBLIC_FRONTEND_URL: https://cred-x.in
+      NEXT_PUBLIC_BRAND_PREFIX: Cred-X
+      NEXT_PUBLIC_BRAND_ACRONYM: TIE
+      NEXT_PUBLIC_BRAND_EXPANSION: Tarun's Investment Engine
+      NEXT_PUBLIC_DISABLE_AUTH: "false"
+      NEXT_PUBLIC_DISABLE_API_PROXY: "false"
+      NEXT_PUBLIC_API_DEBUG: "false"
+      NEXTAUTH_URL: https://cred-x.in
+      NEXTAUTH_SECRET: ci-runtime-secret
+      AUTH_TRUST_HOST: "true"
+      BACKEND_API_URL: http://127.0.0.1:8000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js with npm cache
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         working-directory: frontend
         run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
 
-      - name: Run focused frontend regression tests
-        working-directory: frontend
+      - name: Log cold-build runner resources
         run: |
-          node --test tests/bullpen-auto-run-stage3-invest.test.mjs
-          node --test tests/bullpen-auto-run-progress.test.mjs
+          echo "==> CPU"
+          nproc
+          echo "==> Memory"
+          free -h
+          echo "==> Swap"
+          swapon --show || true
+          echo "==> Disk"
+          df -h "${GITHUB_WORKSPACE}" "${RUNNER_TEMP}"
 
-      - name: Build the production frontend
+      - name: Stamp benchmark fingerprint
+        run: |
+          node scripts/stamp-frontend-build.mjs \
+            frontend/lib/generatedBuildInfo.ts \
+            "${GITHUB_SHA}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      - name: Run isolated cold production build
+        id: benchmark
         working-directory: frontend
         env:
-          NODE_ENV: production
-          NEXT_TELEMETRY_DISABLED: '1'
-          NEXT_PUBLIC_API_URL: https://api.cred-x.in
-          NEXT_PUBLIC_FRONTEND_URL: https://cred-x.in
-          NEXT_PUBLIC_BRAND_PREFIX: Cred-X
-          NEXT_PUBLIC_BRAND_ACRONYM: TIE
-          NEXT_PUBLIC_BRAND_EXPANSION: Tarun's Investment Engine
-          NEXT_PUBLIC_DISABLE_AUTH: 'false'
-          NEXT_PUBLIC_DISABLE_API_PROXY: 'false'
-          NEXT_PUBLIC_API_DEBUG: 'false'
-          NEXTAUTH_URL: https://cred-x.in
-          NEXTAUTH_SECRET: ci-runtime-secret
-          AUTH_TRUST_HOST: 'true'
-          BACKEND_API_URL: http://127.0.0.1:8000
-        run: npm run build
-
-      - name: Commit the verified source implementation
+          BUNDLER: ${{ matrix.bundler }}
         run: |
-          set -euo pipefail
-          git fetch origin main
-          rm -f scripts/.stage2-actionables-fix.py.gz.b64
-          rm -f scripts/stage2-actionables-patch-error.log
-          rm -f .github/workflows/apply-stage2-actionables-full-pipeline.yml
-          git checkout origin/main -- .github/workflows/pr-checks.yml
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --stat
-          if git diff --cached --quiet; then
-            echo 'No source changes were produced.'
-            exit 1
+          set -o pipefail
+          rm -rf .next
+          started_at="$(date +%s)"
+          if [[ "$BUNDLER" == "webpack" ]]; then
+            build_command=(npm run build)
+          else
+            build_command=(npm run build)
           fi
-          git commit -m 'Fix Stage 2 actionables and wallet handoff into Stage 3 Planned'
-          git push origin HEAD:codex/fix-stage2-actionables-full-pipeline
+          set +e
+          /usr/bin/time -v \
+            -o "${RUNNER_TEMP}/frontend-${BUNDLER}-resources.txt" \
+            "${build_command[@]}" 2>&1 |
+            tee "${RUNNER_TEMP}/frontend-${BUNDLER}-build.log"
+          build_status="${PIPESTATUS[0]}"
+          set -e
+          echo "seconds=$(( $(date +%s) - started_at ))" >>"${GITHUB_OUTPUT}"
+          cat "${RUNNER_TEMP}/frontend-${BUNDLER}-resources.txt"
+          exit "$build_status"
+
+      - name: Package benchmark artifact
+        id: package
+        env:
+          BUNDLER: ${{ matrix.bundler }}
+        run: |
+          deploy/no-docker/package-frontend-artifact.sh \
+            frontend/.next \
+            "${RUNNER_TEMP}/frontend-${BUNDLER}.tar.gz" \
+            "${GITHUB_SHA}" \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "${BUNDLER}"
+          mkdir "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime"
+          tar -xzf "${RUNNER_TEMP}/frontend-${BUNDLER}.tar.gz" \
+            -C "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime"
+
+      - name: Install Chromium for authenticated render checks
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify authenticated render and lazy route behavior
+        if: matrix.bundler == 'webpack'
+        working-directory: frontend
+        run: npm run test:playwright-hardening
+
+      - name: Verify fingerprint, auth, routes, assets, and backend proxy
+        id: runtime
+        env:
+          BUNDLER: ${{ matrix.bundler }}
+        run: |
+          node scripts/verify-frontend-artifact-runtime.mjs \
+            "${RUNNER_TEMP}/frontend-${BUNDLER}-runtime" \
+            "${GITHUB_SHA}"
+
+      - name: Record benchmark result
+        if: always()
+        env:
+          BUNDLER: ${{ matrix.bundler }}
+          BUILD_OUTCOME: ${{ steps.benchmark.outcome }}
+          BUILD_SECONDS: ${{ steps.benchmark.outputs.seconds }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          RUNTIME_OUTCOME: ${{ steps.runtime.outcome }}
+        run: |
+          peak_rss_kb="$(
+            awk -F: '/Maximum resident set size/ {
+              sub(/^[[:space:]]*/, "", $2)
+              print $2
+            }' "${RUNNER_TEMP}/frontend-${BUNDLER}-resources.txt" 2>/dev/null ||
+              true
+          )"
+          jq -n \
+            --arg bundler "$BUNDLER" \
+            --arg build_outcome "${BUILD_OUTCOME:-unknown}" \
+            --arg package_outcome "${PACKAGE_OUTCOME:-unknown}" \
+            --arg runtime_outcome "${RUNTIME_OUTCOME:-unknown}" \
+            --arg seconds "${BUILD_SECONDS:-}" \
+            --arg peak_rss_kb "${peak_rss_kb:-}" \
+            '{
+              bundler: $bundler,
+              build_outcome: $build_outcome,
+              package_outcome: $package_outcome,
+              runtime_outcome: $runtime_outcome,
+              compatibility: (
+                if (
+                  $build_outcome == "success" and
+                  $package_outcome == "success" and
+                  $runtime_outcome == "success"
+                )
+                then "passed"
+                else "failed"
+                end
+              ),
+              seconds: $seconds,
+              peak_rss_kb: $peak_rss_kb
+            }' >"${RUNNER_TEMP}/frontend-${BUNDLER}-benchmark.json"
+
+      - name: Upload benchmark result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-${{ matrix.bundler }}-benchmark-result
+          path: ${{ runner.temp }}/frontend-${{ matrix.bundler }}-benchmark.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload benchmark diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-${{ matrix.bundler }}-benchmark
+          path: |
+            ${{ runner.temp }}/frontend-${{ matrix.bundler }}-resources.txt
+            ${{ runner.temp }}/frontend-${{ matrix.bundler }}-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Add benchmark summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.bundler }} frontend benchmark"
+            echo
+            echo "- Cold build duration: ${{ steps.benchmark.outputs.seconds || 'n/a' }}s"
+            echo "- Production selection: Webpack remains the safe deployment artifact."
+            echo "- Runtime gate: fingerprint, login/auth, dashboard, Bullpen AI, JS/CSS, and backend proxy."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+  frontend-build-comparison:
+    name: Compare Webpack and Turbopack production builds
+    needs: frontend-build-benchmark
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Download benchmark results
+        uses: actions/download-artifact@v8
+        with:
+          pattern: frontend-*-benchmark-result
+          path: benchmark-results
+          merge-multiple: true
+
+      - name: Publish side-by-side benchmark
+        run: |
+          webpack_result="benchmark-results/frontend-webpack-benchmark.json"
+          turbopack_result="benchmark-results/frontend-turbopack-benchmark.json"
+          test -f "$webpack_result"
+          test -f "$turbopack_result"
+
+          {
+            echo "### Webpack vs Turbopack cold production build"
+            echo
+            echo "| Bundler | Compatibility gate | Duration | Peak RSS | Production |"
+            echo "| --- | --- | ---: | ---: | --- |"
+            for result in "$webpack_result" "$turbopack_result"; do
+              bundler="$(jq -r '.bundler' "$result")"
+              outcome="$(jq -r '.compatibility' "$result")"
+              seconds="$(jq -r '.seconds | if . == "" then "n/a" else . + "s" end' "$result")"
+              peak_rss="$(jq -r '.peak_rss_kb | if . == "" then "n/a" else . + " KiB" end' "$result")"
+              if [[ "$bundler" == "webpack" ]]; then
+                selection="selected"
+              else
+                selection="benchmark only"
+              fi
+              echo "| $bundler | $outcome | $seconds | $peak_rss | $selection |"
+            done
+            echo
+            echo "Webpack remains mandatory for production artifacts. A successful Turbopack benchmark is compatibility evidence only."
+          } >>"${GITHUB_STEP_SUMMARY}"

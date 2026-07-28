@@ -1447,3 +1447,32 @@ test("Stage 3 preview steps mark the no-work case as finished instead of pending
   assert.match(previewSteps[0].detail, /No executable Step 1 Event Exits were needed/i);
   assert.match(previewSteps[1].detail, /planned queue/i);
 });
+
+test("blocked Stage 3 is terminal and not rendered as queued", () => {
+  const source = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /explicitPhase === "blocked"/);
+  assert.match(source, /\? "Blocked"/);
+});
+
+test("Stage 3 Planned queue consumes backend-persisted Stage 2 actionables", () => {
+  const source = readFileSync(
+    new URL(
+      "../../backend/app/domains/polymarket_auto_live/engine.py",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(source, /stage2_actionable_handoff_source/);
+  assert.match(source, /initial_stage3_execution_steps/);
+  assert.match(source, /accepted_stage2_actionable_exit_market_id_order/);
+  assert.match(source, /accepted_stage2_actionable_buy_market_id_order/);
+  assert.match(source, /if stage2_actionable_handoff_used:/);
+});

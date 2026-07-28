@@ -639,6 +639,7 @@ export function buildBullpenAutoRunWorkflowView(
     if (
       explicitPhase === "completed" ||
       explicitPhase === "partial" ||
+      explicitPhase === "blocked" ||
       explicitPhase === "failed" ||
       explicitPhase === "cancelled" ||
       explicitPhase === "aborted" ||
@@ -662,6 +663,7 @@ export function buildBullpenAutoRunWorkflowView(
 
     const tone: WorkflowTone =
       explicitPhase === "aborted" ||
+      explicitPhase === "blocked" ||
       (definition.key === "invest" &&
         runStatus === "failed" &&
         readBoolean(stage?.outputs?.recovery_required))
@@ -701,6 +703,8 @@ export function buildBullpenAutoRunWorkflowView(
         ? "Cancelled"
       : explicitPhase === "aborted"
         ? "Interrupted"
+      : explicitPhase === "blocked"
+        ? "Blocked"
       : explicitPhase === "failed"
         ? "Failed"
         : definition.key === "llm" && llmExecutionMode === "single_combined"
