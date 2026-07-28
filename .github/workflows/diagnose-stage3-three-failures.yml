@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - codex/diagnose-stage3-three-failures
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
   diagnose:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'codex/diagnose-stage3-three-failures'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
