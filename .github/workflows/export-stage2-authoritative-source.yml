@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - codex/stage2-actionables-authoritative-execution
+  pull_request:
 
 permissions:
   contents: read
 
 jobs:
   export-source:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'codex/stage2-actionables-authoritative-execution'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
