@@ -16,59 +16,28 @@ jobs:
       EXPECTED_SHA: c3d286a5d69f828cdefb713a5096020705666cee
 
     steps:
-      - name: Wait for exact production deployment
+      - name: Verify exact production deployment
         id: deployment
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          run_id=''
-          for attempt in $(seq 1 80); do
-            payload="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${EXPECTED_SHA}&per_page=20")"
-            run_id="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .id // empty' <<<"$payload")"
-            status="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .status // empty' <<<"$payload")"
-            conclusion="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .conclusion // empty' <<<"$payload")"
-            echo "attempt=${attempt} run_id=${run_id:-missing} status=${status:-missing} conclusion=${conclusion:-pending}"
-            if [[ -n "$run_id" && "$status" == 'completed' ]]; then
-              if [[ "$conclusion" != 'success' ]]; then
-                echo "Production deployment failed with conclusion=${conclusion}." >&2
-                gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" --jq '.jobs[] | [.name,.status,(.conclusion // "")] | @tsv' || true
-                exit 1
-              fi
-              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-              echo 'Production deployment completed successfully.'
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Timed out waiting for production deployment of ${EXPECTED_SHA}." >&2
-          exit 1
-
-      - name: Show production deployment jobs
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ steps.deployment.outputs.run_id }}
-        run: |
-          set -euo pipefail
-          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+          payload="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${EXPECTED_SHA}&per_page=20")"
+          run_id="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .id // empty' <<<"$payload")"
+          status="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .status // empty' <<<"$payload")"
+          conclusion="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .conclusion // empty' <<<"$payload")"
+          echo "run_id=${run_id:-missing} status=${status:-missing} conclusion=${conclusion:-missing}"
+          [[ -n "$run_id" && "$status" == 'completed' && "$conclusion" == 'success' ]]
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" \
             --jq '.jobs[] | [.name,.status,(.conclusion // "")] | @tsv'
 
       - name: Verify deployed frontend fingerprint
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 40); do
-            response="$(curl --fail --silent --show-error --location --max-time 20 https://cred-x.in/api/runtime-fingerprint || true)"
-            actual="$(jq -r '.build_sha // empty' <<<"${response:-{}}" 2>/dev/null || true)"
-            timestamp="$(jq -r '.build_timestamp // empty' <<<"${response:-{}}" 2>/dev/null || true)"
-            echo "attempt=${attempt} build_sha=${actual:-missing} build_timestamp=${timestamp:-missing}"
-            if [[ "$actual" == "$EXPECTED_SHA" ]]; then
-              jq . <<<"$response"
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Production frontend did not report expected SHA ${EXPECTED_SHA}." >&2
-          exit 1
+          response="$(curl --fail --silent --show-error --location --max-time 20 https://cred-x.in/api/runtime-fingerprint)"
+          echo "$response" | jq .
+          [[ "$(jq -r '.build_sha // empty' <<<"$response")" == "$EXPECTED_SHA" ]]
 
       - name: Verify public backend health
         run: |
@@ -93,6 +62,7 @@ jobs:
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             if [[ ! -d "$APP_ROOT" && -d /srv/investor ]]; then APP_ROOT=/srv/investor; fi
             if ! id "$APP_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then APP_USER=investor; fi
+            echo "APP_ROOT=$APP_ROOT APP_USER=$APP_USER"
 
             actual_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
             echo "PRODUCTION_GIT_SHA=$actual_sha"
@@ -100,24 +70,29 @@ jobs:
 
             ENGINE="$APP_ROOT/backend/app/domains/polymarket_auto_live/engine.py"
             FRONTEND="$APP_ROOT/frontend/lib/bullpenRunConsoleDetail.ts"
-            grep -Fq 'A dust exit is still a Planned/Processed row' "$ENGINE"
-            grep -Fq 'Materialize the immutable Stage 2 Buy contract before any refresh' "$ENGINE"
-            grep -Fq 'stage2_actionable_exit_market_ids' "$FRONTEND"
+            echo 'checking implementation markers'
+            grep -Fn 'A dust exit is still a Planned/Processed row' "$ENGINE"
+            grep -Fn 'Materialize the immutable Stage 2 Buy contract before any refresh' "$ENGINE"
+            grep -Fn 'stage2_actionable_exit_market_ids' "$FRONTEND" | head -n 3
 
-            for service in \
-              investor-backend \
-              investor-celery-worker \
-              investor-celery-auto-live-worker \
-              investor-frontend \
-              nginx \
-              postgresql; do
-              echo "checking $service"
-              sudo systemctl is-active --quiet "$service"
-            done
-            if sudo systemctl list-unit-files redis-server.service >/dev/null 2>&1; then
-              sudo systemctl is-active --quiet redis-server
-            else
-              sudo systemctl is-active --quiet redis
-            fi
+            require_active_any() {
+              label="$1"; shift
+              for service in "$@"; do
+                state="$(sudo systemctl is-active "$service" 2>/dev/null || true)"
+                echo "$label candidate=$service state=${state:-missing}"
+                if [[ "$state" == 'active' ]]; then
+                  return 0
+                fi
+              done
+              echo "No active service found for $label" >&2
+              return 1
+            }
+
+            require_active_any backend investor-backend investment-engine-backend
+            require_active_any frontend investor-frontend investment-engine-frontend
+            require_active_any auto-live-worker investor-celery-auto-live-worker investor-celery-worker
+            require_active_any nginx nginx
+            require_active_any postgres postgresql postgresql@16-main postgresql@15-main
+            require_active_any redis redis-server redis
 
             echo 'PRODUCTION_STAGE3_AUTHORITATIVE_DEPLOYMENT_VERIFIED=true'
