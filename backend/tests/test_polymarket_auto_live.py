@@ -4394,6 +4394,168 @@ async def test_durable_replacement_uses_initial_free_slot_before_pairing_exit(
 
 
 @pytest.mark.anyio
+async def test_authoritative_dust_exit_remains_planned_and_processed_without_remote_write(
+    monkeypatch,
+):
+    fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
+    active_market = _market(
+        question="Will the dust exit remain visible in Stage 3?",
+        slug="authoritative-dust-exit",
+        current_yes_odds=1,
+        current_no_odds=99,
+    )
+    candidate_market = _market(
+        question="Will the replacement buy remain planned?",
+        slug="authoritative-dust-replacement",
+        current_yes_odds=18,
+        current_no_odds=82,
+    )
+    live_positions = [
+        _console_wallet_position(
+            slug=active_market.slug,
+            market_title=active_market.question,
+            current_price_cents=0.01,
+            exposure_usd=0.001,
+            shares=0.001,
+            side="YES",
+        )
+    ]
+
+    async def fake_read_console_wallet_positions():
+        return live_positions
+
+    async def fake_scan_console_profile_markets(**_kwargs):
+        return SimpleNamespace(
+            source_label="Bullpen console",
+            source_url="https://example.com/bullpen",
+            accepted=[active_market, candidate_market],
+            rejected=[],
+            total_candidates=2,
+        )
+
+    def dust_exit_evaluation(*_args, **_kwargs):
+        return EventExitEvaluation(
+            exit_signals=[
+                ExitSignal(
+                    strategy="OUTSIDE_TOP_10_RETURNS_DAY",
+                    severity="DUST_LOST",
+                    reasonCode="LOW_EXECUTABLE_VALUE",
+                    label="Authoritative dust exit",
+                    description="No executable held-side value remains.",
+                    createdAt=fixed_now.isoformat(),
+                )
+            ],
+            exit_state="DUST_LOST",
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.CONSOLE_RANKED_EVENT_LIMIT",
+        1,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now",
+        lambda: fixed_now,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.utc_now_iso",
+        lambda: fixed_now.isoformat(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.read_console_wallet_positions",
+        fake_read_console_wallet_positions,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.scan_console_profile_markets",
+        fake_scan_console_profile_markets,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.position_returns_per_day",
+        lambda *_args, **_kwargs: 10.0,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.candidate_returns_per_day",
+        lambda market, now: 9.0 if market.slug == candidate_market.slug else 0.5,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_market_rules",
+        lambda *_args, **_kwargs: _fake_rules(hours_remaining=96),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.evaluate_event_exits",
+        dust_exit_evaluation,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.build_evidence_packet",
+        lambda *args, **kwargs: _fake_evidence_packet(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.run_llm_consensus",
+        lambda *args, **kwargs: _fake_llm_consensus(fair_yes=8, fair_no=92),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._should_use_legacy_console_stage_two_path",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine._execute_console_stage_two_shared_llm",
+        _fake_console_stage_two_shared_review(
+            fixed_now=fixed_now,
+            fair_yes=8,
+            fair_no=92,
+        ),
+    )
+
+    result = await BullpenAutoLiveEngine().execute(
+        user_id=7,
+        settings=BullpenAutoLiveSettings(
+            strategy_profile=CONSOLE_PROFILE_ID,
+            auto_live_enabled=True,
+            dry_run=True,
+        ),
+        state=BullpenAutoLiveState(running=True),
+        run=_run_snapshot(),
+        positions=[],
+        historical_decisions=[],
+    )
+
+    by_market = {decision.market_id: decision for decision in result.decisions}
+    dust_decision = by_market[active_market.market_id]
+    buy_decision = by_market[candidate_market.market_id]
+    assert dust_decision.exit_state == "DUST_LOST"
+    assert dust_decision.order_plan is not None
+    assert dust_decision.order_plan.action == "sell"
+    assert dust_decision.order_plan.status == "skipped"
+    assert dust_decision.order_plan.order_size_usd == 0
+    assert dust_decision.order_plan.submission_evidence_present is not True
+    assert buy_decision.order_plan is not None
+    assert buy_decision.order_plan.action == "buy"
+
+    stage2 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "llm"
+    )
+    stage3 = next(
+        stage
+        for stage in result.run.stage_results
+        if stage.outputs.get("workflow_stage_key") == "invest"
+    )
+    assert stage2.outputs["stage2_actionable_exit_market_ids"] == [
+        active_market.market_id
+    ]
+    assert stage2.outputs["stage2_actionable_buy_market_ids"] == [
+        candidate_market.market_id
+    ]
+    steps = {step["key"]: step for step in stage3.outputs["execution_steps"]}
+    assert steps["sell"]["planned_orders"] == 1
+    assert steps["sell"]["processed_orders"] == 1
+    assert steps["sell"]["submitted_orders"] == 0
+    assert steps["buy"]["planned_orders"] == 1
+    assert result.run.orders_planned == 2
+    assert result.run.orders_submitted == 0
+
+
+@pytest.mark.anyio
 async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is_not_submitted(
     monkeypatch,
 ):
@@ -4562,16 +4724,21 @@ async def test_console_profile_stage_3_marks_run_failed_when_event_exit_order_is
     )
     assert invest_stage.status == "fail"
     assert invest_stage.reason == result.run.summary
-    assert invest_stage.outputs["orders_unsubmitted"] == 1
+    assert invest_stage.outputs["orders_unsubmitted"] == 2
     assert invest_stage.outputs["sell_orders_unsubmitted"] == 1
-    assert invest_stage.outputs["buy_orders_unsubmitted"] == 0
+    assert invest_stage.outputs["buy_orders_unsubmitted"] == 1
     assert (
         invest_stage.outputs["execution_failure_message"] == result.run.summary
     )
     buy_decision = next(
         decision for decision in result.decisions if decision.decision == "BUY_NEW"
     )
-    assert buy_decision.order_plan is None
+    assert buy_decision.order_plan is not None
+    assert buy_decision.order_plan.status in {
+        "retry_wait",
+        "waiting_for_collateral",
+        "deferred",
+    }
     assert any(
         marker in buy_decision.reason.lower()
         for marker in ("capacity", "cash", "refresh")
@@ -5292,14 +5459,29 @@ async def test_console_profile_submits_buys_even_while_exit_settlement_is_pendin
         if decision.order_plan is not None and decision.order_plan.action == "buy"
     ]
     assert planned_buy_decisions
-    assert all(
-        decision.order_plan.status == "submitted"
+    submitted_buy_decisions = [
+        decision
         for decision in planned_buy_decisions
-    )
+        if decision.order_plan.status == "submitted"
+    ]
+    deferred_buy_decisions = [
+        decision
+        for decision in planned_buy_decisions
+        if decision.order_plan.status != "submitted"
+    ]
+    # Eight immediately affordable/free-slot buys still submit while the ninth
+    # authoritative Stage 2 Buy remains durable instead of disappearing.
+    assert len(submitted_buy_decisions) == 8
+    assert len(deferred_buy_decisions) == 1
+    assert deferred_buy_decisions[0].order_plan.status in {
+        "waiting_for_collateral",
+        "retry_wait",
+        "deferred",
+    }
     assert all(
         decision.reason
         == "Ranked candidate received a post-exit buy plan using fresh cash and occupied-slot counts."
-        for decision in planned_buy_decisions
+        for decision in submitted_buy_decisions
     )
 
 
@@ -7558,16 +7740,21 @@ async def test_console_profile_plans_formula_sized_top10_buys_and_exits_lower_ra
     planned_buy_decisions = [
         decision for decision in buy_decisions if decision.order_plan is not None
     ]
-    assert len(planned_buy_decisions) == 8
+    assert len(planned_buy_decisions) == 9
     planned_order_sizes = {
         decision.order_plan.order_size_usd for decision in planned_buy_decisions
     }
     assert planned_order_sizes == {5.5}
     assert all(decision.order_plan.side == "NO" for decision in planned_buy_decisions)
-    assert all(
+    assert sum(
         decision.order_plan.status == "skipped"
         for decision in planned_buy_decisions
-    )
+    ) == 8
+    assert sum(
+        decision.order_plan.status
+        in {"waiting_for_collateral", "retry_wait", "deferred"}
+        for decision in planned_buy_decisions
+    ) == 1
     stage2 = next(
         stage
         for stage in result.run.stage_results
@@ -8179,7 +8366,7 @@ async def test_console_profile_nonqualifying_active_positions_do_not_displace_to
     exit_decisions = [decision for decision in result.decisions if decision.decision == "EXIT"]
 
     assert len(buy_decisions) == 10
-    assert sum(decision.order_plan is not None for decision in buy_decisions) == 9
+    assert sum(decision.order_plan is not None for decision in buy_decisions) == 10
     assert exit_decisions[0].market_id == active_market.market_id
     assert exit_decisions[0].exit_state == "EVENT_EXIT_PLANNED"
     assert exit_decisions[0].order_plan is not None
@@ -8542,7 +8729,8 @@ async def test_console_profile_manual_rows_plan_only_one_buy_order_per_duplicate
     assert len(buy_decisions) == 1
     assert buy_decisions[0].market_id == "duplicate-market"
     assert buy_decisions[0].stage3_result == "BLOCKED"
-    assert buy_decisions[0].order_plan is None
+    assert buy_decisions[0].order_plan is not None
+    assert buy_decisions[0].order_plan.status == "waiting_for_collateral"
     assert "Fresh Bullpen cash in hand was unavailable" in buy_decisions[0].reason
     assert len(skipped_decisions) == 1
     assert skipped_decisions[0].market_id == "duplicate-market"

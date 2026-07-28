@@ -308,3 +308,64 @@ test("an authoritative recovery projection clears stale blockers and IDs", async
     [{ id: "full-candidate" }],
   );
 });
+
+test("compact polls cannot erase the terminal authoritative Stage 2 contract", async () => {
+  const { mergeBullpenConsoleRunProjection } = await loadModule();
+  const existingStage = {
+    stage_number: 2,
+    stage_name: "Stage 2",
+    status: "pass",
+    inputs: {},
+    outputs: {
+      workflow_stage_key: "llm",
+      phase_status: "completed",
+      stage2_actionable_contract_authoritative: true,
+      stage2_actionable_contract_version: 2,
+      stage2_actionable_exit_market_ids: ["exit-1", "exit-2", "exit-3", "exit-4"],
+      stage2_actionable_buy_market_ids: ["buy-1", "buy-2", "buy-3", "buy-4", "buy-5"],
+      stage2_actionable_exit_count: 4,
+      stage2_actionable_buy_count: 5,
+    },
+    guardrails_checked: [],
+  };
+  const projectedStage = {
+    ...existingStage,
+    outputs: {
+      workflow_stage_key: "llm",
+      phase_status: "completed",
+      orders_processed: 9,
+    },
+  };
+  const existing = {
+    ...run(existingStage),
+    stage_results: [existingStage],
+  };
+  const projected = {
+    ...run(projectedStage),
+    stage_results: [projectedStage],
+  };
+
+  const merged = mergeBullpenConsoleRunProjection({
+    existing,
+    projected,
+    projectionAvailable: true,
+  });
+  const outputs = merged.stage_results[0].outputs;
+
+  assert.deepEqual(outputs.stage2_actionable_exit_market_ids, [
+    "exit-1",
+    "exit-2",
+    "exit-3",
+    "exit-4",
+  ]);
+  assert.deepEqual(outputs.stage2_actionable_buy_market_ids, [
+    "buy-1",
+    "buy-2",
+    "buy-3",
+    "buy-4",
+    "buy-5",
+  ]);
+  assert.equal(outputs.stage2_actionable_exit_count, 4);
+  assert.equal(outputs.stage2_actionable_buy_count, 5);
+  assert.equal(outputs.orders_processed, 9);
+});
