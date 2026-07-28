@@ -1,0 +1,36 @@
+name: Export Stage 2 authoritative source
+
+on:
+  push:
+    branches:
+      - codex/stage2-actionables-authoritative-execution
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  export-source:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'codex/stage2-actionables-authoritative-execution'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Package repository source
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=frontend/node_modules --exclude=frontend/.next \
+            -czf "${RUNNER_TEMP}/stage2-authoritative-source.tar.gz" .
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage2-authoritative-source
+          path: ${{ runner.temp }}/stage2-authoritative-source.tar.gz
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
