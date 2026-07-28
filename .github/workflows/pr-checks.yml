@@ -48,7 +48,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: stage2-actionables-patch-diagnostics
-          path: /tmp/stage2-actionables-patch-error.log
+          path: |
+            /tmp/stage2-actionables-patch-error.log
+            /tmp/apply_stage2_actionables_stage3_fix.py
           if-no-files-found: error
           retention-days: 2
 
