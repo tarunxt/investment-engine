@@ -36,9 +36,27 @@ jobs:
 
       - name: Decode and apply the permanent source patch
         run: |
-          set -euo pipefail
+          set +e
           base64 -d scripts/.stage2-actionables-fix.py.gz.b64 | gzip -d > /tmp/apply_stage2_actionables_stage3_fix.py
-          python /tmp/apply_stage2_actionables_stage3_fix.py
+          decode_status=${PIPESTATUS[1]}
+          if [ "$decode_status" -ne 0 ]; then
+            echo "Patch payload decode failed with status $decode_status" | tee /tmp/stage2-actionables-patch-error.log
+            patch_status=$decode_status
+          else
+            python /tmp/apply_stage2_actionables_stage3_fix.py 2>&1 | tee /tmp/stage2-actionables-patch-error.log
+            patch_status=${PIPESTATUS[0]}
+          fi
+          if [ "$patch_status" -ne 0 ]; then
+            cp /tmp/stage2-actionables-patch-error.log scripts/stage2-actionables-patch-error.log
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add scripts/stage2-actionables-patch-error.log
+            git commit -m 'Capture Stage 2 actionables patch application failure'
+            git push origin HEAD:codex/fix-stage2-actionables-full-pipeline
+            exit "$patch_status"
+          fi
+          rm -f scripts/stage2-actionables-patch-error.log
+          set -e
 
       - name: Compile backend sources
         run: python -m compileall -q backend/app
@@ -92,6 +110,7 @@ jobs:
           set -euo pipefail
           git fetch origin main
           rm -f scripts/.stage2-actionables-fix.py.gz.b64
+          rm -f scripts/stage2-actionables-patch-error.log
           rm -f .github/workflows/apply-stage2-actionables-full-pipeline.yml
           git checkout origin/main -- .github/workflows/pr-checks.yml
           git config user.name 'github-actions[bot]'
