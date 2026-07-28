@@ -40,6 +40,18 @@ jobs:
           : > /tmp/stage2-actionables-patch-error.log
           {
             base64 -d scripts/.stage2-actionables-fix.py.gz.b64 | gzip -d > /tmp/apply_stage2_actionables_stage3_fix.py
+            python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/apply_stage2_actionables_stage3_fix.py')
+          source = path.read_text(encoding='utf-8')
+          old = """    '        set_run_stage_result(\\n            run,\\n            build_workflow_stage_result(\\n                stage_number=3,\\n',
+              '        initial_stage3_planned_exit_count = len(\\n"""
+          new = """    '            \"decision_rows_persisted\": 0,\\n        }\\n        set_run_stage_result(\\n            run,\\n            build_workflow_stage_result(\\n                stage_number=3,\\n',
+              '            \"decision_rows_persisted\": 0,\\n        }\\n        initial_stage3_planned_exit_count = len(\\n"""
+          if old not in source:
+              raise SystemExit('Runtime patch anchor for Stage 3 initial checkpoint was not found')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
             python /tmp/apply_stage2_actionables_stage3_fix.py
           } 2>&1 | tee /tmp/stage2-actionables-patch-error.log
 
