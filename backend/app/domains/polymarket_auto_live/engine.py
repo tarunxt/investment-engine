@@ -60,6 +60,8 @@ from app.domains.polymarket_auto_live.console_profile import (
     ConsoleWalletPositionsSnapshot,
     ConsoleScanResult,
     candidate_returns_per_day,
+    console_stage1_wallet_recovery_max_age_seconds,
+    console_stage1_wallet_recovery_timeout_seconds,
     console_stage1_wallet_refresh_timeout_seconds,
     llm_returns_per_day,
     console_market_filter_reasons,
@@ -329,6 +331,53 @@ def _stage2_actionable_hold_position_keys(
         for position in positions
         if position.market_id not in actionable_exit_market_ids
     }
+
+
+def _derive_stage2_actionable_market_id_orders(
+    positions: list[ConsoleWalletPosition],
+    top_active_position_keys: set[str],
+    top_candidate_market_id_order: list[str],
+) -> tuple[list[str], list[str]]:
+    """Build the exact full-run Stage 2 -> Stage 3 actionable contract.
+
+    Active positions displaced from the authoritative combined Top 10 become
+    Step 1 exits. New candidate rows inside that Top 10 become Step 2 buys.
+    Order and de-duplication are stable so Stage 3 never substitutes a different
+    market after wallet/cash refresh.
+    """
+
+    exit_market_ids: list[str] = []
+    seen_exit_market_ids: set[str] = set()
+    for position in positions:
+        market_id = str(position.market_id or "").strip()
+        position_key = f"{market_id}::{position.side}"
+        if (
+            not market_id
+            or position_key in top_active_position_keys
+            or market_id in seen_exit_market_ids
+        ):
+            continue
+        seen_exit_market_ids.add(market_id)
+        exit_market_ids.append(market_id)
+
+    return (
+        exit_market_ids,
+        _normalize_stage2_actionable_market_id_order(
+            list(top_candidate_market_id_order)
+        ),
+    )
+
+
+def _merge_workflow_stage_outputs(
+    run: BullpenAutoLiveRun,
+    workflow_stage_key: str,
+    updates: dict[str, object],
+) -> None:
+    for stage_result in run.stage_results:
+        if stage_result.outputs.get("workflow_stage_key") != workflow_stage_key:
+            continue
+        stage_result.outputs.update(updates)
+        return
 
 
 def console_order_usd(settings: BullpenAutoLiveSettings) -> float:
@@ -1724,6 +1773,30 @@ async def _read_stage1_wallet_positions_snapshot() -> ConsoleWalletPositionsSnap
         force_fresh=True,
         caller_source="auto-live-stage1",
         max_age_seconds=0,
+    )
+
+
+async def _read_stage1_wallet_positions_recovery_snapshot(
+    *,
+    max_age_seconds: int,
+) -> ConsoleWalletPositionsSnapshot:
+    """Join the shared refresh or reuse only a recent broker-verified snapshot."""
+
+    if read_console_wallet_positions is not _ORIGINAL_READ_CONSOLE_WALLET_POSITIONS:
+        positions = await read_console_wallet_positions()
+        return ConsoleWalletPositionsSnapshot(
+            positions=positions,
+            source="live-cli",
+            fetched_at=datetime.now(UTC).isoformat(),
+            raw_position_count=len(positions),
+            diagnostics={"test_compatibility_recovery_reader": True},
+            raw_positions=list(positions),
+        )
+
+    return await read_console_wallet_positions_snapshot(
+        force_fresh=False,
+        caller_source="auto-live-stage1-recovery",
+        max_age_seconds=max_age_seconds,
     )
 
 
@@ -5372,6 +5445,15 @@ class BullpenAutoLiveEngine:
         stage1_wallet_refresh_timeout_seconds = (
             console_stage1_wallet_refresh_timeout_seconds()
         )
+        stage1_wallet_recovery_timeout_seconds = (
+            console_stage1_wallet_recovery_timeout_seconds()
+        )
+        stage1_wallet_recovery_max_age_seconds = (
+            console_stage1_wallet_recovery_max_age_seconds()
+        )
+        stage1_wallet_recovery_status = "not-needed"
+        stage1_wallet_recovery_source: str | None = None
+        stage1_wallet_recovery_error: str | None = None
         manual_console_context = (
             run.request_context.console_profile
             if run.request_context and run.request_context.console_profile
@@ -5950,27 +6032,82 @@ class BullpenAutoLiveEngine:
         console_balance_task = asyncio.create_task(refresh_balance())
         stage1_wallet_refresh_error: str | None = None
         live_wallet_snapshot: ConsoleWalletPositionsSnapshot | None = None
+
+        async def recover_stage1_wallet_snapshot(
+            trigger: str,
+        ) -> ConsoleWalletPositionsSnapshot | None:
+            nonlocal stage1_wallet_recovery_status
+            nonlocal stage1_wallet_recovery_source
+            nonlocal stage1_wallet_recovery_error
+
+            stage1_wallet_recovery_status = "running"
+            report_stage1_progress(
+                "Stage 1 wallet refresh exceeded the fast-path budget; joining the bounded shared-snapshot recovery.",
+                completed_items=len(stage1_accepted_candidates),
+                total_items=scanned_total_candidates,
+                commentary=[
+                    "The initial wallet refresh is still unresolved.",
+                    "Joining the runtime broker's coalesced refresh and accepting only a recent verified snapshot.",
+                    "Stage 2 remains gated until the portfolio snapshot is recovered or the bounded recovery expires.",
+                ],
+                outputs={
+                    "wallet_snapshot_status": "recovering",
+                    "wallet_recovery_trigger": trigger,
+                    "wallet_recovery_timeout_seconds": stage1_wallet_recovery_timeout_seconds,
+                    "wallet_recovery_max_age_seconds": stage1_wallet_recovery_max_age_seconds,
+                },
+            )
+            try:
+                recovered = await asyncio.wait_for(
+                    _read_stage1_wallet_positions_recovery_snapshot(
+                        max_age_seconds=stage1_wallet_recovery_max_age_seconds,
+                    ),
+                    timeout=stage1_wallet_recovery_timeout_seconds,
+                )
+                if recovered.freshness_state not in {"fresh", "cached"}:
+                    raise RuntimeError(
+                        "Shared Bullpen wallet recovery returned a non-current snapshot."
+                    )
+            except Exception as recovery_exc:
+                stage1_wallet_recovery_status = "failed"
+                stage1_wallet_recovery_error = str(recovery_exc)
+                logger.warning(
+                    "Stage 1 wallet recovery failed after trigger %s for run %s: %s",
+                    trigger,
+                    run.id,
+                    recovery_exc,
+                )
+                return None
+
+            stage1_wallet_recovery_status = "recovered"
+            stage1_wallet_recovery_source = (
+                f"{recovered.source}:{recovered.freshness_state}"
+            )
+            stage1_wallet_recovery_error = None
+            return recovered
+
         try:
             completed_wallet_tasks, _ = await asyncio.wait(
                 {live_wallet_positions_task},
                 timeout=stage1_wallet_refresh_timeout_seconds,
             )
             if live_wallet_positions_task not in completed_wallet_tasks:
-                # Do not await task cancellation here.  The point of this
-                # circuit breaker is to release Stage 2 even when a lower
-                # level client is slow to unwind a shared lock or subprocess.
-                _cancel_background_task(live_wallet_positions_task)
-                stage1_wallet_refresh_error = (
-                    "Fresh Bullpen wallet refresh did not finish within "
-                    f"{stage1_wallet_refresh_timeout_seconds} seconds."
+                recovered_snapshot = await recover_stage1_wallet_snapshot(
+                    "fast-path-timeout"
                 )
-                logger.warning(
-                    "Stage 1 wallet refresh exceeded its %s-second handoff budget; "
-                    "continuing with candidate-only Stage 2 for run %s.",
-                    stage1_wallet_refresh_timeout_seconds,
-                    run.id,
-                )
-                live_wallet_positions: list[ConsoleWalletPosition] = []
+                if recovered_snapshot is None:
+                    _cancel_background_task(live_wallet_positions_task)
+                    stage1_wallet_refresh_error = (
+                        "Fresh Bullpen wallet refresh and bounded shared-snapshot "
+                        "recovery did not complete within "
+                        f"{stage1_wallet_refresh_timeout_seconds + stage1_wallet_recovery_timeout_seconds} seconds."
+                    )
+                    live_wallet_positions: list[ConsoleWalletPosition] = []
+                else:
+                    live_wallet_snapshot = recovered_snapshot
+                    live_wallet_positions = recovered_snapshot.positions
+                    if not live_wallet_positions_task.done():
+                        _cancel_background_task(live_wallet_positions_task)
             else:
                 live_wallet_snapshot = live_wallet_positions_task.result()
                 live_wallet_positions = live_wallet_snapshot.positions
@@ -5983,22 +6120,19 @@ class BullpenAutoLiveEngine:
                 )
                 return fail_stage_one_wallet_refresh(reason)
 
-            # The runtime broker can enforce its own command or shared-lock
-            # timeout before this outer deadline elapses.  Those are the same
-            # availability condition as an unfinished wallet task: Stage 2 is
-            # safe to continue read-only, while all Stage 3 execution remains
-            # hard-blocked below.
-            stage1_wallet_refresh_error = (
-                "Fresh Bullpen wallet refresh timed out or could not acquire the "
-                "shared wallet lock before the Stage 1 handoff deadline."
+            recovered_snapshot = await recover_stage1_wallet_snapshot(
+                f"transient-{getattr(exc, 'classification', 'timeout')}"
             )
-            logger.warning(
-                "Stage 1 wallet refresh returned a transient %s failure; "
-                "continuing with candidate-only Stage 2 for run %s.",
-                getattr(exc, "classification", "timeout"),
-                run.id,
-            )
-            live_wallet_positions = []
+            if recovered_snapshot is None:
+                _cancel_background_task(live_wallet_positions_task)
+                stage1_wallet_refresh_error = (
+                    "Fresh Bullpen wallet refresh timed out and bounded recovery "
+                    "could not obtain a recent verified shared snapshot."
+                )
+                live_wallet_positions = []
+            else:
+                live_wallet_snapshot = recovered_snapshot
+                live_wallet_positions = recovered_snapshot.positions
 
         stage1_wallet_snapshot_was_unavailable = bool(
             stage1_wallet_refresh_error
@@ -6008,10 +6142,17 @@ class BullpenAutoLiveEngine:
             "warning" if scan_warning or stage1_wallet_refresh_error else "pass"
         )
         stage1_scan_reason = (
-            "Bullpen console profile scan completed, but the fresh wallet snapshot "
-            "did not arrive within the Stage 1 handoff budget. Stage 2 will review "
-            "new candidates only; Stage 3 is blocked so no orders can be planned or submitted."
+            "Bullpen console profile scan completed, but neither the fresh wallet "
+            "refresh nor the bounded shared-snapshot recovery produced a recent "
+            "verified portfolio. Stage 2 will review new candidates only; Stage 3 "
+            "is blocked so no orders can be planned or submitted."
             if stage1_wallet_refresh_error
+            else (
+                "Bullpen console profile recovered a recent verified wallet snapshot "
+                "after the fast-path refresh budget and prepared the complete candidate "
+                "plus active-position set."
+            )
+            if stage1_wallet_recovery_status == "recovered"
             else "Bullpen console profile scan completed with an upstream warning: "
             f"{scan_warning}"
             if scan_warning
@@ -6421,6 +6562,11 @@ class BullpenAutoLiveEngine:
                 else "fresh"
             ),
             "wallet_refresh_timeout_seconds": stage1_wallet_refresh_timeout_seconds,
+            "wallet_recovery_timeout_seconds": stage1_wallet_recovery_timeout_seconds,
+            "wallet_recovery_max_age_seconds": stage1_wallet_recovery_max_age_seconds,
+            "wallet_recovery_status": stage1_wallet_recovery_status,
+            "wallet_recovery_source": stage1_wallet_recovery_source,
+            "wallet_recovery_error": stage1_wallet_recovery_error,
             "wallet_refresh_error": stage1_wallet_refresh_error,
             "stage2_candidate_only": bool(stage1_wallet_refresh_error),
             "live_wallet_positions": len(enriched_wallet_positions),
@@ -8057,6 +8203,16 @@ class BullpenAutoLiveEngine:
                 if row["kind"] == "active"
             }
         )
+        stage2_actionable_handoff_source = (
+            "manual-request"
+            if manual_stage2_actionable_handoff_used
+            else "backend-stage2-ranking"
+            if stage2_universe_complete
+            else "blocked-incomplete-stage2-universe"
+        )
+        stage2_actionable_handoff_used = bool(
+            manual_stage2_actionable_handoff_used or stage2_universe_complete
+        )
         if manual_stage2_actionable_handoff_used:
             available_buy_market_ids = {
                 str(row["market_id"]) for row in candidate_rank_rows
@@ -8097,7 +8253,46 @@ class BullpenAutoLiveEngine:
                 active_bullpen_wallet_positions,
                 set(accepted_stage2_actionable_exit_market_id_order),
             )
-        stage3_buy_queue_market_ids = set(ranking_top_candidate_market_id_order)
+        elif stage2_universe_complete:
+            (
+                accepted_stage2_actionable_exit_market_id_order,
+                accepted_stage2_actionable_buy_market_id_order,
+            ) = _derive_stage2_actionable_market_id_orders(
+                active_bullpen_wallet_positions,
+                ranking_top_active_keys,
+                ranking_top_candidate_market_id_order,
+            )
+
+        stage2_actionable_outputs: dict[str, object] = {
+            "stage2_actionable_handoff_used": stage2_actionable_handoff_used,
+            "stage2_actionable_handoff_source": stage2_actionable_handoff_source,
+            "stage2_actionable_exit_market_ids": list(
+                accepted_stage2_actionable_exit_market_id_order
+            ),
+            "stage2_actionable_buy_market_ids": list(
+                accepted_stage2_actionable_buy_market_id_order
+            ),
+            "stage2_actionable_exit_count": len(
+                accepted_stage2_actionable_exit_market_id_order
+            ),
+            "stage2_actionable_buy_count": len(
+                accepted_stage2_actionable_buy_market_id_order
+            ),
+            "missing_stage2_actionable_exit_market_ids": list(
+                missing_stage2_actionable_exit_market_id_order
+            ),
+            "missing_stage2_actionable_buy_market_ids": list(
+                missing_stage2_actionable_buy_market_id_order
+            ),
+        }
+        _merge_workflow_stage_outputs(run, "llm", stage2_actionable_outputs)
+        self._report_progress(progress_callback, run, state)
+
+        stage3_buy_queue_market_ids = set(
+            accepted_stage2_actionable_buy_market_id_order
+            if stage2_actionable_handoff_used
+            else ranking_top_candidate_market_id_order
+        )
         top_rows = ranking_top_rows
         top_active_keys = ranking_top_active_keys
         top_candidate_market_ids = ranking_top_candidate_market_ids
@@ -8126,19 +8321,7 @@ class BullpenAutoLiveEngine:
                     ),
                     "selected_qualified_candidate_market_ids": sorted(selected_qualified_candidate_market_ids),
                     "top_active_keys": sorted(ranking_top_active_keys),
-                    "stage2_actionable_handoff_used": manual_stage2_actionable_handoff_used,
-                    "stage2_actionable_exit_market_ids": list(
-                        accepted_stage2_actionable_exit_market_id_order
-                    ),
-                    "stage2_actionable_buy_market_ids": list(
-                        accepted_stage2_actionable_buy_market_id_order
-                    ),
-                    "missing_stage2_actionable_exit_market_ids": list(
-                        missing_stage2_actionable_exit_market_id_order
-                    ),
-                    "missing_stage2_actionable_buy_market_ids": list(
-                        missing_stage2_actionable_buy_market_id_order
-                    ),
+                    **stage2_actionable_outputs,
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                     "rejected_candidates": [
@@ -8183,7 +8366,8 @@ class BullpenAutoLiveEngine:
             "received_at": invest_stage_started_at,
             "candidate_market_ids": list(ranking_top_candidate_market_id_order),
             "candidate_count": len(ranking_top_candidate_market_id_order),
-            "actionable_handoff_used": manual_stage2_actionable_handoff_used,
+            "actionable_handoff_used": stage2_actionable_handoff_used,
+            "actionable_handoff_source": stage2_actionable_handoff_source,
             "actionable_exit_market_ids": list(
                 accepted_stage2_actionable_exit_market_id_order
             ),
@@ -8198,6 +8382,56 @@ class BullpenAutoLiveEngine:
             ),
             "decision_rows_persisted": 0,
         }
+        initial_stage3_planned_exit_count = len(
+            accepted_stage2_actionable_exit_market_id_order
+        )
+        initial_stage3_planned_buy_count = len(
+            accepted_stage2_actionable_buy_market_id_order
+        )
+        initial_stage3_execution_steps = [
+            {
+                "key": "sell",
+                "step_number": 1,
+                "step_total": 2,
+                "label": "Event Exits",
+                "status": (
+                    "pending" if initial_stage3_planned_exit_count > 0 else "completed"
+                ),
+                "detail": (
+                    f"{initial_stage3_planned_exit_count} exact Stage 2 Exit actionable"
+                    f"{' is' if initial_stage3_planned_exit_count == 1 else 's are'} in the Stage 3 Planned list."
+                    if initial_stage3_planned_exit_count > 0
+                    else "No Stage 2 Exit actionables were transferred."
+                ),
+                "planned_orders": initial_stage3_planned_exit_count,
+                "processed_orders": 0,
+                "submitted_orders": 0,
+                "event_exit_rows": initial_stage3_planned_exit_count,
+                "ranking_llm_planned_orders": initial_stage3_planned_exit_count,
+                "forced_exit_planned_orders": 0,
+                "redeem_planned_orders": 0,
+                "redeem_processed_orders": 0,
+                "redeem_submitted_orders": 0,
+            },
+            {
+                "key": "buy",
+                "step_number": 2,
+                "step_total": 2,
+                "label": "Invest planned orders",
+                "status": (
+                    "pending" if initial_stage3_planned_buy_count > 0 else "completed"
+                ),
+                "detail": (
+                    f"{initial_stage3_planned_buy_count} exact Stage 2 Buy actionable"
+                    f"{' is' if initial_stage3_planned_buy_count == 1 else 's are'} in the Stage 3 Planned list; executable sizing follows Step 1."
+                    if initial_stage3_planned_buy_count > 0
+                    else "No Stage 2 Buy actionables were transferred."
+                ),
+                "planned_orders": initial_stage3_planned_buy_count,
+                "processed_orders": 0,
+                "submitted_orders": 0,
+            },
+        ]
         set_run_stage_result(
             run,
             build_workflow_stage_result(
@@ -8231,10 +8465,18 @@ class BullpenAutoLiveEngine:
                     "active_position_rows": len(position_snapshots),
                     "candidate_decision_rows": len(candidate_contexts),
                     "decisions_count": 0,
-                    "orders_planned": 0,
+                    "orders_planned": (
+                        initial_stage3_planned_exit_count
+                        + initial_stage3_planned_buy_count
+                    ),
                     "orders_processed": 0,
                     "orders_submitted": 0,
-                    "execution_steps": [],
+                    "event_exit_rows": initial_stage3_planned_exit_count,
+                    "event_exit_planned": initial_stage3_planned_exit_count,
+                    "sell_orders_planned": initial_stage3_planned_exit_count,
+                    "buy_queue_planned": initial_stage3_planned_buy_count,
+                    "buy_orders_planned": 0,
+                    "execution_steps": initial_stage3_execution_steps,
                     "order_metrics": {},
                     "decision_rows": [],
                     "stage2_handoff_checkpoint": stage2_handoff_checkpoint,
@@ -8295,7 +8537,10 @@ class BullpenAutoLiveEngine:
                 decisions,
                 stage3_buy_queue_market_ids,
             )
-            buy_queue_planned = buy_queue_counts["planned"]
+            buy_queue_planned = max(
+                len(accepted_stage2_actionable_buy_market_id_order),
+                buy_queue_counts["planned"],
+            )
             buy_queue_processed = buy_queue_counts["processed"]
             buy_queue_submitted = buy_queue_counts["submitted"]
 
@@ -8335,6 +8580,20 @@ class BullpenAutoLiveEngine:
                             redeem_submitted += 1
                     else:
                         buy_submitted += 1
+
+            sell_planned = max(
+                sell_planned,
+                len(accepted_stage2_actionable_exit_market_id_order),
+            )
+            event_exit_rows = max(
+                event_exit_rows,
+                len(accepted_stage2_actionable_exit_market_id_order),
+            )
+            ranking_llm_sell_planned = max(
+                ranking_llm_sell_planned,
+                len(accepted_stage2_actionable_exit_market_id_order),
+            )
+            buy_planned = max(buy_planned, buy_queue_planned)
 
             return {
                 "sell_planned": sell_planned,
@@ -9117,7 +9376,7 @@ class BullpenAutoLiveEngine:
         # dependency pairing, final ranks, and queue/UI counters.  Retaining
         # the pre-exit handoff order made promoted candidates fall back to
         # market-id sorting and disappear from the Step 2 counters.
-        if manual_stage2_actionable_handoff_used:
+        if stage2_actionable_handoff_used:
             ranked_post_exit_candidate_market_id_order = list(
                 accepted_stage2_actionable_buy_market_id_order
             )

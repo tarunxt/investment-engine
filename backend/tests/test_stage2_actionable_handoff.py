@@ -1,4 +1,5 @@
 from app.domains.polymarket_auto_live.engine import (
+    _derive_stage2_actionable_market_id_orders,
     _filter_stage2_actionable_market_id_order,
     _normalize_stage2_actionable_market_id_order,
     _stage2_actionable_hold_position_keys,
@@ -46,3 +47,35 @@ def test_actionable_exit_handoff_holds_every_non_exit_position() -> None:
         "hold-1::YES",
         "hold-2::NO",
     }
+
+def test_full_run_derives_exact_exit_and_buy_actionable_order() -> None:
+    positions = [
+        _Position("hold-1", "YES"),
+        _Position("exit-1", "NO"),
+        _Position("exit-2", "YES"),
+        _Position("hold-2", "NO"),
+    ]
+
+    exits, buys = _derive_stage2_actionable_market_id_orders(
+        positions,
+        {"hold-1::YES", "hold-2::NO"},
+        ["buy-3", "buy-1", "buy-3"],
+    )
+
+    assert exits == ["exit-1", "exit-2"]
+    assert buys == ["buy-3", "buy-1"]
+
+
+def test_full_run_source_persists_actionables_and_stage3_queue_counts() -> None:
+    from pathlib import Path
+    import app.domains.polymarket_auto_live.engine as engine
+
+    source = Path(engine.__file__).read_text(encoding="utf-8")
+
+    assert '"stage2_actionable_handoff_source"' in source
+    assert '"stage2_actionable_exit_count"' in source
+    assert '"stage2_actionable_buy_count"' in source
+    assert "initial_stage3_execution_steps" in source
+    assert "initial_stage3_planned_exit_count" in source
+    assert "initial_stage3_planned_buy_count" in source
+    assert "async def recover_stage1_wallet_snapshot" in source

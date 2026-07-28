@@ -64,6 +64,21 @@ CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS = 30
 CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_ENV_VAR = (
     "BULLPEN_CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS"
 )
+# A positions refresh can legitimately wait for the shared authenticated-CLI
+# lock, an auth refresh, and the bounded CLI command. The initial 30-second
+# handoff remains the fast path; this recovery window lets the same coalesced
+# broker refresh finish instead of incorrectly converting a healthy run into a
+# candidate-only partial result.
+CONSOLE_STAGE1_WALLET_RECOVERY_TIMEOUT_SECONDS = 75
+CONSOLE_STAGE1_WALLET_RECOVERY_TIMEOUT_ENV_VAR = (
+    "BULLPEN_CONSOLE_STAGE1_WALLET_RECOVERY_TIMEOUT_SECONDS"
+)
+# Recovery may reuse a verified snapshot produced by another in-flight caller,
+# but never an arbitrary historical/LKG portfolio for live planning.
+CONSOLE_STAGE1_WALLET_RECOVERY_MAX_AGE_SECONDS = 60
+CONSOLE_STAGE1_WALLET_RECOVERY_MAX_AGE_ENV_VAR = (
+    "BULLPEN_CONSOLE_STAGE1_WALLET_RECOVERY_MAX_AGE_SECONDS"
+)
 CONSOLE_POSITION_ENRICHMENT_MAX_LOOKUPS = 64
 CONSOLE_POSITION_ENRICHMENT_MAX_CONCURRENCY = 6
 CONSOLE_POSITION_ENRICHMENT_REQUEST_TIMEOUT_SECONDS = 5.0
@@ -238,12 +253,7 @@ def _console_positions_timeout_seconds() -> int:
 
 
 def console_stage1_wallet_refresh_timeout_seconds() -> int:
-    """Return the end-to-end Stage 1 wait budget for a fresh wallet snapshot.
-
-    This is deliberately distinct from the individual Bullpen positions-command
-    timeout.  A fresh request can also wait on the distributed positions and
-    authenticated-CLI locks, so the worker needs its own circuit breaker.
-    """
+    """Return the fast-path Stage 1 wait budget for a fresh wallet snapshot."""
 
     configured = os.getenv(CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_ENV_VAR)
     if configured is None:
@@ -252,6 +262,30 @@ def console_stage1_wallet_refresh_timeout_seconds() -> int:
         return max(1, int(configured))
     except ValueError:
         return CONSOLE_STAGE1_WALLET_REFRESH_TIMEOUT_SECONDS
+
+
+def console_stage1_wallet_recovery_timeout_seconds() -> int:
+    """Return the bounded secondary wait for the shared positions refresh."""
+
+    configured = os.getenv(CONSOLE_STAGE1_WALLET_RECOVERY_TIMEOUT_ENV_VAR)
+    if configured is None:
+        return CONSOLE_STAGE1_WALLET_RECOVERY_TIMEOUT_SECONDS
+    try:
+        return max(1, int(configured))
+    except ValueError:
+        return CONSOLE_STAGE1_WALLET_RECOVERY_TIMEOUT_SECONDS
+
+
+def console_stage1_wallet_recovery_max_age_seconds() -> int:
+    """Maximum age of a broker-verified cached snapshot usable for recovery."""
+
+    configured = os.getenv(CONSOLE_STAGE1_WALLET_RECOVERY_MAX_AGE_ENV_VAR)
+    if configured is None:
+        return CONSOLE_STAGE1_WALLET_RECOVERY_MAX_AGE_SECONDS
+    try:
+        return max(1, int(configured))
+    except ValueError:
+        return CONSOLE_STAGE1_WALLET_RECOVERY_MAX_AGE_SECONDS
 
 
 def _parse_console_start_at(value: str | None) -> datetime | None:
