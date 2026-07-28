@@ -50,6 +50,8 @@ jobs:
           done
 
       - name: Inspect latest production Bullpen run handoff
+        id: inspect
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -60,142 +62,165 @@ jobs:
           command_timeout: 180s
           capture_stdout: true
           script: |
-            set -euo pipefail
+            set +e
             APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             if [[ ! -d "$APP_ROOT" && -d /srv/investor ]]; then APP_ROOT=/srv/investor; fi
             if ! id "$APP_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then APP_USER=investor; fi
             BACKEND_ENV_FILE=/etc/investor/backend.env
             PYTHON="$APP_ROOT/backend/.venv/bin/python"
-            test -x "$PYTHON"
-            test -f "$BACKEND_ENV_FILE"
-            echo "PRODUCTION_GIT_SHA=$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+            echo "APP_ROOT=$APP_ROOT"
+            echo "APP_USER=$APP_USER"
+            echo "PRODUCTION_GIT_SHA=$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD 2>&1)"
+            if [[ ! -x "$PYTHON" ]]; then echo "PYTHON_NOT_EXECUTABLE=$PYTHON"; exit 0; fi
+            if [[ ! -f "$BACKEND_ENV_FILE" ]]; then echo "ENV_FILE_MISSING=$BACKEND_ENV_FILE"; exit 0; fi
             set -a
             source "$BACKEND_ENV_FILE"
             set +a
             export PYTHONPATH="$APP_ROOT/backend"
-            cd "$APP_ROOT/backend"
-            "$PYTHON" - <<'PY'
+            cd "$APP_ROOT/backend" || exit 0
+            "$PYTHON" - 2>&1 <<'PY'
             import json
-            from sqlalchemy import func, select
-            from app.infrastructure.database.session import SyncSessionLocal
-            from app.domains.polymarket_auto_live.models import (
-                PolymarketAutoLiveDecisionRecord,
-                PolymarketAutoLiveOrderIntentRecord,
-                PolymarketAutoLiveRunRecord,
-            )
-
-            output_keys = {
-                "workflow_stage_key",
-                "phase_status",
-                "wallet_snapshot_status",
-                "wallet_recovery_status",
-                "wallet_refresh_error",
-                "stage2_candidate_only",
-                "stage2_eligible_rows_total",
-                "stage2_reviewed_rows",
-                "stage2_skipped_rows",
-                "stage2_universe_complete",
-                "stage2_universe_blocker_code",
-                "stage2_actionable_handoff_used",
-                "stage2_actionable_handoff_source",
-                "stage2_actionable_exit_count",
-                "stage2_actionable_buy_count",
-                "stage2_actionable_exit_market_ids",
-                "stage2_actionable_buy_market_ids",
-                "top_candidate_market_ids",
-                "ranking_top_candidate_market_id_order",
-                "top_active_keys",
-                "active_position_rows",
-                "active_position_rows_before_llm",
-                "candidate_decision_rows",
-                "decisions_count",
-                "orders_planned",
-                "orders_processed",
-                "orders_submitted",
-                "event_exit_rows",
-                "event_exit_planned",
-                "sell_orders_planned",
-                "buy_queue_planned",
-                "buy_orders_planned",
-                "execution_steps",
-                "stage2_handoff_checkpoint",
-            }
-
-            with SyncSessionLocal() as session:
-                run_record = session.execute(
-                    select(PolymarketAutoLiveRunRecord)
-                    .order_by(PolymarketAutoLiveRunRecord.started_at.desc())
-                    .limit(1)
-                ).scalar_one()
-                payload = run_record.payload or {}
-                stages = []
-                for stage in payload.get("stage_results", []):
-                    outputs = stage.get("outputs") or {}
-                    key = outputs.get("workflow_stage_key")
-                    if key not in {"scan", "llm", "invest"}:
-                        continue
-                    stages.append(
-                        {
-                            "stage_number": stage.get("stage_number"),
-                            "status": stage.get("status"),
-                            "reason": stage.get("reason"),
-                            "completed_at": stage.get("completed_at"),
-                            "outputs": {
-                                name: outputs.get(name)
-                                for name in sorted(output_keys)
-                                if name in outputs
-                            },
-                        }
-                    )
-                decision_count = session.scalar(
-                    select(func.count())
-                    .select_from(PolymarketAutoLiveDecisionRecord)
-                    .where(PolymarketAutoLiveDecisionRecord.run_id == run_record.id)
+            import traceback
+            try:
+                from sqlalchemy import func, select
+                from app.infrastructure.database.session import SyncSessionLocal
+                from app.domains.polymarket_auto_live.models import (
+                    PolymarketAutoLiveDecisionRecord,
+                    PolymarketAutoLiveOrderIntentRecord,
+                    PolymarketAutoLiveRunRecord,
                 )
-                intent_rows = session.execute(
-                    select(
-                        PolymarketAutoLiveOrderIntentRecord.action,
-                        PolymarketAutoLiveOrderIntentRecord.status,
-                        func.count(),
+
+                output_keys = {
+                    "workflow_stage_key",
+                    "phase_status",
+                    "wallet_snapshot_status",
+                    "wallet_recovery_status",
+                    "wallet_refresh_error",
+                    "stage2_candidate_only",
+                    "stage2_eligible_rows_total",
+                    "stage2_reviewed_rows",
+                    "stage2_skipped_rows",
+                    "stage2_universe_complete",
+                    "stage2_universe_blocker_code",
+                    "stage2_actionable_handoff_used",
+                    "stage2_actionable_handoff_source",
+                    "stage2_actionable_exit_count",
+                    "stage2_actionable_buy_count",
+                    "stage2_actionable_exit_market_ids",
+                    "stage2_actionable_buy_market_ids",
+                    "top_candidate_market_ids",
+                    "ranking_top_candidate_market_id_order",
+                    "top_active_keys",
+                    "active_position_rows",
+                    "active_position_rows_before_llm",
+                    "candidate_decision_rows",
+                    "decisions_count",
+                    "orders_planned",
+                    "orders_processed",
+                    "orders_submitted",
+                    "event_exit_rows",
+                    "event_exit_planned",
+                    "sell_orders_planned",
+                    "buy_queue_planned",
+                    "buy_orders_planned",
+                    "execution_steps",
+                    "stage2_handoff_checkpoint",
+                }
+
+                with SyncSessionLocal() as session:
+                    run_record = session.execute(
+                        select(PolymarketAutoLiveRunRecord)
+                        .order_by(PolymarketAutoLiveRunRecord.started_at.desc())
+                        .limit(1)
+                    ).scalar_one()
+                    payload = run_record.payload or {}
+                    stages = []
+                    for stage in payload.get("stage_results", []):
+                        outputs = stage.get("outputs") or {}
+                        key = outputs.get("workflow_stage_key")
+                        if key not in {"scan", "llm", "invest"}:
+                            continue
+                        stages.append(
+                            {
+                                "stage_number": stage.get("stage_number"),
+                                "status": stage.get("status"),
+                                "reason": stage.get("reason"),
+                                "completed_at": stage.get("completed_at"),
+                                "outputs": {
+                                    name: outputs.get(name)
+                                    for name in sorted(output_keys)
+                                    if name in outputs
+                                },
+                            }
+                        )
+                    decision_count = session.scalar(
+                        select(func.count())
+                        .select_from(PolymarketAutoLiveDecisionRecord)
+                        .where(PolymarketAutoLiveDecisionRecord.run_id == run_record.id)
                     )
-                    .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_record.id)
-                    .group_by(
-                        PolymarketAutoLiveOrderIntentRecord.action,
-                        PolymarketAutoLiveOrderIntentRecord.status,
-                    )
-                    .order_by(
-                        PolymarketAutoLiveOrderIntentRecord.action,
-                        PolymarketAutoLiveOrderIntentRecord.status,
-                    )
-                ).all()
-                print(
-                    json.dumps(
-                        {
-                            "run": {
-                                "id": run_record.id,
-                                "user_id": run_record.user_id,
-                                "status": run_record.status,
-                                "started_at": run_record.started_at.isoformat(),
-                                "completed_at": run_record.completed_at.isoformat()
-                                if run_record.completed_at
-                                else None,
-                                "decisions_count_column": run_record.decisions_count,
-                                "orders_planned_column": run_record.orders_planned,
-                                "orders_submitted_column": run_record.orders_submitted,
-                                "summary": run_record.summary,
-                                "error_message": run_record.error_message,
+                    intent_rows = session.execute(
+                        select(
+                            PolymarketAutoLiveOrderIntentRecord.action,
+                            PolymarketAutoLiveOrderIntentRecord.status,
+                            func.count(),
+                        )
+                        .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_record.id)
+                        .group_by(
+                            PolymarketAutoLiveOrderIntentRecord.action,
+                            PolymarketAutoLiveOrderIntentRecord.status,
+                        )
+                        .order_by(
+                            PolymarketAutoLiveOrderIntentRecord.action,
+                            PolymarketAutoLiveOrderIntentRecord.status,
+                        )
+                    ).all()
+                    print(
+                        json.dumps(
+                            {
+                                "run": {
+                                    "id": run_record.id,
+                                    "user_id": run_record.user_id,
+                                    "status": run_record.status,
+                                    "started_at": run_record.started_at.isoformat(),
+                                    "completed_at": run_record.completed_at.isoformat()
+                                    if run_record.completed_at
+                                    else None,
+                                    "decisions_count_column": run_record.decisions_count,
+                                    "orders_planned_column": run_record.orders_planned,
+                                    "orders_submitted_column": run_record.orders_submitted,
+                                    "summary": run_record.summary,
+                                    "error_message": run_record.error_message,
+                                },
+                                "decision_rows_in_db": decision_count,
+                                "intent_counts": [
+                                    {"action": action, "status": status, "count": count}
+                                    for action, status, count in intent_rows
+                                ],
+                                "stages": stages,
                             },
-                            "decision_rows_in_db": decision_count,
-                            "intent_counts": [
-                                {"action": action, "status": status, "count": count}
-                                for action, status, count in intent_rows
-                            ],
-                            "stages": stages,
-                        },
-                        indent=2,
-                        sort_keys=True,
-                        default=str,
+                            indent=2,
+                            sort_keys=True,
+                            default=str,
+                        )
                     )
-                )
+            except Exception:
+                traceback.print_exc()
             PY
+            echo "REMOTE_DIAGNOSTIC_COMPLETE=true"
+            exit 0
+
+      - name: Save production handoff output
+        env:
+          INSPECT_STDOUT: ${{ steps.inspect.outputs.stdout }}
+        run: |
+          printf '%s\n' "$INSPECT_STDOUT" > production-stage2-handoff.txt
+          cat production-stage2-handoff.txt
+
+      - name: Upload production handoff output
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-stage2-handoff
+          path: production-stage2-handoff.txt
+          if-no-files-found: error
+          retention-days: 2
