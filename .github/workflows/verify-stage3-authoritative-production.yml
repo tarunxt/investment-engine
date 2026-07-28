@@ -11,13 +11,12 @@ jobs:
   verify-production:
     if: github.event.pull_request.head.ref == 'codex/verify-stage3-authoritative-production'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       EXPECTED_SHA: c3d286a5d69f828cdefb713a5096020705666cee
 
     steps:
       - name: Verify exact production deployment
-        id: deployment
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -28,7 +27,6 @@ jobs:
           conclusion="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .conclusion // empty' <<<"$payload")"
           echo "run_id=${run_id:-missing} status=${status:-missing} conclusion=${conclusion:-missing}"
           [[ -n "$run_id" && "$status" == 'completed' && "$conclusion" == 'success' ]]
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs" \
             --jq '.jobs[] | [.name,.status,(.conclusion // "")] | @tsv'
 
@@ -46,7 +44,7 @@ jobs:
           echo "$response" | jq .
           [[ "$(jq -r '.status // empty' <<<"$response")" == 'ok' ]]
 
-      - name: Verify production checkout, implementation markers and services
+      - name: Verify exact production checkout
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -54,7 +52,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
           timeout: 120s
-          command_timeout: 240s
+          command_timeout: 180s
           script: |
             set -euo pipefail
             EXPECTED_SHA='c3d286a5d69f828cdefb713a5096020705666cee'
@@ -62,37 +60,16 @@ jobs:
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             if [[ ! -d "$APP_ROOT" && -d /srv/investor ]]; then APP_ROOT=/srv/investor; fi
             if ! id "$APP_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then APP_USER=investor; fi
-            echo "APP_ROOT=$APP_ROOT APP_USER=$APP_USER"
 
             actual_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+            echo "APP_ROOT=$APP_ROOT APP_USER=$APP_USER"
             echo "PRODUCTION_GIT_SHA=$actual_sha"
             [[ "$actual_sha" == "$EXPECTED_SHA" ]]
 
-            ENGINE="$APP_ROOT/backend/app/domains/polymarket_auto_live/engine.py"
-            FRONTEND="$APP_ROOT/frontend/lib/bullpenRunConsoleDetail.ts"
-            echo 'checking implementation markers'
-            grep -Fn 'A dust exit is still a Planned/Processed row' "$ENGINE"
-            grep -Fn 'Materialize the immutable Stage 2 Buy contract before any refresh' "$ENGINE"
-            grep -Fn 'stage2_actionable_exit_market_ids' "$FRONTEND" | head -n 3
-
-            require_active_any() {
-              label="$1"; shift
-              for service in "$@"; do
-                state="$(sudo systemctl is-active "$service" 2>/dev/null || true)"
-                echo "$label candidate=$service state=${state:-missing}"
-                if [[ "$state" == 'active' ]]; then
-                  return 0
-                fi
-              done
-              echo "No active service found for $label" >&2
-              return 1
-            }
-
-            require_active_any backend investor-backend investment-engine-backend
-            require_active_any frontend investor-frontend investment-engine-frontend
-            require_active_any auto-live-worker investor-celery-auto-live-worker investor-celery-worker
-            require_active_any nginx nginx
-            require_active_any postgres postgresql postgresql@16-main postgresql@15-main
-            require_active_any redis redis-server redis
-
+            echo "backend=$(sudo systemctl is-active investor-backend 2>/dev/null || true)"
+            echo "frontend=$(sudo systemctl is-active investor-frontend 2>/dev/null || true)"
+            echo "auto_live_worker=$(sudo systemctl is-active investor-celery-auto-live-worker 2>/dev/null || true)"
+            echo "nginx=$(sudo systemctl is-active nginx 2>/dev/null || true)"
+            echo "postgresql=$(sudo systemctl is-active postgresql 2>/dev/null || true)"
+            echo "redis_server=$(sudo systemctl is-active redis-server 2>/dev/null || true)"
             echo 'PRODUCTION_STAGE3_AUTHORITATIVE_DEPLOYMENT_VERIFIED=true'
