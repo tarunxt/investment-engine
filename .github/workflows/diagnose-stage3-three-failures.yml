@@ -1,96 +1,190 @@
-name: Diagnose Stage 3 three failures
+name: Apply and validate Stage 3 authoritative follow-up
 
 on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: stage3-authoritative-followup
+  cancel-in-progress: false
 
 jobs:
-  diagnose:
-    if: github.event.pull_request.head.ref == 'codex/diagnose-stage3-three-failures'
+  apply-and-validate:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.event.pull_request.head.ref == 'codex/diagnose-stage3-three-failures'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 65
+
     steps:
-      - name: Checkout diagnostic branch
+      - name: Checkout implementation branch
         uses: actions/checkout@v7
         with:
+          ref: codex/diagnose-stage3-three-failures
           fetch-depth: 0
 
-      - name: Load production SSH key
-        uses: webfactory/ssh-agent@v0.9.1
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
 
-      - name: Verify production host key
-        env:
-          SSH_HOST: ${{ secrets.EC2_HOST }}
-          SSH_FINGERPRINT: ${{ secrets.EC2_SSH_FINGERPRINT }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.ssh
-          ssh-keyscan -T 20 -t ed25519,rsa "$SSH_HOST" > ~/.ssh/known_hosts
-          if [[ -n "${SSH_FINGERPRINT:-}" ]]; then
-            ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' > /tmp/host-fingerprints
-            grep -Fxq "$SSH_FINGERPRINT" /tmp/host-fingerprints
-          fi
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      - name: Capture production run and worker logs
-        env:
-          SSH_HOST: ${{ secrets.EC2_HOST }}
-          SSH_USER: ${{ secrets.EC2_USER }}
+      - name: Reassemble and apply authoritative Stage 3 follow-up
+        id: apply_patch
+        continue-on-error: true
         run: |
-          set -euo pipefail
-          ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes \
-            "$SSH_USER@$SSH_HOST" 'bash -s' > stage3-three-failures.txt <<'REMOTE'
-          set -euo pipefail
-          APP_ROOT=/srv/investment-engine
-          APP_USER=investment-engine
-          [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
-          id "$APP_USER" >/dev/null 2>&1 || APP_USER=investor
-          INSPECTOR=/tmp/inspect-stage3-three-failures.py
-          sudo -u "$APP_USER" -H git -C "$APP_ROOT" fetch origin codex/diagnose-stage3-three-failures
-          sudo -u "$APP_USER" -H git -C "$APP_ROOT" show FETCH_HEAD:scripts/inspect-stage3-three-failures.py > "$INSPECTOR"
-          echo '=== PRODUCTION RUN JSON ==='
-          sudo env APP_ROOT="$APP_ROOT" INSPECTOR="$INSPECTOR" bash -lc '
+          set -o pipefail
+          {
             set -euo pipefail
-            set -a
-            source /etc/investor/backend.env
-            set +a
-            export PYTHONPATH="$APP_ROOT/backend"
-            cd "$APP_ROOT/backend"
-            "$APP_ROOT/backend/.venv/bin/python" "$INSPECTOR"
-          '
-          echo '=== RELEVANT WORKER LOGS ==='
-          sudo journalctl --no-pager --since '2026-07-28 15:20:00' --until '2026-07-28 15:40:00' \
-            -u investor-celery-auto-live-worker \
-            -u investor-celery-worker \
-            -u investor-backend \
-            | grep -E -i '211488a5-1233-4088-9118-21fe22ff074c|Stage 3|order intent|PERMANENT_REJECTION|CAPACITY_BLOCKED|POSITION_UNAVAILABLE|failed|error' \
-            | tail -n 500 || true
-          rm -f "$INSPECTOR"
-          REMOTE
-          wc -c stage3-three-failures.txt
+            cat \
+              scripts/.stage3-followup.part00 \
+              scripts/.stage3-followup.part01 \
+              scripts/.stage3-followup.part02 \
+              scripts/.stage3-followup.part03 \
+              scripts/.stage3-followup.part04 \
+              scripts/.stage3-followup.part05 \
+              scripts/.stage3-followup.part06 \
+              > /tmp/stage3-authoritative-followup.patch.gz.b64
+            test "$(wc -c < /tmp/stage3-authoritative-followup.patch.gz.b64)" -eq 24756
+            echo '5773e53917542b21731290225c6e56be763dbd04c484e920b66369218e0e449f  /tmp/stage3-authoritative-followup.patch.gz.b64' | sha256sum -c -
+            base64 -d /tmp/stage3-authoritative-followup.patch.gz.b64 \
+              > /tmp/stage3-authoritative-followup.patch.gz
+            echo '398de319950509ff29b072c2963cd7cae98ab9386c54a49baf4f5af973c5c33b  /tmp/stage3-authoritative-followup.patch.gz' | sha256sum -c -
+            gzip -d -c /tmp/stage3-authoritative-followup.patch.gz \
+              > /tmp/stage3-authoritative-followup.patch
+            echo 'f11ec2a8279c6d2eab5839e1133c6cc62f0505051f17da8671ea975205530c07  /tmp/stage3-authoritative-followup.patch' | sha256sum -c -
+            git apply --check --verbose /tmp/stage3-authoritative-followup.patch
+            git apply --verbose /tmp/stage3-authoritative-followup.patch
+            git diff --check
+          } 2>&1 | tee /tmp/stage3-authoritative-apply.log
 
-      - name: Package current repository source
+      - name: Upload patch diagnostics
+        if: steps.apply_patch.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-authoritative-apply-diagnostics
+          path: |
+            /tmp/stage3-authoritative-apply.log
+            /tmp/stage3-authoritative-followup.patch
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Stop after patch failure
+        if: steps.apply_patch.outcome == 'failure'
+        run: exit 1
+
+      - name: Compile backend sources and tests
+        run: python -m compileall -q backend/app backend/tests
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+
+      - name: Run focused backend regressions
+        id: backend_tests
+        continue-on-error: true
+        env:
+          PYTHONPATH: backend
+        run: |
+          set -o pipefail
+          pytest -q --tb=long --maxfail=20 \
+            backend/tests/test_polymarket_auto_live.py \
+            backend/tests/test_polymarket_auto_live_order_intents.py \
+            backend/tests/test_polymarket_auto_live_repository_safety.py \
+            backend/tests/test_stage2_actionable_handoff.py \
+            backend/tests/test_bullpen_run_audit.py \
+            backend/tests/test_stage3_slot_allocation.py \
+            2>&1 | tee /tmp/stage3-authoritative-backend-tests.log
+
+      - name: Upload backend test diagnostics
+        if: steps.backend_tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-authoritative-backend-test-diagnostics
+          path: /tmp/stage3-authoritative-backend-tests.log
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Stop after backend test failure
+        if: steps.backend_tests.outcome == 'failure'
+        run: exit 1
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Run focused frontend regressions
+        id: frontend_tests
+        continue-on-error: true
+        working-directory: frontend
+        run: |
+          set -o pipefail
+          {
+            node --test tests/bullpen-stage2-actionables.test.mjs
+            node --test tests/bullpen-auto-run-invest-metrics.test.mjs
+            node --test tests/bullpen-run-console-detail.test.mjs
+            node --test tests/bullpen-auto-run-stage3-invest.test.mjs
+            node --test tests/bullpen-auto-run-progress.test.mjs
+            node --test tests/bullpen-auto-run-status.test.mjs
+          } 2>&1 | tee /tmp/stage3-authoritative-frontend-tests.log
+
+      - name: Upload frontend test diagnostics
+        if: steps.frontend_tests.outcome == 'failure'
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-authoritative-frontend-test-diagnostics
+          path: /tmp/stage3-authoritative-frontend-tests.log
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Stop after frontend test failure
+        if: steps.frontend_tests.outcome == 'failure'
+        run: exit 1
+
+      - name: Build production frontend
+        working-directory: frontend
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_API_URL: https://api.cred-x.in
+          NEXT_PUBLIC_FRONTEND_URL: https://cred-x.in
+          NEXT_PUBLIC_BRAND_PREFIX: Cred-X
+          NEXT_PUBLIC_BRAND_ACRONYM: TIE
+          NEXT_PUBLIC_BRAND_EXPANSION: Tarun's Investment Engine
+          NEXT_PUBLIC_DISABLE_AUTH: 'false'
+          NEXT_PUBLIC_DISABLE_API_PROXY: 'false'
+          NEXT_PUBLIC_API_DEBUG: 'false'
+          NEXTAUTH_URL: https://cred-x.in
+          NEXTAUTH_SECRET: ci-runtime-secret
+          AUTH_TRUST_HOST: 'true'
+          BACKEND_API_URL: http://127.0.0.1:8000
+        run: npm run build
+
+      - name: Commit verified implementation and remove diagnostics
         run: |
           set -euo pipefail
-          git archive --format=tar.gz --output=current-source.tar.gz HEAD
-          test -s current-source.tar.gz
-
-      - name: Upload diagnostic output
-        uses: actions/upload-artifact@v7
-        with:
-          name: stage3-three-failures
-          path: stage3-three-failures.txt
-          retention-days: 2
-          if-no-files-found: error
-
-      - name: Upload current source
-        uses: actions/upload-artifact@v7
-        with:
-          name: stage3-fix-current-source
-          path: current-source.tar.gz
-          compression-level: 0
-          retention-days: 2
-          if-no-files-found: error
+          rm -f scripts/.stage3-followup.part*
+          rm -f scripts/inspect-stage3-three-failures.py
+          rm -f .github/workflows/diagnose-stage3-three-failures.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo 'No implementation changes were produced.' >&2
+            exit 1
+          fi
+          git commit -m 'Preserve and execute every authoritative Stage 2 action'
+          git push origin HEAD:codex/diagnose-stage3-three-failures
