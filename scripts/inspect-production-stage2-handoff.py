@@ -3,17 +3,9 @@ from __future__ import annotations
 import json
 import traceback
 
-from sqlalchemy import func, select
+from sqlalchemy import text
 
-# Import the auth model before configuring polymarket relationships whose
-# SQLAlchemy registry resolves the string relationship target "User".
-from app.domains.auth.models import User  # noqa: F401
-from app.domains.polymarket_auto_live.models import (
-    PolymarketAutoLiveDecisionRecord,
-    PolymarketAutoLiveOrderIntentRecord,
-    PolymarketAutoLiveRunRecord,
-)
-from app.infrastructure.database.sync_session import SyncSessionLocal
+from app.infrastructure.database.sync_session import sync_engine
 
 OUTPUT_KEYS = {
     "workflow_stage_key",
@@ -54,13 +46,29 @@ OUTPUT_KEYS = {
 
 
 def main() -> None:
-    with SyncSessionLocal() as session:
-        run_record = session.execute(
-            select(PolymarketAutoLiveRunRecord)
-            .order_by(PolymarketAutoLiveRunRecord.started_at.desc())
-            .limit(1)
-        ).scalar_one()
-        payload = run_record.payload or {}
+    with sync_engine.connect() as connection:
+        run_record = connection.execute(
+            text(
+                """
+                SELECT
+                    id,
+                    user_id,
+                    status,
+                    started_at,
+                    completed_at,
+                    decisions_count,
+                    orders_planned,
+                    orders_submitted,
+                    summary,
+                    error_message,
+                    payload
+                FROM polymarket_auto_live_runs
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            )
+        ).mappings().one()
+        payload = run_record["payload"] or {}
         stages: list[dict[str, object]] = []
         for stage in payload.get("stage_results", []):
             outputs = stage.get("outputs") or {}
@@ -80,47 +88,41 @@ def main() -> None:
                     },
                 }
             )
-        decision_count = session.scalar(
-            select(func.count())
-            .select_from(PolymarketAutoLiveDecisionRecord)
-            .where(PolymarketAutoLiveDecisionRecord.run_id == run_record.id)
-        )
-        intent_rows = session.execute(
-            select(
-                PolymarketAutoLiveOrderIntentRecord.action,
-                PolymarketAutoLiveOrderIntentRecord.status,
-                func.count(),
-            )
-            .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_record.id)
-            .group_by(
-                PolymarketAutoLiveOrderIntentRecord.action,
-                PolymarketAutoLiveOrderIntentRecord.status,
-            )
-            .order_by(
-                PolymarketAutoLiveOrderIntentRecord.action,
-                PolymarketAutoLiveOrderIntentRecord.status,
-            )
-        ).all()
+        decision_count = connection.execute(
+            text(
+                "SELECT count(*) FROM polymarket_auto_live_decisions WHERE run_id = :run_id"
+            ),
+            {"run_id": run_record["id"]},
+        ).scalar_one()
+        intent_rows = connection.execute(
+            text(
+                """
+                SELECT action, status, count(*) AS count
+                FROM polymarket_auto_live_order_intents
+                WHERE run_id = :run_id
+                GROUP BY action, status
+                ORDER BY action, status
+                """
+            ),
+            {"run_id": run_record["id"]},
+        ).mappings().all()
         result = {
             "run": {
-                "id": run_record.id,
-                "user_id": run_record.user_id,
-                "status": run_record.status,
-                "started_at": run_record.started_at.isoformat(),
-                "completed_at": run_record.completed_at.isoformat()
-                if run_record.completed_at
+                "id": run_record["id"],
+                "user_id": run_record["user_id"],
+                "status": run_record["status"],
+                "started_at": run_record["started_at"].isoformat(),
+                "completed_at": run_record["completed_at"].isoformat()
+                if run_record["completed_at"]
                 else None,
-                "decisions_count_column": run_record.decisions_count,
-                "orders_planned_column": run_record.orders_planned,
-                "orders_submitted_column": run_record.orders_submitted,
-                "summary": run_record.summary,
-                "error_message": run_record.error_message,
+                "decisions_count_column": run_record["decisions_count"],
+                "orders_planned_column": run_record["orders_planned"],
+                "orders_submitted_column": run_record["orders_submitted"],
+                "summary": run_record["summary"],
+                "error_message": run_record["error_message"],
             },
             "decision_rows_in_db": decision_count,
-            "intent_counts": [
-                {"action": action, "status": status, "count": count}
-                for action, status, count in intent_rows
-            ],
+            "intent_counts": [dict(row) for row in intent_rows],
             "stages": stages,
         }
         print(json.dumps(result, sort_keys=True, default=str, separators=(",", ":")))
