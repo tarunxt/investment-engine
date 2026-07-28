@@ -41,11 +41,27 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Apply Stage 2 authoritative source patch
+      - name: Reassemble and apply Stage 2 authoritative source patch
         run: |
           set -euo pipefail
-          base64 -d scripts/.stage2-authoritative-single-source.patch.gz.b64 \
-            | gzip -d > /tmp/stage2-authoritative-single-source.patch
+          cat \
+            scripts/.stage2-patch.part00 \
+            scripts/.stage2-patch.part01 \
+            scripts/.stage2-patch.part02 \
+            scripts/.stage2-patch.part03 \
+            scripts/.stage2-patch.part04 \
+            scripts/.stage2-patch.part05 \
+            scripts/.stage2-patch.part06 \
+            scripts/.stage2-patch.part07 \
+            > /tmp/stage2-authoritative-single-source.patch.gz.b64
+          test "$(wc -c < /tmp/stage2-authoritative-single-source.patch.gz.b64)" -eq 21084
+          echo '8c654132e270b055431a7c21e1495ff0cb223d317df2d7de317dfcb75f68917e  /tmp/stage2-authoritative-single-source.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/stage2-authoritative-single-source.patch.gz.b64 \
+            > /tmp/stage2-authoritative-single-source.patch.gz
+          echo '3f5b82db5b07b0bdb84d7b008a0bd0137fd7f4c1ed401f2d44caa969e5158aa9  /tmp/stage2-authoritative-single-source.patch.gz' | sha256sum -c -
+          gzip -d -c /tmp/stage2-authoritative-single-source.patch.gz \
+            > /tmp/stage2-authoritative-single-source.patch
+          echo '354765f816c3d9e84033cbaa74ed95d54e43242e219102e47935be5a6a5e6910  /tmp/stage2-authoritative-single-source.patch' | sha256sum -c -
           git apply --check /tmp/stage2-authoritative-single-source.patch
           git apply /tmp/stage2-authoritative-single-source.patch
           git diff --check
@@ -104,6 +120,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f scripts/.stage2-authoritative-single-source.patch.gz.b64
+          rm -f scripts/.stage2-patch.part*
           rm -f .github/workflows/apply-stage2-authoritative-execution.yml
           rm -f .github/workflows/export-stage2-authoritative-source.yml
           rm -f .github/workflows/verify-stage2-handoff-production.yml
