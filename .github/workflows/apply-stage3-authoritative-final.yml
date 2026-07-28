@@ -65,6 +65,17 @@ jobs:
             echo 'c322b20dddfe911b9f8628019dd59dfe1da689d49c0ba291182bd4b1440d0c14  /tmp/stage3-authoritative-followup-v2.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage3-authoritative-followup-v2.patch
             git apply --verbose /tmp/stage3-authoritative-followup-v2.patch
+
+            test "$(wc -c < scripts/.stage3-followup-v3.incremental.gz.b64)" -eq 1604
+            echo 'b1afc438fde6b3ce999249ad6e45797d8acfb52d25262f9e578fea6d58069652  scripts/.stage3-followup-v3.incremental.gz.b64' | sha256sum -c -
+            base64 -d scripts/.stage3-followup-v3.incremental.gz.b64 \
+              > /tmp/stage3-authoritative-incremental-v3.patch.gz
+            echo '25954808eacb30bd7d325cb3ecb20c7ebf6897c669cd93d71f767d8d7db089a7  /tmp/stage3-authoritative-incremental-v3.patch.gz' | sha256sum -c -
+            gzip -d -c /tmp/stage3-authoritative-incremental-v3.patch.gz \
+              > /tmp/stage3-authoritative-incremental-v3.patch
+            echo 'ec0e31274fb3cd4d0da65f002caab8ed6aab091353e9c5fddc902d970eeb75c7  /tmp/stage3-authoritative-incremental-v3.patch' | sha256sum -c -
+            git apply --check --verbose /tmp/stage3-authoritative-incremental-v3.patch
+            git apply --verbose /tmp/stage3-authoritative-incremental-v3.patch
             git diff --check
           } 2>&1 | tee /tmp/stage3-authoritative-apply.log
 
@@ -76,6 +87,7 @@ jobs:
           path: |
             /tmp/stage3-authoritative-apply.log
             /tmp/stage3-authoritative-followup-v2.patch
+            /tmp/stage3-authoritative-incremental-v3.patch
           retention-days: 2
           if-no-files-found: error
 
@@ -175,6 +187,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f scripts/.stage3-followup.part*
+          rm -f scripts/.stage3-followup-v3.incremental.gz.b64
           rm -f .github/workflows/apply-stage3-authoritative-final.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
