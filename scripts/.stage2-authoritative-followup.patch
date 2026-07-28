@@ -1,0 +1,35 @@
+diff --git a/backend/app/domains/polymarket_auto_live/engine.py b/backend/app/domains/polymarket_auto_live/engine.py
+index 1b8e1ec..961f838 100644
+--- a/backend/app/domains/polymarket_auto_live/engine.py
++++ b/backend/app/domains/polymarket_auto_live/engine.py
+@@ -12785,6 +12785,7 @@ class BullpenAutoLiveEngine:
+                     **stage2_actionable_outputs,
+                     **stage2_universe_status,
+                     **stage2_strategy_metadata,
++                    "blocked_by_stage1_wallet_refresh": False,
+                     "active_position_rows": active_position_rows_before_llm,
+                     "claimable_position_rows": len(claimable_wallet_positions),
+                     "candidate_decision_rows": len(candidate_contexts),
+diff --git a/backend/app/domains/polymarket_auto_live/stage3_slots.py b/backend/app/domains/polymarket_auto_live/stage3_slots.py
+index 786d8dc..e81582d 100644
+--- a/backend/app/domains/polymarket_auto_live/stage3_slots.py
++++ b/backend/app/domains/polymarket_auto_live/stage3_slots.py
+@@ -102,11 +102,14 @@ def unresolved_positive_exposure_market_ids(
+         if not market_id:
+             continue
+         normalized_state = str(getattr(position, "classification", None) or "").strip().lower()
++        authoritative_state = str(
++            getattr(position, "authoritative_market_state", None) or ""
++        ).strip().lower()
+         unresolved = (
+-            str(getattr(position, "authoritative_market_state", None) or "").strip().lower()
+-            == "unknown"
+-            or normalized_state in {"stale_or_unknown", "unknown", "unclassified"}
+-        )
++            authoritative_state in {"", "unknown"}
++            and normalized_state
++            not in {"active", "open", "closed", "resolved_zero_payout", "fully_redeemed"}
++        ) or normalized_state in {"stale_or_unknown", "unknown", "unclassified"}
+         if not unresolved:
+             continue
+         if normalized_state in {"closed", "resolved_zero_payout", "fully_redeemed"}:
