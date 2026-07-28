@@ -10,7 +10,7 @@ from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveOrderIntentRecord,
     PolymarketAutoLiveRunRecord,
 )
-from app.infrastructure.database.session import SyncSessionLocal
+from app.infrastructure.database.sync_session import SyncSessionLocal
 
 OUTPUT_KEYS = {
     "workflow_stage_key",
