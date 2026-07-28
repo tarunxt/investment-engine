@@ -14,7 +14,9 @@ function stageIdentity(stage: BullpenAutoLiveStageResult) {
 // These fields describe the current worker/reconciliation generation, rather
 // than expandable frozen evidence. Their absence from an available exact-run
 // projection is an authoritative clear. Keep this list aligned with the live
-// subset of backend console_projection._STAGE_OUTPUT_KEYS.
+// subset of backend console_projection._STAGE_OUTPUT_KEYS. The completed Stage 2
+// actionable contract is intentionally excluded: once persisted, omission from
+// a later compact poll must never erase or locally recompute that contract.
 const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
   "phase_status",
   "progress_commentary",
@@ -90,19 +92,6 @@ const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
   "stage2_skipped_rows",
   "stage2_universe_complete",
   "stage2_universe_status",
-  "stage2_actionable_contract_version",
-  "stage2_actionable_contract_authoritative",
-  "stage2_actionable_contract_execution_mode",
-  "stage2_actionable_wallet_enrichment_degraded",
-  "stage2_actionable_handoff_used",
-  "stage2_actionable_handoff_source",
-  "stage2_actionable_exit_market_ids",
-  "stage2_actionable_buy_market_ids",
-  "stage2_actionable_exit_count",
-  "stage2_actionable_buy_count",
-  "missing_stage2_actionable_exit_market_ids",
-  "missing_stage2_actionable_buy_market_ids",
-  "stage2_handoff_checkpoint",
   "candidate_decision_rows",
   "event_exit_planned",
   "event_exit_processed",
@@ -117,6 +106,15 @@ const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
   "orders_planned",
   "orders_processed",
   "orders_submitted",
+  "orders_ready",
+  "orders_attempted",
+  "orders_remotely_accepted",
+  "orders_confirmed",
+  "orders_filled",
+  "orders_retry_wait",
+  "orders_waiting_for_collateral",
+  "orders_deferred",
+  "orders_permanently_failed",
   "persisted_execution_counters",
   "post_exit_snapshot_source",
   "post_exit_snapshot_fetched_at",

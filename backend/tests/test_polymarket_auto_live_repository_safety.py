@@ -26,6 +26,7 @@ from app.domains.polymarket_auto_live.console_projection import (
 from app.domains.polymarket_auto_live.order_intent_service import (
     _active_reserved_cash,
     _automatic_attempt_budget_allows,
+    _defer_dependent_buys_after_exit_failure,
     _wake_waiting_buys_after_exit_success,
     _visible_run_decision_records_sync,
     create_or_refresh_run_order_intents_sync,
@@ -1930,3 +1931,248 @@ async def test_verified_portfolio_legacy_lookup_falls_through_newer_failed_empty
     assert snapshot.run_id == "prior-seven"
     assert snapshot.active_positions_total == 7
     assert snapshot.occupied_positions == 7
+
+
+def test_authoritative_four_exit_five_buy_contract_persists_all_nine_intents() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            User.__table__,
+            PolymarketAutoLiveRunRecord.__table__,
+            PolymarketAutoLiveDecisionRecord.__table__,
+            PolymarketAutoLiveOrderIntentRecord.__table__,
+            PolymarketAutoLiveOrderAttemptRecord.__table__,
+            PolymarketAutoLiveCapitalReservationRecord.__table__,
+        ],
+    )
+    exit_market_ids = ["exit-1", "exit-2", "exit-3", "exit-dust"]
+    buy_market_ids = ["buy-1", "buy-2", "buy-3", "buy-4", "buy-5"]
+    decisions: list[BullpenAutoLiveDecision] = []
+
+    for index, market_id in enumerate(exit_market_ids):
+        is_dust = market_id == "exit-dust"
+        dependency_group = (
+            f"stage3-replacement:run-authoritative-nine:{market_id}"
+            if index < 3
+            else None
+        )
+        order_plan = BullpenAutoLiveOrderPlan(
+            id=f"order-{market_id}",
+            action="sell",
+            side="YES",
+            status="skipped" if is_dust else "planned",
+            stage3_status="EXIT_NOT_SUBMITTED" if is_dust else None,
+            market_id=market_id,
+            market_title=market_id,
+            dependency_group=dependency_group,
+            order_size_usd=0 if is_dust else 5,
+            shares=0.001 if is_dust else 5,
+            limit_price_cents=0.01 if is_dust else 50,
+            max_slippage_cents=2,
+            dry_run=False,
+            detail=(
+                "Authoritative dust exit completed without a remote write."
+                if is_dust
+                else "Authoritative exit planned."
+            ),
+            latest_error_code="BELOW_MINIMUM_ORDER" if is_dust else None,
+            created_at="2026-07-28T09:55:00+00:00",
+            terminal_at="2026-07-28T09:55:01+00:00" if is_dust else None,
+        )
+        decision = _decision(
+            title=market_id,
+            decision_id=f"decision-{market_id}",
+            run_id="run-authoritative-nine",
+        ).model_copy(
+            update={
+                "market_id": market_id,
+                "market_title": market_id,
+                "slug": market_id,
+                "decision": "EXIT",
+                "exit_state": "DUST_LOST" if is_dust else "EVENT_EXIT_PLANNED",
+                "order_plan": order_plan,
+            }
+        )
+        decisions.append(decision)
+
+    for index, market_id in enumerate(buy_market_ids):
+        dependency_group = (
+            f"stage3-replacement:run-authoritative-nine:{exit_market_ids[index]}"
+            if index < 3
+            else None
+        )
+        order_plan = BullpenAutoLiveOrderPlan(
+            id=f"order-{market_id}",
+            action="buy",
+            side="NO",
+            status="retry_wait" if dependency_group is None else "planned",
+            stage3_status=(
+                "REPLACEMENT_SLOT_RESERVED"
+                if dependency_group
+                else "POST_EXIT_REFRESH_PENDING"
+            ),
+            market_id=market_id,
+            market_title=market_id,
+            dependency_group=dependency_group,
+            order_size_usd=1,
+            shares=0,
+            limit_price_cents=50,
+            max_slippage_cents=2,
+            dry_run=False,
+            detail="Authoritative buy preserved for fresh pre-submit sizing.",
+            retryable=True,
+            next_retry_at="2026-07-28T09:55:30+00:00",
+            latest_error_code=(
+                None if dependency_group else "L2_WALLET_DISAGREEMENT"
+            ),
+            created_at="2026-07-28T09:55:00+00:00",
+        )
+        decision = _decision(
+            title=market_id,
+            decision_id=f"decision-{market_id}",
+            run_id="run-authoritative-nine",
+        ).model_copy(
+            update={
+                "market_id": market_id,
+                "market_title": market_id,
+                "slug": market_id,
+                "decision": "BUY_NEW",
+                "side": "NO",
+                "order_plan": order_plan,
+            }
+        )
+        decisions.append(decision)
+
+    stage2 = BullpenAutoLiveStageResult(
+        stage_number=2,
+        stage_name="Stage 2",
+        status="pass",
+        reason="Authoritative Stage 2 contract persisted.",
+        outputs={
+            "workflow_stage_key": "llm",
+            "phase_status": "completed",
+            "stage2_actionable_contract_authoritative": True,
+            "stage2_actionable_contract_version": 2,
+            "stage2_actionable_exit_market_ids": exit_market_ids,
+            "stage2_actionable_buy_market_ids": buy_market_ids,
+            "stage2_actionable_exit_count": 4,
+            "stage2_actionable_buy_count": 5,
+        },
+        started_at="2026-07-28T09:55:00+00:00",
+        completed_at="2026-07-28T09:57:00+00:00",
+    )
+    stage3 = BullpenAutoLiveStageResult(
+        stage_number=3,
+        stage_name="Stage 3",
+        status="warning",
+        reason="Durable intents are being reconciled.",
+        outputs={
+            "workflow_stage_key": "invest",
+            "phase_status": "confirming",
+            "stage2_actionable_contract_authoritative": True,
+            "stage2_actionable_exit_market_ids": exit_market_ids,
+            "stage2_actionable_buy_market_ids": buy_market_ids,
+            "orders_planned": 9,
+        },
+        started_at="2026-07-28T09:57:00+00:00",
+    )
+    run = BullpenAutoLiveRun(
+        id="run-authoritative-nine",
+        triggered_by="scheduler",
+        status="confirming",
+        dry_run=False,
+        started_at="2026-07-28T09:55:00+00:00",
+        summary="Nine authoritative Stage 2 actions are planned.",
+        stage_results=[stage2, stage3],
+        audit_metadata={
+            "settings_snapshot": {
+                "min_order_usd": 1,
+                "max_order_usd": 25,
+                "bullpen_economic_dust_threshold_usd": 0.01,
+            }
+        },
+    )
+
+    with Session(engine) as session:
+        session.add(
+            User(
+                id=7,
+                email="authoritative-nine@example.test",
+                username="authoritative-nine",
+                password_hash="test-only",
+            )
+        )
+        session.add(
+            PolymarketAutoLiveRunRecord(
+                id=run.id,
+                user_id=7,
+                status=run.status,
+                triggered_by=run.triggered_by,
+                dry_run=False,
+                started_at=datetime(2026, 7, 28, 9, 55, tzinfo=UTC),
+                live_execution_requested=True,
+                summary=run.summary,
+                payload=run.model_dump(mode="json"),
+            )
+        )
+        session.commit()
+
+        intents = create_or_refresh_run_order_intents_sync(
+            session,
+            user_id=7,
+            run=run,
+            decisions=decisions,
+        )
+        session.commit()
+
+        assert len(intents) == 9
+        by_market = {intent.market_id: intent for intent in intents}
+        assert by_market["exit-dust"].status == "DEFERRED"
+        assert by_market["exit-dust"].attempt_count == 0
+        assert by_market["exit-dust"].first_submitted_at is None
+        assert all(by_market[market_id].status == "READY" for market_id in exit_market_ids[:3])
+        assert all(
+            by_market[market_id].status == "WAITING_FOR_EXIT"
+            for market_id in buy_market_ids[:3]
+        )
+        assert all(
+            by_market[market_id].status == "RETRY_WAIT"
+            for market_id in buy_market_ids[3:]
+        )
+        assert all(
+            intent.execution_metadata_json["stage2_authoritative_plan_preserved"]
+            is True
+            for intent in intents
+        )
+
+        failed_exit = session.get(
+            PolymarketAutoLiveOrderIntentRecord,
+            "order-exit-1",
+        )
+        assert failed_exit is not None
+        failed_exit.status = "FAILED_PERMANENT"
+        failed_exit.last_error_code = "POLYMARKET_WALLET_ROUTE_UNCONFIRMED"
+        deferred_ids = _defer_dependent_buys_after_exit_failure(
+            session,
+            exit_record=failed_exit,
+        )
+        session.commit()
+        assert deferred_ids == ["order-buy-1"]
+        failed_replacement = session.get(
+            PolymarketAutoLiveOrderIntentRecord,
+            "order-buy-1",
+        )
+        assert failed_replacement is not None
+        assert failed_replacement.status == "DEFERRED"
+        assert failed_replacement.last_error_code == "DEPENDENCY_EXIT_FAILED"
+        assert failed_replacement.first_submitted_at is None
+
+        summary = summarize_run_orders_sync(
+            session,
+            user_id=7,
+            run_id=run.id,
+        )
+        assert summary.order_funnel.planned == 9
+        assert summary.action_funnels["sell"].planned == 4
+        assert summary.action_funnels["buy"].planned == 5

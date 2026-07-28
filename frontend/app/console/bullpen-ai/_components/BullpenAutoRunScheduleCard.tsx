@@ -40,7 +40,6 @@ import {
   type BullpenQuestionRow,
   getBullpenAmountToBeInvestedBreakdown,
   getBullpenReturnsPerDayBreakdown,
-  getBullpenTopTenStrongestLlmOddsRows,
 } from "@/lib/bullpen-ai";
 import type { BullpenActivePositionLlmAnalysis } from "@/lib/bullpenActivePositions";
 import { buildBullpenInvestmentDisplay } from "@/lib/bullpenInvestments";
@@ -128,7 +127,7 @@ import {
   getInvestMetricRows,
   getInvestStepMetricDialogKind,
   getSellInvestMetricDialogKind,
-  isCompletedWithoutSubmissionInvestOrderPlan,
+  isCompletedWithoutSubmissionInvestDecision,
   isProcessedInvestOrderPlan,
   isSubmittedOrExecutedInvestOrderPlan,
   partitionInvestDecisionsByExecutionEvidence,
@@ -1303,9 +1302,6 @@ function getStageTwoStats(
       ? stageTwoTargets.filter((target) => hasStageTwoLlmIdentity(target)).length
       : null) ??
     Math.max(llmsCompleted, 0);
-  const stage2TopInvestRowCount = run
-    ? buildStageTwoInvestEventsDialogState({ run, decisions })?.rows.length ?? 0
-    : 0;
   const authoritativeBuyMarketIds = readStageOutputStringList(
     stage.outputs.stage2_actionable_buy_market_ids,
   );
@@ -1317,9 +1313,7 @@ function getStageTwoStats(
       Array.isArray(stage.outputs.stage2_actionable_buy_market_ids));
   const newEventsToInvestIn = hasAuthoritativeActionables
     ? authoritativeBuyMarketIds.length
-    : stage2TopInvestRowCount > 0
-      ? stage2TopInvestRowCount
-      : getStageTwoInvestableDecisions(decisions).length;
+    : 0;
 
   return {
     activePositions,
@@ -1418,12 +1412,7 @@ function buildStageTwoInvestEventsDialogState({
   return {
     stage: llmWorkflowStage,
     decisions,
-    rows: hasAuthoritativeActionables
-      ? authoritativeBuyRows
-      : getBullpenTopTenStrongestLlmOddsRows(
-          eventsSummaryRows,
-          DEFAULT_BULLPEN_STAGE2_TO_STAGE3_MAX_POSITIONS,
-        ),
+    rows: hasAuthoritativeActionables ? authoritativeBuyRows : [],
     updatedAt,
     updateUnavailableReason: updatedAt
       ? undefined
@@ -1504,32 +1493,6 @@ function getStageTwoCompletedLlmCount(stage: WorkflowStageView) {
   }
 
   return completedTargets.size;
-}
-
-function getStageTwoInvestableDecisions(decisions: BullpenAutoLiveDecision[]) {
-  return [...decisions]
-    .filter((decision) => {
-      const orderPlan = decision.order_plan;
-      if (orderPlan) {
-        return orderPlan.action === "buy" && orderPlan.status !== "cancelled";
-      }
-      if (decision.decision === "BUY_NEW") {
-        return true;
-      }
-      return (
-        decision.decision === "ADD_MORE" &&
-        decision.risk_status !== "Blocked" &&
-        decision.target_exposure_usd > decision.current_exposure_usd
-      );
-    })
-    .sort((left, right) => {
-      const leftRank = left.stage3_final_rank ?? Number.POSITIVE_INFINITY;
-      const rightRank = right.stage3_final_rank ?? Number.POSITIVE_INFINITY;
-      if (leftRank !== rightRank) {
-        return leftRank - rightRank;
-      }
-      return left.market_title.localeCompare(right.market_title);
-    });
 }
 
 function formatStageTwoInvestExecutionStatus(decision: BullpenAutoLiveDecision) {
@@ -2017,17 +1980,17 @@ function StageTwoRunStats({
     ) ||
     (Array.isArray(stage.outputs.stage2_actionable_exit_market_ids) &&
       Array.isArray(stage.outputs.stage2_actionable_buy_market_ids));
-  const actionables = buildBullpenStage2Actionables({
-    activePositions: positionDialogStage.activePositionsFound,
-    decisions,
-    selectedRows: stage2InvestEventsState?.rows ?? [],
-    authoritativeActionables: hasAuthoritativeActionables
-      ? {
+  const actionables = hasAuthoritativeActionables
+    ? buildBullpenStage2Actionables({
+        activePositions: positionDialogStage.activePositionsFound,
+        decisions,
+        selectedRows: stage2InvestEventsState?.rows ?? [],
+        authoritativeActionables: {
           exitMarketIds: authoritativeExitMarketIds,
           buyMarketIds: authoritativeBuyMarketIds,
-        }
-      : null,
-  });
+        },
+      })
+    : { eventExits: [], buyNew: [], hold: [] };
 
   return (
     <div className="space-y-0.5 pt-2">
@@ -2210,38 +2173,48 @@ function StageTwoRunStats({
           >
             New Events to Invest in:{" "}
             <span className="font-semibold tabular-nums">
-              {displayStat(stats.newEventsToInvestIn)}
+              {hasAuthoritativeActionables
+                ? displayStat(stats.newEventsToInvestIn)
+                : "—"}
             </span>
           </button>
         ) : (
           <>
             New Events to Invest in:{" "}
             <span className="font-semibold tabular-nums">
-              {displayStat(stats.newEventsToInvestIn)}
+              {hasAuthoritativeActionables
+                ? displayStat(stats.newEventsToInvestIn)
+                : "—"}
             </span>
           </>
         )}
       </div>
       <div>
-        <button
-          type="button"
-          onClick={() => setIsActionablesDialogOpen(true)}
-          className="text-left font-medium text-slate-950 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
-          aria-label={`Open actionables with ${actionables.eventExits.length} exits and ${actionables.buyNew.length} buys`}
-          aria-haspopup="dialog"
-          aria-expanded={isActionablesDialogOpen}
-        >
-          Actionables: Exit=
-          <span className="font-semibold tabular-nums">
-            {displayStat(actionables.eventExits.length)}
+        {hasAuthoritativeActionables ? (
+          <button
+            type="button"
+            onClick={() => setIsActionablesDialogOpen(true)}
+            className="text-left font-medium text-slate-950 underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label={`Open authoritative Stage 2 actionables with ${actionables.eventExits.length} exits and ${actionables.buyNew.length} buys`}
+            aria-haspopup="dialog"
+            aria-expanded={isActionablesDialogOpen}
+          >
+            Actionables: Exit=
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionables.eventExits.length)}
+            </span>
+            {" | Buy="}
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionables.buyNew.length)}
+            </span>
+          </button>
+        ) : (
+          <span className="font-medium text-slate-600">
+            Actionables: awaiting authoritative Stage 2 contract
           </span>
-          {" | Buy="}
-          <span className="font-semibold tabular-nums">
-            {displayStat(actionables.buyNew.length)}
-          </span>
-        </button>
+        )}
       </div>
-      {isActionablesDialogOpen ? (
+      {hasAuthoritativeActionables && isActionablesDialogOpen ? (
         <BullpenStage2ActionablesDialog
           actionables={actionables}
           onClose={() => setIsActionablesDialogOpen(false)}
@@ -5224,9 +5197,9 @@ function SubmittedExecutionEventsTable({
     (decision) => decision.order_plan?.action === "buy",
   );
   const actionableExitDecisions = exitDecisions.filter(
-    (decision) =>
-      !isCompletedWithoutSubmissionInvestOrderPlan(decision.order_plan),
+    (decision) => !isCompletedWithoutSubmissionInvestDecision(decision),
   );
+  const plannedDecisions = [...exitDecisions, ...buyDecisions];
   const exitStatus = getSubmittedExecutionStatus(
     actionableExitDecisions.length,
     submittedExitDecisions.length,
@@ -5249,19 +5222,24 @@ function SubmittedExecutionEventsTable({
         </div>
         <div className="flex flex-wrap gap-2 text-xs font-semibold">
           <SubmittedExecutionCountPill className="border-emerald-200 bg-white/80 text-emerald-800">
-            {submittedDecisions.length.toLocaleString("en-IN")} total
+            {plannedDecisions.length.toLocaleString("en-IN")} planned
+          </SubmittedExecutionCountPill>
+          <SubmittedExecutionCountPill className="border-sky-200 bg-sky-50 text-sky-800">
+            {submittedDecisions.length.toLocaleString("en-IN")} submitted
           </SubmittedExecutionCountPill>
           <SubmittedExecutionCountPill
             className="border-rose-200 bg-rose-50 text-rose-800"
             status={exitStatus}
           >
-            {submittedExitDecisions.length.toLocaleString("en-IN")} exits
+            {submittedExitDecisions.length.toLocaleString("en-IN")}/
+            {exitDecisions.length.toLocaleString("en-IN")} exits
           </SubmittedExecutionCountPill>
           <SubmittedExecutionCountPill
             className="border-blue-200 bg-blue-50 text-blue-800"
             status={buyStatus}
           >
-            {submittedBuyDecisions.length.toLocaleString("en-IN")} buys
+            {submittedBuyDecisions.length.toLocaleString("en-IN")}/
+            {buyDecisions.length.toLocaleString("en-IN")} buys
           </SubmittedExecutionCountPill>
           {completedWithoutSubmission.length > 0 ? (
             <SubmittedExecutionCountPill className="border-slate-200 bg-white/80 text-slate-700">

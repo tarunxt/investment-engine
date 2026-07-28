@@ -39,6 +39,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     _extract_remote_refs,
     _intent_requires_operator_resume_reconciliation,
     _matched_buy_submission_fill,
+    _authoritative_stage2_contract_counts,
     _persisted_execution_step,
     _persisted_stage3_counts,
     _post_exit_replacement_sizing,
@@ -3681,6 +3682,65 @@ def test_build_order_plan_projects_uncertain_write_marker_as_submission_evidence
     assert updated.submission_evidence_kind == "uncertain_write_boundary"
 
 
+
+def test_authoritative_stage2_contract_counts_use_latest_persisted_contract():
+    run = SimpleNamespace(
+        stage_results=[
+            SimpleNamespace(
+                stage_number=2,
+                outputs={
+                    "workflow_stage_key": "llm",
+                    "stage2_actionable_contract_authoritative": True,
+                    "stage2_actionable_exit_market_ids": [],
+                    "stage2_actionable_buy_market_ids": ["legacy-buy"],
+                },
+            ),
+            SimpleNamespace(
+                stage_number=3,
+                outputs={
+                    "workflow_stage_key": "invest",
+                    "stage2_actionable_contract_authoritative": True,
+                    "stage2_actionable_exit_market_ids": [
+                        "exit-1",
+                        "exit-2",
+                        "exit-3",
+                        "exit-4",
+                    ],
+                    "stage2_actionable_buy_market_ids": [
+                        "buy-1",
+                        "buy-2",
+                        "buy-3",
+                        "buy-4",
+                        "buy-5",
+                    ],
+                },
+            ),
+        ]
+    )
+
+    assert _authoritative_stage2_contract_counts(run) == {
+        "sell": 4,
+        "buy": 5,
+        "total": 9,
+    }
+
+
+def test_persisted_execution_step_reports_missing_authoritative_intents():
+    step = _persisted_execution_step(
+        key="buy",
+        label="Invest planned orders",
+        step_number=2,
+        counts={"planned": 5, "processed": 0, "submitted": 0},
+        intents=[],
+        recovery_required=False,
+    )
+
+    assert step["status"] == "blocked"
+    assert "5 authoritative Stage 2 actionable" in step["detail"]
+    assert step["planned_orders"] == 5
+    assert step["processed_orders"] == 0
+    assert step["submitted_orders"] == 0
+
 def test_stage3_counters_are_reconciled_from_persisted_order_intents():
     intents = [
         _intent(intent_id="exit-submitted", status="CONFIRMING", action="sell").model_copy(
@@ -3787,7 +3847,8 @@ def test_persisted_execution_step_completed_detail_omits_persisted_records_copy(
     )
 
     assert step["status"] == "completed"
-    assert step["detail"] == ""
+    assert "Processed 1 of 1" in step["detail"]
+    assert "0 crossed the remote-write boundary" in step["detail"]
 
 
 def test_persisted_execution_step_does_not_call_retry_wait_completed_after_attempt():

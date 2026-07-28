@@ -203,6 +203,20 @@ export function isCompletedWithoutSubmissionInvestOrderPlan(
   );
 }
 
+export function isCompletedWithoutSubmissionInvestDecision(
+  decision: BullpenAutoLiveDecision,
+) {
+  if (isCompletedWithoutSubmissionInvestOrderPlan(decision.order_plan)) {
+    return true;
+  }
+  const status = decision.order_plan?.status ?? "";
+  return (
+    decision.exit_state === "DUST_LOST" &&
+    ["deferred", "skipped", "rejected", "failed_permanent"].includes(status) &&
+    !hasInvestOrderSubmissionEvidence(decision.order_plan)
+  );
+}
+
 export function isSubmittedOrExecutedInvestOrderPlan(
   orderPlan: BullpenAutoLiveOrderPlan | null | undefined,
 ) {
@@ -252,9 +266,7 @@ export function partitionInvestDecisionsByExecutionEvidence(
       } else {
         groups.submittedOrExecuted.push(decision);
       }
-    } else if (
-      isCompletedWithoutSubmissionInvestOrderPlan(decision.order_plan)
-    ) {
+    } else if (isCompletedWithoutSubmissionInvestDecision(decision)) {
       groups.completedWithoutSubmission.push(decision);
     } else {
       groups.notSubmitted.push(decision);

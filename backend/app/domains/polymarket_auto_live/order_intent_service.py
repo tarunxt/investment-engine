@@ -1254,6 +1254,53 @@ def _cancel_unsubmitted_intent_for_user(
     return True
 
 
+
+
+def _authoritative_stage2_contract_counts(run: BullpenAutoLiveRun) -> dict[str, int]:
+    """Return immutable Stage 2 Exit/Buy counts from the persisted contract."""
+
+    def normalized_ids(value: object) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        seen: set[str] = set()
+        result: list[str] = []
+        for item in value:
+            market_id = str(item or "").strip()
+            if not market_id or market_id in seen:
+                continue
+            seen.add(market_id)
+            result.append(market_id)
+        return result
+
+    selected = {"sell": 0, "buy": 0, "total": 0}
+    found_contract = False
+    for stage in run.stage_results:
+        if not (
+            stage.stage_number in {2, 3, 6}
+            or stage.outputs.get("workflow_stage_key") in {"llm", "invest"}
+        ):
+            continue
+        outputs = stage.outputs
+        authoritative = bool(
+            outputs.get("stage2_actionable_contract_authoritative")
+            or outputs.get("stage2_actionable_handoff_used")
+        )
+        has_explicit_lists = isinstance(
+            outputs.get("stage2_actionable_exit_market_ids"), list
+        ) and isinstance(outputs.get("stage2_actionable_buy_market_ids"), list)
+        if not authoritative and not has_explicit_lists:
+            continue
+        exit_ids = normalized_ids(outputs.get("stage2_actionable_exit_market_ids"))
+        buy_ids = normalized_ids(outputs.get("stage2_actionable_buy_market_ids"))
+        selected = {
+            "sell": len(exit_ids),
+            "buy": len(buy_ids),
+            "total": len(exit_ids) + len(buy_ids),
+        }
+        found_contract = True
+    return selected if found_contract else {"sell": 0, "buy": 0, "total": 0}
+
+
 def _persisted_stage3_counts(
     intents: Sequence[BullpenAutoLiveOrderIntent],
 ) -> dict[str, object]:
@@ -1314,20 +1361,33 @@ def _persisted_execution_step(
 ) -> dict[str, object]:
     planned = counts["planned"]
     processed = counts["processed"]
+    missing_durable_intents = max(0, planned - len(intents))
     if recovery_required:
         status = "blocked"
         detail = (
             "Worker/service restart interrupted Stage 3. Operator recovery is "
             "required; no order was automatically resubmitted."
         )
-    elif planned == 0 or all(
+    elif missing_durable_intents > 0:
+        status = "blocked"
+        detail = (
+            f"{missing_durable_intents} authoritative Stage 2 actionable(s) are "
+            "still missing durable Stage 3 intent records."
+        )
+    elif planned == 0:
+        status = "completed"
+        detail = "No authoritative Stage 2 orders were planned for this step."
+    elif all(
         intent_has_verified_terminal_success(intent)
         or intent_has_unverified_terminal_success(intent)
         or intent.status in INTENT_TERMINAL_FAILURE_STATUSES
         for intent in intents
     ):
         status = "completed"
-        detail = "" if planned > 0 else "No persisted orders were planned for this step."
+        detail = (
+            f"Processed {processed} of {planned} persisted order(s); "
+            f"{counts['submitted']} crossed the remote-write boundary."
+        )
     elif any(
         intent.status in INTENT_REMOTE_CONFIRMATION_STATUSES
         for intent in intents
@@ -1431,10 +1491,23 @@ def _repair_legacy_replacement_exit_dependency_groups(
 
 def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoLiveRunOrdersResponse) -> None:
     persisted_counts = _persisted_stage3_counts(response.orders)
-    total_counts = persisted_counts["total"]
-    sell_counts = persisted_counts["sell"]
-    redeem_counts = persisted_counts["redeem"]
-    buy_counts = persisted_counts["buy"]
+    contract_counts = _authoritative_stage2_contract_counts(run)
+    total_counts = dict(persisted_counts["total"])
+    sell_counts = dict(persisted_counts["sell"])
+    redeem_counts = dict(persisted_counts["redeem"])
+    buy_counts = dict(persisted_counts["buy"])
+    sell_counts["planned"] = max(int(sell_counts["planned"]), contract_counts["sell"])
+    buy_counts["planned"] = max(int(buy_counts["planned"]), contract_counts["buy"])
+    total_counts["planned"] = max(int(total_counts["planned"]), contract_counts["total"])
+    persisted_counts = {
+        **persisted_counts,
+        "source": "persisted_order_intents_plus_authoritative_stage2_contract",
+        "authoritative_contract": contract_counts,
+        "total": total_counts,
+        "sell": sell_counts,
+        "redeem": redeem_counts,
+        "buy": buy_counts,
+    }
     sell_intents = [
         intent for intent in response.orders if intent.action in {"sell", "redeem"}
     ]
@@ -1468,9 +1541,18 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 else "completed"
                 if run.status in {"completed", "partial_success", "failed"}
                 else stage.outputs.get("phase_status"),
-                "orders_planned": response.order_funnel.planned,
-                "orders_submitted": response.order_funnel.remotely_accepted,
+                "orders_planned": total_counts["planned"],
                 "orders_processed": total_counts["processed"],
+                "orders_submitted": response.order_funnel.remotely_accepted,
+                "orders_ready": response.order_funnel.ready,
+                "orders_attempted": response.order_funnel.attempted,
+                "orders_remotely_accepted": response.order_funnel.remotely_accepted,
+                "orders_confirmed": response.order_funnel.confirmed,
+                "orders_filled": response.order_funnel.filled,
+                "orders_retry_wait": response.order_funnel.retry_wait,
+                "orders_waiting_for_collateral": response.order_funnel.waiting_for_collateral,
+                "orders_deferred": response.order_funnel.deferred,
+                "orders_permanently_failed": response.order_funnel.permanently_failed,
                 "sell_orders_planned": sell_counts["planned"],
                 "sell_orders_processed": sell_counts["processed"],
                 "sell_orders_submitted": sell_counts["submitted"],
@@ -1507,7 +1589,9 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                         recovery_required=recovery_required,
                     ),
                 ],
-                "order_funnel": response.order_funnel.model_dump(mode="json"),
+                "order_funnel": response.order_funnel.model_copy(
+                    update={"planned": total_counts["planned"]}
+                ).model_dump(mode="json"),
                 "action_funnels": {
                     key: value.model_dump(mode="json")
                     for key, value in response.action_funnels.items()
@@ -1919,8 +2003,39 @@ def sync_run_and_decisions_from_intents_sync(
         serialized_rows.append(decision.model_dump(mode="json"))
 
     run.execution_version = "v2"
-    run.order_funnel = response.order_funnel
-    run.action_funnels = response.action_funnels
+    contract_counts = _authoritative_stage2_contract_counts(run)
+    run.order_funnel = response.order_funnel.model_copy(
+        update={
+            "planned": max(response.order_funnel.planned, contract_counts["total"])
+        }
+    )
+    run.action_funnels = {
+        **response.action_funnels,
+        "sell": response.action_funnels.get(
+            "sell", BullpenAutoLiveOrderFunnel()
+        ).model_copy(
+            update={
+                "planned": max(
+                    response.action_funnels.get(
+                        "sell", BullpenAutoLiveOrderFunnel()
+                    ).planned,
+                    contract_counts["sell"],
+                )
+            }
+        ),
+        "buy": response.action_funnels.get(
+            "buy", BullpenAutoLiveOrderFunnel()
+        ).model_copy(
+            update={
+                "planned": max(
+                    response.action_funnels.get(
+                        "buy", BullpenAutoLiveOrderFunnel()
+                    ).planned,
+                    contract_counts["buy"],
+                )
+            }
+        ),
+    }
     run.retry_counts = response.retry_counts
     run.provider_error_counts = response.provider_error_counts
     run.average_confirmation_seconds = response.average_confirmation_seconds
@@ -1930,8 +2045,14 @@ def sync_run_and_decisions_from_intents_sync(
     run.permanent_failure_count = response.permanent_failure_count
     run.transient_failure_count = response.transient_failure_count
     run.order_intent_ids = [intent.id for intent in response.orders]
-    run.orders_planned = response.order_funnel.planned
+    run.orders_planned = max(
+        response.order_funnel.planned,
+        contract_counts["total"],
+    )
     run.orders_submitted = response.order_funnel.remotely_accepted
+    run.live_execution_attempted = bool(
+        run.live_execution_attempted or response.order_funnel.attempted > 0
+    )
     cancelled_by_user = (
         run.status == "failed" and run.error_message == _USER_CANCELLED_RUN_ERROR
     )
@@ -1941,7 +2062,7 @@ def sync_run_and_decisions_from_intents_sync(
             run.completed_at = run.completed_at or utc_now_iso()
         else:
             run.completed_at = None
-        run.summary = _summary_text(run.status, response.order_funnel)
+        run.summary = _summary_text(run.status, run.order_funnel)
     else:
         # Order reconciliations can continue to report the factual outcome of
         # a write that was already submitted, but they must never resurrect a
@@ -2015,6 +2136,13 @@ def create_or_refresh_run_order_intents_sync(
                 "cancelled": "CANCELLED",
                 "rejected": "REJECTED",
                 "timed_out": "TIMED_OUT",
+                "failed": "FAILED_PERMANENT",
+                "failed_permanent": "FAILED_PERMANENT",
+                "deferred": "DEFERRED",
+                "skipped": "DEFERRED",
+                "retry_wait": "RETRY_WAIT",
+                "rpc_rate_limited": "RETRY_WAIT",
+                "waiting_for_collateral": "WAITING_FOR_COLLATERAL",
                 "partially_filled": "PARTIALLY_FILLED",
                 "settlement_pending": "SETTLEMENT_PENDING",
                 # A CLI write can succeed without returning a remote order ID.
@@ -2025,15 +2153,20 @@ def create_or_refresh_run_order_intents_sync(
             if (
                 order_plan.action == "buy"
                 and order_plan.dependency_group
-                and initial_status == "READY"
+                and initial_status in {"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"}
             ):
                 initial_status = "WAITING_FOR_EXIT"
-            persisted_submission = initial_status not in _EXECUTABLE_STATUSES
+            persisted_submission = bool(
+                order_plan.submission_evidence_present
+                or order_plan.remote_order_id
+                or order_plan.remote_transaction_hash
+                or order_plan.executed_at
+            )
             post_exit_sizing_policy = {
-                "version": "v1",
-                "enabled": bool(
-                    order_plan.action == "buy"
-                    and order_plan.dependency_group
+                "version": "v2",
+                "enabled": bool(order_plan.action == "buy"),
+                "requires_exit_confirmation": bool(
+                    order_plan.action == "buy" and order_plan.dependency_group
                 ),
                 "min_order_usd": max(
                     0.01,
@@ -2044,7 +2177,7 @@ def create_or_refresh_run_order_intents_sync(
                     float(settings_snapshot.get("max_order_usd", 25.0) or 25.0),
                 ),
                 "balance_buffer_usd": auto_live_buy_balance_buffer_usd(),
-                "sizing_source": "forced_fresh_post_exit_balance",
+                "sizing_source": "forced_fresh_pre_submit_balance",
             }
             intent = PolymarketAutoLiveOrderIntentRecord(
                 id=order_plan.id,
@@ -2065,7 +2198,23 @@ def create_or_refresh_run_order_intents_sync(
                 current_limit_price_cents=order_plan.limit_price_cents,
                 max_slippage_cents=order_plan.max_slippage_cents,
                 status=initial_status,
-                retryable=not persisted_submission,
+                error_class=(
+                    "stage2_authoritative_non_submission"
+                    if initial_status in INTENT_TERMINAL_FAILURE_STATUSES
+                    and not persisted_submission
+                    else None
+                ),
+                last_error_code=order_plan.latest_error_code,
+                last_error_message=(
+                    order_plan.detail
+                    if initial_status in INTENT_TERMINAL_FAILURE_STATUSES
+                    or initial_status
+                    in {"RETRY_WAIT", "WAITING_FOR_COLLATERAL", "WAITING_FOR_EXIT"}
+                    else None
+                ),
+                retryable=bool(
+                    not persisted_submission and initial_status in _EXECUTABLE_STATUSES
+                ),
                 attempt_count=0,
                 max_attempts=max(
                     1,
@@ -2076,8 +2225,10 @@ def create_or_refresh_run_order_intents_sync(
                     ),
                 ),
                 next_attempt_at=(
-                    utc_now()
-                    if initial_status == "READY" and not persisted_submission
+                    (parse_datetime(order_plan.next_retry_at) or utc_now())
+                    if initial_status
+                    in {"READY", "RETRY_WAIT", "WAITING_FOR_COLLATERAL"}
+                    and not persisted_submission
                     else None
                 ),
                 priority=_intent_priority(order_plan.action),
@@ -2108,13 +2259,19 @@ def create_or_refresh_run_order_intents_sync(
                     "reservation_state": None,
                     "run_status": run.status,
                     "stage3_status": (
-                        "EXIT_SUBMITTED"
-                        if order_plan.action in {"sell", "redeem"}
-                        and persisted_submission
-                        else "EXIT_NOT_SUBMITTED"
-                        if order_plan.action in {"sell", "redeem"}
-                        else order_plan.stage3_status or "BUY_READY"
+                        order_plan.stage3_status
+                        or (
+                            "EXIT_SUBMITTED"
+                            if order_plan.action in {"sell", "redeem"}
+                            and persisted_submission
+                            else "EXIT_NOT_SUBMITTED"
+                            if order_plan.action in {"sell", "redeem"}
+                            else "BUY_READY"
+                        )
                     ),
+                    "current_blockage": order_plan.current_blockage,
+                    "actionable_resolution": order_plan.actionable_resolution,
+                    "stage2_authoritative_plan_preserved": True,
                     "post_exit_sizing_policy": post_exit_sizing_policy,
                     "stage3_rpc_retry_policy": rpc_policy,
                     "stage3_rpc_retry_total_wait_seconds": 0.0,
@@ -2147,12 +2304,24 @@ def create_or_refresh_run_order_intents_sync(
                 },
                 remote_order_id=order_plan.remote_order_id,
                 remote_transaction_hash=order_plan.remote_transaction_hash,
-                first_submitted_at=order_plan.executed_at if persisted_submission else None,
-                last_submitted_at=order_plan.executed_at if persisted_submission else None,
-                confirmed_at=order_plan.confirmed_at,
-                terminal_at=order_plan.terminal_at
-                if initial_status in INTENT_TERMINAL_SUCCESS_STATUSES | INTENT_TERMINAL_FAILURE_STATUSES
-                else None,
+                first_submitted_at=(
+                    parse_datetime(order_plan.executed_at)
+                    if persisted_submission
+                    else None
+                ),
+                last_submitted_at=(
+                    parse_datetime(order_plan.executed_at)
+                    if persisted_submission
+                    else None
+                ),
+                confirmed_at=parse_datetime(order_plan.confirmed_at),
+                terminal_at=(
+                    parse_datetime(order_plan.terminal_at)
+                    if initial_status
+                    in INTENT_TERMINAL_SUCCESS_STATUSES
+                    | INTENT_TERMINAL_FAILURE_STATUSES
+                    else None
+                ),
                 version=1,
             )
             session.add(intent)
@@ -2176,6 +2345,33 @@ def create_or_refresh_run_order_intents_sync(
                 if intent.status == "READY" and intent.next_attempt_at is None:
                     intent.next_attempt_at = utc_now()
             intent.dependency_group = order_plan.dependency_group
+            if not intent_has_persisted_submission_evidence(intent):
+                planned_status = {
+                    "failed": "FAILED_PERMANENT",
+                    "failed_permanent": "FAILED_PERMANENT",
+                    "deferred": "DEFERRED",
+                    "skipped": "DEFERRED",
+                    "rejected": "REJECTED",
+                    "retry_wait": "RETRY_WAIT",
+                    "rpc_rate_limited": "RETRY_WAIT",
+                    "waiting_for_collateral": "WAITING_FOR_COLLATERAL",
+                }.get(order_plan.status)
+                if planned_status is not None:
+                    intent.status = planned_status
+                    intent.retryable = planned_status in _EXECUTABLE_STATUSES
+                    intent.last_error_code = order_plan.latest_error_code
+                    intent.last_error_message = order_plan.detail
+                    intent.next_attempt_at = (
+                        (parse_datetime(order_plan.next_retry_at) or utc_now())
+                        if intent.retryable
+                        and planned_status != "WAITING_FOR_EXIT"
+                        else None
+                    )
+                    intent.terminal_at = (
+                        (parse_datetime(order_plan.terminal_at) or utc_now())
+                        if planned_status in INTENT_TERMINAL_FAILURE_STATUSES
+                        else None
+                    )
             existing_metadata = dict(intent.execution_metadata_json or {})
             existing_capacity_policy = existing_metadata.get("stage3_capacity_policy")
             intent.execution_metadata_json = {
@@ -2185,14 +2381,20 @@ def create_or_refresh_run_order_intents_sync(
                     or order_plan.stage3_status == "CAPACITY_OVERRIDE_USED"
                 ),
                 "stage3_status": (
-                    "EXIT_NOT_SUBMITTED"
-                    if order_plan.action in {"sell", "redeem"}
-                    and not intent.remote_order_id
-                    else "BUY_READY"
-                    if order_plan.action == "buy"
-                    else order_plan.stage3_status
-                    or intent.execution_metadata_json.get("stage3_status")
+                    order_plan.stage3_status
+                    or existing_metadata.get("stage3_status")
+                    or (
+                        "EXIT_NOT_SUBMITTED"
+                        if order_plan.action in {"sell", "redeem"}
+                        and not intent.remote_order_id
+                        else "BUY_READY"
+                        if order_plan.action == "buy"
+                        else None
+                    )
                 ),
+                "current_blockage": order_plan.current_blockage,
+                "actionable_resolution": order_plan.actionable_resolution,
+                "stage2_authoritative_plan_preserved": True,
                 "stage3_rpc_retry_policy": rpc_policy,
                 "expected_stage1_wallet_lineage": (
                     expected_stage1_wallet_lineage
@@ -2208,8 +2410,9 @@ def create_or_refresh_run_order_intents_sync(
                 "post_exit_sizing_policy": (
                     existing_metadata.get("post_exit_sizing_policy")
                     or {
-                        "version": "v1",
-                        "enabled": bool(
+                        "version": "v2",
+                        "enabled": bool(order_plan.action == "buy"),
+                        "requires_exit_confirmation": bool(
                             order_plan.action == "buy"
                             and order_plan.dependency_group
                         ),
@@ -2228,7 +2431,7 @@ def create_or_refresh_run_order_intents_sync(
                             ),
                         ),
                         "balance_buffer_usd": auto_live_buy_balance_buffer_usd(),
-                        "sizing_source": "forced_fresh_post_exit_balance",
+                        "sizing_source": "forced_fresh_pre_submit_balance",
                     }
                 ),
                 "stage3_capacity_policy": {
@@ -4112,7 +4315,7 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             if isinstance(post_exit_sizing_policy, dict)
             else {}
         )
-        if replacement_confirmed and post_exit_sizing_policy.get("enabled"):
+        if post_exit_sizing_policy.get("enabled"):
             post_exit_sizing = _post_exit_replacement_sizing(
                 available_balance_usd=live_controls.balance.available_balance_usd,
                 economically_active_position_count=(
@@ -4155,8 +4358,8 @@ async def _prepare_intent_submission(intent: BullpenAutoLiveOrderIntent) -> Prep
             intent.execution_metadata_json = {
                 **dict(intent.execution_metadata_json or {}),
                 "post_exit_sizing": {
-                    "version": "v1",
-                    "source": "forced_fresh_post_exit_balance",
+                    "version": "v2",
+                    "source": "forced_fresh_pre_submit_balance",
                     "applied_at": utc_now_iso(),
                     **post_exit_sizing,
                 },
@@ -4880,6 +5083,99 @@ async def _submit_prepared_intent(
     )
 
 
+def _defer_dependent_buys_after_exit_failure(
+    session: Session,
+    *,
+    exit_record: PolymarketAutoLiveOrderIntentRecord,
+) -> list[str]:
+    """Terminalize unsent replacement buys when their required exit fails.
+
+    The authoritative Stage 2 Buy rows remain durable and Planned, but a buy
+    whose reserved slot depends on a definitively failed exit must not wait
+    forever or issue against an occupied slot.
+    """
+
+    if (
+        exit_record.action not in {"sell", "redeem"}
+        or exit_record.status
+        not in _DEFINITIVE_EXIT_DEPENDENCY_FAILURE_STATUSES
+        or not exit_record.dependency_group
+    ):
+        return []
+
+    now = utc_now()
+    deferred_ids: list[str] = []
+    replacements = session.execute(
+        select(PolymarketAutoLiveOrderIntentRecord)
+        .where(
+            PolymarketAutoLiveOrderIntentRecord.run_id == exit_record.run_id
+        )
+        .where(
+            PolymarketAutoLiveOrderIntentRecord.dependency_group
+            == exit_record.dependency_group
+        )
+        .where(PolymarketAutoLiveOrderIntentRecord.action == "buy")
+        .where(
+            PolymarketAutoLiveOrderIntentRecord.status.in_(
+                (
+                    "PLANNED",
+                    "READY",
+                    "RETRY_WAIT",
+                    "WAITING_FOR_COLLATERAL",
+                    "WAITING_FOR_EXIT",
+                )
+            )
+        )
+        .with_for_update(skip_locked=True)
+    ).scalars()
+    for replacement in replacements:
+        if _intent_has_persisted_submission_reference(replacement):
+            # A remote write may already exist; preserve reconciliation instead
+            # of fabricating a local dependency failure.
+            continue
+        detail = (
+            f"Authoritative replacement buy is blocked because required exit "
+            f"{exit_record.market_id} ended in {exit_record.status} before any "
+            "confirmed slot release. No external buy write was issued."
+        )
+        replacement.status = "DEFERRED"
+        replacement.retryable = False
+        replacement.next_attempt_at = None
+        replacement.terminal_at = now
+        replacement.last_error_code = "DEPENDENCY_EXIT_FAILED"
+        replacement.last_error_message = detail
+        replacement.dependency_metadata_json = {
+            **dict(replacement.dependency_metadata_json or {}),
+            "state": "blocked_by_failed_exit",
+            "exit_intent_id": exit_record.id,
+            "exit_market_id": exit_record.market_id,
+            "exit_status": exit_record.status,
+            "recorded_at": _isoformat(now),
+        }
+        replacement.execution_metadata_json = {
+            **dict(replacement.execution_metadata_json or {}),
+            "stage3_status": "BUY_FAILED",
+            "current_blockage": detail,
+            "actionable_resolution": (
+                "Resolve the exit blocker and start a new full run; this exact "
+                "buy remains preserved as a non-submitted Stage 2 actionable."
+            ),
+            "automatic_resubmission": False,
+            "stage2_authoritative_plan_preserved": True,
+        }
+        _release_buy_reservation_if_no_remote_evidence(
+            session,
+            replacement,
+            reason=(
+                f"Required exit {exit_record.market_id} failed before the "
+                "replacement buy could be submitted."
+            ),
+            definitive_no_fill=True,
+        )
+        deferred_ids.append(replacement.id)
+    return deferred_ids
+
+
 def _apply_executor_error(
     session: Session,
     *,
@@ -5041,6 +5337,11 @@ def _apply_executor_error(
             metadata["stage3_rpc_retry_exhausted"] = True
             attempt.result_status = "FAILED_PERMANENT"
         record.execution_metadata_json = metadata
+        if record.status in _DEFINITIVE_EXIT_DEPENDENCY_FAILURE_STATUSES:
+            _defer_dependent_buys_after_exit_failure(
+                session,
+                exit_record=record,
+            )
         return
 
     record.retryable = exc.retryable
@@ -5088,6 +5389,11 @@ def _apply_executor_error(
     else:
         metadata["stage3_status"] = "BUY_FAILED"
     record.execution_metadata_json = metadata
+    if record.status in _DEFINITIVE_EXIT_DEPENDENCY_FAILURE_STATUSES:
+        _defer_dependent_buys_after_exit_failure(
+            session,
+            exit_record=record,
+        )
 
 
 def _automatic_attempt_budget_allows(
@@ -5132,6 +5438,10 @@ def _automatic_attempt_budget_allows(
             session,
             record,
             reason="Automatic execution attempt budget exhausted before any persisted remote write.",
+        )
+        _defer_dependent_buys_after_exit_failure(
+            session,
+            exit_record=record,
         )
     return False
 

@@ -248,4 +248,12 @@ test("the Stage 2 monitor renders the clickable Actionables line below New Event
   );
   assert.match(scheduleCardSource, /stage2_actionable_exit_market_ids/);
   assert.match(scheduleCardSource, /stage2_actionable_buy_market_ids/);
+  assert.match(
+    scheduleCardSource,
+    /Actionables: awaiting authoritative Stage 2 contract/,
+  );
+  assert.doesNotMatch(
+    scheduleCardSource,
+    /getBullpenTopTenStrongestLlmOddsRows/,
+  );
 });

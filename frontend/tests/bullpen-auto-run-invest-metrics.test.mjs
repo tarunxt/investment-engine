@@ -678,3 +678,42 @@ test("Stage 3 order and detail cells render immediate-sell telemetry", () => {
       ?.length >= 3,
   );
 });
+
+test("authoritative DUST_LOST exits remain planned and processed without submission", async () => {
+  const {
+    isCompletedWithoutSubmissionInvestDecision,
+    partitionInvestDecisionsByExecutionEvidence,
+    summarizeInvestStepCountsFromDecisions,
+  } = await loadInvestMetricsModule();
+  const dustExit = createDecision({
+    id: "authoritative-dust-exit",
+    action: "sell",
+    status: "skipped",
+    exitState: "DUST_LOST",
+    exitStrategies: ["OUTSIDE_TOP_10_RETURNS_DAY"],
+  });
+
+  assert.equal(isCompletedWithoutSubmissionInvestDecision(dustExit), true);
+  const groups = partitionInvestDecisionsByExecutionEvidence([dustExit]);
+  assert.deepEqual(
+    groups.completedWithoutSubmission.map((decision) => decision.id),
+    ["authoritative-dust-exit"],
+  );
+  assert.deepEqual(groups.notSubmitted, []);
+  assert.deepEqual(
+    summarizeInvestStepCountsFromDecisions("sell", [dustExit]),
+    {
+      plannedOrders: 1,
+      processedOrders: 1,
+      submittedOrders: 0,
+      eventExitRows: 1,
+      rankingLlmPlannedOrders: 0,
+      forcedExitPlannedOrders: 0,
+      redeemPlannedOrders: 0,
+      redeemProcessedOrders: 0,
+      redeemSubmittedOrders: 0,
+      rankingLlmSubmittedOrders: 0,
+      forcedExitSubmittedOrders: 0,
+    },
+  );
+});

@@ -2424,7 +2424,7 @@ def _summarize_live_order_issues(
     examples = "; ".join(
         (
             f"The {'Event Exit order' if row.get('action') == 'sell' else 'planned buy order'} "
-            f"for {row.get('market_title') or 'an unknown market'} was not submitted: "
+            f"for {row.get('market_title') or 'an unknown market'} was not confirmed: "
             f"{row.get('detail') or 'No execution detail was recorded.'}"
         )
         for row in example_rows
@@ -9988,25 +9988,62 @@ class BullpenAutoLiveEngine:
                         },
                     )
                 )
-                record_invest_decision(
-                    _build_decision(
-                        market=market,
-                        decision_action="EXIT",
-                        reason=reason,
-                        stage_results=stage_results,
-                        current_position=current_position,
-                        current_exposure_usd=position.exposure_usd,
-                        target_exposure_usd=0,
-                        order_usd=0,
-                        order_shares=position.shares,
-                        llm_outputs=llm_outputs,
-                        llm_consensus=llm_consensus,
-                        exit_signals=exit_signals,
-                        exit_state=current_position.exit_state,
-                        include_order_plan=False,
-                    ),
+                dust_decision = _build_decision(
                     market=market,
+                    decision_action="EXIT",
+                    reason=reason,
+                    stage_results=stage_results,
+                    current_position=current_position,
+                    current_exposure_usd=position.exposure_usd,
+                    target_exposure_usd=0,
+                    order_usd=0,
+                    order_shares=position.shares,
+                    llm_outputs=llm_outputs,
+                    llm_consensus=llm_consensus,
+                    exit_signals=exit_signals,
+                    exit_state=current_position.exit_state,
+                    # The authoritative Stage 2 contract is immutable.  A dust
+                    # exit is still a Planned/Processed row even though there is
+                    # no safe remote sell write to issue right now.
+                    include_order_plan=is_authoritative_stage2_exit,
                 )
+                if dust_decision.order_plan is not None:
+                    dust_detail = (
+                        "Stage 2 selected this Event Exit, but the held outcome has "
+                        "no meaningful executable bid/value. The row remains in "
+                        "Stage 3 Planned and is recorded as processed DUST_LOST; "
+                        "no remote sell write was attempted."
+                    )
+                    dust_decision.order_plan.status = "skipped"
+                    dust_decision.order_plan.stage3_status = "EXIT_NOT_SUBMITTED"
+                    dust_decision.order_plan.detail = dust_detail
+                    dust_decision.order_plan.current_blockage = (
+                        "No executable held-side bid/value above the configured dust threshold."
+                    )
+                    dust_decision.order_plan.actionable_resolution = (
+                        "No immediate operator action is required. A later run may "
+                        "sell if an executable bid appears or redeem after resolution."
+                    )
+                    dust_decision.order_plan.retryable = False
+                    dust_decision.order_plan.latest_error_code = "BELOW_MINIMUM_ORDER"
+                    dust_decision.order_plan.terminal_at = utc_now_iso()
+                    dust_decision.reason = dust_detail
+                    dust_decision.summary = dust_detail
+                    dust_decision.stage3_status = "EXIT_NOT_SUBMITTED"
+                    _set_stage3_decision_result(
+                        dust_decision,
+                        result="BLOCKED",
+                        reason=dust_detail,
+                    )
+                    dust_decision.stage_results.append(
+                        build_stage_result(
+                            stage_number=7,
+                            status="warning",
+                            reason=dust_detail,
+                            outputs=dust_decision.order_plan.model_dump(mode="json"),
+                        )
+                    )
+                record_invest_decision(dust_decision, market=market)
                 continue
 
             if current_position.exit_state == "EVENT_EXIT_PLANNED":
@@ -10659,52 +10696,194 @@ class BullpenAutoLiveEngine:
                 )
             )
 
+        def _ensure_authoritative_buy_plan(
+            decision: BullpenAutoLiveDecision,
+            *,
+            outputs: dict[str, object] | None = None,
+        ) -> BullpenAutoLiveOrderPlan:
+            """Persist one order plan for every authoritative Stage 2 Buy row.
+
+            The amount is deliberately provisional. The durable executor always
+            refreshes wallet lineage, capacity, cash, and quote immediately before
+            a remote write and replaces this amount with fresh executable sizing.
+            """
+
+            if decision.order_plan is not None:
+                return decision.order_plan
+            reservation = replacement_reservations.get(decision.market_id)
+            reservation = reservation if isinstance(reservation, dict) else None
+            configured_amount = (
+                last_calculated_console_order_usd
+                if isinstance(last_calculated_console_order_usd, (int, float))
+                else settings.min_order_usd
+            )
+            provisional_order_usd = round(
+                min(
+                    float(settings.max_order_usd),
+                    max(float(settings.min_order_usd), float(configured_amount or 0.0)),
+                ),
+                2,
+            )
+            plan = BullpenAutoLiveOrderPlan(
+                id=_auto_live_record_id(
+                    "order",
+                    run_id=run.id,
+                    market_id=decision.market_id,
+                    action=decision.decision,
+                ),
+                action="buy",
+                side=decision.side,
+                stage3_status=(
+                    "REPLACEMENT_SLOT_RESERVED" if reservation else "BUY_READY"
+                ),
+                market_id=decision.market_id,
+                market_title=decision.market_title,
+                dependency_group=(
+                    str(reservation.get("dependency_group"))
+                    if reservation and reservation.get("dependency_group")
+                    else None
+                ),
+                order_size_usd=provisional_order_usd,
+                shares=0,
+                limit_price_cents=max(0.01, round(decision.price_cents, 2)),
+                max_slippage_cents=settings.max_slippage_cents,
+                dry_run=state.dry_run,
+                detail=(
+                    "Authoritative Stage 2 Buy persisted in Stage 3 Planned; "
+                    "fresh wallet, capacity, cash, and quote preflight is pending."
+                ),
+                created_at=utc_now_iso(),
+            )
+            decision.order_plan = plan
+            decision.target_exposure_usd = provisional_order_usd
+            decision.score = provisional_order_usd
+            if outputs:
+                _append_decision_stage_result(
+                    decision,
+                    stage_number=5,
+                    status="warning",
+                    reason=plan.detail,
+                    outputs=outputs,
+                )
+            if plan.id not in stage3_slot_diagnostics["planned_buy_ids"]:
+                stage3_slot_diagnostics["planned_buy_ids"].append(plan.id)
+            return plan
+
         def _mark_ranked_buy_candidate_unplanned(
             decision: BullpenAutoLiveDecision,
             *,
             reason: str,
             outputs: dict[str, object] | None = None,
+            retryable: bool = True,
+            plan_status: str | None = None,
+            stage3_status: str | None = None,
+            latest_error_code: str | None = None,
+            actionable_resolution: str | None = None,
         ) -> None:
+            """Record a blocker without deleting the authoritative Stage 2 plan."""
+
+            order_plan = _ensure_authoritative_buy_plan(decision, outputs=outputs)
+            if isinstance(outputs, dict):
+                intended_order_usd = next(
+                    (
+                        float(value)
+                        for value in (
+                            outputs.get("order_usd"),
+                            outputs.get("affordable_buy_initial_order_usd"),
+                            outputs.get("console_trade_last_calculated_usd"),
+                        )
+                        if isinstance(value, (int, float)) and float(value) > 0
+                    ),
+                    None,
+                )
+                if intended_order_usd is not None:
+                    order_plan.order_size_usd = round(
+                        min(
+                            float(settings.max_order_usd),
+                            max(float(settings.min_order_usd), intended_order_usd),
+                        ),
+                        2,
+                    )
+                    decision.target_exposure_usd = order_plan.order_size_usd
+                    decision.score = order_plan.order_size_usd
+            lowered_reason = reason.lower()
+            normalized_stage3_status = stage3_status or (
+                "GENUINE_CAPACITY_BLOCK"
+                if "capacity" in lowered_reason or "10-position" in lowered_reason
+                else "POST_EXIT_REFRESH_PENDING"
+                if any(
+                    marker in lowered_reason
+                    for marker in ("refresh", "balance", "cash", "lineage")
+                )
+                else "BUY_FAILED"
+            )
+            normalized_plan_status = plan_status or (
+                "retry_wait" if retryable else "deferred"
+            )
+            next_retry_time = (
+                (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+                if retryable
+                else None
+            )
+            reservation = replacement_reservations.get(decision.market_id)
+            reservation = reservation if isinstance(reservation, dict) else None
+
             stage3_slot_diagnostics["final_block_bypass_reason"] = reason
             decision.reason = reason
             decision.summary = reason
-            decision.stage3_status = (
-                "GENUINE_CAPACITY_BLOCK"
-                if "capacity" in reason.lower() or "10-position" in reason.lower()
-                else "POST_EXIT_REFRESH_PENDING"
-                if "refresh" in reason.lower()
-                else "BUY_FAILED"
-            )
+            decision.stage3_status = normalized_stage3_status  # type: ignore[assignment]
             decision.stage3_blocker = {
                 "exact_blocker": reason,
                 "related_exit_market": (
-                    replacement_reservations.get(decision.market_id, {}).get("exit_market_id")
-                    if isinstance(replacement_reservations.get(decision.market_id), dict)
-                    else None
+                    reservation.get("exit_market_id") if reservation else None
                 ),
                 "exit_order_status": None,
-                "retry_count": 0,
-                "next_retry_time": None,
+                "retry_count": order_plan.attempt_count,
+                "next_retry_time": next_retry_time,
                 "occupied_slots": (
                     outputs.get("occupied_positions")
-                    if isinstance(outputs, dict) and outputs.get("occupied_positions") is not None
+                    if isinstance(outputs, dict)
+                    and outputs.get("occupied_positions") is not None
                     else stage3_slot_diagnostics.get("occupied_slots_before_exit")
                 ),
                 "reserved_replacement_slots": len(
                     [
                         item
-                        for item in stage3_slot_diagnostics.get("replacement_reservations", [])
-                        if isinstance(item, dict) and item.get("status") == "reserved"
+                        for item in stage3_slot_diagnostics.get(
+                            "replacement_reservations", []
+                        )
+                        if isinstance(item, dict)
+                        and item.get("status") in {"reserved", "waiting_for_exit"}
                     ]
                 ),
-                "available_cash": outputs.get("cash_in_hand_usd") if isinstance(outputs, dict) else None,
+                "available_cash": (
+                    outputs.get("cash_in_hand_usd")
+                    if isinstance(outputs, dict)
+                    else None
+                ),
                 "operator_action_available": bool(
-                    decision.stage3_status == "GENUINE_CAPACITY_BLOCK"
+                    normalized_stage3_status == "GENUINE_CAPACITY_BLOCK"
                 ),
             }
-            decision.target_exposure_usd = 0
-            decision.score = 0
-            decision.order_plan = None
+            order_plan.status = normalized_plan_status  # type: ignore[assignment]
+            order_plan.stage3_status = normalized_stage3_status  # type: ignore[assignment]
+            order_plan.detail = reason
+            order_plan.current_blockage = reason
+            order_plan.actionable_resolution = actionable_resolution or (
+                "The durable executor will retry after a fresh wallet/balance/quote "
+                "preflight when this blocker is transient."
+                if retryable
+                else "Review the recorded blocker before a later run retries this market."
+            )
+            order_plan.retryable = retryable
+            order_plan.next_retry_at = next_retry_time
+            order_plan.latest_error_code = latest_error_code
+            order_plan.terminal_at = (
+                utc_now_iso()
+                if normalized_plan_status
+                in {"deferred", "rejected", "skipped", "failed_permanent"}
+                else None
+            )
             _set_stage3_decision_result(
                 decision,
                 result="BLOCKED",
@@ -10712,17 +10891,10 @@ class BullpenAutoLiveEngine:
             )
             _append_decision_stage_result(
                 decision,
-                stage_number=5,
-                status="warning",
-                reason=reason,
-                outputs=outputs,
-            )
-            _append_decision_stage_result(
-                decision,
                 stage_number=7,
                 status="warning",
                 reason=reason,
-                outputs=outputs,
+                outputs=order_plan.model_dump(mode="json"),
             )
 
         def _plan_ranked_buy_candidate(
@@ -11024,6 +11196,12 @@ class BullpenAutoLiveEngine:
                 buy_execution_decisions = []
                 return
 
+            # Materialize the immutable Stage 2 Buy contract before any refresh.
+            # A later preflight may change each plan's state, but not erase it.
+            for decision in ranked_buy_candidate_decisions:
+                _ensure_authoritative_buy_plan(decision)
+            buy_execution_decisions = list(ranked_buy_candidate_decisions)
+
             try:
                 refreshed_state = await _refresh_stage3_buy_state()
             except Exception as exc:
@@ -11042,8 +11220,12 @@ class BullpenAutoLiveEngine:
                             **stage2_universe_status,
                             **stage2_strategy_metadata,
                         },
+                        retryable=True,
+                        plan_status="retry_wait",
+                        stage3_status="POST_EXIT_REFRESH_PENDING",
+                        latest_error_code="L2_WALLET_DISAGREEMENT",
                     )
-                buy_execution_decisions = []
+                buy_execution_decisions = list(ranked_buy_candidate_decisions)
                 return
 
             stage3_buy_refresh_snapshot = _serialize_stage3_refresh_state(refreshed_state)
@@ -11091,6 +11273,30 @@ class BullpenAutoLiveEngine:
                     continue
                 eligible_ranked_candidates.append(ranked_candidate)
                 seen_ranked_candidate_aliases.update(candidate_aliases)
+
+            # Apply terminally confirmed Event Exit evidence before sizing the
+            # authoritative Buy list. A just-filled exit can legitimately lag in
+            # the next wallet snapshot; its durable confirmation is stronger than
+            # that stale row for replacement-slot accounting.
+            confirmed_exit_capacity_release_market_ids: set[str] = set()
+            for reservation in replacement_reservations.values():
+                if not isinstance(reservation, dict):
+                    continue
+                if reservation.get("status") != "confirmed":
+                    continue
+                exit_market_id = reservation.get("exit_market_id")
+                if not isinstance(exit_market_id, str) or not exit_market_id:
+                    continue
+                occupied_market_ids.discard(exit_market_id)
+                capacity_sizing_market_ids.discard(exit_market_id)
+                normalized_occupied_market_aliases.discard(
+                    exit_market_id.strip().lower()
+                )
+                confirmed_exit_capacity_release_market_ids.add(exit_market_id)
+            if confirmed_exit_capacity_release_market_ids:
+                stage3_slot_diagnostics[
+                    "confirmed_exit_capacity_release_market_ids"
+                ] = sorted(confirmed_exit_capacity_release_market_ids)
 
             sizing_available_slots = max(
                 0,
@@ -11158,6 +11364,31 @@ class BullpenAutoLiveEngine:
 
             for decision in ranked_buy_candidate_decisions:
                 reservation = replacement_reservations.get(decision.market_id)
+                if (
+                    isinstance(reservation, dict)
+                    and reservation.get("status") == "confirmed"
+                ):
+                    # A confirmed/filled Event Exit is itself authoritative slot-
+                    # release evidence.  A lagging wallet snapshot may still show
+                    # the old position briefly, but it must not strand the exact
+                    # Stage 2 replacement buy after the sell has terminally filled.
+                    exit_market_id = reservation.get("exit_market_id")
+                    if isinstance(exit_market_id, str) and exit_market_id:
+                        occupied_market_ids.discard(exit_market_id)
+                        capacity_sizing_market_ids.discard(exit_market_id)
+                        normalized_occupied_market_aliases.discard(
+                            exit_market_id.strip().lower()
+                        )
+                        stage3_slot_diagnostics[
+                            "confirmed_exit_capacity_release_market_ids"
+                        ] = sorted(
+                            {
+                                *stage3_slot_diagnostics.get(
+                                    "confirmed_exit_capacity_release_market_ids", []
+                                ),
+                                exit_market_id,
+                            }
+                        )
                 reserved_for_async_exit = bool(
                     reservation is not None
                     and not state.dry_run
@@ -11240,6 +11471,9 @@ class BullpenAutoLiveEngine:
                     "affordable_buy_max_order_usd": affordable_allocation[
                         "max_order_usd"
                     ],
+                    "affordable_buy_initial_order_usd": affordable_allocation[
+                        "initial_order_usd"
+                    ],
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                 }
@@ -11259,6 +11493,10 @@ class BullpenAutoLiveEngine:
                         decision,
                         reason=reservation_reason,
                         outputs=current_outputs,
+                        retryable=True,
+                        plan_status="retry_wait",
+                        stage3_status="REPLACEMENT_SLOT_RESERVED",
+                        latest_error_code="SETTLEMENT_PENDING",
                     )
                     stage3_slot_diagnostics["final_block_bypass_reason"] = reservation_reason
                     continue
@@ -11271,8 +11509,12 @@ class BullpenAutoLiveEngine:
                 if candidate_market_aliases & normalized_occupied_market_aliases:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
-                        reason="Market already has an active or submitted Bullpen position after the post-exit refresh, so Stage 3 did not plan another buy.",
+                        reason="Market already has an active or submitted Bullpen position after the post-exit refresh, so the authoritative buy was rejected as duplicate exposure.",
                         outputs=current_outputs,
+                        retryable=False,
+                        plan_status="rejected",
+                        stage3_status="BUY_FAILED",
+                        latest_error_code="PERMANENT_REJECTION",
                     )
                     continue
 
@@ -11282,8 +11524,12 @@ class BullpenAutoLiveEngine:
                 ):
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
-                        reason="Another ranked buy for this market was already planned earlier in the same run.",
+                        reason="Another authoritative buy for this market already exists in the same run; this duplicate row remains recorded but will not issue a second write.",
                         outputs=current_outputs,
+                        retryable=False,
+                        plan_status="rejected",
+                        stage3_status="BUY_FAILED",
+                        latest_error_code="PERMANENT_REJECTION",
                     )
                     continue
 
@@ -11303,9 +11549,13 @@ class BullpenAutoLiveEngine:
                         reserved_replacement=True,
                         deferred_post_exit_sizing=True,
                     )
-                    stage3_slot_diagnostics["planned_buy_ids"].append(
+                    if (
                         decision.order_plan.id
-                    )
+                        not in stage3_slot_diagnostics["planned_buy_ids"]
+                    ):
+                        stage3_slot_diagnostics["planned_buy_ids"].append(
+                            decision.order_plan.id
+                        )
                     planned_buy_market_ids.add(decision.market_id)
                     planned_buy_market_aliases.update(candidate_market_aliases)
                     reservation["status"] = "waiting_for_exit"
@@ -11330,6 +11580,10 @@ class BullpenAutoLiveEngine:
                         decision,
                         reason=balance_reason,
                         outputs=current_outputs,
+                        retryable=True,
+                        plan_status="waiting_for_collateral",
+                        stage3_status="POST_EXIT_REFRESH_PENDING",
+                        latest_error_code="BALANCE_UNAVAILABLE",
                     )
                     stage3_slot_diagnostics["final_block_bypass_reason"] = balance_reason
                     continue
@@ -11398,6 +11652,10 @@ class BullpenAutoLiveEngine:
                             decision,
                             reason=block_reason,
                             outputs=current_outputs,
+                            retryable=False,
+                            plan_status="deferred",
+                            stage3_status="GENUINE_CAPACITY_BLOCK",
+                            latest_error_code="CAPACITY_BLOCKED",
                         )
                         stage3_slot_diagnostics["final_block_bypass_reason"] = block_reason
                         continue
@@ -11428,6 +11686,10 @@ class BullpenAutoLiveEngine:
                             **current_outputs,
                             "affordable_ranked_buys_remaining": 0,
                         },
+                        retryable=True,
+                        plan_status="waiting_for_collateral",
+                        stage3_status="POST_EXIT_REFRESH_PENDING",
+                        latest_error_code="INSUFFICIENT_COLLATERAL",
                     )
                     continue
 
@@ -11453,17 +11715,25 @@ class BullpenAutoLiveEngine:
                         decision,
                         reason="The refreshed post-exit cash balance did not leave a positive order size for this ranked candidate.",
                         outputs=current_outputs,
+                        retryable=True,
+                        plan_status="waiting_for_collateral",
+                        stage3_status="POST_EXIT_REFRESH_PENDING",
+                        latest_error_code="INSUFFICIENT_COLLATERAL",
                     )
                     continue
 
                 if order_usd < settings.min_order_usd:
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
-                        reason="The refreshed post-exit order size is below the minimum order amount, so Stage 3 deferred this buy.",
+                        reason="The refreshed post-exit order size is below the minimum order amount, so the authoritative buy is waiting for collateral.",
                         outputs={
                             **current_outputs,
                             "order_usd": round(order_usd, 2),
                         },
+                        retryable=True,
+                        plan_status="waiting_for_collateral",
+                        stage3_status="POST_EXIT_REFRESH_PENDING",
+                        latest_error_code="BELOW_MINIMUM_ORDER",
                     )
                     continue
 
@@ -11474,8 +11744,12 @@ class BullpenAutoLiveEngine:
                 ):
                     _mark_ranked_buy_candidate_unplanned(
                         decision,
-                        reason="Planning this buy would exceed the 10-position Bullpen limit, so the guardrail blocked it.",
+                        reason="Planning this buy would exceed the 10-position Bullpen limit, so the authoritative buy remains deferred by the capacity guardrail.",
                         outputs=current_outputs,
+                        retryable=False,
+                        plan_status="deferred",
+                        stage3_status="GENUINE_CAPACITY_BLOCK",
+                        latest_error_code="CAPACITY_BLOCKED",
                     )
                     continue
 
@@ -11494,7 +11768,13 @@ class BullpenAutoLiveEngine:
                     reserved_replacement=reserved_for_async_exit,
                     capacity_override_used=capacity_override_used,
                 )
-                stage3_slot_diagnostics["planned_buy_ids"].append(decision.order_plan.id)
+                if (
+                    decision.order_plan.id
+                    not in stage3_slot_diagnostics["planned_buy_ids"]
+                ):
+                    stage3_slot_diagnostics["planned_buy_ids"].append(
+                        decision.order_plan.id
+                    )
                 occupied_market_ids.add(decision.market_id)
                 capacity_sizing_market_ids.add(decision.market_id)
                 planned_buy_market_ids.add(decision.market_id)
@@ -11518,7 +11798,6 @@ class BullpenAutoLiveEngine:
                 decision
                 for decision in ranked_buy_candidate_decisions
                 if decision.order_plan is not None
-                and decision.order_plan.status == "planned"
                 and decision.order_plan.action == "buy"
             ]
             stage3_slot_diagnostics["replacement_reservations"] = list(
