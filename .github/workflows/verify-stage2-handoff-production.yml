@@ -1,0 +1,50 @@
+name: Verify production Stage 2 handoff deployment
+
+on:
+  pull_request:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Show recent production deployment runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo 'Recent Deploy to Production runs on main:'
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?branch=main&per_page=10" \
+            --jq '.workflow_runs[] | [.id, .event, .status, (.conclusion // ""), .head_sha, .created_at, .updated_at, .html_url] | @tsv'
+
+      - name: Read production frontend fingerprint
+        run: |
+          set -euo pipefail
+          expected='46fadad29564c2a856b47fb1f5d5b7d3980b5308'
+          response="$(curl --fail --silent --show-error --location --max-time 20 https://cred-x.in/api/runtime-fingerprint)"
+          echo "$response" | jq .
+          actual="$(echo "$response" | jq -r '.build_sha // empty')"
+          echo "EXPECTED_BUILD_SHA=$expected"
+          echo "ACTUAL_BUILD_SHA=$actual"
+          if [[ "$actual" == "$expected" ]]; then
+            echo 'PRODUCTION_FRONTEND_MATCH=true'
+          else
+            echo 'PRODUCTION_FRONTEND_MATCH=false'
+          fi
+
+      - name: Probe production backend health routes
+        run: |
+          set -u
+          for path in /health /healthz /api/health /api/v1/health; do
+            echo "==> https://api.cred-x.in${path}"
+            curl --silent --show-error --location --max-time 15 \
+              --output /tmp/backend-health-body \
+              --write-out 'HTTP %{http_code}\n' \
+              "https://api.cred-x.in${path}" || true
+            head -c 1000 /tmp/backend-health-body 2>/dev/null || true
+            echo
+          done
