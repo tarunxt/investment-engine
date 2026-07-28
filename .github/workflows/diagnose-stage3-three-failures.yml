@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - name: Load production SSH key
         uses: webfactory/ssh-agent@v0.9.1
         with:
@@ -67,10 +72,25 @@ jobs:
           REMOTE
           wc -c stage3-three-failures.txt
 
+      - name: Package current repository source
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=frontend/node_modules --exclude=frontend/.next \
+            -czf current-source.tar.gz .
+
       - name: Upload diagnostic output
         uses: actions/upload-artifact@v7
         with:
           name: stage3-three-failures
           path: stage3-three-failures.txt
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Upload current source
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-fix-current-source
+          path: current-source.tar.gz
+          compression-level: 0
           retention-days: 2
           if-no-files-found: error
