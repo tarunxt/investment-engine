@@ -75,8 +75,8 @@ jobs:
       - name: Package current repository source
         run: |
           set -euo pipefail
-          tar --exclude=.git --exclude=frontend/node_modules --exclude=frontend/.next \
-            -czf current-source.tar.gz .
+          git archive --format=tar.gz --output=current-source.tar.gz HEAD
+          test -s current-source.tar.gz
 
       - name: Upload diagnostic output
         uses: actions/upload-artifact@v7
