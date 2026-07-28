@@ -75,6 +75,9 @@ jobs:
             echo '83f0fb70946dd8ae498b25fd7c7a0ae7b7678b4de07eb23df03ea94ba706243e  /tmp/stage2-authoritative-single-source.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage2-authoritative-single-source.patch
             git apply --verbose /tmp/stage2-authoritative-single-source.patch
+            echo '79e46f6a91f4be249df06ab07890fd0c72c9df9cf97c1422e3c22500d4584547  scripts/.stage2-authoritative-followup.patch' | sha256sum -c -
+            git apply --check --verbose scripts/.stage2-authoritative-followup.patch
+            git apply --verbose scripts/.stage2-authoritative-followup.patch
             git diff --check
           } 2>&1 | tee /tmp/stage2-authoritative-apply.log
 
@@ -86,6 +89,7 @@ jobs:
           path: |
             /tmp/stage2-authoritative-apply.log
             /tmp/stage2-authoritative-single-source.patch
+            scripts/.stage2-authoritative-followup.patch
           if-no-files-found: error
           retention-days: 2
 
@@ -182,6 +186,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f scripts/.stage2-authoritative-single-source.patch.gz.b64
+          rm -f scripts/.stage2-authoritative-followup.patch
           rm -f scripts/.stage2-patch.part*
           rm -f .github/workflows/apply-stage2-authoritative-execution.yml
           rm -f .github/workflows/export-stage2-authoritative-source.yml
