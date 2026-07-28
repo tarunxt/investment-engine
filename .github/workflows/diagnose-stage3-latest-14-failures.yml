@@ -1,0 +1,99 @@
+name: Diagnose latest Stage 3 14-failure run
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.event.pull_request.head.ref == 'codex/diagnose-stage3-latest-14-failures'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout diagnostic branch
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Load production SSH key
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Verify production host key
+        env:
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_FINGERPRINT: ${{ secrets.EC2_SSH_FINGERPRINT }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          ssh-keyscan -T 20 -t ed25519,rsa "$SSH_HOST" > ~/.ssh/known_hosts
+          if [[ -n "${SSH_FINGERPRINT:-}" ]]; then
+            ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | awk '{print $2}' > /tmp/host-fingerprints
+            grep -Fxq "$SSH_FINGERPRINT" /tmp/host-fingerprints
+          fi
+
+      - name: Capture production run, intents and worker logs
+        env:
+          SSH_HOST: ${{ secrets.EC2_HOST }}
+          SSH_USER: ${{ secrets.EC2_USER }}
+        run: |
+          set -euo pipefail
+          scp -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes \
+            scripts/inspect-stage3-latest-14-failures.py \
+            "$SSH_USER@$SSH_HOST:/tmp/inspect-stage3-latest-14-failures.py"
+          ssh -o BatchMode=yes -o ConnectTimeout=30 -o StrictHostKeyChecking=yes \
+            "$SSH_USER@$SSH_HOST" 'bash -s' > stage3-latest-14-failures.txt <<'REMOTE'
+          set -euo pipefail
+          APP_ROOT=/srv/investment-engine
+          [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
+          echo '=== PRODUCTION CHECKOUT ==='
+          git -C "$APP_ROOT" rev-parse HEAD || sudo git -C "$APP_ROOT" rev-parse HEAD
+          echo '=== PRODUCTION RUN JSON ==='
+          sudo env APP_ROOT="$APP_ROOT" bash -lc '
+            set -euo pipefail
+            set -a
+            source /etc/investor/backend.env
+            set +a
+            export PYTHONPATH="$APP_ROOT/backend"
+            cd "$APP_ROOT/backend"
+            "$APP_ROOT/backend/.venv/bin/python" /tmp/inspect-stage3-latest-14-failures.py
+          '
+          echo '=== RELEVANT WORKER LOGS ==='
+          sudo journalctl --no-pager \
+            --since '2026-07-28 14:10:00 UTC' \
+            --until '2026-07-28 14:30:00 UTC' \
+            -u investor-celery-auto-live-worker \
+            -u investor-celery-worker \
+            -u investor-backend \
+            | grep -E -i '235062c3-efd1-41c9-9f33-6283c5e74769|Stage 2|Stage 3|order intent|POLYMARKET_WALLET_ROUTE_UNCONFIRMED|failed|error|planned|submitted|confirmed' \
+            | tail -n 1200 || true
+          rm -f /tmp/inspect-stage3-latest-14-failures.py
+          REMOTE
+          wc -c stage3-latest-14-failures.txt
+
+      - name: Package current source
+        run: |
+          set -euo pipefail
+          git archive --format=tar.gz --output=stage3-latest-source.tar.gz HEAD
+          test -s stage3-latest-source.tar.gz
+
+      - name: Upload production diagnostics
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-latest-14-failures
+          path: stage3-latest-14-failures.txt
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Upload current source
+        uses: actions/upload-artifact@v7
+        with:
+          name: stage3-latest-source
+          path: stage3-latest-source.tar.gz
+          compression-level: 0
+          retention-days: 2
+          if-no-files-found: error
