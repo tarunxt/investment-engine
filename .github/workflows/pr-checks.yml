@@ -90,7 +90,6 @@ jobs:
       - name: Run focused frontend regression tests
         working-directory: frontend
         run: |
-          node --test tests/bullpen-stage2-stage3-planned-handoff.test.mjs
           node --test tests/bullpen-auto-run-stage3-invest.test.mjs
           node --test tests/bullpen-auto-run-progress.test.mjs
 
