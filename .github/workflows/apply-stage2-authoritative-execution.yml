@@ -1,17 +1,22 @@
 name: Apply and verify Stage 2 authoritative execution
 
 on:
-  push:
-    branches:
-      - codex/complete-stage2-authoritative-execution
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: stage2-authoritative-execution
+  cancel-in-progress: false
+
 jobs:
   apply-and-verify:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.pull_request.head.ref == 'codex/complete-stage2-authoritative-execution')
     runs-on: ubuntu-24.04
     timeout-minutes: 55
 
