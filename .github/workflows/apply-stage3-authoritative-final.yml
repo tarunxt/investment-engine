@@ -57,25 +57,30 @@ jobs:
               > /tmp/stage3-authoritative-followup-v2.patch.gz.b64
             test "$(wc -c < /tmp/stage3-authoritative-followup-v2.patch.gz.b64)" -eq 26212
             echo '8ee5252f13dfca9d85eeb5d10091dfede11c386ea21bb89b34f2131339c22353  /tmp/stage3-authoritative-followup-v2.patch.gz.b64' | sha256sum -c -
-            base64 -d /tmp/stage3-authoritative-followup-v2.patch.gz.b64 \
-              > /tmp/stage3-authoritative-followup-v2.patch.gz
+            base64 -d /tmp/stage3-authoritative-followup-v2.patch.gz.b64 > /tmp/stage3-authoritative-followup-v2.patch.gz
             echo '9daed39e1b906d4e92409e39d365813e26d571752eb36be112c386c3641132ef  /tmp/stage3-authoritative-followup-v2.patch.gz' | sha256sum -c -
-            gzip -d -c /tmp/stage3-authoritative-followup-v2.patch.gz \
-              > /tmp/stage3-authoritative-followup-v2.patch
+            gzip -d -c /tmp/stage3-authoritative-followup-v2.patch.gz > /tmp/stage3-authoritative-followup-v2.patch
             echo 'c322b20dddfe911b9f8628019dd59dfe1da689d49c0ba291182bd4b1440d0c14  /tmp/stage3-authoritative-followup-v2.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage3-authoritative-followup-v2.patch
             git apply --verbose /tmp/stage3-authoritative-followup-v2.patch
 
             test "$(wc -c < scripts/.stage3-followup-v3.incremental.gz.b64)" -eq 1604
             echo 'b1afc438fde6b3ce999249ad6e45797d8acfb52d25262f9e578fea6d58069652  scripts/.stage3-followup-v3.incremental.gz.b64' | sha256sum -c -
-            base64 -d scripts/.stage3-followup-v3.incremental.gz.b64 \
-              > /tmp/stage3-authoritative-incremental-v3.patch.gz
+            base64 -d scripts/.stage3-followup-v3.incremental.gz.b64 > /tmp/stage3-authoritative-incremental-v3.patch.gz
             echo '25954808eacb30bd7d325cb3ecb20c7ebf6897c669cd93d71f767d8d7db089a7  /tmp/stage3-authoritative-incremental-v3.patch.gz' | sha256sum -c -
-            gzip -d -c /tmp/stage3-authoritative-incremental-v3.patch.gz \
-              > /tmp/stage3-authoritative-incremental-v3.patch
+            gzip -d -c /tmp/stage3-authoritative-incremental-v3.patch.gz > /tmp/stage3-authoritative-incremental-v3.patch
             echo 'ec0e31274fb3cd4d0da65f002caab8ed6aab091353e9c5fddc902d970eeb75c7  /tmp/stage3-authoritative-incremental-v3.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage3-authoritative-incremental-v3.patch
             git apply --verbose /tmp/stage3-authoritative-incremental-v3.patch
+
+            test "$(wc -c < scripts/.stage3-followup-v4-debug.gz.b64)" -eq 728
+            echo 'e8cf48425e4385621f816687f849af0efc8e8685bbc754bf6b807432918917f9  scripts/.stage3-followup-v4-debug.gz.b64' | sha256sum -c -
+            base64 -d scripts/.stage3-followup-v4-debug.gz.b64 > /tmp/stage3-authoritative-incremental-v4-debug.patch.gz
+            echo '0e48ec8855605fb3a94e9405c077727c0b0a7aa224fd1a0acf29ed833a47409b  /tmp/stage3-authoritative-incremental-v4-debug.patch.gz' | sha256sum -c -
+            gzip -d -c /tmp/stage3-authoritative-incremental-v4-debug.patch.gz > /tmp/stage3-authoritative-incremental-v4-debug.patch
+            echo '3aa369e18ed6fb0f96d5ce5d3ce8f0b1d4f622977727e1aefe5695f786485720  /tmp/stage3-authoritative-incremental-v4-debug.patch' | sha256sum -c -
+            git apply --check --verbose /tmp/stage3-authoritative-incremental-v4-debug.patch
+            git apply --verbose /tmp/stage3-authoritative-incremental-v4-debug.patch
             git diff --check
           } 2>&1 | tee /tmp/stage3-authoritative-apply.log
 
@@ -84,10 +89,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: stage3-authoritative-final-apply-diagnostics
-          path: |
-            /tmp/stage3-authoritative-apply.log
-            /tmp/stage3-authoritative-followup-v2.patch
-            /tmp/stage3-authoritative-incremental-v3.patch
+          path: /tmp/stage3-authoritative-apply.log
           retention-days: 2
           if-no-files-found: error
 
@@ -103,20 +105,16 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest
 
-      - name: Run focused backend regressions
+      - name: Run remaining backend regressions
         id: backend_tests
         continue-on-error: true
         env:
           PYTHONPATH: backend
         run: |
           set -o pipefail
-          pytest -q --tb=long --maxfail=20 \
+          pytest -q --tb=long \
             backend/tests/test_polymarket_auto_live.py \
-            backend/tests/test_polymarket_auto_live_order_intents.py \
-            backend/tests/test_polymarket_auto_live_repository_safety.py \
-            backend/tests/test_stage2_actionable_handoff.py \
-            backend/tests/test_bullpen_run_audit.py \
-            backend/tests/test_stage3_slot_allocation.py \
+            -k 'submits_buys_even_while_exit_settlement_is_pending or plans_formula_sized_top10_buys_and_exits_lower_ranked_positions' \
             2>&1 | tee /tmp/stage3-authoritative-backend-tests.log
 
       - name: Upload backend test diagnostics
@@ -188,6 +186,7 @@ jobs:
           set -euo pipefail
           rm -f scripts/.stage3-followup.part*
           rm -f scripts/.stage3-followup-v3.incremental.gz.b64
+          rm -f scripts/.stage3-followup-v4-debug.gz.b64
           rm -f .github/workflows/apply-stage3-authoritative-final.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
