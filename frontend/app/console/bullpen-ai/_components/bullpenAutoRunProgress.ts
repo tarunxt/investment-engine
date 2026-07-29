@@ -365,6 +365,112 @@ function readOutputs(stage: BullpenAutoLiveStageResult | null) {
   return readStageRecord(stage?.outputs);
 }
 
+const STAGE2_ACTIONABLE_DISPLAY_KEYS = [
+  "stage2_actionable_contract_version",
+  "stage2_actionable_contract_authoritative",
+  "stage2_actionable_contract_execution_mode",
+  "stage2_actionable_handoff_used",
+  "stage2_actionable_handoff_source",
+  "stage2_actionable_exit_market_ids",
+  "stage2_actionable_buy_market_ids",
+  "stage2_actionable_exit_count",
+  "stage2_actionable_buy_count",
+  "missing_stage2_actionable_exit_market_ids",
+  "missing_stage2_actionable_buy_market_ids",
+] as const;
+
+function stage2ActionableEvidenceScore(outputs: Record<string, unknown>) {
+  const hasExactMarketIds =
+    Array.isArray(outputs.stage2_actionable_exit_market_ids) &&
+    Array.isArray(outputs.stage2_actionable_buy_market_ids);
+  const hasAuthoritativeFlag = readBoolean(
+    outputs.stage2_actionable_contract_authoritative,
+  );
+  const hasCounts =
+    readNumber(outputs.stage2_actionable_exit_count) !== null &&
+    readNumber(outputs.stage2_actionable_buy_count) !== null;
+
+  if (hasExactMarketIds) return 3;
+  if (hasAuthoritativeFlag) return 2;
+  if (hasCounts) return 1;
+  return 0;
+}
+
+function stage2ActionableDisplaySourceLabel(
+  stage: BullpenAutoLiveStageResult,
+) {
+  return (
+    readString(stage.outputs?.workflow_stage_key) ??
+    `stage-${stage.stage_number}`
+  );
+}
+
+function readStage2DisplayOutputs(
+  run: BullpenAutoLiveRun | null,
+  stage: BullpenAutoLiveStageResult | null,
+) {
+  const primaryOutputs = readOutputs(stage);
+  if (stage2ActionableEvidenceScore(primaryOutputs) > 0 || !run) {
+    return primaryOutputs;
+  }
+
+  const fallback = run.stage_results
+    .filter((candidate) => candidate !== stage)
+    .map((candidate) => ({
+      stage: candidate,
+      outputs: readOutputs(candidate),
+      score: stage2ActionableEvidenceScore(readOutputs(candidate)),
+    }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((left, right) => right.score - left.score)[0];
+
+  if (fallback) {
+    const recoveredOutputs: Record<string, unknown> = {
+      ...primaryOutputs,
+      stage2_actionable_contract_display_recovered: true,
+      stage2_actionable_contract_display_source:
+        stage2ActionableDisplaySourceLabel(fallback.stage),
+    };
+    for (const key of STAGE2_ACTIONABLE_DISPLAY_KEYS) {
+      if (key in fallback.outputs) {
+        recoveredOutputs[key] = fallback.outputs[key];
+      }
+    }
+    return recoveredOutputs;
+  }
+
+  const investStage =
+    run.stage_results.find(
+      (candidate) =>
+        readString(candidate.outputs?.workflow_stage_key) === "invest",
+    ) ??
+    run.stage_results.find((candidate) => candidate.stage_number === 3) ??
+    null;
+  const investOutputs = readOutputs(investStage);
+  const exitCount =
+    readNumber(investOutputs.stage2_actionable_exit_count) ??
+    readNumber(investOutputs.event_exit_planned);
+  const buyCount =
+    readNumber(investOutputs.stage2_actionable_buy_count) ??
+    readNumber(investOutputs.orders_planned);
+
+  if (exitCount === null || buyCount === null) {
+    return primaryOutputs;
+  }
+
+  // Display-only recovery: Stage 3's durable plan counts are derivative evidence
+  // of the already-completed Stage 2 handoff. They must never become an execution
+  // input or be described as row-level authoritative when compact market IDs are
+  // unavailable.
+  return {
+    ...primaryOutputs,
+    stage2_actionable_exit_count: exitCount,
+    stage2_actionable_buy_count: buyCount,
+    stage2_actionable_contract_display_recovered: true,
+    stage2_actionable_contract_display_source: "invest-plan-counts",
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -677,6 +783,11 @@ export function buildBullpenAutoRunWorkflowView(
             : "blue";
     const shouldShowStageData = state !== "queued";
     const stageInputs = readWorkflowInputs(definition, stage, previousStage);
+    const stageOutputs = shouldShowStageData
+      ? definition.key === "llm"
+        ? readStage2DisplayOutputs(normalizedRun, stage)
+        : readOutputs(stage)
+      : {};
     const completedItems = shouldShowStageData
       ? getCompletedItems(stage)
       : null;
@@ -775,7 +886,7 @@ export function buildBullpenAutoRunWorkflowView(
     }
     detail = buildStageDetail(stage, detail, definition, normalizedRun);
     const progressCommentary = shouldShowStageData
-      ? readStringList(stage?.outputs?.progress_commentary)
+      ? readStringList(stageOutputs.progress_commentary)
       : [];
 
     return {
@@ -800,7 +911,7 @@ export function buildBullpenAutoRunWorkflowView(
           ? readActivePositionsFound(stage)
           : [],
       inputs: Object.keys(stageInputs).length > 0 ? stageInputs : {},
-      outputs: shouldShowStageData ? readOutputs(stage) : {},
+      outputs: stageOutputs,
     } satisfies BullpenAutoRunWorkflowStageView;
   });
 
