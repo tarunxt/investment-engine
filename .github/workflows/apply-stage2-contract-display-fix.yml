@@ -1,0 +1,99 @@
+name: Materialize Stage 2 contract display fix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/stage2-contract-display.patch
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  apply-validate-and-open-pr:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Apply source patch and remove bootstrap files
+        run: |
+          set -euo pipefail
+          git apply --check scripts/stage2-contract-display.patch
+          git apply scripts/stage2-contract-display.patch
+          rm scripts/stage2-contract-display.patch
+          rm -f scripts/stage2-contract-display.trigger
+          rm .github/workflows/apply-stage2-contract-display-fix.yml
+          git diff --check
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+
+      - name: Run focused Stage 2 display regressions
+        working-directory: frontend
+        run: |
+          node --test \
+            tests/bullpen-stage2-contract-display-fallback.test.mjs \
+            tests/bullpen-stage2-actionables.test.mjs \
+            tests/bullpen-auto-run-progress.test.mjs
+
+      - name: Build production frontend
+        working-directory: frontend
+        env:
+          NODE_ENV: production
+          NEXT_TELEMETRY_DISABLED: "1"
+          NEXT_STANDALONE_BUILD: "true"
+          NEXT_PUBLIC_API_URL: https://api.cred-x.in
+          NEXT_PUBLIC_FRONTEND_URL: https://cred-x.in
+          NEXTAUTH_URL: https://cred-x.in
+          NEXTAUTH_SECRET: build-only-stage2-display-validation
+          AUTH_TRUST_HOST: "true"
+          BACKEND_API_URL: http://127.0.0.1:8000
+        run: npm run build
+
+      - name: Commit validated source changes on a clean PR branch
+        env:
+          BRANCH_NAME: codex/stage2-contract-display-source-fix
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "${BRANCH_NAME}"
+          git add -A
+          git commit \
+            -m "Recover Stage 2 actionables in compact monitor" \
+            -m "[deploy-scope:frontend]"
+          git push --force origin "HEAD:${BRANCH_NAME}"
+
+      - name: Open source-fix pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: codex/stage2-contract-display-source-fix
+        run: |
+          set -euo pipefail
+          if gh pr view "${BRANCH_NAME}" --json number >/dev/null 2>&1; then
+            gh pr edit "${BRANCH_NAME}" \
+              --title "Recover Stage 2 actionables in compact monitor" \
+              --body "Display the persisted Stage 2 Exit/Buy contract in compact monitor projections. Recover exact row IDs from saved handoff evidence when available, fall back to durable Stage 3 plan counts for display only, keep execution authority unchanged, and add focused regressions."
+          else
+            gh pr create \
+              --base main \
+              --head "${BRANCH_NAME}" \
+              --title "Recover Stage 2 actionables in compact monitor" \
+              --body "Display the persisted Stage 2 Exit/Buy contract in compact monitor projections. Recover exact row IDs from saved handoff evidence when available, fall back to durable Stage 3 plan counts for display only, keep execution authority unchanged, and add focused regressions."
+          fi
