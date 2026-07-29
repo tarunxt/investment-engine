@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - scripts/stage2-contract-display.patch
+      - scripts/stage2-contract-display.trigger
 
 permissions:
   contents: write
