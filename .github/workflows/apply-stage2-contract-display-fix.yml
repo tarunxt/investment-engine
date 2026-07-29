@@ -84,6 +84,30 @@ jobs:
               not in schedule
           ):
               raise SystemExit("Stage 2 dialog row-selection anchor was not found")
+
+          if "const hasAuthoritativeContract =" not in schedule:
+              helper_anchor = (
+                  "    Array.isArray(outputs.stage2_actionable_buy_market_ids);\n"
+              )
+              helper_addition = (
+                  helper_anchor
+                  + "  const hasAuthoritativeContract =\n"
+                  + "    readStageOutputBoolean(\n"
+                  + "      outputs.stage2_actionable_contract_authoritative,\n"
+                  + "    ) ||\n"
+                  + "    readStageOutputBoolean(\n"
+                  + "      outputs.stage2_actionable_contract_display_recovered,\n"
+                  + "    );\n"
+              )
+              if helper_anchor not in schedule:
+                  raise SystemExit("Stage 2 display-contract helper anchor was not found")
+              schedule = schedule.replace(helper_anchor, helper_addition, 1)
+          schedule = schedule.replace(
+              "    hasDisplayCounts: exitCount !== null && buyCount !== null,",
+              "    hasDisplayCounts:\n"
+              "      hasAuthoritativeContract && exitCount !== null && buyCount !== null,",
+              1,
+          )
           schedule_path.write_text(schedule)
 
           progress = Path(
@@ -96,6 +120,7 @@ jobs:
               "readStageTwoActionableDisplayContract",
               "hasActionableDisplay",
               "canOpenActionablesDialog",
+              "stage2_actionable_contract_authoritative",
               "stage2_actionable_exit_count",
               "stage2_actionable_buy_count",
               "Persisted Stage 2 action counts are available",
