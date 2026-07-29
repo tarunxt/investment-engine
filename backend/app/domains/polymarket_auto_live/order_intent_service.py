@@ -21,7 +21,10 @@ from app.domains.polymarket.bullpen import (
     BullpenRedeemedTradesReader,
     BullpenTradeHistoryReader,
 )
-from app.domains.polymarket.doctor_errors import parse_bullpen_doctor_failure
+from app.domains.polymarket.doctor_errors import (
+    is_terminal_bullpen_support_error_code,
+    parse_bullpen_doctor_failure,
+)
 from app.domains.polymarket.runtime_broker import (
     get_bullpen_runtime_broker,
     run_with_bullpen_runtime_cleanup,
@@ -45,6 +48,7 @@ from app.domains.polymarket_auto_live.console_profile import (
 )
 from app.domains.polymarket_auto_live.execution import (
     refresh_balance,
+    refresh_doctor,
     refresh_execution_quote,
     refresh_live_controls,
 )
@@ -128,6 +132,7 @@ from app.infrastructure.messaging.task_registry import (
 
 STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_FORMAT = "auto-live:v2"
 STAGE3_ORDER_INTENT_IDEMPOTENCY_KEY_MAX_LENGTH = 128
+STAGE3_SUPPORT_BLOCKER_AUDIT_KEY = "stage3_support_blocker"
 
 logger = get_logger("app.domains.polymarket_auto_live.order_intent_service")
 
@@ -237,6 +242,298 @@ def _first_present_value(
         if key in mapping and mapping[key] is not None:
             return mapping[key]
     return None
+
+
+def _run_stage3_support_blocker(
+    run_record: PolymarketAutoLiveRunRecord | None,
+) -> dict[str, object] | None:
+    if run_record is None:
+        return None
+    payload = dict(run_record.payload or {})
+    audit_metadata = payload.get("audit_metadata")
+    if not isinstance(audit_metadata, dict):
+        return None
+    blocker = audit_metadata.get(STAGE3_SUPPORT_BLOCKER_AUDIT_KEY)
+    if not isinstance(blocker, dict) or blocker.get("active") is False:
+        return None
+    return dict(blocker)
+
+
+def _support_blocker_message(blocker: dict[str, object]) -> str:
+    message = sanitize_message(str(blocker.get("message") or "")).strip()
+    if message:
+        return message
+    code = str(blocker.get("error_code") or "BULLPEN_SUPPORT_REQUIRED").strip()
+    return (
+        "Bullpen blocked Polymarket remote writes pending account-route support "
+        f"verification ({code})."
+    )
+
+
+def _intent_is_support_blocked(intent: object) -> bool:
+    metadata = getattr(intent, "execution_metadata_json", None)
+    code = getattr(intent, "last_error_code", None)
+    return bool(
+        (isinstance(metadata, dict) and metadata.get("support_blocked") is True)
+        or is_terminal_bullpen_support_error_code(code)
+    )
+
+
+def _defer_intent_for_support_blocker(
+    session: Session,
+    *,
+    record: PolymarketAutoLiveOrderIntentRecord,
+    blocker: dict[str, object],
+    now: datetime,
+    attempt: PolymarketAutoLiveOrderAttemptRecord | None = None,
+) -> bool:
+    """Preserve an unsubmitted plan while one account-level support gate is active.
+
+    A Bullpen route-readiness failure is not a market/order-specific rejection.
+    Every authoritative Stage 2 order remains Planned, while the durable intent is
+    terminally deferred and automatic resubmission is disabled until the operator
+    explicitly resumes after Bullpen support clears the account route.
+    """
+
+    if _intent_has_persisted_submission_reference(record):
+        return False
+    if record.status in INTENT_TERMINAL_SUCCESS_STATUSES:
+        return False
+    if record.status in INTENT_REMOTE_CONFIRMATION_STATUSES and record.status != "SUBMITTING":
+        return False
+
+    code = str(blocker.get("error_code") or "BULLPEN_SUPPORT_REQUIRED").strip()
+    detail = _support_blocker_message(blocker)
+    record.status = "DEFERRED"
+    record.retryable = False
+    record.next_attempt_at = None
+    record.terminal_at = now
+    record.last_error_code = code
+    record.last_error_message = detail
+    record.error_class = "bullpen_support_blocked"
+    record.version += 1
+    record.execution_metadata_json = {
+        **dict(record.execution_metadata_json or {}),
+        "support_blocked": True,
+        "stage3_support_blocker": dict(blocker),
+        "automatic_resubmission": False,
+        "stage2_authoritative_plan_preserved": True,
+        "remote_write_prevented_at": _isoformat(now),
+        "stage3_status": (
+            "EXIT_NOT_SUBMITTED"
+            if record.action in {"sell", "redeem"}
+            else "BUY_FAILED"
+        ),
+        "current_blockage": detail,
+        "how_to_resolve": (
+            "Keep Auto Runs paused. Continue the existing Bullpen support ticket, "
+            "then explicitly resume only after Polymarket preflight reports trade_ready=true."
+        ),
+        "actionable_resolution": (
+            "No automatic retry is scheduled. The exact Stage 2 order remains "
+            "durable and visible for a later operator-authorized run."
+        ),
+    }
+    _release_buy_reservation_if_no_remote_evidence(
+        session,
+        record,
+        reason=(
+            "Bullpen account-route support blocker stopped this planned order "
+            "before any remote-write evidence was recorded."
+        ),
+        definitive_no_fill=True,
+    )
+    if attempt is not None:
+        attempt.completed_at = attempt.completed_at or now
+        attempt.result_status = "DEFERRED"
+        attempt.error_code = code
+        attempt.error_message = detail
+        attempt.reconciliation_json = {
+            **dict(attempt.reconciliation_json or {}),
+            "retryable": False,
+            "ambiguous_submission": False,
+            "next_step": "bullpen_support_required",
+            "stage3_support_blocker": dict(blocker),
+        }
+    return True
+
+
+def _persist_stage3_support_blocker(
+    session: Session,
+    *,
+    run_id: str,
+    user_id: int,
+    error_code: str,
+    message: str,
+    source_intent_id: str | None = None,
+    source: str = "intent_preflight",
+    current_attempt: PolymarketAutoLiveOrderAttemptRecord | None = None,
+) -> dict[str, object]:
+    now = utc_now()
+    run_record = session.execute(
+        select(PolymarketAutoLiveRunRecord)
+        .where(PolymarketAutoLiveRunRecord.id == run_id)
+        .where(PolymarketAutoLiveRunRecord.user_id == user_id)
+        .with_for_update()
+    ).scalar_one()
+    existing = _run_stage3_support_blocker(run_record) or {}
+    source_intent_ids = [
+        str(value)
+        for value in existing.get("source_intent_ids", [])
+        if isinstance(value, str) and value.strip()
+    ]
+    if source_intent_id and source_intent_id not in source_intent_ids:
+        source_intent_ids.append(source_intent_id)
+    blocker: dict[str, object] = {
+        **existing,
+        "active": True,
+        "error_code": error_code,
+        "message": sanitize_message(message),
+        "support_required": True,
+        "resolution_owner": "bullpen_support",
+        "automatic_resubmission": False,
+        "source": source,
+        "source_intent_ids": source_intent_ids,
+        "recorded_at": existing.get("recorded_at") or _isoformat(now),
+        "updated_at": _isoformat(now),
+    }
+
+    run = record_to_run(run_record)
+    run.audit_metadata = {
+        **dict(run.audit_metadata or {}),
+        STAGE3_SUPPORT_BLOCKER_AUDIT_KEY: blocker,
+    }
+    run.error_message = _support_blocker_message(blocker)
+    apply_run_to_record(run_record, run, user_id=user_id)
+
+    state_record = session.execute(
+        select(PolymarketAutoLiveStateRecord)
+        .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if state_record is not None:
+        state = record_to_state(state_record)
+        state.running = False
+        state.paused = True
+        state.status = "paused"
+        state.next_run_at = None
+        state.last_error = _support_blocker_message(blocker)
+        state.last_action = (
+            "Auto Runs paused because Bullpen requires support verification for "
+            "the selected Polymarket wallet route."
+        )
+        apply_state_to_record(state_record, state)
+
+    records = list(
+        session.execute(
+            select(PolymarketAutoLiveOrderIntentRecord)
+            .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+            .where(PolymarketAutoLiveOrderIntentRecord.user_id == user_id)
+            .with_for_update(skip_locked=True)
+        )
+        .scalars()
+        .all()
+    )
+    for candidate in records:
+        candidate_attempt = (
+            current_attempt
+            if source_intent_id and candidate.id == source_intent_id
+            else None
+        )
+        _defer_intent_for_support_blocker(
+            session,
+            record=candidate,
+            blocker=blocker,
+            now=now,
+            attempt=candidate_attempt,
+        )
+    session.flush()
+    return blocker
+
+
+def preflight_run_order_intents_sync(run_id: str) -> bool:
+    """Run one account-level Doctor gate before fan-out to order workers.
+
+    Transient diagnostic failures fall back to the existing per-intent fenced
+    preflight. A terminal Bullpen-support route blocker is persisted once, every
+    unsubmitted intent is deferred without losing its Planned row, and the
+    scheduler is paused before any individual order task is dispatched.
+    """
+
+    with SyncSessionLocal() as session:
+        run_record = session.get(PolymarketAutoLiveRunRecord, run_id)
+        if run_record is None:
+            return True
+        if _run_stage3_support_blocker(run_record) is not None:
+            return False
+        has_executable_intent = session.scalar(
+            select(func.count())
+            .select_from(PolymarketAutoLiveOrderIntentRecord)
+            .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+            .where(PolymarketAutoLiveOrderIntentRecord.status.in_(_EXECUTABLE_STATUSES))
+        )
+        if not has_executable_intent:
+            return True
+        user_id = run_record.user_id
+
+    try:
+        doctor = run_with_bullpen_runtime_cleanup(refresh_doctor())
+    except Exception:
+        logger.warning(
+            "Run-level Bullpen Doctor preflight was unavailable for %s; "
+            "falling back to fenced per-intent preflight.",
+            run_id,
+            exc_info=True,
+        )
+        return True
+    if doctor.ok:
+        return True
+
+    failure = parse_bullpen_doctor_failure(
+        doctor.message,
+        {
+            "error_code": doctor.error_code,
+            "safe_to_retry": doctor.safe_to_retry,
+            "support_required": doctor.support_required,
+            "terminal": doctor.terminal,
+            "resolution_owner": doctor.resolution_owner,
+        },
+    )
+    if not failure.is_terminal:
+        return True
+
+    code = failure.auto_live_error_code
+    with SyncSessionLocal() as session:
+        _persist_stage3_support_blocker(
+            session,
+            run_id=run_id,
+            user_id=user_id,
+            error_code=code,
+            message=doctor.message or "Bullpen Doctor requires account support.",
+            source="run_level_doctor_preflight",
+        )
+        synced_run = sync_run_and_decisions_from_intents_sync(
+            session,
+            user_id=user_id,
+            run_id=run_id,
+        )
+        if synced_run is not None:
+            state_record = session.get(PolymarketAutoLiveStateRecord, user_id)
+            if state_record is not None:
+                state = record_to_state(state_record)
+                state.last_run_id = synced_run.id
+                state.last_run_at = synced_run.completed_at or utc_now_iso()
+                state.last_action = synced_run.summary
+                state.last_error = synced_run.summary
+                apply_state_to_record(state_record, state)
+        session.commit()
+    logger.warning(
+        "Paused Auto Runs and deferred Stage 3 run %s because Bullpen Doctor "
+        "reported terminal support blocker %s.",
+        run_id,
+        code,
+    )
+    return False
 
 
 def _walk_response_payload(value: object):
@@ -574,7 +871,24 @@ def _next_confirmation_attempt_at(intent: BullpenAutoLiveOrderIntent) -> datetim
     return now + timedelta(minutes=1)
 
 
-def _summary_text(run_status: str, funnel: BullpenAutoLiveOrderFunnel) -> str:
+def _summary_text(
+    run_status: str,
+    funnel: BullpenAutoLiveOrderFunnel,
+    intents: Sequence[BullpenAutoLiveOrderIntent] = (),
+) -> str:
+    support_blocked_count = sum(1 for intent in intents if _intent_is_support_blocked(intent))
+    if (
+        funnel.planned > 0
+        and support_blocked_count > 0
+        and support_blocked_count == len(intents)
+        and funnel.remotely_accepted == 0
+    ):
+        return (
+            f"Stage 3 preserved {funnel.planned} planned order intent"
+            f"{'s' if funnel.planned != 1 else ''}; {support_blocked_count} "
+            "are blocked/deferred and 0 were submitted. Auto Runs are paused "
+            "pending Bullpen support verification of the Polymarket wallet route."
+        )
     if run_status == "running":
         terminal_count = (
             funnel.confirmed
@@ -1377,6 +1691,13 @@ def _persisted_execution_step(
     elif planned == 0:
         status = "completed"
         detail = "No authoritative Stage 2 orders were planned for this step."
+    elif intents and all(_intent_is_support_blocked(intent) for intent in intents):
+        status = "blocked"
+        detail = (
+            f"Preserved and processed {processed} of {planned} persisted order(s); "
+            "0 crossed the remote-write boundary because Bullpen support must "
+            "verify the selected Polymarket wallet route."
+        )
     elif all(
         intent_has_verified_terminal_success(intent)
         or intent_has_unverified_terminal_success(intent)
@@ -1525,6 +1846,11 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
     cancelled_by_user = (
         run.status == "failed" and run.error_message == _USER_CANCELLED_RUN_ERROR
     )
+    support_blocker = run.audit_metadata.get(STAGE3_SUPPORT_BLOCKER_AUDIT_KEY)
+    support_blocked = bool(
+        isinstance(support_blocker, dict)
+        and support_blocker.get("active") is not False
+    )
     for stage in run.stage_results:
         if (
             stage.stage_number == 3
@@ -1534,6 +1860,8 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 **stage.outputs,
                 "phase_status": "cancelled"
                 if cancelled_by_user
+                else "blocked"
+                if support_blocked
                 else "running"
                 if run.status == "running"
                 else "confirming"
@@ -1604,11 +1932,20 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 "partial_fill_count": response.partial_fill_count,
                 "permanent_failure_count": response.permanent_failure_count,
                 "transient_failure_count": response.transient_failure_count,
+                "support_blocked": support_blocked,
+                "stage3_support_blocker": (
+                    dict(support_blocker)
+                    if isinstance(support_blocker, dict)
+                    else None
+                ),
+                "automatic_resubmission": False if support_blocked else True,
             }
             stage.reason = run.summary
             stage.completed_at = run.completed_at
             stage.status = (
-                "fail"
+                "warning"
+                if support_blocked
+                else "fail"
                 if run.status == "failed"
                 else "warning"
                 if run.status in {"running", "confirming", "partial_success"}
@@ -2062,7 +2399,11 @@ def sync_run_and_decisions_from_intents_sync(
             run.completed_at = run.completed_at or utc_now_iso()
         else:
             run.completed_at = None
-        run.summary = _summary_text(run.status, run.order_funnel)
+        run.summary = _summary_text(run.status, run.order_funnel, response.orders)
+        if response.orders and all(
+            _intent_is_support_blocked(intent) for intent in response.orders
+        ):
+            run.error_message = run.summary
     else:
         # Order reconciliations can continue to report the factual outcome of
         # a write that was already submitted, but they must never resurrect a
@@ -5267,6 +5608,20 @@ def _apply_executor_error(
     if exc.retry_after_seconds is not None:
         attempt.retry_after_seconds = exc.retry_after_seconds
 
+    support_error_code = exc.upstream_error_code or exc.code
+    if is_terminal_bullpen_support_error_code(support_error_code):
+        _persist_stage3_support_blocker(
+            session,
+            run_id=record.run_id,
+            user_id=record.user_id,
+            error_code=support_error_code,
+            message=exc.message,
+            source_intent_id=record.id,
+            source="intent_preflight",
+            current_attempt=attempt,
+        )
+        return
+
     if exc.code == "RPC_RATE_LIMITED":
         policy = metadata.get("stage3_rpc_retry_policy")
         policy = policy if isinstance(policy, dict) else {}
@@ -5455,6 +5810,23 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             return record.status
         if _run_was_cancelled_by_user(session, run_id=record.run_id):
             _cancel_unsubmitted_intent_for_user(session, record=record)
+            session.commit()
+            return record.status
+        support_blocker = _run_stage3_support_blocker(
+            session.get(PolymarketAutoLiveRunRecord, record.run_id)
+        )
+        if support_blocker is not None:
+            _defer_intent_for_support_blocker(
+                session,
+                record=record,
+                blocker=support_blocker,
+                now=utc_now(),
+            )
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
             session.commit()
             return record.status
         recovery_block_reason = _run_recovery_block_reason(
@@ -5818,6 +6190,32 @@ def execute_order_intent_sync(intent_id: str, *, worker_task_id: str | None = No
             session,
             run_id=record.run_id,
         )
+        support_blocker = _run_stage3_support_blocker(
+            session.get(PolymarketAutoLiveRunRecord, record.run_id)
+        )
+        if support_blocker is not None and record.status == "SUBMITTING":
+            attempt = session.execute(
+                select(PolymarketAutoLiveOrderAttemptRecord)
+                .where(PolymarketAutoLiveOrderAttemptRecord.intent_id == intent_id)
+                .where(
+                    PolymarketAutoLiveOrderAttemptRecord.attempt_number
+                    == record.attempt_count
+                )
+            ).scalar_one_or_none()
+            _defer_intent_for_support_blocker(
+                session,
+                record=record,
+                blocker=support_blocker,
+                now=utc_now(),
+                attempt=attempt,
+            )
+            sync_run_and_decisions_from_intents_sync(
+                session,
+                user_id=record.user_id,
+                run_id=record.run_id,
+            )
+            session.commit()
+            return record.status
         if (
             record.status != "SUBMITTING"
             or recovery_block_reason is not None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine, inspect
@@ -2176,3 +2177,25 @@ def test_authoritative_four_exit_five_buy_contract_persists_all_nine_intents() -
         assert summary.order_funnel.planned == 9
         assert summary.action_funnels["sell"].planned == 4
         assert summary.action_funnels["buy"].planned == 5
+
+
+def test_stage3_run_level_support_preflight_precedes_order_fanout():
+    tasks_source = Path(
+        "backend/app/domains/polymarket_auto_live/tasks.py"
+    ).read_text(encoding="utf-8")
+    service_source = Path(
+        "backend/app/domains/polymarket_auto_live/order_intent_service.py"
+    ).read_text(encoding="utf-8")
+
+    preflight_call = "preflight_run_order_intents_sync(run_id)"
+    fanout_call = "_queue_due_order_intents_for_run_sync(run_id)"
+    assert preflight_call in tasks_source
+    assert fanout_call in tasks_source
+    assert tasks_source.index(preflight_call) < tasks_source.index(fanout_call)
+
+    assert 'STAGE3_SUPPORT_BLOCKER_AUDIT_KEY = "stage3_support_blocker"' in service_source
+    assert "state.running = False" in service_source
+    assert "state.paused = True" in service_source
+    assert 'record.status = "DEFERRED"' in service_source
+    assert '"automatic_resubmission": False' in service_source
+    assert service_source.count("_run_stage3_support_blocker(") >= 3

@@ -56,6 +56,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     get_intent_user_id_sync,
     list_due_order_intent_ids_sync,
     persist_stage3_intent_diagnostics_sync,
+    preflight_run_order_intents_sync,
     reconcile_order_intent_sync,
     sync_run_and_decisions_from_intents_sync,
     watchdog_requeue_stale_order_intents_sync,
@@ -1310,11 +1311,18 @@ def _execute_polymarket_auto_live_run_with_lease(
                     ),
                     countdown=AUTO_LIVE_RUN_REDELIVERY_RETRY_SECONDS,
                 )
-            queued_count = _queue_due_order_intents_for_run_sync(run_id)
-            if queued_count:
-                logger.info(
-                    "Queued %s due durable Stage 3 order intents for run %s immediately after planning.",
-                    queued_count,
+            if preflight_run_order_intents_sync(run_id):
+                queued_count = _queue_due_order_intents_for_run_sync(run_id)
+                if queued_count:
+                    logger.info(
+                        "Queued %s due durable Stage 3 order intents for run %s immediately after planning.",
+                        queued_count,
+                        run_id,
+                    )
+            else:
+                logger.warning(
+                    "Skipped Stage 3 order fan-out for run %s because the shared "
+                    "Bullpen Doctor preflight paused execution pending support.",
                     run_id,
                 )
         try:

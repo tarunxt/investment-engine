@@ -1301,6 +1301,43 @@ Stage 3 `orders_planned`, `orders_processed`, `orders_submitted`, both execution
 tiles, and the run-level order funnel are materialized from durable order-intent and
 attempt records. `persisted_execution_counters.source` is
 `persisted_order_intents`; validators reject contradictory counter orderings.
+
+## Bullpen account-route support blocker
+
+Stage 3 performs one run-level Bullpen Doctor check before durable order intents
+are fanned out to individual execution workers. When Doctor returns a terminal,
+support-owned Polymarket account-route error such as
+`POLYMARKET_WALLET_ROUTE_UNCONFIRMED`, the run records the additive
+`audit_metadata.stage3_support_blocker` object and pauses Auto Runs. The blocker
+contains the sanitized code, message, source, timestamps, support ownership, and
+`automatic_resubmission=false`; credentials and raw provider bodies are never
+stored.
+
+The exact Stage 2 Exit and Buy contract remains authoritative. Every unsubmitted
+durable intent stays counted in Planned and is moved to `DEFERRED` with
+`support_blocked=true`, `stage2_authoritative_plan_preserved=true`, and no next
+automatic attempt. Execution-step projections report the step as `blocked`, with
+Processed reflecting the durable preflight and Submitted remaining evidence-based
+at zero. Intents that already contain a remote order ID, transaction hash, or
+other persisted submission evidence are not rewritten and continue through normal
+reconciliation.
+
+A second fence re-reads the same run blocker immediately before any remote write,
+so sibling tasks already reserved by Celery cannot bypass a blocker discovered by
+another worker. Resuming later remains an explicit operator action after Bullpen
+support confirms the route and fresh preflight reports `trade_ready=true`. This
+metadata is additive; frozen historical runs that predate the blocker contract
+remain valid and are not backfilled.
+
+## Non-blocking portfolio balance refresh
+
+The manual portfolio balance endpoint starts or coalesces the Bullpen refresh and
+returns the current `loading` snapshot immediately. The browser polls the ordinary
+bot-state resource until the background refresh is ready, retains the last usable
+balance throughout, and confines timeout/unavailability messages to the portfolio
+card. This presentation/runtime change does not modify Stage 1 evidence, the Stage
+2 actionable contract, durable Stage 3 intents, or frozen audit snapshots.
+
 # Lightweight run-list projection
 
 `GET /polymarket/auto-live/runs` preserves the historical response shape but
