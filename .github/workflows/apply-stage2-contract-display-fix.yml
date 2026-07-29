@@ -39,8 +39,8 @@ jobs:
             echo "Source patch was already materialized on this pull request branch."
             exit 0
           fi
-          git apply --check scripts/stage2-contract-display.patch
-          git apply scripts/stage2-contract-display.patch
+          git apply --recount --check scripts/stage2-contract-display.patch
+          git apply --recount scripts/stage2-contract-display.patch
           rm scripts/stage2-contract-display.patch
           rm -f scripts/stage2-contract-display.trigger
           rm .github/workflows/apply-stage2-contract-display-fix.yml
