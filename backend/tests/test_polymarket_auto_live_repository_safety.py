@@ -2196,6 +2196,8 @@ def test_stage3_run_level_support_preflight_precedes_order_fanout():
     assert 'STAGE3_SUPPORT_BLOCKER_AUDIT_KEY = "stage3_support_blocker"' in service_source
     assert "state.running = False" in service_source
     assert "state.paused = True" in service_source
+    assert 'run.status = "partial_success"' in service_source
+    assert "state.last_error = None" in service_source
     assert 'record.status = "DEFERRED"' in service_source
     assert '"automatic_resubmission": False' in service_source
     assert service_source.count("_run_stage3_support_blocker(") >= 3

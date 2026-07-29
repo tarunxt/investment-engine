@@ -417,7 +417,7 @@ def _persist_stage3_support_blocker(
         state.paused = True
         state.status = "paused"
         state.next_run_at = None
-        state.last_error = _support_blocker_message(blocker)
+        state.last_error = None
         state.last_action = (
             "Auto Runs paused because Bullpen requires support verification for "
             "the selected Polymarket wallet route."
@@ -524,7 +524,7 @@ def preflight_run_order_intents_sync(run_id: str) -> bool:
                 state.last_run_id = synced_run.id
                 state.last_run_at = synced_run.completed_at or utc_now_iso()
                 state.last_action = synced_run.summary
-                state.last_error = synced_run.summary
+                state.last_error = None
                 apply_state_to_record(state_record, state)
         session.commit()
     logger.warning(
@@ -1930,7 +1930,9 @@ def _update_invest_stage_outputs(run: BullpenAutoLiveRun, response: BullpenAutoL
                 "oldest_pending_order_age_seconds": response.oldest_pending_order_age_seconds,
                 "pending_confirmation_count": response.pending_confirmation_count,
                 "partial_fill_count": response.partial_fill_count,
-                "permanent_failure_count": response.permanent_failure_count,
+                "permanent_failure_count": (
+                    0 if support_blocked else response.permanent_failure_count
+                ),
                 "transient_failure_count": response.transient_failure_count,
                 "support_blocked": support_blocked,
                 "stage3_support_blocker": (
@@ -2379,7 +2381,12 @@ def sync_run_and_decisions_from_intents_sync(
     run.oldest_pending_order_age_seconds = response.oldest_pending_order_age_seconds
     run.pending_confirmation_count = response.pending_confirmation_count
     run.partial_fill_count = response.partial_fill_count
-    run.permanent_failure_count = response.permanent_failure_count
+    all_support_blocked = bool(response.orders) and all(
+        _intent_is_support_blocked(intent) for intent in response.orders
+    )
+    run.permanent_failure_count = (
+        0 if all_support_blocked else response.permanent_failure_count
+    )
     run.transient_failure_count = response.transient_failure_count
     run.order_intent_ids = [intent.id for intent in response.orders]
     run.orders_planned = max(
@@ -2395,15 +2402,18 @@ def sync_run_and_decisions_from_intents_sync(
     )
     if not cancelled_by_user:
         run.status = derive_run_status_from_intents(response.orders)  # type: ignore[assignment]
+        if all_support_blocked:
+            # Stage 1/2 completed and every exact Stage 2 plan was durably
+            # preserved. The run is blocked by an account-level support gate,
+            # not failed by eleven independent market/order errors.
+            run.status = "partial_success"
         if run.status in {"completed", "partial_success", "failed"}:
             run.completed_at = run.completed_at or utc_now_iso()
         else:
             run.completed_at = None
         run.summary = _summary_text(run.status, run.order_funnel, response.orders)
-        if response.orders and all(
-            _intent_is_support_blocked(intent) for intent in response.orders
-        ):
-            run.error_message = run.summary
+        if all_support_blocked:
+            run.error_message = None
     else:
         # Order reconciliations can continue to report the factual outcome of
         # a write that was already submitted, but they must never resurrect a
