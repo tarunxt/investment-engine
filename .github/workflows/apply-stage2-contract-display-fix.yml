@@ -53,29 +53,23 @@ jobs:
               "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
           )
           schedule = schedule_path.read_text()
-          old_block = '''  const authoritativeBuyMarketIds = readStageOutputStringList(
-            llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
-          );
-          const hasAuthoritativeActionables =
-            readStageOutputBoolean(
-              llmWorkflowStage.outputs.stage2_actionable_contract_authoritative,
-            ) ||
-            (Array.isArray(
-              llmWorkflowStage.outputs.stage2_actionable_exit_market_ids,
-            ) &&
-              Array.isArray(
-                llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
-              ));
-          '''
           new_block = '''  const actionableContract = readStageTwoActionableDisplayContract(
             llmWorkflowStage.outputs,
           );
           const authoritativeBuyMarketIds = actionableContract.buyMarketIds;
           '''
-          if old_block in schedule:
-              schedule = schedule.replace(old_block, new_block, 1)
-          elif new_block not in schedule:
-              raise SystemExit("Stage 2 dialog actionable declaration anchor was not found")
+          if new_block not in schedule:
+              start_marker = '''  const authoritativeBuyMarketIds = readStageOutputStringList(
+            llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
+          );'''
+              end_marker = "  const authoritativeBuyRows = authoritativeBuyMarketIds"
+              start = schedule.find(start_marker)
+              end = schedule.find(end_marker, start + 1 if start >= 0 else 0)
+              if start < 0 or end < 0 or end <= start:
+                  raise SystemExit(
+                      "Stage 2 dialog actionable declaration anchors were not found"
+                  )
+              schedule = schedule[:start] + new_block + schedule[end:]
 
           old_rows = "    rows: hasAuthoritativeActionables ? authoritativeBuyRows : [],"
           new_rows = (
