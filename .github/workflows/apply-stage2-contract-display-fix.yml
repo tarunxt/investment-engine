@@ -39,8 +39,93 @@ jobs:
             echo "Source patch was already materialized on this pull request branch."
             exit 0
           fi
-          git apply --recount --check scripts/stage2-contract-display.patch
-          git apply --recount scripts/stage2-contract-display.patch
+
+          set +e
+          git apply --recount --reject --whitespace=nowarn scripts/stage2-contract-display.patch
+          apply_status=$?
+          set -e
+          echo "git apply --reject exit status: ${apply_status}"
+
+          python - <<'PY'
+          from pathlib import Path
+
+          schedule_path = Path(
+              "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
+          )
+          schedule = schedule_path.read_text()
+          old_block = '''  const authoritativeBuyMarketIds = readStageOutputStringList(
+            llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
+          );
+          const hasAuthoritativeActionables =
+            readStageOutputBoolean(
+              llmWorkflowStage.outputs.stage2_actionable_contract_authoritative,
+            ) ||
+            (Array.isArray(
+              llmWorkflowStage.outputs.stage2_actionable_exit_market_ids,
+            ) &&
+              Array.isArray(
+                llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
+              ));
+          '''
+          new_block = '''  const actionableContract = readStageTwoActionableDisplayContract(
+            llmWorkflowStage.outputs,
+          );
+          const authoritativeBuyMarketIds = actionableContract.buyMarketIds;
+          '''
+          if old_block in schedule:
+              schedule = schedule.replace(old_block, new_block, 1)
+          elif new_block not in schedule:
+              raise SystemExit("Stage 2 dialog actionable declaration anchor was not found")
+
+          old_rows = "    rows: hasAuthoritativeActionables ? authoritativeBuyRows : [],"
+          new_rows = (
+              "    rows: actionableContract.hasExactMarketIds ? authoritativeBuyRows : [],"
+          )
+          if old_rows in schedule:
+              schedule = schedule.replace(old_rows, new_rows, 1)
+          elif new_rows not in schedule:
+              raise SystemExit("Stage 2 dialog row-selection anchor was not found")
+          schedule_path.write_text(schedule)
+
+          progress = Path(
+              "frontend/app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts"
+          ).read_text()
+          test_path = Path(
+              "frontend/tests/bullpen-stage2-contract-display-fallback.test.mjs"
+          )
+          schedule_markers = (
+              "readStageTwoActionableDisplayContract",
+              "hasActionableDisplay",
+              "canOpenActionablesDialog",
+              "stage2_actionable_exit_count",
+              "stage2_actionable_buy_count",
+              "Persisted Stage 2 action counts are available",
+          )
+          progress_markers = (
+              "readStage2DisplayOutputs",
+              "stage2_actionable_contract_display_recovered",
+              "invest-plan-counts",
+          )
+          missing = [marker for marker in schedule_markers if marker not in schedule]
+          missing += [marker for marker in progress_markers if marker not in progress]
+          if not test_path.is_file():
+              missing.append(str(test_path))
+          if missing:
+              raise SystemExit(
+                  "Stage 2 display materialization is incomplete: " + ", ".join(missing)
+              )
+          PY
+
+          mapfile -t reject_files < <(find frontend -type f -name '*.rej' -print)
+          for reject_file in "${reject_files[@]}"; do
+            if [[ "${reject_file}" != "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx.rej" ]]; then
+              echo "Unexpected rejected hunk file: ${reject_file}" >&2
+              cat "${reject_file}" >&2
+              exit 1
+            fi
+          done
+          rm -f frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx.rej
+
           rm scripts/stage2-contract-display.patch
           rm -f scripts/stage2-contract-display.trigger
           rm .github/workflows/apply-stage2-contract-display-fix.yml
