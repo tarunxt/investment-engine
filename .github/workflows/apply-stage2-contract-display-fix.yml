@@ -47,37 +47,42 @@ jobs:
           echo "git apply --reject exit status: ${apply_status}"
 
           python - <<'PY'
+          import re
           from pathlib import Path
 
           schedule_path = Path(
               "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
           )
           schedule = schedule_path.read_text()
-          new_block = '''  const actionableContract = readStageTwoActionableDisplayContract(
-            llmWorkflowStage.outputs,
-          );
-          const authoritativeBuyMarketIds = actionableContract.buyMarketIds;
-          '''
-          if new_block not in schedule:
-              start_marker = '''  const authoritativeBuyMarketIds = readStageOutputStringList(
-            llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
-          );'''
-              end_marker = "  const authoritativeBuyRows = authoritativeBuyMarketIds"
-              start = schedule.find(start_marker)
-              end = schedule.find(end_marker, start + 1 if start >= 0 else 0)
-              if start < 0 or end < 0 or end <= start:
-                  raise SystemExit(
-                      "Stage 2 dialog actionable declaration anchors were not found"
-                  )
-              schedule = schedule[:start] + new_block + schedule[end:]
-
-          old_rows = "    rows: hasAuthoritativeActionables ? authoritativeBuyRows : [],"
-          new_rows = (
-              "    rows: actionableContract.hasExactMarketIds ? authoritativeBuyRows : [],"
+          new_block = (
+              "\n  const actionableContract = readStageTwoActionableDisplayContract(\n"
+              "    llmWorkflowStage.outputs,\n"
+              "  );\n"
+              "  const authoritativeBuyMarketIds = actionableContract.buyMarketIds;\n"
           )
-          if old_rows in schedule:
-              schedule = schedule.replace(old_rows, new_rows, 1)
-          elif new_rows not in schedule:
+          if "const authoritativeBuyMarketIds = actionableContract.buyMarketIds;" not in schedule:
+              pattern = re.compile(
+                  r"\n\s*const authoritativeBuyMarketIds = readStageOutputStringList\(\s*"
+                  r"llmWorkflowStage\.outputs\.stage2_actionable_buy_market_ids,\s*"
+                  r"\);\s*const hasAuthoritativeActionables\s*=.*?"
+                  r"(?=\n\s*const authoritativeBuyRows = authoritativeBuyMarketIds)",
+                  re.DOTALL,
+              )
+              schedule, replacements = pattern.subn(new_block, schedule, count=1)
+              if replacements != 1:
+                  raise SystemExit(
+                      "Stage 2 dialog actionable declaration regex did not match exactly once"
+                  )
+
+          schedule = schedule.replace(
+              "    rows: hasAuthoritativeActionables ? authoritativeBuyRows : [],",
+              "    rows: actionableContract.hasExactMarketIds ? authoritativeBuyRows : [],",
+              1,
+          )
+          if (
+              "rows: actionableContract.hasExactMarketIds ? authoritativeBuyRows : []"
+              not in schedule
+          ):
               raise SystemExit("Stage 2 dialog row-selection anchor was not found")
           schedule_path.write_text(schedule)
 
