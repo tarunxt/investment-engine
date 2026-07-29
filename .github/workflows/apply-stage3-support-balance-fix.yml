@@ -55,6 +55,15 @@ jobs:
             echo 'f913bcb1728adc9a01e36972c89b13765083429c92fa3c9a80ae352abd01f176  /tmp/stage3-support-balance-fix.patch' | sha256sum -c -
             git apply --check --verbose /tmp/stage3-support-balance-fix.patch
             git apply --verbose /tmp/stage3-support-balance-fix.patch
+
+            test "$(wc -c < scripts/.stage3-support-balance-fix-v2.gz.b64)" -eq 292
+            echo 'dfe968d3a43581088d7464906195fc7083a1ef2493973cc975c5e5ac273c3f3d  scripts/.stage3-support-balance-fix-v2.gz.b64' | sha256sum -c -
+            base64 -d scripts/.stage3-support-balance-fix-v2.gz.b64 > /tmp/stage3-support-balance-fix-v2.patch.gz
+            echo '35830ea2f2d664731264295eac01052bba9934ce60f5717d9a67b4ee6ec42f6a  /tmp/stage3-support-balance-fix-v2.patch.gz' | sha256sum -c -
+            gzip -d -c /tmp/stage3-support-balance-fix-v2.patch.gz > /tmp/stage3-support-balance-fix-v2.patch
+            echo 'c50d6f416b8c8be898861046f808750e8fa17c5453009202c6fa2b17181a234c  /tmp/stage3-support-balance-fix-v2.patch' | sha256sum -c -
+            git apply --check --verbose /tmp/stage3-support-balance-fix-v2.patch
+            git apply --verbose /tmp/stage3-support-balance-fix-v2.patch
             git diff --check
           } 2>&1 | tee /tmp/stage3-support-balance-apply.log
 
@@ -66,6 +75,7 @@ jobs:
           path: |
             /tmp/stage3-support-balance-apply.log
             /tmp/stage3-support-balance-fix.patch
+            /tmp/stage3-support-balance-fix-v2.patch
           retention-days: 2
           if-no-files-found: error
 
@@ -164,6 +174,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f scripts/.stage3-support-balance-fix.part*
+          rm -f scripts/.stage3-support-balance-fix-v2.gz.b64
           rm -f .github/workflows/apply-stage3-support-balance-fix.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
