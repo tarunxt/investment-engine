@@ -1,0 +1,111 @@
+name: Verify Stage 2 display production deployment
+
+on:
+  pull_request:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-production:
+    if: github.event.pull_request.head.ref == 'codex/verify-stage2-display-production'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: d726bbfb88c9cd72cbdc10e9d2bcf69816fd54aa
+
+    steps:
+      - name: Wait for exact production deployment
+        id: deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 80); do
+            payload="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/deploy.yml/runs?head_sha=${EXPECTED_SHA}&per_page=20")"
+            run_id="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .id // empty' <<<"$payload")"
+            status="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .status // empty' <<<"$payload")"
+            conclusion="$(jq -r '.workflow_runs | map(select(.head_sha == env.EXPECTED_SHA)) | first | .conclusion // empty' <<<"$payload")"
+            echo "attempt=${attempt} run_id=${run_id:-missing} status=${status:-missing} conclusion=${conclusion:-pending}"
+            if [[ -n "$run_id" && "$status" == 'completed' ]]; then
+              [[ "$conclusion" == 'success' ]]
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for deployment of ${EXPECTED_SHA}." >&2
+          exit 1
+
+      - name: Show production deployment jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.deployment.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs" \
+            --jq '.jobs[] | [.name,.status,(.conclusion // "")] | @tsv'
+
+      - name: Verify deployed frontend fingerprint
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 40); do
+            response="$(curl --fail --silent --show-error --location --max-time 20 https://cred-x.in/api/runtime-fingerprint || true)"
+            actual="$(jq -r '.build_sha // empty' <<<"${response:-{}}" 2>/dev/null || true)"
+            echo "attempt=${attempt} build_sha=${actual:-missing}"
+            if [[ "$actual" == "$EXPECTED_SHA" ]]; then
+              echo "$response" | jq .
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Production frontend did not report ${EXPECTED_SHA}." >&2
+          exit 1
+
+      - name: Verify public backend health
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error --location --max-time 20 https://api.cred-x.in/health)"
+          echo "$response" | jq .
+          [[ "$(jq -r '.status // empty' <<<"$response")" == 'ok' ]]
+
+      - name: Verify production checkout, source markers, cleanup and services
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 120s
+          command_timeout: 240s
+          script: |
+            set -euo pipefail
+            EXPECTED_SHA='d726bbfb88c9cd72cbdc10e9d2bcf69816fd54aa'
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            [[ -d "$APP_ROOT" ]] || APP_ROOT=/srv/investor
+            id "$APP_USER" >/dev/null 2>&1 || APP_USER=investor
+
+            actual_sha="$(sudo -u "$APP_USER" -H git -C "$APP_ROOT" rev-parse HEAD)"
+            echo "PRODUCTION_GIT_SHA=$actual_sha"
+            [[ "$actual_sha" == "$EXPECTED_SHA" ]]
+
+            grep -Fq 'function readStageTwoActionableDisplayContract' "$APP_ROOT/frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
+            grep -Fq 'Persisted Stage 2 action counts are available' "$APP_ROOT/frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
+            grep -Fq 'stage2_actionable_contract_display_recovered' "$APP_ROOT/frontend/app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts"
+            grep -Fq 'invest-plan-counts' "$APP_ROOT/frontend/app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts"
+            test -f "$APP_ROOT/frontend/tests/bullpen-stage2-contract-display-fallback.test.mjs"
+            test ! -e "$APP_ROOT/.github/workflows/apply-stage2-contract-display-fix.yml"
+            test ! -e "$APP_ROOT/scripts/stage2-contract-display.patch"
+            test ! -e "$APP_ROOT/scripts/stage2-contract-display.trigger"
+
+            for service in investor-backend investor-celery-auto-live-worker investor-frontend nginx postgresql; do
+              state="$(sudo systemctl is-active "$service" 2>/dev/null || true)"
+              echo "$service=$state"
+              [[ "$state" == 'active' ]]
+            done
+            redis_state="$(sudo systemctl is-active redis-server 2>/dev/null || sudo systemctl is-active redis 2>/dev/null || true)"
+            echo "redis=$redis_state"
+            [[ "$redis_state" == 'active' ]]
+            echo 'PRODUCTION_STAGE2_DISPLAY_FIX_VERIFIED=true'
