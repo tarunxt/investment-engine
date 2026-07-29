@@ -5,7 +5,7 @@ on:
     branches:
       - codex/fix-stage2-contract-display-fallback
     paths:
-      - scripts/stage2-contract-display.patch
+      - scripts/stage2-contract-display.trigger
 
 permissions:
   contents: write
@@ -28,6 +28,7 @@ jobs:
           git apply --check scripts/stage2-contract-display.patch
           git apply scripts/stage2-contract-display.patch
           rm scripts/stage2-contract-display.patch
+          rm scripts/stage2-contract-display.trigger
           git diff --check
 
       - name: Set up Node.js
@@ -74,7 +75,8 @@ jobs:
             frontend/app/console/bullpen-ai/_components/bullpenAutoRunProgress.ts \
             frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx \
             frontend/tests/bullpen-stage2-contract-display-fallback.test.mjs \
-            scripts/stage2-contract-display.patch
+            scripts/stage2-contract-display.patch \
+            scripts/stage2-contract-display.trigger
           git commit \
             -m "Recover Stage 2 actionables in compact monitor" \
             -m "[deploy-scope:frontend]"
