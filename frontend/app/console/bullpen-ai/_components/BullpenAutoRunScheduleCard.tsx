@@ -1302,18 +1302,8 @@ function getStageTwoStats(
       ? stageTwoTargets.filter((target) => hasStageTwoLlmIdentity(target)).length
       : null) ??
     Math.max(llmsCompleted, 0);
-  const authoritativeBuyMarketIds = readStageOutputStringList(
-    stage.outputs.stage2_actionable_buy_market_ids,
-  );
-  const hasAuthoritativeActionables =
-    readStageOutputBoolean(
-      stage.outputs.stage2_actionable_contract_authoritative,
-    ) ||
-    (Array.isArray(stage.outputs.stage2_actionable_exit_market_ids) &&
-      Array.isArray(stage.outputs.stage2_actionable_buy_market_ids));
-  const newEventsToInvestIn = hasAuthoritativeActionables
-    ? authoritativeBuyMarketIds.length
-    : 0;
+  const actionableContract = readStageTwoActionableDisplayContract(stage.outputs);
+  const newEventsToInvestIn = actionableContract.buyCount ?? 0;
 
   return {
     activePositions,
@@ -1383,20 +1373,11 @@ function buildStageTwoInvestEventsDialogState({
     scanCompletedAt:
       scanStageResult?.completed_at ?? scanWorkflowStage?.timerCompletedAt ?? null,
   });
-
-  const authoritativeBuyMarketIds = readStageOutputStringList(
-    llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
+  const actionableContract = readStageTwoActionableDisplayContract(
+    llmWorkflowStage.outputs,
   );
-  const hasAuthoritativeActionables =
-    readStageOutputBoolean(
-      llmWorkflowStage.outputs.stage2_actionable_contract_authoritative,
-    ) ||
-    (Array.isArray(
-      llmWorkflowStage.outputs.stage2_actionable_exit_market_ids,
-    ) &&
-      Array.isArray(
-        llmWorkflowStage.outputs.stage2_actionable_buy_market_ids,
-      ));
+  const authoritativeBuyMarketIds = actionableContract.buyMarketIds;
+
   const authoritativeBuyRows = authoritativeBuyMarketIds
     .map((marketId) => {
       const normalizedMarketId = normalizeMatchKey(marketId);
@@ -1412,7 +1393,7 @@ function buildStageTwoInvestEventsDialogState({
   return {
     stage: llmWorkflowStage,
     decisions,
-    rows: hasAuthoritativeActionables ? authoritativeBuyRows : [],
+    rows: actionableContract.hasExactMarketIds ? authoritativeBuyRows : [],
     updatedAt,
     updateUnavailableReason: updatedAt
       ? undefined
@@ -1968,26 +1949,17 @@ function StageTwoRunStats({
     positionStats.activePositions + stats.newOpportunities - stats.llmRanOn,
   );
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
-  const authoritativeExitMarketIds = readStageOutputStringList(
-    stage.outputs.stage2_actionable_exit_market_ids,
-  );
-  const authoritativeBuyMarketIds = readStageOutputStringList(
-    stage.outputs.stage2_actionable_buy_market_ids,
-  );
-  const hasAuthoritativeActionables =
-    readStageOutputBoolean(
-      stage.outputs.stage2_actionable_contract_authoritative,
-    ) ||
-    (Array.isArray(stage.outputs.stage2_actionable_exit_market_ids) &&
-      Array.isArray(stage.outputs.stage2_actionable_buy_market_ids));
-  const actionables = hasAuthoritativeActionables
+  const actionableContract = readStageTwoActionableDisplayContract(stage.outputs);
+  const hasActionableDisplay = actionableContract.hasDisplayCounts;
+  const canOpenActionablesDialog = actionableContract.hasExactMarketIds;
+  const actionables = canOpenActionablesDialog
     ? buildBullpenStage2Actionables({
         activePositions: positionDialogStage.activePositionsFound,
         decisions,
         selectedRows: stage2InvestEventsState?.rows ?? [],
         authoritativeActionables: {
-          exitMarketIds: authoritativeExitMarketIds,
-          buyMarketIds: authoritativeBuyMarketIds,
+          exitMarketIds: actionableContract.exitMarketIds,
+          buyMarketIds: actionableContract.buyMarketIds,
         },
       })
     : { eventExits: [], buyNew: [], hold: [] };
@@ -2173,7 +2145,7 @@ function StageTwoRunStats({
           >
             New Events to Invest in:{" "}
             <span className="font-semibold tabular-nums">
-              {hasAuthoritativeActionables
+              {hasActionableDisplay
                 ? displayStat(stats.newEventsToInvestIn)
                 : "—"}
             </span>
@@ -2182,7 +2154,7 @@ function StageTwoRunStats({
           <>
             New Events to Invest in:{" "}
             <span className="font-semibold tabular-nums">
-              {hasAuthoritativeActionables
+              {hasActionableDisplay
                 ? displayStat(stats.newEventsToInvestIn)
                 : "—"}
             </span>
@@ -2190,7 +2162,7 @@ function StageTwoRunStats({
         )}
       </div>
       <div>
-        {hasAuthoritativeActionables ? (
+        {hasActionableDisplay && canOpenActionablesDialog ? (
           <button
             type="button"
             onClick={() => setIsActionablesDialogOpen(true)}
@@ -2208,13 +2180,27 @@ function StageTwoRunStats({
               {displayStat(actionables.buyNew.length)}
             </span>
           </button>
+        ) : hasActionableDisplay ? (
+          <span
+            className="font-medium text-slate-950"
+            title="Persisted Stage 2 action counts are available; compact row IDs were unavailable for this run."
+          >
+            Actionables: Exit=
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionableContract.exitCount ?? 0)}
+            </span>
+            {" | Buy="}
+            <span className="font-semibold tabular-nums">
+              {displayStat(actionableContract.buyCount ?? 0)}
+            </span>
+          </span>
         ) : (
           <span className="font-medium text-slate-600">
             Actionables: awaiting authoritative Stage 2 contract
           </span>
         )}
       </div>
-      {hasAuthoritativeActionables && isActionablesDialogOpen ? (
+      {canOpenActionablesDialog && isActionablesDialogOpen ? (
         <BullpenStage2ActionablesDialog
           actionables={actionables}
           onClose={() => setIsActionablesDialogOpen(false)}
@@ -2252,6 +2238,52 @@ function readStageOutputStringList(value: unknown) {
       seen.add(key);
       return true;
     });
+}
+
+type StageTwoActionableDisplayContract = {
+  hasDisplayCounts: boolean;
+  hasExactMarketIds: boolean;
+  exitMarketIds: string[];
+  buyMarketIds: string[];
+  exitCount: number | null;
+  buyCount: number | null;
+};
+
+function readStageTwoActionableDisplayContract(
+  outputs: Record<string, unknown>,
+): StageTwoActionableDisplayContract {
+  const exitMarketIds = readStageOutputStringList(
+    outputs.stage2_actionable_exit_market_ids,
+  );
+  const buyMarketIds = readStageOutputStringList(
+    outputs.stage2_actionable_buy_market_ids,
+  );
+  const hasExactMarketIds =
+    Array.isArray(outputs.stage2_actionable_exit_market_ids) &&
+    Array.isArray(outputs.stage2_actionable_buy_market_ids);
+  const hasAuthoritativeContract =
+    readStageOutputBoolean(
+      outputs.stage2_actionable_contract_authoritative,
+    ) ||
+    readStageOutputBoolean(
+      outputs.stage2_actionable_contract_display_recovered,
+    );
+  const exitCount = hasExactMarketIds
+    ? exitMarketIds.length
+    : readStageOutputNumber(outputs.stage2_actionable_exit_count);
+  const buyCount = hasExactMarketIds
+    ? buyMarketIds.length
+    : readStageOutputNumber(outputs.stage2_actionable_buy_count);
+
+  return {
+    hasDisplayCounts:
+      hasAuthoritativeContract && exitCount !== null && buyCount !== null,
+    hasExactMarketIds,
+    exitMarketIds,
+    buyMarketIds,
+    exitCount,
+    buyCount,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
