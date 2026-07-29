@@ -1059,6 +1059,24 @@ class ReadyBalanceReader:
         )
 
 
+class ControlledBalanceReader:
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls = 0
+
+    async def refresh(self):
+        self.calls += 1
+        self.started.set()
+        await self.release.wait()
+        return PolymarketBalanceState(
+            status="ready",
+            message="Bullpen account value: 114.07 USD",
+            account_value_usd=114.07,
+            available_balance_usd=97.48,
+        )
+
+
 class ManualBatchExecutor:
     def __init__(self):
         self.doctor_calls = 0
@@ -1120,6 +1138,47 @@ async def test_manual_balance_refresh_waits_for_values(tmp_path):
 
     assert bot.balance_state.status == "ready"
     assert bot.balance_state.account_value_usd == 114.07
+
+
+@pytest.mark.anyio
+async def test_request_balance_refresh_returns_loading_and_coalesces(tmp_path):
+    config = load_polymarket_config().model_copy(
+        update={
+            "paper_trading": True,
+            "live_trading": False,
+            "use_live_reads": False,
+            "auto_redeem_live": False,
+            "data_dir": str(tmp_path),
+        }
+    )
+    provider = SlowProvider()
+    logger = PolymarketFileLogger(tmp_path / "bot.log", tmp_path / "errors.log")
+    await logger.init()
+    balance_reader = ControlledBalanceReader()
+    bot = PolymarketPaperCopyBot(
+        config=config,
+        provider=provider,
+        fallback_provider=provider,
+        store=JsonModelStore(tmp_path / "paper.json", PolymarketPaperTrade),
+        live_store=JsonModelStore(tmp_path / "live.json", PolymarketLiveTradeDecision),
+        live_executor=BullpenLiveExecutor(),
+        balance_reader=balance_reader,
+        logger=logger,
+    )
+
+    started = await bot.request_balance_refresh()
+    await asyncio.wait_for(balance_reader.started.wait(), timeout=1)
+
+    assert started is True
+    assert bot.get_state_snapshot().live.balance.status == "loading"
+    assert await bot.request_balance_refresh() is False
+    assert balance_reader.calls == 1
+
+    balance_reader.release.set()
+    await bot.refresh_balance()
+
+    assert bot.get_state_snapshot().live.balance.status == "ready"
+    assert balance_reader.calls == 1
 
 
 @pytest.mark.anyio

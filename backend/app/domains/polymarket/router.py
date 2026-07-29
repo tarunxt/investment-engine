@@ -317,7 +317,10 @@ async def refresh_polymarket_doctor(current_user: User = Depends(get_current_use
 @router.post("/live/balance/refresh", response_model=PolymarketBotState)
 async def refresh_polymarket_balance(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
-    await bot.refresh_balance()
+    # The Bullpen refresh may include balance, redeem-history and wallet work.
+    # Start/coalesce that work and return the current loading snapshot instead
+    # of holding an HTTP request open across the full CLI operation.
+    await bot.request_balance_refresh()
     return bot.get_state_snapshot()
 
 

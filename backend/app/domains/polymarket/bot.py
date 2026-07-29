@@ -329,18 +329,32 @@ class PolymarketPaperCopyBot:
         async with self._lock:
             await self._refresh_doctor_unlocked()
 
-    async def refresh_balance(self) -> None:
+    async def request_balance_refresh(self) -> bool:
+        """Start or coalesce a manual balance refresh without blocking HTTP.
+
+        The dashboard refresh endpoint uses this method so the request returns the
+        current ``loading`` snapshot immediately while the existing background
+        refresh continues on the FastAPI event loop.  Worker-side execution still
+        calls :meth:`refresh_balance` and awaits the same coalesced task before
+        using balance data for a money-moving decision.
+        """
+
         if (
             self._manual_balance_refresh_task
             and not self._manual_balance_refresh_task.done()
         ):
-            await self._manual_balance_refresh_task
-            return
+            return False
         self.balance_state = self._loading_balance_state()
         self._manual_balance_refresh_task = asyncio.create_task(
             self._refresh_balance_background()
         )
-        await self._manual_balance_refresh_task
+        return True
+
+    async def refresh_balance(self) -> None:
+        await self.request_balance_refresh()
+        task = self._manual_balance_refresh_task
+        if task is not None:
+            await task
 
     async def redeem_live_positions(
         self, condition_ids: list[str] | None = None
@@ -1736,33 +1750,49 @@ class PolymarketPaperCopyBot:
 
     async def _refresh_balance_background(self) -> None:
         async with self._balance_refresh_lock:
-            await self._auto_redeem_background()
-            async with self._lock:
-                self.balance_state = self._loading_balance_state()
-            balance_state = self._with_next_balance_refresh(
-                await self.balance_reader.refresh()
-            )
             try:
-                redeemed_trades = await self.redeemed_trades_reader.refresh()
-            except Exception as exc:
-                await self.logger.error(
-                    "Bullpen redeemed trade history refresh failed", exc
+                await self._auto_redeem_background()
+                async with self._lock:
+                    self.balance_state = self._loading_balance_state()
+                balance_state = self._with_next_balance_refresh(
+                    await self.balance_reader.refresh()
                 )
-                redeemed_trades = None
-            async with self._lock:
-                self.balance_state = balance_state
-                if redeemed_trades is not None:
-                    self.bullpen_redeemed_trades = redeemed_trades
-            if redeemed_trades is not None and self.user_id is not None:
                 try:
-                    await sync_redeemed_trades_async(
-                        user_id=self.user_id,
-                        redeemed_trades=redeemed_trades,
-                    )
-                except Exception as capture_exc:
+                    redeemed_trades = await self.redeemed_trades_reader.refresh()
+                except Exception as exc:
                     await self.logger.error(
-                        "Bullpen trade-analysis redeem history sync failed",
-                        capture_exc,
+                        "Bullpen redeemed trade history refresh failed", exc
+                    )
+                    redeemed_trades = None
+                async with self._lock:
+                    self.balance_state = balance_state
+                    if redeemed_trades is not None:
+                        self.bullpen_redeemed_trades = redeemed_trades
+                if redeemed_trades is not None and self.user_id is not None:
+                    try:
+                        await sync_redeemed_trades_async(
+                            user_id=self.user_id,
+                            redeemed_trades=redeemed_trades,
+                        )
+                    except Exception as capture_exc:
+                        await self.logger.error(
+                            "Bullpen trade-analysis redeem history sync failed",
+                            capture_exc,
+                        )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self.logger.error("Bullpen balance refresh failed", exc)
+                async with self._lock:
+                    self.balance_state = self.balance_state.model_copy(
+                        update={
+                            "status": "error",
+                            "message": (
+                                "Bullpen balance refresh failed. The last usable "
+                                "portfolio values remain available where shown."
+                            ),
+                            "checked_at": utc_now(),
+                        }
                     )
 
     async def _try_auto_unlock_live_unlocked(self, reason: str) -> None:

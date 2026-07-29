@@ -8511,6 +8511,7 @@ function BullpenPortfolioSnapshot({
   verifiedActivePositionsTruncated,
   verifiedCashInHandUsd,
   refreshing,
+  refreshNotice,
   historicalRuns,
   recentDecisions,
   onRefresh,
@@ -8532,6 +8533,7 @@ function BullpenPortfolioSnapshot({
   verifiedActivePositionsTruncated: boolean;
   verifiedCashInHandUsd: number | null;
   refreshing: boolean;
+  refreshNotice: string | null;
   historicalRuns: BullpenAutoLiveRun[];
   recentDecisions: BullpenAutoLiveDecision[];
   onRefresh: () => void;
@@ -8876,6 +8878,14 @@ function BullpenPortfolioSnapshot({
           {positionVerification ? (
             <span className="text-right text-[11px] font-semibold text-emerald-300">
               {positionVerification}
+            </span>
+          ) : null}
+          {refreshNotice ? (
+            <span
+              className="max-w-sm text-right text-[11px] font-medium text-amber-200"
+              role="status"
+            >
+              {refreshNotice}
             </span>
           ) : null}
           {displayedLineageAccount ||
@@ -9447,6 +9457,9 @@ export function BullpenAutoRunScheduleCard({
   >(null);
   const [, setPortfolioLoading] = useState(true);
   const [portfolioRefreshing, setPortfolioRefreshing] = useState(false);
+  const [portfolioRefreshNotice, setPortfolioRefreshNotice] = useState<
+    string | null
+  >(null);
   const postCompletionPortfolioRefreshRunIdsRef = useRef<Set<string>>(
     new Set(),
   );
@@ -10360,13 +10373,22 @@ export function BullpenAutoRunScheduleCard({
             (workflowStage) => workflowStage.key === "invest",
           ) ?? null;
         let detailRun = run;
+        const persistedDecisions = Array.isArray(decisions) ? decisions : [];
         let detailDecisions = mergeInvestStageDecisionRows({
           stage: fullStage,
-          persistedDecisions: decisions,
+          persistedDecisions,
         });
         let decisionListTruncated = false;
         let decisionListLimit: number | undefined;
         if (consoleDetail?.projection_available) {
+          const projectedDecisions = Array.isArray(consoleDetail.decisions)
+            ? consoleDetail.decisions
+            : [];
+          const visibleDecisionIds = Array.isArray(
+            consoleDetail.visible_decision_ids,
+          )
+            ? consoleDetail.visible_decision_ids
+            : [];
           const projectedStage =
             buildBullpenAutoRunWorkflowView(consoleDetail.run).stages.find(
               (workflowStage) => workflowStage.key === "invest",
@@ -10380,18 +10402,18 @@ export function BullpenAutoRunScheduleCard({
             existing: detailDecisions,
             projected: mergeInvestStageDecisionRows({
               stage: projectedStage,
-              persistedDecisions: consoleDetail.decisions,
+              persistedDecisions: projectedDecisions,
             }),
-            truncated: consoleDetail.decisions_truncated,
-            visibleDecisionIds: consoleDetail.visible_decision_ids,
-            visibleDecisionIdsTruncated:
+            truncated: Boolean(consoleDetail.decisions_truncated),
+            visibleDecisionIds,
+            visibleDecisionIdsTruncated: Boolean(
               consoleDetail.visible_decision_ids_truncated,
+            ),
           });
           decisionListTruncated =
-            consoleDetail.visible_decision_ids_truncated ||
-            (consoleDetail.decisions_truncated &&
-              detailDecisions.length <
-                consoleDetail.visible_decision_ids.length);
+            Boolean(consoleDetail.visible_decision_ids_truncated) ||
+            (Boolean(consoleDetail.decisions_truncated) &&
+              detailDecisions.length < visibleDecisionIds.length);
           decisionListLimit = consoleDetail.decisions_limit;
         }
         setRunDetailDialog({
@@ -10589,41 +10611,88 @@ export function BullpenAutoRunScheduleCard({
       portfolioLoadInFlightRef.current = true;
       if (forceBalanceRefresh) {
         setPortfolioRefreshing(true);
+        setPortfolioRefreshNotice(null);
       }
       setPortfolioLoading(true);
-      const positionsRefreshTask =
+
+      const applyPortfolioState = (nextState: PolymarketBotState) => {
+        setPortfolioState(nextState);
+        if (isUsableBullpenBalance(nextState.live.balance)) {
+          setLastUsablePortfolioBalance(nextState.live.balance);
+        }
+      };
+      const positionsRefreshTask: Promise<string | null> | null =
         forceBalanceRefresh && onRefreshPortfolioPositionsRef.current
           ? Promise.resolve()
               .then(() => onRefreshPortfolioPositionsRef.current?.())
-              .then(() => undefined)
+              .then(() => null)
               .catch((nextError) => {
-                if (!requestSignal?.aborted && !isRequestAbort(nextError)) {
-                  setError(normalizeError(nextError));
+                if (requestSignal?.aborted || isRequestAbort(nextError)) {
+                  return null;
                 }
+                return `Wallet positions refresh is temporarily unavailable. ${normalizeError(nextError)}`;
               })
           : null;
+
       try {
-        const nextState = forceBalanceRefresh
+        let nextState = forceBalanceRefresh
           ? await apiService.polymarketLiveBalanceRefresh({
               signal: requestSignal,
-              timeoutMs: 8_000,
+              timeoutMs: 5_000,
             })
           : await apiService.polymarketState({
               signal: requestSignal,
               timeoutMs: 8_000,
             });
         if (requestSignal?.aborted) return;
-        setPortfolioState(nextState);
-        if (isUsableBullpenBalance(nextState.live.balance)) {
-          setLastUsablePortfolioBalance(nextState.live.balance);
+        applyPortfolioState(nextState);
+
+        if (forceBalanceRefresh && nextState.live.balance.status === "loading") {
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            await new Promise<void>((resolve) => {
+              window.setTimeout(resolve, 1_000);
+            });
+            if (requestSignal?.aborted) return;
+            try {
+              nextState = await apiService.polymarketState({
+                signal: requestSignal,
+                timeoutMs: 5_000,
+              });
+              if (requestSignal?.aborted) return;
+              applyPortfolioState(nextState);
+              if (nextState.live.balance.status !== "loading") break;
+            } catch (nextError) {
+              if (requestSignal?.aborted || isRequestAbort(nextError)) return;
+              if (attempt === 19) {
+                setPortfolioRefreshNotice(
+                  `Balance refresh is still running in the background. The last usable snapshot remains displayed. ${normalizeError(nextError)}`,
+                );
+              }
+            }
+          }
+          if (nextState.live.balance.status === "loading") {
+            setPortfolioRefreshNotice(
+              "Balance refresh is still running in the background. The last usable snapshot remains displayed and will update automatically.",
+            );
+          } else if (nextState.live.balance.status === "error") {
+            setPortfolioRefreshNotice(
+              nextState.live.balance.message ||
+                "Bullpen balance refresh finished without a usable snapshot.",
+            );
+          }
         }
       } catch (nextError) {
         if (!requestSignal?.aborted && !isRequestAbort(nextError)) {
-          setError(normalizeError(nextError));
+          setPortfolioRefreshNotice(
+            `Portfolio refresh is temporarily unavailable. The last usable snapshot remains displayed. ${normalizeError(nextError)}`,
+          );
         }
       } finally {
-        if (positionsRefreshTask) {
-          await positionsRefreshTask;
+        const positionsWarning = positionsRefreshTask
+          ? await positionsRefreshTask
+          : null;
+        if (positionsWarning && !requestSignal?.aborted) {
+          setPortfolioRefreshNotice(positionsWarning);
         }
         portfolioLoadInFlightRef.current = false;
         if (!requestSignal?.aborted) {
@@ -11786,6 +11855,7 @@ export function BullpenAutoRunScheduleCard({
               : null
           }
           refreshing={portfolioRefreshing}
+          refreshNotice={portfolioRefreshNotice}
           historicalRuns={summary?.recent_runs ?? []}
           recentDecisions={recentDecisions}
           onRefresh={() => void refreshPortfolioSnapshot(true)}

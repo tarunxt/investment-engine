@@ -29,7 +29,7 @@ test("Bullpen auto-run completion refreshes the live portfolio snapshot once per
   assert.match(source, /await refreshPortfolioSnapshot\(true\)/);
 });
 
-test("portfolio refresh keeps balance and wallet positions in one refresh lifecycle", () => {
+test("portfolio refresh starts balance work quickly, polls state, and keeps warnings local", () => {
   assert.match(
     source,
     /onRefreshPortfolioPositionsRef\s*=\s*useRef\(onRefreshPortfolioPositions\)/,
@@ -38,7 +38,18 @@ test("portfolio refresh keeps balance and wallet positions in one refresh lifecy
     source,
     /forceBalanceRefresh && onRefreshPortfolioPositionsRef\.current/,
   );
+  assert.match(source, /polymarketLiveBalanceRefresh\(\{[\s\S]*?timeoutMs:\s*5_000/);
+  assert.match(
+    source,
+    /nextState\.live\.balance\.status === "loading"[\s\S]*?for \(let attempt = 0; attempt < 20; attempt \+= 1\)[\s\S]*?apiService\.polymarketState/,
+  );
   assert.match(source, /await positionsRefreshTask/);
+  assert.match(source, /setPortfolioRefreshNotice/);
+  const refreshBlock = source.slice(
+    source.indexOf("const refreshPortfolioSnapshot = useCallback"),
+    source.indexOf("useEffect(() => {", source.indexOf("const refreshPortfolioSnapshot = useCallback")),
+  );
+  assert.doesNotMatch(refreshBlock, /setError\(/);
   assert.match(pageSource, /onRefreshPortfolioPositions=\{async \(\) =>/);
   assert.match(pageSource, /callerSource:\s*"ui-portfolio-refresh"/);
 });

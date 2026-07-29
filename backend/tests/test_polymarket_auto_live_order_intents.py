@@ -41,6 +41,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
     _matched_buy_submission_fill,
     _authoritative_stage2_contract_counts,
     _persisted_execution_step,
+    _summary_text,
     _persisted_stage3_counts,
     _post_exit_replacement_sizing,
     _position_is_non_tradable,
@@ -3723,6 +3724,45 @@ def test_authoritative_stage2_contract_counts_use_latest_persisted_contract():
         "buy": 5,
         "total": 9,
     }
+
+
+def test_support_blocker_preserves_planned_summary_and_blocks_execution_step():
+    blocked_intent = _intent(
+        intent_id="support-blocked-buy",
+        status="DEFERRED",
+        action="buy",
+        attempt_count=0,
+        retryable=False,
+        last_error_code="POLYMARKET_WALLET_ROUTE_UNCONFIRMED",
+    ).model_copy(
+        update={
+            "execution_metadata_json": {
+                "support_blocked": True,
+                "stage2_authoritative_plan_preserved": True,
+                "automatic_resubmission": False,
+            }
+        }
+    )
+    funnel = build_order_funnel([blocked_intent])
+
+    summary = _summary_text("failed", funnel, [blocked_intent])
+    step = _persisted_execution_step(
+        key="buy",
+        label="Invest planned orders",
+        step_number=2,
+        counts={"planned": 1, "processed": 1, "submitted": 0},
+        intents=[blocked_intent],
+        recovery_required=False,
+    )
+
+    assert "preserved 1 planned order intent" in summary
+    assert "blocked/deferred" in summary
+    assert "Auto Runs are paused" in summary
+    assert step["status"] == "blocked"
+    assert step["planned_orders"] == 1
+    assert step["processed_orders"] == 1
+    assert step["submitted_orders"] == 0
+    assert "Bullpen support" in step["detail"]
 
 
 def test_persisted_execution_step_reports_missing_authoritative_intents():
