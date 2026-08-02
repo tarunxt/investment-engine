@@ -39,7 +39,7 @@ jobs:
           exec(compile(textwrap.dedent(embedded), str(workflow), 'exec'))
           PY
 
-      - name: Keep size from identifying history-only rows
+      - name: Keep aliases precise and stabilize fixture
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -63,6 +63,19 @@ jobs:
                       1,
                   )
               )
+
+          test_path = Path("frontend/tests/bullpen-positions.test.mjs")
+          test_text = test_path.read_text()
+          fixture_date = '          end_date: "2026-07-30",'
+          if test_text.count(fixture_date) != 1:
+              raise RuntimeError("Expected one time-sensitive active position fixture date.")
+          test_path.write_text(
+              test_text.replace(
+                  fixture_date,
+                  '          end_date: "2099-07-30",',
+                  1,
+              )
+          )
           PY
 
       - name: Set up Node.js
