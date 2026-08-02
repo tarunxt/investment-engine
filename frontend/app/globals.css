@@ -118,6 +118,12 @@
   --sidebar-accent-foreground: oklch(0.986 0.002 67.8);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.547 0.021 43.1);
+  /* High-contrast foregrounds for legacy, color-coded console utilities. */
+  --dark-positive-foreground: oklch(0.88 0.13 155);
+  --dark-warning-foreground: oklch(0.9 0.13 85);
+  --dark-danger-foreground: oklch(0.84 0.14 24);
+  --dark-info-foreground: oklch(0.84 0.11 250);
+  --dark-accent-foreground: oklch(0.84 0.14 305);
 }
 
 @layer base {
@@ -222,6 +228,168 @@
 .dark .bg-amber-50,
 .dark .bg-orange-50 {
   background-color: color-mix(in oklch, oklch(0.72 0.16 75) 16%, var(--card)) !important;
+}
+
+/*
+ * Bullpen and older console tables also use tinted 100/200 surfaces and
+ * opacity-suffixed utilities. Match those class families so a newly added
+ * table row cannot silently reintroduce a white or pastel panel in dark mode.
+ */
+.dark [class*="bg-emerald-50"],
+.dark [class*="bg-emerald-100"],
+.dark [class*="bg-emerald-200"],
+.dark [class*="bg-green-50"],
+.dark [class*="bg-teal-50"],
+.dark [class*="bg-lime-50"] {
+  background-color: color-mix(in oklch, oklch(0.55 0.16 155) 16%, var(--card)) !important;
+}
+
+.dark [class*="bg-red-50"],
+.dark [class*="bg-red-100"],
+.dark [class*="bg-rose-50"],
+.dark [class*="bg-rose-100"],
+.dark [class*="bg-rose-200"],
+.dark [class*="bg-pink-50"] {
+  background-color: color-mix(in oklch, oklch(0.58 0.22 25) 16%, var(--card)) !important;
+}
+
+.dark [class*="bg-blue-50"],
+.dark [class*="bg-blue-100"],
+.dark [class*="bg-sky-50"],
+.dark [class*="bg-sky-100"],
+.dark [class*="bg-sky-200"],
+.dark [class*="bg-indigo-50"] {
+  background-color: color-mix(in oklch, oklch(0.52 0.2 265) 16%, var(--card)) !important;
+}
+
+.dark [class*="bg-violet-50"],
+.dark [class*="bg-violet-100"],
+.dark [class*="bg-purple-50"],
+.dark [class*="bg-purple-100"],
+.dark [class*="bg-fuchsia-50"],
+.dark [class*="bg-fuchsia-100"] {
+  background-color: color-mix(in oklch, oklch(0.58 0.22 305) 16%, var(--card)) !important;
+}
+
+.dark [class*="bg-yellow-50"],
+.dark [class*="bg-amber-50"],
+.dark [class*="bg-amber-100"],
+.dark [class*="bg-amber-200"],
+.dark [class*="bg-orange-50"] {
+  background-color: color-mix(in oklch, oklch(0.72 0.16 75) 16%, var(--card)) !important;
+}
+
+/* Preserve semantic meaning while meeting high contrast on the dark tints. */
+
+.dark [class~="text-emerald-500"],
+.dark [class~="text-emerald-600"],
+.dark [class~="text-emerald-700"],
+.dark [class~="text-emerald-800"],
+.dark [class~="text-emerald-900"],
+.dark [class~="text-emerald-950"],
+.dark [class~="text-green-500"],
+.dark [class~="text-green-600"],
+.dark [class~="text-green-700"],
+.dark [class~="text-green-800"],
+.dark [class~="text-green-900"],
+.dark [class~="text-green-950"],
+.dark [class~="text-teal-500"],
+.dark [class~="text-teal-600"],
+.dark [class~="text-teal-700"],
+.dark [class~="text-teal-800"],
+.dark [class~="text-teal-900"],
+.dark [class~="text-teal-950"],
+.dark [class~="text-lime-500"],
+.dark [class~="text-lime-600"],
+.dark [class~="text-lime-700"],
+.dark [class~="text-lime-800"],
+.dark [class~="text-lime-900"],
+.dark [class~="text-lime-950"] {
+  color: var(--dark-positive-foreground) !important;
+}
+
+.dark [class~="text-amber-500"],
+.dark [class~="text-amber-600"],
+.dark [class~="text-amber-700"],
+.dark [class~="text-amber-800"],
+.dark [class~="text-amber-900"],
+.dark [class~="text-amber-950"],
+.dark [class~="text-yellow-500"],
+.dark [class~="text-yellow-600"],
+.dark [class~="text-yellow-700"],
+.dark [class~="text-yellow-800"],
+.dark [class~="text-yellow-900"],
+.dark [class~="text-yellow-950"],
+.dark [class~="text-orange-500"],
+.dark [class~="text-orange-600"],
+.dark [class~="text-orange-700"],
+.dark [class~="text-orange-800"],
+.dark [class~="text-orange-900"],
+.dark [class~="text-orange-950"] {
+  color: var(--dark-warning-foreground) !important;
+}
+
+.dark [class~="text-red-500"],
+.dark [class~="text-red-600"],
+.dark [class~="text-red-700"],
+.dark [class~="text-red-800"],
+.dark [class~="text-red-900"],
+.dark [class~="text-red-950"],
+.dark [class~="text-rose-500"],
+.dark [class~="text-rose-600"],
+.dark [class~="text-rose-700"],
+.dark [class~="text-rose-800"],
+.dark [class~="text-rose-900"],
+.dark [class~="text-rose-950"],
+.dark [class~="text-pink-500"],
+.dark [class~="text-pink-600"],
+.dark [class~="text-pink-700"],
+.dark [class~="text-pink-800"],
+.dark [class~="text-pink-900"],
+.dark [class~="text-pink-950"] {
+  color: var(--dark-danger-foreground) !important;
+}
+
+.dark [class~="text-blue-500"],
+.dark [class~="text-blue-600"],
+.dark [class~="text-blue-700"],
+.dark [class~="text-blue-800"],
+.dark [class~="text-blue-900"],
+.dark [class~="text-blue-950"],
+.dark [class~="text-sky-500"],
+.dark [class~="text-sky-600"],
+.dark [class~="text-sky-700"],
+.dark [class~="text-sky-800"],
+.dark [class~="text-sky-900"],
+.dark [class~="text-sky-950"],
+.dark [class~="text-indigo-500"],
+.dark [class~="text-indigo-600"],
+.dark [class~="text-indigo-700"],
+.dark [class~="text-indigo-800"],
+.dark [class~="text-indigo-900"],
+.dark [class~="text-indigo-950"] {
+  color: var(--dark-info-foreground) !important;
+}
+
+.dark [class~="text-violet-500"],
+.dark [class~="text-violet-600"],
+.dark [class~="text-violet-700"],
+.dark [class~="text-violet-800"],
+.dark [class~="text-violet-900"],
+.dark [class~="text-violet-950"],
+.dark [class~="text-purple-500"],
+.dark [class~="text-purple-600"],
+.dark [class~="text-purple-700"],
+.dark [class~="text-purple-800"],
+.dark [class~="text-purple-900"],
+.dark [class~="text-purple-950"],
+.dark [class~="text-fuchsia-500"],
+.dark [class~="text-fuchsia-600"],
+.dark [class~="text-fuchsia-700"],
+.dark [class~="text-fuchsia-800"],
+.dark [class~="text-fuchsia-900"],
+.dark [class~="text-fuchsia-950"] {
+  color: var(--dark-accent-foreground) !important;
 }
 
 .dark .text-gray-950,
