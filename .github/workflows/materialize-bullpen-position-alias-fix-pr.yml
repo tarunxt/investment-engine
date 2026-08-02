@@ -39,6 +39,32 @@ jobs:
           exec(compile(textwrap.dedent(embedded), str(workflow), 'exec'))
           PY
 
+      - name: Keep size from identifying history-only rows
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          for path in (
+              "frontend/lib/bullpenPositions.ts",
+              "backend/app/domains/polymarket_auto_live/console_profile.py",
+          ):
+              file_path = Path(path)
+              text = file_path.read_text()
+              target = '    "avg_price",\n    "avgPrice",\n    "size",\n'
+              count = text.count(target)
+              if count != 1:
+                  raise RuntimeError(
+                      f"Expected one generated size signal block in {path}, found {count}."
+                  )
+              file_path.write_text(
+                  text.replace(
+                      target,
+                      '    "avg_price",\n    "avgPrice",\n',
+                      1,
+                  )
+              )
+          PY
+
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
