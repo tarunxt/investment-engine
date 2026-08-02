@@ -160,10 +160,18 @@ _POSITION_SIGNAL_KEYS = (
     "avgPrice",
     "current_price",
     "currentPrice",
+    "cur_price",
+    "curPrice",
     "current_value",
     "currentValue",
     "invested_usd",
     "investedUsd",
+    "initial_value",
+    "initialValue",
+    "cash_pnl",
+    "cashPnl",
+    "percent_pnl",
+    "percentPnl",
     "claimableValue",
     "claimable_value",
     "redeemableValue",
@@ -1250,17 +1258,28 @@ def parse_console_wallet_positions_payload(
         raw_current_price = row.get("current_price")
         if raw_current_price is None:
             raw_current_price = row.get("currentPrice")
+        if raw_current_price is None:
+            raw_current_price = row.get("cur_price")
+        if raw_current_price is None:
+            raw_current_price = row.get("curPrice")
         current_price_cents = _normalize_price_to_cents(raw_current_price)
         yes_odds, no_odds = _position_yes_no_odds(side, current_price_cents)
         raw_average_price = row.get("avg_price")
         if raw_average_price is None:
             raw_average_price = row.get("avgPrice")
         average_price_cents = _normalize_price_to_cents(raw_average_price) or 0.0
-        shares = round(_read_number(row.get("shares")) or 0.0, 6)
+        shares = round(
+            _read_number(row.get("shares"))
+            or _read_number(row.get("size"))
+            or 0.0,
+            6,
+        )
         exposure_usd = round(
             (
                 _read_number(row.get("invested_usd"))
                 or _read_number(row.get("investedUsd"))
+                or _read_number(row.get("initial_value"))
+                or _read_number(row.get("initialValue"))
                 or (shares * (average_price_cents / 100))
             ),
             2,
