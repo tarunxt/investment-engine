@@ -1,3 +1,5 @@
+"""Regression coverage for the live Bullpen/Polymarket position payload."""
+
 from app.domains.polymarket_auto_live.console_profile import (
     parse_console_wallet_positions_payload,
 )
