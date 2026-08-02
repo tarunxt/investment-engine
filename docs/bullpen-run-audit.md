@@ -1154,6 +1154,15 @@ does not alter the algorithm registry or deterministic audit validators.
 Therefore the frozen snapshot schema remains version 2; historical snapshot
 facts and hashes are unchanged.
 
+During an active run, compact console projections must retain the last observed
+outputs of completed stages. In particular, starting Stage 3 must not clear the
+persisted Stage 1 and Stage 2 counts and make the main workflow cards fall back
+to zero. This is presentation-state preservation only; the completed stage
+facts remain the values captured by the worker. In Run Details, the Stage 3
+Planned, Processed, and Submitted tiles use the same evidence-filtered detail
+dialogs as the main workflow monitor and pass the detail view's exact decision
+rows into those dialogs.
+
 The deterministic Stage 2 unit adapter used only when tests replace
 `run_llm_consensus` now derives selected, started, completed, usable, and failed
 provider-target counters from the configured provider/model identities and the

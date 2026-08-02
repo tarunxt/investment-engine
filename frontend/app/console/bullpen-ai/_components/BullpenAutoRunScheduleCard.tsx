@@ -713,6 +713,35 @@ function resolveStageTwoLlmRunDialogState({
   };
 }
 
+function preserveCompletedStageEvidence(
+  previousSummary: BullpenAutoLiveSummaryResponse | null,
+  nextSummary: BullpenAutoLiveSummaryResponse,
+  trackedRun: BullpenAutoLiveRun | null,
+) {
+  if (!previousSummary || !trackedRun) return nextSummary;
+  const previousRun = [
+    previousSummary.latest_run,
+    ...previousSummary.recent_runs,
+  ].find((run) => run?.id === trackedRun.id);
+  if (!previousRun) return nextSummary;
+
+  const mergedRun = mergeBullpenConsoleRunProjection({
+    existing: previousRun,
+    projected: trackedRun,
+    projectionAvailable: true,
+  });
+  return {
+    ...nextSummary,
+    latest_run:
+      nextSummary.latest_run?.id === mergedRun.id
+        ? mergedRun
+        : nextSummary.latest_run,
+    recent_runs: nextSummary.recent_runs.map((run) =>
+      run.id === mergedRun.id ? mergedRun : run,
+    ),
+  };
+}
+
 type StageTwoDecisionDialogState = {
   decision: BullpenAutoLiveDecision;
   llmContext: Record<string, unknown> | null;
@@ -4315,12 +4344,14 @@ function RunDetailWorkerStages({
   onOpenScanFilters,
   onOpenStageTwoInvestEvents,
   onOpenStageTwoLlmRunDetails,
+  onOpenMetricDetails,
 }: {
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
   onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
+  onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
   const timerNowMs = Date.parse(run.completed_at ?? run.started_at ?? "");
@@ -4458,9 +4489,16 @@ function RunDetailWorkerStages({
               {investStageCounters.length > 0 ? (
                 <div className="mt-3 grid grid-cols-2 gap-2">
                   {investStageCounters.map((counter) => (
-                    <div
+                    <button
+                      type="button"
                       key={counter.label}
-                      className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left"
+                      onClick={() =>
+                        onOpenMetricDetails?.(
+                          counter.label.toLowerCase() as InvestMetricDialogKind,
+                        )
+                      }
+                      disabled={!onOpenMetricDetails}
+                      className="rounded-xl border border-white/70 bg-white/60 px-3 py-2 text-left transition enabled:hover:-translate-y-0.5 enabled:hover:bg-white enabled:focus:outline-none enabled:focus:ring-2 enabled:focus:ring-sky-300"
                     >
                       <p
                         className={`text-[10px] font-semibold uppercase tracking-[0.14em] ${toneClasses.muted}`}
@@ -4472,7 +4510,7 @@ function RunDetailWorkerStages({
                       >
                         {counter.value}
                       </p>
-                    </div>
+                    </button>
                   ))}
                 </div>
               ) : null}
@@ -4482,6 +4520,7 @@ function RunDetailWorkerStages({
                   <InvestExecutionStepsSummary
                     steps={investExecutionSteps}
                     compact
+                    onOpenMetricDetails={onOpenMetricDetails}
                   />
                 </div>
               ) : null}
@@ -4545,6 +4584,7 @@ function RunDetailDialog({
   onOpenMetricDetails?: (
     run: BullpenAutoLiveRun,
     kind: InvestMetricDialogKind,
+    decisions?: BullpenAutoLiveDecision[],
   ) => void;
 }) {
   const { run, decisions } = state;
@@ -4583,7 +4623,7 @@ function RunDetailDialog({
               value={run.decisions_count}
               onClick={
                 onOpenMetricDetails
-                  ? () => onOpenMetricDetails(run, "decisions")
+                  ? () => onOpenMetricDetails(run, "decisions", decisions)
                   : undefined
               }
             />
@@ -4592,7 +4632,7 @@ function RunDetailDialog({
               value={run.orders_planned}
               onClick={
                 onOpenMetricDetails
-                  ? () => onOpenMetricDetails(run, "planned")
+                  ? () => onOpenMetricDetails(run, "planned", decisions)
                   : undefined
               }
             />
@@ -4601,7 +4641,7 @@ function RunDetailDialog({
               value={run.orders_submitted}
               onClick={
                 onOpenMetricDetails
-                  ? () => onOpenMetricDetails(run, "submitted")
+                  ? () => onOpenMetricDetails(run, "submitted", decisions)
                   : undefined
               }
             />
@@ -4648,6 +4688,11 @@ function RunDetailDialog({
             onOpenScanFilters={onOpenScanFilters}
             onOpenStageTwoInvestEvents={onOpenStageTwoInvestEvents}
             onOpenStageTwoLlmRunDetails={onOpenStageTwoLlmRunDetails}
+            onOpenMetricDetails={
+              onOpenMetricDetails
+                ? (kind) => onOpenMetricDetails(run, kind, decisions)
+                : undefined
+            }
           />
           <div className="mt-5 space-y-4">
             {run.stage_results.map((stage) => (
@@ -10358,9 +10403,18 @@ export function BullpenAutoRunScheduleCard({
         nextSummary,
         resolvedPendingRunId,
       );
-      const visiblePayload = mergeTerminalRunEvidence(
+      const evidencePreservingSummary = preserveCompletedStageEvidence(
+        summary,
         nextSummary,
         projectedTrackedRun,
+      );
+      const evidencePreservingTrackedRun = getVisibleRun(
+        evidencePreservingSummary,
+        resolvedPendingRunId,
+      );
+      const visiblePayload = mergeTerminalRunEvidence(
+        evidencePreservingSummary,
+        evidencePreservingTrackedRun,
       );
       setSummary(visiblePayload.summary);
       summaryLastLoadedAtRef.current = Date.now();
@@ -11814,6 +11868,7 @@ export function BullpenAutoRunScheduleCard({
   const openRunInvestMetricDialog = (
     run: BullpenAutoLiveRun,
     kind: InvestMetricDialogKind = "planned",
+    detailDecisions?: BullpenAutoLiveDecision[],
   ) => {
     const stage =
       buildBullpenAutoRunWorkflowView(run).stages.find(
@@ -11826,9 +11881,11 @@ export function BullpenAutoRunScheduleCard({
       decisions: mergeInvestStageDecisionRows({
         stage,
         persistedDecisions:
+          detailDecisions ??
           summary?.recent_decisions.filter(
             (decision) => decision.run_id === run.id,
-          ) ?? [],
+          ) ??
+          [],
       }),
     });
   };

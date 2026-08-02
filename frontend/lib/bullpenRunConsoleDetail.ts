@@ -143,6 +143,32 @@ const FROZEN_EVIDENCE_OUTPUT_KEYS = [
   "slot_allocation",
 ] as const;
 
+// Once a stage has completed these aggregate facts are as immutable as its
+// expandable evidence. Later-stage compact projections are allowed to omit
+// them, but omission must not make the workflow UI recalculate them as zero.
+const COMPLETED_STAGE_METRIC_OUTPUT_KEYS = [
+  "scanned_candidates",
+  "total_items",
+  "accepted_candidates_count",
+  "candidate_rows_before_llm",
+  "stage1_accepted_candidate_count",
+  "active_position_rows",
+  "active_position_rows_before_llm",
+  "active_positions_total",
+  "llm_candidate_count",
+  "llm_provider_target_count",
+  "llm_selected_target_count",
+  "llm_target_count",
+  "llm_completed_provider_target_count",
+  "llm_completed_model_count",
+  "llm_successful_provider_target_count",
+  "llm_passed_provider_target_count",
+  "llm_usable_provider_target_count",
+  "llm_failed_provider_target_count",
+  "llm_failed_model_count",
+  "llms_completed",
+] as const;
+
 function mergeStageProjection(
   existing: BullpenAutoLiveStageResult,
   projected: BullpenAutoLiveStageResult,
@@ -154,6 +180,16 @@ function mergeStageProjection(
   for (const key of AUTHORITATIVE_LIVE_OUTPUT_KEYS) {
     if (!Object.hasOwn(projected.outputs ?? {}, key)) {
       delete outputs[key];
+    }
+  }
+  if (projected.completed_at) {
+    for (const key of COMPLETED_STAGE_METRIC_OUTPUT_KEYS) {
+      if (
+        !Object.hasOwn(projected.outputs ?? {}, key) &&
+        Object.hasOwn(existing.outputs ?? {}, key)
+      ) {
+        outputs[key] = existing.outputs[key];
+      }
     }
   }
   for (const key of FROZEN_EVIDENCE_OUTPUT_KEYS) {

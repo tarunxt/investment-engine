@@ -482,6 +482,10 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
   assert.match(source, /value: step\.rankingLlmSubmittedOrders/);
   assert.match(source, /value: step\.forcedExitSubmittedOrders/);
   assert.match(source, /value: step\.redeemSubmittedOrders/);
+  assert.match(
+    source,
+    /onOpenMetricDetails=\{\s*onOpenMetricDetails\s*\? \(kind\) => onOpenMetricDetails\(run, kind, decisions\)/,
+  );
 });
 
 test("same-run schedule and detail views use the shared execution-evidence partition", () => {
