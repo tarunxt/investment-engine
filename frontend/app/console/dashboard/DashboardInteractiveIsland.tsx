@@ -1,9 +1,11 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
 
+import { usePersistentInteractiveIsland } from "@/app/console/_components/usePersistentInteractiveIsland";
 import type { DashboardSummaryResponse } from "@/types/api";
+
+const DASHBOARD_ANALYTICS_STORAGE_KEY = "investor:dashboard-analytics:open";
 
 const DashboardPageClient = dynamic(
   () =>
@@ -24,9 +26,11 @@ export function DashboardInteractiveIsland({
 }: {
   initialSummary: DashboardSummaryResponse | null;
 }) {
-  const [mounted, setMounted] = useState(false);
+  const { isOpen, open } = usePersistentInteractiveIsland(
+    DASHBOARD_ANALYTICS_STORAGE_KEY,
+  );
 
-  if (!mounted) {
+  if (!isOpen) {
     return (
       <section
         className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm"
@@ -42,7 +46,7 @@ export function DashboardInteractiveIsland({
         <button
           type="button"
           className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          onClick={() => setMounted(true)}
+          onClick={open}
         >
           Open dashboard analytics
         </button>
