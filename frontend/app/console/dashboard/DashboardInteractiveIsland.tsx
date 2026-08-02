@@ -1,9 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { DashboardSummaryResponse } from "@/types/api";
+
+const DASHBOARD_ANALYTICS_OPEN_STORAGE_KEY =
+  "investment-engine:dashboard:analytics-open:v1";
 
 const DashboardPageClient = dynamic(
   () =>
@@ -26,6 +29,29 @@ export function DashboardInteractiveIsland({
 }) {
   const [mounted, setMounted] = useState(false);
 
+  useEffect(() => {
+    try {
+      setMounted(
+        window.sessionStorage.getItem(DASHBOARD_ANALYTICS_OPEN_STORAGE_KEY) ===
+          "true",
+      );
+    } catch (error) {
+      console.warn("Unable to restore dashboard analytics state", error);
+    }
+  }, []);
+
+  const openDashboardAnalytics = () => {
+    try {
+      window.sessionStorage.setItem(
+        DASHBOARD_ANALYTICS_OPEN_STORAGE_KEY,
+        "true",
+      );
+    } catch (error) {
+      console.warn("Unable to persist dashboard analytics state", error);
+    }
+    setMounted(true);
+  };
+
   if (!mounted) {
     return (
       <section
@@ -42,7 +68,7 @@ export function DashboardInteractiveIsland({
         <button
           type="button"
           className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          onClick={() => setMounted(true)}
+          onClick={openDashboardAnalytics}
         >
           Open dashboard analytics
         </button>
