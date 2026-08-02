@@ -3,7 +3,10 @@ import type {
   BullpenQuestionLlmBreakdownItem,
   BullpenQuestionRow,
 } from "./bullpen-ai";
-import { classifyBullpenLlmDirection } from "./bullpen-ai";
+import {
+  classifyBullpenLlmDirection,
+  isBullpenEvidenceStatusInsufficient,
+} from "./bullpen-ai";
 import {
   BullpenEventIdentityResolver,
   buildBullpenEventIdentity,
@@ -353,6 +356,7 @@ export function isBullpenHistoricalAssessmentRowInvalid(
     row.llmNoOdds > 100;
   return (
     hasOutOfRangeOdds ||
+    isBullpenEvidenceStatusInsufficient(row.evidenceStatus) ||
     Boolean(row.invalidReason) ||
     Boolean(row.invalidStaleFact)
   );
