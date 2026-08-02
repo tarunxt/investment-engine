@@ -486,6 +486,11 @@ test("schedule card wires step metric tiles into the shared popup flow", () => {
     source,
     /onOpenMetricDetails=\{\s*onOpenMetricDetails\s*\? \(kind\) => onOpenMetricDetails\(run, kind, decisions\)/,
   );
+  assert.match(
+    source,
+    /function RunDetailDialog[\s\S]*?fixed inset-0 z-\[140\][\s\S]*?function InvestMetricDetailsDialog[\s\S]*?fixed inset-0 z-\[180\]/,
+    "Stage 3 metric details must stack above the Run Details dialog",
+  );
 });
 
 test("same-run schedule and detail views use the shared execution-evidence partition", () => {
