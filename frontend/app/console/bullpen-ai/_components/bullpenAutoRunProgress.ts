@@ -20,6 +20,8 @@ export type BullpenAutoRunScanCandidateView = {
   volumeUsd: number | null;
   liquidityUsd: number | null;
   forceInclude: boolean;
+  scanStatus: "passed" | "filtered";
+  filterReasons: string[];
 };
 
 export type BullpenAutoRunActivePositionView = {
@@ -55,6 +57,7 @@ export type BullpenAutoRunWorkflowStageView = {
   timerStartedAt: string | null;
   timerCompletedAt: string | null;
   scanCandidates: BullpenAutoRunScanCandidateView[];
+  scannedCandidates: BullpenAutoRunScanCandidateView[];
   activePositionsFound: BullpenAutoRunActivePositionView[];
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
@@ -598,11 +601,18 @@ function getProgressItemLabel(
 }
 
 function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
-  const rawCandidates = stage?.outputs?.accepted_candidates;
-  if (!Array.isArray(rawCandidates)) return [];
+  const acceptedCandidates = Array.isArray(stage?.outputs?.accepted_candidates)
+    ? stage.outputs.accepted_candidates
+    : [];
+  const rejectedCandidates = Array.isArray(stage?.outputs?.rejected_candidates)
+    ? stage.outputs.rejected_candidates
+    : [];
 
-  return rawCandidates
-    .map((candidate) => {
+  return [
+    ...acceptedCandidates.map((candidate) => ({ candidate, scanStatus: "passed" as const })),
+    ...rejectedCandidates.map((candidate) => ({ candidate, scanStatus: "filtered" as const })),
+  ]
+    .map(({ candidate, scanStatus }) => {
       if (!candidate || typeof candidate !== "object") return null;
       const record = candidate as Record<string, unknown>;
       const question = readString(record.question);
@@ -621,6 +631,12 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
         volumeUsd: readNumber(record.volume_usd),
         liquidityUsd: readNumber(record.liquidity_usd),
         forceInclude: readBoolean(record.force_include),
+        scanStatus,
+        filterReasons: Array.isArray(record.reasons)
+          ? record.reasons.filter(
+              (reason): reason is string => typeof reason === "string",
+            )
+          : [],
       } satisfies BullpenAutoRunScanCandidateView;
     })
     .filter((candidate): candidate is BullpenAutoRunScanCandidateView =>
@@ -903,6 +919,12 @@ export function buildBullpenAutoRunWorkflowView(
       timerStartedAt: stageTimerStartedAt,
       timerCompletedAt: stageTimerCompletedAt,
       scanCandidates:
+        definition.key === "scan" && shouldShowStageData
+          ? readScanCandidates(stage).filter(
+              (candidate) => candidate.scanStatus === "passed",
+            )
+          : [],
+      scannedCandidates:
         definition.key === "scan" && shouldShowStageData
           ? readScanCandidates(stage)
           : [],

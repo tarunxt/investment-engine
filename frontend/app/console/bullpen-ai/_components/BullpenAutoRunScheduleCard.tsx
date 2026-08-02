@@ -287,7 +287,10 @@ type Stage3PreviewDialogState = {
   buyPlannedOrders: number;
 };
 
-type ScanCandidateDialogMode = "fresh-opportunities" | "active-positions";
+type ScanCandidateDialogMode =
+  | "all-scanned"
+  | "fresh-opportunities"
+  | "active-positions";
 
 type RunDetailDialogState = {
   run: BullpenAutoLiveRun;
@@ -1853,12 +1856,25 @@ function StageOneRunStats({
           </span>
         </div>
       )}
-      <div className="pt-2">
-        Total Events Scanned:{" "}
-        <span className="font-semibold tabular-nums">
-          {displayStat(stats.totalScanned)}
-        </span>
-      </div>
+      {renderInteractiveRows && onOpenScanCandidateDialog ? (
+        <button
+          type="button"
+          onClick={() => onOpenScanCandidateDialog(stage, "all-scanned")}
+          className={`${rowClassName} pt-2`}
+        >
+          Total Events Scanned:{" "}
+          <span className="font-semibold tabular-nums">
+            {displayStat(stats.totalScanned)}
+          </span>
+        </button>
+      ) : (
+        <div className="pt-2">
+          Total Events Scanned:{" "}
+          <span className="font-semibold tabular-nums">
+            {displayStat(stats.totalScanned)}
+          </span>
+        </div>
+      )}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center justify-between gap-2">
           <button
@@ -3642,6 +3658,9 @@ function StageOneOutputDialog({
     useState(false);
   const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
     useState<BullpenQuestionRow | null>(null);
+  if (state.mode === "all-scanned") {
+    return <AllScannedEventsDialog state={state} onClose={onClose} />;
+  }
   const showActivePositionsFirst = state.mode === "active-positions";
   const claimablePositions = state.activePositions.filter(
     (position) => position.isClaimable,
@@ -4025,6 +4044,55 @@ function StageOneOutputDialog({
           onClose={() => setIsReturnsPerDayFormulaDialogOpen(false)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function AllScannedEventsDialog({
+  state,
+  onClose,
+}: {
+  state: ScanCandidateDialogState;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
+      <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Stage 1 scan</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-950">All Events Scanned ({state.candidates.length})</h2>
+            <p className="mt-2 text-sm text-slate-600">Scanned at {formatIstDateTime(state.scanCompletedAt)}. Filtered rows are included.</p>
+          </div>
+          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close all scanned events">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-auto p-6">
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {state.candidates.map((candidate, index) => (
+                  <tr key={`${candidate.marketId ?? candidate.slug ?? candidate.question}-${index}`}>
+                    <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                    <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
+                    <td className="px-4 py-3"><span title={candidate.filterReasons.join("; ") || undefined} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${candidate.scanStatus === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{candidate.scanStatus === "passed" ? "Passed" : "Filtered"}</span></td>
+                    <td className="px-4 py-3">{formatOddsPercent(candidate.currentYesOdds)}</td>
+                    <td className="px-4 py-3">{formatOddsPercent(candidate.currentNoOdds)}</td>
+                    <td className="px-4 py-3">{formatIstDateTime(candidate.closeTime)}</td>
+                    <td className="px-4 py-3">{formatMoney(candidate.volumeUsd)}</td>
+                    <td className="px-4 py-3">{formatMoney(candidate.liquidityUsd)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {state.candidates.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">Detailed scanned-event rows were not retained for this run.</p> : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -11498,7 +11566,8 @@ export function BullpenAutoRunScheduleCard({
       mode,
       scanCompletedAt: stage.timerCompletedAt,
       candidates: buildScanCandidateDialogRows({
-        candidates: stage.scanCandidates,
+        candidates:
+          mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates,
         run: workflowRunForMonitor,
         decisions: summary?.recent_decisions ?? [],
       }),

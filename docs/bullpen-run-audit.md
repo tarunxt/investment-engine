@@ -1,5 +1,11 @@
 # Bullpen Run Audit
 
+Stage 1 console projections retain both accepted and rejected candidate
+summaries so the run monitor can display the complete scanned-event list
+without changing frozen audit snapshots. Older snapshots that do not contain
+rejected candidate rows remain readable and show the rows that were
+historically retained.
+
 ## Purpose
 
 Bullpen Run Audit captures an immutable, reviewable record of each Bullpen AI auto-live

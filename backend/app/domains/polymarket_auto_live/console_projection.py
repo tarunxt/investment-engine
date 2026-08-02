@@ -25,6 +25,7 @@ _LIST_LIMITS = {
     # Keep the list bounded, while allowing the normal 30-day/EOM scan universe
     # to survive the lightweight dashboard projection without an extra read.
     "accepted_candidates": 100,
+    "rejected_candidates": 100,
     "active_positions_found": 10,
     "available_for_claim": 10,
     "settlement_pending_positions": 10,
@@ -87,6 +88,7 @@ _STAGE_OUTPUT_KEYS = {
     "failed_items",
     "accepted_candidates_count",
     "accepted_candidates",
+    "rejected_candidates",
     "candidate_rows_before_llm",
     "stage1_accepted_candidate_count",
     "active_position_rows",
