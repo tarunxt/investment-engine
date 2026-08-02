@@ -171,6 +171,8 @@ export type BullpenCliPosition = {
   condition_id?: unknown;
   currentPrice?: unknown;
   current_price?: unknown;
+  curPrice?: unknown;
+  cur_price?: unknown;
   currentValue?: unknown;
   current_value?: unknown;
   expectedPayoutUsd?: unknown;
@@ -182,6 +184,8 @@ export type BullpenCliPosition = {
   event_slug?: unknown;
   investedUsd?: unknown;
   invested_usd?: unknown;
+  initialValue?: unknown;
+  initial_value?: unknown;
   isClaimable?: unknown;
   isRedeemable?: unknown;
   market?: unknown;
@@ -190,17 +194,22 @@ export type BullpenCliPosition = {
   outcome?: unknown;
   pnlPercent?: unknown;
   pnl_percent?: unknown;
+  percentPnl?: unknown;
+  percent_pnl?: unknown;
   redeemable?: unknown;
   redeemableValue?: unknown;
   redeemable_value?: unknown;
   resolutionStatus?: unknown;
   resolution_status?: unknown;
   shares?: unknown;
+  size?: unknown;
   slug?: unknown;
   status?: unknown;
   title?: unknown;
   unrealizedPnl?: unknown;
   unrealized_pnl?: unknown;
+  cashPnl?: unknown;
+  cash_pnl?: unknown;
   upstream_redeemable?: unknown;
   upstreamRedeemable?: unknown;
 };
@@ -760,10 +769,18 @@ function isBullpenCliPositionRecord(value: unknown): value is BullpenCliPosition
     "avgPrice",
     "current_price",
     "currentPrice",
+    "cur_price",
+    "curPrice",
     "current_value",
     "currentValue",
     "invested_usd",
     "investedUsd",
+    "initial_value",
+    "initialValue",
+    "cash_pnl",
+    "cashPnl",
+    "percent_pnl",
+    "percentPnl",
     "claimableValue",
     "claimable_value",
     "redeemableValue",
@@ -832,22 +849,42 @@ function mergeBullpenCliPosition(
   existing: BullpenCliPosition,
   incoming: BullpenCliPosition,
 ) {
-  const existingShares = readNumber(existing.shares) || 0;
-  const incomingShares = readNumber(incoming.shares) || 0;
+  const existingShares = readNumber(existing.shares ?? existing.size) || 0;
+  const incomingShares = readNumber(incoming.shares ?? incoming.size) || 0;
   const shares = round(existingShares + incomingShares, 4);
   const existingCostBasis =
-    readNumber(existing.invested_usd ?? existing.investedUsd) ?? 0;
+    readNumber(
+      existing.invested_usd ??
+        existing.investedUsd ??
+        existing.initial_value ??
+        existing.initialValue,
+    ) ?? 0;
   const incomingCostBasis =
-    readNumber(incoming.invested_usd ?? incoming.investedUsd) ?? 0;
+    readNumber(
+      incoming.invested_usd ??
+        incoming.investedUsd ??
+        incoming.initial_value ??
+        incoming.initialValue,
+    ) ?? 0;
   const investedUsd = round(existingCostBasis + incomingCostBasis, 2);
   const averagePrice =
     shares > 0 ? round(investedUsd / shares, 4) : readPrice(existing.avg_price ?? existing.avgPrice);
   const existingCurrentValue =
     readNumber(existing.current_value ?? existing.currentValue) ??
-    ((readPrice(existing.current_price ?? existing.currentPrice) ?? 0) * existingShares);
+    ((readPrice(
+      existing.current_price ??
+        existing.currentPrice ??
+        existing.cur_price ??
+        existing.curPrice,
+    ) ?? 0) * existingShares);
   const incomingCurrentValue =
     readNumber(incoming.current_value ?? incoming.currentValue) ??
-    ((readPrice(incoming.current_price ?? incoming.currentPrice) ?? 0) * incomingShares);
+    ((readPrice(
+      incoming.current_price ??
+        incoming.currentPrice ??
+        incoming.cur_price ??
+        incoming.curPrice,
+    ) ?? 0) * incomingShares);
   const currentValue = round(existingCurrentValue + incomingCurrentValue, 2);
   const currentPrice = shares > 0 ? round(currentValue / shares, 4) : null;
 
@@ -986,20 +1023,39 @@ export function normalizeBullpenPosition(
   const marketTitle =
     readString(value.market) || readString(value.title) || marketId;
   const outcome = readString(value.outcome) || "—";
-  const shares = readNumber(value.shares) || 0;
+  const shares = readNumber(value.shares ?? value.size) || 0;
   const averagePrice = readPrice(value.avg_price ?? value.avgPrice);
   const costBasis =
-    readNumber(value.invested_usd ?? value.investedUsd) ??
-    (averagePrice !== null ? shares * averagePrice : 0);
-  const currentPrice = readPrice(value.current_price ?? value.currentPrice);
+    readNumber(
+      value.invested_usd ??
+        value.investedUsd ??
+        value.initial_value ??
+        value.initialValue,
+    ) ?? (averagePrice !== null ? shares * averagePrice : 0);
+  const currentPrice = readPrice(
+    value.current_price ??
+      value.currentPrice ??
+      value.cur_price ??
+      value.curPrice,
+  );
   const currentValue =
     readNumber(value.current_value ?? value.currentValue) ??
     (currentPrice !== null ? shares * currentPrice : null);
   const unrealizedPnl =
-    readNumber(value.unrealized_pnl ?? value.unrealizedPnl) ??
+    readNumber(
+      value.unrealized_pnl ??
+        value.unrealizedPnl ??
+        value.cash_pnl ??
+        value.cashPnl,
+    ) ??
     (currentValue !== null ? currentValue - costBasis : null);
   const unrealizedPnlPercent =
-    readNumber(value.pnl_percent ?? value.pnlPercent) ??
+    readNumber(
+      value.pnl_percent ??
+        value.pnlPercent ??
+        value.percent_pnl ??
+        value.percentPnl,
+    ) ??
     (costBasis > 0 && unrealizedPnl !== null
       ? (unrealizedPnl / costBasis) * 100
       : null);

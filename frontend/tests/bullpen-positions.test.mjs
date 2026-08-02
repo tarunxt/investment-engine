@@ -168,7 +168,7 @@ test("Bullpen CLI position extraction ignores nested history and activity rows",
           avg_price: 0.44,
           current_price: 0.41,
           invested_usd: 2.2,
-          end_date: "2026-07-30",
+          end_date: "2099-07-30",
         },
       ],
       history: [
@@ -909,4 +909,52 @@ test("portfolio values respect source authority and reconcile verified component
     ]),
     5.83,
   );
+});
+
+
+test("standard Polymarket payload aliases remain active Bullpen positions", async () => {
+  const {
+    extractBullpenCliPositionRows,
+    filterDisplayBullpenPositions,
+    normalizeBullpenPosition,
+    summarizeBullpenPositions,
+  } = await loadBullpenPositionsModule();
+
+  const rows = extractBullpenCliPositionRows({
+    positions: [
+      {
+        conditionId:
+          "0x1111111111111111111111111111111111111111111111111111111111111111",
+        title: "Iran full airspace closure by August 15, 2099?",
+        slug: "iran-full-airspace-closure-by-august-15-2099",
+        eventSlug: "iran-full-airspace-closure-by-august-15-2099",
+        outcome: "No",
+        size: "3.017",
+        avgPrice: "0.60",
+        initialValue: "1.81",
+        curPrice: "0.855",
+        currentValue: "2.58",
+        cashPnl: "0.77",
+        percentPnl: "42.5",
+        endDate: "2099-08-15",
+        redeemable: false,
+      },
+    ],
+  });
+
+  assert.equal(rows.length, 1);
+  const position = normalizeBullpenPosition(rows[0], () => null);
+  const visible = filterDisplayBullpenPositions([position]);
+  const summary = summarizeBullpenPositions(visible, null);
+
+  assert.equal(position.shares, 3.017);
+  assert.equal(position.averagePrice, 0.6);
+  assert.equal(position.costBasis, 1.81);
+  assert.equal(position.currentPrice, 0.855);
+  assert.equal(position.currentValue, 2.58);
+  assert.equal(position.unrealizedPnl, 0.77);
+  assert.equal(position.unrealizedPnlPercent, 42.5);
+  assert.equal(position.economicClassification, "active");
+  assert.equal(visible.length, 1);
+  assert.equal(summary.activeCount, 1);
 });
