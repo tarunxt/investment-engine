@@ -45,6 +45,14 @@ def _large_run() -> BullpenAutoLiveRun:
                 }
                 for index in range(44)
             ],
+            "rejected_candidates": [
+                {
+                    "question": f"Filtered event {index}",
+                    "slug": f"filtered-{index}",
+                    "reasons": ["Below minimum liquidity"],
+                }
+                for index in range(56)
+            ],
             "active_position_rows_before_llm": 3,
             "console_trade_cash_in_hand_usd": 3.44,
             "console_trade_available_slots": 3,
@@ -86,6 +94,9 @@ def test_console_projection_is_bounded_and_does_not_mutate_frozen_run() -> None:
     assert len(
         projection["stage_results"][0]["outputs"]["accepted_candidates"]
     ) == 44
+    assert len(
+        projection["stage_results"][0]["outputs"]["rejected_candidates"]
+    ) == 56
     assert (
         projection["stage_results"][0]["outputs"][
             "active_position_rows_before_llm"

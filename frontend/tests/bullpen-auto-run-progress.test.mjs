@@ -899,6 +899,13 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
           },
           { question: "" },
         ],
+        rejected_candidates: [
+          {
+            question: "Will the filtered event happen?",
+            slug: "filtered-event",
+            reasons: ["Below minimum liquidity"],
+          },
+        ],
       }),
     ],
   });
@@ -917,7 +924,14 @@ test("Bullpen auto-run workflow view exposes Stage 1 output candidates", async (
     volumeUsd: 1200.5,
     liquidityUsd: 450,
     forceInclude: true,
+    scanStatus: "passed",
+    filterReasons: [],
   });
+  assert.equal(view.stages[0].scannedCandidates.length, 2);
+  assert.equal(view.stages[0].scannedCandidates[1].scanStatus, "filtered");
+  assert.deepEqual(view.stages[0].scannedCandidates[1].filterReasons, [
+    "Below minimum liquidity",
+  ]);
   assert.deepEqual(view.stages[1].scanCandidates, []);
 });
 
