@@ -216,6 +216,32 @@ test("available projections update status without deleting frozen detail", async
   assert.equal(merged.stage_results[0].outputs.orders_submitted, 2);
 });
 
+test("completed stage metrics survive later compact workflow projections", async () => {
+  const { mergeBullpenConsoleRunProjection } = await loadModule();
+  const completedAt = "2026-08-02T14:08:10Z";
+  const existing = run({
+    ...stage("pass", {
+      active_position_rows: 2,
+      accepted_candidates_count: 16,
+      llm_candidate_count: 17,
+    }),
+  });
+  const projected = run({
+    ...stage("pass", {}),
+    completed_at: completedAt,
+  });
+
+  const merged = mergeBullpenConsoleRunProjection({
+    existing,
+    projected,
+    projectionAvailable: true,
+  });
+
+  assert.equal(merged.stage_results[0].outputs.active_position_rows, 2);
+  assert.equal(merged.stage_results[0].outputs.accepted_candidates_count, 16);
+  assert.equal(merged.stage_results[0].outputs.llm_candidate_count, 17);
+});
+
 test("an authoritative recovery projection clears stale blockers and IDs", async () => {
   const { mergeBullpenConsoleRunProjection } = await loadModule();
   const existing = {
