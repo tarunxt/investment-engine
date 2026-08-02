@@ -740,6 +740,10 @@ type StageTwoLlmRunBreakupKind =
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
   scanCompletedAt: string | null;
+  totalScanned: number;
+  passedFilterCount: number;
+  rejectedFilterCount: number | null;
+  emptyRowsReason: string | null;
   candidates: ScanCandidateDialogCandidate[];
   activePositions: ReturnType<
     typeof buildBullpenAutoRunWorkflowView
@@ -4055,13 +4059,16 @@ function AllScannedEventsDialog({
   state: ScanCandidateDialogState;
   onClose: () => void;
 }) {
+  const retainedRowCount = state.candidates.length;
+  const omittedRowCount = Math.max(0, state.totalScanned - retainedRowCount);
+
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Stage 1 scan</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">All Events Scanned ({state.candidates.length})</h2>
+            <h2 className="mt-2 text-xl font-semibold text-slate-950">All Events Scanned ({state.totalScanned})</h2>
             <p className="mt-2 text-sm text-slate-600">Scanned at {formatIstDateTime(state.scanCompletedAt)}. Filtered rows are included.</p>
           </div>
           <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close all scanned events">
@@ -4072,7 +4079,7 @@ function AllScannedEventsDialog({
           <div className="overflow-hidden rounded-2xl border border-slate-200">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
+                <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {state.candidates.map((candidate, index) => (
@@ -4080,6 +4087,7 @@ function AllScannedEventsDialog({
                     <td className="px-4 py-3 text-slate-500">{index + 1}</td>
                     <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
                     <td className="px-4 py-3"><span title={candidate.filterReasons.join("; ") || undefined} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${candidate.scanStatus === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{candidate.scanStatus === "passed" ? "Passed" : "Filtered"}</span></td>
+                    <td className="max-w-xs px-4 py-3 text-slate-600">{candidate.filterReasons.join("; ") || "Passed all Stage 1 filters."}</td>
                     <td className="px-4 py-3">{formatOddsPercent(candidate.currentYesOdds)}</td>
                     <td className="px-4 py-3">{formatOddsPercent(candidate.currentNoOdds)}</td>
                     <td className="px-4 py-3">{formatIstDateTime(candidate.closeTime)}</td>
@@ -4090,7 +4098,22 @@ function AllScannedEventsDialog({
               </tbody>
             </table>
           </div>
-          {state.candidates.length === 0 ? <p className="py-8 text-center text-sm text-slate-500">Detailed scanned-event rows were not retained for this run.</p> : null}
+          {retainedRowCount === 0 ? (
+            <div className="mx-auto max-w-2xl py-8 text-center">
+              <p className="font-semibold text-slate-800">No detailed event rows are available.</p>
+              <p className="mt-2 text-sm text-slate-600">{state.emptyRowsReason ?? "The run payload contains the scan total, but it does not contain the individual scanned-event records."}</p>
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-left text-sm text-amber-950">
+                <p className="font-semibold">What the saved run does show</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  <li>{state.totalScanned.toLocaleString("en-IN")} events were scanned.</li>
+                  <li>{state.passedFilterCount.toLocaleString("en-IN")} events passed Stage 1 filters.</li>
+                  <li>{state.rejectedFilterCount === null ? "The rejected-event count was not retained." : `${state.rejectedFilterCount.toLocaleString("en-IN")} events were filtered out.`}</li>
+                </ul>
+              </div>
+            </div>
+          ) : omittedRowCount > 0 ? (
+            <p className="py-4 text-center text-sm text-amber-700">Showing {retainedRowCount.toLocaleString("en-IN")} retained rows. {omittedRowCount.toLocaleString("en-IN")} additional scanned rows were not retained in the console payload.</p>
+          ) : null}
         </div>
       </div>
     </div>
@@ -11562,12 +11585,30 @@ export function BullpenAutoRunScheduleCard({
     mode: ScanCandidateDialogMode,
   ) => {
     const activePositionCounts = getStageActivePositionCounts(stage);
+    const stageOneStats = getStageOneStats(stage);
+    const rejectedFilterCount =
+      readStageOutputNumber(stage.outputs.rejected_candidates_count) ??
+      (Array.isArray(stage.outputs.rejected_candidates)
+        ? stage.outputs.rejected_candidates.length
+        : null);
+    const detailedRows =
+      mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
+    const emptyRowsReason = detailedRows.length > 0
+      ? null
+      : stage.state === "current"
+        ? "Stage 1 has reported its scan total, but the detailed rows have not been published yet. This dialog updates after the run refreshes."
+        : stageOneStats.totalScanned > 0
+          ? "This saved run retained aggregate scan counts only. Individual event names and per-event filter reasons cannot be reconstructed from those counts."
+          : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
     setScanCandidateDialog({
       mode,
       scanCompletedAt: stage.timerCompletedAt,
+      totalScanned: stageOneStats.totalScanned,
+      passedFilterCount: stageOneStats.passedFilters,
+      rejectedFilterCount,
+      emptyRowsReason,
       candidates: buildScanCandidateDialogRows({
-        candidates:
-          mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates,
+        candidates: detailedRows,
         run: workflowRunForMonitor,
         decisions: summary?.recent_decisions ?? [],
       }),
