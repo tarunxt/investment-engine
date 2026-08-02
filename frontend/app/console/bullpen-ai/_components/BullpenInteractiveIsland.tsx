@@ -3,6 +3,9 @@
 import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
+const BULLPEN_WORKSPACE_OPEN_STORAGE_KEY =
+  "investment-engine:bullpen-ai:workspace-open:v1";
+
 const BullpenAiPageClient = dynamic(() => import("./BullpenAiPageClient"), {
   ssr: false,
   loading: () => (
@@ -17,14 +20,27 @@ export function BullpenInteractiveIsland() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        setMounted(false);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
+    try {
+      setMounted(
+        window.sessionStorage.getItem(BULLPEN_WORKSPACE_OPEN_STORAGE_KEY) ===
+          "true",
+      );
+    } catch (error) {
+      console.warn("Unable to restore Bullpen workspace state", error);
+    }
   }, []);
+
+  const openWorkspace = () => {
+    try {
+      window.sessionStorage.setItem(
+        BULLPEN_WORKSPACE_OPEN_STORAGE_KEY,
+        "true",
+      );
+    } catch (error) {
+      console.warn("Unable to persist Bullpen workspace state", error);
+    }
+    setMounted(true);
+  };
 
   if (!mounted) {
     return (
@@ -42,7 +58,7 @@ export function BullpenInteractiveIsland() {
         <button
           type="button"
           className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          onClick={() => setMounted(true)}
+          onClick={openWorkspace}
         >
           Open live workspace
         </button>
