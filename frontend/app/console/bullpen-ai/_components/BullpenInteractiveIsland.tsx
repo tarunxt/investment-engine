@@ -1,7 +1,10 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useState } from "react";
+
+import { usePersistentInteractiveIsland } from "@/app/console/_components/usePersistentInteractiveIsland";
+
+const BULLPEN_WORKSPACE_STORAGE_KEY = "investor:bullpen-workspace:open";
 
 const BullpenAiPageClient = dynamic(() => import("./BullpenAiPageClient"), {
   ssr: false,
@@ -14,19 +17,11 @@ const BullpenAiPageClient = dynamic(() => import("./BullpenAiPageClient"), {
 });
 
 export function BullpenInteractiveIsland() {
-  const [mounted, setMounted] = useState(false);
+  const { isOpen, open } = usePersistentInteractiveIsland(
+    BULLPEN_WORKSPACE_STORAGE_KEY,
+  );
 
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        setMounted(false);
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, []);
-
-  if (!mounted) {
+  if (!isOpen) {
     return (
       <section
         className="rounded-3xl border border-fuchsia-100 bg-white p-5 shadow-sm"
@@ -42,7 +37,7 @@ export function BullpenInteractiveIsland() {
         <button
           type="button"
           className="mt-4 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          onClick={() => setMounted(true)}
+          onClick={open}
         >
           Open live workspace
         </button>
