@@ -9,7 +9,10 @@ import {
   isBullpenHistoricalAssessmentRowInvalid,
   type BullpenHistoricalAssessmentRow,
 } from "@/lib/bullpenHistoricalAssessment";
-import type { BullpenQuestionRow } from "@/lib/bullpen-ai";
+import {
+  isBullpenEvidenceStatusInsufficient,
+  type BullpenQuestionRow,
+} from "@/lib/bullpen-ai";
 import { formatApiTimestamp } from "@/lib/datetime";
 import {
   getInternetAccessBadgeText,
@@ -121,7 +124,11 @@ function HistoricalAssessmentRationaleCell({
   const internetVerified =
     row.internetVerified ?? row.webSearchUsed ?? row.evidenceBlockUsed;
   const invalidWarning =
-    row.invalidReason || (row.staleFactDetected ? row.staleFactReason : null);
+    row.invalidReason ||
+    (row.staleFactDetected ? row.staleFactReason : null) ||
+    (isBullpenEvidenceStatusInsufficient(row.evidenceStatus)
+      ? "The model marked its evidence insufficient, so this estimate is excluded from consensus."
+      : null);
   const showNoSearchWarning = webCapable && row.webSearchUsed === false;
   const showNoSourcesWarning =
     row.webSearchUsed === true && (row.webSources?.length || 0) === 0;
@@ -170,9 +177,11 @@ function HistoricalAssessmentRationaleCell({
         <div>Direction: {formatDirection(row.direction)}</div>
         <div>
           Effective weight:{" "}
-          {row.effectiveWeight?.toLocaleString(undefined, {
-            maximumFractionDigits: 2,
-          }) || "—"}
+          {isBullpenHistoricalAssessmentRowInvalid(row)
+            ? "0 (excluded)"
+            : row.effectiveWeight?.toLocaleString(undefined, {
+                maximumFractionDigits: 2,
+              }) || "—"}
         </div>
         <div>Web used: {formatYesNo(row.webSearchUsed)}</div>
         <div>Internet verified: {formatYesNo(internetVerified)}</div>

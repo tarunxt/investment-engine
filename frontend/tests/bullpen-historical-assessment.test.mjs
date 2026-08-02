@@ -122,6 +122,22 @@ function createRun(reviewedCandidates) {
   };
 }
 
+test("historical assessment marks insufficient-evidence outputs invalid", async () => {
+  const { isBullpenHistoricalAssessmentRowInvalid } =
+    await loadHistoricalAssessmentModule();
+
+  assert.equal(
+    isBullpenHistoricalAssessmentRowInvalid({
+      llmYesOdds: 87.5,
+      llmNoOdds: 12.5,
+      evidenceStatus: "Insufficient",
+      invalidReason: null,
+      invalidStaleFact: false,
+    }),
+    true,
+  );
+});
+
 test("historical assessment matches Stage 2 rows by canonicalized URL without a decision", async () => {
   const { buildBullpenHistoricalAssessmentRows } =
     await loadHistoricalAssessmentModule();

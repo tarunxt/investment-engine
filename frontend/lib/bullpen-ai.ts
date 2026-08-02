@@ -1435,9 +1435,22 @@ function readStringArrayValue(value: unknown) {
 }
 
 function isBullpenBreakdownEntryInvalid(
-  entry: Pick<BullpenQuestionLlmBreakdownItem, "invalidReason" | "invalidStaleFact">,
+  entry: Pick<
+    BullpenQuestionLlmBreakdownItem,
+    "evidenceStatus" | "invalidReason" | "invalidStaleFact"
+  >,
 ) {
-  return Boolean(entry.invalidReason) || entry.invalidStaleFact;
+  return (
+    isBullpenEvidenceStatusInsufficient(entry.evidenceStatus) ||
+    Boolean(entry.invalidReason) ||
+    entry.invalidStaleFact
+  );
+}
+
+export function isBullpenEvidenceStatusInsufficient(
+  evidenceStatus: string | null | undefined,
+) {
+  return evidenceStatus?.trim().toLowerCase() === "insufficient";
 }
 
 function normalizePolymarketQuestionRuntimeMetadata(

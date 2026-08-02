@@ -126,6 +126,35 @@ test("computeBullpenLlmConsensus excludes entries flagged with invalid reasons",
   assert.equal(consensus.llmSpreadYesOdds, 0);
 });
 
+test("computeBullpenLlmConsensus excludes estimates whose own evidence is insufficient", async () => {
+  const { computeBullpenLlmConsensus } = await loadBullpenAiModule();
+  const breakdown = [
+    {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      llmYesOdds: 87.5,
+      llmNoOdds: 12.5,
+      evidenceStatus: "Insufficient",
+      rationale: "The evidence packet lacks direct confirmation.",
+    },
+    {
+      provider: "openai",
+      model: "gpt-5",
+      llmYesOdds: 35,
+      llmNoOdds: 65,
+      evidenceStatus: "Moderate",
+      rationale: "The supplied sources support this estimate.",
+    },
+  ];
+
+  const consensus = computeBullpenLlmConsensus(breakdown);
+
+  assert.equal(consensus.consensusYesOdds, 35);
+  assert.equal(consensus.consensusNoOdds, 65);
+  assert.equal(consensus.llmAverageYesOdds, 35);
+  assert.equal(consensus.llmRationaleMismatchCount, 0);
+});
+
 test("computeBullpenLlmConsensus treats one uncertain outlier as consensus with outlier", async () => {
   const { computeBullpenLlmConsensus } = await loadBullpenAiModule();
   const yesValues = [10, 12, 15, 8, 14, 9, 11, 13, 50];

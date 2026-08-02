@@ -1362,3 +1362,12 @@ metadata by default. These frozen facts remain unchanged and available from
 `include_detail=true`; ordinary list and initial-render callers must use the
 lightweight projection. This is a presentation-only projection and does not
 rewrite or version any frozen audit snapshot.
+
+## Insufficient-evidence LLM estimates
+
+The Stage 2 console treats an LLM output whose normalized `evidence_status` is
+`insufficient` as non-contributing evidence. It remains visible in historical run
+details, but is labelled excluded, has an effective consensus weight of zero, and
+does not participate in displayed consensus odds. This is a deterministic
+presentation and consensus-validation rule over already-frozen output fields; it
+does not rewrite historical snapshots or change their schema version.
