@@ -230,6 +230,34 @@ test("Bullpen auto-run status rejects malformed API and cache payloads", async (
   assert.equal(normalizeBullpenAutoRunStatusData({ scheduler: {} }), null);
 });
 
+test("Bullpen auto-run badge rationales explain unavailable status and live mode", async () => {
+  const { getBullpenAutoRunBadgeRationale } = await loadStatusModule();
+  const unavailableLiveStatus = createStatus({
+    state: { running: false, status: "error", mode: "live-trading" },
+  });
+
+  assert.deepEqual(
+    getBullpenAutoRunBadgeRationale("status", unavailableLiveStatus, "ready"),
+    {
+      label: "Status: Unavailable",
+      reason:
+        "The scheduler reported an error and is not currently running, so its status is Unavailable.",
+      context:
+        "This tag is based on the last valid scheduler response and is marked as last known while the reported error or refresh problem remains.",
+    },
+  );
+  assert.deepEqual(
+    getBullpenAutoRunBadgeRationale("mode", unavailableLiveStatus, "ready"),
+    {
+      label: "Mode: Live trading",
+      reason:
+        "The saved scheduler configuration is set to live-trading, so the tag shows Live trading.",
+      context:
+        "Live trading describes the configured execution mode. It does not mean an order will always be placed: Auto-Live permission, scheduler state, Bullpen doctor, balance checks, and every execution guardrail must still pass.",
+    },
+  );
+});
+
 test("Bullpen auto-run status uses only a validated summary as its secondary semantic fallback", async () => {
   const { normalizeBullpenAutoRunStatusFromSummary } = await loadStatusModule();
   const summary = {

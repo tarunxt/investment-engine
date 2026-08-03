@@ -72,6 +72,14 @@ export type BullpenAutoRunStatusBadges = {
   isUpdating: boolean;
 };
 
+export type BullpenAutoRunBadgeKind = "status" | "mode";
+
+export type BullpenAutoRunBadgeRationale = {
+  label: string;
+  reason: string;
+  context: string;
+};
+
 export type BullpenAutoRunStatusCacheEntry = {
   version: typeof BULLPEN_AUTO_RUN_STATUS_CACHE_VERSION;
   savedAt: number;
@@ -738,6 +746,64 @@ export function getBullpenAutoRunStatusBadges(
     modeLabel: "Check failed",
     isStale: false,
     isUpdating: false,
+  };
+}
+
+/** Explains the exact persisted fields used to produce either scheduler badge. */
+export function getBullpenAutoRunBadgeRationale(
+  kind: BullpenAutoRunBadgeKind,
+  data: BullpenAutoRunStatusData | null | undefined,
+  loadState: BullpenAutoRunStatusLoadState,
+): BullpenAutoRunBadgeRationale {
+  const badges = getBullpenAutoRunStatusBadges(data, loadState);
+
+  if (kind === "mode") {
+    const label = badges.modeLabel ?? "Loading";
+    const reason = !data
+      ? loadState === "loading"
+        ? "The console is retrieving the scheduler configuration, so no trading mode is available yet."
+        : "The scheduler check did not return usable configuration, so the mode is shown as Check failed."
+      : data.state.mode === "live-trading"
+        ? "The saved scheduler configuration is set to live-trading, so the tag shows Live trading."
+        : data.state.mode === "analysis-only"
+          ? "The saved scheduler configuration is set to analysis-only, so runs can analyze opportunities but cannot place orders."
+          : "The saved scheduler configuration is set to dry-run, so order actions are simulated rather than submitted.";
+
+    return {
+      label: `Mode: ${label}`,
+      reason,
+      context:
+        data?.state.mode === "live-trading"
+          ? "Live trading describes the configured execution mode. It does not mean an order will always be placed: Auto-Live permission, scheduler state, Bullpen doctor, balance checks, and every execution guardrail must still pass."
+          : "This tag describes how a future eligible run is configured to execute; it is separate from whether the scheduler is currently available or enabled.",
+    };
+  }
+
+  const label = badges.statusLabel ?? "Loading";
+  let reason: string;
+  if (!data) {
+    reason =
+      loadState === "loading"
+        ? "The console is retrieving the current scheduler state, so a status is not available yet."
+        : "The scheduler status check failed or timed out and no valid saved response is available.";
+  } else if (!data.settings.auto_live_enabled) {
+    reason = "Auto-Live is disabled in the saved scheduler settings.";
+  } else if (data.state.emergency_stopped) {
+    reason = "The scheduler is emergency-stopped, so automatic runs are paused.";
+  } else if (data.state.paused || data.state.status === "paused") {
+    reason = "The saved scheduler state is paused, so it will not start the next automatic run.";
+  } else if (data.state.status === "error" && !data.state.running) {
+    reason = "The scheduler reported an error and is not currently running, so its status is Unavailable.";
+  } else {
+    reason = "Auto-Live is enabled and the scheduler is running without a pause or emergency stop.";
+  }
+
+  return {
+    label: `Status: ${label}`,
+    reason,
+    context: badges.isStale
+      ? "This tag is based on the last valid scheduler response and is marked as last known while the reported error or refresh problem remains."
+      : "This status reflects scheduler availability. The execution mode and per-order safety guardrails are evaluated separately.",
   };
 }
 
