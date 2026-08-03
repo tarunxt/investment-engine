@@ -15,13 +15,15 @@ test("interactive Bullpen workspace remains open across visibility and route cha
   assert.doesNotMatch(source, /setMounted\(false\)/);
 });
 
-test("dashboard analytics restores its open state after remounting", async () => {
+test("dashboard analytics is always mounted without an interaction prompt", async () => {
   const source = await readSource(
     "../app/console/dashboard/DashboardInteractiveIsland.tsx",
   );
 
-  assert.match(source, /usePersistentInteractiveIsland/);
-  assert.match(source, /investor:dashboard-analytics:open/);
+  assert.match(source, /data-dashboard-analytics="mounted"/);
+  assert.doesNotMatch(source, /usePersistentInteractiveIsland/);
+  assert.doesNotMatch(source, /Open dashboard analytics/);
+  assert.doesNotMatch(source, /Charts and portfolio tools/);
 });
 
 test("interactive-island preference is durable and storage failures are non-blocking", async () => {

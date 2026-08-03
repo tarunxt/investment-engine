@@ -217,23 +217,12 @@ async function assertLazyRoutesDoNotLoadHiddenWork(browser, baseUrl) {
   await dashboardPage.goto(`${baseUrl}/console/dashboard`, {
     waitUntil: "networkidle",
   });
-  await dashboardPage.locator('[data-dashboard-analytics="unmounted"]').waitFor();
-  const dashboardInitialScripts = new Set(
-    dashboardRequests.filter((url) => url.includes("/_next/static/chunks/")),
-  );
-  await dashboardPage
-    .getByRole("button", { name: "Open dashboard analytics" })
-    .click();
   await dashboardPage.locator('[data-dashboard-analytics="mounted"]').waitFor();
-  await dashboardPage.waitForTimeout(500);
-  if (
-    !dashboardRequests.some(
-      (url) =>
-        url.includes("/_next/static/chunks/") &&
-        !dashboardInitialScripts.has(url),
-    )
-  ) {
-    throw new Error("Dashboard interaction did not load its isolated analytics chunk");
+  if (await dashboardPage.getByText("Charts and portfolio tools").count()) {
+    throw new Error("Dashboard analytics still shows the interaction prompt");
+  }
+  if (!dashboardRequests.some((url) => url.includes("/_next/static/chunks/"))) {
+    throw new Error("Dashboard did not load its analytics route chunks");
   }
 
   await context.close();
