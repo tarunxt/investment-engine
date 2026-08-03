@@ -96,6 +96,7 @@ import {
   getBullpenAutoRunActiveRunId,
   getBullpenAutoRunStatusCacheKey,
   getBullpenAutoRunStatusBadges,
+  getBullpenAutoRunBadgeRationale,
   getBullpenAutoRunStatusRetryDelay,
   isBullpenAutoRunProgressActive,
   isBullpenAutoRunSchedulerEnabled,
@@ -107,7 +108,9 @@ import {
   writeCachedBullpenAutoRunStatus,
   type BullpenAutoRunStatusData,
   type BullpenAutoRunStatusLoadState,
+  type BullpenAutoRunBadgeKind,
 } from "./bullpenAutoRunStatus";
+import { BullpenAutoRunBadgeRationaleDialog } from "./BullpenAutoRunBadgeRationaleDialog";
 import {
   BullpenReturnsPerDayFormulaDialog,
   BullpenReturnsPerDayHeader,
@@ -9489,6 +9492,8 @@ export function BullpenAutoRunScheduleCard({
   const [autoRunStatusError, setAutoRunStatusError] = useState<string | null>(
     null,
   );
+  const [openBadgeRationale, setOpenBadgeRationale] =
+    useState<BullpenAutoRunBadgeKind | null>(null);
   const autoRunStatusRetryAttemptRef = useRef(0);
   const autoRunStatusRetryTimerRef = useRef<number | null>(null);
   const autoRunStatusPollTimerRef = useRef<number | null>(null);
@@ -12065,9 +12070,13 @@ export function BullpenAutoRunScheduleCard({
               <span className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-700">
                 Auto Run Schedule
               </span>
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+              <button
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 disabled:cursor-wait disabled:hover:border-slate-200 disabled:hover:bg-white"
                 aria-live="polite"
+                aria-haspopup="dialog"
+                disabled={!autoRunStatusBadges.statusLabel}
+                onClick={() => setOpenBadgeRationale("status")}
+                type="button"
               >
                 {autoRunStatusBadges.statusLabel ? (
                   <>Status: {autoRunStatusBadges.statusLabel}</>
@@ -12086,10 +12095,14 @@ export function BullpenAutoRunScheduleCard({
                     className="size-3.5 animate-spin text-slate-500"
                   />
                 ) : null}
-              </span>
-              <span
-                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700"
+              </button>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-sky-300 hover:bg-sky-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-sky-600 disabled:cursor-wait disabled:hover:border-slate-200 disabled:hover:bg-white"
                 aria-live="polite"
+                aria-haspopup="dialog"
+                disabled={!mode}
+                onClick={() => setOpenBadgeRationale("mode")}
+                type="button"
               >
                 {mode ? (
                   <>Mode: {mode}</>
@@ -12108,7 +12121,7 @@ export function BullpenAutoRunScheduleCard({
                     className="size-3.5 animate-spin text-slate-500"
                   />
                 ) : null}
-              </span>
+              </button>
               {autoRunStatusBadges.isStale ? (
                 <span className="text-[11px] font-medium text-slate-500">
                   {autoRunStatusBadges.isUpdating
@@ -13804,6 +13817,16 @@ export function BullpenAutoRunScheduleCard({
             stageDetail={openStage.detail}
             outputs={openStage.outputs}
             onClose={() => setOpenStageKey(null)}
+          />
+        ) : null}
+        {openBadgeRationale ? (
+          <BullpenAutoRunBadgeRationaleDialog
+            rationale={getBullpenAutoRunBadgeRationale(
+              openBadgeRationale,
+              visiblePersistedAutoRunStatus,
+              autoRunStatusLoadState,
+            )}
+            onClose={() => setOpenBadgeRationale(null)}
           />
         ) : null}
       </CardContent>
