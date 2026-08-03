@@ -550,6 +550,7 @@ export const URLs = {
     console: {
       dashboard: () => "/console/dashboard",
       overview: () => "/console/dashboard",
+      database: () => "/database",
       jobs: () => "/console/jobs",
       runs: () => "/console/runs",
       jobDetail: (id: number) => `/console/jobs/${id}`,
