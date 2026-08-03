@@ -178,7 +178,7 @@ async function assertAuthFailureStates(browser, baseUrl) {
   await failed.close();
 }
 
-async function assertLazyRoutesDoNotLoadHiddenWork(browser, baseUrl) {
+async function assertInteractiveRoutesLoadByDefault(browser, baseUrl) {
   const context = await authenticatedContext(browser, baseUrl);
   const page = await context.newPage();
   const requests = [];
@@ -187,26 +187,12 @@ async function assertLazyRoutesDoNotLoadHiddenWork(browser, baseUrl) {
   await page.goto(`${baseUrl}/console/bullpen-ai`, {
     waitUntil: "networkidle",
   });
-  await page.locator('[data-bullpen-workspace="unmounted"]').waitFor();
-  if (
-    requests.some((url) =>
-      /api\/bullpen-ai\/(positions|current-odds)|polymarket\/auto-live/.test(url),
-    )
-  ) {
-    throw new Error("Hidden Bullpen workspace fetched or polled before interaction");
-  }
-  const initialScripts = new Set(
-    requests.filter((url) => url.includes("/_next/static/chunks/")),
-  );
-  await page.getByRole("button", { name: "Open live workspace" }).click();
   await page.locator('[data-bullpen-workspace="mounted"]').waitFor();
-  await page.waitForTimeout(500);
-  const postInteractionScripts = requests.filter(
-    (url) =>
-      url.includes("/_next/static/chunks/") && !initialScripts.has(url),
-  );
-  if (postInteractionScripts.length === 0) {
-    throw new Error("Bullpen interaction did not load its isolated route chunk");
+  if (await page.getByText("Interactive workspace").count()) {
+    throw new Error("Bullpen workspace still shows the interaction prompt");
+  }
+  if (!requests.some((url) => url.includes("/_next/static/chunks/"))) {
+    throw new Error("Bullpen workspace did not load its route chunks");
   }
 
   const dashboardPage = await context.newPage();
@@ -263,7 +249,7 @@ async function main() {
     browser = await chromium.launch({ headless: true });
     await assertDelayedBootstrapDoesNotGateContent(browser, baseUrl);
     await assertAuthFailureStates(browser, baseUrl);
-    await assertLazyRoutesDoNotLoadHiddenWork(browser, baseUrl);
+    await assertInteractiveRoutesLoadByDefault(browser, baseUrl);
     console.log("Auth rendering and lazy-route Playwright checks passed");
   } catch (error) {
     if (output) console.error(output);
