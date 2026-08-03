@@ -4,15 +4,15 @@ import test from "node:test";
 
 const readSource = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("interactive Bullpen workspace remains open across visibility and route changes", async () => {
+test("interactive Bullpen workspace is always mounted without an interaction prompt", async () => {
   const source = await readSource(
     "../app/console/bullpen-ai/_components/BullpenInteractiveIsland.tsx",
   );
 
-  assert.match(source, /usePersistentInteractiveIsland/);
-  assert.match(source, /investor:bullpen-workspace:open/);
-  assert.doesNotMatch(source, /visibilitychange/);
-  assert.doesNotMatch(source, /setMounted\(false\)/);
+  assert.match(source, /data-bullpen-workspace="mounted"/);
+  assert.doesNotMatch(source, /usePersistentInteractiveIsland/);
+  assert.doesNotMatch(source, /Open live workspace/);
+  assert.doesNotMatch(source, /Interactive workspace/);
 });
 
 test("dashboard analytics is always mounted without an interaction prompt", async () => {
