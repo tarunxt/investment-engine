@@ -2,6 +2,7 @@ import type { ComponentType } from 'react';
 import {
     Bot,
     BriefcaseBusiness,
+    Database,
     LayoutDashboard,
     LogOut,
     Plug2,
@@ -209,6 +210,15 @@ export const SIDEBAR_SECTIONS = [
         id: 'platform',
         label: 'Platform',
         entries: [
+            {
+                type: 'item',
+                id: 'database',
+                name: 'Database',
+                href: URLs.routes.console.database(),
+                icon: Database,
+                matchMode: 'prefix',
+                title: 'Open the database viewer',
+            },
             {
                 type: 'group',
                 id: 'integrations',
