@@ -41,11 +41,6 @@ DEFAULT_DEEPSEEK_PRICING_PER_1M_TOKENS = DEEPSEEK_PRICING_PER_1M_TOKENS[
 SUPPORTED_MODELS = [
     "deepseek-v4-flash",
     "deepseek-v4-pro",
-    "deepseek-reasoner",
-    "deepseek-chat",
-    "deepseek-coder",
-    "deepseek-r1",
-    "deepseek-v3",
 ]
 
 current_date = datetime.datetime.now().strftime("%Y-%m-%d")

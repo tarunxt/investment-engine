@@ -31,11 +31,11 @@ test("timed-out analysis queue requests reconcile against durable auto-rebalance
 });
 
 
-test("provider balance and quota failures are cooled down, skipped, and not retried", () => {
-  assert.match(availabilitySource, /CAPACITY_FAILURE_COOLDOWN = timedelta\(hours=1\)/);
+test("provider balance and quota failures do not block a later funded attempt", () => {
+  assert.doesNotMatch(availabilitySource, /CAPACITY_FAILURE_COOLDOWN/);
   assert.match(availabilitySource, /insufficient balance/);
   assert.match(availabilitySource, /exceeded your current quota/);
-  assert.match(availabilitySource, /Asia\/Kolkata/);
+  assert.match(availabilitySource, /return TargetAvailability\(available=True\)/);
   assert.match(targetResolutionSource, /get_recent_target_availability/);
   assert.match(targetResolutionSource, /default_target_candidates/);
   assert.match(createRunSource, /filter_recently_available_targets/);

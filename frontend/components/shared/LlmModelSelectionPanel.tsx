@@ -22,7 +22,6 @@ interface LlmModelSelectionPanelProps {
   loadingRows?: number;
   modelMixControls?: ReactNode;
   showBulkActions?: boolean;
-  allowUnavailableModels?: boolean;
   onToggle: (key: string) => void;
   onSelectAll?: () => void;
   onClear?: () => void;
@@ -58,15 +57,10 @@ function getModelKey(providerName: string, model: string) {
   return `${providerName}::${model}`;
 }
 
-function isCompatible(
-  provider: ProviderInfo,
-  model: string,
-  allowUnavailableModels = false,
-) {
+function isCompatible(provider: ProviderInfo, model: string) {
   return (
     provider.configured &&
-    (allowUnavailableModels ||
-      provider.model_compatibility?.[model]?.compatible !== false)
+    provider.model_compatibility?.[model]?.compatible !== false
   );
 }
 
@@ -138,7 +132,6 @@ export function LlmModelSelectionPanel({
   loadingRows = 3,
   modelMixControls,
   showBulkActions = true,
-  allowUnavailableModels = false,
   onToggle,
   onSelectAll,
   onClear,
@@ -159,7 +152,7 @@ export function LlmModelSelectionPanel({
     return (
       total +
       provider.models.filter((model) => {
-        if (!isCompatible(provider, model, allowUnavailableModels)) return false;
+        if (!isCompatible(provider, model)) return false;
         const selectionConstraint = getSelectionConstraint?.(provider, model);
         return selectionConstraint?.selectable !== false;
       }).length
@@ -294,7 +287,7 @@ export function LlmModelSelectionPanel({
               selectedKeys.has(key),
             ).length;
             const compatibleModels = provider.models.filter((model) => {
-              if (!isCompatible(provider, model, allowUnavailableModels)) return false;
+              if (!isCompatible(provider, model)) return false;
               const selectionConstraint = getSelectionConstraint?.(
                 provider,
                 model,
@@ -385,7 +378,7 @@ export function LlmModelSelectionPanel({
                         model,
                       );
                       const compatible =
-                        isCompatible(provider, model, allowUnavailableModels) &&
+                        isCompatible(provider, model) &&
                         selectionConstraint?.selectable !== false;
                       const internetAccess = getResolvedProviderInternetAccess(
                         provider.name,

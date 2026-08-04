@@ -140,6 +140,26 @@ class ProviderFactoryTests(unittest.TestCase):
         self.assertEqual(providers["deepseek"]["internet_access"]["mode"], "tool_auto")
         self.assertEqual(providers["anthropic"]["internet_access"]["mode"], "none")
 
+    def test_deepseek_catalog_advertises_only_current_v4_models(self):
+        providers = {item["name"]: item for item in ProviderFactory.list_providers()}
+
+        self.assertEqual(
+            providers["deepseek"]["models"],
+            ["deepseek-v4-flash", "deepseek-v4-pro"],
+        )
+
+    def test_legacy_deepseek_models_are_incompatible(self):
+        for model in (
+            "deepseek-reasoner",
+            "deepseek-chat",
+            "deepseek-coder",
+            "deepseek-r1",
+            "deepseek-v3",
+        ):
+            compatible, reason = ProviderFactory.model_compatibility("deepseek", model)
+            self.assertFalse(compatible)
+            self.assertTrue(reason)
+
     def test_get_provider_internet_access_returns_force_token_for_openai(self):
         internet_access = ProviderFactory.get_provider_internet_access("openai")
 
