@@ -251,6 +251,27 @@ export function mergeBullpenConsoleRunProjection({
   } satisfies BullpenAutoLiveRun;
 }
 
+/**
+ * The summary response can contain the same run twice: a compact `latest_run`
+ * projection and a richer entry in `recent_runs`. Reconcile those copies before
+ * rendering so a later-stage compact projection cannot make completed Stage 1
+ * or Stage 2 metrics appear to become zero.
+ */
+export function reconcileBullpenConsoleRunCopies(
+  evidenceRun: BullpenAutoLiveRun,
+  latestProjection: BullpenAutoLiveRun | null | undefined,
+) {
+  if (!latestProjection || evidenceRun.id !== latestProjection.id) {
+    return evidenceRun;
+  }
+
+  return mergeBullpenConsoleRunProjection({
+    existing: evidenceRun,
+    projected: latestProjection,
+    projectionAvailable: true,
+  });
+}
+
 export function mergeBullpenConsoleDecisionProjection({
   existing,
   projected,

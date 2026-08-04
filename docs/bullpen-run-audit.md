@@ -1363,6 +1363,14 @@ metadata by default. These frozen facts remain unchanged and available from
 lightweight projection. This is a presentation-only projection and does not
 rewrite or version any frozen audit snapshot.
 
+The console can receive the same run as both a compact `latest_run` projection
+and a richer `recent_runs` entry. Before rendering the worker-stage monitor, it
+reconciles those same-ID copies: current status remains authoritative from the
+latest projection, while completed Stage 1 and Stage 2 counts and frozen evidence
+remain sourced from the richer copy. This prevents completed metrics from
+disappearing or changing to fallback zeroes when Stage 3 publishes a compact
+update; frozen snapshots and historical facts are not modified.
+
 ## Insufficient-evidence LLM estimates
 
 The Stage 2 console treats an LLM output whose normalized `evidence_status` is

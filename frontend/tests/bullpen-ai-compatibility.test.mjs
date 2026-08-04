@@ -993,7 +993,15 @@ test("Bullpen auto-run summary sync keeps completed run visible after refresh", 
 
   assert.match(
     scheduleCardSource,
-    /summary\.latest_run\?\.status === "completed"\) return summary\.latest_run/,
+    /summary\.latest_run\?\.status === "completed"/,
+  );
+  assert.match(
+    scheduleCardSource,
+    /reconcileBullpenConsoleRunCopies\(recentCopy, summary\.latest_run\)/,
+  );
+  assert.match(
+    scheduleCardSource,
+    /const latestRun = summary\?\.latest_run\s+\? reconcileBullpenConsoleRunCopies/,
   );
   assert.match(
     scheduleCardSource,
