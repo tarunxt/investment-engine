@@ -1708,7 +1708,7 @@ function Stage2TopTenEventsSummaryTable({
         if (!decision.order_plan) {
           return (
             <div className={isCompact ? "space-y-0.5" : "space-y-1"}>
-              <p className="font-semibold text-slate-950">No order planned</p>
+              <p className="truncate font-semibold text-slate-950">No order planned</p>
               <p
                 className={`text-xs leading-5 text-slate-600${isCompact ? " line-clamp-2" : ""}`}
                 title={row.reason}
@@ -2248,16 +2248,35 @@ function StageTwoRunStats({
             </span>
           </span>
         ) : (
-          <span className="font-medium text-slate-600">
+          <button
+            type="button"
+            onClick={() => setIsActionablesDialogOpen(true)}
+            className="text-left font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline focus:outline-none focus:ring-2 focus:ring-amber-300"
+            aria-label="Explain why Stage 2 actionables are awaiting the authoritative contract"
+          >
             Actionables: awaiting authoritative Stage 2 contract
-          </span>
+          </button>
         )}
       </div>
-      {canOpenActionablesDialog && isActionablesDialogOpen ? (
-        <BullpenStage2ActionablesDialog
-          actionables={actionables}
-          onClose={() => setIsActionablesDialogOpen(false)}
-        />
+      {isActionablesDialogOpen ? (
+        canOpenActionablesDialog ? (
+          <BullpenStage2ActionablesDialog
+            actionables={actionables}
+            onClose={() => setIsActionablesDialogOpen(false)}
+          />
+        ) : (
+          <SimpleInfoDialog
+            eyebrow="Stage 2 actionables"
+            title="Awaiting authoritative Stage 2 contract"
+            onClose={() => setIsActionablesDialogOpen(false)}
+            sections={[
+              { title: "Meaning", body: "Stage 2 has not yet persisted the exact authoritative Exit and Buy market-id contract that Stage 3 is allowed to execute. The UI intentionally avoids guessing actionables from partial or compact progress data." },
+              { title: "What is happening now", body: "Stage 2 may still be running selected LLM targets, parsing model output, validating probabilities, ranking rows, or writing the final action contract. Until that durable contract exists, Stage 3 should wait or continue from a previously saved contract only." },
+              { title: "Done and waiting", body: `LLM selected: ${displayStat(stats.llmsSelected)}. Completed: ${displayStat(stats.llmsCompleted)}. Passed: ${displayStat(stats.llmsPassed)}. Failed: ${displayStat(stats.llmsFailed)}. New events currently visible: ${hasActionableDisplay ? displayStat(stats.newEventsToInvestIn) : "not authoritative yet"}.` },
+              { title: "Current progress", body: "When Stage 2 finishes and saves exact Exit and Buy IDs, this line changes to clickable Exit and Buy counts. If it stays here after Stage 2 is finished, refresh the run detail and check worker logs for a Stage 2 persistence or validation error." },
+            ]}
+          />
+        )
       ) : null}
     </div>
   );
@@ -3247,6 +3266,59 @@ function extractErrorCodeFromDetail(detail: string | null | undefined) {
   return null;
 }
 
+function SimpleInfoDialog({
+  eyebrow,
+  title,
+  sections,
+  onClose,
+}: {
+  eyebrow: string;
+  title: string;
+  sections: Array<{ title: string; body: string }>;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="bullpen-simple-info-title"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-[86vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white text-left shadow-[0_30px_90px_-28px_rgba(15,23,42,0.6)]">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+              {eyebrow}
+            </p>
+            <h2 id="bullpen-simple-info-title" className="mt-2 text-xl font-semibold text-slate-950">
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Close details"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 space-y-3 overflow-y-auto px-6 py-5">
+          {sections.map((section) => (
+            <section key={section.title} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <h3 className="text-sm font-bold text-slate-950">{section.title}</h3>
+              <p className="mt-1 text-sm leading-6 text-slate-700">{section.body}</p>
+            </section>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ErrorCodeWithDetails({
   detail,
   detailClassName = "text-slate-700",
@@ -3795,7 +3867,7 @@ function StageOneOutputDialog({
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {claimablePositions.map((position) => (
                         <tr key={position.positionKey}>
-                          <td className="px-4 py-3 align-top">
+                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
                             <div className="font-semibold text-slate-950">
                               {position.marketUrl ? (
                                 <a
@@ -3810,7 +3882,7 @@ function StageOneOutputDialog({
                                 position.marketTitle
                               )}
                             </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                            <div className="mt-1 flex gap-2 overflow-hidden whitespace-nowrap text-[11px] text-slate-500">
                               {position.theme ? (
                                 <span>{position.theme}</span>
                               ) : null}
@@ -3819,7 +3891,7 @@ function StageOneOutputDialog({
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {position.side ?? "—"}
                             <br />
                             Shares {formatShares(position.shares)}
@@ -3828,12 +3900,12 @@ function StageOneOutputDialog({
                             <br />
                             Avg {formatPriceCents(position.averagePriceCents)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             Yes {formatOddsPercent(position.currentYesOdds)}
                             <br />
                             No {formatOddsPercent(position.currentNoOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {formatIstDateTime(position.closeTime)}
                           </td>
                         </tr>
@@ -3867,8 +3939,8 @@ function StageOneOutputDialog({
               </div>
 
               {activePositions.length > 0 ? (
-                <div className="overflow-hidden rounded-2xl border border-slate-200">
-                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <table className="min-w-[980px] table-fixed divide-y divide-slate-200 text-xs">
                     <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                       <tr>
                         <th className="px-4 py-3">Position</th>
@@ -3880,7 +3952,7 @@ function StageOneOutputDialog({
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {activePositions.map((position) => (
                         <tr key={position.positionKey}>
-                          <td className="px-4 py-3 align-top">
+                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
                             <div className="font-semibold text-slate-950">
                               {position.marketUrl ? (
                                 <a
@@ -3904,7 +3976,7 @@ function StageOneOutputDialog({
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {position.side ?? "—"}
                             <br />
                             Shares {formatShares(position.shares)}
@@ -3913,12 +3985,12 @@ function StageOneOutputDialog({
                             <br />
                             Avg {formatPriceCents(position.averagePriceCents)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             Yes {formatOddsPercent(position.currentYesOdds)}
                             <br />
                             No {formatOddsPercent(position.currentNoOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {formatIstDateTime(position.closeTime)}
                           </td>
                         </tr>
@@ -3960,11 +4032,11 @@ function StageOneOutputDialog({
               </div>
 
               {state.candidates.length > 0 ? (
-                <div className="overflow-hidden rounded-2xl border border-slate-200">
-                  <table className="min-w-full divide-y divide-slate-200 text-sm">
+                <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                  <table className="min-w-[980px] table-fixed divide-y divide-slate-200 text-xs">
                     <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                       <tr>
-                        <th className="px-4 py-3">Outcomes</th>
+                        <th className="w-[24rem] px-3 py-2">Outcomes</th>
                         <th className="px-4 py-3">Current Yes odds %</th>
                         <th className="px-4 py-3">Current No odds %</th>
                         <th className="px-4 py-3">LLM Yes Odds</th>
@@ -3986,7 +4058,7 @@ function StageOneOutputDialog({
                         <tr
                           key={`${candidate.slug || candidate.question}-${index}`}
                         >
-                          <td className="px-4 py-3 align-top">
+                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
                             <div className="font-semibold text-slate-950">
                               {candidate.marketUrl ? (
                                 <a
@@ -4010,19 +4082,19 @@ function StageOneOutputDialog({
                               ) : null}
                             </div>
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold text-emerald-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-emerald-700">
                             {formatOddsPercent(candidate.currentYesOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold text-rose-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-rose-700">
                             {formatOddsPercent(candidate.currentNoOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold text-violet-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-violet-700">
                             {formatOddsPercent(candidate.llmYesOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold text-fuchsia-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-fuchsia-700">
                             {formatOddsPercent(candidate.llmNoOdds)}
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-slate-700">
                             <BullpenReturnsPerDayValueButton
                               disabled={candidate.returnsPerDay === null}
                               onOpen={() => setReturnsPerDayQuestion(
@@ -4033,13 +4105,13 @@ function StageOneOutputDialog({
                               {formatReturnsPerDay(candidate.returnsPerDay)}
                             </BullpenReturnsPerDayValueButton>
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-slate-700">
                             {formatInvestAmount(candidate.amountToBeInvested)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {formatMoney(candidate.volumeUsd)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {formatMoney(candidate.liquidityUsd)}
                           </td>
                         </tr>
@@ -5678,9 +5750,6 @@ type StageTwoRunSummaryStatus =
 
 const STAGE_TWO_LLM_IDENTITY_ERROR =
   "Data integrity error: Stage 2 recorded an LLM target execution without a provider/model identity.";
-const STAGE_TWO_LLM_MISSING_CHILD_ERROR =
-  "Data integrity error: Stage 2 never recorded a child LLM execution for this selected provider/model target.";
-
 type StageTwoLlmRunSummaryRow = {
   key: string;
   provider: string;
@@ -5756,18 +5825,6 @@ function isFailedStageTwoTargetRun(run: Record<string, unknown>) {
   return normalizeStageTwoRunStatus(readLlmContextString(run, "status")) === "failed";
 }
 
-function isTerminalStageTwoStage(stage: WorkflowStageView) {
-  const phaseStatus =
-    readStageOutputString(stage.outputs.phase_status) ??
-    readStageOutputString(stage.inputs.phase_status);
-  return (
-    Boolean(stage.timerCompletedAt) ||
-    phaseStatus === "completed" ||
-    phaseStatus === "partial" ||
-    phaseStatus === "failed"
-  );
-}
-
 function getStageTwoLlmTargets(stage: WorkflowStageView) {
   const targets = stage.outputs.llm_targets ?? stage.inputs.llm_targets;
   if (!Array.isArray(targets)) return [];
@@ -5804,7 +5861,6 @@ function getStageTwoLlmRunSummaryRows(
 
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
-    const stageIsTerminal = isTerminalStageTwoStage(stage);
     const runRows = targetRuns.map((run, index) => {
       const identity = readStageTwoLlmIdentity(run);
       const provider = identity?.provider ?? "—";
@@ -5885,7 +5941,7 @@ function getStageTwoLlmRunSummaryRows(
         const identity = readStageTwoLlmIdentity(target);
         const provider = identity?.provider ?? "—";
         const model = identity?.model ?? "—";
-        const isIntegrityFailure = !identity || stageIsTerminal;
+        const isIntegrityFailure = !identity;
         return {
           key: `${provider}::${model}-pending-${index}`,
           provider,
@@ -5896,12 +5952,8 @@ function getStageTwoLlmRunSummaryRows(
             : ("pending" as StageTwoRunSummaryStatus),
           runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
           cost: null,
-          error: !identity
-            ? STAGE_TWO_LLM_IDENTITY_ERROR
-            : stageIsTerminal
-              ? STAGE_TWO_LLM_MISSING_CHILD_ERROR
-              : null,
-          failureCategory: !identity || stageIsTerminal ? "data_integrity_error" : null,
+          error: !identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null,
+          failureCategory: !identity ? "data_integrity_error" : null,
           firstError: null,
           lastError: null,
           batchErrors: [],
@@ -5918,7 +5970,6 @@ function getStageTwoLlmRunSummaryRows(
   }
 
   const knownKeys = new Set(groups.map((group) => group.key));
-  const stageIsTerminal = isTerminalStageTwoStage(stage);
   const pendingTargets = getStageTwoLlmTargets(stage).filter((target) => {
     const identity = readStageTwoLlmIdentity(target);
     if (!identity) return true;
@@ -5934,18 +5985,13 @@ function getStageTwoLlmRunSummaryRows(
       model,
       requestedModel: identity?.model ?? null,
       status:
-        !identity || stageIsTerminal
+        !identity
           ? ("failed" as StageTwoRunSummaryStatus)
           : ("pending" as StageTwoRunSummaryStatus),
       runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
       cost: null,
-      error: !identity
-        ? STAGE_TWO_LLM_IDENTITY_ERROR
-        : stageIsTerminal
-          ? STAGE_TWO_LLM_MISSING_CHILD_ERROR
-          : null,
-      failureCategory:
-        !identity || stageIsTerminal ? "data_integrity_error" : null,
+      error: !identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null,
+      failureCategory: !identity ? "data_integrity_error" : null,
       firstError: null,
       lastError: null,
       batchErrors: [],
@@ -8192,7 +8238,7 @@ function InvestMetricDetailsDialog({
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {tableRows.map((decision) => (
                         <tr key={decision.id}>
-                          <td className="px-4 py-3 align-top">
+                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
                             <div className="font-semibold text-slate-950">
                               {decision.market_url ? (
                                 <a
@@ -8212,7 +8258,7 @@ function InvestMetricDetailsDialog({
                               {formatIstDateTime(decision.close_time)}
                             </div>
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             <span className="font-semibold capitalize text-slate-950">
                               {decision.decision.replaceAll("_", " ")}
                             </span>
@@ -8221,7 +8267,7 @@ function InvestMetricDetailsDialog({
                             <br />
                             {decision.risk_status.replaceAll("_", " ")}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             Edge{" "}
                             {decision.edge_pp.toLocaleString("en-IN", {
                               maximumFractionDigits: 2,
@@ -8236,17 +8282,17 @@ function InvestMetricDetailsDialog({
                             Fair{" "}
                             {formatOddsPercent(decision.fair_probability_pct)}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             Current {formatMoney(decision.current_exposure_usd)}
                             <br />
                             Target {formatMoney(decision.target_exposure_usd)}
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold tabular-nums text-violet-800">
                             {formatOddsPercent(
                               decision.fair_yes_probability_pct ?? null,
                             )}
                           </td>
-                          <td className="px-4 py-3 align-top font-semibold tabular-nums text-violet-800">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold tabular-nums text-violet-800">
                             {formatOddsPercent(
                               decision.fair_no_probability_pct ?? null,
                             )}
@@ -8266,7 +8312,7 @@ function InvestMetricDetailsDialog({
                               )}
                             </BullpenReturnsPerDayValueButton>
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             {(() => {
                               const exitType =
                                 getDecisionExitTypeDetails(decision);
@@ -8285,7 +8331,7 @@ function InvestMetricDetailsDialog({
                               );
                             })()}
                           </td>
-                          <td className="px-4 py-3 align-top text-slate-700">
+                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
                             <span className="font-semibold capitalize">
                               {formatInvestMetricOrderStatus(decision)}
                             </span>
@@ -9583,6 +9629,8 @@ export function BullpenAutoRunScheduleCard({
     useState<StageTwoInvestEventsDialogState | null>(null);
   const [stageTwoLlmRunDialog, setStageTwoLlmRunDialog] =
     useState<StageTwoLlmRunDialogState | null>(null);
+  const [runtimeErrorDialog, setRuntimeErrorDialog] = useState<string | null>(null);
+  const [runHistoryStageHelp, setRunHistoryStageHelp] = useState<{ label: string; status: string } | null>(null);
   const [stageTwoBypassDialog, setStageTwoBypassDialog] =
     useState<StageTwoBypassDialogState | null>(null);
   const [isSchedulePickerOpen, setIsSchedulePickerOpen] = useState(false);
@@ -12768,7 +12816,7 @@ export function BullpenAutoRunScheduleCard({
               const toneClasses = getWorkflowToneClasses(
                 selectedRunSummaryTile === "next" && !runIsActive
                   ? "slate"
-                  : immediateSuccess || investPreviewFinished
+                  : immediateSuccess || investPreviewFinished || stage.state === "finished" || Boolean(stage.timerCompletedAt)
                     ? "green"
                     : stage.tone,
               );
@@ -13407,7 +13455,7 @@ export function BullpenAutoRunScheduleCard({
                 </div>
               </div>
               <div className="max-h-[65vh] overflow-y-auto px-6 py-5">
-                {runHistoryError ? (
+                {runHistoryError && !runHistoryLoading ? (
                   <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     {runHistoryError}
                   </div>
@@ -13479,7 +13527,20 @@ export function BullpenAutoRunScheduleCard({
                               {run.stages.map((stage) => (
                                 <span
                                   key={`${run.id}-${stage.key}`}
-                                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setRunHistoryStageHelp({ label: stage.label, status: stage.status });
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      setRunHistoryStageHelp({ label: stage.label, status: stage.status });
+                                    }
+                                  }}
+                                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900 focus:outline-none focus:ring-2 focus:ring-sky-300"
                                 >
                                   {stage.label}: {stage.status}
                                 </span>
@@ -13611,6 +13672,31 @@ export function BullpenAutoRunScheduleCard({
           />
         ) : null}
 
+        {runtimeErrorDialog ? (
+          <SimpleInfoDialog
+            eyebrow="Runtime error"
+            title={runtimeErrorDialog}
+            onClose={() => setRuntimeErrorDialog(null)}
+            sections={[
+              { title: "What happened", body: "The Bullpen console received an unexpected runtime/API error while refreshing independent run-history or live-progress data. The main worker may still be running." },
+              { title: "Status", body: "This message is informational unless it persists after refresh. It should no longer block the current stage tiles from using the latest durable run state." },
+              { title: "How to resolve", body: "Refresh the console, reopen Run History, and if the same error remains, check the backend investor-backend service logs plus Celery worker logs for the matching request time and run id." },
+            ]}
+          />
+        ) : null}
+        {runHistoryStageHelp ? (
+          <SimpleInfoDialog
+            eyebrow="Run history stage badge"
+            title={`${runHistoryStageHelp.label}: ${runHistoryStageHelp.status}`}
+            onClose={() => setRunHistoryStageHelp(null)}
+            sections={[
+              { title: "What it means", body: "This badge summarizes one deterministic audit checkpoint for the saved Bullpen run." },
+              { title: "Candidate Scan", body: "Stage 1 scanned active wallet positions and fresh opportunities, applied filters, and records warning when candidates exist but some scan evidence needs attention." },
+              { title: "Market Rules and Deadline", body: "This check verifies market rule/deadline eligibility before LLM and order planning. Pass means the saved run had enough rule evidence to continue." },
+              { title: "Evidence and LLM Consensus", body: "This check validates Stage 2 evidence packets, LLM output parsing, probability estimates, and consensus. Fail means Stage 3 may have no durable actionable orders to submit." },
+            ]}
+          />
+        ) : null}
         {refreshedStageTwoLlmRunDialog ? (
           <StageTwoLlmRunDetailsDialog
             state={refreshedStageTwoLlmRunDialog}
@@ -13805,14 +13891,19 @@ export function BullpenAutoRunScheduleCard({
         ) : null}
 
         {error ? (
-          <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-            <p className="font-medium">{error.message}</p>
+          <button
+            type="button"
+            onClick={() => setRuntimeErrorDialog(error.details ? `${error.message}\n${error.details}` : error.message)}
+            className="w-full rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-left text-sm text-rose-900 underline-offset-2 transition hover:bg-rose-100 hover:underline focus:outline-none focus:ring-2 focus:ring-rose-300"
+            aria-label="Open runtime error details and resolution steps"
+          >
+            <span className="block font-medium">{error.message}</span>
             {error.details ? (
-              <p className="mt-1 text-xs leading-5 text-rose-800">
+              <span className="mt-1 block text-xs leading-5 text-rose-800">
                 {error.details}
-              </p>
+              </span>
             ) : null}
-          </div>
+          </button>
         ) : null}
 
         {loading && !summary ? (
