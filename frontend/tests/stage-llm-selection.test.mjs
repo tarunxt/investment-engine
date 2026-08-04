@@ -14,15 +14,15 @@ const panelSource = readFileSync(
   "utf8",
 );
 
-test("workflow stage selector allows configured models regardless of availability history", () => {
+test("workflow stage selector permits only configured, compatible models", () => {
   assert.match(workflowSource, /selectionMode=\{singleSelect \? "single" : "multiple"\}/);
-  assert.match(workflowSource, /allowUnavailableModels/);
+  assert.doesNotMatch(workflowSource, /allowUnavailableModels/);
   assert.match(workflowSource, /stage === "threats" \|\| stage === "technical"/);
-  assert.match(workflowSource, /\.filter\(\(\) => provider\.configured\)/);
+  assert.match(workflowSource, /provider\.model_compatibility\?\.\[model\]\?\.compatible !== false/);
 });
 
-test("LLM panel keeps unavailable models selectable when explicitly enabled", () => {
-  assert.match(panelSource, /allowUnavailableModels\?: boolean/);
-  assert.match(panelSource, /allowUnavailableModels \|\|/);
+test("LLM panel disables unavailable models while retaining single selection", () => {
+  assert.doesNotMatch(panelSource, /allowUnavailableModels/);
+  assert.match(panelSource, /provider\.model_compatibility\?\.\[model\]\?\.compatible !== false/);
   assert.match(panelSource, /selectionMode === "single" \? "radio" : "checkbox"/);
 });

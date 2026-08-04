@@ -104,6 +104,9 @@ class ProviderFactory:
             "o3-mini": "Project access denied (403).",
         },
         "deepseek": {
+            "deepseek-reasoner": "Retired model alias; use a current DeepSeek V4 model.",
+            "deepseek-chat": "Retired model alias; use a current DeepSeek V4 model.",
+            "deepseek-coder": "Unsupported by the current DeepSeek API.",
             "deepseek-r1": "Unsupported by current DeepSeek API account.",
             "deepseek-v3": "Unsupported by current DeepSeek API account.",
         },

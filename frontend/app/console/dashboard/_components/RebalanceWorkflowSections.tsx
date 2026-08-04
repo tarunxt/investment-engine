@@ -1471,7 +1471,11 @@ function uniqueTargetKeys(keys: string[]) {
 function getCompatibleTargets(providers: ProviderInfo[]) {
   return providers.flatMap((provider) =>
     provider.models
-      .filter(() => provider.configured)
+      .filter(
+        (model) =>
+          provider.configured &&
+          provider.model_compatibility?.[model]?.compatible !== false,
+      )
       .map((model) => ({ provider: provider.name, model })),
   );
 }
@@ -4599,7 +4603,11 @@ function StageLlmSelectorDialog({
   const compatibleTargets = new Set(
     providers.flatMap((provider) =>
       provider.models
-        .filter(() => provider.configured)
+        .filter(
+          (model) =>
+            provider.configured &&
+            provider.model_compatibility?.[model]?.compatible !== false,
+        )
         .map((model) => `${provider.name}::${model}`),
     ),
   );
@@ -4782,7 +4790,6 @@ function StageLlmSelectorDialog({
             providers={providers}
             selectedKeys={selectedKeys}
             selectionMode={singleSelect ? "single" : "multiple"}
-            allowUnavailableModels
             emptyMessage="Loading provider models..."
             showBulkActions={!singleSelect}
             modelMixControls={modelMixControls}

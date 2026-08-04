@@ -86,7 +86,7 @@ class DeepSeekProviderTests(unittest.TestCase):
                 "Return only one markdown table.\n"
                 "Table columns: Stock Symbol, Stock Name, Technical Setup, Entry Range, Units to Buy"
             ),
-            model="deepseek-chat",
+            model="deepseek-v4-flash",
         )
 
         self.assertEqual(result.content, recovered_table)
