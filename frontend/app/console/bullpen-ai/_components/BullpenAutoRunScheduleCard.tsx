@@ -72,6 +72,7 @@ import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
 import {
   mergeBullpenConsoleDecisionProjection,
   mergeBullpenConsoleRunProjection,
+  reconcileBullpenConsoleRunCopies,
 } from "@/lib/bullpenRunConsoleDetail";
 import { APIError, RequestTimeoutError, apiService } from "@/services/api";
 import type {
@@ -8575,16 +8576,25 @@ function getVisibleRun(
 ) {
   if (!summary) return null;
   if (pendingRunId) {
-    return (
-      summary.recent_runs.find((run) => run.id === pendingRunId) ??
-      (summary.latest_run?.id === pendingRunId ? summary.latest_run : null)
+    const recentRun = summary.recent_runs.find(
+      (run) => run.id === pendingRunId,
     );
+    return recentRun
+      ? reconcileBullpenConsoleRunCopies(recentRun, summary.latest_run)
+      : summary.latest_run?.id === pendingRunId
+        ? summary.latest_run
+        : null;
   }
   if (
     summary.latest_run?.status === "running" ||
     summary.latest_run?.status === "confirming"
   ) {
-    return summary.latest_run;
+    const recentCopy = summary.recent_runs.find(
+      (run) => run.id === summary.latest_run?.id,
+    );
+    return recentCopy
+      ? reconcileBullpenConsoleRunCopies(recentCopy, summary.latest_run)
+      : summary.latest_run;
   }
   const runningRun = summary.recent_runs.find(
     (run) => run.status === "running" || run.status === "confirming",
@@ -8595,7 +8605,14 @@ function getVisibleRun(
   // console still needs the most recent completed run payload so the parent can
   // rebuild the Events Summary and Events to invest in tables with persisted LLM
   // odds/returns until a newer scan replaces them.
-  if (summary.latest_run?.status === "completed") return summary.latest_run;
+  if (summary.latest_run?.status === "completed") {
+    const recentCopy = summary.recent_runs.find(
+      (run) => run.id === summary.latest_run?.id,
+    );
+    return recentCopy
+      ? reconcileBullpenConsoleRunCopies(recentCopy, summary.latest_run)
+      : summary.latest_run;
+  }
   return summary.recent_runs.find((run) => run.status === "completed") ?? null;
 }
 
@@ -11542,7 +11559,16 @@ export function BullpenAutoRunScheduleCard({
     visibleRunCandidate && killedRunIds.has(visibleRunCandidate.id)
       ? null
       : visibleRunCandidate;
-  const latestRun = summary?.latest_run ?? null;
+  // Terminal failed/partial runs fall back to `latestRun` below rather than
+  // `getVisibleRun`. Reconcile that path too, otherwise Stage 3's compact
+  // update can replace the richer Stage 1/2 counts shown in the monitor.
+  const latestRun = summary?.latest_run
+    ? reconcileBullpenConsoleRunCopies(
+        summary.recent_runs.find((run) => run.id === summary.latest_run?.id) ??
+          summary.latest_run,
+        summary.latest_run,
+      )
+    : null;
   const workflowRun =
     visibleRun ??
     (pendingRunId && latestRun?.id !== pendingRunId ? null : latestRun);

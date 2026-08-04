@@ -242,6 +242,48 @@ test("completed stage metrics survive later compact workflow projections", async
   assert.equal(merged.stage_results[0].outputs.llm_candidate_count, 17);
 });
 
+test("duplicate summary copies retain completed metrics from the richer run", async () => {
+  const { reconcileBullpenConsoleRunCopies } = await loadModule();
+  const completedAt = "2026-08-03T10:25:10Z";
+  const evidenceRun = run({
+    ...stage("pass", {
+      active_position_rows_before_llm: 2,
+      stage1_accepted_candidate_count: 20,
+      llm_candidate_count: 21,
+      llm_completed_provider_target_count: 2,
+      llm_provider_target_count: 2,
+    }),
+    completed_at: completedAt,
+  });
+  const compactLatestRun = run({
+    ...stage("pass", {}),
+    completed_at: completedAt,
+  });
+
+  const reconciled = reconcileBullpenConsoleRunCopies(
+    evidenceRun,
+    compactLatestRun,
+  );
+
+  assert.equal(
+    reconciled.stage_results[0].outputs.active_position_rows_before_llm,
+    2,
+  );
+  assert.equal(
+    reconciled.stage_results[0].outputs.stage1_accepted_candidate_count,
+    20,
+  );
+  assert.equal(reconciled.stage_results[0].outputs.llm_candidate_count, 21);
+  assert.equal(
+    reconciled.stage_results[0].outputs.llm_completed_provider_target_count,
+    2,
+  );
+  assert.equal(
+    reconciled.stage_results[0].outputs.llm_provider_target_count,
+    2,
+  );
+});
+
 test("an authoritative recovery projection clears stale blockers and IDs", async () => {
   const { mergeBullpenConsoleRunProjection } = await loadModule();
   const existing = {
