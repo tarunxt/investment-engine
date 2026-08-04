@@ -36,6 +36,50 @@ function consensusLabel(stock: StockConsensus) {
   return `${stock.actionCounts[stock.consensusAction]}/${stock.totalSuggestions}`;
 }
 
+const BASKET_ACTION_ORDER = ["Sell All", "Trim", "Buy New", "Add more", "Hold"];
+
+function compareFinalActionables(
+  left: ReturnType<typeof buildDashboardActionRows>[number],
+  right: ReturnType<typeof buildDashboardActionRows>[number],
+) {
+  const leftIndex = BASKET_ACTION_ORDER.indexOf(left.formulaAction);
+  const rightIndex = BASKET_ACTION_ORDER.indexOf(right.formulaAction);
+  const actionComparison = (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex)
+    - (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex);
+  if (actionComparison !== 0) return actionComparison;
+
+  const leftScore = left.formulaScore;
+  const rightScore = right.formulaScore;
+  const leftMissing = leftScore === null || !Number.isFinite(leftScore);
+  const rightMissing = rightScore === null || !Number.isFinite(rightScore);
+  if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
+  if (!leftMissing && !rightMissing) {
+    const increasing = left.formulaAction === "Sell All" || left.formulaAction === "Trim";
+    const decreasing = left.formulaAction === "Buy New" || left.formulaAction === "Add more";
+    const scoreComparison = increasing
+      ? leftScore - rightScore
+      : decreasing
+        ? rightScore - leftScore
+        : 0;
+    if (scoreComparison !== 0) return scoreComparison;
+  }
+
+  return left.stock.symbol.localeCompare(right.stock.symbol, undefined, {
+    sensitivity: "base",
+    numeric: true,
+  });
+}
+
+function stageRunMeta(run: RunResponse | undefined) {
+  if (!run) return null;
+  const models = Array.from(new Set(run.run_jobs.map(({ job }) => job.model).filter(Boolean)));
+  const timestamp = new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(run.created_at));
+  return { models: models.length ? models.join(", ") : "Model unavailable", timestamp };
+}
+
 function EmptyStage() {
   return <p className="py-8 text-center text-sm text-slate-500">No stocks found in the latest completed scan.</p>;
 }
@@ -71,8 +115,16 @@ export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFor
       portfolio.market,
       buildTechnicalScanMap(runs),
       formulaConfig,
-    );
-    return { portfolio, swing, rebalance, actionables, rebalanceRun };
+    ).sort(compareFinalActionables);
+    return {
+      portfolio,
+      swing,
+      rebalance,
+      actionables,
+      rebalanceRun,
+      swingMeta: stageRunMeta(swingRun),
+      rebalanceMeta: stageRunMeta(rebalanceRun),
+    };
   }, [active, formulaConfig, runs]);
 
   return (
@@ -121,17 +173,17 @@ export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFor
           : error ? <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>
           : (
             <div className="mt-5 grid gap-4 xl:grid-cols-3">
-              <Stage title="Swing Scan" count={flow.swing.length}>
+              <Stage title="Swing Scan" count={flow.swing.length} meta={flow.swingMeta}>
                 {flow.swing.length ? flow.swing.map((stock) => (
                   <StockRow key={stock.key} name={stock.symbol} detailed={detailed} details={[`Exchange: ${stock.exchange || "—"}`, `Suggestions: ${stock.totalSuggestions}`]} />
                 )) : <EmptyStage />}
               </Stage>
-              <Stage title="Rebalance Scan" count={flow.rebalance.length}>
+              <Stage title="Rebalance Scan" count={flow.rebalance.length} meta={flow.rebalanceMeta}>
                 {flow.rebalance.length ? flow.rebalance.map((stock) => (
                   <StockRow key={stock.key} name={stock.symbol} action={stock.consensusAction} detailed={detailed} details={[`Consensus: ${consensusLabel(stock)}`, `Exchange: ${stock.exchange || "—"}`]} />
                 )) : <EmptyStage />}
               </Stage>
-              <Stage title="Final Actionables" count={flow.actionables.length}>
+              <Stage title="Final Actionables" count={flow.actionables.length} meta={flow.rebalanceMeta}>
                 {flow.actionables.length ? flow.actionables.map((row) => (
                   <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed={detailed} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${inferRebalanceMarketFromPrompt(flow.rebalanceRun?.prompt || "") ? "Latest rebalance scan" : "Rebalance scan"}`]} />
                 )) : <EmptyStage />}
@@ -144,8 +196,8 @@ export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFor
   );
 }
 
-function Stage({ title, count, children }: { title: string; count: number; children: ReactNode }) {
-  return <article className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60"><header className="flex items-center justify-between border-b border-slate-200 bg-slate-100 px-4 py-3"><h3 className="font-semibold text-slate-950">{title}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{count}</span></header><div className="divide-y divide-slate-200">{children}</div></article>;
+function Stage({ title, count, meta, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; children: ReactNode }) {
+  return <article className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60"><header className="border-b border-slate-200 bg-slate-100 px-4 py-3"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-950">{title}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{count}</span></div>{meta ? <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500"><span><b className="font-semibold text-slate-700">LLM:</b> {meta.models}</span><time><b className="font-semibold text-slate-700">Run:</b> {meta.timestamp}</time></div> : <p className="mt-1.5 text-[11px] text-slate-500">No completed run metadata</p>}</header><div className="divide-y divide-slate-200">{children}</div></article>;
 }
 
 function StockRow({ name, action, score, consensus, detailed, details = [] }: { name: string; action?: string; score?: number | null; consensus?: string; detailed: boolean; details?: string[] }) {
