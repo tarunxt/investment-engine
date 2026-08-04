@@ -3392,9 +3392,14 @@ export function buildConsensusRows(
   const grouped = new Map<string, LlmBreakupRow[]>();
   const currentValueSnapshots = buildCurrentValueSnapshotMap(portfolioSnapshot, market);
   const llmMetas = runs.flatMap(getRunJobMetas);
+  const parsedRows = runs
+    .flatMap(parseRunRows)
+    .filter((row) => Object.values(row.cells).some((value) => value.trim()));
+  const outputMetaKeys = new Set(parsedRows.map((row) => getMetaKey(row.meta)));
+  const outputLlmMetas = llmMetas.filter((meta) => outputMetaKeys.has(getMetaKey(meta)));
+  const consensusDenominator = outputMetaKeys.size || parsedRows.length;
 
-  runs.flatMap(parseRunRows).forEach((row) => {
-    if (!Object.values(row.cells).some((value) => value.trim())) return;
+  parsedRows.forEach((row) => {
     const key = getStockKey(row.cells);
     const rows = grouped.get(key) ?? [];
     rows.push(row);
@@ -3429,13 +3434,13 @@ export function buildConsensusRows(
       }, "Hold" as ActionCategory);
 
       const rowByMeta = new Map(rows.map((row) => [getMetaKey(row.meta), row]));
-      const breakupEntries = (llmMetas.length ? llmMetas : rows.map((row) => row.meta))
+      const breakupEntries = (outputLlmMetas.length ? outputLlmMetas : rows.map((row) => row.meta))
         .map((meta) => ({
           meta,
           row: rowByMeta.get(getMetaKey(meta)) ?? null,
         }))
         .sort(compareConsensusBreakupEntries);
-      const totalSuggestions = llmMetas.length || rows.length;
+      const totalSuggestions = consensusDenominator || rows.length;
 
       const first = getRepresentativeConsensusRow(rows);
       const swingScanEntries = getSwingScanBreakupEntriesForStock(allRuns, market, first);
@@ -3777,7 +3782,7 @@ export function ConsensusBreakupButton({
                   </span>
                 </h2>
                 <p className="mt-2 text-sm text-gray-500">
-                  Recommendation from every LLM included in the consolidated actionables run; missing stock mentions are marked as Not mentioned.
+                  Recommendation denominator includes only LLMs with completed or partial output in the consolidated actionables run; missing stock mentions from those outputs are marked as Not mentioned.
                 </p>
                 <PopupDragHint />
               </div>
