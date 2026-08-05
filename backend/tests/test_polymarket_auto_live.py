@@ -6973,6 +6973,33 @@ def test_candidate_filter_reasons_block_unclear_social_count_market():
     assert "Excluded unclear non-binary market." in reasons
 
 
+def test_candidate_filter_reasons_block_released_by_markets():
+    market = _market(
+        question="GPT-5.6 released by July 7, 2026?",
+        slug="gpt-56-released-by-july-7-2026",
+        theme="AI",
+    )
+
+    reasons = _evaluate_filter_reasons(market, min_liquidity_usd=0)
+
+    assert "Excluded release-by event market." in reasons
+
+
+def test_console_market_filter_reasons_block_released_by_markets():
+    market = _market(
+        question="GPT-5.6 released by July 7, 2026?",
+        slug="gpt-56-released-by-july-7-2026",
+        theme="AI",
+    )
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
+
+    assert "Excluded release-by event market." in reasons
+
+
 @pytest.mark.anyio
 async def test_trading_bots_summary_returns_four_cards_in_order(monkeypatch):
     async def fake_bullpen_state():

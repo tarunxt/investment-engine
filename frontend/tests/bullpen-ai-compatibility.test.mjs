@@ -609,6 +609,19 @@ test("Bullpen x AI scan defaults exclude tweet counts", async () => {
   );
 });
 
+test("Bullpen x AI scan defaults exclude release-by events", async () => {
+  const { DEFAULT_BULLPEN_SCAN_FILTERS } = await loadBullpenAiModule();
+
+  assert.equal(
+    DEFAULT_BULLPEN_SCAN_FILTERS["30-days"].excludeReleasedByEvents,
+    true,
+  );
+  assert.equal(
+    DEFAULT_BULLPEN_SCAN_FILTERS["end-of-month"].excludeReleasedByEvents,
+    true,
+  );
+});
+
 test("Bullpen x AI investment candidates include strong LLM Yes or No odds", async () => {
   const { isBullpenQuestionInvestmentCandidate } = await loadBullpenAiModule();
 
@@ -780,6 +793,31 @@ test("Bullpen x AI market prediction filter excludes largest-company-by-market-c
     backendScannerSource,
     /largest company in the world by market cap/,
   );
+});
+
+test("Bullpen x AI release-by filter is wired through UI, API, and backend scanner", async () => {
+  const { RELEASED_BY_EVENT_KEYWORDS } =
+    await loadBullpenScanExclusionsModule();
+  const pageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
+    "utf8",
+  );
+  const routeSource = readFileSync(
+    new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
+    "utf8",
+  );
+  const backendScannerSource = readFileSync(
+    new URL(
+      "../../backend/app/domains/polymarket_auto_live/scanner.py",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.deepEqual(RELEASED_BY_EVENT_KEYWORDS, ["released by"]);
+  assert.match(pageSource, /excludeReleasedByEvents/);
+  assert.match(routeSource, /isReleasedByEventQuestion/);
+  assert.match(backendScannerSource, /RELEASED_BY_EVENT_KEYWORDS/);
 });
 
 test("Bullpen x AI exclusions dialog includes exact-rule copy for tile drilldowns", () => {

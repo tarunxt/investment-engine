@@ -6,6 +6,12 @@ without changing frozen audit snapshots. Older snapshots that do not contain
 rejected candidate rows remain readable and show the rows that were
 historically retained.
 
+Stage 1 scan snapshots record the active Bullpen scan-filter configuration,
+including the release-by event exclusion. That filter removes markets whose
+normalized scan text contains the phrase "released by" so release-deadline
+markets are consistently represented in new run-audit snapshots without
+rewriting historical frozen snapshots.
+
 ## Purpose
 
 Bullpen Run Audit captures an immutable, reviewable record of each Bullpen AI auto-live
