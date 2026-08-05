@@ -30,6 +30,14 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
 const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
+// Auto-Live dashboard, history, and exact-run reads intentionally have backend
+// deadlines of up to four seconds. Give those routes enough time to return
+// their own compact 503/degraded response while keeping the BFF below the
+// console's five-second poll deadline.
+const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
+const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
+const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
+const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
 const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]);
 const PUBLIC_BACKEND_PATHS = new Set([
@@ -193,12 +201,28 @@ function readBoundedTimeout(
   return Math.min(Math.max(configured, 1_000), maximumMs);
 }
 
-function getProxyAttemptTimeoutMs(method: string) {
+function isBullpenAutoLiveRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live" ||
+      path.startsWith("polymarket/auto-live/"))
+  );
+}
+
+function getProxyAttemptTimeoutMs(method: string, path: string) {
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return readBoundedTimeout(
       process.env.BACKEND_PROXY_TIMEOUT_MS,
       DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS,
       30_000,
+    );
+  }
+
+  if (isBullpenAutoLiveRead(method, path)) {
+    return readBoundedTimeout(
+      process.env.BULLPEN_BACKEND_PROXY_TIMEOUT_MS,
+      DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
+      MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS,
     );
   }
 
@@ -209,9 +233,17 @@ function getProxyAttemptTimeoutMs(method: string) {
   );
 }
 
-function getProxyTotalTimeoutMs(method: string) {
+function getProxyTotalTimeoutMs(method: string, path: string) {
   if (!SAFE_FALLBACK_METHODS.has(method)) {
-    return getProxyAttemptTimeoutMs(method);
+    return getProxyAttemptTimeoutMs(method, path);
+  }
+
+  if (isBullpenAutoLiveRead(method, path)) {
+    return readBoundedTimeout(
+      process.env.BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+      DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+      MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS,
+    );
   }
 
   // Keep the same-origin BFF attempt chain inside one bounded deadline.
@@ -294,7 +326,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     );
   }
 
-  const totalTimeoutMs = getProxyTotalTimeoutMs(request.method);
+  const totalTimeoutMs = getProxyTotalTimeoutMs(request.method, path);
 
   try {
     const result = await executeBoundedApiRequest({
@@ -303,7 +335,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
       circuit: originCircuit,
       callerSignal: request.signal,
       totalBudgetMs: totalTimeoutMs,
-      primaryAttemptBudgetMs: getProxyAttemptTimeoutMs(request.method),
+      primaryAttemptBudgetMs: getProxyAttemptTimeoutMs(request.method, path),
       refreshAuthentication: backendSession
         ? (signal) => rotateBackendTokens(backendSession, signal)
         : undefined,
@@ -350,6 +382,7 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
           headers: {
             "Retry-After": "1",
             "X-Correlation-ID": correlationId,
+            "X-Backend-Proxy-Budget-Ms": String(totalTimeoutMs),
           },
         },
       );
