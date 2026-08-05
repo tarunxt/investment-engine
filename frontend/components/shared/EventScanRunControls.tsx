@@ -307,7 +307,6 @@ function getPreferredTargets(
     | undefined,
 ) {
   const compatibleTargets: ProviderModelTarget[] = [];
-  const seenKeys = new Set<string>();
   const candidates = [
     ...(defaultTargets || []),
     ...(defaultTarget ? [defaultTarget] : []),
@@ -315,10 +314,9 @@ function getPreferredTargets(
 
   for (const candidate of candidates) {
     const key = targetKey(candidate);
-    if (!candidate || !key || seenKeys.has(key)) continue;
+    if (!candidate || !key) continue;
     if (isSelectableTarget(providers, candidate, getSelectionConstraint)) {
       compatibleTargets.push(candidate);
-      seenKeys.add(key);
     }
   }
 
@@ -339,6 +337,7 @@ function getPreferredTargets(
 function getTargetsFromKeys(
   providers: ProviderInfo[],
   selectedKeys: Set<string>,
+  multipliers: Record<string, number> = {},
   getSelectionConstraint?: (
     provider: ProviderInfo,
     model: string,
@@ -361,12 +360,24 @@ function getTargetsFromKeys(
         selectedKeys.has(key) &&
         isSelectableModel(provider, model, getSelectionConstraint)
       ) {
-        targets.push({ provider: provider.name, model });
+        const repeatCount = Math.max(1, Math.floor(multipliers[key] ?? 1));
+        for (let index = 0; index < repeatCount; index += 1) {
+          targets.push({ provider: provider.name, model });
+        }
       }
     }
   }
 
   return targets;
+}
+
+function countTargetMultipliers(targets: ProviderModelTarget[]) {
+  return targets.reduce<Record<string, number>>((counts, target) => {
+    const key = targetKey(target);
+    if (!key) return counts;
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 export function EventScanRunControls({
@@ -401,18 +412,24 @@ export function EventScanRunControls({
     null,
   );
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => {
-    const lastSelection = ignoreStoredSelection ? null : readLastModelSelection();
+    const lastSelection = ignoreStoredSelection
+      ? null
+      : readLastModelSelection();
     return new Set(lastSelection?.targets ?? []);
   });
+  const [selectedMultipliers, setSelectedMultipliers] = useState<
+    Record<string, number>
+  >({});
   const [hasTouchedSelection, setHasTouchedSelection] = useState(() =>
     Boolean(!ignoreStoredSelection && readLastModelSelection()?.targets.length),
   );
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
   );
-  const [selectedMixId, setSelectedMixId] = useState(
-    () =>
-      ignoreStoredSelection ? "" : readLastModelSelection()?.selectedMixId ?? "",
+  const [selectedMixId, setSelectedMixId] = useState(() =>
+    ignoreStoredSelection
+      ? ""
+      : (readLastModelSelection()?.selectedMixId ?? ""),
   );
   const lastSelectionChangeRef = useRef("");
   const selectionChangeVersionRef = useRef(0);
@@ -575,19 +592,21 @@ export function EventScanRunControls({
       compatibleTargets.has(key),
     ),
   );
+  const preferredTargets = getPreferredTargets(
+    providers,
+    {
+      defaultTarget,
+      defaultTargets,
+      disableImplicitDefaultTarget,
+    },
+    getSelectionConstraint,
+  );
   const defaultSelectedKeys = new Set(
-    getPreferredTargets(
-      providers,
-      {
-        defaultTarget,
-        defaultTargets,
-        disableImplicitDefaultTarget,
-      },
-      getSelectionConstraint,
-    )
+    preferredTargets
       .map((target) => targetKey(target))
       .filter((key): key is string => Boolean(key)),
   );
+  const defaultMultipliers = countTargetMultipliers(preferredTargets);
   const effectiveSelectedKeys =
     selectionMode === "multiple"
       ? hasTouchedSelection
@@ -596,9 +615,13 @@ export function EventScanRunControls({
       : compatibleSelectedKeys.size > 0
         ? compatibleSelectedKeys
         : defaultSelectedKeys;
+  const effectiveMultipliers = hasTouchedSelection
+    ? selectedMultipliers
+    : defaultMultipliers;
   const activeTargets = getTargetsFromKeys(
     providers,
     effectiveSelectedKeys,
+    effectiveMultipliers,
     getSelectionConstraint,
   );
   const activeSingleTarget = activeTargets[0] ?? activeTarget;
@@ -671,6 +694,7 @@ export function EventScanRunControls({
             ? compatibleMixTargets
             : compatibleMixTargets.slice(0, 1);
         setSelectedKeys(new Set(nextTargets));
+        setSelectedMultipliers({});
         setSelectedMixId(id);
         persistLastSelection(nextTargets, id);
       }}
@@ -872,8 +896,17 @@ export function EventScanRunControls({
                           const next = new Set(current);
                           if (next.has(key)) {
                             next.delete(key);
+                            setSelectedMultipliers((currentMultipliers) => {
+                              const remaining = { ...currentMultipliers };
+                              delete remaining[key];
+                              return remaining;
+                            });
                           } else {
                             next.add(key);
+                            setSelectedMultipliers((currentMultipliers) => ({
+                              ...currentMultipliers,
+                              [key]: currentMultipliers[key] ?? 1,
+                            }));
                           }
                           persistLastSelection(next, "");
                           setSelectedMixId("");
@@ -892,6 +925,7 @@ export function EventScanRunControls({
                             markSelectionChangedByUser();
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set(compatibleTargets));
+                            setSelectedMultipliers({});
                             setSelectedMixId("");
                             persistLastSelection(compatibleTargets, "");
                           }
@@ -903,6 +937,7 @@ export function EventScanRunControls({
                             markSelectionChangedByUser();
                             setHasTouchedSelection(true);
                             setSelectedKeys(new Set());
+                            setSelectedMultipliers({});
                             setSelectedMixId("");
                             writeLastModelSelection(null);
                           }
@@ -916,6 +951,7 @@ export function EventScanRunControls({
                             setSelectedKeys(
                               new Set(webCapableCompatibleTargets),
                             );
+                            setSelectedMultipliers({});
                             setSelectedMixId("");
                             persistLastSelection(
                               webCapableCompatibleTargets,
@@ -946,10 +982,51 @@ export function EventScanRunControls({
                                 }
                               });
 
+                              setSelectedMultipliers((currentMultipliers) => {
+                                const nextMultipliers = {
+                                  ...currentMultipliers,
+                                };
+                                providerKeys.forEach((providerKey) => {
+                                  if (next.has(providerKey)) {
+                                    nextMultipliers[providerKey] =
+                                      nextMultipliers[providerKey] ?? 1;
+                                  } else {
+                                    delete nextMultipliers[providerKey];
+                                  }
+                                });
+                                return nextMultipliers;
+                              });
                               persistLastSelection(next, "");
                               setSelectedMixId("");
                               return next;
                             });
+                          }
+                        : undefined
+                    }
+                    selectedMultipliers={effectiveMultipliers}
+                    onMultiplierChange={
+                      selectionMode === "multiple"
+                        ? (key, nextValue) => {
+                            markSelectionChangedByUser();
+                            setHasTouchedSelection(true);
+                            setSelectedMixId("");
+                            setSelectedMultipliers((currentMultipliers) => {
+                              const nextMultipliers = { ...currentMultipliers };
+                              if (nextValue <= 0) {
+                                delete nextMultipliers[key];
+                              } else {
+                                nextMultipliers[key] = Math.max(1, nextValue);
+                              }
+                              return nextMultipliers;
+                            });
+                            if (nextValue <= 0) {
+                              setSelectedKeys((current) => {
+                                const next = new Set(current);
+                                next.delete(key);
+                                persistLastSelection(next, "");
+                                return next;
+                              });
+                            }
                           }
                         : undefined
                     }
