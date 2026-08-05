@@ -30,6 +30,7 @@ from app.domains.polymarket_auto_live.scanner import (
     MARKET_PREDICTION_KEYWORDS,
     MARKET_PREDICTION_PATTERNS,
     POLYMARKET_GAMMA_MARKETS_URL,
+    RELEASED_BY_EVENT_KEYWORDS,
     TWEET_COUNT_KEYWORDS,
     TWEET_COUNT_PATTERNS,
     WEATHER_KEYWORDS,
@@ -667,6 +668,8 @@ def console_market_filter_reasons(
         pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
     ):
         reasons.append("Excluded tweet-count or social-post-count market.")
+    if _includes_any(search_text, RELEASED_BY_EVENT_KEYWORDS):
+        reasons.append("Excluded release-by deadline market.")
     if is_insult_market_text(search_text):
         reasons.append("Excluded insult or name-calling market.")
     if not _is_binary_yes_no(

@@ -113,6 +113,7 @@ export type BullpenScanFilters = {
   excludeWeather: boolean;
   excludeMarketPredictions: boolean;
   excludeTweetCountQuestions: boolean;
+  excludeReleasedByEvents: boolean;
   customExcludeSportsKeywords: string[];
   customExcludeWeatherKeywords: string[];
   customExcludeMarketPredictionsKeywords: string[];
@@ -404,6 +405,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     excludeWeather: true,
     excludeMarketPredictions: true,
     excludeTweetCountQuestions: true,
+    excludeReleasedByEvents: true,
     customExcludeSportsKeywords: [],
     customExcludeWeatherKeywords: [],
     customExcludeMarketPredictionsKeywords: [],
@@ -419,6 +421,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     excludeWeather: true,
     excludeMarketPredictions: true,
     excludeTweetCountQuestions: true,
+    excludeReleasedByEvents: true,
     customExcludeSportsKeywords: [],
     customExcludeWeatherKeywords: [],
     customExcludeMarketPredictionsKeywords: [],
@@ -516,6 +519,10 @@ export function normalizeBullpenScanFilters(
       searchParams.get("excludeTweetCountQuestions"),
       defaults.excludeTweetCountQuestions,
     ),
+    excludeReleasedByEvents: parseBooleanSearchParam(
+      searchParams.get("excludeReleasedByEvents"),
+      defaults.excludeReleasedByEvents,
+    ),
     customExcludeSportsKeywords: parseKeywordListSearchParam(
       searchParams.get("customExcludeSportsKeywords"),
     ),
@@ -560,6 +567,10 @@ export function buildBullpenScanQueryParams(
   params.set(
     "excludeTweetCountQuestions",
     String(filters.excludeTweetCountQuestions),
+  );
+  params.set(
+    "excludeReleasedByEvents",
+    String(filters.excludeReleasedByEvents),
   );
   params.set(
     "customExcludeSportsKeywords",
