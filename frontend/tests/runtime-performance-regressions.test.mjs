@@ -114,7 +114,7 @@ test("hidden Bullpen legacy controls remain disabled", () => {
     bullpen,
     /NEXT_PUBLIC_RENDER_LEGACY_BULLPEN_SCAN === "true"/,
   );
-  assert.match(bullpen, /RENDER_LEGACY_SCAN_CONTROLS \? \(/);
+  assert.match(bullpen, /RENDER_LEGACY_SCAN_CONTROLS\s*\?\s*\(/);
   assert.match(bullpen, /data-performance-usable="bullpen-runtime"/);
   assert.match(sidebar, /prefetch=\{false\}/);
 });
