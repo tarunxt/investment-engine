@@ -710,6 +710,8 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
     left.excludeMarketPredictions === right.excludeMarketPredictions &&
     Boolean(left.excludeTweetCountQuestions) ===
       Boolean(right.excludeTweetCountQuestions) &&
+    Boolean(left.excludeReleasedByEvents) ===
+      Boolean(right.excludeReleasedByEvents) &&
     left.customExcludeSportsKeywords.join(",") ===
       right.customExcludeSportsKeywords.join(",") &&
     left.customExcludeWeatherKeywords.join(",") ===
@@ -4568,6 +4570,26 @@ function BullpenAiPageContent() {
                             description={
                               BULLPEN_SCAN_FILTER_DETAILS
                                 .excludeTweetCountQuestions.description
+                            }
+                            className="h-full"
+                          />
+                          <FilterToggle
+                            checked={activeFilters.excludeReleasedByEvents}
+                            onChange={(checked) =>
+                              updateActiveFilters({
+                                excludeReleasedByEvents: checked,
+                              })
+                            }
+                            onOpenDetails={() =>
+                              setOpenFilterDetailsId("excludeReleasedByEvents")
+                            }
+                            label={
+                              BULLPEN_SCAN_FILTER_DETAILS
+                                .excludeReleasedByEvents.label
+                            }
+                            description={
+                              BULLPEN_SCAN_FILTER_DETAILS
+                                .excludeReleasedByEvents.description
                             }
                             className="h-full"
                           />

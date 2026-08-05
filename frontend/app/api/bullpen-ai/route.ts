@@ -23,6 +23,7 @@ import {
   MARKET_CATEGORY_KEYWORDS,
   MARKET_PREDICTION_PATTERNS,
   MARKET_QUESTION_KEYWORDS,
+  RELEASED_BY_EVENT_KEYWORDS,
   SOCIAL_POST_COUNT_KEYWORDS,
   SOCIAL_POST_COUNT_PATTERNS,
   isLikelySportsWinOnText,
@@ -786,6 +787,13 @@ function isTweetCountQuestion(question: FilterableBullpenQuestion) {
   );
 }
 
+function isReleasedByEventQuestion(question: FilterableBullpenQuestion) {
+  return includesAnyKeyword(
+    getQuestionSearchText(question),
+    RELEASED_BY_EVENT_KEYWORDS,
+  );
+}
+
 function isInsultMarket(question: FilterableBullpenQuestion) {
   const searchText = getQuestionSearchText(question);
   return INSULT_MARKET_PATTERNS.some((pattern) => pattern.test(searchText));
@@ -1088,6 +1096,8 @@ function passesFilters(
   if (filters.excludeMarketPredictions && isMarketPredictionQuestion(question))
     return false;
   if (filters.excludeTweetCountQuestions && isTweetCountQuestion(question))
+    return false;
+  if (filters.excludeReleasedByEvents && isReleasedByEventQuestion(question))
     return false;
   if (isInsultMarket(question)) return false;
   if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;

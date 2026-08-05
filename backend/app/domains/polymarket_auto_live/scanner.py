@@ -247,6 +247,7 @@ TWEET_COUNT_KEYWORDS = (
     "truth social posts",
     "truths",
 )
+RELEASED_BY_EVENT_KEYWORDS = ("released by",)
 TWEET_COUNT_PATTERNS = (
     re.compile(r"\bhow many (?:tweets?|posts?|truths?)\b", re.IGNORECASE),
     re.compile(r"\bnumber of (?:tweets?|posts?|truths?)\b", re.IGNORECASE),
@@ -536,6 +537,8 @@ def _evaluate_filter_reasons(
         pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
     ):
         reasons.append("Excluded tweet-count or social-post-count market.")
+    if _includes_any(search_text, RELEASED_BY_EVENT_KEYWORDS):
+        reasons.append("Excluded release-by event market.")
     if is_insult_market_text(search_text):
         reasons.append("Excluded insult or name-calling market.")
     if not _is_binary_yes_no(
