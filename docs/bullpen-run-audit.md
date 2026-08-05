@@ -290,6 +290,11 @@ and timeline summaries.
 Source scan inputs, filter context, candidate inputs, active-position carry-over, and
 pre-LLM review rows.
 
+Stage 1 scan filtering excludes release-deadline markets whose normalized event
+search text contains `released by`; run-audit snapshots should preserve the
+resulting rejected/accepted candidate counts without rewriting historical frozen
+snapshots.
+
 For auto-live console-profile runs, Stage 1 background Bullpen CLI reads are
 expected to stay non-interactive: discover, positions, and balance refreshes
 must use short worker-safe timeouts and must not block on manual Bullpen login

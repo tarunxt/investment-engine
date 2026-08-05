@@ -3,6 +3,7 @@ export type BullpenScanFilterDetailId =
   | "excludeWeather"
   | "excludeMarketPredictions"
   | "excludeTweetCountQuestions"
+  | "excludeReleasedByEvents"
   | "onlyBinaryYesNo";
 
 export type BullpenScanFilterDetail = {
@@ -248,6 +249,8 @@ export const MARKET_PREDICTION_PATTERNS = [
   /\blargest company by market cap\b/i,
 ] as const;
 
+export const RELEASED_BY_EVENT_KEYWORDS = ["released by"] as const;
+
 export const BULLPEN_SCAN_FILTER_DETAILS: Record<
   BullpenScanFilterDetailId,
   BullpenScanFilterDetail
@@ -360,6 +363,26 @@ export const BULLPEN_SCAN_FILTER_DETAILS: Record<
     excludedEventExamples: [
       "How many tweets will someone post this week?",
       "Will a person make at least 10 Truth Social posts this month?",
+    ],
+  },
+  excludeReleasedByEvents: {
+    id: "excludeReleasedByEvents",
+    label: "Exclude release-by events",
+    description:
+      "Remove markets whose event or question name contains the phrase released by, such as product launch deadline markets.",
+    dialogEyebrow: "Release-by exclusion",
+    title: "How the release-by filter excludes markets",
+    matcherScope:
+      "Search text = question + category/tags/event category + slug + outcome labels, normalized to lowercase and matched for release-by phrases.",
+    algorithmSteps: [
+      "Build a normalized search string from the market question, category, slug, outcome labels, and supported nested event/category metadata.",
+      "Look for the phrase released by anywhere in that normalized string.",
+      "Exclude the market as soon as the phrase is present so deadline-style release markets do not enter Bullpen scans.",
+    ],
+    keywordGroups: [RELEASED_BY_EVENT_KEYWORDS.join(", ")],
+    excludedEventExamples: [
+      "Will GPT-6 be released by August 21, 2026?",
+      "Will a product, model, or feature be released by a stated deadline?",
     ],
   },
   onlyBinaryYesNo: {
