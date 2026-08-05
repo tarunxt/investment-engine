@@ -9606,6 +9606,11 @@ export function BullpenAutoRunScheduleCard({
   );
   const [action, setAction] = useState<ActionState>(null);
   const actionInFlightRef = useRef<ActionState>(null);
+  const [optimisticSchedulerState, setOptimisticSchedulerState] = useState<{
+    running: boolean;
+    paused: boolean;
+    message: string;
+  } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<ErrorState | null>(null);
   const [pendingRunId, setPendingRunId] = useState<string | null>(null);
@@ -11211,7 +11216,19 @@ export function BullpenAutoRunScheduleCard({
           String(refreshMinutes),
         ),
       );
+      setOptimisticSchedulerState({
+        running: true,
+        paused: false,
+        message: startWasNow
+          ? "Auto runs are enabling and the first run is queueing…"
+          : "Auto runs are enabling. Waiting for backend status confirmation…",
+      });
       const startedState = await apiService.startBullpenAutoLive();
+      setOptimisticSchedulerState({
+        running: true,
+        paused: Boolean(startedState.paused),
+        message: "Auto runs enabled. Refreshing confirmed backend status…",
+      });
       void refreshPersistedAutoRunStatus();
       setSummary((currentSummary) =>
         currentSummary
@@ -11258,6 +11275,7 @@ export function BullpenAutoRunScheduleCard({
         );
       }
     } catch (nextError) {
+      setOptimisticSchedulerState(null);
       setError(normalizeError(nextError));
     } finally {
       releaseClaimedAction("enable");
@@ -11387,13 +11405,24 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
+      setOptimisticSchedulerState({
+        running: false,
+        paused: false,
+        message: "Stopping auto runs and cancelling active backend work…",
+      });
       await apiService.stopBullpenAutoLive();
+      setOptimisticSchedulerState({
+        running: false,
+        paused: false,
+        message: "Auto runs stopped. Refreshing confirmed backend status…",
+      });
       void refreshPersistedAutoRunStatus();
       void loadSummary({ preserveLoading: true });
       setNotice(
         "Auto runs stopped. Any active Auto-Live run was cancelled immediately.",
       );
     } catch (nextError) {
+      setOptimisticSchedulerState(null);
       setError(normalizeError(nextError));
     } finally {
       releaseClaimedAction("stop");
@@ -11567,11 +11596,25 @@ export function BullpenAutoRunScheduleCard({
     setError(null);
 
     try {
+      setOptimisticSchedulerState({
+        running: true,
+        paused: !shouldResume,
+        message: shouldResume
+          ? "Resuming auto runs. Waiting for backend confirmation…"
+          : "Pausing auto runs at the next safe backend checkpoint…",
+      });
       if (shouldResume) {
         await apiService.resumeBullpenAutoLive();
       } else {
         await apiService.pauseBullpenAutoLive();
       }
+      setOptimisticSchedulerState({
+        running: true,
+        paused: !shouldResume,
+        message: shouldResume
+          ? "Auto runs resumed. Refreshing confirmed backend status…"
+          : "Auto runs paused. Refreshing confirmed backend status…",
+      });
       void refreshPersistedAutoRunStatus();
       void loadSummary({ preserveLoading: true });
       setNotice(
@@ -11580,6 +11623,7 @@ export function BullpenAutoRunScheduleCard({
           : "Auto-Live paused. The active run will stop before any new backend work starts where runtime guards are checked.",
       );
     } catch (nextError) {
+      setOptimisticSchedulerState(null);
       setError(normalizeError(nextError));
     } finally {
       releaseClaimedAction(nextAction);
@@ -11594,7 +11638,17 @@ export function BullpenAutoRunScheduleCard({
     resetActiveAutoRunUi();
 
     try {
+      setOptimisticSchedulerState({
+        running: false,
+        paused: false,
+        message: "Killing the active run and stopping the scheduler…",
+      });
       await apiService.stopBullpenAutoLive();
+      setOptimisticSchedulerState({
+        running: false,
+        paused: false,
+        message: "Active run killed. Refreshing confirmed backend status…",
+      });
       void refreshPersistedAutoRunStatus();
       void (loadSummary({
         preserveLoading: true,
@@ -11611,6 +11665,7 @@ export function BullpenAutoRunScheduleCard({
         "Auto-Live stopped. Active backend work was cancelled immediately.",
       );
     } catch (nextError) {
+      setOptimisticSchedulerState(null);
       setError(normalizeError(nextError));
     } finally {
       releaseClaimedAction("kill-run");
@@ -11623,9 +11678,11 @@ export function BullpenAutoRunScheduleCard({
   // Once the lightweight persisted read has resolved, it is fresher and more
   // authoritative for scheduler controls than the deferred diagnostics
   // summary. Never let a stale summary keep Start/Stop or Pause labels wrong.
-  const autoRunActive = visiblePersistedAutoRunStatus
+  const confirmedAutoRunActive = visiblePersistedAutoRunStatus
     ? persistedAutoRunIsActive
     : isAutoRunActive(summary);
+  const autoRunActive =
+    optimisticSchedulerState?.running ?? confirmedAutoRunActive;
   const consoleProfileSelected = visiblePersistedAutoRunStatus
     ? visiblePersistedAutoRunStatus.settings.strategy_profile ===
       CONSOLE_PROFILE_ID
@@ -11639,8 +11696,12 @@ export function BullpenAutoRunScheduleCard({
     visiblePersistedAutoRunStatus?.state.next_run_at ?? summary?.state.next_run_at;
   const schedulerLastRunAt =
     visiblePersistedAutoRunStatus?.state.last_run_at ?? summary?.state.last_run_at;
-  const schedulerPaused =
+  const confirmedSchedulerPaused =
     visiblePersistedAutoRunStatus?.state.paused ?? summary?.state.paused ?? false;
+  const schedulerPaused =
+    optimisticSchedulerState?.paused ?? confirmedSchedulerPaused;
+  const scheduleSettingsPending =
+    scheduleSettingsDirty || scheduleSettingsSaveBusy;
   const visibleRunCandidate = getVisibleRun(summary, pendingRunId);
   const visibleRun =
     visibleRunCandidate && killedRunIds.has(visibleRunCandidate.id)
@@ -12119,6 +12180,16 @@ export function BullpenAutoRunScheduleCard({
   }, [shouldTickTimers, runTimerStartedAt]);
 
   useEffect(() => {
+    if (!optimisticSchedulerState || !visiblePersistedAutoRunStatus) return;
+    if (
+      visiblePersistedAutoRunStatus.state.running === optimisticSchedulerState.running &&
+      visiblePersistedAutoRunStatus.state.paused === optimisticSchedulerState.paused
+    ) {
+      window.queueMicrotask(() => setOptimisticSchedulerState(null));
+    }
+  }, [optimisticSchedulerState, visiblePersistedAutoRunStatus]);
+
+  useEffect(() => {
     if (!workflowSettled) return;
     window.queueMicrotask(() => {
       if (pendingRunId !== null) {
@@ -12336,6 +12407,20 @@ export function BullpenAutoRunScheduleCard({
                 )}
               </Button>
             )}
+            {optimisticSchedulerState ? (
+              <div
+                className="basis-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold leading-5 text-sky-900 shadow-sm"
+                aria-live="polite"
+              >
+                <span className="inline-flex items-center gap-2">
+                  <Loader2
+                    className="h-3.5 w-3.5 animate-spin"
+                    aria-hidden="true"
+                  />
+                  {optimisticSchedulerState.message}
+                </span>
+              </div>
+            ) : null}
             {startNowProgress ? (
               <div
                 className="basis-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 shadow-sm"
@@ -12515,9 +12600,15 @@ export function BullpenAutoRunScheduleCard({
               </div>
             </div>
           </div>
-          {scheduleSettingsSaveBusy ? (
-            <p className="mt-3 text-right text-xs font-semibold text-slate-500">
-              Saving auto-run settings…
+          {scheduleSettingsPending ? (
+            <p
+              className="mt-3 inline-flex w-full items-center justify-end gap-2 text-right text-xs font-semibold text-slate-500"
+              aria-live="polite"
+            >
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              {scheduleSettingsSaveBusy
+                ? "Saving auto-run settings…"
+                : "Auto-run setting change queued…"}
             </p>
           ) : null}
         </div>
@@ -12537,7 +12628,13 @@ export function BullpenAutoRunScheduleCard({
               ) : (
                 <PauseCircle className="mr-2 h-4 w-4" />
               )}
-              {schedulerPaused ? "Resume" : "Pause"}
+              {action === "pause-run"
+                ? "Pausing…"
+                : action === "resume-run"
+                  ? "Resuming…"
+                  : schedulerPaused
+                    ? "Resume"
+                    : "Pause"}
             </Button>
             <Button
               type="button"
@@ -12550,7 +12647,7 @@ export function BullpenAutoRunScheduleCard({
               ) : (
                 <X className="mr-2 h-4 w-4" />
               )}
-              Kill
+              {action === "kill-run" ? "Killing…" : "Kill"}
             </Button>
           </div>
         ) : null}
