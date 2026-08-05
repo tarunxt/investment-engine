@@ -1468,6 +1468,19 @@ function uniqueTargetKeys(keys: string[]) {
   return unique;
 }
 
+function getSelectionMultipliers(keys: string[]) {
+  return keys.reduce<Record<string, number>>((counts, key) => {
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function expandSelectionKeys(selectedKeys: Set<string>, multipliers: Record<string, number>) {
+  return Array.from(selectedKeys).flatMap((key) =>
+    Array.from({ length: Math.max(1, multipliers[key] ?? 1) }, () => key),
+  );
+}
+
 function getCompatibleTargets(providers: ProviderInfo[]) {
   return providers.flatMap((provider) =>
     provider.models
@@ -1522,7 +1535,7 @@ function getSavedStageTargets(
   const compatibleKeys = new Set(
     getCompatibleTargets(providers).map(targetKey),
   );
-  const savedTargets = uniqueTargetKeys(readStageLlmSelection(stage))
+  const savedTargets = readStageLlmSelection(stage)
     .filter((key) => compatibleKeys.has(key))
     .map(parseTargetKey)
     .filter((target): target is ProviderModelTarget => Boolean(target));
@@ -1563,9 +1576,7 @@ function buildRunPayload({
   runMetadata?: AutoRebalanceRunMetadata | null;
   scanLabel?: "Swing Scan" | "Rebalance Scan" | "Technical Scan";
 }): RunCreate {
-  const uniqueTargets = uniqueTargetKeys(targets.map(targetKey))
-    .map(parseTargetKey)
-    .filter((target): target is ProviderModelTarget => Boolean(target));
+  const uniqueTargets = targets;
 
   const metadata = runMetadata
     ? {
@@ -4513,6 +4524,8 @@ function StageLlmSelectorDialog({
   onClear,
   onResetDefaults,
   onReplaceSelection,
+  selectedMultipliers,
+  onMultiplierChange,
   onClose,
   lastRunCostInr,
   historicalEstimatedCostInrByTarget = {},
@@ -4527,6 +4540,8 @@ function StageLlmSelectorDialog({
   onClear: () => void;
   onResetDefaults: () => void;
   onReplaceSelection: (keys: Set<string>) => void;
+  selectedMultipliers: Record<string, number>;
+  onMultiplierChange: (key: string, nextValue: number) => void;
   onClose: () => void;
   lastRunCostInr?: number | null;
   historicalEstimatedCostInrByTarget?: HistoricalLlmCostMapInr;
@@ -4789,6 +4804,8 @@ function StageLlmSelectorDialog({
           <LlmModelSelectionPanel
             providers={providers}
             selectedKeys={selectedKeys}
+            selectedMultipliers={singleSelect ? undefined : selectedMultipliers}
+            onMultiplierChange={singleSelect ? undefined : onMultiplierChange}
             selectionMode={singleSelect ? "single" : "multiple"}
             emptyMessage="Loading provider models..."
             showBulkActions={!singleSelect}
@@ -4998,6 +5015,7 @@ export function RebalanceWorkflowSections({
   const [llmDialogSelectedKeys, setLlmDialogSelectedKeys] = useState<
     Set<string>
   >(new Set());
+  const [llmDialogMultipliers, setLlmDialogMultipliers] = useState<Record<string, number>>({});
   const [llmDialogHistoricalCosts, setLlmDialogHistoricalCosts] =
     useState<HistoricalLlmCostMapInr>({});
   const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
@@ -6565,6 +6583,7 @@ ${zerodhaExecutionMode === "direct_market"
     setLlmDialogPortfolio(portfolio);
     setLlmDialogProviders([]);
     setLlmDialogSelectedKeys(new Set());
+    setLlmDialogMultipliers({});
     setLlmDialogHistoricalCosts({});
     try {
       const [providers, historicalCosts] = await Promise.all([
@@ -6579,8 +6598,10 @@ ${zerodhaExecutionMode === "direct_market"
         loadStageHistoricalCostMapInr(stage, portfolio, usdInrRate),
       ]);
       const targets = getSavedStageTargets(stage, providers);
+      const targetKeys = targets.map(targetKey);
       setLlmDialogProviders(providers);
-      setLlmDialogSelectedKeys(new Set(targets.map(targetKey)));
+      setLlmDialogSelectedKeys(new Set(targetKeys));
+      setLlmDialogMultipliers(getSelectionMultipliers(targetKeys));
       setLlmDialogHistoricalCosts(historicalCosts);
     } catch (error) {
       setLlmDialogStage(null);
@@ -6734,10 +6755,12 @@ ${zerodhaExecutionMode === "direct_market"
   const persistLlmDialogSelection = useCallback(
     (nextKeys: Set<string>) => {
       if (!llmDialogStage) return;
-      writeStageLlmSelection(llmDialogStage, [...nextKeys]);
+      const expandedKeys = expandSelectionKeys(nextKeys, llmDialogMultipliers);
+      writeStageLlmSelection(llmDialogStage, expandedKeys);
       setLlmDialogSelectedKeys(nextKeys);
+      setLlmDialogMultipliers(getSelectionMultipliers(expandedKeys));
     },
-    [llmDialogStage],
+    [llmDialogMultipliers, llmDialogStage],
   );
 
   const toggleLlmTarget = useCallback(
@@ -6758,25 +6781,49 @@ ${zerodhaExecutionMode === "direct_market"
   );
 
   const selectAllLlmTargets = useCallback(() => {
-    persistLlmDialogSelection(
-      new Set(getCompatibleTargets(llmDialogProviders).map(targetKey)),
-    );
-  }, [llmDialogProviders, persistLlmDialogSelection]);
+    if (!llmDialogStage) return;
+    const keys = getCompatibleTargets(llmDialogProviders).map(targetKey);
+    writeStageLlmSelection(llmDialogStage, keys);
+    setLlmDialogSelectedKeys(new Set(keys));
+    setLlmDialogMultipliers(getSelectionMultipliers(keys));
+  }, [llmDialogProviders, llmDialogStage]);
 
   const clearLlmTargets = useCallback(() => {
-    persistLlmDialogSelection(new Set());
-  }, [persistLlmDialogSelection]);
+    if (!llmDialogStage) return;
+    writeStageLlmSelection(llmDialogStage, []);
+    setLlmDialogSelectedKeys(new Set());
+    setLlmDialogMultipliers({});
+  }, [llmDialogStage]);
 
   const resetDefaultLlmTargets = useCallback(() => {
     if (!llmDialogStage) return;
-    persistLlmDialogSelection(
-      new Set(
-        getDefaultStageTargets(llmDialogStage, llmDialogProviders).map(
-          targetKey,
-        ),
-      ),
-    );
-  }, [llmDialogProviders, llmDialogStage, persistLlmDialogSelection]);
+    const keys = getDefaultStageTargets(llmDialogStage, llmDialogProviders).map(targetKey);
+    writeStageLlmSelection(llmDialogStage, keys);
+    setLlmDialogSelectedKeys(new Set(keys));
+    setLlmDialogMultipliers(getSelectionMultipliers(keys));
+  }, [llmDialogProviders, llmDialogStage]);
+
+  const changeLlmMultiplier = useCallback(
+    (key: string, nextValue: number) => {
+      if (!llmDialogStage) return;
+      const nextSelectedKeys = new Set(llmDialogSelectedKeys);
+      const nextMultipliers = { ...llmDialogMultipliers };
+      if (nextValue <= 0) {
+        nextSelectedKeys.delete(key);
+        delete nextMultipliers[key];
+      } else {
+        nextSelectedKeys.add(key);
+        nextMultipliers[key] = Math.floor(nextValue);
+      }
+      writeStageLlmSelection(
+        llmDialogStage,
+        expandSelectionKeys(nextSelectedKeys, nextMultipliers),
+      );
+      setLlmDialogSelectedKeys(nextSelectedKeys);
+      setLlmDialogMultipliers(nextMultipliers);
+    },
+    [llmDialogMultipliers, llmDialogSelectedKeys, llmDialogStage],
+  );
 
   const navigateForStage = useCallback(
     (
@@ -8112,6 +8159,8 @@ ${zerodhaExecutionMode === "direct_market"
         onClear={clearLlmTargets}
         onResetDefaults={resetDefaultLlmTargets}
         onReplaceSelection={persistLlmDialogSelection}
+        selectedMultipliers={llmDialogMultipliers}
+        onMultiplierChange={changeLlmMultiplier}
         lastRunCostInr={
           llmDialogStage && llmDialogPortfolio
             ? getStageCostInr(

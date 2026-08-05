@@ -1,6 +1,6 @@
 "use client";
 
-import { Check } from "lucide-react";
+import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -23,6 +23,8 @@ interface LlmModelSelectionPanelProps {
   modelMixControls?: ReactNode;
   showBulkActions?: boolean;
   onToggle: (key: string) => void;
+  selectedMultipliers?: Record<string, number>;
+  onMultiplierChange?: (key: string, nextValue: number) => void;
   onSelectAll?: () => void;
   onClear?: () => void;
   onSelectWebCapable?: () => void;
@@ -133,6 +135,8 @@ export function LlmModelSelectionPanel({
   modelMixControls,
   showBulkActions = true,
   onToggle,
+  selectedMultipliers,
+  onMultiplierChange,
   onSelectAll,
   onClear,
   onSelectWebCapable,
@@ -164,6 +168,7 @@ export function LlmModelSelectionPanel({
         (summary, model) => {
           const key = getModelKey(provider.name, model);
           if (!selectedKeys.has(key)) return summary;
+          const multiplier = Math.max(1, selectedMultipliers?.[key] ?? 1);
 
           const historicalCostInr = getModelHistoricalCostInr(
             provider,
@@ -171,12 +176,12 @@ export function LlmModelSelectionPanel({
             getHistoricalCostInr,
           );
           return {
-            selectedCount: summary.selectedCount + 1,
+            selectedCount: summary.selectedCount + multiplier,
             estimatedCostInr:
               summary.estimatedCostInr +
-              getModelEstimatedCostInr(provider, model, getEstimatedCostInr),
+              getModelEstimatedCostInr(provider, model, getEstimatedCostInr) * multiplier,
             historicalCostInr:
-              summary.historicalCostInr + (historicalCostInr ?? 0),
+              summary.historicalCostInr + (historicalCostInr ?? 0) * multiplier,
           };
         },
         { selectedCount: 0, estimatedCostInr: 0, historicalCostInr: 0 },
@@ -373,6 +378,7 @@ export function LlmModelSelectionPanel({
                     {provider.models.map((model) => {
                       const key = getModelKey(provider.name, model);
                       const selected = selectedKeys.has(key);
+                      const multiplier = Math.max(1, selectedMultipliers?.[key] ?? 1);
                       const selectionConstraint = getSelectionConstraint?.(
                         provider,
                         model,
@@ -492,7 +498,38 @@ export function LlmModelSelectionPanel({
                               ) : null}
                             </span>
                           </span>
-                          {selected ? (
+                          {selected && selectionMode === "multiple" && onMultiplierChange ? (
+                            <span className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-indigo-200 bg-white px-2 py-1 text-xs font-extrabold text-indigo-700 shadow-sm" onClick={(event) => event.preventDefault()}>
+                              <span aria-hidden="true">×</span>
+                              <span className="min-w-4 text-center">{multiplier}</span>
+                              <span className="flex flex-col">
+                                <button
+                                  type="button"
+                                  className="rounded text-indigo-600 hover:bg-indigo-50"
+                                  aria-label={`Increase ${model} multiplier`}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onMultiplierChange(key, multiplier + 1);
+                                  }}
+                                >
+                                  <ChevronUp className="size-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded text-indigo-600 hover:bg-indigo-50"
+                                  aria-label={`Decrease ${model} multiplier`}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    onMultiplierChange(key, multiplier - 1);
+                                  }}
+                                >
+                                  <ChevronDown className="size-3" />
+                                </button>
+                              </span>
+                            </span>
+                          ) : selected ? (
                             <Check className="size-3.5 shrink-0 text-indigo-600" />
                           ) : null}
                         </label>
