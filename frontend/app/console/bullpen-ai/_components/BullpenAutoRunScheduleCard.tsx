@@ -949,6 +949,43 @@ function formatDateTimeLocalValue(date: Date) {
   return `${byType.year}-${byType.month}-${byType.day}T${byType.hour}:${byType.minute}`;
 }
 
+function parseScheduleInputToDateTimeLocalValue(value: string) {
+  const normalized = value.trim();
+  if (!normalized || normalized.toLowerCase() === "now") {
+    return formatDateTimeLocalValue(new Date());
+  }
+
+  const match = normalized.replace(",", "").match(
+    /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s+(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/,
+  );
+  if (!match) {
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime())
+      ? formatDateTimeLocalValue(new Date())
+      : formatDateTimeLocalValue(parsed);
+  }
+
+  const monthIndex = new Date(`${match[5]} 1, 2000`).getMonth();
+  if (Number.isNaN(monthIndex)) return formatDateTimeLocalValue(new Date());
+
+  const hour = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[4], 10);
+  const year = Number.parseInt(match[6], 10);
+  if (![hour, minute, day, year].every(Number.isFinite)) {
+    return formatDateTimeLocalValue(new Date());
+  }
+
+  const datePart = `${year}-${String(monthIndex + 1).padStart(2, "0")}-${String(
+    day,
+  ).padStart(2, "0")}`;
+  const timePart = `${String(hour).padStart(2, "0")}:${String(minute).padStart(
+    2,
+    "0",
+  )}`;
+  return `${datePart}T${timePart}`;
+}
+
 function formatScheduleInputFromDateTimeLocal(value: string) {
   if (!value) return "";
   const [datePart, timePart] = value.split("T");
@@ -9645,6 +9682,7 @@ export function BullpenAutoRunScheduleCard({
   const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
     useState(false);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
+  const [schedulePickerValue, setSchedulePickerValue] = useState("");
   const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
   const [scheduleSettingsDirty, setScheduleSettingsDirty] = useState(false);
   const [scheduleSettingsSaveBusy, setScheduleSettingsSaveBusy] =
@@ -10040,6 +10078,7 @@ export function BullpenAutoRunScheduleCard({
       60;
     window.queueMicrotask(() => {
       setScheduleStartInput(nextStart);
+      setSchedulePickerValue(parseScheduleInputToDateTimeLocalValue(nextStart));
       setScheduleRefreshInput(String(nextRefresh));
       setScheduleSavedSummary(
         buildScheduleSummary(nextStart, String(nextRefresh)),
@@ -12359,7 +12398,11 @@ export function BullpenAutoRunScheduleCard({
                   type="text"
                   value={scheduleStartInput}
                   onChange={(event) => {
-                    setScheduleStartInput(event.target.value);
+                    const nextStart = event.target.value;
+                    setScheduleStartInput(nextStart);
+                    setSchedulePickerValue(
+                      parseScheduleInputToDateTimeLocalValue(nextStart),
+                    );
                     setScheduleSettingsDirty(true);
                   }}
                   disabled={action !== null}
@@ -12371,6 +12414,7 @@ export function BullpenAutoRunScheduleCard({
                   variant="outline"
                   onClick={() => {
                     setScheduleStartInput("Now");
+                    setSchedulePickerValue(formatDateTimeLocalValue(new Date()));
                     setScheduleSettingsDirty(true);
                   }}
                   disabled={action !== null}
@@ -12380,7 +12424,12 @@ export function BullpenAutoRunScheduleCard({
                 </Button>
                 <button
                   type="button"
-                  onClick={() => setIsSchedulePickerOpen((open) => !open)}
+                  onClick={() => {
+                    setSchedulePickerValue(
+                      parseScheduleInputToDateTimeLocalValue(scheduleStartInput),
+                    );
+                    setIsSchedulePickerOpen((open) => !open);
+                  }}
                   disabled={action !== null}
                   className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-300"
                   aria-label="Open auto-run date and time picker"
@@ -12391,12 +12440,20 @@ export function BullpenAutoRunScheduleCard({
                   <div className="absolute left-0 top-12 z-30 w-[22rem] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
                     <input
                       type="datetime-local"
-                      defaultValue={formatDateTimeLocalValue(new Date())}
-                      onChange={(event) => {
+                      value={schedulePickerValue}
+                      onInput={(event) => {
+                        const nextValue = event.currentTarget.value;
+                        setSchedulePickerValue(nextValue);
                         setScheduleStartInput(
-                          formatScheduleInputFromDateTimeLocal(
-                            event.target.value,
-                          ),
+                          formatScheduleInputFromDateTimeLocal(nextValue),
+                        );
+                        setScheduleSettingsDirty(true);
+                      }}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setSchedulePickerValue(nextValue);
+                        setScheduleStartInput(
+                          formatScheduleInputFromDateTimeLocal(nextValue),
                         );
                         setScheduleSettingsDirty(true);
                       }}
@@ -12408,6 +12465,9 @@ export function BullpenAutoRunScheduleCard({
                         variant="outline"
                         onClick={() => {
                           setScheduleStartInput("Now");
+                          setSchedulePickerValue(
+                            formatDateTimeLocalValue(new Date()),
+                          );
                           setScheduleSettingsDirty(true);
                           setIsSchedulePickerOpen(false);
                         }}
