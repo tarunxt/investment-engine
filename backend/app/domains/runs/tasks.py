@@ -10,7 +10,10 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.auth.models import User
-from app.domains.runs.final_actionable_history import backfill_user_history
+from app.domains.runs.final_actionable_history import (
+    backfill_user_history,
+    final_actionable_history_backfill_key,
+)
 from app.domains.runs.models import Run, RunJob
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
@@ -27,10 +30,18 @@ def _mark_final_actionable_history_backfill_complete(user_id: int) -> None:
     client = redis.from_url(settings.redis_url, decode_responses=True)
     try:
         client.set(
-            f"final_actionable_history_backfill:{user_id}",
+            final_actionable_history_backfill_key(user_id),
             "completed",
             ex=FINAL_ACTIONABLE_HISTORY_BACKFILL_TTL_SECONDS,
         )
+    finally:
+        client.close()
+
+
+def _clear_final_actionable_history_backfill_marker(user_id: int) -> None:
+    client = redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        client.delete(final_actionable_history_backfill_key(user_id))
     finally:
         client.close()
 
@@ -326,6 +337,10 @@ def send_run_completion_email_task(self, run_id: int) -> None:
     queue="ai",
 )
 def backfill_final_actionable_history_task(self, user_id: int) -> dict[str, int]:
+    # Celery imports task modules without necessarily importing every domain
+    # model. Register the complete SQLAlchemy mapper graph before querying.
+    import app.models  # noqa: F401
+
     with SyncSessionLocal() as db:
         try:
             result = backfill_user_history(db, user_id=user_id)
@@ -335,4 +350,6 @@ def backfill_final_actionable_history_task(self, user_id: int) -> dict[str, int]
         except Exception as exc:
             db.rollback()
             logger.exception("Final actionable history backfill failed for user %s", user_id)
+            if self.request.retries >= self.max_retries:
+                _clear_final_actionable_history_backfill_marker(user_id)
             raise self.retry(exc=exc)
