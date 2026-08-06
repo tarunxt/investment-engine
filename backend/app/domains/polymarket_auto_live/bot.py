@@ -1042,6 +1042,14 @@ class BullpenAutoLiveBot:
         triggered_by: str = "manual",
         request: BullpenAutoLiveRunOnceRequest | None = None,
     ) -> BullpenAutoLiveRun:
+        """Canonical full Auto-Live run template for every trigger source.
+
+        Calendar/custom schedules, the fixed-slot fallback schedule, and the
+        immediate UI action must call this method. ``triggered_by`` records how
+        the run was requested; it must not select a different execution path.
+        A request context remains supported for explicit operator stage actions.
+        """
+
         from app.domains.polymarket_auto_live.tasks import execute_polymarket_auto_live_run
 
         async with AsyncSessionLocal() as session:
@@ -1098,6 +1106,13 @@ class BullpenAutoLiveBot:
                 return run
 
             if running_run is not None:
+                if triggered_by == "scheduler":
+                    logger.info(
+                        "Scheduled Auto-Live trigger for user %s reused active run %s.",
+                        self.user_id,
+                        running_run.id,
+                    )
+                    return running_run
                 run = BullpenAutoLiveRun(
                     id=requested_run_id or str(uuid4()),
                     triggered_by=triggered_by,  # type: ignore[arg-type]

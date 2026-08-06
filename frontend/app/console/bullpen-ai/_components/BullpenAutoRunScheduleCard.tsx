@@ -11301,8 +11301,7 @@ export function BullpenAutoRunScheduleCard({
           : currentSummary,
       );
       if (startWasNow) {
-        const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
-        const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+        const run = await apiService.runBullpenAutoLiveOnce();
         setPendingRunId(run.id);
         setRunNowStartedAt(run.started_at ?? new Date().toISOString());
       }
@@ -11408,15 +11407,11 @@ export function BullpenAutoRunScheduleCard({
       await apiService.startBullpenAutoLive();
       void refreshPersistedAutoRunStatus();
       if (abortIfStartCancelled()) return;
-      setStartNowProgress(
-        "Building the latest Bullpen candidate snapshot for this run…",
-      );
-      const runNowRequest = (await buildRunNowRequest?.()) ?? undefined;
       if (abortIfStartCancelled()) return;
       setStartNowProgress(
-        "Stage 1 Bullpen Scan snapshot is ready. Queueing the Auto Run worker now…",
+        "Queueing the canonical Auto Run worker now…",
       );
-      const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+      const run = await apiService.runBullpenAutoLiveOnce();
       if (abortIfStartCancelled()) return;
       setPendingRunId(run.id);
       setRunNowStartedAt(run.started_at ?? new Date().toISOString());

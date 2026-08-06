@@ -366,7 +366,14 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   assert.match(autoRunCardSource, /Start Auto Run Now/);
   assert.match(autoRunCardSource, /handleStartAutoRunNow/);
   assert.match(autoRunCardSource, /const normalizedStart = startWasNow \? "" : scheduleStartInput\.trim\(\);/);
-  assert.match(autoRunCardSource, /runBullpenAutoLiveOnce\(runNowRequest\)/);
+  assert.match(
+    autoRunCardSource,
+    /async function handleStartAutoRunNow\(\)[\s\S]*?startBullpenAutoLive\(\);[\s\S]*?runBullpenAutoLiveOnce\(\);/,
+  );
+  assert.match(
+    autoRunCardSource,
+    /if \(startWasNow\) \{[\s\S]*?runBullpenAutoLiveOnce\(\);/,
+  );
   assert.match(
     autoRunCardSource,
     /const consoleLlmTargets = startWasNow\s*\?\s*await ensureCanonicalStage2LlmTargets\(\{\s*requireNonEmpty:\s*true,\s*\}\)\s*:\s*await ensureCanonicalStage2LlmTargets\(\);/,
