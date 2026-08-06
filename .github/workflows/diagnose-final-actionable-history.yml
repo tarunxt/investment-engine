@@ -36,102 +36,102 @@ jobs:
               | grep -i -E 'final actionable|backfill_final_actionable|history backfill' || true
 
             echo "==> Database diagnosis and synchronous idempotent backfill"
-            sudo -u "$APP_USER" -H env APP_ROOT="$APP_ROOT" bash -lc '
+            sudo -u "$APP_USER" -H env APP_ROOT="$APP_ROOT" bash -c '
               set -euo pipefail
               set -a
               source /etc/investor/backend.env
               set +a
               cd "$APP_ROOT/backend"
-              .venv/bin/python - <<"PY"
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
+              .venv/bin/python -
+            ' <<'PY'
+            from sqlalchemy import func, select
+            from sqlalchemy.orm import selectinload
 
-from app.domains.auth.models import User
-from app.domains.runs.final_actionable_history import (
-    _run_projection,
-    backfill_user_history,
-    infer_market,
-    is_rebalance_run,
-)
-from app.domains.runs.models import FinalActionableHistory, Run, RunJob
-from app.infrastructure.database.sync_session import SyncSessionLocal
+            from app.domains.auth.models import User
+            from app.domains.runs.final_actionable_history import (
+                _run_projection,
+                backfill_user_history,
+                infer_market,
+                is_rebalance_run,
+            )
+            from app.domains.runs.models import FinalActionableHistory, Run, RunJob
+            from app.infrastructure.database.sync_session import SyncSessionLocal
 
-with SyncSessionLocal() as db:
-    users = list(db.execute(select(User).order_by(User.id)).scalars())
-    print(f"users={len(users)}")
-    for user in users:
-        total_runs = db.scalar(select(func.count(Run.id)).where(Run.user_id == user.id)) or 0
-        before = db.scalar(
-            select(func.count(FinalActionableHistory.id)).where(
-                FinalActionableHistory.user_id == user.id
-            )
-        ) or 0
-        runs = list(
-            db.execute(
-                select(Run)
-                .where(Run.user_id == user.id)
-                .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
-                .order_by(Run.created_at.asc(), Run.id.asc())
-            ).scalars()
-        )
-        eligible = [run for run in runs if is_rebalance_run(run) and infer_market(run)]
-        parseable = 0
-        projected_symbols = 0
-        for run in eligible:
-            projection, usable = _run_projection(run)
-            if usable:
-                parseable += 1
-            projected_symbols += len(projection)
-        print(
-            f"USER id={user.id} email={getattr(user, 'email', None)!r} "
-            f"runs={total_runs} eligible={len(eligible)} parseable={parseable} "
-            f"projected_symbols={projected_symbols} history_before={before}"
-        )
-        for run in runs[-20:]:
-            market = infer_market(run)
-            print(
-                "RUN",
-                run.id,
-                run.created_at,
-                repr(run.auto_rebalance_label),
-                repr(run.auto_rebalance_portfolio),
-                "market=", market,
-                "rebalance=", is_rebalance_run(run),
-                "status=", getattr(run.status, "value", run.status),
-                "prompt_head=", (run.prompt or "")[:120].replace("\n", " "),
-            )
-        try:
-            result = backfill_user_history(db, user_id=user.id)
-            print(f"BACKFILL user={user.id} result={result}")
-        except Exception as exc:
-            import traceback
-            print(f"BACKFILL_FAILED user={user.id} type={type(exc).__name__} error={exc}")
-            traceback.print_exc()
-            db.rollback()
-        after = db.scalar(
-            select(func.count(FinalActionableHistory.id)).where(
-                FinalActionableHistory.user_id == user.id
-            )
-        ) or 0
-        print(f"HISTORY_AFTER user={user.id} count={after}")
+            with SyncSessionLocal() as db:
+                users = list(db.execute(select(User).order_by(User.id)).scalars())
+                print(f"users={len(users)}")
+                for user in users:
+                    total_runs = db.scalar(select(func.count(Run.id)).where(Run.user_id == user.id)) or 0
+                    before = db.scalar(
+                        select(func.count(FinalActionableHistory.id)).where(
+                            FinalActionableHistory.user_id == user.id
+                        )
+                    ) or 0
+                    runs = list(
+                        db.execute(
+                            select(Run)
+                            .where(Run.user_id == user.id)
+                            .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
+                            .order_by(Run.created_at.asc(), Run.id.asc())
+                        ).scalars()
+                    )
+                    eligible = [run for run in runs if is_rebalance_run(run) and infer_market(run)]
+                    parseable = 0
+                    projected_symbols = 0
+                    for run in eligible:
+                        projection, usable = _run_projection(run)
+                        if usable:
+                            parseable += 1
+                        projected_symbols += len(projection)
+                    print(
+                        f"USER id={user.id} email={getattr(user, 'email', None)!r} "
+                        f"runs={total_runs} eligible={len(eligible)} parseable={parseable} "
+                        f"projected_symbols={projected_symbols} history_before={before}"
+                    )
+                    for run in runs[-20:]:
+                        market = infer_market(run)
+                        print(
+                            "RUN",
+                            run.id,
+                            run.created_at,
+                            repr(run.auto_rebalance_label),
+                            repr(run.auto_rebalance_portfolio),
+                            "market=", market,
+                            "rebalance=", is_rebalance_run(run),
+                            "status=", getattr(run.status, "value", run.status),
+                            "prompt_head=", (run.prompt or "")[:120].replace("\n", " "),
+                        )
+                    try:
+                        result = backfill_user_history(db, user_id=user.id)
+                        print(f"BACKFILL user={user.id} result={result}")
+                    except Exception as exc:
+                        import traceback
+                        print(f"BACKFILL_FAILED user={user.id} type={type(exc).__name__} error={exc}")
+                        traceback.print_exc()
+                        db.rollback()
+                    after = db.scalar(
+                        select(func.count(FinalActionableHistory.id)).where(
+                            FinalActionableHistory.user_id == user.id
+                        )
+                    ) or 0
+                    print(f"HISTORY_AFTER user={user.id} count={after}")
 
-    samples = list(
-        db.execute(
-            select(FinalActionableHistory)
-            .order_by(FinalActionableHistory.covered_at.desc(), FinalActionableHistory.id.desc())
-            .limit(30)
-        ).scalars()
-    )
-    for row in samples:
-        print(
-            "HISTORY",
-            row.user_id,
-            row.market,
-            row.stock_symbol,
-            row.covered_at,
-            row.coverage_status,
-            row.action,
-            row.rebalance_run_id,
-        )
-PY
-            '
+                samples = list(
+                    db.execute(
+                        select(FinalActionableHistory)
+                        .order_by(FinalActionableHistory.covered_at.desc(), FinalActionableHistory.id.desc())
+                        .limit(30)
+                    ).scalars()
+                )
+                for row in samples:
+                    print(
+                        "HISTORY",
+                        row.user_id,
+                        row.market,
+                        row.stock_symbol,
+                        row.covered_at,
+                        row.coverage_status,
+                        row.action,
+                        row.rebalance_run_id,
+                    )
+            PY
