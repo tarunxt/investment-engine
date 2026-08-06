@@ -1,0 +1,42 @@
+name: Apply Final Actionable Backfill Fix
+
+on:
+  push:
+    branches:
+      - codex/fix-legacy-final-actionable-backfill
+    paths:
+      - scripts/apply_final_actionable_backfill_reliability_fix.py
+      - .github/workflows/apply-final-actionable-backfill-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout fix branch
+        uses: actions/checkout@v7
+        with:
+          ref: codex/fix-legacy-final-actionable-backfill
+          fetch-depth: 0
+
+      - name: Apply implementation
+        run: python3 scripts/apply_final_actionable_backfill_reliability_fix.py
+
+      - name: Validate backend sources
+        run: |
+          python3 -m compileall -q backend/app backend/tests
+          python3 -m pytest -q \
+            backend/tests/test_final_actionable_history_parser.py \
+            backend/tests/test_final_actionable_history_task_contract.py
+
+      - name: Commit implementation
+        run: |
+          rm -f .github/workflows/apply-final-actionable-backfill-fix.yml
+          git config user.name "Tarun Singh"
+          git config user.email "37398213+tarunxt@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix legacy final actionable history backfill"
+          git push origin HEAD:codex/fix-legacy-final-actionable-backfill
