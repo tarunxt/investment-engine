@@ -44,6 +44,8 @@ jobs:
               cd "$APP_ROOT/backend"
               .venv/bin/python -
             ' <<'PY'
+            import app.models  # noqa: F401 - register every SQLAlchemy mapper first
+
             from sqlalchemy import func, select
             from sqlalchemy.orm import selectinload
 
