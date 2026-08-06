@@ -193,16 +193,15 @@ def _normalize_console_llm_targets(
     targets: list[BullpenAutoLiveLlmTarget],
 ) -> list[BullpenAutoLiveLlmTarget]:
     normalized_targets: list[BullpenAutoLiveLlmTarget] = []
-    seen_targets: set[tuple[str, str]] = set()
     for target in targets:
-        key = (target.provider.strip().lower(), target.model.strip().lower())
-        if not key[0] or not key[1] or key in seen_targets:
+        provider = target.provider.strip()
+        model = target.model.strip()
+        if not provider or not model:
             continue
-        seen_targets.add(key)
         normalized_targets.append(
             BullpenAutoLiveLlmTarget(
-                provider=target.provider.strip(),
-                model=target.model.strip(),
+                provider=provider,
+                model=model,
             )
         )
     return normalized_targets

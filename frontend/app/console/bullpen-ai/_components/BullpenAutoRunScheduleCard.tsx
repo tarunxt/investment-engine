@@ -5791,6 +5791,7 @@ type StageTwoLlmRunSummaryRow = {
   key: string;
   provider: string;
   model: string;
+  displayModel: string;
   requestedModel: string | null;
   status: StageTwoRunSummaryStatus;
   runtime: string;
@@ -5898,17 +5899,32 @@ function getStageTwoLlmRunSummaryRows(
 
   const targetRuns = getStageTwoLlmTargetRuns(stage);
   if (targetRuns.length) {
+    const targetRunTotals = new Map<string, number>();
+    targetRuns.forEach((run) => {
+      const identity = readStageTwoLlmIdentity(run);
+      const provider = identity?.provider ?? "—";
+      const model = identity?.model ?? "—";
+      const key = `${provider}::${model}`;
+      targetRunTotals.set(key, (targetRunTotals.get(key) ?? 0) + 1);
+    });
+    const targetRunDisplayCounts = new Map<string, number>();
     const runRows = targetRuns.map((run, index) => {
       const identity = readStageTwoLlmIdentity(run);
       const provider = identity?.provider ?? "—";
       const model = identity?.model ?? "—";
       const key = `${provider}::${model}`;
+      const duplicateIndex = (targetRunDisplayCounts.get(key) ?? 0) + 1;
+      targetRunDisplayCounts.set(key, duplicateIndex);
       const rawStatus = normalizeStageTwoRunStatus(readLlmContextString(run, "status"));
       const status = identity ? rawStatus : "failed";
       return {
         key: `${key}-${index}`,
         provider,
         model,
+        displayModel:
+          (targetRunTotals.get(key) ?? 0) > 1
+            ? `${model} ${duplicateIndex}`
+            : model,
         requestedModel:
           readLlmContextString(run, "requested_model") ?? (identity ? model : null),
         status,
@@ -5960,47 +5976,63 @@ function getStageTwoLlmRunSummaryRows(
         recoveryBatchCount: readLlmContextNumber(run, "recovery_batch_count"),
       };
     });
-    const runKeys = new Set(
-      runRows.map(
-        (row) =>
-          row.provider !== "—" && (row.requestedModel ?? row.model)
-            ? `${row.provider}::${row.requestedModel ?? row.model}`
-            : null,
-      ),
-    );
-    const pendingRunRows = getStageTwoLlmTargets(stage)
-      .filter((target) => {
-        const identity = readStageTwoLlmIdentity(target);
-        if (!identity) return true;
-        return !runKeys.has(`${identity.provider}::${identity.model}`);
-      })
-      .map((target, index) => {
-        const identity = readStageTwoLlmIdentity(target);
-        const provider = identity?.provider ?? "—";
-        const model = identity?.model ?? "—";
-        const isIntegrityFailure = !identity;
-        return {
-          key: `${provider}::${model}-pending-${index}`,
-          provider,
-          model,
-          requestedModel: identity?.model ?? null,
-          status: isIntegrityFailure
-            ? ("failed" as StageTwoRunSummaryStatus)
-            : ("pending" as StageTwoRunSummaryStatus),
-          runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
-          cost: null,
-          error: !identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null,
-          failureCategory: !identity ? "data_integrity_error" : null,
-          firstError: null,
-          lastError: null,
-          batchErrors: [],
-          failedEventCount: null,
-          invalidEventCount: null,
-          blockedEventCount: null,
-          retryRequestCount: null,
-          recoveryBatchCount: null,
-        };
-      });
+    const runCountsByKey = new Map<string, number>();
+    runRows.forEach((row) => {
+      if (row.provider === "—") return;
+      const model = row.requestedModel ?? row.model;
+      if (!model) return;
+      const key = `${row.provider}::${model}`;
+      runCountsByKey.set(key, (runCountsByKey.get(key) ?? 0) + 1);
+    });
+    const pendingTargets: Record<string, unknown>[] = [];
+    const targetCountsByKey = new Map<string, number>();
+    getStageTwoLlmTargets(stage).forEach((target) => {
+      const identity = readStageTwoLlmIdentity(target);
+      if (!identity) {
+        pendingTargets.push(target);
+        return;
+      }
+      const key = `${identity.provider}::${identity.model}`;
+      const nextSeen = (targetCountsByKey.get(key) ?? 0) + 1;
+      targetCountsByKey.set(key, nextSeen);
+      if (nextSeen > (runCountsByKey.get(key) ?? 0)) pendingTargets.push(target);
+    });
+    const pendingDisplayCounts = new Map<string, number>(runCountsByKey);
+    const pendingRunRows = pendingTargets.map((target, index) => {
+      const identity = readStageTwoLlmIdentity(target);
+      const provider = identity?.provider ?? "—";
+      const model = identity?.model ?? "—";
+      const isIntegrityFailure = !identity;
+      const key = `${provider}::${model}`;
+      const duplicateIndex = (pendingDisplayCounts.get(key) ?? 0) + 1;
+      pendingDisplayCounts.set(key, duplicateIndex);
+      const duplicateTotal = Math.max(
+        targetCountsByKey.get(key) ?? 0,
+        runCountsByKey.get(key) ?? 0,
+      );
+      return {
+        key: `${provider}::${model}-pending-${index}`,
+        provider,
+        model,
+        displayModel: duplicateTotal > 1 ? `${model} ${duplicateIndex}` : model,
+        requestedModel: identity?.model ?? null,
+        status: isIntegrityFailure
+          ? ("failed" as StageTwoRunSummaryStatus)
+          : ("pending" as StageTwoRunSummaryStatus),
+        runtime: formatStageElapsedTime(stage.timerStartedAt, null, nowMs),
+        cost: null,
+        error: !identity ? STAGE_TWO_LLM_IDENTITY_ERROR : null,
+        failureCategory: !identity ? "data_integrity_error" : null,
+        firstError: null,
+        lastError: null,
+        batchErrors: [],
+        failedEventCount: null,
+        invalidEventCount: null,
+        blockedEventCount: null,
+        retryRequestCount: null,
+        recoveryBatchCount: null,
+      };
+    });
     return [...runRows, ...pendingRunRows].sort(
       (left, right) => (right.cost ?? 0) - (left.cost ?? 0),
     );
@@ -6012,14 +6044,30 @@ function getStageTwoLlmRunSummaryRows(
     if (!identity) return true;
     return !knownKeys.has(`${identity.provider}::${identity.model}`);
   });
+  const pendingTargetTotals = new Map<string, number>();
+  pendingTargets.forEach((target) => {
+    const identity = readStageTwoLlmIdentity(target);
+    const provider = identity?.provider ?? "—";
+    const model = identity?.model ?? "—";
+    const key = `${provider}::${model}`;
+    pendingTargetTotals.set(key, (pendingTargetTotals.get(key) ?? 0) + 1);
+  });
+  const pendingDisplayCounts = new Map<string, number>();
   const pendingRows = pendingTargets.map((target, index) => {
     const identity = readStageTwoLlmIdentity(target);
     const provider = identity?.provider ?? "—";
     const model = identity?.model ?? "—";
+    const key = `${provider}::${model}`;
+    const duplicateIndex = (pendingDisplayCounts.get(key) ?? 0) + 1;
+    pendingDisplayCounts.set(key, duplicateIndex);
     return {
       key: `${provider}::${model}-pending-${index}`,
       provider,
       model,
+      displayModel:
+        (pendingTargetTotals.get(key) ?? 0) > 1
+          ? `${model} ${duplicateIndex}`
+          : model,
       requestedModel: identity?.model ?? null,
       status:
         !identity
@@ -6045,6 +6093,7 @@ function getStageTwoLlmRunSummaryRows(
       key: group.key,
       provider: group.rows[0]?.provider ?? "—",
       model: group.rows[0]?.model ?? group.label,
+      displayModel: group.rows[0]?.model ?? group.label,
       requestedModel: group.rows[0]?.model ?? group.label,
       status:
         group.rows[0]?.provider === "—" || group.rows[0]?.model === "—"
@@ -6522,7 +6571,7 @@ export function StageTwoLlmRunDetailsDialog({
                             {row.provider}
                           </td>
                           <td className="px-4 py-3 font-semibold text-slate-700">
-                            {row.model}
+                            {row.displayModel}
                           </td>
                           <td className="px-4 py-3">
                             {row.status === "failed" ? (

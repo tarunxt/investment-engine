@@ -425,10 +425,12 @@ test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM 
   assert.match(autoRunCardSource, /Single combined/);
   assert.match(autoRunCardSource, /Events\/prompt/);
   assert.match(autoRunCardSource, /Current run LLMs completed/);
+  assert.match(autoRunCardSource, /displayModel:\s*\n\s*\(targetRunTotals\.get\(key\) \?\? 0\) > 1/);
+  assert.match(autoRunCardSource, /`\$\{model\} \$\{duplicateIndex\}`/);
   assert.match(autoRunCardSource, /Open LLM completion diagnostics/);
   assert.match(
     autoRunCardSource,
-    /stageTwoTargets\.length > 0\s*\?\s*stageTwoTargets\.filter\(\(target\) => hasStageTwoLlmIdentity\(target\)\)\.length\s*:\s*null/,
+    /stageTwoTargets\.length > 0\s*\?\s*stageTwoTargets\.filter\(\(target\) => hasStageTwoLlmIdentity\(target\)\)\s*\.length\s*:\s*null/,
   );
   assert.match(autoRunCardSource, /llm_execution_mode/);
   assert.match(autoRunCardSource, /llm_events_per_prompt/);

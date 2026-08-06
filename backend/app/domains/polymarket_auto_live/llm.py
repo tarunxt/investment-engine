@@ -560,8 +560,7 @@ def resolve_auto_live_llm_target_pairs(
     if not targets:
         return []
 
-    deduped_targets: list[tuple[str, str]] = []
-    seen_targets: set[tuple[str, str]] = set()
+    resolved_targets: list[tuple[str, str]] = []
     for target in targets:
         if isinstance(target, tuple):
             provider_name, model_name = target
@@ -569,11 +568,10 @@ def resolve_auto_live_llm_target_pairs(
             provider_name = target.provider
             model_name = target.model
         key = (provider_name.strip(), model_name.strip())
-        if not key[0] or not key[1] or key in seen_targets:
+        if not key[0] or not key[1]:
             continue
-        seen_targets.add(key)
-        deduped_targets.append(key)
-    return deduped_targets
+        resolved_targets.append(key)
+    return resolved_targets
 
 
 def resolve_auto_live_llm_targets(
