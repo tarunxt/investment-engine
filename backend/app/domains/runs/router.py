@@ -41,6 +41,7 @@ from app.domains.runs.schemas import (
     RunResponse,
 )
 from app.domains.runs.final_actionable_history import (
+    final_actionable_history_backfill_key,
     list_stock_history,
     persist_history_items,
 )
@@ -515,9 +516,9 @@ async def queue_final_actionable_history_backfill(
     current_user: User = Depends(get_current_user),
 ):
     redis = _get_redis()
-    dedupe_key = f"final_actionable_history_backfill:{current_user.id}"
+    dedupe_key = final_actionable_history_backfill_key(current_user.id)
     try:
-        queued = await redis.set(dedupe_key, "1", nx=True, ex=60 * 60)
+        queued = await redis.set(dedupe_key, "queued", nx=True, ex=60 * 60)
     finally:
         await redis.aclose()
     if not queued:

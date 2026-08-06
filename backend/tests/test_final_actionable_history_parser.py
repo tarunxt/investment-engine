@@ -26,3 +26,14 @@ def test_symbol_and_cursor_are_stable() -> None:
     assert normalize_stock_symbol("NSE:SUZLON.NS") == "SUZLON"
     covered_at = datetime(2026, 8, 6, 9, 56, tzinfo=timezone.utc)
     assert decode_history_cursor(encode_history_cursor(covered_at, 42)) == (covered_at, 42)
+
+
+def test_backfill_marker_is_versioned() -> None:
+    from app.domains.runs.final_actionable_history import (
+        FINAL_ACTIONABLE_HISTORY_BACKFILL_VERSION,
+        final_actionable_history_backfill_key,
+    )
+
+    assert FINAL_ACTIONABLE_HISTORY_BACKFILL_VERSION >= 2
+    assert final_actionable_history_backfill_key(7).endswith(":7")
+    assert "final_actionable_history_backfill:v" in final_actionable_history_backfill_key(7)
