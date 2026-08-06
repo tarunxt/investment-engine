@@ -32,9 +32,17 @@ from app.domains.runs.schemas import (
     AutoRebalanceStageKey,
     AutoRebalanceStageResponse,
     AutoRebalanceStageUpdateRequest,
+    FinalActionableHistoryBackfillResponse,
+    FinalActionableHistoryBulkCreateRequest,
+    FinalActionableHistoryBulkCreateResponse,
+    FinalActionableHistoryListResponse,
     RunCreate,
     RunListItem,
     RunResponse,
+)
+from app.domains.runs.final_actionable_history import (
+    list_stock_history,
+    persist_history_items,
 )
 from app.domains.runs.use_cases.create_run import (
     CreateRunCommand,
@@ -442,6 +450,83 @@ async def _build_auto_rebalance_history(
             group_jobs,
         ))
     return sorted(result, key=lambda entry: (entry[0].sequence, entry[0].updated_at), reverse=True)
+
+
+@router.get(
+    "/final-actionables/history",
+    response_model=FinalActionableHistoryListResponse,
+)
+async def get_final_actionable_history(
+    market: str = Query(..., pattern="^(india|us)$"),
+    symbol: str = Query(..., min_length=1, max_length=64),
+    limit: int = Query(default=50, ge=1, le=200),
+    cursor: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        items, next_cursor, has_more = await list_stock_history(
+            db,
+            user_id=current_user.id,
+            market=market,
+            symbol=symbol,
+            limit=limit,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return FinalActionableHistoryListResponse(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+@router.post(
+    "/final-actionables/history",
+    response_model=FinalActionableHistoryBulkCreateResponse,
+)
+async def save_final_actionable_history(
+    body: FinalActionableHistoryBulkCreateRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        inserted, skipped, coverage_inserted = await persist_history_items(
+            db,
+            user_id=current_user.id,
+            items=body.items,
+        )
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return FinalActionableHistoryBulkCreateResponse(
+        inserted=inserted,
+        skipped=skipped,
+        coverage_inserted=coverage_inserted,
+    )
+
+
+@router.post(
+    "/final-actionables/history/backfill",
+    response_model=FinalActionableHistoryBackfillResponse,
+)
+async def queue_final_actionable_history_backfill(
+    current_user: User = Depends(get_current_user),
+):
+    redis = _get_redis()
+    dedupe_key = f"final_actionable_history_backfill:{current_user.id}"
+    try:
+        queued = await redis.set(dedupe_key, "1", nx=True, ex=60 * 60)
+    finally:
+        await redis.aclose()
+    if not queued:
+        return FinalActionableHistoryBackfillResponse(status="already_queued")
+
+    from app.domains.runs.tasks import backfill_final_actionable_history_task
+
+    task = backfill_final_actionable_history_task.delay(current_user.id)
+    return FinalActionableHistoryBackfillResponse(status="queued", task_id=task.id)
 
 
 @router.post("/auto-rebalance-label", response_model=AutoRebalanceRunReservationResponse)

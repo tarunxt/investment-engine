@@ -50,6 +50,8 @@ import type {
   IndMoneyUsEventsAnalysis,
   IndMoneyUsPortfolioSnapshotDetail,
   IndMoneyUsThreatAnalysis,
+  FinalActionableHistoryCreateItem,
+  FinalActionableHistoryItem,
   PortfolioAnalysisHistoryItem,
   ProviderModelTarget,
   RunListItem,
@@ -468,7 +470,7 @@ const TECHNICAL_SCAN_POLL_INTERVAL_MS = 5000;
 const FINAL_ACTIONABLES_RUN_CACHE_VERSION = 1;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION = 1;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
-const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 1;
+const HISTORICAL_ACTION_ROWS_CACHE_VERSION = 2;
 const HISTORICAL_ACTION_ROWS_CACHE_LIMIT = 400;
 const DASHBOARD_FINAL_ACTIONABLES_CACHE_KEY = `investment-engine:dashboard:final-actionables:v${DASHBOARD_FINAL_ACTIONABLES_CACHE_VERSION}`;
 
@@ -574,11 +576,34 @@ function readHistoricalActionRowsCache(market: SwingTradeMarket) {
   }
 }
 
+function getHistoricalActionRowCacheId(row: HistoricalDashboardActionRow) {
+  return `${row.market}:${row.runId}:${normalizeStockSymbol(row.stock.symbol || row.stock.key)}`;
+}
+
+function mergeHistoricalActionRows(
+  ...rowGroups: HistoricalDashboardActionRow[][]
+) {
+  const merged = new Map<string, HistoricalDashboardActionRow>();
+  rowGroups.flat().forEach((row) => {
+    const key = getHistoricalActionRowCacheId(row);
+    const existing = merged.get(key);
+    if (!existing || parseTimestampMs(row.coveredAt) >= parseTimestampMs(existing.coveredAt)) {
+      merged.set(key, row);
+    }
+  });
+  return Array.from(merged.values()).sort(
+    (left, right) => parseTimestampMs(right.coveredAt) - parseTimestampMs(left.coveredAt),
+  );
+}
+
 function writeHistoricalActionRowsCache(market: SwingTradeMarket, rows: HistoricalDashboardActionRow[]) {
   if (typeof window === "undefined") return;
 
   try {
-    const cacheableRows = rows.slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
+    const cacheableRows = mergeHistoricalActionRows(
+      rows,
+      readHistoricalActionRowsCache(market),
+    ).slice(0, HISTORICAL_ACTION_ROWS_CACHE_LIMIT);
     window.localStorage.setItem(
       getHistoricalActionRowsCacheKey(market),
       JSON.stringify({
@@ -3917,6 +3942,11 @@ export function StockDetailsButton({
   const [open, setOpen] = useState(false);
   const [zerodhaOrders, setZerodhaOrders] = useState<ZerodhaOrder[]>([]);
   const [zerodhaOrdersError, setZerodhaOrdersError] = useState<string | null>(null);
+  const [persistedHistory, setPersistedHistory] = useState<FinalActionableHistoryItem[]>([]);
+  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
   const zerodhaHolding = market === "india" ? getZerodhaHoldingForStock(detailsData.portfolioSnapshot, stock) : null;
   const zerodhaBuyTransactions = useMemo(
@@ -3929,13 +3959,39 @@ export function StockDetailsButton({
   );
   const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
   const effectiveHistoricalRows = useMemo(
-    () => (historicalRows.length ? historicalRows : readHistoricalActionRowsCache(market)),
+    () => mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)),
     [historicalRows, market],
   );
-  const matchingHistoricalRows = useMemo(
-    () => effectiveHistoricalRows.filter((row) => stockConsensusMatches(row.stock, stock)),
-    [effectiveHistoricalRows, stock],
+  const persistedRunIds = useMemo(
+    () => new Set(persistedHistory.map((item) => item.rebalance_run_id)),
+    [persistedHistory],
   );
+  const matchingHistoricalRows = useMemo(
+    () => effectiveHistoricalRows.filter(
+      (row) => stockConsensusMatches(row.stock, stock) && !persistedRunIds.has(row.runId),
+    ),
+    [effectiveHistoricalRows, persistedRunIds, stock],
+  );
+  const loadPersistedHistory = useCallback(async (cursor: string | null, append: boolean) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const response = await apiService.getFinalActionableHistory({
+        market,
+        symbol: stock.symbol,
+        limit: 50,
+        cursor,
+      });
+      setPersistedHistory((current) => append ? [...current, ...response.items] : response.items);
+      setHistoryCursor(response.next_cursor);
+      setHistoryHasMore(response.has_more);
+    } catch (error) {
+      setHistoryError(error instanceof Error ? error.message : "Unable to load complete stock history.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [market, stock.symbol]);
+
   const directHistoricalEvidenceRows = useMemo(() => {
     const seen = new Set<string>();
     const rows: Array<{
@@ -3984,6 +4040,14 @@ export function StockDetailsButton({
 
     return rows.sort((a, b) => parseTimestampMs(b.createdAt) - parseTimestampMs(a.createdAt));
   }, [stock]);
+
+  useEffect(() => {
+    if (!open) return;
+    setPersistedHistory([]);
+    setHistoryCursor(null);
+    setHistoryHasMore(false);
+    void loadPersistedHistory(null, false);
+  }, [loadPersistedHistory, open]);
 
   useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
@@ -4119,6 +4183,70 @@ export function StockDetailsButton({
 
               <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                 <h3 className="mb-3 font-semibold text-slate-950">Historical LLM suggestions</h3>
+                {historyError ? (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
+                    Complete server history could not be loaded: {historyError}. Recent locally reconstructed rows remain below.
+                  </div>
+                ) : null}
+                {historyLoading && persistedHistory.length === 0 ? (
+                  <div className="mb-3 rounded-lg border border-slate-200 bg-white p-3 text-slate-500">
+                    Loading complete historical suggestions…
+                  </div>
+                ) : null}
+                {persistedHistory.length ? (
+                  <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
+                    <table className="min-w-[72rem] text-xs">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-slate-50 text-left text-[11px] uppercase tracking-wide text-gray-500">
+                          <th className="px-3 py-2 font-semibold">Stock</th>
+                          <th className="px-3 py-2 font-semibold">Timestamp covered</th>
+                          <th className="px-3 py-2 font-semibold">Coverage</th>
+                          <th className="px-3 py-2 font-semibold">Action</th>
+                          <th className="px-3 py-2 font-semibold">Score</th>
+                          <th className="px-3 py-2 font-semibold">Consensus</th>
+                          <th className="px-3 py-2 font-semibold">Historical value</th>
+                          <th className="px-3 py-2 font-semibold">Action/current units</th>
+                          <th className="px-3 py-2 font-semibold">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {persistedHistory.map((item) => (
+                          <tr key={item.id} className={item.coverage_status === "suggested" ? "bg-white" : "bg-slate-50/70"}>
+                            <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{item.stock_symbol}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              <RunJobLink runId={item.rebalance_run_id}>{formatDateTime(item.covered_at)}</RunJobLink>
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 capitalize text-gray-600">{item.coverage_status.replaceAll("_", " ")}</td>
+                            <td className="px-3 py-2"><FinalActionValue value={item.action} /></td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatScoreValue(item.score)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              {item.consensus_numerator !== null && item.consensus_denominator !== null
+                                ? `${item.consensus_numerator}/${item.consensus_denominator}`
+                                : "—"}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatDisplayAmount(item.historical_current_value, market)}</td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">
+                              {`${formatQuantity(item.action_units)}/${formatQuantity(item.historical_current_units)}`}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-2 text-gray-700">{formatDisplayAmount(item.amount, market)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {historyHasMore ? (
+                      <div className="border-t border-slate-200 p-3 text-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={historyLoading || !historyCursor}
+                          onClick={() => void loadPersistedHistory(historyCursor, true)}
+                        >
+                          {historyLoading ? "Loading…" : "Load older suggestions"}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 {matchingHistoricalRows.length ? (
                   <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white/80">
                     <table className="min-w-[70rem] text-xs">
@@ -7024,6 +7152,71 @@ export function buildHistoricalDashboardActionRows(
     );
 }
 
+function buildFinalActionableHistoryItems(
+  rows: HistoricalDashboardActionRow[],
+  runs: RunResponse[],
+): FinalActionableHistoryCreateItem[] {
+  const runsById = new Map(runs.map((run) => [run.id, run]));
+  return rows.map((row) => {
+    const sourceRun = runsById.get(row.runId);
+    const action = row.formulaAction;
+    const estimate = row.formulaEstimate;
+    const sourceRunIds = Array.from(new Set([
+      row.runId,
+      ...row.stock.rows.map((stockRow) => stockRow.meta.runId),
+      ...(row.detail.technicalScanSourceRunId ? [row.detail.technicalScanSourceRunId] : []),
+    ]));
+    return {
+      workflow_id: null,
+      auto_rebalance_sequence: sourceRun?.auto_rebalance_sequence ?? null,
+      rebalance_run_id: row.runId,
+      market: row.market,
+      stock_symbol: normalizeStockSymbol(row.stock.symbol || row.stock.key),
+      stock_name: row.stock.representative["Stock Name"] || row.stock.symbol || null,
+      covered_at: row.coveredAt,
+      action,
+      score: row.formulaScore,
+      consensus_numerator: row.stock.actionCounts[action],
+      consensus_denominator: row.stock.totalSuggestions,
+      historical_current_units: estimate.currentUnits,
+      historical_current_value: estimate.currentInvestmentAmount,
+      action_units: estimate.units,
+      amount: estimate.amount,
+      technical_scan_run_id: row.detail.technicalScanSourceRunId,
+      formula_version: "score-matrix-v1",
+      formula_inputs_json: row.detail as unknown as Record<string, unknown>,
+      source_run_ids_json: sourceRunIds,
+      snapshot_json: {
+        representative: row.stock.representative,
+        action_counts: row.stock.actionCounts,
+        formula_action: row.formulaAction,
+        formula_score: row.formulaScore,
+        formula_estimate: row.formulaEstimate,
+      },
+      coverage_status: "suggested",
+    };
+  });
+}
+
+function getCurrentPersistableHistoryRows(
+  rows: HistoricalDashboardActionRow[],
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+) {
+  const latestRunIds = new Set(getLatestMatchingRuns(runs, market).map((run) => run.id));
+  return rows.filter((row) => latestRunIds.has(row.runId));
+}
+
+async function persistFinalActionableHistoryRows(
+  rows: HistoricalDashboardActionRow[],
+  runs: RunResponse[],
+) {
+  const items = buildFinalActionableHistoryItems(rows, runs);
+  for (let index = 0; index < items.length; index += 100) {
+    await apiService.saveFinalActionableHistory({ items: items.slice(index, index + 100) });
+  }
+}
+
 function getDefaultDashboardActionSortState(action: ActionCategory): DashboardActionSortState {
   return {
     key: "score",
@@ -7456,7 +7649,27 @@ export function DashboardFinalActionablesTables() {
     if (!runs.length) return;
     writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
     writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
-  }, [historicalActionRowsByMarket, runs.length]);
+    const allRows = [
+      ...getCurrentPersistableHistoryRows(
+        historicalActionRowsByMarket.india,
+        runs,
+        "india",
+      ),
+      ...getCurrentPersistableHistoryRows(
+        historicalActionRowsByMarket.us,
+        runs,
+        "us",
+      ),
+    ];
+    if (allRows.length) {
+      void persistFinalActionableHistoryRows(allRows, runs).catch((error) => {
+        console.warn("Failed to persist immutable final actionables history:", error);
+      });
+    }
+    void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
+      console.warn("Unable to queue legacy final actionables history backfill:", error);
+    });
+  }, [historicalActionRowsByMarket, runs]);
 
   const actionRowsByMarket = useMemo(() => ({
     india: buildDashboardActionRows(
@@ -8068,7 +8281,20 @@ export function FinalActionablesConsole({
   useEffect(() => {
     if (!runs.length) return;
     writeHistoricalActionRowsCache(market, historicalActionRows);
-  }, [historicalActionRows, market, runs.length]);
+    const currentHistoryRows = getCurrentPersistableHistoryRows(
+      historicalActionRows,
+      runs,
+      market,
+    );
+    if (currentHistoryRows.length) {
+      void persistFinalActionableHistoryRows(currentHistoryRows, runs).catch((error) => {
+        console.warn("Failed to persist immutable final actionables history:", error);
+      });
+    }
+    void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
+      console.warn("Unable to queue legacy final actionables history backfill:", error);
+    });
+  }, [historicalActionRows, market, runs]);
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};

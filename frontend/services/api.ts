@@ -91,6 +91,10 @@ import {
   AutoRebalanceStageKey,
   AutoRebalanceStageResponse,
   AutoRebalanceStageUpdateRequest,
+  FinalActionableHistoryBackfillResponse,
+  FinalActionableHistoryBulkCreateRequest,
+  FinalActionableHistoryBulkCreateResponse,
+  FinalActionableHistoryListResponse,
   RunResponse,
   UpdatePasswordRequest,
   UpdateProfileRequest,
@@ -976,6 +980,39 @@ class apiServiceClass implements IApiService {
 
   queueAutoRebalanceCompletionEmail(data: AutoRebalanceCompletionEmailRequest): Promise<{ status: string }> {
     return this.post<{ status: string }>(URLs.runs.autoRebalanceCompletionEmail(), data);
+  }
+
+  getFinalActionableHistory(params: {
+    market: "india" | "us";
+    symbol: string;
+    limit?: number;
+    cursor?: string | null;
+  }): Promise<FinalActionableHistoryListResponse> {
+    const query = new URLSearchParams({
+      market: params.market,
+      symbol: params.symbol,
+      limit: String(params.limit ?? 50),
+    });
+    if (params.cursor) query.set("cursor", params.cursor);
+    return this.get<FinalActionableHistoryListResponse>(
+      `${URLs.runs.finalActionableHistory()}?${query.toString()}`,
+    );
+  }
+
+  saveFinalActionableHistory(
+    data: FinalActionableHistoryBulkCreateRequest,
+  ): Promise<FinalActionableHistoryBulkCreateResponse> {
+    return this.post<FinalActionableHistoryBulkCreateResponse>(
+      URLs.runs.finalActionableHistory(),
+      data,
+    );
+  }
+
+  queueFinalActionableHistoryBackfill(): Promise<FinalActionableHistoryBackfillResponse> {
+    return this.post<FinalActionableHistoryBackfillResponse>(
+      URLs.runs.finalActionableHistoryBackfill(),
+      {},
+    );
   }
 
   getAutoRebalanceHistory(

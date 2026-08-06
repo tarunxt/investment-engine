@@ -45,6 +45,7 @@ from app.domains.prompts.models import Prompt
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
     AutoRebalanceWorkflowStage,
+    FinalActionableHistory,
     Run,
     RunJob,
 )
@@ -57,6 +58,7 @@ __all__ = [
     "APIKey",
     "AutoRebalanceWorkflow",
     "AutoRebalanceWorkflowStage",
+    "FinalActionableHistory",
     "BullpenRunAuditBlobRecord",
     "BullpenRunAuditEventRecord",
     "BullpenRunAuditFeedbackRecord",
