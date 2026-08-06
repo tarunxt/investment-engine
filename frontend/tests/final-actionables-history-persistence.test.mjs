@@ -30,4 +30,5 @@ test("dashboard remains bounded while history persists separately", () => {
   assert.match(source, /DASHBOARD_RECENT_RUN_DETAIL_LIMIT = 24/);
   assert.match(source, /apiService\.saveFinalActionableHistory\(/);
   assert.match(source, /queueFinalActionableHistoryBackfill\(/);
+  assert.match(source, /getCurrentPersistableHistoryRows\(/);
 });

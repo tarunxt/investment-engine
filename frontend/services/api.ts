@@ -982,7 +982,7 @@ class apiServiceClass implements IApiService {
     return this.post<{ status: string }>(URLs.runs.autoRebalanceCompletionEmail(), data);
   }
 
-  async getFinalActionableHistory(params: {
+  getFinalActionableHistory(params: {
     market: "india" | "us";
     symbol: string;
     limit?: number;
@@ -994,24 +994,24 @@ class apiServiceClass implements IApiService {
       limit: String(params.limit ?? 50),
     });
     if (params.cursor) query.set("cursor", params.cursor);
-    return this.fetch<FinalActionableHistoryListResponse>(
+    return this.get<FinalActionableHistoryListResponse>(
       `${URLs.runs.finalActionableHistory()}?${query.toString()}`,
     );
   }
 
-  async saveFinalActionableHistory(
+  saveFinalActionableHistory(
     data: FinalActionableHistoryBulkCreateRequest,
   ): Promise<FinalActionableHistoryBulkCreateResponse> {
-    return this.fetch<FinalActionableHistoryBulkCreateResponse>(
+    return this.post<FinalActionableHistoryBulkCreateResponse>(
       URLs.runs.finalActionableHistory(),
-      { method: "POST", body: JSON.stringify(data) },
+      data,
     );
   }
 
-  async queueFinalActionableHistoryBackfill(): Promise<FinalActionableHistoryBackfillResponse> {
-    return this.fetch<FinalActionableHistoryBackfillResponse>(
+  queueFinalActionableHistoryBackfill(): Promise<FinalActionableHistoryBackfillResponse> {
+    return this.post<FinalActionableHistoryBackfillResponse>(
       URLs.runs.finalActionableHistoryBackfill(),
-      { method: "POST" },
+      {},
     );
   }
 

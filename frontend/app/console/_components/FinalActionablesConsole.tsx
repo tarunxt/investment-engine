@@ -7198,6 +7198,15 @@ function buildFinalActionableHistoryItems(
   });
 }
 
+function getCurrentPersistableHistoryRows(
+  rows: HistoricalDashboardActionRow[],
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+) {
+  const latestRunIds = new Set(getLatestMatchingRuns(runs, market).map((run) => run.id));
+  return rows.filter((row) => latestRunIds.has(row.runId));
+}
+
 async function persistFinalActionableHistoryRows(
   rows: HistoricalDashboardActionRow[],
   runs: RunResponse[],
@@ -7641,8 +7650,16 @@ export function DashboardFinalActionablesTables() {
     writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
     writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
     const allRows = [
-      ...historicalActionRowsByMarket.india,
-      ...historicalActionRowsByMarket.us,
+      ...getCurrentPersistableHistoryRows(
+        historicalActionRowsByMarket.india,
+        runs,
+        "india",
+      ),
+      ...getCurrentPersistableHistoryRows(
+        historicalActionRowsByMarket.us,
+        runs,
+        "us",
+      ),
     ];
     if (allRows.length) {
       void persistFinalActionableHistoryRows(allRows, runs).catch((error) => {
@@ -8264,8 +8281,13 @@ export function FinalActionablesConsole({
   useEffect(() => {
     if (!runs.length) return;
     writeHistoricalActionRowsCache(market, historicalActionRows);
-    if (historicalActionRows.length) {
-      void persistFinalActionableHistoryRows(historicalActionRows, runs).catch((error) => {
+    const currentHistoryRows = getCurrentPersistableHistoryRows(
+      historicalActionRows,
+      runs,
+      market,
+    );
+    if (currentHistoryRows.length) {
+      void persistFinalActionableHistoryRows(currentHistoryRows, runs).catch((error) => {
         console.warn("Failed to persist immutable final actionables history:", error);
       });
     }

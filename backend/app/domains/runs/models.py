@@ -87,8 +87,7 @@ class FinalActionableHistory(Base, TimestampMixin):
             "market",
             "rebalance_run_id",
             "stock_symbol",
-            "formula_version",
-            name="uq_final_actionable_history_run_stock_formula",
+            name="uq_final_actionable_history_run_stock",
         ),
         Index(
             "ix_final_actionable_history_lookup",

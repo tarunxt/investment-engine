@@ -16,7 +16,6 @@ from app.domains.jobs.models import Job
 from app.domains.runs.models import (
     AutoRebalanceWorkflow,
     AutoRebalanceWorkflowStage,
-    FinalActionableHistory,
     Run,
     RunJob,
 )

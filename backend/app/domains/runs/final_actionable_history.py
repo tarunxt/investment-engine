@@ -8,6 +8,7 @@ import re
 from typing import Iterable, Sequence
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
@@ -200,68 +201,23 @@ async def persist_history_items(
     if owned_ids != all_run_ids:
         raise ValueError("One or more referenced runs do not belong to the current user")
 
-    submitted_keys = {
-        (item.market, item.rebalance_run_id, normalize_stock_symbol(item.stock_symbol), item.formula_version)
-        for item in items
-    }
-    existing_rows = (
-        await db.execute(
-            select(FinalActionableHistory).where(
-                FinalActionableHistory.user_id == user_id,
-                FinalActionableHistory.rebalance_run_id.in_(run_ids),
+    existing_rows = list(
+        (
+            await db.execute(
+                select(FinalActionableHistory).where(
+                    FinalActionableHistory.user_id == user_id,
+                    FinalActionableHistory.rebalance_run_id.in_(run_ids),
+                )
             )
         )
-    ).scalars().all()
-    existing_keys = {
-        (row.market, row.rebalance_run_id, row.stock_symbol, row.formula_version)
+        .scalars()
+        .all()
+    )
+    existing_by_key = {
+        (row.market, row.rebalance_run_id, row.stock_symbol): row.coverage_status
         for row in existing_rows
     }
 
-    inserted = 0
-    skipped = 0
-    run_templates: dict[tuple[str, int], FinalActionableHistoryCreateItem] = {}
-    submitted_symbols: dict[tuple[str, int], set[str]] = defaultdict(set)
-    for item in items:
-        symbol = normalize_stock_symbol(item.stock_symbol)
-        key = (item.market, item.rebalance_run_id, symbol, item.formula_version)
-        run_key = (item.market, item.rebalance_run_id)
-        run_templates.setdefault(run_key, item)
-        submitted_symbols[run_key].add(symbol)
-        if key in existing_keys:
-            skipped += 1
-            continue
-        db.add(
-            FinalActionableHistory(
-                user_id=user_id,
-                workflow_id=item.workflow_id,
-                auto_rebalance_sequence=item.auto_rebalance_sequence,
-                rebalance_run_id=item.rebalance_run_id,
-                market=item.market,
-                stock_symbol=symbol,
-                stock_name=item.stock_name,
-                covered_at=item.covered_at,
-                action=item.action,
-                score=item.score,
-                consensus_numerator=item.consensus_numerator,
-                consensus_denominator=item.consensus_denominator,
-                historical_current_units=item.historical_current_units,
-                historical_current_value=item.historical_current_value,
-                action_units=item.action_units,
-                amount=item.amount,
-                technical_scan_run_id=item.technical_scan_run_id,
-                formula_version=item.formula_version,
-                formula_inputs_json=item.formula_inputs_json,
-                source_run_ids_json=item.source_run_ids_json,
-                snapshot_json=item.snapshot_json,
-                coverage_status=item.coverage_status,
-            )
-        )
-        existing_keys.add(key)
-        inserted += 1
-
-    # Keep an explicit date/run trail for every previously observed symbol.
-    # Missing symbols are labelled only as "not mentioned"; the projection does
-    # not pretend they were necessarily in that run's input universe.
     known_rows = (
         await db.execute(
             select(FinalActionableHistory.market, FinalActionableHistory.stock_symbol)
@@ -272,35 +228,120 @@ async def persist_history_items(
     known_by_market: dict[str, set[str]] = defaultdict(set)
     for market, symbol in known_rows:
         known_by_market[market].add(symbol)
-    for item in items:
-        known_by_market[item.market].add(normalize_stock_symbol(item.stock_symbol))
 
-    coverage_inserted = 0
+    payload_by_key: dict[tuple[str, int, str], dict] = {}
+    run_templates: dict[tuple[str, int], FinalActionableHistoryCreateItem] = {}
+    submitted_symbols: dict[tuple[str, int], set[str]] = defaultdict(set)
+    for item in items:
+        symbol = normalize_stock_symbol(item.stock_symbol)
+        key = (item.market, item.rebalance_run_id, symbol)
+        run_key = (item.market, item.rebalance_run_id)
+        run_templates.setdefault(run_key, item)
+        submitted_symbols[run_key].add(symbol)
+        known_by_market[item.market].add(symbol)
+        payload_by_key[key] = {
+            "user_id": user_id,
+            "workflow_id": item.workflow_id,
+            "auto_rebalance_sequence": item.auto_rebalance_sequence,
+            "rebalance_run_id": item.rebalance_run_id,
+            "market": item.market,
+            "stock_symbol": symbol,
+            "stock_name": item.stock_name,
+            "covered_at": item.covered_at,
+            "action": item.action,
+            "score": item.score,
+            "consensus_numerator": item.consensus_numerator,
+            "consensus_denominator": item.consensus_denominator,
+            "historical_current_units": item.historical_current_units,
+            "historical_current_value": item.historical_current_value,
+            "action_units": item.action_units,
+            "amount": item.amount,
+            "technical_scan_run_id": item.technical_scan_run_id,
+            "formula_version": item.formula_version,
+            "formula_inputs_json": item.formula_inputs_json,
+            "source_run_ids_json": item.source_run_ids_json,
+            "snapshot_json": item.snapshot_json,
+            "coverage_status": item.coverage_status,
+        }
+
+    # Keep explicit gaps for symbols already known at the time of this write.
+    # setdefault ensures a real suggestion always wins over a generated gap,
+    # even when a large run is retried or split across request batches.
     for (market, run_id), template in run_templates.items():
         for symbol in sorted(known_by_market[market] - submitted_symbols[(market, run_id)]):
-            key = (market, run_id, symbol, "coverage-v1")
-            if key in existing_keys:
-                continue
-            db.add(
-                FinalActionableHistory(
-                    user_id=user_id,
-                    workflow_id=template.workflow_id,
-                    auto_rebalance_sequence=template.auto_rebalance_sequence,
-                    rebalance_run_id=run_id,
-                    market=market,
-                    stock_symbol=symbol,
-                    covered_at=template.covered_at,
-                    formula_version="coverage-v1",
-                    source_run_ids_json=[run_id],
-                    coverage_status="not_mentioned",
-                    snapshot_json={"reason": "Stock was not mentioned in persisted output rows."},
-                )
+            key = (market, run_id, symbol)
+            payload_by_key.setdefault(
+                key,
+                {
+                    "user_id": user_id,
+                    "workflow_id": template.workflow_id,
+                    "auto_rebalance_sequence": template.auto_rebalance_sequence,
+                    "rebalance_run_id": run_id,
+                    "market": market,
+                    "stock_symbol": symbol,
+                    "covered_at": template.covered_at,
+                    "formula_version": "coverage-v1",
+                    "source_run_ids_json": [run_id],
+                    "coverage_status": "not_mentioned",
+                    "snapshot_json": {
+                        "reason": "Stock was not mentioned in persisted output rows."
+                    },
+                },
             )
-            existing_keys.add(key)
-            coverage_inserted += 1
 
+    payloads = list(payload_by_key.values())
+    if not payloads:
+        return 0, 0, 0
+
+    statement = pg_insert(FinalActionableHistory).values(payloads)
+    excluded = statement.excluded
+    update_columns = (
+        "workflow_id",
+        "auto_rebalance_sequence",
+        "stock_name",
+        "covered_at",
+        "action",
+        "score",
+        "consensus_numerator",
+        "consensus_denominator",
+        "historical_current_units",
+        "historical_current_value",
+        "action_units",
+        "amount",
+        "technical_scan_run_id",
+        "formula_version",
+        "formula_inputs_json",
+        "source_run_ids_json",
+        "snapshot_json",
+        "coverage_status",
+        "updated_at",
+    )
+    statement = statement.on_conflict_do_update(
+        constraint="uq_final_actionable_history_run_stock",
+        set_={column: getattr(excluded, column) for column in update_columns},
+        where=and_(
+            FinalActionableHistory.coverage_status != "suggested",
+            excluded.coverage_status == "suggested",
+        ),
+    )
+    await db.execute(statement)
     await db.commit()
-    return inserted, skipped, coverage_inserted
+
+    new_rows = sum(key not in existing_by_key for key in payload_by_key)
+    upgrades = sum(
+        key in existing_by_key
+        and existing_by_key[key] != "suggested"
+        and payload_by_key[key].get("coverage_status") == "suggested"
+        for key in payload_by_key
+    )
+    persisted = new_rows + upgrades
+    skipped = len(payload_by_key) - persisted
+    coverage_inserted = sum(
+        key not in existing_by_key
+        and payload.get("coverage_status") != "suggested"
+        for key, payload in payload_by_key.items()
+    )
+    return persisted, skipped, coverage_inserted
 
 
 async def list_stock_history(
@@ -427,26 +468,25 @@ def backfill_user_history(db: Session, *, user_id: int) -> dict[str, int]:
         ).scalars().all()
     )
     eligible = [run for run in runs if is_rebalance_run(run) and infer_market(run)]
-    projections: list[tuple[Run, str, dict[str, dict], bool]] = []
-    known_by_market: dict[str, set[str]] = defaultdict(set)
+    existing_by_key = {
+        (row.market, row.rebalance_run_id, row.stock_symbol): row
+        for row in db.execute(
+            select(FinalActionableHistory).where(FinalActionableHistory.user_id == user_id)
+        ).scalars().all()
+    }
+
+    inserted = 0
+    upgraded = 0
+    coverage_inserted = 0
+    seen_by_market: dict[str, set[str]] = defaultdict(set)
     for run in eligible:
         market = infer_market(run)
         if not market:
             continue
         projection, usable_output_seen = _run_projection(run)
-        known_by_market[market].update(projection)
-        projections.append((run, market, projection, usable_output_seen))
+        seen_by_market[market].update(projection)
 
-    existing = {
-        (row.market, row.rebalance_run_id, row.stock_symbol, row.formula_version)
-        for row in db.execute(
-            select(FinalActionableHistory).where(FinalActionableHistory.user_id == user_id)
-        ).scalars().all()
-    }
-    inserted = 0
-    coverage_inserted = 0
-    for run, market, projection, usable_output_seen in projections:
-        for symbol in sorted(known_by_market[market]):
+        for symbol in sorted(seen_by_market[market]):
             data = projection.get(symbol)
             if data:
                 formula_version = "legacy-backfill-v1"
@@ -459,50 +499,76 @@ def backfill_user_history(db: Session, *, user_id: int) -> dict[str, int]:
                     coverage_status = "not_mentioned"
                 else:
                     coverage_status = "parse_failed"
-            key = (market, run.id, symbol, formula_version)
-            if key in existing:
-                continue
-            db.add(
-                FinalActionableHistory(
-                    user_id=user_id,
-                    auto_rebalance_sequence=run.auto_rebalance_sequence,
-                    rebalance_run_id=run.id,
-                    market=market,
-                    stock_symbol=symbol,
-                    stock_name=data.get("stock_name") if data else None,
-                    covered_at=run.created_at,
-                    action=data.get("action") if data else None,
-                    score=data.get("score") if data else None,
-                    consensus_numerator=data.get("consensus_numerator") if data else None,
-                    consensus_denominator=data.get("consensus_denominator") if data else None,
-                    historical_current_units=data.get("historical_current_units") if data else None,
-                    historical_current_value=data.get("historical_current_value") if data else None,
-                    action_units=data.get("action_units") if data else None,
-                    amount=data.get("amount") if data else None,
-                    formula_version=formula_version,
-                    formula_inputs_json={
+
+            key = (market, run.id, symbol)
+            existing = existing_by_key.get(key)
+            if existing is not None:
+                if data and existing.coverage_status != "suggested":
+                    existing.stock_name = data.get("stock_name")
+                    existing.action = data.get("action")
+                    existing.score = data.get("score")
+                    existing.consensus_numerator = data.get("consensus_numerator")
+                    existing.consensus_denominator = data.get("consensus_denominator")
+                    existing.historical_current_units = data.get("historical_current_units")
+                    existing.historical_current_value = data.get("historical_current_value")
+                    existing.action_units = data.get("action_units")
+                    existing.amount = data.get("amount")
+                    existing.formula_version = formula_version
+                    existing.formula_inputs_json = {
                         "parser": "legacy-markdown-backfill-v1",
-                        "source_job_ids": data.get("source_job_ids", []) if data else [],
-                    },
-                    source_run_ids_json=[run.id],
-                    snapshot_json={
+                        "source_job_ids": data.get("source_job_ids", []),
+                    }
+                    existing.source_run_ids_json = [run.id]
+                    existing.snapshot_json = {
                         "source": "legacy-backfill",
-                        "rows": data.get("rows", []) if data else [],
-                        "reason": None if data else coverage_status,
-                    },
-                    coverage_status=coverage_status,
-                )
+                        "rows": data.get("rows", []),
+                    }
+                    existing.coverage_status = "suggested"
+                    upgraded += 1
+                continue
+
+            record = FinalActionableHistory(
+                user_id=user_id,
+                auto_rebalance_sequence=run.auto_rebalance_sequence,
+                rebalance_run_id=run.id,
+                market=market,
+                stock_symbol=symbol,
+                stock_name=data.get("stock_name") if data else None,
+                covered_at=run.created_at,
+                action=data.get("action") if data else None,
+                score=data.get("score") if data else None,
+                consensus_numerator=data.get("consensus_numerator") if data else None,
+                consensus_denominator=data.get("consensus_denominator") if data else None,
+                historical_current_units=data.get("historical_current_units") if data else None,
+                historical_current_value=data.get("historical_current_value") if data else None,
+                action_units=data.get("action_units") if data else None,
+                amount=data.get("amount") if data else None,
+                formula_version=formula_version,
+                formula_inputs_json={
+                    "parser": "legacy-markdown-backfill-v1",
+                    "source_job_ids": data.get("source_job_ids", []) if data else [],
+                },
+                source_run_ids_json=[run.id],
+                snapshot_json={
+                    "source": "legacy-backfill",
+                    "rows": data.get("rows", []) if data else [],
+                    "reason": None if data else coverage_status,
+                },
+                coverage_status=coverage_status,
             )
-            existing.add(key)
+            db.add(record)
+            existing_by_key[key] = record
             if data:
                 inserted += 1
             else:
                 coverage_inserted += 1
-            if (inserted + coverage_inserted) % 250 == 0:
+            if (inserted + upgraded + coverage_inserted) % 250 == 0:
                 db.flush()
+
     db.commit()
     return {
         "runs_scanned": len(eligible),
         "suggestions_inserted": inserted,
+        "suggestions_upgraded": upgraded,
         "coverage_inserted": coverage_inserted,
     }
