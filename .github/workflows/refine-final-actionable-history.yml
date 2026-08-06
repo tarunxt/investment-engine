@@ -1,0 +1,42 @@
+name: Refine Final Actionable History
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.head_ref == 'codex/persist-final-actionable-history'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply hardening changes
+        run: python3 scripts/refine_final_actionable_history.py
+
+      - name: Validate generated sources
+        run: |
+          git diff --check
+          python3 -m py_compile \
+            backend/app/domains/runs/models.py \
+            backend/app/domains/runs/final_actionable_history.py \
+            backend/app/domains/runs/router.py \
+            backend/alembic/versions/b5c6d7e8f9g0_add_final_actionable_history.py
+          node --test frontend/tests/final-actionables-history-persistence.test.mjs
+
+      - name: Commit hardening changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden final actionables history persistence"
+          git push origin HEAD:${{ github.head_ref }}
