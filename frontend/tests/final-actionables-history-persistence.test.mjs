@@ -17,6 +17,7 @@ test("stock details loads cursor-paginated durable history", () => {
   assert.match(source, /Load older suggestions/);
   assert.match(apiSource, /finalActionableHistory\(\)/);
   assert.match(routerSource, /"\/final-actionables\/history"/);
+  assert.match(routerSource, /"\/final-actionables\/history\/backfill"/);
 });
 
 test("historical cache merges rather than replacing older rows", () => {
