@@ -1218,6 +1218,19 @@ class BullpenAutoLiveHistoryPage(BaseModel):
     generated_at: str
 
 
+class BullpenAutoLiveEventTrend(BaseModel):
+    market_id: str
+    market_title: str
+    score: float = Field(ge=0)
+    scan_scores: list[float | None] = Field(min_length=20, max_length=20)
+
+
+class BullpenAutoLiveEventTrendsResponse(BaseModel):
+    events: list[BullpenAutoLiveEventTrend] = Field(default_factory=list)
+    scan_count: int = Field(default=20, ge=0, le=20)
+    generated_at: str
+
+
 class TradingBotGuardrail(BaseModel):
     label: str
     value: str

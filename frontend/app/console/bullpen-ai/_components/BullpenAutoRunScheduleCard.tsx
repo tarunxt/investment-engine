@@ -79,6 +79,7 @@ import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveHistoryItem,
   BullpenAutoLiveHistoryPage,
+  BullpenAutoLiveEventTrendsResponse,
   BullpenAutoLiveOutcomeSide,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
@@ -226,6 +227,16 @@ const BULLPEN_LOGIN_COMMAND =
   "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
+
+function getHistoryScoreColor(score: number | null): string {
+  if (score === null) return "rgb(203 213 225)";
+  const clamped = Math.max(0, Math.min(100, score));
+  const [start, end, progress] = clamped <= 65
+    ? [[244, 166, 160], [255, 255, 255], (clamped - 50) / 15]
+    : [[255, 255, 255], [82, 183, 126], (clamped - 65) / 35];
+  const boundedProgress = Math.max(0, Math.min(1, progress));
+  return `rgb(${start.map((value, index) => Math.round(value + (end[index] - value) * boundedProgress)).join(" ")})`;
+}
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -9700,6 +9711,8 @@ export function BullpenAutoRunScheduleCard({
   const [isRunHistoryDialogOpen, setIsRunHistoryDialogOpen] = useState(false);
   const [runHistoryPage, setRunHistoryPage] =
     useState<BullpenAutoLiveHistoryPage | null>(null);
+  const [runHistoryEventTrends, setRunHistoryEventTrends] =
+    useState<BullpenAutoLiveEventTrendsResponse | null>(null);
   const [runHistoryLoading, setRunHistoryLoading] = useState(false);
   const [runHistoryDetailLoadingId, setRunHistoryDetailLoadingId] = useState<
     string | null
@@ -10647,20 +10660,23 @@ export function BullpenAutoRunScheduleCard({
       runHistoryOwnerKeyRef.current = requestOwnerKey;
       setRunHistoryOwnerKey(requestOwnerKey);
       setRunHistoryPage(null);
+      setRunHistoryEventTrends(null);
     }
     setRunHistoryLoading(true);
     setRunHistoryError(null);
 
     try {
-      const nextPage = await apiService.getBullpenAutoLiveHistory(
-        { page, size: 20 },
-        {
+      const requestOptions = {
           signal: controller.signal,
           timeoutMs: 5_000,
-        },
-      );
+        };
+      const [nextPage, nextTrends] = await Promise.all([
+        apiService.getBullpenAutoLiveHistory({ page, size: 20 }, requestOptions),
+        apiService.getBullpenAutoLiveHistoryEventTrends(requestOptions),
+      ]);
       if (controller.signal.aborted) return;
       setRunHistoryPage(nextPage);
+      setRunHistoryEventTrends(nextTrends);
     } catch (nextError) {
       if (controller.signal.aborted || isRequestAbort(nextError)) return;
       setRunHistoryError(
@@ -12202,6 +12218,9 @@ export function BullpenAutoRunScheduleCard({
     ? runHistoryPage
     : null;
   const visibleRunHistoryItems = visibleRunHistoryPage?.items ?? [];
+  const visibleRunHistoryEventTrends = runHistoryBelongsToCurrentUser
+    ? runHistoryEventTrends
+    : null;
 
   useEffect(() => {
     return () => {
@@ -13611,7 +13630,7 @@ export function BullpenAutoRunScheduleCard({
               role="dialog"
               aria-modal="true"
               aria-labelledby="bullpen-run-history-title"
-              className="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
+              className="max-h-[88vh] w-full max-w-7xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
             >
               <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
                 <div>
@@ -13655,7 +13674,29 @@ export function BullpenAutoRunScheduleCard({
                   </button>
                 </div>
               </div>
-              <div className="max-h-[65vh] overflow-y-auto px-6 py-5">
+              <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
+                {visibleRunHistoryEventTrends ? (
+                  <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
+                    <div className="flex items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
+                      <div><h3 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h3><p className="mt-0.5 text-[11px] text-slate-500">Latest scan is leftmost. Score = latest + 0.5 × previous + 0.25 × third-latest.</p></div>
+                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Grey = not covered</span>
+                    </div>
+                    {visibleRunHistoryEventTrends.events.length ? (
+                      <div className="overflow-x-auto px-4 py-2"><div className="min-w-[66rem]">
+                        <div className="grid grid-cols-[minmax(22rem,1fr)_6rem_25rem] items-center gap-3 border-b border-slate-200 px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500"><span>Event</span><span className="text-right">Score</span><span>20 scans · newest to oldest</span></div>
+                        {visibleRunHistoryEventTrends.events.map((event) => (
+                          <div key={event.market_id} className="grid grid-cols-[minmax(22rem,1fr)_6rem_25rem] items-center gap-3 border-b border-slate-200/70 px-1 py-1 last:border-0">
+                            <span className="truncate whitespace-nowrap text-xs font-semibold text-slate-800" title={event.market_title}>{event.market_title}</span>
+                            <span className="text-right text-xs font-bold tabular-nums text-slate-950">{event.score.toFixed(2)}</span>
+                            <span className="flex items-center gap-1" aria-label={`Strongest Side LLM scores for ${event.market_title}`}>
+                              {event.scan_scores.map((scanScore, index) => (<span key={`${event.market_id}-${index}`} className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-900/10" style={{ backgroundColor: getHistoryScoreColor(scanScore) }} title={scanScore === null ? `Scan ${index + 1}: not covered` : `Scan ${index + 1}: ${scanScore.toFixed(2)}`} />))}
+                            </span>
+                          </div>
+                        ))}
+                      </div></div>
+                    ) : (<p className="px-4 py-4 text-xs text-slate-500">No events were covered in the latest 20 saved scans.</p>)}
+                  </section>
+                ) : null}
                 {runHistoryError && !runHistoryLoading ? (
                   <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     {runHistoryError}

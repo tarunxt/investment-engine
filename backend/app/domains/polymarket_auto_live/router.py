@@ -27,6 +27,7 @@ from app.domains.polymarket_auto_live.console_projection import (
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
+    BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunDiagnostics,
@@ -699,6 +700,24 @@ async def list_auto_live_history(
     response.headers["Vary"] = "Authorization, Cookie"
     response.headers["Server-Timing"] = f"db;dur={elapsed_ms:.1f}, app;dur={elapsed_ms:.1f}"
     return history
+
+
+@router.get("/history/event-trends", response_model=BullpenAutoLiveEventTrendsResponse)
+async def list_auto_live_history_event_trends(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Return the strongest-side score heatmap for the latest 20 scans."""
+    bot = await _get_bot(current_user)
+    try:
+        trends = await asyncio.wait_for(bot.list_recent_event_trends(), timeout=HISTORY_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(status_code=503, detail="Auto-Live event trends are temporarily delayed. Retry shortly.", headers={"Cache-Control": "no-store"}) from exc
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.headers["Vary"] = "Authorization, Cookie"
+    return trends
 
 
 @router.get("/runs", response_model=list[BullpenAutoLiveRun])

@@ -32,6 +32,8 @@ from app.domains.polymarket_auto_live.models import (
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
+    BullpenAutoLiveEventTrend,
+    BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
@@ -1187,6 +1189,50 @@ class AsyncPolymarketAutoLiveRepository:
             has_next=normalized_page < pages,
             generated_at=utc_now().isoformat(),
         )
+
+    async def list_recent_event_trends(self, user_id: int, *, scan_count: int = 20) -> BullpenAutoLiveEventTrendsResponse:
+        """Aggregate visible events over the latest runs without loading payloads."""
+        run = PolymarketAutoLiveRunRecord
+        decision = PolymarketAutoLiveDecisionRecord
+        run_rows = (await self.session.execute(
+            select(run.id).where(run.user_id == user_id)
+            .order_by(desc(run.started_at), desc(run.created_at)).limit(max(1, min(scan_count, 20)))
+        )).scalars().all()
+        run_ids = [str(run_id) for run_id in run_rows]
+        if not run_ids:
+            return BullpenAutoLiveEventTrendsResponse(scan_count=20, generated_at=utc_now().isoformat())
+        rows = (await self.session.execute(select(
+            decision.id, decision.run_id, decision.market_id, decision.slug,
+            decision.market_title, decision.side, decision.decision,
+            decision.risk_status, decision.edge_pp, decision.score,
+            decision.console_projection, decision.created_at, decision.updated_at,
+        ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
+          .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
+        run_index = {run_id: index for index, run_id in enumerate(run_ids)}
+        event_scores: dict[str, tuple[str, list[float | None]]] = {}
+        for row in rows:
+            try:
+                projected = projected_row_to_decision(row)
+            except (ValidationError, ValueError) as exc:
+                logger.warning("Skipping malformed Auto-Live trend decision %s: %s", getattr(row, "id", "unknown"), exc)
+                continue
+            index = run_index.get(str(row.run_id))
+            if index is None:
+                continue
+            strongest = max(
+                projected.fair_yes_probability_pct if projected.fair_yes_probability_pct is not None else projected.fair_probability_pct,
+                projected.fair_no_probability_pct if projected.fair_no_probability_pct is not None else 100 - projected.fair_probability_pct,
+            )
+            title, scores = event_scores.setdefault(projected.market_id, (projected.market_title, [None] * 20))
+            scores[index] = round(max(scores[index] or 0, strongest), 2)
+            event_scores[projected.market_id] = (title, scores)
+        events = [BullpenAutoLiveEventTrend(
+            market_id=market_id, market_title=title,
+            score=round(sum((scores[index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))), 2),
+            scan_scores=scores,
+        ) for market_id, (title, scores) in event_scores.items()]
+        events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
+        return BullpenAutoLiveEventTrendsResponse(events=events, scan_count=20, generated_at=utc_now().isoformat())
 
     async def list_projected_decisions_for_run(
         self,

@@ -38,6 +38,7 @@ import {
   BullpenAutoLiveRun,
   BullpenAutoLiveConsoleRunDetail,
   BullpenAutoLiveHistoryPage,
+  BullpenAutoLiveEventTrendsResponse,
   BullpenAutoLiveRunOrdersResponse,
   BullpenAutoLiveRunOnceRequest,
   BullpenAutoLiveDecision,
@@ -1669,6 +1670,15 @@ class apiServiceClass implements IApiService {
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.get<BullpenAutoLiveHistoryPage>(
       `${URLs.bullpenAutoLive.history()}${suffix}`,
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpenAutoLiveHistoryEventTrends(
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveEventTrendsResponse> {
+    return this.get<BullpenAutoLiveEventTrendsResponse>(
+      URLs.bullpenAutoLive.historyEventTrends(),
       { cache: "no-store", ...options },
     );
   }

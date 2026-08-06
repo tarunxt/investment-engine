@@ -1395,3 +1395,12 @@ details, but is labelled excluded, has an effective consensus weight of zero, an
 does not participate in displayed consensus odds. This is a deterministic
 presentation and consensus-validation rule over already-frozen output fields; it
 does not rewrite historical snapshots or change their schema version.
+# Run-history event trend presentation
+
+The Run History dialog includes a read-only, backward-compatible trend view over
+the latest 20 saved scans, including successful and failed runs. It does not
+alter any frozen audit snapshot or Bullpen stage formula. For each event, the
+view records the strongest LLM-side probability in each scan (newest first),
+uses `null` when the event was absent, and sorts by `latest + 0.5 × previous +
+0.25 × third-latest`. This presentation-only score must not be interpreted as a
+Stage 2 or Stage 3 ranking input.

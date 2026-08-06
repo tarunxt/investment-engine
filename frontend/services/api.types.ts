@@ -43,6 +43,7 @@ import {
     IndMoneyUsThreatLatestResponse,
     IndMoneyUsThreatRunResponse,
     PolymarketBotState,
+    BullpenAutoLiveEventTrendsResponse,
     PolymarketManualInvestOrderRequest,
     PolymarketManualInvestResponse,
     PolymarketLiveLimitUpdate,
@@ -269,6 +270,9 @@ export interface IApiService {
         params?: { page?: number; size?: number },
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveHistoryPage>;
+    getBullpenAutoLiveHistoryEventTrends(
+        options?: ApiRequestControl,
+    ): Promise<BullpenAutoLiveEventTrendsResponse>;
     getBullpenAutoLiveRun(runId: string, options?: ApiRequestControl): Promise<BullpenAutoLiveRun>;
     getBullpenAutoLiveRunConsole(
         runId: string,

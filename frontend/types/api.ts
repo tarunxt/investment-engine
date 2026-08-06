@@ -2997,6 +2997,19 @@ export interface BullpenAutoLiveHistoryPage {
   generated_at: string;
 }
 
+export interface BullpenAutoLiveEventTrend {
+  market_id: string;
+  market_title: string;
+  score: number;
+  scan_scores: Array<number | null>;
+}
+
+export interface BullpenAutoLiveEventTrendsResponse {
+  events: BullpenAutoLiveEventTrend[];
+  scan_count: number;
+  generated_at: string;
+}
+
 export type TradingBotStatus =
   | "running"
   | "paused"
