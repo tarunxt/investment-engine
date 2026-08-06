@@ -19,6 +19,10 @@ const taskSource = readFileSync(
   new URL("../../backend/app/domains/runs/tasks.py", import.meta.url),
   "utf8",
 );
+const migrationSource = readFileSync(
+  new URL("../../backend/alembic/versions/b5c6d7e8f9g0_add_final_actionable_history.py", import.meta.url),
+  "utf8",
+);
 
 test("stock details loads cursor-paginated durable history", () => {
   assert.match(source, /apiService\.getFinalActionableHistory\(/);
@@ -43,4 +47,9 @@ test("dashboard remains bounded while history persists separately", () => {
   assert.match(persistenceSource, /payload_defaults = \{/);
   assert.match(persistenceSource, /source_ids = \{/);
   assert.match(taskSource, /FINAL_ACTIONABLE_HISTORY_BACKFILL_TTL_SECONDS = 365/);
+  assert.match(migrationSource, /uq_final_actionable_history_run_stock/);
+  assert.doesNotMatch(
+    migrationSource,
+    /"stock_symbol",\s*"formula_version",\s*name="uq_final_actionable_history/,
+  );
 });
