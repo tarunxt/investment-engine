@@ -277,17 +277,7 @@ class RunCreate(BaseModel):
     def targets_not_empty(cls, v: list[RunModelTarget]) -> list[RunModelTarget]:
         if not v:
             raise ValueError("At least one (provider, model) target is required.")
-
-        unique_targets: list[RunModelTarget] = []
-        seen: set[tuple[str, str]] = set()
-        for target in v:
-            key = (target.provider.strip().lower(), target.model.strip().lower())
-            if key in seen:
-                continue
-            seen.add(key)
-            unique_targets.append(target)
-
-        return unique_targets
+        return v
 
     @field_validator("auto_rebalance_portfolio")
     @classmethod

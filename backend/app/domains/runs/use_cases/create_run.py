@@ -58,18 +58,9 @@ class CreateRunUseCase:
         if not cmd.targets:
             raise ValidationException("At least one (provider, model) target is required.")
 
-        targets: list[RunModelTarget] = []
-        seen_targets: set[tuple[str, str]] = set()
-        for target in cmd.targets:
-            key = (target.provider.strip().lower(), target.model.strip().lower())
-            if key in seen_targets:
-                continue
-            seen_targets.add(key)
-            targets.append(target)
-
         targets, blocked_targets = await filter_recently_available_targets(
             self._session,
-            targets,
+            cmd.targets,
         )
         if blocked_targets:
             logger.warning(

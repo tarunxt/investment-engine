@@ -2092,6 +2092,22 @@ function getRunCostUsd(run: RunResponse) {
   );
 }
 
+function getRunJobDisplayModels(jobs: JobResponse[]) {
+  const totals = new Map<string, number>();
+  jobs.forEach((job) => {
+    const key = `${job.provider ?? "Unknown"}::${job.model ?? "Unknown"}`;
+    totals.set(key, (totals.get(key) ?? 0) + 1);
+  });
+  const seen = new Map<string, number>();
+  return jobs.map((job) => {
+    const model = job.model ?? "Unknown";
+    const key = `${job.provider ?? "Unknown"}::${model}`;
+    const ordinal = (seen.get(key) ?? 0) + 1;
+    seen.set(key, ordinal);
+    return (totals.get(key) ?? 0) > 1 ? `${model} ${ordinal}` : model;
+  });
+}
+
 function getRunLlmLabel(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter(Boolean) ?? [];
   if (jobs.length === 0) return { provider: "Unknown", model: "No LLM jobs" };
@@ -2612,6 +2628,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
   const duration = getRunDuration(run);
   const costUsd = getRunCostUsd(run);
   const runLabel = getRunOutputDisplayLabel(run);
+  const displayModels = getRunJobDisplayModels(jobs);
 
   const scrollToJob = (jobId: number) => {
     setHighlightedJobId(jobId);
@@ -2665,7 +2682,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {jobs.map((job) => {
+                {jobs.map((job, index) => {
                   const state = classifyRunOutputJob(job);
                   const jobDuration = getJobDuration(job);
                   return (
@@ -2681,7 +2698,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
                       title={`Jump to ${job.provider}/${job.model}`}
                     >
                       <td className="px-4 py-3 font-bold capitalize text-slate-900">{job.provider}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-700">{job.model}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700">{displayModels[index]}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full border px-2.5 py-1 text-xs font-bold ${getRunOutputStatusClass(state)}`}>
                           {getRunOutputStatusLabel(state)}
@@ -2701,7 +2718,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
         </p>
       </section>
 
-      {jobs.map((job) => {
+      {jobs.map((job, index) => {
         const state = classifyRunOutputJob(job);
         const isHighlighted = highlightedJobId === job.id;
         return (
@@ -2718,7 +2735,7 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
               <div>
                 <h4 className="font-bold text-slate-950">
                   <span className="capitalize">{job.provider}</span>
-                  <span className="ml-3 text-sm font-medium text-slate-500">{job.model}</span>
+                  <span className="ml-3 text-sm font-medium text-slate-500">{displayModels[index]}</span>
                   <span className="ml-3 text-sm font-medium text-slate-500">Job #{job.id}</span>
                 </h4>
               </div>
