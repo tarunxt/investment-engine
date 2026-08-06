@@ -51,6 +51,9 @@ order reconciliation remain backward compatible.
 Current implementation notes:
 
 * New runs persist `audit_metadata` on the run payload for provenance and settings hash.
+* Returned Stage 2 provider targets are normalized to terminal `completed`,
+  `partial`, or `failed` states. A provider adapter's stale `pending` or
+  `running` value therefore cannot contradict a terminal Stage 2 snapshot.
 * Existing runs are backfilled lazily when listed or opened.
 * Large sections are loaded lazily through section endpoints instead of bloating the
   list response.

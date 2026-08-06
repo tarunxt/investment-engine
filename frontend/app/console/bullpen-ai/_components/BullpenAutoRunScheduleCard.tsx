@@ -13674,6 +13674,14 @@ export function BullpenAutoRunScheduleCard({
                           run.triggered_by === "scheduler"
                             ? "Auto Run"
                             : "Manual Run";
+                        const triggerLabel =
+                          run.triggered_by === "scheduler"
+                            ? "Scheduler"
+                            : run.triggered_by === "start"
+                              ? "Start auto runs"
+                              : run.triggered_by === "resume"
+                                ? "Resume auto runs"
+                                : "Manual run now";
                         const detailLoading =
                           runHistoryDetailLoadingId === run.id;
                         return (
@@ -13689,6 +13697,9 @@ export function BullpenAutoRunScheduleCard({
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
                                     {runKind}
+                                  </span>
+                                  <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800">
+                                    Trigger: {triggerLabel}
                                   </span>
                                   <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
                                     {run.status}
