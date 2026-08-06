@@ -1737,7 +1737,7 @@ async def test_console_profile_shared_stage_2_path_uses_saved_execution_settings
 
 
 @pytest.mark.anyio
-async def test_shared_stage_2_creates_one_child_execution_per_selected_target(
+async def test_shared_stage_2_terminalizes_returned_child_executions(
     monkeypatch,
 ):
     fixed_now = datetime(2026, 6, 21, 0, 0, tzinfo=UTC)
@@ -1851,7 +1851,9 @@ async def test_shared_stage_2_creates_one_child_execution_per_selected_target(
             },
             event_results={event_id: event_result},
             batch_metadata=[],
-            status="completed",
+            # Reproduce adapters that return usable output without advancing
+            # their mutable pre-request state from pending.
+            status="pending",
             tokens_in=100,
             tokens_out=25,
             estimated_cost=0.01,
@@ -1898,6 +1900,10 @@ async def test_shared_stage_2_creates_one_child_execution_per_selected_target(
     } == expected_targets
     assert all(
         row["response_text"] and row["usable_event_count"] == 1
+        for row in review.runtime_outputs["llm_target_runs"]
+    )
+    assert all(
+        row["status"] == "completed"
         for row in review.runtime_outputs["llm_target_runs"]
     )
 

@@ -1234,6 +1234,26 @@ async def _execute_console_stage_two_shared_llm(
             )
         )
 
+    def _terminal_target_status(target_result: object) -> str:
+        """Never persist an in-flight status after target execution returns."""
+
+        status = str(getattr(target_result, "status", "") or "").strip().lower()
+        if status in {"completed", "partial", "failed"}:
+            return status
+        event_results = getattr(target_result, "event_results", {})
+        if not isinstance(event_results, dict) or not event_results:
+            return "failed"
+        usable_count = sum(
+            1
+            for result in event_results.values()
+            if getattr(result, "error", None) is None
+            and getattr(result, "invalid_reason", None) is None
+            and getattr(result, "row", None) is not None
+        )
+        if usable_count == len(event_results):
+            return "completed"
+        return "partial" if usable_count > 0 else "failed"
+
     def _target_output_payload(
         *,
         provider_name: str,
@@ -1302,7 +1322,7 @@ async def _execute_console_stage_two_shared_llm(
                 prepared_context=prepared_context,
             )
             elapsed_seconds = round(time.perf_counter() - started_monotonic, 3)
-            target_status = getattr(target_result, "status", "completed")
+            target_status = _terminal_target_status(target_result)
             completed_at = utc_now_iso()
             incremental_event_outputs, usable_event_count = _target_output_payload(
                 provider_name=provider_name,
@@ -1313,11 +1333,7 @@ async def _execute_console_stage_two_shared_llm(
             first_error = _read_target_first_error(target_result)
             last_error = _read_target_last_error(target_result)
             target_run_progress[target_key].update({
-                "status": (
-                    target_status
-                    if target_status in {"completed", "partial", "failed"}
-                    else "completed"
-                ),
+                "status": target_status,
                 "completed_at": completed_at,
                 "elapsed_seconds": elapsed_seconds,
                 "estimated_cost": getattr(target_result, "estimated_cost", None),
@@ -1418,7 +1434,7 @@ async def _execute_console_stage_two_shared_llm(
                 "provider": provider_name,
                 "requested_model": model_name,
                 "model": target_result.runtime_metadata.get("llm_model") or model_name,
-                "status": target_result.status,
+                "status": _terminal_target_status(target_result),
                 "primary_request_count": target_result.primary_request_count,
                 "retry_request_count": target_result.retry_request_count,
                 "recovery_batch_count": target_result.recovery_batch_count,

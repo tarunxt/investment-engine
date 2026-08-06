@@ -1251,6 +1251,48 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
         if isinstance(stage_2.get("universe_status"), dict)
         else {}
     )
+    llm_runtime = (
+        stage_2.get("llm_runtime")
+        if isinstance(stage_2.get("llm_runtime"), dict)
+        else {}
+    )
+    target_runs = (
+        llm_runtime.get("llm_target_runs")
+        if isinstance(llm_runtime.get("llm_target_runs"), list)
+        else []
+    )
+    in_flight_target_indexes = [
+        index
+        for index, target_run in enumerate(target_runs)
+        if isinstance(target_run, dict)
+        and str(target_run.get("status") or "").strip().lower()
+        in {"queued", "pending", "running", "processing"}
+    ]
+    completed_target_count = _float(
+        llm_runtime.get("llm_completed_provider_target_count")
+    )
+    if (
+        in_flight_target_indexes
+        and completed_target_count is not None
+        and completed_target_count >= len(target_runs)
+    ):
+        findings.append(
+            _finding(
+                code="STAGE2_TERMINAL_WITH_IN_FLIGHT_LLM_TARGET",
+                severity="high",
+                stage="stage-2",
+                category="status-consistency",
+                title="Terminal Stage 2 retains an in-flight LLM target",
+                explanation=(
+                    "Stage 2 was captured after execution returned, but one or more "
+                    "provider targets still carry a transient status."
+                ),
+                observed_value=str(in_flight_target_indexes),
+                expected_value="Every returned target is completed, partial, or failed",
+                blocking=True,
+                evidence_pointers=["/stage_2/llm_runtime/llm_target_runs"],
+            )
+        )
     qualified_market_ids: set[str] = set()
     for index, review in enumerate(candidate_reviews):
         if not isinstance(review, dict):
