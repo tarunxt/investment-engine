@@ -1692,8 +1692,12 @@ def enqueue_due_polymarket_auto_live_runs() -> None:
                 reference_time=now,
             )
             repo.save_state(user_id, state)
-            session.commit()
             due_user_ids.append(user_id)
+
+        # Keep every claimed due row locked until all next-run reservations in
+        # this Beat batch are durable. An overlapping tick can then claim only
+        # rows that were not part of this batch.
+        session.commit()
 
     for user_id in due_user_ids:
         try:
