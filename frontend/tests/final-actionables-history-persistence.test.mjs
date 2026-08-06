@@ -11,6 +11,14 @@ const routerSource = readFileSync(
   new URL("../../backend/app/domains/runs/router.py", import.meta.url),
   "utf8",
 );
+const persistenceSource = readFileSync(
+  new URL("../../backend/app/domains/runs/final_actionable_history.py", import.meta.url),
+  "utf8",
+);
+const taskSource = readFileSync(
+  new URL("../../backend/app/domains/runs/tasks.py", import.meta.url),
+  "utf8",
+);
 
 test("stock details loads cursor-paginated durable history", () => {
   assert.match(source, /apiService\.getFinalActionableHistory\(/);
@@ -31,4 +39,8 @@ test("dashboard remains bounded while history persists separately", () => {
   assert.match(source, /apiService\.saveFinalActionableHistory\(/);
   assert.match(source, /queueFinalActionableHistoryBackfill\(/);
   assert.match(source, /getCurrentPersistableHistoryRows\(/);
+  assert.match(persistenceSource, /on_conflict_do_update\(/);
+  assert.match(persistenceSource, /payload_defaults = \{/);
+  assert.match(persistenceSource, /source_ids = \{/);
+  assert.match(taskSource, /FINAL_ACTIONABLE_HISTORY_BACKFILL_TTL_SECONDS = 365/);
 });

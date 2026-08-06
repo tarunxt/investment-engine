@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from html import escape
 
+import redis
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -19,6 +20,19 @@ from app.shared.types import JobStatus
 logger = get_logger(__name__)
 
 TERMINAL_RUN_STATUSES = {JobStatus.COMPLETED, JobStatus.PARTIAL, JobStatus.FAILED}
+FINAL_ACTIONABLE_HISTORY_BACKFILL_TTL_SECONDS = 365 * 24 * 60 * 60
+
+
+def _mark_final_actionable_history_backfill_complete(user_id: int) -> None:
+    client = redis.from_url(settings.redis_url, decode_responses=True)
+    try:
+        client.set(
+            f"final_actionable_history_backfill:{user_id}",
+            "completed",
+            ex=FINAL_ACTIONABLE_HISTORY_BACKFILL_TTL_SECONDS,
+        )
+    finally:
+        client.close()
 
 
 def _status_value(status: object) -> str:
@@ -315,6 +329,7 @@ def backfill_final_actionable_history_task(self, user_id: int) -> dict[str, int]
     with SyncSessionLocal() as db:
         try:
             result = backfill_user_history(db, user_id=user_id)
+            _mark_final_actionable_history_backfill_complete(user_id)
             logger.info("Final actionable history backfill completed for user %s: %s", user_id, result)
             return result
         except Exception as exc:

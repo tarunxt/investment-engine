@@ -12,7 +12,12 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 
-from app.domains.runs.models import FinalActionableHistory, Run, RunJob
+from app.domains.runs.models import (
+    AutoRebalanceWorkflow,
+    FinalActionableHistory,
+    Run,
+    RunJob,
+)
 from app.domains.runs.schemas import FinalActionableHistoryCreateItem
 
 USABLE_STATUSES = {"completed", "partial"}
@@ -192,7 +197,12 @@ async def persist_history_items(
 ) -> tuple[int, int, int]:
     run_ids = {item.rebalance_run_id for item in items}
     technical_ids = {item.technical_scan_run_id for item in items if item.technical_scan_run_id}
-    all_run_ids = run_ids | technical_ids
+    source_ids = {
+        source_id
+        for item in items
+        for source_id in item.source_run_ids_json
+    }
+    all_run_ids = run_ids | technical_ids | source_ids
     owned_ids = set(
         (await db.execute(select(Run.id).where(Run.user_id == user_id, Run.id.in_(all_run_ids))))
         .scalars()
@@ -200,6 +210,23 @@ async def persist_history_items(
     )
     if owned_ids != all_run_ids:
         raise ValueError("One or more referenced runs do not belong to the current user")
+
+    workflow_ids = {item.workflow_id for item in items if item.workflow_id is not None}
+    if workflow_ids:
+        owned_workflow_ids = set(
+            (
+                await db.execute(
+                    select(AutoRebalanceWorkflow.id).where(
+                        AutoRebalanceWorkflow.user_id == user_id,
+                        AutoRebalanceWorkflow.id.in_(workflow_ids),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if owned_workflow_ids != workflow_ids:
+            raise ValueError("One or more referenced workflows do not belong to the current user")
 
     existing_rows = list(
         (
@@ -289,7 +316,30 @@ async def persist_history_items(
                 },
             )
 
-    payloads = list(payload_by_key.values())
+    payload_defaults = {
+        "workflow_id": None,
+        "auto_rebalance_sequence": None,
+        "stock_name": None,
+        "action": None,
+        "score": None,
+        "consensus_numerator": None,
+        "consensus_denominator": None,
+        "historical_current_units": None,
+        "historical_current_value": None,
+        "action_units": None,
+        "amount": None,
+        "technical_scan_run_id": None,
+        "formula_inputs_json": None,
+        "source_run_ids_json": None,
+        "snapshot_json": None,
+    }
+    # SQLAlchemy multi-row INSERT requires a consistent key set for every row.
+    # Coverage rows intentionally omit recommendation fields, so normalize them
+    # to explicit NULLs before constructing the PostgreSQL upsert.
+    payloads = [
+        {**payload_defaults, **payload}
+        for payload in payload_by_key.values()
+    ]
     if not payloads:
         return 0, 0, 0
 
