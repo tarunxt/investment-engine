@@ -53,6 +53,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveBotCardSummary,
     BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
+    BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
@@ -870,6 +871,10 @@ class BullpenAutoLiveBot:
                 page=page,
                 size=size,
             )
+
+    async def list_recent_event_trends(self) -> BullpenAutoLiveEventTrendsResponse:
+        async with AsyncSessionLocal() as session:
+            return await AsyncPolymarketAutoLiveRepository(session).list_recent_event_trends(self.user_id)
 
     async def get_run(self, run_id: str) -> BullpenAutoLiveRun:
         async with AsyncSessionLocal() as session:

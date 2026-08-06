@@ -20,6 +20,8 @@ from app.domains.polymarket_auto_live.router import (
 from app.domains.polymarket_auto_live.router import router as auto_live_router
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveBotCardSummary,
+    BullpenAutoLiveEventTrend,
+    BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOnceRequest,
@@ -520,6 +522,36 @@ async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
     assert history.headers["cache-control"] == "private, no-cache"
     assert details.status_code == 200
     assert calls == [("history", 2, 10), ("decisions", "run-1")]
+
+
+@pytest.mark.anyio
+async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
+    app = _build_test_app(auto_live_router)
+
+    class FakeBot:
+        async def list_recent_event_trends(self):
+            return BullpenAutoLiveEventTrendsResponse(
+                events=[BullpenAutoLiveEventTrend(
+                    market_id="market-1",
+                    market_title="Will the event happen?",
+                    score=140,
+                    scan_scores=[80, 80, 80] + [None] * 17,
+                )],
+                generated_at="2026-08-06T10:00:00+00:00",
+            )
+
+    async def fake_get_bot(_current_user):
+        return FakeBot()
+
+    monkeypatch.setattr("app.domains.polymarket_auto_live.router._get_bot", fake_get_bot)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/polymarket/auto-live/history/event-trends")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-cache"
+    assert response.json()["events"][0]["score"] == 140
+    assert len(response.json()["events"][0]["scan_scores"]) == 20
 
 
 def test_polymarket_manual_invest_route_remains_available():

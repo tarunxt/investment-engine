@@ -69,6 +69,16 @@ test("Bullpen history requests bypass caches and remain abortable", () => {
   assert.match(scheduleCard, /Page \{visibleRunHistoryPage\.page\}/);
 });
 
+test("Bullpen history shows scored event trends for exactly 20 newest-first scans", () => {
+  assert.match(scheduleCard, /Recurring Events Across the Last 20 Scans/);
+  assert.match(scheduleCard, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
+  assert.match(scheduleCard, /event\.scan_scores\.map\(\(scanScore, index\) =>/);
+  assert.match(scheduleCard, /Grey = not covered/);
+  assert.match(scheduleCard, /max-w-7xl/);
+  assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
+  assert.match(urls, /history\/event-trends/);
+});
+
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {
   assert.match(
     urls,
