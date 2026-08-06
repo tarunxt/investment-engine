@@ -186,3 +186,22 @@ measurements still breach latency targets, move latency-sensitive workers off
 the web host or migrate to a non-burstable instance sized from measured p75/p95
 CPU. Do not increase concurrency on the current two-vCPU host. This
 infrastructure change requires explicit operator approval.
+
+
+<!-- UNIFIED_AUTO_RUN_TRIGGER_TEMPLATE -->
+## Unified Auto-Run trigger template
+
+All full Bullpen Auto-Run triggers now converge on
+`BullpenAutoLiveBot.run_once`, which is the canonical durable run template. The
+calendar/custom start time, the immediate **Start Auto Run Now** action, and the
+fixed fallback slots at 00:00, 06:00, 12:00, and 18:00 IST differ only in how
+they create a trigger. After that point they share the same run persistence,
+guardrails, audit metadata, queue handoff, worker stages, retries, and Stage 3
+execution path.
+
+The immediate action no longer waits for the browser to build a candidate
+snapshot before queueing. It starts the scheduler, immediately calls the
+canonical run endpoint without a client snapshot, and lets Stage 1 build the
+current authoritative backend scan exactly like scheduled execution. Explicit
+stage-only operator actions may still provide a request context because they are
+not full Auto-Run triggers.

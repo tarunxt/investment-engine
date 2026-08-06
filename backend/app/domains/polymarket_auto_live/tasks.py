@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -1640,137 +1641,75 @@ def dispatch_stalled_auto_live_run_fallbacks_sync(
     queue="beat",
 )
 def enqueue_due_polymarket_auto_live_runs() -> None:
+    """Dispatch every due schedule through ``BullpenAutoLiveBot.run_once``.
+
+    The calendar picker, immediate Start Auto Run action, custom recurring
+    interval, and fixed fallback slots must differ only in how they produce a
+    trigger. Once due, they all enter the same durable run creation, queue
+    handoff, lifecycle, guardrail, audit, and worker pipeline in ``run_once``.
+    """
+
     now = _utc_now()
     dispatch_stalled_auto_live_run_fallbacks_sync(now=now)
+    due_user_ids: list[int] = []
+
+    # Reserve each due timestamp before leaving the synchronous beat session.
+    # ``skip_locked`` prevents overlapping ten-second beat ticks from claiming
+    # the same user. ``run_once`` recalculates the next timestamp again from
+    # the actual queue time, so this reservation is only the duplicate fence.
     with SyncSessionLocal() as session:
         repo = SyncPolymarketAutoLiveRepository(session)
-        due_states = session.execute(
-            select(PolymarketAutoLiveStateRecord).where(
-                and_(
-                    PolymarketAutoLiveStateRecord.running.is_(True),
-                    PolymarketAutoLiveStateRecord.paused.is_(False),
-                    PolymarketAutoLiveStateRecord.next_run_at.is_not(None),
-                    PolymarketAutoLiveStateRecord.next_run_at <= now,
+        due_states = (
+            session.execute(
+                select(PolymarketAutoLiveStateRecord)
+                .where(
+                    and_(
+                        PolymarketAutoLiveStateRecord.running.is_(True),
+                        PolymarketAutoLiveStateRecord.paused.is_(False),
+                        PolymarketAutoLiveStateRecord.next_run_at.is_not(None),
+                        PolymarketAutoLiveStateRecord.next_run_at <= now,
+                    )
                 )
+                .with_for_update(skip_locked=True)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         for state_record in due_states:
             user_id = state_record.user_id
-            settings_record = repo.get_settings_record(user_id)
-            settings = record_to_settings(settings_record)
+            settings = record_to_settings(repo.get_settings_record(user_id))
             if settings.emergency_stop or not settings.auto_live_enabled:
                 continue
+
             state = record_to_state(state_record)
-            active_run = session.execute(
-                select(PolymarketAutoLiveRunRecord).where(
-                    and_(
-                        PolymarketAutoLiveRunRecord.user_id == user_id,
-                        PolymarketAutoLiveRunRecord.status == "running",
-                    )
-                )
-            ).scalar_one_or_none()
-            if active_run is not None:
-                recovered_run = reconcile_running_auto_live_run(
-                    record_to_run(active_run),
-                    started_at=active_run.started_at,
-                    updated_at=active_run.updated_at,
-                )
-                if recovered_run is None:
-                    continue
-
-                state.last_run_id = recovered_run.id
-                state.last_run_at = recovered_run.completed_at
-                state.last_action = recovered_run.summary
-                state.last_error = (
-                    None if recovered_run.status == "completed" else recovered_run.summary
-                )
-                state = BullpenAutoLiveBot(user_id=user_id)._synchronize_state(
-                    settings,
-                    state,
-                )
-                repo.save_run(user_id, recovered_run)
-                repo.replace_run_decisions_from_stage3_payload(user_id, recovered_run)
-                repo.save_state(user_id, state)
-                session.commit()
-
-            state.last_action = "Queued scheduled Auto-Live run."
+            state.last_action = (
+                "Dispatching scheduled Auto-Live run through the canonical run template."
+            )
             BullpenAutoLiveBot(user_id=user_id)._schedule_next_cycles(
                 settings,
                 state,
                 reference_time=now,
             )
-            task_id = str(uuid4())
-            run_id = str(uuid4())
-            started_at = now.isoformat()
-            run = BullpenAutoLiveRun(
-                id=run_id,
-                triggered_by="scheduler",
-                status="running",
-                dry_run=effective_dry_run(settings),
-                started_at=started_at,
-                summary=build_initial_run_summary(),
-                live_execution_requested=live_execution_requested(settings),
-                guardrail_checks=state.latest_guardrail_checks,
-                stage_results=[
-                    build_initial_scan_stage_result(
-                        started_at=started_at,
-                    )
-                ],
-                stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
-                audit_metadata=build_auto_live_run_audit_metadata(
-                    settings,
-                    run_id=run_id,
-                    task_id=task_id,
-                    enqueued_at=started_at,
-                ),
-                task_lifecycle=queued_auto_live_task_lifecycle(
-                    task_id=task_id,
-                    enqueued_at=started_at,
-                ),
-            )
-            repo.save_run(user_id, run)
             repo.save_state(user_id, state)
             session.commit()
-            try:
-                task, fallback_used = publish_auto_live_task_with_fallback(
-                    execute_polymarket_auto_live_run,
-                    user_id=user_id,
-                    run=run,
-                    task_id=task_id,
-                    logger=logger,
+            due_user_ids.append(user_id)
+
+    for user_id in due_user_ids:
+        try:
+            asyncio.run(
+                BullpenAutoLiveBot(user_id=user_id).run_once(
+                    triggered_by="scheduler",
                 )
-            except AutoLiveTaskPublishExhausted as publish_error:
-                run.status = "failed"
-                run.completed_at = publish_error.failed_at
-                run.error_message = (
-                    "Could not enqueue Auto-Live worker task through the "
-                    "primary or fallback queue."
-                )
-                run.summary = finalize_failed_run_progress(
-                    run,
-                    failure_message=run.error_message,
-                    completed_at=publish_error.failed_at,
-                )
-                if run.task_lifecycle is not None:
-                    run.task_lifecycle = run.task_lifecycle.model_copy(
-                        update={
-                            "state": "FAILURE",
-                            "detail": run.error_message,
-                        }
-                    )
-                state.last_run_id = run.id
-                state.last_run_at = publish_error.failed_at
-                state.last_action = run.summary
-                state.last_error = run.summary
-                repo.save_run(user_id, run)
-                repo.save_state(user_id, state)
-                session.commit()
-                continue
-            if fallback_used:
-                repo.save_run(user_id, run)
-                session.commit()
-            register_auto_live_run_task_sync(run.id, str(task.id))
+            )
+        except Exception:
+            # ``run_once`` durably records queue-publication failures. Keep the
+            # beat scanner available for other users and the next interval.
+            logger.exception(
+                "Could not dispatch due Auto-Live run through the canonical "
+                "run template for user %s.",
+                user_id,
+            )
 
 
 @celery.task(
