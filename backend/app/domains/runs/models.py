@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -70,6 +70,79 @@ class RunJob(Base, TimestampMixin):
 
     run: Mapped[Run] = relationship(back_populates="run_jobs")
     job: Mapped[Job] = relationship()
+
+
+class FinalActionableHistory(Base, TimestampMixin):
+    """Immutable stock-level action captured for one completed rebalance run.
+
+    Raw LLM output remains in ``jobs.response``.  This projection is deliberately
+    append-only and queryable by stock so the dashboard never has to download
+    every historical run merely to render one ticker's audit trail.
+    """
+
+    __tablename__ = "final_actionable_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "market",
+            "rebalance_run_id",
+            "stock_symbol",
+            "formula_version",
+            name="uq_final_actionable_history_run_stock_formula",
+        ),
+        Index(
+            "ix_final_actionable_history_lookup",
+            "user_id",
+            "market",
+            "stock_symbol",
+            "covered_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workflow_id: Mapped[int | None] = mapped_column(
+        ForeignKey("auto_rebalance_workflows.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    auto_rebalance_sequence: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    rebalance_run_id: Mapped[int] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    market: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    stock_symbol: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    stock_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    covered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    consensus_numerator: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    consensus_denominator: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    historical_current_units: Mapped[float | None] = mapped_column(Float, nullable=True)
+    historical_current_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    action_units: Mapped[float | None] = mapped_column(Float, nullable=True)
+    amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    technical_scan_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    formula_version: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="score-matrix-v1"
+    )
+    formula_inputs_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_run_ids_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    snapshot_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    coverage_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="suggested", index=True
+    )
+
+    user: Mapped[User] = relationship()
 
 
 class AutoRebalanceWorkflow(Base, TimestampMixin):

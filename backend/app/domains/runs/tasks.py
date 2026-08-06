@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.auth.models import User
+from app.domains.runs.final_actionable_history import backfill_user_history
 from app.domains.runs.models import Run, RunJob
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
@@ -300,4 +301,23 @@ def send_run_completion_email_task(self, run_id: int) -> None:
             logger.info("Run completion email sent for run %s to user %s", run_id, run.user_id)
         except Exception as exc:
             logger.exception("Run completion email failed for run %s", run_id)
+            raise self.retry(exc=exc)
+
+
+@celery.task(
+    bind=True,
+    max_retries=1,
+    default_retry_delay=120,
+    name="app.domains.runs.tasks.backfill_final_actionable_history_task",
+    queue="ai",
+)
+def backfill_final_actionable_history_task(self, user_id: int) -> dict[str, int]:
+    with SyncSessionLocal() as db:
+        try:
+            result = backfill_user_history(db, user_id=user_id)
+            logger.info("Final actionable history backfill completed for user %s: %s", user_id, result)
+            return result
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Final actionable history backfill failed for user %s", user_id)
             raise self.retry(exc=exc)

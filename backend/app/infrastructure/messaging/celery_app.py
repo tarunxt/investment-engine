@@ -32,6 +32,7 @@ celery.conf.task_default_queue = "ai"
 celery.conf.task_routes = {
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.auth.tasks.*": {"queue": "email"},
+    "app.domains.runs.tasks.backfill_final_actionable_history_task": {"queue": "ai"},
     "app.domains.runs.tasks.*": {"queue": "email"},
     "app.domains.polymarket_auto_live.tasks.execute_polymarket_auto_live_run": {"queue": AUTO_LIVE_QUEUE},
     "app.domains.polymarket_auto_live.tasks.execute_auto_live_order_intent": {"queue": "ai"},

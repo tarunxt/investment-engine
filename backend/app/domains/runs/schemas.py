@@ -255,6 +255,97 @@ class AutoRebalanceHistoryDetailResponse(AutoRebalanceHistoryItemResponse):
     standalone_jobs: list[AutoRebalanceJobDetailResponse] = Field(default_factory=list)
 
 
+FinalActionableMarket = Literal["india", "us"]
+FinalActionableCoverageStatus = Literal[
+    "suggested",
+    "not_mentioned",
+    "not_in_input_universe",
+    "run_failed",
+    "parse_failed",
+]
+
+
+class FinalActionableHistoryCreateItem(BaseModel):
+    workflow_id: int | None = Field(default=None, ge=1)
+    auto_rebalance_sequence: int | None = Field(default=None, ge=1)
+    rebalance_run_id: int = Field(ge=1)
+    market: FinalActionableMarket
+    stock_symbol: str = Field(min_length=1, max_length=64)
+    stock_name: str | None = Field(default=None, max_length=255)
+    covered_at: datetime
+    action: str | None = Field(default=None, max_length=32)
+    score: float | None = None
+    consensus_numerator: int | None = Field(default=None, ge=0)
+    consensus_denominator: int | None = Field(default=None, ge=0)
+    historical_current_units: float | None = None
+    historical_current_value: float | None = None
+    action_units: float | None = None
+    amount: float | None = None
+    technical_scan_run_id: int | None = Field(default=None, ge=1)
+    formula_version: str = Field(default="score-matrix-v1", min_length=1, max_length=64)
+    formula_inputs_json: dict[str, Any] | None = None
+    source_run_ids_json: list[int] = Field(default_factory=list)
+    snapshot_json: dict[str, Any] | None = None
+    coverage_status: FinalActionableCoverageStatus = "suggested"
+
+    @field_validator("stock_symbol")
+    @classmethod
+    def normalize_stock_symbol(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not normalized:
+            raise ValueError("stock_symbol is required")
+        return normalized
+
+
+class FinalActionableHistoryBulkCreateRequest(BaseModel):
+    items: list[FinalActionableHistoryCreateItem] = Field(min_length=1, max_length=500)
+
+
+class FinalActionableHistoryBulkCreateResponse(BaseModel):
+    inserted: int
+    skipped: int
+    coverage_inserted: int = 0
+
+
+class FinalActionableHistoryItemResponse(BaseModel):
+    id: int
+    workflow_id: int | None = None
+    auto_rebalance_sequence: int | None = None
+    rebalance_run_id: int
+    market: FinalActionableMarket
+    stock_symbol: str
+    stock_name: str | None = None
+    covered_at: datetime
+    action: str | None = None
+    score: float | None = None
+    consensus_numerator: int | None = None
+    consensus_denominator: int | None = None
+    historical_current_units: float | None = None
+    historical_current_value: float | None = None
+    action_units: float | None = None
+    amount: float | None = None
+    technical_scan_run_id: int | None = None
+    formula_version: str
+    formula_inputs_json: dict[str, Any] | None = None
+    source_run_ids_json: list[int] | None = None
+    snapshot_json: dict[str, Any] | None = None
+    coverage_status: FinalActionableCoverageStatus
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FinalActionableHistoryListResponse(BaseModel):
+    items: list[FinalActionableHistoryItemResponse] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class FinalActionableHistoryBackfillResponse(BaseModel):
+    status: Literal["queued", "already_queued"]
+    task_id: str | None = None
+
+
 class RunCreate(BaseModel):
     prompt: str
     targets: list[RunModelTarget]

@@ -3540,3 +3540,63 @@ export function isHTTPValidationError(response: unknown): response is HTTPValida
     Array.isArray((response as Record<string, unknown>).detail)
   );
 }
+
+
+export type FinalActionableHistoryCoverageStatus =
+  | "suggested"
+  | "not_mentioned"
+  | "not_in_input_universe"
+  | "run_failed"
+  | "parse_failed";
+
+export type FinalActionableHistoryItem = {
+  id: number;
+  workflow_id: number | null;
+  auto_rebalance_sequence: number | null;
+  rebalance_run_id: number;
+  market: "india" | "us";
+  stock_symbol: string;
+  stock_name: string | null;
+  covered_at: string;
+  action: string | null;
+  score: number | null;
+  consensus_numerator: number | null;
+  consensus_denominator: number | null;
+  historical_current_units: number | null;
+  historical_current_value: number | null;
+  action_units: number | null;
+  amount: number | null;
+  technical_scan_run_id: number | null;
+  formula_version: string;
+  formula_inputs_json: Record<string, unknown> | null;
+  source_run_ids_json: number[] | null;
+  snapshot_json: Record<string, unknown> | null;
+  coverage_status: FinalActionableHistoryCoverageStatus;
+  created_at: string;
+};
+
+export type FinalActionableHistoryListResponse = {
+  items: FinalActionableHistoryItem[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
+export type FinalActionableHistoryCreateItem = Omit<
+  FinalActionableHistoryItem,
+  "id" | "created_at"
+>;
+
+export type FinalActionableHistoryBulkCreateRequest = {
+  items: FinalActionableHistoryCreateItem[];
+};
+
+export type FinalActionableHistoryBulkCreateResponse = {
+  inserted: number;
+  skipped: number;
+  coverage_inserted: number;
+};
+
+export type FinalActionableHistoryBackfillResponse = {
+  status: "queued" | "already_queued";
+  task_id: string | null;
+};

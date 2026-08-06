@@ -101,6 +101,10 @@ import {
     AutoRebalanceStageKey,
     AutoRebalanceStageResponse,
     AutoRebalanceStageUpdateRequest,
+    FinalActionableHistoryBackfillResponse,
+    FinalActionableHistoryBulkCreateRequest,
+    FinalActionableHistoryBulkCreateResponse,
+    FinalActionableHistoryListResponse,
 } from '@/types/api';
 
 export type ApiRequestControl = {
@@ -139,6 +143,16 @@ export interface IApiService {
         params?: { page?: number; limit?: number },
         options?: ApiRequestControl,
     ): Promise<PaginatedResponse<RunResponse>>;
+    getFinalActionableHistory(params: {
+        market: "india" | "us";
+        symbol: string;
+        limit?: number;
+        cursor?: string | null;
+    }): Promise<FinalActionableHistoryListResponse>;
+    saveFinalActionableHistory(
+        data: FinalActionableHistoryBulkCreateRequest,
+    ): Promise<FinalActionableHistoryBulkCreateResponse>;
+    queueFinalActionableHistoryBackfill(): Promise<FinalActionableHistoryBackfillResponse>;
     getAutoRebalanceHistory(
         portfolio: AutoRebalancePortfolioKey,
         params?: { limit?: number },
