@@ -21,7 +21,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Apply implementation
-        run: python3 scripts/apply_final_actionable_history_patch.py
+        run: python3 scripts/fix_apply_final_actionable_history_patch.py
 
       - name: Validate generated sources
         run: |
