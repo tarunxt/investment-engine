@@ -16,6 +16,13 @@ const clientSource = readFileSync(
   ),
   "utf8",
 );
+const workflowSource = readFileSync(
+  new URL(
+    "../app/console/dashboard/_components/RebalanceWorkflowSections.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("automated rebalance clamps run history and hydrates only a bounded recent set", () => {
   assert.match(bridgeSource, /const BACKEND_RUN_PAGE_LIMIT = 100;/);
@@ -47,8 +54,16 @@ test("LLMs completed opens an inline provider/model dialog with layered saved-da
   assert.match(bridgeSource, /onKeyDownCapture=\{handleKeyDownCapture\}/);
   assert.match(bridgeSource, /loadThreatFallback\(context\)/);
   assert.match(bridgeSource, /loadRecentRunFallback\(context\)/);
+  assert.match(bridgeSource, /getOrdinalModelLabels\(loaded\.jobs\)/);
+  assert.match(bridgeSource, /\$\{model\} \$\{ordinal\}/);
   assert.doesNotMatch(bridgeSource, /window\.alert|globalThis\.alert/);
   for (const heading of ["Provider", "Model", "Status", "Runtime", "Cost"]) {
     assert.match(bridgeSource, new RegExp(`>${heading}<`));
   }
+});
+
+test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {
+  assert.match(workflowSource, /totalLlms: jobs\.length/);
+  assert.match(workflowSource, /getRunJobDisplayModels\(jobs\)/);
+  assert.match(workflowSource, /\$\{model\} \$\{ordinal\}/);
 });

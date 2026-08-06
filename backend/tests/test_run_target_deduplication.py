@@ -1,7 +1,7 @@
 from app.domains.runs.schemas import RunCreate, RunModelTarget
 
 
-def test_run_create_deduplicates_targets_preserving_first_selection_order():
+def test_run_create_preserves_repeated_targets_in_selection_order():
     run = RunCreate(
         prompt="Swing Scan",
         targets=[
@@ -16,5 +16,7 @@ def test_run_create_deduplicates_targets_preserving_first_selection_order():
     assert [(target.provider, target.model) for target in run.targets] == [
         ("openai", "gpt-4o-mini"),
         ("deepseek", "deepseek-chat"),
+        ("openai", "gpt-4o-mini"),
+        ("OpenAI", "GPT-4O-MINI"),
         ("deepseek", "deepseek-coder"),
     ]

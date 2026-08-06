@@ -31,6 +31,7 @@ type LlmMetricContext = {
 };
 type StageJobRow = {
   job: AutoRebalanceJobDetailResponse;
+  displayModel: string;
   runtime: string;
 };
 type CachedRun = {
@@ -724,6 +725,22 @@ function statusTone(status: string) {
   return "border-slate-200 bg-slate-50 text-slate-700";
 }
 
+function getOrdinalModelLabels(jobs: AutoRebalanceJobDetailResponse[]) {
+  const totals = new Map<string, number>();
+  jobs.forEach((job) => {
+    const key = `${job.provider || "Unknown"}::${job.model || "Unknown"}`;
+    totals.set(key, (totals.get(key) ?? 0) + 1);
+  });
+  const seen = new Map<string, number>();
+  return jobs.map((job) => {
+    const model = job.model || "Unknown";
+    const key = `${job.provider || "Unknown"}::${model}`;
+    const ordinal = (seen.get(key) ?? 0) + 1;
+    seen.set(key, ordinal);
+    return (totals.get(key) ?? 0) > 1 ? `${model} ${ordinal}` : model;
+  });
+}
+
 function LlmDetailsDialog({
   context,
   onClose,
@@ -743,8 +760,10 @@ function LlmDetailsDialog({
       setError(null);
       try {
         const loaded = await loadSavedStageJobs(context);
-        const jobs = loaded.jobs.map((job) => ({
+        const displayModels = getOrdinalModelLabels(loaded.jobs);
+        const jobs = loaded.jobs.map((job, index) => ({
           job,
+          displayModel: displayModels[index] ?? job.model ?? "Unknown",
           runtime: getJobRuntime(job),
         }));
         if (!cancelled) {
@@ -844,13 +863,13 @@ function LlmDetailsDialog({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white">
-                    {rows.map(({ job, runtime }) => (
+                    {rows.map(({ job, displayModel, runtime }) => (
                       <tr key={job.id} className="align-top">
                         <td className="px-4 py-3 font-semibold text-slate-900">
                           {job.provider || "Unknown"}
                         </td>
                         <td className="px-4 py-3 text-slate-700">
-                          {job.model || "Unknown"}
+                          {displayModel}
                         </td>
                         <td className="px-4 py-3">
                           <span
