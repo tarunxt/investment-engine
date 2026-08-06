@@ -77,6 +77,9 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(scheduleCard, /max-w-7xl/);
   assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
   assert.match(urls, /history\/event-trends/);
+  assert.match(scheduleCard, /Promise\.allSettled/);
+  assert.match(scheduleCard, /Loading event trends/);
+  assert.match(scheduleCard, /Event trends are temporarily unavailable/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {

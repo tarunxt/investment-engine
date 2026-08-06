@@ -9713,6 +9713,11 @@ export function BullpenAutoRunScheduleCard({
     useState<BullpenAutoLiveHistoryPage | null>(null);
   const [runHistoryEventTrends, setRunHistoryEventTrends] =
     useState<BullpenAutoLiveEventTrendsResponse | null>(null);
+  const [runHistoryEventTrendsLoading, setRunHistoryEventTrendsLoading] =
+    useState(false);
+  const [runHistoryEventTrendsError, setRunHistoryEventTrendsError] = useState<
+    string | null
+  >(null);
   const [runHistoryLoading, setRunHistoryLoading] = useState(false);
   const [runHistoryDetailLoadingId, setRunHistoryDetailLoadingId] = useState<
     string | null
@@ -10663,20 +10668,36 @@ export function BullpenAutoRunScheduleCard({
       setRunHistoryEventTrends(null);
     }
     setRunHistoryLoading(true);
+    setRunHistoryEventTrendsLoading(true);
     setRunHistoryError(null);
+    setRunHistoryEventTrendsError(null);
 
     try {
       const requestOptions = {
           signal: controller.signal,
           timeoutMs: 5_000,
         };
-      const [nextPage, nextTrends] = await Promise.all([
+      const [pageResult, trendsResult] = await Promise.allSettled([
         apiService.getBullpenAutoLiveHistory({ page, size: 20 }, requestOptions),
         apiService.getBullpenAutoLiveHistoryEventTrends(requestOptions),
       ]);
       if (controller.signal.aborted) return;
-      setRunHistoryPage(nextPage);
-      setRunHistoryEventTrends(nextTrends);
+
+      if (pageResult.status === "fulfilled") {
+        setRunHistoryPage(pageResult.value);
+      } else if (!isRequestAbort(pageResult.reason)) {
+        setRunHistoryError(
+          `Run history is temporarily unavailable. ${formatUnknownError(pageResult.reason)}`,
+        );
+      }
+
+      if (trendsResult.status === "fulfilled") {
+        setRunHistoryEventTrends(trendsResult.value);
+      } else if (!isRequestAbort(trendsResult.reason)) {
+        setRunHistoryEventTrendsError(
+          `Event trends are temporarily unavailable. ${formatUnknownError(trendsResult.reason)}`,
+        );
+      }
     } catch (nextError) {
       if (controller.signal.aborted || isRequestAbort(nextError)) return;
       setRunHistoryError(
@@ -10685,6 +10706,7 @@ export function BullpenAutoRunScheduleCard({
     } finally {
       if (!controller.signal.aborted) {
         setRunHistoryLoading(false);
+        setRunHistoryEventTrendsLoading(false);
       }
     }
   }, [autoRunStatusCacheKey]);
@@ -13675,13 +13697,16 @@ export function BullpenAutoRunScheduleCard({
                 </div>
               </div>
               <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
-                {visibleRunHistoryEventTrends ? (
-                  <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
+                <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
                     <div className="flex items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
                       <div><h3 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h3><p className="mt-0.5 text-[11px] text-slate-500">Latest scan is leftmost. Score = latest + 0.5 × previous + 0.25 × third-latest.</p></div>
                       <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Grey = not covered</span>
                     </div>
-                    {visibleRunHistoryEventTrends.events.length ? (
+                    {runHistoryEventTrendsLoading && !visibleRunHistoryEventTrends ? (
+                      <div className="flex items-center gap-2 px-4 py-4 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading event trends…</div>
+                    ) : runHistoryEventTrendsError ? (
+                      <p className="px-4 py-4 text-xs text-amber-800">{runHistoryEventTrendsError}</p>
+                    ) : visibleRunHistoryEventTrends?.events.length ? (
                       <div className="overflow-x-auto px-4 py-2"><div className="min-w-[66rem]">
                         <div className="grid grid-cols-[minmax(22rem,1fr)_6rem_25rem] items-center gap-3 border-b border-slate-200 px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500"><span>Event</span><span className="text-right">Score</span><span>20 scans · newest to oldest</span></div>
                         {visibleRunHistoryEventTrends.events.map((event) => (
@@ -13696,7 +13721,6 @@ export function BullpenAutoRunScheduleCard({
                       </div></div>
                     ) : (<p className="px-4 py-4 text-xs text-slate-500">No events were covered in the latest 20 saved scans.</p>)}
                   </section>
-                ) : null}
                 {runHistoryError && !runHistoryLoading ? (
                   <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                     {runHistoryError}
