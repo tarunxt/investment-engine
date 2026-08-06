@@ -21,6 +21,15 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertNotIn("run = BullpenAutoLiveRun(", section)
         self.assertNotIn("publish_auto_live_task_with_fallback(", section)
 
+        reservation_block = section.split("for state_record in due_states:", 1)[1].split(
+            "for user_id in due_user_ids:", 1
+        )[0]
+        self.assertEqual(reservation_block.count("session.commit()"), 1)
+        self.assertLess(
+            reservation_block.index("due_user_ids.append(user_id)"),
+            reservation_block.index("session.commit()"),
+        )
+
     def test_scheduler_trigger_reuses_an_existing_active_run(self) -> None:
         source = (
             ROOT / "backend/app/domains/polymarket_auto_live/bot.py"
