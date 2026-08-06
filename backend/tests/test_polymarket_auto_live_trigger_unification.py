@@ -33,6 +33,19 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertIn('if triggered_by == "scheduler":', run_once)
         self.assertIn("return running_run", run_once)
 
+    def test_start_now_queues_backend_template_without_browser_scan_wait(self) -> None:
+        source = (
+            ROOT
+            / "frontend/app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx"
+        ).read_text(encoding="utf-8")
+        handler = source.split("  async function handleStartAutoRunNow()", 1)[1].split(
+            "  async function handleStopAutoRuns()", 1
+        )[0]
+
+        self.assertIn("await apiService.startBullpenAutoLive();", handler)
+        self.assertIn("apiService.runBullpenAutoLiveOnce();", handler)
+        self.assertNotIn("buildRunNowRequest", handler)
+
 
 if __name__ == "__main__":
     unittest.main()
