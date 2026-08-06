@@ -1,0 +1,40 @@
+name: Fix Final Actionable History Upsert
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'codex/persist-final-actionable-history'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out pull request branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply persistence fix
+        run: python3 scripts/fix_final_actionable_history_upsert.py
+
+      - name: Validate generated sources
+        run: |
+          git diff --check
+          python3 -m py_compile \
+            backend/app/domains/runs/final_actionable_history.py \
+            backend/app/domains/runs/tasks.py
+          node --test frontend/tests/final-actionables-history-persistence.test.mjs
+
+      - name: Commit persistence fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix final actionables history upsert"
+          git push origin HEAD:${{ github.head_ref }}
