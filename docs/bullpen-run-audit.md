@@ -1178,6 +1178,13 @@ evidence fields, algorithm registry, and snapshot schema are unchanged. The
 adapter exists to validate the current target-accounting fields and does not
 backfill or reinterpret any frozen snapshot.
 
+Stage 2 LLM target accounting preserves repeated selections of the same
+provider/model as independent target slots. A run configured with the same LLM
+three times must persist three selected targets, execute three target attempts,
+include all three outputs in the LLM odds consensus, and render three run-summary
+rows with ordinal labels for duplicate models. This is an execution-cardinality
+fix only; historical frozen snapshots are not rewritten.
+
 ## Active Auth Recovery and Restart-Safe Stage 3
 
 Snapshot schema version 2 adds the current Stage 3 recovery and durable-counter

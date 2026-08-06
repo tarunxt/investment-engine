@@ -7116,6 +7116,22 @@ def test_resolve_auto_live_llm_targets_does_not_fall_back_to_random_defaults():
     assert resolve_auto_live_llm_targets() == []
 
 
+def test_resolve_auto_live_llm_targets_preserves_duplicate_slots():
+    settings = BullpenAutoLiveSettings(
+        console_llm_targets=[
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+            BullpenAutoLiveLlmTarget(provider="deepseek", model="deepseek-v4-flash"),
+        ]
+    )
+
+    assert resolve_auto_live_llm_targets(settings) == [
+        ("deepseek", "deepseek-v4-flash"),
+        ("deepseek", "deepseek-v4-flash"),
+        ("deepseek", "deepseek-v4-flash"),
+    ]
+
+
 def _market(
     *,
     question: str = "Will candidate X win?",
