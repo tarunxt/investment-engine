@@ -112,6 +112,7 @@ jobs:
           tests/rebalance-workflow-resilience.test.mjs
           tests/auto-rebalance-provider-errors-ist.test.mjs
           tests/bullpen-auto-run-status.test.mjs
+          tests/bullpen-auto-run-history.test.mjs
 
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification
