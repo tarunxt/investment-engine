@@ -123,6 +123,10 @@ class PolymarketEventPreflightTests(unittest.TestCase):
             runtime_metadata["question_runtime"]["12345"]["internet_verified"],
             True,
         )
+        self.assertIn(
+            "Rules:\nResolves YES if Acme starts trading on Nasdaq by Dec 31, 2026.",
+            runtime_metadata["question_runtime"]["12345"]["preflight_evidence_block"],
+        )
         stage2_context = runtime_metadata["question_runtime"]["12345"]["stage2_context"]
         self.assertEqual(stage2_context["matched_gamma_market_id"], "12345")
         self.assertEqual(stage2_context["gamma_match_method"], "market_id")
