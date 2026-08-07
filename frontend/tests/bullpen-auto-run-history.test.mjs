@@ -81,6 +81,11 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(scheduleCard, /Promise\.allSettled/);
   assert.match(historyContent, /Loading event trends/);
   assert.match(scheduleCard, /Event trends are temporarily unavailable/);
+  assert.match(historyContent, /href=\{event\.market_url\}/);
+  assert.match(historyContent, /event\.active_position_side === "YES"/);
+  assert.match(historyContent, /border-\[3px\] border-black/);
+  assert.match(historyContent, /<BullpenLlmBreakdownDialog question=\{llmQuestion\}/);
+  assert.match(historyContent, /<BullpenInvestmentMathDialog focus="returnsPerDay"/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {

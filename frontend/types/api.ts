@@ -3000,6 +3000,8 @@ export interface BullpenAutoLiveHistoryPage {
 export interface BullpenAutoLiveEventTrend {
   market_id: string;
   market_title: string;
+  market_url?: string | null;
+  close_time?: string | null;
   score: number;
   scan_scores: Array<number | null>;
   scan_sides: Array<BullpenAutoLiveOutcomeSide | null>;
@@ -3010,6 +3012,7 @@ export interface BullpenAutoLiveEventTrend {
   llm_no_odds?: number | null;
   returns_per_day?: number | null;
   is_active_position?: boolean;
+  active_position_side?: BullpenAutoLiveOutcomeSide | null;
 }
 
 export interface BullpenAutoLiveEventTrendsResponse {

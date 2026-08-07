@@ -1237,6 +1237,8 @@ class AsyncPolymarketAutoLiveRepository:
                     entry["latest"] = projected
         events = [BullpenAutoLiveEventTrend(
             market_id=market_id, market_title=str(entry["title"]),
+            market_url=entry["latest"].market_url if entry["latest"] else None,
+            close_time=entry["latest"].close_time if entry["latest"] else None,
             score=round(sum((entry["scores"][index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))), 2),
             scan_scores=entry["scores"], scan_sides=entry["sides"], scan_timestamps=entry["timestamps"],
             current_yes_odds=entry["latest"].current_yes_odds if entry["latest"] else None,
@@ -1245,6 +1247,7 @@ class AsyncPolymarketAutoLiveRepository:
             llm_no_odds=entry["latest"].fair_no_probability_pct if entry["latest"] else None,
             returns_per_day=next((result.outputs.get("returns_per_day") for result in reversed(entry["latest"].stage_results) if isinstance(result.outputs.get("returns_per_day"), (int, float))), None) if entry["latest"] else None,
             is_active_position=bool(entry["latest"] and entry["latest"].current_exposure_usd > 0),
+            active_position_side=entry["latest"].side if entry["latest"] and entry["latest"].current_exposure_usd > 0 else None,
         ) for market_id, entry in event_scores.items()]
         events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
         return BullpenAutoLiveEventTrendsResponse(events=events, scan_count=20, generated_at=utc_now().isoformat())
