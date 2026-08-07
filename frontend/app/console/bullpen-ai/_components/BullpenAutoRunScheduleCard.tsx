@@ -18,6 +18,7 @@ import {
   Clock3,
   Copy,
   History,
+  ExternalLink,
   Info,
   Bot,
   RefreshCw,
@@ -118,6 +119,7 @@ import {
   BullpenReturnsPerDayHeader,
   BullpenReturnsPerDayValueButton,
 } from "./BullpenReturnsPerDayInfo";
+import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import {
   buildBullpenStage3InvestPreviewSteps,
   buildBullpenStage3OnlyInvestExecutionPlan,
@@ -227,16 +229,6 @@ const BULLPEN_LOGIN_COMMAND =
   "sudo -u investor -H /usr/local/bin/bullpen login --no-browser";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
-
-function getHistoryScoreColor(score: number | null): string {
-  if (score === null) return "rgb(203 213 225)";
-  const clamped = Math.max(0, Math.min(100, score));
-  const [start, end, progress] = clamped <= 65
-    ? [[244, 166, 160], [255, 255, 255], (clamped - 50) / 15]
-    : [[255, 255, 255], [82, 183, 126], (clamped - 65) / 35];
-  const boundedProgress = Math.max(0, Math.min(1, progress));
-  return `rgb(${start.map((value, index) => Math.round(value + (end[index] - value) * boundedProgress)).join(" ")})`;
-}
 
 type BullpenAutoRunScheduleCardProps = {
   onRunCompleted?: () => void | Promise<void>;
@@ -12239,7 +12231,6 @@ export function BullpenAutoRunScheduleCard({
   const visibleRunHistoryPage = runHistoryBelongsToCurrentUser
     ? runHistoryPage
     : null;
-  const visibleRunHistoryItems = visibleRunHistoryPage?.items ?? [];
   const visibleRunHistoryEventTrends = runHistoryBelongsToCurrentUser
     ? runHistoryEventTrends
     : null;
@@ -12431,11 +12422,12 @@ export function BullpenAutoRunScheduleCard({
               variant="outline"
               onClick={() => setIsRunHistoryDialogOpen(true)}
               aria-label="Show Bullpen run history"
-              className="border-[#f4d458] bg-[#f4d458] text-slate-950 hover:border-[#e7c845] hover:bg-[#e7c845]"
+              className="rounded-r-none border-[#f4d458] bg-[#f4d458] text-slate-950 hover:border-[#e7c845] hover:bg-[#e7c845]"
             >
               <History className="mr-2 h-4 w-4" />
               History
             </Button>
+            <Button type="button" variant="outline" onClick={() => window.open("/console/bullpen-ai/history", "_blank", "noopener,noreferrer")} aria-label="Open Bullpen History in new window" title="Open in new window" className="-ml-2 rounded-l-none border-l border-l-slate-900/20 border-[#f4d458] bg-[#f4d458] px-3 text-slate-950 hover:bg-[#e7c845]"><ExternalLink className="h-4 w-4" /></Button>
 
             <Button
               type="button"
@@ -13641,257 +13633,9 @@ export function BullpenAutoRunScheduleCard({
         </div>
 
         {isRunHistoryDialogOpen ? (
-          <div
-            className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget)
-                closeRunHistoryDialog();
-            }}
-          >
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="bullpen-run-history-title"
-              className="max-h-[88vh] w-full max-w-7xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
-            >
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
-                    Run History
-                  </p>
-                  <h2
-                    id="bullpen-run-history-title"
-                    className="mt-2 text-xl font-semibold text-slate-950"
-                  >
-                    Bullpen Auto and Manual Runs
-                  </h2>
-                  <p className="mt-1 text-xs text-slate-500">
-                    {runHistoryLoading
-                      ? "Loading compact history…"
-                      : visibleRunHistoryPage
-                        ? `${visibleRunHistoryPage.total.toLocaleString("en-IN")} saved run${visibleRunHistoryPage.total === 1 ? "" : "s"}`
-                        : "History has not been loaded"}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void loadRunHistory()}
-                    disabled={runHistoryLoading}
-                    className="inline-flex h-10 items-center justify-center rounded-full border border-slate-200 px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-                    aria-label="Refresh Bullpen run history"
-                  >
-                    <RefreshCw
-                      className={`mr-2 h-4 w-4 ${runHistoryLoading ? "animate-spin" : ""}`}
-                    />
-                    Refresh
-                  </button>
-                  <button
-                    type="button"
-                    onClick={closeRunHistoryDialog}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-                    aria-label="Close Bullpen run history"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-              <div className="max-h-[70vh] overflow-y-auto px-6 py-5">
-                <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70">
-                    <div className="flex items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
-                      <div><h3 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h3><p className="mt-0.5 text-[11px] text-slate-500">Latest scan is leftmost. Score = latest + 0.5 × previous + 0.25 × third-latest.</p></div>
-                      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Grey = not covered</span>
-                    </div>
-                    {runHistoryEventTrendsLoading && !visibleRunHistoryEventTrends ? (
-                      <div className="flex items-center gap-2 px-4 py-4 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading event trends…</div>
-                    ) : runHistoryEventTrendsError ? (
-                      <p className="px-4 py-4 text-xs text-amber-800">{runHistoryEventTrendsError}</p>
-                    ) : visibleRunHistoryEventTrends?.events.length ? (
-                      <div className="overflow-x-auto px-4 py-2"><div className="min-w-[66rem]">
-                        <div className="grid grid-cols-[minmax(22rem,1fr)_6rem_25rem] items-center gap-3 border-b border-slate-200 px-1 pb-1 text-[10px] font-bold uppercase tracking-wider text-slate-500"><span>Event</span><span className="text-right">Score</span><span>20 scans · newest to oldest</span></div>
-                        {visibleRunHistoryEventTrends.events.map((event) => (
-                          <div key={event.market_id} className="grid grid-cols-[minmax(22rem,1fr)_6rem_25rem] items-center gap-3 border-b border-slate-200/70 px-1 py-1 last:border-0">
-                            <span className="truncate whitespace-nowrap text-xs font-semibold text-slate-800" title={event.market_title}>{event.market_title}</span>
-                            <span className="text-right text-xs font-bold tabular-nums text-slate-950">{event.score.toFixed(2)}</span>
-                            <span className="flex items-center gap-1" aria-label={`Strongest Side LLM scores for ${event.market_title}`}>
-                              {event.scan_scores.map((scanScore, index) => (<span key={`${event.market_id}-${index}`} className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-900/10" style={{ backgroundColor: getHistoryScoreColor(scanScore) }} title={scanScore === null ? `Scan ${index + 1}: not covered` : `Scan ${index + 1}: ${scanScore.toFixed(2)}`} />))}
-                            </span>
-                          </div>
-                        ))}
-                      </div></div>
-                    ) : (<p className="px-4 py-4 text-xs text-slate-500">No events were covered in the latest 20 saved scans.</p>)}
-                  </section>
-                {runHistoryError && !runHistoryLoading ? (
-                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    {runHistoryError}
-                  </div>
-                ) : null}
-                {runHistoryLoading && visibleRunHistoryItems.length === 0 ? (
-                  <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 p-8 text-sm text-slate-600">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    Loading saved Bullpen runs…
-                  </div>
-                ) : visibleRunHistoryItems.length ? (
-                  <>
-                    <div className="space-y-3">
-                      {visibleRunHistoryItems.map((run) => {
-                        const runKind =
-                          run.triggered_by === "scheduler"
-                            ? "Auto Run"
-                            : "Manual Run";
-                        const triggerLabel =
-                          run.triggered_by === "scheduler"
-                            ? "Scheduler"
-                            : run.triggered_by === "start"
-                              ? "Start auto runs"
-                              : run.triggered_by === "resume"
-                                ? "Resume auto runs"
-                                : "Manual run now";
-                        const detailLoading =
-                          runHistoryDetailLoadingId === run.id;
-                        return (
-                          <button
-                            key={run.id}
-                            type="button"
-                            onClick={() => void openHistoryRunDetail(run)}
-                            disabled={runHistoryDetailLoadingId !== null}
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left transition hover:border-blue-200 hover:bg-blue-50/40 disabled:cursor-wait disabled:opacity-70"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-                                    {runKind}
-                                  </span>
-                                  <span className="rounded-full border border-violet-200 bg-violet-50 px-2.5 py-1 text-xs font-semibold text-violet-800">
-                                    Trigger: {triggerLabel}
-                                  </span>
-                                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold capitalize text-slate-700">
-                                    {run.status}
-                                  </span>
-                                  <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-900 shadow-sm">
-                                    {formatIstDateTime(run.started_at)}
-                                  </span>
-                                </div>
-                                <p className="mt-2 line-clamp-2 text-sm font-semibold leading-5 text-slate-950">
-                                  {run.summary || "Run summary unavailable."}
-                                </p>
-                                <p className="mt-1 truncate text-xs text-slate-600">
-                                  Run {run.id}
-                                </p>
-                              </div>
-                              <div className="grid shrink-0 grid-cols-3 gap-2 text-center">
-                                {[
-                                  ["Decisions", run.decisions_count],
-                                  ["Planned", run.orders_planned],
-                                  ["Submitted", run.orders_submitted],
-                                ].map(([label, value]) => (
-                                  <span
-                                    key={String(label)}
-                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2"
-                                  >
-                                    <span className="block text-sm font-bold text-slate-900">
-                                      {Number(value).toLocaleString("en-IN")}
-                                    </span>
-                                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                                      {label}
-                                    </span>
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {run.stages.map((stage) => (
-                                <span
-                                  key={`${run.id}-${stage.key}`}
-                                  role="button"
-                                  tabIndex={0}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setRunHistoryStageHelp({ label: stage.label, status: stage.status });
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      event.stopPropagation();
-                                      setRunHistoryStageHelp({ label: stage.label, status: stage.status });
-                                    }
-                                  }}
-                                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-900 focus:outline-none focus:ring-2 focus:ring-sky-300"
-                                >
-                                  {stage.label}: {stage.status}
-                                </span>
-                              ))}
-                              {detailLoading ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-800">
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  Loading full details
-                                </span>
-                              ) : null}
-                            </div>
-                            {run.error_message ? (
-                              <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                                <ErrorCodeWithDetails
-                                  detail={run.error_message}
-                                  detailClassName="text-rose-800"
-                                />
-                              </div>
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {visibleRunHistoryPage &&
-                    visibleRunHistoryPage.pages > 1 ? (
-                      <div className="mt-5 flex items-center justify-between gap-3 border-t border-slate-200 pt-4">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={
-                            runHistoryLoading ||
-                            visibleRunHistoryPage.page <= 1
-                          }
-                          onClick={() =>
-                            void loadRunHistory(
-                              visibleRunHistoryPage.page - 1,
-                            )
-                          }
-                        >
-                          Previous
-                        </Button>
-                        <span className="text-xs font-semibold text-slate-600">
-                          Page {visibleRunHistoryPage.page} of{" "}
-                          {visibleRunHistoryPage.pages}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={
-                            runHistoryLoading ||
-                            !visibleRunHistoryPage.has_next
-                          }
-                          onClick={() =>
-                            void loadRunHistory(
-                              visibleRunHistoryPage.page + 1,
-                            )
-                          }
-                        >
-                          Next
-                        </Button>
-                      </div>
-                    ) : null}
-                  </>
-                ) : runHistoryError ? (
-                  <div className="rounded-2xl border border-dashed border-amber-300 bg-amber-50 p-8 text-center text-sm text-amber-900">
-                    Saved run history could not be shown. Retry when the service
-                    is available.
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-600">
-                    No Bullpen run history is available yet.
-                  </div>
-                )}
-              </div>
+          <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRunHistoryDialog(); }}>
+            <div className="max-h-[92vh] w-full max-w-7xl">
+              <BullpenRunHistoryContent page={visibleRunHistoryPage} trends={visibleRunHistoryEventTrends} loading={runHistoryLoading} trendsLoading={runHistoryEventTrendsLoading} error={runHistoryError} trendsError={runHistoryEventTrendsError} detailLoadingId={runHistoryDetailLoadingId} onRefresh={() => void loadRunHistory()} onPage={(page) => void loadRunHistory(page)} onOpenRun={(run) => void openHistoryRunDetail(run)} onClose={closeRunHistoryDialog} />
             </div>
           </div>
         ) : null}
