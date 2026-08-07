@@ -1221,6 +1221,8 @@ class BullpenAutoLiveHistoryPage(BaseModel):
 class BullpenAutoLiveEventTrend(BaseModel):
     market_id: str
     market_title: str
+    market_url: str | None = None
+    close_time: str | None = None
     score: float = Field(ge=0)
     scan_scores: list[float | None] = Field(min_length=20, max_length=20)
     scan_sides: list[AutoLiveOutcomeSide | None] = Field(default_factory=lambda: [None] * 20, min_length=20, max_length=20)
@@ -1231,6 +1233,7 @@ class BullpenAutoLiveEventTrend(BaseModel):
     llm_no_odds: float | None = Field(default=None, ge=0, le=100)
     returns_per_day: float | None = None
     is_active_position: bool = False
+    active_position_side: AutoLiveOutcomeSide | None = None
 
 
 class BullpenAutoLiveEventTrendsResponse(BaseModel):
