@@ -251,7 +251,14 @@ function readOutcomeOdds(record: Record<string, unknown>) {
 }
 
 function extractRulesText(record: Record<string, unknown>) {
-  return normalizeText(readString(record, ["description", "rules"]));
+  return normalizeText(
+    readString(record, [
+      "resolutionCriteria",
+      "resolution_criteria",
+      "rules",
+      "description",
+    ]),
+  );
 }
 
 function extractResolutionSourceText(

@@ -150,6 +150,10 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
   assert.match(legacyPrompt, /"llm_no_odds"/);
   assert.match(preflightEvidenceBlock, /Preflight Evidence Block:/);
   assert.match(preflightEvidenceBlock, /Market:\nWill candidate X win\?/);
+  assert.match(
+    preflightEvidenceBlock,
+    /Rules:\nThis market resolves to "Yes" if candidate X wins\./,
+  );
   assert.match(preflightEvidenceBlock, /Verified current facts:/);
   assert.match(
     preflightEvidenceBlock,
@@ -938,6 +942,10 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
   assert.match(
     marketUrlsSource,
     /export async function resolvePolymarketMarketsWithQuestionFallback/,
+  );
+  assert.match(
+    marketUrlsSource,
+    /"resolutionCriteria",\s*"resolution_criteria",\s*"rules",\s*"description"/,
   );
   assert.match(marketUrlsSource, /yesOdds: resolved\.yesOdds/);
   assert.match(marketUrlsSource, /noOdds: resolved\.noOdds/);

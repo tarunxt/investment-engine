@@ -475,6 +475,12 @@ market context. Summaries such as parsed YES definitions, deadline labels, or
 prior blocker strings are not a substitute for the original rules text because
 Stage 3 re-parses those rows before planning new buy orders.
 
+The legacy preflight evidence rendering also includes that original text in a
+dedicated `Rules:` section. Rule capture uses the same Gamma field precedence as
+the canonical Stage 2 context (`resolutionCriteria`, `resolution_criteria`,
+`rules`, then `description`) so the human-visible block and audited LLM input do
+not silently omit a market's resolution preamble.
+
 Stage 2 snapshots also persist the eligible-universe coverage record:
 reviewed rows, skipped rows, completeness, and any stored blocker summary/fix
 used to explain why the full universe could not be reviewed and what should be
