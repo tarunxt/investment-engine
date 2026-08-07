@@ -9,6 +9,7 @@ const scheduleCard = readFileSync(
   ),
   "utf8",
 );
+const historyContent = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx", import.meta.url), "utf8");
 const apiService = readFileSync(
   new URL("../services/api.ts", import.meta.url),
   "utf8",
@@ -40,7 +41,7 @@ test("Bullpen history modal loads a compact page and lazy selected-run detail", 
     scheduleCard,
     /detailDecisions\.length <\s*consoleDetail\.visible_decision_ids\.length/,
   );
-  assert.match(scheduleCard, /visibleRunHistoryItems\.map\(\(run\) =>/);
+  assert.match(historyContent, /page\?\.items\.map\(run =>/);
   assert.match(
     scheduleCard,
     /runHistoryOwnerKey === autoRunStatusCacheKey/,
@@ -65,20 +66,20 @@ test("Bullpen history requests bypass caches and remain abortable", () => {
     scheduleCard,
     /runHistoryDetailAbortControllerRef\.current\?\.abort\(\)/,
   );
-  assert.match(scheduleCard, /Refresh Bullpen run history/);
-  assert.match(scheduleCard, /Page \{visibleRunHistoryPage\.page\}/);
+  assert.match(historyContent, /Close Bullpen run history/);
+  assert.match(historyContent, /Page \{page\.page\}/);
 });
 
 test("Bullpen history shows scored event trends for exactly 20 newest-first scans", () => {
-  assert.match(scheduleCard, /Recurring Events Across the Last 20 Scans/);
-  assert.match(scheduleCard, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
-  assert.match(scheduleCard, /event\.scan_scores\.map\(\(scanScore, index\) =>/);
-  assert.match(scheduleCard, /Grey = not covered/);
+  assert.match(historyContent, /Recurring Events Across the Last 20 Scans/);
+  assert.match(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
+  assert.match(historyContent, /event\.scan_scores\.map\(\(score, i\) =>/);
+  assert.match(historyContent, /Grey = not covered/);
   assert.match(scheduleCard, /max-w-7xl/);
   assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
   assert.match(urls, /history\/event-trends/);
   assert.match(scheduleCard, /Promise\.allSettled/);
-  assert.match(scheduleCard, /Loading event trends/);
+  assert.match(historyContent, /Loading event trends/);
   assert.match(scheduleCard, /Event trends are temporarily unavailable/);
 });
 

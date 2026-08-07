@@ -1223,6 +1223,14 @@ class BullpenAutoLiveEventTrend(BaseModel):
     market_title: str
     score: float = Field(ge=0)
     scan_scores: list[float | None] = Field(min_length=20, max_length=20)
+    scan_sides: list[AutoLiveOutcomeSide | None] = Field(default_factory=lambda: [None] * 20, min_length=20, max_length=20)
+    scan_timestamps: list[str | None] = Field(default_factory=lambda: [None] * 20, min_length=20, max_length=20)
+    current_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    current_no_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_yes_odds: float | None = Field(default=None, ge=0, le=100)
+    llm_no_odds: float | None = Field(default=None, ge=0, le=100)
+    returns_per_day: float | None = None
+    is_active_position: bool = False
 
 
 class BullpenAutoLiveEventTrendsResponse(BaseModel):

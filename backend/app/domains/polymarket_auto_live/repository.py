@@ -1209,7 +1209,7 @@ class AsyncPolymarketAutoLiveRepository:
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
           .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
         run_index = {run_id: index for index, run_id in enumerate(run_ids)}
-        event_scores: dict[str, tuple[str, list[float | None]]] = {}
+        event_scores: dict[str, dict[str, object]] = {}
         for row in rows:
             try:
                 projected = projected_row_to_decision(row)
@@ -1219,18 +1219,33 @@ class AsyncPolymarketAutoLiveRepository:
             index = run_index.get(str(row.run_id))
             if index is None:
                 continue
-            strongest = max(
-                projected.fair_yes_probability_pct if projected.fair_yes_probability_pct is not None else projected.fair_probability_pct,
-                projected.fair_no_probability_pct if projected.fair_no_probability_pct is not None else 100 - projected.fair_probability_pct,
-            )
-            title, scores = event_scores.setdefault(projected.market_id, (projected.market_title, [None] * 20))
-            scores[index] = round(max(scores[index] or 0, strongest), 2)
-            event_scores[projected.market_id] = (title, scores)
+            yes_score = projected.fair_yes_probability_pct if projected.fair_yes_probability_pct is not None else projected.fair_probability_pct
+            no_score = projected.fair_no_probability_pct if projected.fair_no_probability_pct is not None else 100 - projected.fair_probability_pct
+            strongest = max(yes_score, no_score)
+            strongest_side = "YES" if yes_score >= no_score else "NO"
+            entry = event_scores.setdefault(projected.market_id, {
+                "title": projected.market_title, "scores": [None] * 20,
+                "sides": [None] * 20, "timestamps": [None] * 20,
+                "latest": None,
+            })
+            scores = entry["scores"]
+            if isinstance(scores, list) and strongest >= (scores[index] or 0):
+                scores[index] = round(strongest, 2)
+                entry["sides"][index] = strongest_side
+                entry["timestamps"][index] = projected.updated_at or projected.created_at
+                if index == 0:
+                    entry["latest"] = projected
         events = [BullpenAutoLiveEventTrend(
-            market_id=market_id, market_title=title,
-            score=round(sum((scores[index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))), 2),
-            scan_scores=scores,
-        ) for market_id, (title, scores) in event_scores.items()]
+            market_id=market_id, market_title=str(entry["title"]),
+            score=round(sum((entry["scores"][index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))), 2),
+            scan_scores=entry["scores"], scan_sides=entry["sides"], scan_timestamps=entry["timestamps"],
+            current_yes_odds=entry["latest"].current_yes_odds if entry["latest"] else None,
+            current_no_odds=entry["latest"].current_no_odds if entry["latest"] else None,
+            llm_yes_odds=entry["latest"].fair_yes_probability_pct if entry["latest"] else None,
+            llm_no_odds=entry["latest"].fair_no_probability_pct if entry["latest"] else None,
+            returns_per_day=next((result.outputs.get("returns_per_day") for result in reversed(entry["latest"].stage_results) if isinstance(result.outputs.get("returns_per_day"), (int, float))), None) if entry["latest"] else None,
+            is_active_position=bool(entry["latest"] and entry["latest"].current_exposure_usd > 0),
+        ) for market_id, entry in event_scores.items()]
         events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
         return BullpenAutoLiveEventTrendsResponse(events=events, scan_count=20, generated_at=utc_now().isoformat())
 

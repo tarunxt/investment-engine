@@ -3002,6 +3002,14 @@ export interface BullpenAutoLiveEventTrend {
   market_title: string;
   score: number;
   scan_scores: Array<number | null>;
+  scan_sides: Array<BullpenAutoLiveOutcomeSide | null>;
+  scan_timestamps: Array<string | null>;
+  current_yes_odds?: number | null;
+  current_no_odds?: number | null;
+  llm_yes_odds?: number | null;
+  llm_no_odds?: number | null;
+  returns_per_day?: number | null;
+  is_active_position?: boolean;
 }
 
 export interface BullpenAutoLiveEventTrendsResponse {
