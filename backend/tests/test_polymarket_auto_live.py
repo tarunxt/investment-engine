@@ -82,6 +82,7 @@ from app.domains.polymarket_auto_live.normalization import (
 )
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
+    _event_trend_llm_outputs,
     apply_state_to_record,
     normalize_auto_live_status,
     record_to_decision,
@@ -119,6 +120,26 @@ from app.domains.trading_bots.service import (
 )
 
 
+def test_event_trend_llm_outputs_restore_saved_odds_and_commentary():
+    outputs = _event_trend_llm_outputs(
+        [
+            {
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "llm_yes_odds": 15,
+                "llm_no_odds": 85,
+                "rationale": "No qualifying announcement appears in the evidence.",
+            },
+            {"provider": "missing-model"},
+        ]
+    )
+
+    assert len(outputs) == 1
+    assert outputs[0].provider == "deepseek"
+    assert outputs[0].llm_yes_odds == 15
+    assert outputs[0].rationale == (
+        "No qualifying announcement appears in the evidence."
+    )
 
 
 def test_state_has_due_scheduled_run_allows_polling_failsafe():
