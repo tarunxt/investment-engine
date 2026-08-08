@@ -77,6 +77,11 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
   assert.match(trendsTable, /event\.scan_scores\.map\(\(score,i\) =>/);
   assert.match(historyContent, /Grey = not covered/);
+  assert.match(historyContent, /Strongest LLM odds ≥80%/);
+  assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
+  assert.match(trendsTable, /\(event\.scan_scores\[0\] \?\? -1\) >= 80/);
+  assert.match(trendsTable, /hasStrongestLatestLlmOdds\(event\) \|\| event\.is_active_position/);
+  assert.match(trendsTable, /activeBelowThreshold[\s\S]*?bg-red-100 text-red-950/);
   assert.match(scheduleCard, /max-w-7xl/);
   assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
   assert.match(urls, /history\/event-trends/);
