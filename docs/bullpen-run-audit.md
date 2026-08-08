@@ -1418,3 +1418,11 @@ current odds, strongest LLM side, close time, and latest decision timestamp usin
 the registered `llm_returns_per_day` formula. The calculation dialog uses that
 same latest scan timestamp for its days-left input, so its arithmetic matches the
 table without changing historical snapshots.
+
+The trend response also projects each scan's already-frozen `llm_outputs` into
+an aligned 20-item `scan_llm_outputs` array. This additive, presentation-only
+field lets the history heatmap and its click dialog show provider, model,
+Yes/No odds, and saved rationale for the exact run represented by a circle.
+Older or compact projections remain compatible: a scan without retained model
+outputs is represented by an empty array and its historical facts are not
+rewritten.

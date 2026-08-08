@@ -419,6 +419,23 @@ export function BullpenLlmBreakdownDialog({
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
+          <section className="mb-4 overflow-hidden rounded-2xl border border-slate-200" aria-label="Individual LLM odds and commentary">
+            <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+              <h3 className="text-sm font-semibold text-slate-950">Individual LLM odds and commentary</h3>
+              <p className="mt-1 text-xs text-slate-500">Every model saved for this event/run, including its probability estimate and descriptive rationale.</p>
+            </div>
+            {question.llmBreakdown.length ? (
+              <div className="divide-y divide-slate-200">
+                {question.llmBreakdown.map((output, index) => (
+                  <article key={`${output.provider}-${output.model}-${output.runId ?? index}`} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(12rem,0.8fr)_minmax(10rem,0.6fr)_minmax(20rem,2fr)]">
+                    <div><p className="text-xs font-bold text-slate-950">{output.provider || "Unknown provider"}</p><p className="mt-1 break-words text-xs text-slate-500">{output.model || "Unknown model"}</p></div>
+                    <div className="text-sm font-semibold text-slate-800"><span className="text-emerald-700">Yes {formatOdds(output.llmYesOdds)}</span><br/><span className="text-rose-700">No {formatOdds(output.llmNoOdds)}</span></div>
+                    <div><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Commentary</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-700">{output.rationale || output.invalidReason || output.providerError || "No commentary was saved for this model."}</p></div>
+                  </article>
+                ))}
+              </div>
+            ) : <p className="px-4 py-5 text-sm text-slate-500">No individual model outputs were saved for this event/run.</p>}
+          </section>
           {reviewState ? (
             <div
               className={`mb-4 flex items-start gap-3 rounded-2xl px-4 py-3 text-sm ${

@@ -3006,6 +3006,7 @@ export interface BullpenAutoLiveEventTrend {
   scan_scores: Array<number | null>;
   scan_sides: Array<BullpenAutoLiveOutcomeSide | null>;
   scan_timestamps: Array<string | null>;
+  scan_llm_outputs?: BullpenAutoLiveLlmOutput[][];
   current_yes_odds?: number | null;
   current_no_odds?: number | null;
   llm_yes_odds?: number | null;
