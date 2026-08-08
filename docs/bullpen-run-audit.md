@@ -1423,6 +1423,11 @@ The trend response also projects each scan's already-frozen `llm_outputs` into
 an aligned 20-item `scan_llm_outputs` array. This additive, presentation-only
 field lets the history heatmap and its click dialog show provider, model,
 Yes/No odds, and saved rationale for the exact run represented by a circle.
+The repository selects only the `llm_outputs` JSON member from each immutable
+decision payload because the normal console projection intentionally removes
+that comparatively large field. It validates each selected output before
+returning it, so one malformed legacy output cannot hide the other saved model
+commentary or break the history response.
 Older or compact projections remain compatible: a scan without retained model
 outputs is represented by an empty array and its historical facts are not
 rewritten.

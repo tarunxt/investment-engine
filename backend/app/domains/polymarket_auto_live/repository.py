@@ -36,6 +36,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveEventTrend,
     BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
+    BullpenAutoLiveLlmOutput,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
     BullpenAutoLiveState,
@@ -43,6 +44,21 @@ from app.domains.polymarket_auto_live.schemas import (
 )
 
 logger = get_logger("app.domains.polymarket_auto_live.repository")
+
+
+def _event_trend_llm_outputs(value: object) -> list[BullpenAutoLiveLlmOutput]:
+    """Validate the bounded LLM-output slice selected from a decision payload."""
+    if not isinstance(value, list):
+        return []
+
+    outputs: list[BullpenAutoLiveLlmOutput] = []
+    for item in value:
+        try:
+            outputs.append(BullpenAutoLiveLlmOutput.model_validate(item))
+        except ValidationError as exc:
+            logger.warning("Skipping malformed Auto-Live trend LLM output: %s", exc)
+    return outputs
+
 
 if TYPE_CHECKING:
     from app.domains.polymarket_auto_live.engine import PositionSnapshot
@@ -1221,7 +1237,7 @@ class AsyncPolymarketAutoLiveRepository:
         )
 
     async def list_recent_event_trends(self, user_id: int, *, scan_count: int = 20) -> BullpenAutoLiveEventTrendsResponse:
-        """Aggregate visible events over the latest runs without loading payloads."""
+        """Aggregate visible events and their bounded LLM details over recent runs."""
         run = PolymarketAutoLiveRunRecord
         decision = PolymarketAutoLiveDecisionRecord
         run_rows = (await self.session.execute(
@@ -1235,7 +1251,9 @@ class AsyncPolymarketAutoLiveRepository:
             decision.id, decision.run_id, decision.market_id, decision.slug,
             decision.market_title, decision.side, decision.decision,
             decision.risk_status, decision.edge_pp, decision.score,
-            decision.console_projection, decision.created_at, decision.updated_at,
+            decision.console_projection,
+            decision.payload["llm_outputs"].label("trend_llm_outputs"),
+            decision.created_at, decision.updated_at,
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
           .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
         run_index = {run_id: index for index, run_id in enumerate(run_ids)}
@@ -1264,7 +1282,9 @@ class AsyncPolymarketAutoLiveRepository:
                 scores[index] = round(strongest, 2)
                 entry["sides"][index] = strongest_side
                 entry["timestamps"][index] = projected.updated_at or projected.created_at
-                entry["llm_outputs"][index] = projected.llm_outputs
+                entry["llm_outputs"][index] = _event_trend_llm_outputs(
+                    row.trend_llm_outputs
+                )
                 if index == 0:
                     entry["latest"] = projected
         events = [BullpenAutoLiveEventTrend(
