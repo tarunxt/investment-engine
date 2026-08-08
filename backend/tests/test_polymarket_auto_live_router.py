@@ -552,6 +552,7 @@ async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
     assert response.headers["cache-control"] == "private, no-cache"
     assert response.json()["events"][0]["score"] == 140
     assert len(response.json()["events"][0]["scan_scores"]) == 20
+    assert response.json()["events"][0]["scan_llm_outputs"] == [[] for _ in range(20)]
 
 
 def test_polymarket_manual_invest_route_remains_available():

@@ -1256,6 +1256,7 @@ class AsyncPolymarketAutoLiveRepository:
             entry = event_scores.setdefault(projected.market_id, {
                 "title": projected.market_title, "scores": [None] * 20,
                 "sides": [None] * 20, "timestamps": [None] * 20,
+                "llm_outputs": [[] for _ in range(20)],
                 "latest": None,
             })
             scores = entry["scores"]
@@ -1263,6 +1264,7 @@ class AsyncPolymarketAutoLiveRepository:
                 scores[index] = round(strongest, 2)
                 entry["sides"][index] = strongest_side
                 entry["timestamps"][index] = projected.updated_at or projected.created_at
+                entry["llm_outputs"][index] = projected.llm_outputs
                 if index == 0:
                     entry["latest"] = projected
         events = [BullpenAutoLiveEventTrend(
@@ -1271,6 +1273,7 @@ class AsyncPolymarketAutoLiveRepository:
             close_time=entry["latest"].close_time if entry["latest"] else None,
             score=round(sum((entry["scores"][index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))), 2),
             scan_scores=entry["scores"], scan_sides=entry["sides"], scan_timestamps=entry["timestamps"],
+            scan_llm_outputs=entry["llm_outputs"],
             current_yes_odds=entry["latest"].current_yes_odds if entry["latest"] else None,
             current_no_odds=entry["latest"].current_no_odds if entry["latest"] else None,
             llm_yes_odds=entry["latest"].fair_yes_probability_pct if entry["latest"] else None,
