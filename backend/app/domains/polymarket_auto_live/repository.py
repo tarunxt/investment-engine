@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from math import ceil
 from types import SimpleNamespace
-from typing import Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 
 from pydantic import ValidationError
 from sqlalchemy import Select, and_, desc, exists, func, or_, select
@@ -22,6 +22,7 @@ from app.domains.polymarket_auto_live.console_projection import (
     projected_run_payload,
     workflow_stage_key,
 )
+from app.domains.polymarket_auto_live.console_profile import llm_returns_per_day
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveDecisionRecord,
     PolymarketAutoLiveOrderIntentRecord,
@@ -42,6 +43,9 @@ from app.domains.polymarket_auto_live.schemas import (
 )
 
 logger = get_logger("app.domains.polymarket_auto_live.repository")
+
+if TYPE_CHECKING:
+    from app.domains.polymarket_auto_live.engine import PositionSnapshot
 
 VALID_AUTO_LIVE_STATUSES = {
     "running",
@@ -124,6 +128,32 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=UTC)
     return parsed.astimezone(UTC)
+
+
+def _event_trend_returns_per_day(decision: BullpenAutoLiveDecision) -> float | None:
+    """Return the saved value, or rebuild it from the latest scan's frozen inputs."""
+    persisted = next(
+        (
+            result.outputs.get("returns_per_day")
+            for result in reversed(decision.stage_results)
+            if isinstance(result.outputs.get("returns_per_day"), (int, float))
+        ),
+        None,
+    )
+    if persisted is not None:
+        return float(persisted)
+
+    as_of = _parse_datetime(decision.updated_at) or _parse_datetime(decision.created_at)
+    if as_of is None:
+        return None
+    return llm_returns_per_day(
+        llm_yes_odds=decision.fair_yes_probability_pct,
+        llm_no_odds=decision.fair_no_probability_pct,
+        close_time=decision.close_time,
+        now=as_of,
+        current_yes_odds=decision.current_yes_odds,
+        current_no_odds=decision.current_no_odds,
+    )
 
 
 def _payload_or_default(payload: dict[str, object] | None) -> dict[str, object]:
@@ -1245,7 +1275,7 @@ class AsyncPolymarketAutoLiveRepository:
             current_no_odds=entry["latest"].current_no_odds if entry["latest"] else None,
             llm_yes_odds=entry["latest"].fair_yes_probability_pct if entry["latest"] else None,
             llm_no_odds=entry["latest"].fair_no_probability_pct if entry["latest"] else None,
-            returns_per_day=next((result.outputs.get("returns_per_day") for result in reversed(entry["latest"].stage_results) if isinstance(result.outputs.get("returns_per_day"), (int, float))), None) if entry["latest"] else None,
+            returns_per_day=_event_trend_returns_per_day(entry["latest"]) if entry["latest"] else None,
             is_active_position=bool(entry["latest"] and entry["latest"].current_exposure_usd > 0),
             active_position_side=entry["latest"].side if entry["latest"] and entry["latest"].current_exposure_usd > 0 else None,
         ) for market_id, entry in event_scores.items()]

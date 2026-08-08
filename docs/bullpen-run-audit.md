@@ -1410,3 +1410,11 @@ view records the strongest LLM-side probability in each scan (newest first),
 uses `null` when the event was absent, and sorts by `latest + 0.5 × previous +
 0.25 × third-latest`. This presentation-only score must not be interpreted as a
 Stage 2 or Stage 3 ranking input.
+
+The trend response displays Returns/day from the latest decision's saved stage
+output when available. For backward compatibility with older decisions that did
+not persist that output, it deterministically rebuilds the value from the frozen
+current odds, strongest LLM side, close time, and latest decision timestamp using
+the registered `llm_returns_per_day` formula. The calculation dialog uses that
+same latest scan timestamp for its days-left input, so its arithmetic matches the
+table without changing historical snapshots.
