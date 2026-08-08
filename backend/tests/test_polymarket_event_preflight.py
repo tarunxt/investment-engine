@@ -272,6 +272,44 @@ class PolymarketEventPreflightTests(unittest.TestCase):
         )
         self.assertIsNone(stage2_context["exact_yes_definition"])
 
+    @patch("app.domains.polymarket.event_preflight._fetch_gamma_market")
+    def test_preflight_keeps_required_evidence_fields_and_explains_missing_values(
+        self,
+        fetch_gamma_market_mock,
+    ):
+        fetch_gamma_market_mock.return_value = GammaMarketLookupResult()
+        context = _sample_context(require_fresh=False)
+        question = context.question_payload[0].model_copy(
+            update={
+                "market_url": None,
+                "slug": None,
+                "market_slug": None,
+                "polymarket_rules": None,
+                "polymarket_market_context": None,
+                "polymarket_resolution_source": None,
+            }
+        )
+
+        prepared = prepare_polymarket_event_context(
+            context.model_copy(update={"question_payload": [question]})
+        )
+        block = prepared.runtime_metadata["question_runtime"]["12345"][
+            "preflight_evidence_block"
+        ]
+
+        self.assertIn(
+            "- Polymarket rules: Not supplied (reason: no exact Polymarket Gamma market matched",
+            block,
+        )
+        self.assertIn(
+            "- detailed market context: Not supplied (reason: no canonical Polymarket event URL was available",
+            block,
+        )
+        self.assertIn(
+            "- resolution source: Not supplied (reason: Polymarket supplied neither",
+            block,
+        )
+
     @patch("app.domains.polymarket.event_preflight._fetch_event_market_context")
     @patch("app.domains.polymarket.event_preflight._fetch_gamma_market")
     def test_prepare_context_marks_verified_binary_rule_bypass_for_exact_gamma_match(

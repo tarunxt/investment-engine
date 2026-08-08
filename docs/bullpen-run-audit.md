@@ -1400,6 +1400,13 @@ update; frozen snapshots and historical facts are not modified.
 
 ## Insufficient-evidence LLM estimates
 
+Stage 2 preflight evidence blocks always retain explicit `Polymarket rules`,
+`detailed market context`, and `resolution source` lines. When canonical refresh
+cannot populate one of these mandatory evidence slots, the frozen run input stores
+`Not supplied` together with the specific retrieval or upstream-data reason. This
+keeps missing evidence visible and diagnosable without inventing facts or changing
+the shape of existing snapshots; older frozen blocks remain readable unchanged.
+
 The Stage 2 console treats an LLM output whose normalized `evidence_status` is
 `insufficient` as non-contributing evidence. It remains visible in historical run
 details, but is labelled excluded, has an effective consensus weight of zero, and

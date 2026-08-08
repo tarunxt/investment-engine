@@ -182,6 +182,29 @@ test("Bullpen preflight uses the selected market's by-date instead of a stale ev
   assert.match(preflightEvidenceBlock, /hours remaining: 183\.98/);
 });
 
+test("Bullpen preflight always shows rules and Market Context with missing reasons", async () => {
+  const { buildBullpenQuestionPreflightEvidenceBlock } = await loadBullpenAiModule();
+  const preflightEvidenceBlock = buildBullpenQuestionPreflightEvidenceBlock({
+    ...createQuestionRow(),
+    rules: null,
+    marketContext: null,
+    resolutionSource: null,
+  });
+
+  assert.match(
+    preflightEvidenceBlock,
+    /- Polymarket rules: Not supplied \(reason: the saved market snapshot did not contain Polymarket rules;/,
+  );
+  assert.match(
+    preflightEvidenceBlock,
+    /- detailed market context: Not supplied \(reason: the saved market snapshot did not contain Market Context;/,
+  );
+  assert.match(
+    preflightEvidenceBlock,
+    /- resolution source: Not supplied \(reason: the saved market snapshot contained neither a resolution-source field/,
+  );
+});
+
 test("Bullpen x AI manual invest flow stays wired to the Polymarket manual-invest endpoint", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
