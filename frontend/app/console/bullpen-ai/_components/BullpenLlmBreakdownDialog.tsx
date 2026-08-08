@@ -430,7 +430,18 @@ export function BullpenLlmBreakdownDialog({
                   <article key={`${output.provider}-${output.model}-${output.runId ?? index}`} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(12rem,0.8fr)_minmax(10rem,0.6fr)_minmax(20rem,2fr)]">
                     <div><p className="text-xs font-bold text-slate-950">{output.provider || "Unknown provider"}</p><p className="mt-1 break-words text-xs text-slate-500">{output.model || "Unknown model"}</p></div>
                     <div className="text-sm font-semibold text-slate-800"><span className="text-emerald-700">Yes {formatOdds(output.llmYesOdds)}</span><br/><span className="text-rose-700">No {formatOdds(output.llmNoOdds)}</span></div>
-                    <div><p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Commentary</p><p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-700">{output.rationale || output.invalidReason || output.providerError || "No commentary was saved for this model."}</p></div>
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      {[
+                        ["Commentary based on Preflight Evidence Block:", output.preflightCommentary],
+                        ["Commentary based on Internet Search", output.internetSearchCommentary],
+                        ["Final Conclusion", output.finalConclusion || output.rationale],
+                      ].map(([label, value]) => (
+                        <div key={label} className="border-b border-slate-200 px-3 py-2 last:border-b-0">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{label}</p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-slate-700">{value || output.invalidReason || output.providerError || "No commentary was saved for this section."}</p>
+                        </div>
+                      ))}
+                    </div>
                   </article>
                 ))}
               </div>

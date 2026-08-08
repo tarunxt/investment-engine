@@ -188,6 +188,9 @@ export type BullpenQuestionLlmBreakdownItem = {
   confidence: string | null;
   keyEvidence: string[];
   redFlags: string[];
+  preflightCommentary?: string | null;
+  internetSearchCommentary?: string | null;
+  finalConclusion?: string | null;
   rationale: string | null;
   direction?: BullpenLlmDirection | null;
   rationaleOddsMismatch?: boolean;
@@ -367,6 +370,7 @@ Output requirements:
 - Do not invent evidence or probabilities.
 - Preserve valid 0/100 outcomes when the rules and evidence already settle the market.
 - If only one side is known, return the complement for the other side.
+- Write all three commentary fields for every event. Keep the preflight commentary limited to the Preflight Evidence Block/canonical market context, keep the Internet Search commentary limited to the supplied searched claims and sources, then make Final Conclusion explicitly reconcile those two analyses.
 
 Schema:
 {
@@ -386,7 +390,10 @@ Schema:
       "confidence": "Low|Medium|High",
       "key_evidence_source_ids": ["S1", "S3"],
       "red_flags": ["short caveat"],
-      "rationale": "short explanation"
+      "preflight_commentary": "Commentary based only on rules, deadline, market fields, and the Preflight Evidence Block",
+      "internet_search_commentary": "Commentary based only on supplied Internet Search evidence and source IDs",
+      "final_conclusion": "Final Conclusion based on and reconciling the previous two commentaries",
+      "rationale": "Same text as final_conclusion for backward compatibility"
     }
   ]
 }
@@ -1706,14 +1713,19 @@ export function normalizeBullpenLlmBreakdownEntry(
       "fair_no_probability_pct",
     ]),
   );
+  const explicitFinalConclusion = readStringValue(record.finalConclusion ?? record.final_conclusion);
   const rationaleText =
     readStringValue(record.rationale) ||
+    explicitFinalConclusion ||
     readStringValue(record.reasoning) ||
     readStringValue(record.notes) ||
     readStringValue(record.note) ||
     readStringValue(record.explanation) ||
     readStringValue(record.summary) ||
     null;
+  const preflightCommentary = readStringValue(record.preflightCommentary ?? record.preflight_commentary);
+  const internetSearchCommentary = readStringValue(record.internetSearchCommentary ?? record.internet_search_commentary);
+  const finalConclusion = explicitFinalConclusion || rationaleText;
   const rationaleMismatch = detectBullpenRationaleOddsMismatch(
     rationaleText,
     normalizedOdds.yes,
@@ -1794,6 +1806,9 @@ export function normalizeBullpenLlmBreakdownEntry(
         record.key_evidence_source_ids,
     ),
     redFlags: readStringArrayValue(record.redFlags ?? record.red_flags),
+    preflightCommentary,
+    internetSearchCommentary,
+    finalConclusion,
     rationale: rationaleText,
     direction:
       (readStringValue(record.direction) as BullpenLlmDirection | null) ??

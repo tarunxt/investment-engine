@@ -303,9 +303,14 @@ def _parse_single_output(
             )
         ),
         red_flags=_read_str_list(record, "red_flags", "redFlags"),
+        preflight_commentary=_read_str(record, "preflight_commentary", "preflightCommentary"),
+        internet_search_commentary=_read_str(record, "internet_search_commentary", "internetSearchCommentary"),
+        final_conclusion=_read_str(record, "final_conclusion", "finalConclusion"),
         rationale=_read_str(
             record,
             "rationale",
+            "final_conclusion",
+            "finalConclusion",
             "reasoning",
             "notes",
             "note",
@@ -630,6 +635,7 @@ def build_market_prompt(
 [STAGE2_SHARED_EVIDENCE_ONLY]
 You are estimating one Polymarket YES/NO probability using a canonical shared market context.
 Do not browse. Do not use evidence outside the packet below.
+Write separate commentary based on the canonical preflight context and commentary based on the supplied Internet Search evidence packet. Then write a Final Conclusion that explicitly reconciles both. Copy that conclusion into `rationale` for backward compatibility.
 
 Evaluation timestamp:
 - current_time_utc: {rules.current_time_utc or built_at_utc}
@@ -691,7 +697,10 @@ Return strict JSON only:
       "confidence": "Low|Medium|High",
       "key_evidence_source_ids": ["S1"],
       "red_flags": ["short caveat"],
-      "rationale": "short explanation"
+      "preflight_commentary": "Commentary based only on the rules, deadline, and canonical market context above",
+      "internet_search_commentary": "Commentary based only on the internet-search evidence packet, referencing source IDs",
+      "final_conclusion": "Final conclusion based on and reconciling the previous two commentaries",
+      "rationale": "Same text as final_conclusion for backward compatibility"
     }}
   ]
 }}

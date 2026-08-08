@@ -139,6 +139,9 @@ test("Bullpen x AI prompt builder still supports default and legacy prompt templ
   assert.match(defaultPrompt, /Use event_id as the primary key\./);
   assert.match(defaultPrompt, /stage2_context/);
   assert.match(defaultPrompt, /Do not browse\. Do not add outside evidence\./);
+  assert.match(defaultPrompt, /"preflight_commentary"/);
+  assert.match(defaultPrompt, /"internet_search_commentary"/);
+  assert.match(defaultPrompt, /"final_conclusion"/);
   assert.match(
     defaultPrompt,
     /Experimental AI-generated summary referencing Polymarket data\./,
@@ -981,6 +984,9 @@ test("Bullpen x AI LLM breakdown dialog shows the preflight evidence block", () 
   assert.match(dialogSource, /buildBullpenQuestionPreflightEvidenceBlock/);
   assert.match(dialogSource, /Latest LLM update:/);
   assert.match(dialogSource, /BullpenEventHistoricalAssessmentTable/);
+  assert.match(dialogSource, /Commentary based on Internet Search/);
+  assert.match(dialogSource, /Final Conclusion/);
+  assert.match(dialogSource, /output\.preflightCommentary/);
 });
 
 test("Bullpen x AI treats saved odds or timestamps as clickable LLM analysis", async () => {

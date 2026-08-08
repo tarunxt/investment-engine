@@ -91,6 +91,7 @@ Output requirements:
 - Do not invent evidence or probabilities.
 - Preserve valid 0/100 outcomes when the rules and evidence already settle the market.
 - If only one side is known, return the complement for the other side.
+- Write all three commentary fields for every event. Keep `preflight_commentary` limited to the Preflight Evidence Block/canonical market context, keep `internet_search_commentary` limited to the supplied searched claims and sources, then make `final_conclusion` explicitly reconcile those two analyses.
 
 Schema:
 {
@@ -110,7 +111,10 @@ Schema:
       "confidence": "Low|Medium|High",
       "key_evidence_source_ids": ["S1", "S3"],
       "red_flags": ["short caveat"],
-      "rationale": "short explanation"
+      "preflight_commentary": "Commentary based only on rules, deadline, market fields, and the Preflight Evidence Block",
+      "internet_search_commentary": "Commentary based only on the supplied internet-search evidence packet and cited source IDs",
+      "final_conclusion": "Final conclusion reconciling the previous two commentaries and supporting the probability",
+      "rationale": "Same text as final_conclusion for backward compatibility"
     }
   ]
 }
@@ -183,6 +187,9 @@ class ParsedBullpenMarketRow:
     key_evidence_source_ids: list[str]
     red_flags: list[str]
     rationale: str | None
+    preflight_commentary: str | None = None
+    internet_search_commentary: str | None = None
+    final_conclusion: str | None = None
 
 
 @dataclass
@@ -849,6 +856,9 @@ def parse_bullpen_batch_response(
                         "keyEvidenceSourceIds",
                     ),
                     "red_flags": _read_str_list(record, "red_flags", "redFlags"),
+                    "preflight_commentary": _read_str(record, "preflight_commentary", "preflightCommentary"),
+                    "internet_search_commentary": _read_str(record, "internet_search_commentary", "internetSearchCommentary"),
+                    "final_conclusion": _read_str(record, "final_conclusion", "finalConclusion"),
                     "rationale": _read_str(
                         record,
                         "rationale",
@@ -886,7 +896,10 @@ def parse_bullpen_batch_response(
             key_evidence=_read_str_list(record, "key_evidence", "keyEvidence"),
             key_evidence_source_ids=validated_row.key_evidence_source_ids,
             red_flags=validated_row.red_flags,
-            rationale=validated_row.rationale,
+            preflight_commentary=validated_row.preflight_commentary,
+            internet_search_commentary=validated_row.internet_search_commentary,
+            final_conclusion=validated_row.final_conclusion,
+            rationale=validated_row.rationale or validated_row.final_conclusion,
         )
 
     response.missing_event_ids = [
@@ -1171,6 +1184,9 @@ def _serialize_final_market_row(
             row.key_evidence_source_ids if row is not None else []
         ),
         "red_flags": row.red_flags if row is not None else [],
+        "preflight_commentary": row.preflight_commentary if row is not None else None,
+        "internet_search_commentary": row.internet_search_commentary if row is not None else None,
+        "final_conclusion": row.final_conclusion if row is not None else rationale,
         "status": (
             event_result.status if event_result is not None else "provider_failed"
         ),

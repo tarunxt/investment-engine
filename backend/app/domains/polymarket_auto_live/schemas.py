@@ -487,6 +487,9 @@ class BullpenAutoLiveLlmOutput(BaseModel):
     event_state: str | None = None
     key_evidence: list[str] = Field(default_factory=list)
     red_flags: list[str] = Field(default_factory=list)
+    preflight_commentary: str | None = None
+    internet_search_commentary: str | None = None
+    final_conclusion: str | None = None
     rationale: str | None = None
     error: str | None = None
     invalid_reason: str | None = None
