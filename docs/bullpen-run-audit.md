@@ -459,7 +459,12 @@ snapshots or relax any Stage 1/Stage 3 lineage validator.
 ### Stage 2
 
 Persisted candidate reviews, per-model outputs, Stage 2 LLM runtime payloads, and
-qualified handoff inputs. Stage 2 returns/day is rendered as the unpriced upside
+qualified handoff inputs.
+Per-model outputs preserve three additive commentary fields: commentary derived from
+the preflight block, commentary derived from the supplied Internet Search evidence,
+and a final conclusion reconciling both. The legacy `rationale` remains populated
+with the final conclusion so frozen snapshots and existing consumers remain compatible.
+Stage 2 returns/day is rendered as the unpriced upside
 for the current market odds on the same side as the strongest LLM Yes/No odds
 divided by days left: `(100 - current side odds) / days left`. This is used
 when usable current and LLM odds are available, falling back to the persisted
