@@ -38,6 +38,7 @@ from app.domains.polymarket_auto_live.order_intent_service import (
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
     SyncPolymarketAutoLiveRepository,
+    _event_trend_returns_per_day,
     extract_stage3_decisions_from_run,
 )
 from app.domains.polymarket_auto_live.schemas import (
@@ -75,6 +76,40 @@ def _decision(
         reason="Persisted decision.",
         summary="Persisted decision.",
     )
+
+
+def test_event_trend_rebuilds_missing_returns_per_day_from_frozen_scan_inputs() -> None:
+    decision = _decision(title="Historical market").model_copy(
+        update={
+            "close_time": "2026-07-27T10:01:00+00:00",
+            "current_yes_odds": 10.5,
+            "current_no_odds": 89.5,
+            "fair_yes_probability_pct": 15,
+            "fair_no_probability_pct": 85,
+        }
+    )
+
+    assert _event_trend_returns_per_day(decision) == 10.5
+
+
+def test_event_trend_prefers_saved_returns_per_day() -> None:
+    decision = _decision(title="Historical market").model_copy(
+        update={
+            "stage_results": [
+                BullpenAutoLiveStageResult(
+                    stage_number=2,
+                    stage_name="Stage 2",
+                    status="pass",
+                    reason="Saved calculation.",
+                    outputs={"returns_per_day": 7.25},
+                    started_at="2026-07-26T10:00:00+00:00",
+                    completed_at="2026-07-26T10:01:00+00:00",
+                )
+            ]
+        }
+    )
+
+    assert _event_trend_returns_per_day(decision) == 7.25
 
 
 def test_decision_relationship_does_not_orphan_delete_durable_intents() -> None:

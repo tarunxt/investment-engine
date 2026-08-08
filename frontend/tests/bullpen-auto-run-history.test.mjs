@@ -86,6 +86,9 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /border-\[1\.5px\] border-black/);
   assert.match(historyContent, /<BullpenLlmBreakdownDialog question=\{llmQuestion\}/);
   assert.match(historyContent, /<BullpenInvestmentMathDialog focus="returnsPerDay"/);
+  assert.match(historyContent, /calculateTrendDaysUntilClose/);
+  assert.match(historyContent, /event\.scan_timestamps\.find\(Boolean\)/);
+  assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {

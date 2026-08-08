@@ -19,6 +19,16 @@ const color = (score: number | null) => {
   return `rgb(${start.map((v, i) => Math.round(v + (end[i] - v) * p)).join(" ")})`;
 };
 
+export const calculateTrendDaysUntilClose = (event: BullpenAutoLiveEventTrend) => {
+  if (!event.close_time) return null;
+  const closeTime = new Date(event.close_time).getTime();
+  const latestScan = event.scan_timestamps.find(Boolean);
+  const scanTime = latestScan ? new Date(latestScan).getTime() : Number.NaN;
+  if (!Number.isFinite(closeTime) || !Number.isFinite(scanTime)) return null;
+  const days = Number(((closeTime - scanTime) / 86_400_000).toFixed(1));
+  return days > 0 ? days : null;
+};
+
 const trendQuestion = (event: BullpenAutoLiveEventTrend): BullpenQuestionRow => createBullpenQuestionRow({
   id: event.market_id,
   question: event.market_title,
@@ -36,7 +46,7 @@ const trendQuestion = (event: BullpenAutoLiveEventTrend): BullpenQuestionRow => 
   outcomeLabels: ["Yes", "No"],
   outcomeCount: 2,
   isBinaryYesNo: true,
-  daysUntilClose: null,
+  daysUntilClose: calculateTrendDaysUntilClose(event),
   rules: null,
   marketContext: null,
   resolutionSource: null,
