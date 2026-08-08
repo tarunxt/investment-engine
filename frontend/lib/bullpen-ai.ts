@@ -2442,6 +2442,16 @@ function formatBullpenPreflightText(
   return trimmed || fallback;
 }
 
+function formatRequiredBullpenPreflightEvidence(
+  value: string | null | undefined,
+  missingReason: string,
+) {
+  return formatBullpenPreflightText(
+    value,
+    `Not supplied (reason: ${missingReason})`,
+  );
+}
+
 function formatBullpenPreflightOdds(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "Unknown";
@@ -2478,13 +2488,25 @@ function buildBullpenPreflightEvidenceBlock(
   question: BullpenQuestionRow,
   payload: BullpenLegacyPreflightPayload,
 ) {
+  const rules = formatRequiredBullpenPreflightEvidence(
+    payload.polymarket_rules,
+    "the saved market snapshot did not contain Polymarket rules; the backend will retry the canonical Gamma market lookup before execution",
+  );
+  const marketContext = formatRequiredBullpenPreflightEvidence(
+    payload.polymarket_market_context,
+    "the saved market snapshot did not contain Market Context; the backend will retry the canonical Polymarket event page before execution",
+  );
+  const resolutionSource = formatRequiredBullpenPreflightEvidence(
+    payload.polymarket_resolution_source,
+    "the saved market snapshot contained neither a resolution-source field nor a resolution-source statement in the rules",
+  );
   const lines = [
     "Preflight Evidence Block:",
     "Market:",
     question.question,
     "",
     "Rules:",
-    formatBullpenPreflightText(payload.polymarket_rules),
+    rules,
     "",
     "Verified current facts:",
     `- question_id: ${question.id}`,
@@ -2501,9 +2523,9 @@ function buildBullpenPreflightEvidenceBlock(
     `- current no odds: ${formatBullpenPreflightOdds(payload.current_no_odds)}`,
     `- market URL: ${formatBullpenPreflightText(payload.market_url, "Not supplied")}`,
     `- slug: ${formatBullpenPreflightText(payload.slug, "Not supplied")}`,
-    `- Polymarket rules: ${formatBullpenPreflightText(payload.polymarket_rules)}`,
-    `- detailed market context: ${formatBullpenPreflightText(payload.polymarket_market_context)}`,
-    `- resolution source: ${formatBullpenPreflightText(payload.polymarket_resolution_source)}`,
+    `- Polymarket rules: ${rules}`,
+    `- detailed market context: ${marketContext}`,
+    `- resolution source: ${resolutionSource}`,
     "",
     "Instruction:",
     "These facts are authoritative. Do not contradict them. Only estimate the unresolved condition.",

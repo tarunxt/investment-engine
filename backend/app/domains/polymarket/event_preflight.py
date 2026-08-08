@@ -184,6 +184,12 @@ def _format_text(value: str | None, fallback: str = "Not supplied") -> str:
     return normalized or fallback
 
 
+def _format_missing_evidence(value: str | None, reason: str) -> str:
+    """Keep mandatory evidence fields visible and explain an empty value."""
+    normalized = _normalize_text(value)
+    return normalized or f"Not supplied (reason: {reason})"
+
+
 def _normalize_close_time(value: object) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -749,6 +755,9 @@ def _build_verified_evidence_block(
     search_queries: list[str],
     search_results: list[dict[str, str | None]],
     warnings: list[str],
+    rules_missing_reason: str,
+    market_context_missing_reason: str,
+    resolution_source_missing_reason: str,
 ) -> str:
     highlight_lines = _build_evidence_highlights(search_results)
     source_urls = dedupe_strings(
@@ -761,7 +770,7 @@ def _build_verified_evidence_block(
         refreshed_question,
         "",
         "Rules:",
-        _format_text(rules_text),
+        _format_missing_evidence(rules_text, rules_missing_reason),
         "",
         "Verified current facts:",
         f"- question_ref: {question.question_ref}",
@@ -777,9 +786,15 @@ def _build_verified_evidence_block(
         f"- current no odds: {_format_odds(current_no_odds)}",
         f"- market URL: {_format_text(market_url)}",
         f"- slug: {_format_text(slug)}",
-        f"- Polymarket rules: {_format_text(rules_text)}",
-        f"- detailed market context: {_format_text(market_context)}",
-        f"- resolution source: {_format_text(resolution_source)}",
+        "- Polymarket rules: "
+        + _format_missing_evidence(rules_text, rules_missing_reason),
+        "- detailed market context: "
+        + _format_missing_evidence(market_context, market_context_missing_reason),
+        "- resolution source: "
+        + _format_missing_evidence(
+            resolution_source,
+            resolution_source_missing_reason,
+        ),
         f"- source count: {len(source_urls)}",
         f"- search queries: {' | '.join(search_queries) if search_queries else 'None'}",
     ]
@@ -1246,6 +1261,25 @@ def prepare_polymarket_event_context(
         all_sources.extend(question_sources)
         all_warnings.extend(question_warnings)
 
+        if gamma_record is None:
+            rules_missing_reason = (
+                "no exact Polymarket Gamma market matched the supplied market identifiers"
+            )
+        else:
+            rules_missing_reason = (
+                "the matched Polymarket Gamma market returned no rules, description, "
+                "or resolution criteria"
+            )
+        market_context_missing_reason = (
+            "no canonical Polymarket event URL was available for Market Context retrieval"
+            if not refreshed_market_url
+            else "the Polymarket event page returned no extractable Market Context"
+        )
+        resolution_source_missing_reason = (
+            "Polymarket supplied neither a resolution-source field nor a "
+            "resolution-source statement in the rules"
+        )
+
         verified_block = _build_verified_evidence_block(
             question,
             refreshed_question=refreshed_question,
@@ -1265,6 +1299,9 @@ def prepare_polymarket_event_context(
             search_queries=search_queries,
             search_results=search_results,
             warnings=question_warnings,
+            rules_missing_reason=rules_missing_reason,
+            market_context_missing_reason=market_context_missing_reason,
+            resolution_source_missing_reason=resolution_source_missing_reason,
         )
         if evidence_packet is not None:
             evidence_packet.legacy_preflight_evidence_block = verified_block
