@@ -4,7 +4,6 @@ import json
 from typing import Any
 
 from app.domains.polymarket import runtime_broker as runtime_broker_module
-from app.domains.polymarket.logger import redact_secrets
 
 
 _UI_POSITION_REFRESH_CALLERS = frozenset(
@@ -56,12 +55,12 @@ async def _refresh_ui_positions_snapshot(
     """Read the Bullpen wallet without pre-gating the read on trade auth.
 
     The Bullpen CLI can expose Polymarket positions even when its account/trade
-    login needs remediation.  A UI refresh is therefore allowed to execute the
-    read command first.  ``execute_raw`` still performs the broker's existing
+    login needs remediation. A UI refresh is therefore allowed to execute the
+    read command first. ``execute_raw`` still performs the broker's existing
     auth-refresh-and-retry flow if the positions command itself returns an
     auth rejection.
 
-    A successful read is always safe to publish to the display-only LKG.  It is
+    A successful read is always safe to publish to the display-only LKG. It is
     promoted into the authenticated execution snapshot only when the current
     credential artifact still has a matching short-lived auth-ready cache.
     This keeps auto-trade/auto-claim lineage strict while making the portfolio
@@ -110,7 +109,9 @@ async def _refresh_ui_positions_snapshot(
     )
 
     payload_account_identity = runtime_broker_module._extract_account_identity(payload)
-    cached_account_identity = auth_cache.account_identity if auth_cache is not None else None
+    cached_account_identity = (
+        auth_cache.account_identity if auth_cache is not None else None
+    )
     active_account_identity = (
         active_auth.account_identity if active_auth is not None else None
     )
