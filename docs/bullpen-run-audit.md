@@ -1199,6 +1199,12 @@ include all three outputs in the LLM odds consensus, and render three run-summar
 rows with ordinal labels for duplicate models. This is an execution-cardinality
 fix only; historical frozen snapshots are not rewritten.
 
+The console also refuses to enable either an immediate or future Auto-Live
+schedule when the canonical Stage 2 LLM target selection is empty. This is a
+pre-scheduling validation guard: it prevents a known-invalid run from being
+queued, but does not change Stage 1 filters, Stage 2 execution, audit capture,
+the algorithm registry, or existing frozen snapshots.
+
 ## Active Auth Recovery and Restart-Safe Stage 3
 
 Snapshot schema version 2 adds the current Stage 3 recovery and durable-counter
