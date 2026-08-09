@@ -176,7 +176,7 @@ async def test_ui_portfolio_refresh_reads_positions_before_trade_auth(
     )
 
     assert calls == [
-        (["polymarket", "positions", "--output", "json"], 17, True)
+        (["polymarket", "positions", "--output", "json"], 17, False)
     ]
     assert snapshot.source == "live-cli"
     assert snapshot.freshness_state == "fresh"
