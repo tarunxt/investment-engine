@@ -169,9 +169,9 @@ export function BullpenHistoryPortfolio() {
     positions?.summary?.cashBalance ??
     botState?.live.balance.available_balance_usd ??
     null;
-  const total =
-    positions?.summary?.totalValue ??
-    (positions ? sumBullpenPortfolioPositionValue(rows) + (cash ?? 0) : null);
+  const total = positions
+    ? sumBullpenPortfolioPositionValue(rows) + (cash ?? 0)
+    : null;
   return (
     <section
       aria-labelledby="bullpen-portfolio-title"
