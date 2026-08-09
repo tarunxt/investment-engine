@@ -39,6 +39,9 @@ from app.domains.polymarket.runtime_broker import (
     close_bullpen_runtime_broker,
     get_bullpen_runtime_broker,
 )
+from app.domains.polymarket.runtime_positions_refresh import (
+    install_bullpen_ui_positions_refresh,
+)
 from app.domains.polymarket.service import polymarket_bot_manager
 from app.domains.polymarket_auto_live.router import router as polymarket_auto_live_router
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
@@ -57,6 +60,7 @@ from app.shared.exceptions import AppException
 # Ensure all ORM models are registered with the shared metadata.
 from app.models import *  # noqa: F401,F403
 
+install_bullpen_ui_positions_refresh()
 configure_logging()
 logger = get_logger(__name__)
 
