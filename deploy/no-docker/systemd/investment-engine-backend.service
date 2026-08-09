@@ -12,6 +12,7 @@ WorkingDirectory=__APP_ROOT__/backend
 Environment=APP_ROOT=__APP_ROOT__
 Environment=APP_USER=__APP_USER__
 EnvironmentFile=__BACKEND_ENV_FILE__
+ExecStartPre=+/bin/bash __APP_ROOT__/deploy/no-docker/scripts/sync-bullpen-operator-credentials.sh
 ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-backend.sh
 Restart=always
 RestartSec=5
