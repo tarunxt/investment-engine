@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import importlib.util
 from pathlib import Path
 
@@ -84,7 +85,7 @@ def test_upgrade_recovers_latest_historical_non_empty_target_selection(monkeypat
                 {
                     "id": 11,
                     "user_id": 1,
-                    "started_at": sa.text("CURRENT_TIMESTAMP"),
+                    "started_at": datetime(2026, 8, 10, tzinfo=UTC),
                     "payload": {
                         "stage2_llm_targets_snapshot": [],
                         "audit_metadata": {
@@ -95,7 +96,7 @@ def test_upgrade_recovers_latest_historical_non_empty_target_selection(monkeypat
                 {
                     "id": 10,
                     "user_id": 1,
-                    "started_at": "2026-08-09 00:00:00",
+                    "started_at": datetime(2026, 8, 9, tzinfo=UTC),
                     "payload": {
                         "stage2_llm_targets_snapshot": [
                             {"provider": " openai ", "model": " gpt-5 "},
@@ -107,7 +108,7 @@ def test_upgrade_recovers_latest_historical_non_empty_target_selection(monkeypat
                 {
                     "id": 20,
                     "user_id": 2,
-                    "started_at": "2026-08-08 00:00:00",
+                    "started_at": datetime(2026, 8, 8, tzinfo=UTC),
                     "payload": {
                         "stage2_llm_targets_snapshot": [
                             {"provider": "anthropic", "model": "old-model"}
@@ -117,7 +118,7 @@ def test_upgrade_recovers_latest_historical_non_empty_target_selection(monkeypat
                 {
                     "id": 30,
                     "user_id": 3,
-                    "started_at": "2026-08-08 00:00:00",
+                    "started_at": datetime(2026, 8, 8, tzinfo=UTC),
                     "payload": {
                         "audit_metadata": {
                             "settings_snapshot": {"console_llm_targets": []}
