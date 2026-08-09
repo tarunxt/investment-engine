@@ -74,7 +74,7 @@ export function BullpenHistoryPortfolio() {
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(null);
   const [botState, setBotState] = useState<PolymarketBotState | null>(null);
   const [lastUsableBalance, setLastUsableBalance] = useState<
-    (PolymarketBotState["live"]["balance"] & { status: "ready" }) | null
+    PolymarketBotState["live"]["balance"] | null
   >(null);
   const [refreshing, setRefreshing] = useState(true);
   const [refreshNotice, setRefreshNotice] = useState<string | null>(null);
