@@ -45,6 +45,22 @@ if ! id "$OPERATOR_USER" >/dev/null 2>&1 || [[ ! -f "$OPERATOR_CREDENTIALS" ]]; 
   exit 0
 fi
 
+bullpen_env() {
+  local user="$1"
+  local home="$2"
+  local store="$3"
+  local config="$4"
+  shift 4
+  timeout 40s sudo -u "$user" -H env \
+    HOME="$home" \
+    BULLPEN_HOME="$store" \
+    BULLPEN_CREDENTIALS_HOME="$store" \
+    BULLPEN_CONFIG="$config" \
+    BULLPEN_ENV=production \
+    BULLPEN_NON_INTERACTIVE=true \
+    "$BULLPEN_BIN" "$@"
+}
+
 read_wallet() {
   local user="$1"
   local home="$2"
@@ -52,16 +68,7 @@ read_wallet() {
   local config="$4"
   local payload
 
-  payload="$(
-    timeout 10s sudo -u "$user" -H env \
-      HOME="$home" \
-      BULLPEN_HOME="$store" \
-      BULLPEN_CREDENTIALS_HOME="$store" \
-      BULLPEN_CONFIG="$config" \
-      BULLPEN_ENV=production \
-      BULLPEN_NON_INTERACTIVE=true \
-      "$BULLPEN_BIN" status --output json 2>/dev/null || true
-  )"
+  payload="$(bullpen_env "$user" "$home" "$store" "$config" status --output json 2>/dev/null || true)"
 
   python3 - "$payload" <<'PY'
 import json
@@ -90,6 +97,40 @@ for value in candidates:
     if isinstance(value, str) and re.fullmatch(r"0x[a-fA-F0-9]{40}", value.strip()):
         print(value.strip().lower())
         break
+PY
+}
+
+read_position_count() {
+  local user="$1"
+  local home="$2"
+  local store="$3"
+  local config="$4"
+  local payload
+
+  payload="$(bullpen_env "$user" "$home" "$store" "$config" polymarket positions --output json 2>/dev/null || true)"
+
+  python3 - "$payload" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+try:
+    payload = json.loads(raw)
+except Exception:
+    raise SystemExit(1)
+
+if not isinstance(payload, dict):
+    raise SystemExit(1)
+positions = payload.get("positions")
+summary = payload.get("summary")
+if not isinstance(positions, list):
+    raise SystemExit(1)
+if isinstance(summary, dict):
+    active = summary.get("active_count")
+    if isinstance(active, (int, float)):
+        print(int(active))
+        raise SystemExit(0)
+print(len(positions))
 PY
 }
 
@@ -140,11 +181,19 @@ if [[ -f "$OPERATOR_CONFIG" ]]; then
   fi
 fi
 
-# Validate that the canonical service account can now resolve the same wallet.
+# Validate both identity and the exact read used by the Bullpen Portfolio UI.
+# This prevents a deployment from reporting success merely because passive
+# status works while the service account still cannot read current positions.
 post_sync_wallet="$(read_wallet "$CANONICAL_USER" "$CANONICAL_HOME" "$CANONICAL_STORE" "$CANONICAL_CONFIG")"
 if [[ "$post_sync_wallet" != "$operator_wallet" ]]; then
   log "Canonical Bullpen wallet verification failed after synchronization."
   exit 1
 fi
+
+if ! canonical_position_count="$(read_position_count "$CANONICAL_USER" "$CANONICAL_HOME" "$CANONICAL_STORE" "$CANONICAL_CONFIG")"; then
+  log "Canonical service account cannot execute 'bullpen polymarket positions --output json' after synchronization."
+  exit 1
+fi
+log "Canonical Bullpen positions read succeeded for wallet $operator_wallet (active positions: $canonical_position_count)."
 
 exit 0
