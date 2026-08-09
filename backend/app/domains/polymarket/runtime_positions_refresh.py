@@ -12,10 +12,14 @@ import httpx
 from app.domains.polymarket import runtime_broker as runtime_broker_module
 
 
+# These callers are presentation-only portfolio reads. They must all resolve the
+# same wallet display snapshot. Execution/Stage-3 callers intentionally do not
+# appear here and continue to use the authenticated execution snapshot.
 _MANUAL_UI_POSITION_REFRESH_CALLERS = frozenset(
     {
         "ui-history-portfolio-refresh",
         "ui-manual-refresh",
+        "ui-portfolio-refresh",
     }
 )
 _PASSIVE_UI_POSITION_REFRESH_CALLERS = frozenset(
@@ -32,7 +36,7 @@ _INSTALLED = False
 
 _POLYMARKET_DATA_API_BASE_URL = "https://data-api.polymarket.com"
 _POLYMARKET_DATA_API_TIMEOUT_SECONDS = 10
-_POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-portfolio/1.0"}
+_POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-portfolio/2.0"}
 _POLYGON_RPC_URLS = (
     "https://polygon-rpc.com",
     "https://polygon-bor-rpc.publicnode.com",
@@ -45,34 +49,6 @@ _WALLET_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _PUBLIC_POSITION_PAGE_SIZE = 500
 _PUBLIC_POSITION_MAX_PAGES = 4
 _VALUE_EPSILON = 0.000001
-
-
-def _verified_auth_cache_for_credential(
-    auth_cache: runtime_broker_module.BullpenAuthReadyCache | None,
-    credential_artifact: runtime_broker_module.BullpenCredentialArtifact,
-) -> runtime_broker_module.BullpenAuthReadyCache | None:
-    if auth_cache is None:
-        return None
-    if not runtime_broker_module._credential_artifact_matches(
-        auth_cache.credential_artifact,
-        credential_artifact,
-    ):
-        return None
-    return auth_cache
-
-
-def _verified_active_auth_for_credential(
-    active_auth: runtime_broker_module.BullpenRuntimeActiveAuthResult | None,
-    credential_artifact: runtime_broker_module.BullpenCredentialArtifact,
-) -> runtime_broker_module.BullpenRuntimeActiveAuthResult | None:
-    if active_auth is None or not active_auth.healthy:
-        return None
-    if not runtime_broker_module._credential_artifact_matches(
-        active_auth.credential_artifact,
-        credential_artifact,
-    ):
-        return None
-    return active_auth
 
 
 def _read_number(value: object) -> float | None:
@@ -138,12 +114,7 @@ def _normalize_public_position(row: dict[str, Any]) -> dict[str, Any] | None:
     )
     redeemable = bool(
         _read_bool(
-            _first_value(
-                row,
-                "redeemable",
-                "isRedeemable",
-                "is_redeemable",
-            )
+            _first_value(row, "redeemable", "isRedeemable", "is_redeemable")
         )
     )
     if shares <= _VALUE_EPSILON and not (
@@ -234,13 +205,13 @@ def _build_public_summary(
         row
         for row in positions
         if not bool(row.get("redeemable"))
-        and (_read_number(row.get("shares")) or 0) > _VALUE_EPSILON
+        and (_read_number(row.get("shares")) or 0.0) > _VALUE_EPSILON
     ]
     claimable_positions = [
         row
         for row in positions
         if bool(row.get("redeemable"))
-        and (_read_number(row.get("current_value")) or 0) > _VALUE_EPSILON
+        and (_read_number(row.get("current_value")) or 0.0) > _VALUE_EPSILON
     ]
     positions_value = sum(
         max(0.0, _read_number(row.get("current_value")) or 0.0)
@@ -293,13 +264,10 @@ async def _read_public_pusd_balance(
             payload = response.json()
             result = payload.get("result") if isinstance(payload, dict) else None
             if not isinstance(result, str) or not result.startswith("0x"):
-                raise RuntimeError(
-                    "Polygon RPC returned an invalid pUSD balance payload."
-                )
+                raise RuntimeError("Polygon RPC returned an invalid pUSD balance payload.")
             return int(result, 16) / _POLYMARKET_PUSD_DECIMALS
-        except Exception as exc:  # pragma: no cover - provider-specific failure detail
+        except Exception as exc:  # pragma: no cover - provider-specific detail
             last_error = exc
-            continue
     if last_error is not None:
         raise last_error
     raise RuntimeError("No Polygon RPC endpoint was available for the pUSD balance read.")
@@ -331,7 +299,6 @@ async def _read_public_positions_payload(wallet: str) -> dict[str, Any]:
             raw_rows.extend(page_rows)
             if len(page_rows) < _PUBLIC_POSITION_PAGE_SIZE:
                 break
-
         cash_balance = await _read_public_pusd_balance(client, wallet)
 
     positions = [
@@ -349,16 +316,15 @@ async def _read_public_positions_payload(wallet: str) -> dict[str, Any]:
         "magic_link_suspected": False,
         "positions": positions,
         "source": "polymarket-public-data-api",
-        "summary": _build_public_summary(
-            positions,
-            cash_balance=cash_balance,
-        ),
+        "summary": _build_public_summary(positions, cash_balance=cash_balance),
     }
 
 
 async def _status_wallet_address(
     broker: runtime_broker_module.BullpenRuntimeBroker,
 ) -> str | None:
+    # Status is passive/local in current Bullpen CLI builds and is the best
+    # account-identity source when the trade-auth diagnostic is degraded.
     try:
         result = await broker.execute_raw(
             ["status", "--output", "json"],
@@ -381,6 +347,9 @@ async def _status_wallet_address(
     if wallet:
         return wallet
 
+    # Read raw cache records deliberately. Display identity remains useful for
+    # presentation even if a rotated canonical credential makes the stricter
+    # execution-lineage validator reject that snapshot.
     for cache_key in (
         runtime_broker_module._POSITIONS_DISPLAY_LKG_KEY,
         runtime_broker_module._POSITIONS_SNAPSHOT_KEY,
@@ -397,6 +366,53 @@ async def _status_wallet_address(
     return None
 
 
+def _verified_auth_proof(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+    *,
+    credential: runtime_broker_module.BullpenCredentialArtifact,
+    auth_cache: runtime_broker_module.BullpenAuthReadyCache | None,
+    active_auth: runtime_broker_module.BullpenRuntimeActiveAuthResult | None,
+) -> tuple[str | None, str | None]:
+    cached_identity: str | None = None
+    active_identity: str | None = None
+    auth_checked_at: str | None = None
+
+    if auth_cache is not None and runtime_broker_module._credential_artifact_matches(
+        auth_cache.credential_artifact,
+        credential,
+    ):
+        cached_identity = auth_cache.account_identity
+        auth_checked_at = auth_cache.checked_at
+
+    if (
+        active_auth is not None
+        and active_auth.healthy
+        and runtime_broker_module._credential_artifact_matches(
+            active_auth.credential_artifact,
+            credential,
+        )
+    ):
+        active_identity = active_auth.account_identity
+        auth_checked_at = (
+            auth_checked_at or active_auth.auth_checked_at or active_auth.checked_at
+        )
+
+    if cached_identity and active_identity and cached_identity != active_identity:
+        return None, None
+    return auth_checked_at, cached_identity or active_identity
+
+
+async def _write_display_snapshot(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+    snapshot: runtime_broker_module.BullpenPositionsSnapshot,
+) -> None:
+    await broker._redis.set(
+        runtime_broker_module._POSITIONS_DISPLAY_LKG_KEY,
+        snapshot.model_dump_json(),
+        ex=runtime_broker_module._POSITIONS_DISPLAY_LKG_TTL_SECONDS,
+    )
+
+
 async def _refresh_public_wallet_snapshot(
     broker: runtime_broker_module.BullpenRuntimeBroker,
     *,
@@ -405,7 +421,7 @@ async def _refresh_public_wallet_snapshot(
     wallet = await _status_wallet_address(broker)
     if wallet is None:
         raise runtime_broker_module.BullpenRuntimeCommandError(
-            "Unable to resolve the Bullpen Polymarket wallet address for the display-only public refresh.",
+            "Unable to resolve the Bullpen Polymarket wallet address for the display refresh.",
             classification="public_wallet_identity_missing",
         )
 
@@ -435,17 +451,13 @@ async def _refresh_public_wallet_snapshot(
             runtime_broker_module.BULLPEN_POSITION_CLASSIFIER_VERSION
         ),
         auth_checked_at=None,
-        # The data was observed now, but it is intentionally labelled cached:
-        # it is safe for display and sizing previews, not for execution lineage.
+        # Cached means display-only here. This record is never written to the
+        # execution-authoritative positions key by this function.
         source="redis-cache",
         freshness_state="cached",
         diagnostics=diagnostics,
     )
-    await broker._redis.set(
-        runtime_broker_module._POSITIONS_DISPLAY_LKG_KEY,
-        snapshot.model_dump_json(),
-        ex=runtime_broker_module._POSITIONS_DISPLAY_LKG_TTL_SECONDS,
-    )
+    await _write_display_snapshot(broker, snapshot)
     return snapshot
 
 
@@ -455,120 +467,62 @@ async def _refresh_ui_positions_snapshot(
     caller_source: str,
     timeout_seconds: int,
 ) -> runtime_broker_module.BullpenPositionsSnapshot:
-    """Read the Bullpen wallet without pre-gating the read on trade auth.
-
-    UI refreshes deliberately do not spend their request budget on ``doctor
-    auth --refresh``. They try the current Bullpen ``polymarket positions``
-    command once; an auth rejection immediately falls back to the same wallet's
-    public Polymarket position/cash evidence for display. Execution callers keep
-    the broker's normal authenticated refresh-and-retry contract.
-
-    A successful CLI read is always safe to publish to the display-only LKG. It
-    is promoted into the authenticated execution snapshot only when the current
-    credential artifact still has a matching short-lived auth-ready cache.
-    """
-
-    refresh_requested_at = runtime_broker_module._utc_now_iso()
-    normalized_caller_source = runtime_broker_module._normalize_caller_source(
-        caller_source
-    )
-
+    # Match the operator's successful command exactly. Do not run doctor-auth
+    # first; a readable wallet must remain readable even when trade auth needs
+    # remediation.
     result = await broker.execute_raw(
         ["polymarket", "positions", "--output", "json"],
         timeout_seconds=timeout_seconds,
         retry_auth_once=False,
     )
     try:
-        payload: Any = json.loads(result.stdout)
+        payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        error = runtime_broker_module.BullpenRuntimeCommandError(
+        raise runtime_broker_module.BullpenRuntimeCommandError(
             "Bullpen positions returned invalid JSON.",
             classification="json_parse_error",
             stdout=result.stdout,
             stderr=result.stderr,
             exit_code=result.exit_code,
             signal=result.signal,
-        )
-        result.diagnostics.error_classification = error.classification
-        broker._record_failure(
-            command_category="positions",
-            classification=error.classification,
-            message=str(error),
-            diagnostics=result.diagnostics,
-        )
-        raise error from exc
+        ) from exc
 
-    credential_artifact = result.diagnostics.credential_artifact
+    credential = result.diagnostics.credential_artifact
     auth_cache_key = f"{runtime_broker_module._REDIS_PREFIX}:auth:ready"
-    auth_cache = _verified_auth_cache_for_credential(
-        await broker._read_auth_ready_cache(auth_cache_key),
-        credential_artifact,
+    auth_cache = await broker._read_auth_ready_cache(auth_cache_key)
+    active_auth = await broker.read_latest_active_auth_result()
+    auth_checked_at, verified_identity = _verified_auth_proof(
+        broker,
+        credential=credential,
+        auth_cache=auth_cache,
+        active_auth=active_auth,
     )
-    active_auth = _verified_active_auth_for_credential(
-        await broker.read_latest_active_auth_result(),
-        credential_artifact,
+    payload_identity = _normalize_wallet_address(
+        runtime_broker_module._extract_account_identity(payload)
     )
-
-    payload_account_identity = runtime_broker_module._extract_account_identity(payload)
-    cached_account_identity = (
-        auth_cache.account_identity if auth_cache is not None else None
-    )
-    active_account_identity = (
-        active_auth.account_identity if active_auth is not None else None
-    )
-    verified_account_identity = cached_account_identity or active_account_identity
-
+    normalized_verified_identity = _normalize_wallet_address(verified_identity)
     if (
-        payload_account_identity
-        and verified_account_identity
-        and payload_account_identity != verified_account_identity
-    ) or (
-        cached_account_identity
-        and active_account_identity
-        and cached_account_identity != active_account_identity
+        payload_identity
+        and normalized_verified_identity
+        and payload_identity != normalized_verified_identity
     ):
-        result.diagnostics.error_classification = "account_identity_mismatch"
-        message = (
-            "Bullpen positions account identity did not match the authenticated "
-            "account."
-        )
-        broker._record_failure(
-            command_category="positions",
-            classification="account_identity_mismatch",
-            message=message,
-            diagnostics=result.diagnostics,
-        )
         raise runtime_broker_module.BullpenRuntimeCommandError(
-            message,
+            "Bullpen positions account identity did not match the authenticated account.",
             classification="account_identity_mismatch",
         )
+    account_identity = payload_identity or normalized_verified_identity
 
-    account_identity = (
-        payload_account_identity
-        or cached_account_identity
-        or active_account_identity
+    result.diagnostics.refresh_requested_at = runtime_broker_module._utc_now_iso()
+    result.diagnostics.caller_source = runtime_broker_module._normalize_caller_source(
+        caller_source
     )
-    auth_checked_at = (
-        auth_cache.checked_at
-        if auth_cache is not None
-        else active_auth.auth_checked_at if active_auth is not None else None
-    )
-
-    diagnostics = result.diagnostics.model_copy(
-        update={
-            "command_category": "positions",
-            "cache_status": "bypass",
-            "refresh_requested_at": refresh_requested_at,
-            "caller_source": normalized_caller_source,
-            "snapshot_producer_source": normalized_caller_source,
-            "produced_by_another_refresh": False,
-        }
-    )
+    result.diagnostics.snapshot_producer_source = "live-cli"
+    result.diagnostics.cache_status = "bypass"
     snapshot = runtime_broker_module.BullpenPositionsSnapshot(
         payload=payload,
         fetched_at=runtime_broker_module._utc_now_iso(),
         cli_version=result.diagnostics.bullpen_version or broker._version_cache_value,
-        credential_artifact=credential_artifact,
+        credential_artifact=credential,
         account_identity=account_identity,
         position_classifier_version=(
             runtime_broker_module.BULLPEN_POSITION_CLASSIFIER_VERSION
@@ -576,43 +530,29 @@ async def _refresh_ui_positions_snapshot(
         auth_checked_at=auth_checked_at,
         source="live-cli",
         freshness_state="fresh",
-        diagnostics=diagnostics,
+        diagnostics=result.diagnostics,
     )
-    serialized_snapshot = snapshot.model_dump_json()
+    await _write_display_snapshot(broker, snapshot)
 
-    # UI display state is intentionally separate from the execution-safe cache.
-    await broker._redis.set(
-        runtime_broker_module._POSITIONS_DISPLAY_LKG_KEY,
-        serialized_snapshot,
-        ex=runtime_broker_module._POSITIONS_DISPLAY_LKG_TTL_SECONDS,
-    )
-
-    if auth_cache is not None:
-        # Preserve the existing strict execution contract only when the current
-        # credential still has a recent verified auth-ready proof.
-        await broker._write_auth_ready_cache(
-            cache_key=auth_cache_key,
-            checked_at=auth_cache.checked_at,
-            credential_artifact=credential_artifact,
-            account_identity=account_identity,
-        )
+    # Promotion into the execution key requires an independently established
+    # current auth proof for this exact credential. A successful read alone is
+    # never interpreted as trade authorization.
+    if auth_checked_at is not None:
         await broker._redis.set(
             runtime_broker_module._POSITIONS_SNAPSHOT_KEY,
-            serialized_snapshot,
+            snapshot.model_dump_json(),
             ex=runtime_broker_module._POSITIONS_SNAPSHOT_TTL_SECONDS,
         )
-
-    # A prior auth failure remains valid for trade safety, but it must not make
-    # a successfully read wallet look unavailable to the portfolio UI.
-    broker._update_cached_health(
-        ok=True,
-        message="Bullpen positions read completed for portfolio display.",
-        command_category="positions",
-        error_classification=None,
-        diagnostics=diagnostics,
-    )
-    broker._log_runtime_event(diagnostics, success=True)
     return snapshot
+
+
+async def _read_display_snapshot_without_deleting(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+) -> runtime_broker_module.BullpenPositionsSnapshot | None:
+    try:
+        return await broker.read_display_positions_snapshot(delete_invalid=False)
+    except Exception:
+        return None
 
 
 async def _get_positions_snapshot_with_ui_read_fallback(
@@ -621,39 +561,52 @@ async def _get_positions_snapshot_with_ui_read_fallback(
     force_fresh: bool = False,
     allow_refresh: bool = True,
     caller_source: str | None = None,
-    max_age_seconds: int = runtime_broker_module._POSITIONS_FRESH_SECONDS,
-    timeout_seconds: int = runtime_broker_module._CLI_DEFAULT_TIMEOUT_SECONDS,
+    max_age_seconds: int = 20,
+    timeout_seconds: int = 30,
 ) -> runtime_broker_module.BullpenPositionsSnapshot:
     normalized_caller_source = runtime_broker_module._normalize_caller_source(
         caller_source
     )
 
-    if (
-        force_fresh
-        and allow_refresh
-        and normalized_caller_source in _MANUAL_UI_POSITION_REFRESH_CALLERS
-    ):
+    if normalized_caller_source in _MANUAL_UI_POSITION_REFRESH_CALLERS:
+        if not force_fresh:
+            cached_display = await _read_display_snapshot_without_deleting(self)
+            if cached_display is not None:
+                return cached_display
         try:
             return await _refresh_ui_positions_snapshot(
                 self,
                 caller_source=normalized_caller_source,
                 timeout_seconds=timeout_seconds,
             )
-        except Exception as cli_error:
-            try:
-                return await _refresh_public_wallet_snapshot(
-                    self,
-                    caller_source=normalized_caller_source,
-                )
-            except Exception:
-                raise cli_error
+        except Exception:
+            # The canonical service-account CLI can be degraded while the wallet
+            # identity remains known. Refresh the same wallet from Polymarket's
+            # current data API and on-chain pUSD balance for display.
+            return await _refresh_public_wallet_snapshot(
+                self,
+                caller_source=normalized_caller_source,
+            )
 
     if (
-        not force_fresh
+        normalized_caller_source in _PASSIVE_UI_POSITION_REFRESH_CALLERS
         and not allow_refresh
-        and normalized_caller_source in _PASSIVE_UI_POSITION_REFRESH_CALLERS
+        and not force_fresh
     ):
+        # Do not enter the original broker's long passive lock/poll budget for a
+        # page render. Both portfolio surfaces should read the same display LKG
+        # immediately; if none exists, rebuild it from the current wallet.
+        cached_display = await _read_display_snapshot_without_deleting(self)
+        if cached_display is not None:
+            return cached_display
         try:
+            return await _refresh_public_wallet_snapshot(
+                self,
+                caller_source=normalized_caller_source,
+            )
+        except Exception:
+            # Preserve the original error/fallback behavior only as the final
+            # fallback when the shared display path itself cannot be resolved.
             return await _ORIGINAL_GET_POSITIONS_SNAPSHOT(
                 self,
                 force_fresh=force_fresh,
@@ -662,16 +615,6 @@ async def _get_positions_snapshot_with_ui_read_fallback(
                 max_age_seconds=max_age_seconds,
                 timeout_seconds=timeout_seconds,
             )
-        except runtime_broker_module.BullpenRuntimeCommandError as cache_error:
-            if cache_error.classification != "passive_cache_miss":
-                raise
-            try:
-                return await _refresh_public_wallet_snapshot(
-                    self,
-                    caller_source=normalized_caller_source,
-                )
-            except Exception:
-                raise cache_error
 
     return await _ORIGINAL_GET_POSITIONS_SNAPSHOT(
         self,
@@ -684,8 +627,6 @@ async def _get_positions_snapshot_with_ui_read_fallback(
 
 
 def install_bullpen_ui_positions_refresh() -> None:
-    """Install the UI-only wallet-read path exactly once per process."""
-
     global _INSTALLED
     if _INSTALLED:
         return
