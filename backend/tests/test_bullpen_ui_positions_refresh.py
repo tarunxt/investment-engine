@@ -19,6 +19,11 @@ from app.domains.polymarket.runtime_broker import (
     BullpenRuntimeActiveAuthResult,
     BullpenRuntimeBroker,
 )
+from app.domains.polymarket.runtime_positions_refresh import (
+    install_bullpen_ui_positions_refresh,
+)
+
+install_bullpen_ui_positions_refresh()
 
 
 class FakeRedis:
