@@ -406,9 +406,9 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   );
   assert.match(
     autoRunCardSource,
-    /const consoleLlmTargets = startWasNow\s*\?\s*await ensureCanonicalStage2LlmTargets\(\{\s*requireNonEmpty:\s*true,\s*\}\)\s*:\s*await ensureCanonicalStage2LlmTargets\(\);/,
+    /const consoleLlmTargets = await ensureCanonicalStage2LlmTargets\(\{\s*requireNonEmpty:\s*true,\s*\}\);/,
   );
-  assert.match(autoRunCardSource, /if \(startWasNow && !consoleLlmTargets\) \{/);
+  assert.match(autoRunCardSource, /if \(!consoleLlmTargets\) \{/);
 });
 
 test("Bullpen x AI run-now request can reuse the current scan snapshot before manual LLM selection exists", () => {
@@ -425,6 +425,25 @@ test("Bullpen x AI run-now request can reuse the current scan snapshot before ma
   );
   assert.match(bullpenAiPageSource, /candidate_rows_prefiltered:\s*true/);
   assert.match(bullpenAiPageSource, /reuse_saved_llm_outputs:\s*false/);
+});
+
+test("Bullpen auto-run cannot enable a future schedule without Stage 2 LLM targets", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    autoRunCardSource,
+    /async function handleEnableAutoRuns\(\)[\s\S]*?ensureCanonicalStage2LlmTargets\(\{\s*requireNonEmpty:\s*true,\s*\}\);[\s\S]*?if \(!consoleLlmTargets\) \{\s*return;/,
+  );
+  assert.doesNotMatch(
+    autoRunCardSource,
+    /Select at least one LLM before (?:that run|the first run) so Stage 2 can execute/,
+  );
 });
 
 test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM runs", () => {

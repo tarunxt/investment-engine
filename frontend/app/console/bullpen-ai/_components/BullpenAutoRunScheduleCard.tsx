@@ -11272,12 +11272,13 @@ export function BullpenAutoRunScheduleCard({
       }
       const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
-      const consoleLlmTargets = startWasNow
-        ? await ensureCanonicalStage2LlmTargets({
-            requireNonEmpty: true,
-          })
-        : await ensureCanonicalStage2LlmTargets();
-      if (startWasNow && !consoleLlmTargets) {
+      // Every scheduled cycle includes Stage 2, not only an immediate first
+      // cycle. Do not enable a scheduler that is guaranteed to scan rows and
+      // then stop before LLM review because its frozen target list is empty.
+      const consoleLlmTargets = await ensureCanonicalStage2LlmTargets({
+        requireNonEmpty: true,
+      });
+      if (!consoleLlmTargets) {
         return;
       }
       await apiService.updateBullpenAutoLiveSettings(
@@ -11339,19 +11340,11 @@ export function BullpenAutoRunScheduleCard({
       // the mutation succeeds; they must not keep the action controls busy.
       void loadSummary({ preserveLoading: true });
       const nextRunAt = startedState.next_run_at;
-      if (!startWasNow && (!consoleLlmTargets || consoleLlmTargets.length === 0)) {
-        setNotice(
-          nextRunAt
-            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextRunAt)}. Select at least one LLM before that run so Stage 2 can execute.`
-            : "Auto runs enabled. Select at least one LLM before the first run so Stage 2 can execute.",
-        );
-      } else {
-        setNotice(
-          nextRunAt
-            ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextRunAt)}.`
-            : "Auto runs enabled.",
-        );
-      }
+      setNotice(
+        nextRunAt
+          ? `Auto runs enabled. Next scheduled run: ${formatIstDateTime(nextRunAt)}.`
+          : "Auto runs enabled.",
+      );
     } catch (nextError) {
       setOptimisticSchedulerState(null);
       setError(normalizeError(nextError));
