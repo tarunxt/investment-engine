@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import UTC, datetime
 from typing import Any
@@ -155,13 +156,31 @@ def _normalize_public_position(row: dict[str, Any]) -> dict[str, Any] | None:
         _first_value(row, "curPrice", "currentPrice", "current_price")
     )
     invested = _read_number(
-        _first_value(row, "initialValue", "initial_value", "investedUsd", "invested_usd")
+        _first_value(
+            row,
+            "initialValue",
+            "initial_value",
+            "investedUsd",
+            "invested_usd",
+        )
     )
     unrealized_pnl = _read_number(
-        _first_value(row, "cashPnl", "cash_pnl", "unrealizedPnl", "unrealized_pnl")
+        _first_value(
+            row,
+            "cashPnl",
+            "cash_pnl",
+            "unrealizedPnl",
+            "unrealized_pnl",
+        )
     )
     pnl_percent = _read_number(
-        _first_value(row, "percentPnl", "percent_pnl", "pnlPercent", "pnl_percent")
+        _first_value(
+            row,
+            "percentPnl",
+            "percent_pnl",
+            "pnlPercent",
+            "pnl_percent",
+        )
     )
     condition_id = _first_value(row, "conditionId", "condition_id")
     event_slug = _first_value(row, "eventSlug", "event_slug")
@@ -170,11 +189,16 @@ def _normalize_public_position(row: dict[str, Any]) -> dict[str, Any] | None:
     slug = _first_value(row, "slug", "marketSlug", "market_slug")
     end_date = _first_value(row, "endDate", "end_date")
     icon = _first_value(row, "icon", "image")
-    asset = _first_value(row, "asset", "assetId", "asset_id", "tokenId", "token_id")
-
-    expected_payout = (
-        max(0.0, current_value or 0.0) if redeemable else 0.0
+    asset = _first_value(
+        row,
+        "asset",
+        "assetId",
+        "asset_id",
+        "tokenId",
+        "token_id",
     )
+
+    expected_payout = max(0.0, current_value or 0.0) if redeemable else 0.0
     return {
         "asset": str(asset) if asset is not None else None,
         "avg_price": avg_price,
@@ -209,7 +233,8 @@ def _build_public_summary(
     active_positions = [
         row
         for row in positions
-        if not bool(row.get("redeemable")) and (_read_number(row.get("shares")) or 0) > _VALUE_EPSILON
+        if not bool(row.get("redeemable"))
+        and (_read_number(row.get("shares")) or 0) > _VALUE_EPSILON
     ]
     claimable_positions = [
         row
@@ -268,7 +293,9 @@ async def _read_public_pusd_balance(
             payload = response.json()
             result = payload.get("result") if isinstance(payload, dict) else None
             if not isinstance(result, str) or not result.startswith("0x"):
-                raise RuntimeError("Polygon RPC returned an invalid pUSD balance payload.")
+                raise RuntimeError(
+                    "Polygon RPC returned an invalid pUSD balance payload."
+                )
             return int(result, 16) / _POLYMARKET_PUSD_DECIMALS
         except Exception as exc:  # pragma: no cover - provider-specific failure detail
             last_error = exc
@@ -335,7 +362,7 @@ async def _status_wallet_address(
     try:
         result = await broker.execute_raw(
             ["status", "--output", "json"],
-            timeout_seconds=10,
+            timeout_seconds=5,
             retry_auth_once=False,
         )
         payload = json.loads(result.stdout or "{}")
@@ -386,7 +413,7 @@ async def _refresh_public_wallet_snapshot(
     config = runtime_broker_module._runtime_config()
     diagnostics = runtime_broker_module.BullpenCommandDiagnostics(
         command_category="positions",
-        pid=__import__("os").getpid(),
+        pid=os.getpid(),
         unix_user=config.effective_user,
         effective_home=config.home,
         bullpen_version=broker._version_cache_value,
@@ -430,17 +457,15 @@ async def _refresh_ui_positions_snapshot(
 ) -> runtime_broker_module.BullpenPositionsSnapshot:
     """Read the Bullpen wallet without pre-gating the read on trade auth.
 
-    The Bullpen CLI can expose Polymarket positions even when its account/trade
-    login needs remediation. A UI refresh is therefore allowed to execute the
-    read command first. ``execute_raw`` still performs the broker's existing
-    auth-refresh-and-retry flow if the positions command itself returns an
-    auth rejection.
+    UI refreshes deliberately do not spend their request budget on ``doctor
+    auth --refresh``. They try the current Bullpen ``polymarket positions``
+    command once; an auth rejection immediately falls back to the same wallet's
+    public Polymarket position/cash evidence for display. Execution callers keep
+    the broker's normal authenticated refresh-and-retry contract.
 
-    A successful read is always safe to publish to the display-only LKG. It is
-    promoted into the authenticated execution snapshot only when the current
+    A successful CLI read is always safe to publish to the display-only LKG. It
+    is promoted into the authenticated execution snapshot only when the current
     credential artifact still has a matching short-lived auth-ready cache.
-    This keeps auto-trade/auto-claim lineage strict while making the portfolio
-    refresh reflect the wallet that Bullpen itself can currently read.
     """
 
     refresh_requested_at = runtime_broker_module._utc_now_iso()
@@ -451,7 +476,7 @@ async def _refresh_ui_positions_snapshot(
     result = await broker.execute_raw(
         ["polymarket", "positions", "--output", "json"],
         timeout_seconds=timeout_seconds,
-        retry_auth_once=True,
+        retry_auth_once=False,
     )
     try:
         payload: Any = json.loads(result.stdout)
