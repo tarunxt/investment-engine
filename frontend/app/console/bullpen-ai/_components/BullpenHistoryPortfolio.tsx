@@ -30,7 +30,10 @@ const refreshedAt = (value?: string | null) =>
 
 async function fetchPositions(forceFresh: boolean) {
   const params = new URLSearchParams({
-    caller_source: forceFresh ? "ui-history-portfolio-refresh" : "ui-history-portfolio-load",
+    // Keep the history view on the exact same backend refresh lanes as the
+    // main Bullpen x AI console. Both surfaces must resolve one shared wallet
+    // snapshot rather than maintaining route-specific portfolio state.
+    caller_source: forceFresh ? "ui-manual-refresh" : "ui-passive-refresh",
     max_age_seconds: forceFresh ? "0" : "20",
     request_id: crypto.randomUUID(),
   });
@@ -82,12 +85,20 @@ export function BullpenHistoryPortfolio() {
       setPositions(freshPositions);
       setBotState(latestState);
       if (freshPositions.liveAvailable !== true) {
-        setNotice(freshPositions.fallback?.message || freshPositions.error || "Showing the latest verified wallet snapshot.");
+        setNotice(
+          freshPositions.fallback?.message ||
+            freshPositions.error ||
+            "Showing the latest verified wallet snapshot.",
+        );
       } else if (balanceResult.status === "rejected") {
-        setNotice("Wallet positions are fresh, but the separate balance refresh is temporarily unavailable.");
+        setNotice(
+          "Wallet positions are fresh, but the separate balance refresh is temporarily unavailable.",
+        );
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Bullpen portfolio refresh failed.");
+      setNotice(
+        error instanceof Error ? error.message : "Bullpen portfolio refresh failed.",
+      );
     } finally {
       setRefreshing(false);
     }
@@ -101,30 +112,132 @@ export function BullpenHistoryPortfolio() {
     const rows = positions?.positions ?? [];
     const active = rows.filter(isActiveBullpenPosition);
     const claimable = rows.filter(isClaimableBullpenPosition);
-    const cash = positions?.summary?.cashBalance ?? botState?.live.balance.available_balance_usd ?? null;
+    const cash =
+      positions?.summary?.cashBalance ??
+      botState?.live.balance.available_balance_usd ??
+      null;
     const investments = sumCurrentPositionValue(active);
     return [
       ["Investment Value", money(investments), "Current investments value"],
       ["Cash in Hand", money(cash), "Available pUSD · wallet snapshot"],
-      ["Events Available for Claim", claimable.length.toLocaleString("en-IN"), money(claimable.reduce((sum, row) => sum + Math.max(0, row.claimableValue ?? row.expectedPayoutUsd ?? row.currentValue ?? 0), 0))],
-      ["Active Positions", active.length.toLocaleString("en-IN"), `${money(active.reduce((sum, row) => sum + row.costBasis, 0))} invested`],
+      [
+        "Events Available for Claim",
+        claimable.length.toLocaleString("en-IN"),
+        money(
+          claimable.reduce(
+            (sum, row) =>
+              sum +
+              Math.max(
+                0,
+                row.claimableValue ??
+                  row.expectedPayoutUsd ??
+                  row.currentValue ??
+                  0,
+              ),
+            0,
+          ),
+        ),
+      ],
+      [
+        "Active Positions",
+        active.length.toLocaleString("en-IN"),
+        `${money(active.reduce((sum, row) => sum + row.costBasis, 0))} invested`,
+      ],
       ["PnL", money(botState?.live.balance.pnl_usd), "Realized PnL"],
-      ["uPnL", money(positions?.summary?.unrealizedPnl ?? botState?.live.balance.upnl_usd), "Unrealized PnL"],
-      ["Live Trades Today", (botState?.live.live_trades_today ?? 0).toLocaleString("en-IN"), `Mode: ${botState?.mode ?? "—"}`],
-      ["Pending Confirmations", (botState?.live.pending_confirmations.length ?? 0).toLocaleString("en-IN"), botState?.live.balance.status ?? "loading"],
+      [
+        "uPnL",
+        money(
+          positions?.summary?.unrealizedPnl ?? botState?.live.balance.upnl_usd,
+        ),
+        "Unrealized PnL",
+      ],
+      [
+        "Live Trades Today",
+        (botState?.live.live_trades_today ?? 0).toLocaleString("en-IN"),
+        `Mode: ${botState?.mode ?? "—"}`,
+      ],
+      [
+        "Pending Confirmations",
+        (botState?.live.pending_confirmations.length ?? 0).toLocaleString("en-IN"),
+        botState?.live.balance.status ?? "loading",
+      ],
     ] as const;
   }, [botState, positions]);
 
   const rows = positions?.positions ?? [];
-  const cash = positions?.summary?.cashBalance ?? botState?.live.balance.available_balance_usd ?? null;
-  const total = positions?.summary?.walletValue ??
+  const cash =
+    positions?.summary?.cashBalance ??
+    botState?.live.balance.available_balance_usd ??
+    null;
+  const total =
     positions?.summary?.totalValue ??
     (positions ? sumBullpenPortfolioPositionValue(rows) + (cash ?? 0) : null);
-  return <section aria-labelledby="bullpen-portfolio-title" className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-5 text-white shadow-xl shadow-slate-950/10">
-    <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-      <div><div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[.2em] text-sky-100"><Wallet className="size-3.5" /> Bullpen Portfolio</div><h2 id="bullpen-portfolio-title" className="mt-3 text-2xl font-semibold tracking-tight">{money(total)} Total Portfolio Value</h2></div>
-      <div className="flex flex-col items-end gap-1"><Button type="button" size="sm" variant="outline" onClick={() => void load(true)} disabled={refreshing} className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:bg-sky-300/20 hover:text-white disabled:text-slate-400"><RefreshCw className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`} />Refresh</Button><span className="text-right text-[11px] text-slate-400">Wallet positions refresh: {refreshedAt(positions?.fetchedAt)}</span>{positions?.positionsSource ? <span className="text-right text-[11px] text-sky-200">source {positions.positionsSource}{positions.lineage?.positionClassifierVersion ? ` · classifier v${positions.lineage.positionClassifierVersion}` : ""}</span> : null}{notice ? <span role="status" className="max-w-md text-right text-[11px] text-amber-200">{notice}</span> : null}</div>
-    </div>
-    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(([label, value, detail]) => <div key={label} className="rounded-3xl border border-white/10 bg-white/10 px-5 py-4"><p className="text-xs uppercase tracking-[.2em] text-slate-300">{label}</p><p className="mt-3 text-2xl font-semibold">{value}</p><p className="mt-2 text-sm text-slate-400">{detail}</p></div>)}</div>
-  </section>;
+  return (
+    <section
+      aria-labelledby="bullpen-portfolio-title"
+      className="rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-5 text-white shadow-xl shadow-slate-950/10"
+    >
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[.2em] text-sky-100">
+            <Wallet className="size-3.5" /> Bullpen Portfolio
+          </div>
+          <h2
+            id="bullpen-portfolio-title"
+            className="mt-3 text-2xl font-semibold tracking-tight"
+          >
+            {money(total)} Total Portfolio Value
+          </h2>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => void load(true)}
+            disabled={refreshing}
+            className="rounded-full border-sky-300/50 bg-sky-300/10 text-sky-100 hover:bg-sky-300/20 hover:text-white disabled:text-slate-400"
+          >
+            <RefreshCw
+              className={`mr-2 size-3.5 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </Button>
+          <span className="text-right text-[11px] text-slate-400">
+            Wallet positions refresh: {refreshedAt(positions?.fetchedAt)}
+          </span>
+          {positions?.positionsSource ? (
+            <span className="text-right text-[11px] text-sky-200">
+              source {positions.positionsSource}
+              {positions.lineage?.positionClassifierVersion
+                ? ` · classifier v${positions.lineage.positionClassifierVersion}`
+                : ""}
+            </span>
+          ) : null}
+          {notice ? (
+            <span
+              role="status"
+              className="max-w-md text-right text-[11px] text-amber-200"
+            >
+              {notice}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {metrics.map(([label, value, detail]) => (
+          <div
+            key={label}
+            className="rounded-3xl border border-white/10 bg-white/10 px-5 py-4"
+          >
+            <p className="text-xs uppercase tracking-[.2em] text-slate-300">
+              {label}
+            </p>
+            <p className="mt-3 text-2xl font-semibold">{value}</p>
+            <p className="mt-2 text-sm text-slate-400">{detail}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }
