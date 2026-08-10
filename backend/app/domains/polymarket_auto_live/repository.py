@@ -39,6 +39,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveLlmOutput,
     BullpenAutoLiveRun,
     BullpenAutoLiveSettings,
+    BullpenAutoLiveStageResult,
     BullpenAutoLiveState,
     BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
@@ -1237,16 +1238,253 @@ class AsyncPolymarketAutoLiveRepository:
         )
 
     async def list_recent_event_trends(self, user_id: int, *, scan_count: int = 20) -> BullpenAutoLiveEventTrendsResponse:
-        """Aggregate visible events and their bounded LLM details over recent runs."""
+        """Aggregate the latest Stage 2 LLM scans, with decision rows as fallback.
+
+        The heatmap represents LLM scans, not only Stage 3 decisions. A run can
+        finish Stage 2 successfully and legitimately produce no Stage 3 decision
+        rows (candidate-only analysis, zero buys, or a later execution block).
+        Reading only decision records therefore left the newest circle grey even
+        though the LLM run had completed. Stage 2's durable reviewed-candidate
+        rows are authoritative for each scan slot; compact decision projections
+        remain useful as a backward-compatible fallback and for position metadata.
+        """
         run = PolymarketAutoLiveRunRecord
         decision = PolymarketAutoLiveDecisionRecord
+        normalized_scan_count = max(1, min(scan_count, 20))
         run_rows = (await self.session.execute(
-            select(run.id).where(run.user_id == user_id)
-            .order_by(desc(run.started_at), desc(run.created_at)).limit(max(1, min(scan_count, 20)))
-        )).scalars().all()
-        run_ids = [str(run_id) for run_id in run_rows]
+            select(
+                run.id,
+                run.payload["stage_results"].label("trend_stage_results"),
+                run.started_at,
+                run.completed_at,
+                run.updated_at,
+            )
+            .where(run.user_id == user_id)
+            .order_by(desc(run.started_at), desc(run.created_at))
+            .limit(normalized_scan_count)
+        )).all()
+        run_ids = [str(row.id) for row in run_rows]
         if not run_ids:
-            return BullpenAutoLiveEventTrendsResponse(scan_count=20, generated_at=utc_now().isoformat())
+            return BullpenAutoLiveEventTrendsResponse(
+                scan_count=20,
+                generated_at=utc_now().isoformat(),
+            )
+
+        run_index = {run_id: index for index, run_id in enumerate(run_ids)}
+        event_scores: dict[str, dict[str, object]] = {}
+
+        def as_record(value: object) -> dict[str, object]:
+            return value if isinstance(value, dict) else {}
+
+        def first_text(*values: object) -> str | None:
+            for value in values:
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return None
+
+        def first_number(*values: object) -> float | None:
+            for value in values:
+                if isinstance(value, bool) or value is None:
+                    continue
+                if isinstance(value, (int, float)):
+                    return float(value)
+                if isinstance(value, str):
+                    try:
+                        return float(value.strip().replace("%", ""))
+                    except ValueError:
+                        continue
+            return None
+
+        def ensure_entry(market_id: str, title: str) -> dict[str, object]:
+            entry = event_scores.setdefault(
+                market_id,
+                {
+                    "title": title,
+                    "scores": [None] * 20,
+                    "sides": [None] * 20,
+                    "timestamps": [None] * 20,
+                    "llm_outputs": [[] for _ in range(20)],
+                    "latest_stage2": None,
+                    "latest_decision": None,
+                },
+            )
+            if title:
+                entry["title"] = title
+            return entry
+
+        # Stage 2 is the source of truth for the scan circles. Read only the
+        # stage_results JSON slice so History does not hydrate complete run payloads.
+        for run_row in run_rows:
+            index = run_index[str(run_row.id)]
+            raw_stages = run_row.trend_stage_results
+            if not isinstance(raw_stages, list):
+                continue
+            llm_stage: BullpenAutoLiveStageResult | None = None
+            for raw_stage in raw_stages:
+                try:
+                    stage = BullpenAutoLiveStageResult.model_validate(raw_stage)
+                except ValidationError as exc:
+                    logger.warning(
+                        "Skipping malformed Auto-Live trend stage for run %s: %s",
+                        run_row.id,
+                        exc,
+                    )
+                    continue
+                if workflow_stage_key(stage) == "llm":
+                    llm_stage = stage
+                    break
+            if llm_stage is None:
+                continue
+
+            reviewed_rows = llm_stage.outputs.get("llm_reviewed_candidates")
+            if not isinstance(reviewed_rows, list):
+                continue
+            stage_timestamp = first_text(
+                llm_stage.completed_at,
+                llm_stage.started_at,
+                _isoformat(run_row.completed_at),
+                _isoformat(run_row.updated_at),
+                _isoformat(run_row.started_at),
+            )
+            for raw_candidate in reviewed_rows:
+                if not isinstance(raw_candidate, dict):
+                    continue
+                candidate = raw_candidate
+                prompt_inputs = as_record(candidate.get("llm_prompt_inputs"))
+                prompt_market = as_record(prompt_inputs.get("market"))
+                prepared = as_record(candidate.get("prepared_question_payload"))
+                if not prepared:
+                    prepared = as_record(prompt_inputs.get("question_payload"))
+
+                market_id = first_text(
+                    candidate.get("market_id"),
+                    candidate.get("marketId"),
+                    prepared.get("market_id"),
+                    prompt_market.get("market_id"),
+                    candidate.get("question_id"),
+                    candidate.get("questionId"),
+                    prepared.get("question_id"),
+                    candidate.get("slug"),
+                    prepared.get("slug"),
+                    prompt_market.get("slug"),
+                )
+                if market_id is None:
+                    continue
+                title = first_text(
+                    candidate.get("market_title"),
+                    candidate.get("question"),
+                    candidate.get("title"),
+                    prepared.get("question"),
+                    prepared.get("market_title"),
+                    prompt_market.get("question"),
+                    prompt_market.get("market_title"),
+                    market_id,
+                ) or market_id
+
+                yes_score = first_number(
+                    candidate.get("fair_yes_probability_pct"),
+                    candidate.get("llm_yes_odds"),
+                    candidate.get("yes_probability_pct"),
+                )
+                no_score = first_number(
+                    candidate.get("fair_no_probability_pct"),
+                    candidate.get("llm_no_odds"),
+                    candidate.get("no_probability_pct"),
+                )
+                if yes_score is None and no_score is not None and 0 <= no_score <= 100:
+                    yes_score = 100 - no_score
+                if no_score is None and yes_score is not None and 0 <= yes_score <= 100:
+                    no_score = 100 - yes_score
+                if yes_score is None or no_score is None:
+                    continue
+
+                strongest = max(yes_score, no_score)
+                strongest_side = "YES" if yes_score >= no_score else "NO"
+                current_yes_odds = first_number(
+                    candidate.get("current_yes_odds"),
+                    candidate.get("current_yes_odds_pct"),
+                    candidate.get("yes_price_pct"),
+                    prompt_market.get("current_yes_odds"),
+                    prepared.get("current_yes_odds"),
+                )
+                current_no_odds = first_number(
+                    candidate.get("current_no_odds"),
+                    candidate.get("current_no_odds_pct"),
+                    candidate.get("no_price_pct"),
+                    prompt_market.get("current_no_odds"),
+                    prepared.get("current_no_odds"),
+                )
+                if (
+                    current_no_odds is None
+                    and current_yes_odds is not None
+                    and 0 <= current_yes_odds <= 100
+                ):
+                    current_no_odds = 100 - current_yes_odds
+                if (
+                    current_yes_odds is None
+                    and current_no_odds is not None
+                    and 0 <= current_no_odds <= 100
+                ):
+                    current_yes_odds = 100 - current_no_odds
+
+                timestamp = first_text(
+                    candidate.get("events_summary_snapshot_timestamp"),
+                    candidate.get("events_summary_updated_at"),
+                    candidate.get("events_summary_calculated_at"),
+                    candidate.get("calculation_timestamp"),
+                    candidate.get("calculated_at"),
+                    candidate.get("llm_completed_at"),
+                    candidate.get("completed_at"),
+                    candidate.get("llm_run_at"),
+                    candidate.get("scanned_at"),
+                    stage_timestamp,
+                )
+                llm_outputs = _event_trend_llm_outputs(candidate.get("llm_outputs"))
+                entry = ensure_entry(market_id, title)
+                scores = entry["scores"]
+                if isinstance(scores, list) and (
+                    scores[index] is None or strongest >= float(scores[index])
+                ):
+                    scores[index] = round(strongest, 2)
+                    entry["sides"][index] = strongest_side
+                    entry["timestamps"][index] = timestamp
+                    entry["llm_outputs"][index] = llm_outputs
+                    if index == 0:
+                        exposure = first_number(
+                            candidate.get("current_exposure_usd"),
+                            candidate.get("exposure_usd"),
+                        )
+                        entry["latest_stage2"] = {
+                            "market_url": first_text(
+                                candidate.get("market_url"),
+                                candidate.get("source_url"),
+                                prepared.get("market_url"),
+                                prompt_market.get("market_url"),
+                            ),
+                            "close_time": first_text(
+                                candidate.get("close_time"),
+                                candidate.get("end_date"),
+                                prepared.get("close_time"),
+                                prompt_market.get("close_time"),
+                            ),
+                            "current_yes_odds": current_yes_odds,
+                            "current_no_odds": current_no_odds,
+                            "llm_yes_odds": yes_score,
+                            "llm_no_odds": no_score,
+                            "returns_per_day": first_number(
+                                candidate.get("returns_per_day")
+                            ),
+                            "is_active_position": bool(
+                                exposure is not None and exposure > 0
+                            ),
+                            "active_position_side": first_text(
+                                candidate.get("position_side"),
+                                candidate.get("side"),
+                            ),
+                        }
+
+        # Decision rows preserve legacy history and enrich the newest scan with
+        # position metadata, but never overwrite a Stage 2 scan observation.
         rows = (await self.session.execute(select(
             decision.id, decision.run_id, decision.market_id, decision.slug,
             decision.market_title, decision.side, decision.decision,
@@ -1256,54 +1494,126 @@ class AsyncPolymarketAutoLiveRepository:
             decision.created_at, decision.updated_at,
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
           .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
-        run_index = {run_id: index for index, run_id in enumerate(run_ids)}
-        event_scores: dict[str, dict[str, object]] = {}
         for row in rows:
             try:
                 projected = projected_row_to_decision(row)
             except (ValidationError, ValueError) as exc:
-                logger.warning("Skipping malformed Auto-Live trend decision %s: %s", getattr(row, "id", "unknown"), exc)
+                logger.warning(
+                    "Skipping malformed Auto-Live trend decision %s: %s",
+                    getattr(row, "id", "unknown"),
+                    exc,
+                )
                 continue
             index = run_index.get(str(row.run_id))
             if index is None:
                 continue
-            yes_score = projected.fair_yes_probability_pct if projected.fair_yes_probability_pct is not None else projected.fair_probability_pct
-            no_score = projected.fair_no_probability_pct if projected.fair_no_probability_pct is not None else 100 - projected.fair_probability_pct
+            yes_score = (
+                projected.fair_yes_probability_pct
+                if projected.fair_yes_probability_pct is not None
+                else projected.fair_probability_pct
+            )
+            no_score = (
+                projected.fair_no_probability_pct
+                if projected.fair_no_probability_pct is not None
+                else 100 - projected.fair_probability_pct
+            )
             strongest = max(yes_score, no_score)
             strongest_side = "YES" if yes_score >= no_score else "NO"
-            entry = event_scores.setdefault(projected.market_id, {
-                "title": projected.market_title, "scores": [None] * 20,
-                "sides": [None] * 20, "timestamps": [None] * 20,
-                "llm_outputs": [[] for _ in range(20)],
-                "latest": None,
-            })
+            entry = ensure_entry(projected.market_id, projected.market_title)
             scores = entry["scores"]
-            if isinstance(scores, list) and strongest >= (scores[index] or 0):
+            if isinstance(scores, list) and scores[index] is None:
                 scores[index] = round(strongest, 2)
                 entry["sides"][index] = strongest_side
                 entry["timestamps"][index] = projected.updated_at or projected.created_at
                 entry["llm_outputs"][index] = _event_trend_llm_outputs(
                     row.trend_llm_outputs
                 )
-                if index == 0:
-                    entry["latest"] = projected
-        events = [BullpenAutoLiveEventTrend(
-            market_id=market_id, market_title=str(entry["title"]),
-            market_url=entry["latest"].market_url if entry["latest"] else None,
-            close_time=entry["latest"].close_time if entry["latest"] else None,
-            score=round(sum((entry["scores"][index] or 0) * weight for index, weight in enumerate((1, 0.5, 0.25))), 2),
-            scan_scores=entry["scores"], scan_sides=entry["sides"], scan_timestamps=entry["timestamps"],
-            scan_llm_outputs=entry["llm_outputs"],
-            current_yes_odds=entry["latest"].current_yes_odds if entry["latest"] else None,
-            current_no_odds=entry["latest"].current_no_odds if entry["latest"] else None,
-            llm_yes_odds=entry["latest"].fair_yes_probability_pct if entry["latest"] else None,
-            llm_no_odds=entry["latest"].fair_no_probability_pct if entry["latest"] else None,
-            returns_per_day=_event_trend_returns_per_day(entry["latest"]) if entry["latest"] else None,
-            is_active_position=bool(entry["latest"] and entry["latest"].current_exposure_usd > 0),
-            active_position_side=entry["latest"].side if entry["latest"] and entry["latest"].current_exposure_usd > 0 else None,
-        ) for market_id, entry in event_scores.items()]
+            if index == 0:
+                entry["latest_decision"] = projected
+
+        events: list[BullpenAutoLiveEventTrend] = []
+        for market_id, entry in event_scores.items():
+            latest_stage2 = (
+                entry["latest_stage2"]
+                if isinstance(entry.get("latest_stage2"), dict)
+                else {}
+            )
+            latest_decision = entry.get("latest_decision")
+            if not isinstance(latest_decision, BullpenAutoLiveDecision):
+                latest_decision = None
+
+            def stage2_or_decision(key: str, decision_value: object) -> object:
+                value = latest_stage2.get(key)
+                return decision_value if value is None else value
+
+            decision_returns = (
+                _event_trend_returns_per_day(latest_decision)
+                if latest_decision is not None
+                else None
+            )
+            active_from_stage2 = bool(latest_stage2.get("is_active_position"))
+            active_from_decision = bool(
+                latest_decision is not None
+                and latest_decision.current_exposure_usd > 0
+            )
+            events.append(BullpenAutoLiveEventTrend(
+                market_id=market_id,
+                market_title=str(entry["title"]),
+                market_url=stage2_or_decision(
+                    "market_url",
+                    latest_decision.market_url if latest_decision else None,
+                ),
+                close_time=stage2_or_decision(
+                    "close_time",
+                    latest_decision.close_time if latest_decision else None,
+                ),
+                score=round(sum(
+                    (entry["scores"][index] or 0) * weight
+                    for index, weight in enumerate((1, 0.5, 0.25))
+                ), 2),
+                scan_scores=entry["scores"],
+                scan_sides=entry["sides"],
+                scan_timestamps=entry["timestamps"],
+                scan_llm_outputs=entry["llm_outputs"],
+                current_yes_odds=stage2_or_decision(
+                    "current_yes_odds",
+                    latest_decision.current_yes_odds if latest_decision else None,
+                ),
+                current_no_odds=stage2_or_decision(
+                    "current_no_odds",
+                    latest_decision.current_no_odds if latest_decision else None,
+                ),
+                llm_yes_odds=stage2_or_decision(
+                    "llm_yes_odds",
+                    latest_decision.fair_yes_probability_pct
+                    if latest_decision else None,
+                ),
+                llm_no_odds=stage2_or_decision(
+                    "llm_no_odds",
+                    latest_decision.fair_no_probability_pct
+                    if latest_decision else None,
+                ),
+                returns_per_day=stage2_or_decision(
+                    "returns_per_day", decision_returns
+                ),
+                is_active_position=active_from_stage2 or active_from_decision,
+                active_position_side=(
+                    latest_stage2.get("active_position_side")
+                    if active_from_stage2
+                    else (
+                        latest_decision.side
+                        if active_from_decision and latest_decision is not None
+                        else None
+                    )
+                ),
+            ))
+
         events.sort(key=lambda event: (-event.score, event.market_title.casefold()))
-        return BullpenAutoLiveEventTrendsResponse(events=events, scan_count=20, generated_at=utc_now().isoformat())
+        return BullpenAutoLiveEventTrendsResponse(
+            events=events,
+            scan_count=20,
+            generated_at=utc_now().isoformat(),
+        )
 
     async def list_projected_decisions_for_run(
         self,
