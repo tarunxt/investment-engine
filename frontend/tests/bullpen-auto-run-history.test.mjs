@@ -20,6 +20,10 @@ const urls = readFileSync(
   new URL("../lib/urls.ts", import.meta.url),
   "utf8",
 );
+const bullpenAi = readFileSync(
+  new URL("../lib/bullpen-ai.ts", import.meta.url),
+  "utf8",
+);
 
 test("Bullpen history modal loads a compact page and lazy selected-run detail", () => {
   assert.match(scheduleCard, /apiService\.getBullpenAutoLiveHistory\(/);
@@ -99,6 +103,18 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /calculateTrendDaysUntilClose/);
   assert.match(historyContent, /event\.scan_timestamps\.find\(Boolean\)/);
   assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
+});
+
+test("Bullpen event links use the direct market route instead of the trending search", () => {
+  assert.match(
+    bullpenAi,
+    /BULLPEN_PREDICTIONS_MARKET_URL\s*=\s*[\s\S]*?\/predictions\/market/,
+  );
+  assert.match(bullpenAi, /encodeURIComponent\(normalizedMarketId\)/);
+  assert.doesNotMatch(
+    bullpenAi,
+    /BULLPEN_PREDICTIONS_URL[\s\S]*?searchParams\.set\("marketId"/,
+  );
 });
 
 test("event trends support deadlines, persistent table controls, and stable scan details", () => {

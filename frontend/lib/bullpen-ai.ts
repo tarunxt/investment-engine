@@ -296,13 +296,17 @@ export const BULLPEN_SOURCE_URLS: Record<ScanMode, string> = {
     "https://app.bullpen.fi/predictions/trending?primaryMode=calendar&ref=intrepid-crane-3",
 };
 
-const BULLPEN_PREDICTIONS_URL =
-  "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3";
+const BULLPEN_PREDICTIONS_MARKET_URL =
+  "https://app.bullpen.fi/predictions/market";
+const BULLPEN_REFERRAL_CODE = "intrepid-crane-3";
 
 /** Build Bullpen's prediction view with the exact child market selected. */
 export function buildBullpenMarketUrl(marketId: string) {
-  const url = new URL(BULLPEN_PREDICTIONS_URL);
-  url.searchParams.set("marketId", marketId.trim());
+  const normalizedMarketId = marketId.trim();
+  const url = new URL(
+    `${BULLPEN_PREDICTIONS_MARKET_URL}/${encodeURIComponent(normalizedMarketId)}`,
+  );
+  url.searchParams.set("ref", BULLPEN_REFERRAL_CODE);
   return url.toString();
 }
 
