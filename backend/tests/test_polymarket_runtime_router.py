@@ -143,3 +143,101 @@ async def test_runtime_health_reads_cached_snapshot_without_refetching_positions
     assert payload["snapshot"]["fetched_at"] == snapshot.fetched_at
     assert "payload" not in payload["snapshot"]
     assert payload["doctor"]["message"] == "Cached broker health is ready."
+
+
+@pytest.mark.anyio
+async def test_runtime_display_positions_allows_signed_in_user_and_strips_runtime_credentials(
+    monkeypatch,
+):
+    snapshot = BullpenPositionsSnapshot(
+        payload={
+            "positions": [
+                {"market": "Current wallet row", "outcome": "Yes", "shares": 2.0}
+            ],
+            "summary": {"total_value": 22.91},
+        },
+        fetched_at="2026-08-10T05:15:15+00:00",
+        cli_version="bullpen 0.1.116",
+        credential_artifact=BullpenCredentialArtifact(
+            path="/home/ubuntu/.bullpen/credentials.json.enc",
+            inode=99,
+            mtime=100.0,
+            mtime_ns=100,
+            size=200,
+        ),
+        account_identity="0xabc123",
+        position_classifier_version=4,
+        source="redis-cache",
+        freshness_state="cached",
+        diagnostics=BullpenCommandDiagnostics(
+            command_category="positions",
+            pid=1234,
+            unix_user="ubuntu",
+            effective_home="/home/ubuntu",
+            snapshot_producer_source="operator-cli-display-bridge",
+        ),
+    )
+
+    class FakeBroker:
+        async def read_display_positions_snapshot(self):
+            return snapshot
+
+        async def read_cached_positions_snapshot(self):
+            raise AssertionError("Display snapshot should be preferred.")
+
+        async def get_positions_snapshot(self, **kwargs):
+            assert kwargs["caller_source"] == "ui-history-portfolio-refresh"
+            return snapshot
+
+    app = FastAPI()
+    app.include_router(polymarket_router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=8,
+        role=UserRole.USER,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket.router.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/polymarket/runtime/positions/display",
+            params={
+                "force_fresh": "true",
+                "max_age_seconds": "0",
+                "caller_source": "ui-history-portfolio-refresh",
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert len(payload["snapshot"]["payload"]["positions"]) == 1
+    assert payload["snapshot"]["account_identity"] == "0xabc123"
+    assert payload["snapshot"]["position_classifier_version"] == 4
+    assert "credential_artifact" not in payload["snapshot"]
+    assert "diagnostics" not in payload["snapshot"]
+
+
+@pytest.mark.anyio
+async def test_operational_runtime_positions_remain_admin_only(monkeypatch):
+    app = FastAPI()
+    app.include_router(polymarket_router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=8,
+        role=UserRole.USER,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket.router.get_bullpen_runtime_broker",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("Non-admin users must not reach the operational runtime.")
+        ),
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/polymarket/runtime/positions")
+
+    assert response.status_code == 403

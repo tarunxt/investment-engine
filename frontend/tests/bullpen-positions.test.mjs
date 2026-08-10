@@ -958,3 +958,48 @@ test("standard Polymarket payload aliases remain active Bullpen positions", asyn
   assert.equal(visible.length, 1);
   assert.equal(summary.activeCount, 1);
 });
+
+
+test("same-account Redis display cache can replace stale displayed live rows without replacing execution lineage", async () => {
+  const { canUseBullpenDisplayCacheWithVerifiedLineage } =
+    await loadBullpenPositionsModule();
+  const current = {
+    accountIdentity: "0xABC123",
+    credentialArtifact: { inode: 10, mtimeNs: 20, size: 30 },
+    positionClassifierVersion: 4,
+    source: "live-cli",
+    freshnessState: "fresh",
+  };
+  const sameWalletDisplay = {
+    accountIdentity: "0xabc123",
+    credentialArtifact: { inode: null, mtimeNs: null, size: null },
+    positionClassifierVersion: 4,
+    source: "redis-cache",
+    freshnessState: "cached",
+  };
+
+  assert.equal(
+    canUseBullpenDisplayCacheWithVerifiedLineage({
+      current,
+      incoming: sameWalletDisplay,
+      incomingSource: "redis-cache",
+    }),
+    true,
+  );
+  assert.equal(
+    canUseBullpenDisplayCacheWithVerifiedLineage({
+      current,
+      incoming: { ...sameWalletDisplay, accountIdentity: "0xdifferent" },
+      incomingSource: "redis-cache",
+    }),
+    false,
+  );
+  assert.equal(
+    canUseBullpenDisplayCacheWithVerifiedLineage({
+      current,
+      incoming: { ...sameWalletDisplay, positionClassifierVersion: 5 },
+      incomingSource: "redis-cache",
+    }),
+    false,
+  );
+});

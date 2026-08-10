@@ -1694,6 +1694,37 @@ export function canAutoRebaselineBullpenPositionsLineage({
   );
 }
 
+export function canUseBullpenDisplayCacheWithVerifiedLineage({
+  current,
+  incoming,
+  incomingSource,
+}: {
+  current: BullpenPositionsSnapshotLineage | null | undefined;
+  incoming: BullpenPositionsSnapshotLineage | null | undefined;
+  incomingSource: BullpenPositionsSource | null | undefined;
+}) {
+  if (incomingSource !== "redis-cache" || !current || !incoming) return false;
+  if (incoming.source?.trim().toLowerCase() !== "redis-cache") return false;
+
+  const currentAccount = normalizeLineageAccountIdentity(current.accountIdentity);
+  const incomingAccount = normalizeLineageAccountIdentity(incoming.accountIdentity);
+  if (currentAccount && incomingAccount !== currentAccount) return false;
+
+  if (
+    hasKnownLineageValue(current.positionClassifierVersion) &&
+    current.positionClassifierVersion !== incoming.positionClassifierVersion
+  ) {
+    return false;
+  }
+
+  // Display caches may be produced by the read-only operator bridge and thus
+  // carry a different (or sanitized-away) credential artifact. Same-account,
+  // same-classifier evidence is safe to render, while the verified live
+  // snapshot remains the execution baseline.
+  return true;
+}
+
+
 export function shouldPreserveBullpenPositionsOnRefresh({
   incomingPositions,
   incomingSource,
