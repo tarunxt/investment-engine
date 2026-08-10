@@ -141,6 +141,6 @@ jobs:
               set -a
               source /etc/investor/backend.env
               set +a
-              .venv/bin/python /tmp/diagnose-bullpen-stage2-zero.py
+              PYTHONPATH=/srv/investor/backend .venv/bin/python /tmp/diagnose-bullpen-stage2-zero.py
             '
             rm -f /tmp/diagnose-bullpen-stage2-zero.py
