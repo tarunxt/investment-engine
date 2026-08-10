@@ -7,6 +7,7 @@ import { formatUnknownError } from "@/lib/apiErrors";
 import { BullpenEventIdentityResolver } from "@/lib/bullpenEventIdentityResolver";
 import {
   isActiveBullpenPosition,
+  isUsableBullpenPositionsSnapshot,
   type BullpenActivePositionView,
   type BullpenPositionsResponse,
 } from "@/lib/bullpenPositions";
@@ -105,9 +106,16 @@ export function BullpenRunHistoryScreen() {
         apiService.getBullpenAutoLiveHistoryEventTrends(),
         positionsPromise,
       ]);
+      const hasUsableCurrentPositions = Boolean(
+        currentPositions &&
+          isUsableBullpenPositionsSnapshot({
+            positionsSource: currentPositions.positionsSource,
+            liveAvailable: currentPositions.liveAvailable,
+          }),
+      );
       setPage(nextPage);
       setTrends(
-        currentPositions
+        hasUsableCurrentPositions && currentPositions
           ? applyCurrentBullpenPositionsToEventTrends(
               nextTrends,
               currentPositions,
