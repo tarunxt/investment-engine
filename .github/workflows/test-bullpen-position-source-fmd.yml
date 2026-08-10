@@ -1,0 +1,48 @@
+name: Test Bullpen Position Source FMD
+
+on:
+  push:
+    branches:
+      - test/bullpen-position-source-fmd
+
+permissions:
+  contents: read
+
+jobs:
+  targeted:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r backend/requirements.txt
+          python -m pip install --disable-pip-version-check pytest
+      - name: Run Bullpen backend regression tests
+        env:
+          PYTHONPATH: backend
+        run: |
+          pytest -q \
+            backend/tests/test_polymarket_runtime_router.py \
+            backend/tests/test_bullpen_ui_positions_refresh.py \
+            backend/tests/test_bullpen_persistent_display_wallet_identity.py
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
+      - name: Run Bullpen frontend regression tests
+        working-directory: frontend
+        run: |
+          node --test \
+            tests/bullpen-positions.test.mjs \
+            tests/bullpen-positions-route-access.test.mjs \
+            tests/bullpen-auto-run-portfolio-refresh.test.mjs
