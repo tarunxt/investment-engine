@@ -88,7 +88,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(scheduleCard, /Promise\.allSettled/);
   assert.match(historyContent, /Loading event trends/);
   assert.match(scheduleCard, /Event trends are temporarily unavailable/);
+  assert.match(trendsTable, /href=\{buildBullpenMarketUrl\(event\.market_id\)\}/);
+  assert.match(trendsTable, /aria-label=\{`Open \$\{event\.market_title\} on Polymarket`\}/);
   assert.match(trendsTable, /href=\{event\.market_url\}/);
+  assert.match(trendsTable, /Not covered<br\/>in latest scan/);
   assert.match(trendsTable, /rounded-full bg-green-600 text-white/);
   assert.match(trendsTable, /border-\[1\.5px\] border-black/);
   assert.match(historyContent, /<BullpenLlmBreakdownDialog question=\{llmQuestion\}/);
