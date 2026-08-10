@@ -1449,3 +1449,19 @@ commentary or break the history response.
 Older or compact projections remain compatible: a scan without retained model
 outputs is represented by an empty array and its historical facts are not
 rewritten.
+
+
+## Candidate-only Stage 2 after wallet-read failure
+
+For the Bullpen console top-10 profile, a failure to refresh the verified wallet
+snapshot (including authentication/session failures, timeouts, or other runtime
+read errors) is execution-degrading rather than candidate-analysis-blocking. The
+run first attempts the existing bounded recent verified-snapshot recovery. If no
+verified wallet evidence is available, Stage 1 records the wallet error as a
+warning and Stage 2 may still review the independently scanned **new candidate**
+markets with the run's frozen LLM target selection. Active-position review is
+omitted for that pass and `stage2_candidate_only` /
+`blocked_by_stage1_wallet_refresh` remain frozen in the run evidence. Stage 3 is
+kept blocked: no exits, sizing, order planning, or submission may use the
+candidate-only result until verified wallet evidence is restored. Historical
+frozen snapshots are not rewritten.
