@@ -12,6 +12,8 @@ set -euo pipefail
 # Safety contract:
 # - the operator wallet address and positions payload are public/read-only;
 # - the display LKG is always safe to seed;
+# - the public wallet identity is persisted independently of expiring LKGs so
+#   current display positions can always be rebuilt after cache expiry;
 # - the execution snapshot is seeded only when the canonical service account
 #   resolves the exact same wallet AND its existing active-auth verdict is
 #   healthy; otherwise execution state is left untouched;
@@ -168,6 +170,15 @@ async def main() -> None:
                     'operator wallet; refusing to alter runtime wallet identity.'
                 )
                 return
+
+        # This key deliberately has no TTL. A wallet address is public identity,
+        # not authentication material. Keeping it durable lets the web runtime
+        # reconstruct current positions from public Polymarket data even after
+        # the 24-hour display/auth snapshots expire.
+        display_wallet_identity_key = (
+            f'{rb._REDIS_PREFIX}:positions:display-wallet-identity'
+        )
+        await client.set(display_wallet_identity_key, operator_wallet)
 
         artifact = credential_artifact()
         now = datetime.now(UTC).isoformat()
