@@ -40,9 +40,23 @@ jobs:
         working-directory: frontend
         run: npm ci --include=dev --prefer-offline --no-audit --fund=false --loglevel=error
       - name: Run Bullpen frontend regression tests
+        id: frontend-tests
         working-directory: frontend
+        shell: bash
         run: |
+          set +e
           node --test \
             tests/bullpen-positions.test.mjs \
             tests/bullpen-positions-route-access.test.mjs \
-            tests/bullpen-auto-run-portfolio-refresh.test.mjs
+            tests/bullpen-auto-run-portfolio-refresh.test.mjs \
+            2>&1 | tee ../bullpen-frontend-test.log
+          status=${PIPESTATUS[0]}
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+      - name: Upload Bullpen frontend test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bullpen-frontend-test-log
+          path: bullpen-frontend-test.log
+          if-no-files-found: error
