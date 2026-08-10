@@ -1,0 +1,76 @@
+name: Verify Bullpen Position Source FMD
+
+on:
+  push:
+    branches:
+      - verify/bullpen-position-source-fmd
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify production over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 900s
+          command_timeout: 900s
+          script: |
+            set -euo pipefail
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            if [[ ! -d "$APP" && -d /srv/investor ]]; then APP=/srv/investor; fi
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then APP_USER=investor; fi
+            echo "DEPLOYED_HEAD=$(sudo -u "$APP_USER" -H git -C "$APP" rev-parse HEAD)"
+            grep -F '/polymarket/runtime/positions/display?' "$APP/frontend/app/api/bullpen-ai/positions/route.ts" >/dev/null
+            grep -F '"/runtime/positions/display"' "$APP/backend/app/domains/polymarket/router.py" >/dev/null
+            echo "DISPLAY_ENDPOINT_SOURCE=present"
+
+            sudo -u "$APP_USER" -H env APP_ROOT="$APP" bash -c '
+              set -a
+              source /etc/investor/backend.env
+              set +a
+              export PYTHONPATH="$APP_ROOT/backend"
+              "$APP_ROOT/backend/.venv/bin/python" - <<"PY"
+            import asyncio, json
+            from app.domains.polymarket import runtime_broker as rb
+            from app.domains.polymarket import runtime_positions_refresh as rpr
+
+            def summary(snap):
+                payload = snap.payload if snap and isinstance(snap.payload, dict) else {}
+                rows = payload.get("positions") if isinstance(payload.get("positions"), list) else []
+                s = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+                return {
+                    "count": len(rows),
+                    "total_value": s.get("total_value"),
+                    "cash_balance": s.get("cash_balance"),
+                    "source": getattr(snap, "source", None),
+                    "freshness": getattr(snap, "freshness_state", None),
+                    "fetched_at": getattr(snap, "fetched_at", None),
+                }
+
+            async def main():
+                rpr.install_bullpen_ui_positions_refresh()
+                broker = rb.BullpenRuntimeBroker()
+                try:
+                    display = await broker.read_display_positions_snapshot()
+                    live = await broker.get_positions_snapshot(
+                        force_fresh=True,
+                        allow_refresh=True,
+                        caller_source="ui-history-portfolio-refresh",
+                        max_age_seconds=0,
+                        timeout_seconds=20,
+                    )
+                    print("DISPLAY_SNAPSHOT=" + json.dumps(summary(display), sort_keys=True))
+                    print("FORCED_UI_REFRESH=" + json.dumps(summary(live), sort_keys=True))
+                finally:
+                    await broker.aclose()
+            asyncio.run(main())
+            PY
+            '
