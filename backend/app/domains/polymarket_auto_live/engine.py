@@ -6129,22 +6129,24 @@ class BullpenAutoLiveEngine:
                 live_wallet_snapshot = live_wallet_positions_task.result()
                 live_wallet_positions = live_wallet_snapshot.positions
         except Exception as exc:
-            if not _is_stage1_wallet_handoff_timeout(exc):
-                _cancel_background_task(console_balance_task)
-                reason = (
-                    "Stage 1 failed because Cred-X could not refresh fresh Bullpen wallet positions: "
-                    f"{exc}"
-                )
-                return fail_stage_one_wallet_refresh(reason)
-
-            recovered_snapshot = await recover_stage1_wallet_snapshot(
-                f"transient-{getattr(exc, 'classification', 'timeout')}"
+            # A wallet refresh failure must not erase independently scanned Stage 1
+            # candidates. Active-position reconciliation and Stage 3 execution still
+            # require verified wallet evidence, but Stage 2 can safely analyze fresh
+            # candidate markets while bounded recovery tries to restore that evidence.
+            failure_classification = getattr(exc, "classification", None)
+            recovery_trigger = (
+                "transient-timeout"
+                if _is_stage1_wallet_handoff_timeout(exc)
+                else f"wallet-refresh-{failure_classification or 'error'}"
             )
+            recovered_snapshot = await recover_stage1_wallet_snapshot(recovery_trigger)
             if recovered_snapshot is None:
                 _cancel_background_task(live_wallet_positions_task)
                 stage1_wallet_refresh_error = (
-                    "Fresh Bullpen wallet refresh timed out and bounded recovery "
-                    "could not obtain a recent verified shared snapshot."
+                    "Fresh Bullpen wallet refresh failed and bounded recovery could "
+                    "not obtain a recent verified shared snapshot. Stage 2 will review "
+                    "new candidates only; Stage 3 remains blocked. "
+                    f"Wallet error: {exc}"
                 )
                 live_wallet_positions = []
             else:
