@@ -71,6 +71,7 @@ test("fresh same-account passive/run refreshes may rotate lineage while account 
   assert.match(pageSource, /getBullpenPositionsLineageMismatchFields/);
   assert.match(pageSource, /preservingForLineageMismatch/);
   assert.match(pageSource, /canAutoRebaselineBullpenPositionsLineage/);
+  assert.match(pageSource, /canUseBullpenDisplayCacheWithVerifiedLineage/);
   assert.match(pageSource, /incomingIsFreshUsableLive/);
   assert.match(
     pageSource,
@@ -85,7 +86,7 @@ test("fresh same-account passive/run refreshes may rotate lineage while account 
   assert.doesNotMatch(pageSource, /allowFreshLineageRebaseline/);
   assert.match(
     pageSource,
-    /previousLiveSnapshot && !incomingIsFreshUsableLive/,
+    /previousLiveSnapshot && !incomingSnapshotUsable/,
   );
   assert.match(
     pageSource,

@@ -46,6 +46,24 @@ class BullpenRuntimePositionsResponse(BaseModel):
     error: str | None = None
 
 
+class BullpenRuntimeDisplaySnapshot(BaseModel):
+    """Sanitized wallet evidence safe for authenticated UI display."""
+
+    payload: dict[str, object]
+    fetched_at: str
+    account_identity: str | None = None
+    position_classifier_version: int | None = None
+    source: str | None = None
+    freshness_state: str | None = None
+
+
+class BullpenRuntimeDisplayPositionsResponse(BaseModel):
+    ok: bool
+    snapshot: BullpenRuntimeDisplaySnapshot | None = None
+    stale_snapshot: BullpenRuntimeDisplaySnapshot | None = None
+    error: str | None = None
+
+
 class BullpenRuntimeHealthResponse(BaseModel):
     ok: bool
     checked_at: str
@@ -73,6 +91,21 @@ class BullpenRuntimeDiagnosticsResponse(BaseModel):
 
 class BullpenRuntimeSearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
+
+
+def _sanitize_bullpen_display_snapshot(
+    snapshot: BullpenPositionsSnapshot | None,
+) -> BullpenRuntimeDisplaySnapshot | None:
+    if snapshot is None:
+        return None
+    return BullpenRuntimeDisplaySnapshot(
+        payload=snapshot.payload,
+        fetched_at=snapshot.fetched_at,
+        account_identity=snapshot.account_identity,
+        position_classifier_version=snapshot.position_classifier_version,
+        source=snapshot.source,
+        freshness_state=snapshot.freshness_state,
+    )
 
 
 async def _get_bot(current_user: User) -> object:
@@ -154,6 +187,53 @@ async def get_bullpen_runtime_positions(
             last_failure=passive_health.last_failure,
             active_auth=passive_health.active_auth,
             cli_version=passive_health.cli_version,
+            error=_http_error_detail(exc),
+        )
+
+
+@router.get(
+    "/runtime/positions/display",
+    response_model=BullpenRuntimeDisplayPositionsResponse,
+)
+async def get_bullpen_runtime_display_positions(
+    force_fresh: bool = Query(default=False),
+    passive: bool = Query(default=False),
+    caller_source: str | None = Query(default=None, max_length=80),
+    max_age_seconds: int = Query(default=20, ge=0, le=300),
+    current_user: User = Depends(get_current_user),
+):
+    """Read-only, sanitized Bullpen wallet evidence for the signed-in UI.
+
+    The operational singleton runtime endpoints remain admin-only. This route
+    exposes only portfolio evidence and deliberately strips credential and
+    runtime diagnostics from the snapshot before it crosses the user boundary.
+    """
+
+    del current_user
+    if passive and force_fresh:
+        raise HTTPException(
+            status_code=400,
+            detail="Passive Bullpen positions requests cannot force a refresh.",
+        )
+    broker = get_bullpen_runtime_broker()
+    stale_snapshot = await broker.read_display_positions_snapshot()
+    if stale_snapshot is None:
+        stale_snapshot = await broker.read_cached_positions_snapshot()
+    try:
+        snapshot = await broker.get_positions_snapshot(
+            force_fresh=force_fresh,
+            allow_refresh=not passive,
+            caller_source=caller_source,
+            max_age_seconds=max_age_seconds,
+        )
+        return BullpenRuntimeDisplayPositionsResponse(
+            ok=True,
+            snapshot=_sanitize_bullpen_display_snapshot(snapshot),
+        )
+    except Exception as exc:
+        return BullpenRuntimeDisplayPositionsResponse(
+            ok=False,
+            stale_snapshot=_sanitize_bullpen_display_snapshot(stale_snapshot),
             error=_http_error_detail(exc),
         )
 

@@ -466,7 +466,7 @@ export async function GET(request: NextRequest) {
     backendPositions =
       await fetchBackendJsonWithSession<BackendBullpenRuntimePositionsResponse>(
         backendSession,
-        `/polymarket/runtime/positions?${backendQuery.toString()}`,
+        `/polymarket/runtime/positions/display?${backendQuery.toString()}`,
       );
   } catch (error) {
     const sanitizedMessage =

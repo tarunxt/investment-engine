@@ -125,6 +125,7 @@ import {
   type BullpenPositionsSource,
   type BullpenPositionsSummary,
   canAutoRebaselineBullpenPositionsLineage,
+  canUseBullpenDisplayCacheWithVerifiedLineage,
   getBullpenPositionsLineageMismatchFields,
   isUsableBullpenPositionsSnapshot,
   isActiveBullpenPosition,
@@ -2765,12 +2766,19 @@ function BullpenAiPageContent() {
             incomingIsFreshLive: incomingIsFreshUsableLive,
           }),
       );
+      const canRenderDisplayCache =
+        canUseBullpenDisplayCacheWithVerifiedLineage({
+          current: previousLiveSnapshot?.lineage,
+          incoming: incomingLineage,
+          incomingSource: livePositionsPayload.positionsSource,
+        });
       const preservingForLineageMismatch =
         lineageMismatchFields.length > 0 &&
         !canEstablishFreshLineageBaseline &&
+        !canRenderDisplayCache &&
         Boolean(previousLiveSnapshot);
       const preserveForDegradedFallback =
-        Boolean(previousLiveSnapshot && !incomingIsFreshUsableLive) ||
+        Boolean(previousLiveSnapshot && !incomingSnapshotUsable) ||
         shouldPreserveBullpenPositionsOnRefresh({
           incomingPositions: livePositions,
           incomingSource: livePositionsPayload.positionsSource,
