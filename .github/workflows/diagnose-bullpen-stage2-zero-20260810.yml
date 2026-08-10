@@ -29,6 +29,7 @@ jobs:
 
             from sqlalchemy import select
 
+            import app.models  # Register all ORM relationships before querying.
             from app.domains.polymarket_auto_live.models import (
                 PolymarketAutoLiveRunRecord,
                 PolymarketAutoLiveSettingsRecord,
@@ -52,35 +53,21 @@ jobs:
                 return None
 
             wanted = [
-                "scanned_candidates",
-                "accepted_candidates_count",
-                "stage1_accepted_candidate_count",
-                "candidate_rows_before_llm",
-                "active_position_rows_before_llm",
-                "llm_candidate_count",
-                "total_items",
-                "completed_items",
-                "llm_target_count",
-                "llm_provider_target_count",
-                "llm_selected_target_count",
-                "llm_started_provider_target_count",
-                "llm_completed_provider_target_count",
-                "llm_usable_provider_target_count",
-                "llm_passed_provider_target_count",
-                "llm_failed_provider_target_count",
-                "stage2_actionable_contract_authoritative",
-                "stage2_actionable_buy_count",
-                "stage2_actionable_exit_count",
-                "stage2_universe_complete",
-                "stage2_universe_blocker_code",
-                "stage2_candidate_only",
-                "blocked_by_stage1_wallet_refresh",
+                "scanned_candidates", "accepted_candidates_count",
+                "stage1_accepted_candidate_count", "candidate_rows_before_llm",
+                "active_position_rows_before_llm", "llm_candidate_count",
+                "total_items", "completed_items", "llm_target_count",
+                "llm_provider_target_count", "llm_selected_target_count",
+                "llm_started_provider_target_count", "llm_completed_provider_target_count",
+                "llm_usable_provider_target_count", "llm_passed_provider_target_count",
+                "llm_failed_provider_target_count", "stage2_actionable_contract_authoritative",
+                "stage2_actionable_buy_count", "stage2_actionable_exit_count",
+                "stage2_universe_complete", "stage2_universe_blocker_code",
+                "stage2_candidate_only", "blocked_by_stage1_wallet_refresh",
             ]
 
             with SyncSessionLocal() as session:
-                settings_rows = session.execute(
-                    select(PolymarketAutoLiveSettingsRecord)
-                ).scalars().all()
+                settings_rows = session.execute(select(PolymarketAutoLiveSettingsRecord)).scalars().all()
                 print("=== SETTINGS ===")
                 for record in settings_rows:
                     settings = record_to_settings(record)
@@ -94,7 +81,6 @@ jobs:
                         "start_at": settings.console_auto_start_at,
                         "refresh_minutes": settings.console_auto_refresh_minutes,
                     })
-
                     latest = session.execute(
                         select(PolymarketAutoLiveRunRecord)
                         .where(PolymarketAutoLiveRunRecord.user_id == record.user_id)
@@ -106,10 +92,8 @@ jobs:
                         run = record_to_run(run_record)
                         ctx = run.request_context.console_profile if run.request_context and run.request_context.console_profile else None
                         print({
-                            "run_id": run.id,
-                            "started_at": run.started_at,
-                            "triggered_by": run.triggered_by,
-                            "status": run.status,
+                            "run_id": run.id, "started_at": run.started_at,
+                            "triggered_by": run.triggered_by, "status": run.status,
                             "summary": run.summary[:220],
                             "frozen_target_count": len(run.stage2_llm_targets_snapshot or []),
                             "frozen_targets": targets(run.stage2_llm_targets_snapshot),
