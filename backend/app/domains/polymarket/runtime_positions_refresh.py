@@ -49,6 +49,12 @@ _WALLET_ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 _PUBLIC_POSITION_PAGE_SIZE = 500
 _PUBLIC_POSITION_MAX_PAGES = 4
 _VALUE_EPSILON = 0.000001
+# The display wallet address is public/read-only identity, not an auth token.
+# Keep it independently of the 24-hour display/auth LKGs so a UI refresh can
+# still rebuild the current wallet after those caches expire.
+_DISPLAY_WALLET_IDENTITY_KEY = (
+    f"{runtime_broker_module._REDIS_PREFIX}:positions:display-wallet-identity"
+)
 
 
 def _read_number(value: object) -> float | None:
@@ -93,6 +99,33 @@ def _normalize_wallet_address(value: object) -> str | None:
     if not _WALLET_ADDRESS_RE.fullmatch(normalized):
         return None
     return normalized.lower()
+
+
+async def _read_persisted_display_wallet_identity(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+) -> str | None:
+    try:
+        raw_wallet = await broker._redis.get(_DISPLAY_WALLET_IDENTITY_KEY)
+    except Exception:
+        return None
+    return _normalize_wallet_address(raw_wallet)
+
+
+async def _persist_display_wallet_identity(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+    wallet: object,
+) -> str | None:
+    normalized = _normalize_wallet_address(wallet)
+    if normalized is None:
+        return None
+    try:
+        # Deliberately no TTL. This is only a public wallet address and exists
+        # solely to make current read-only portfolio reconstruction durable.
+        await broker._redis.set(_DISPLAY_WALLET_IDENTITY_KEY, normalized)
+    except Exception:
+        # A Redis write failure must not make an otherwise valid wallet read fail.
+        pass
+    return normalized
 
 
 def _collect_rows(payload: object) -> list[dict[str, Any]]:
@@ -336,6 +369,7 @@ async def _status_wallet_address(
             runtime_broker_module._extract_account_identity(payload)
         )
         if wallet:
+            await _persist_display_wallet_identity(broker, wallet)
             return wallet
     except Exception:
         pass
@@ -345,7 +379,15 @@ async def _status_wallet_address(
         active_auth.account_identity if active_auth is not None else None
     )
     if wallet:
+        await _persist_display_wallet_identity(broker, wallet)
         return wallet
+
+    # Unlike the display/auth LKGs below, this public wallet identity does not
+    # expire. It is the durable anchor that lets a forced refresh reconstruct
+    # current positions even after all 24-hour snapshots have aged out.
+    persisted_wallet = await _read_persisted_display_wallet_identity(broker)
+    if persisted_wallet:
+        return persisted_wallet
 
     # Read raw cache records deliberately. Display identity remains useful for
     # presentation even if a rotated canonical credential makes the stricter
@@ -362,6 +404,7 @@ async def _status_wallet_address(
             snapshot.account_identity if snapshot is not None else None
         )
         if wallet:
+            await _persist_display_wallet_identity(broker, wallet)
             return wallet
     return None
 
@@ -425,6 +468,7 @@ async def _refresh_public_wallet_snapshot(
             classification="public_wallet_identity_missing",
         )
 
+    await _persist_display_wallet_identity(broker, wallet)
     payload = await _read_public_positions_payload(wallet)
     config = runtime_broker_module._runtime_config()
     diagnostics = runtime_broker_module.BullpenCommandDiagnostics(
@@ -511,6 +555,8 @@ async def _refresh_ui_positions_snapshot(
             classification="account_identity_mismatch",
         )
     account_identity = payload_identity or normalized_verified_identity
+    if account_identity:
+        await _persist_display_wallet_identity(broker, account_identity)
 
     result.diagnostics.refresh_requested_at = runtime_broker_module._utc_now_iso()
     result.diagnostics.caller_source = runtime_broker_module._normalize_caller_source(
