@@ -1,0 +1,141 @@
+name: Diagnose Bullpen Stage 2 zero rows 20260810
+
+on:
+  push:
+    branches:
+      - diagnose/bullpen-stage2-zero-20260810
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Diagnose production Bullpen Stage 2 state
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          timeout: 300s
+          command_timeout: 300s
+          capture_stdout: true
+          script: |
+            set -euo pipefail
+            cd /srv/investor/backend
+            set -a
+            source /etc/investor/backend.env
+            set +a
+            .venv/bin/python - <<'PY'
+            from __future__ import annotations
+
+            from sqlalchemy import select
+
+            from app.domains.polymarket_auto_live.models import (
+                PolymarketAutoLiveRunRecord,
+                PolymarketAutoLiveSettingsRecord,
+            )
+            from app.domains.polymarket_auto_live.repository import (
+                record_to_run,
+                record_to_settings,
+            )
+            from app.infrastructure.database.sync_session import SyncSessionLocal
+
+            def targets(value):
+                return [
+                    f"{getattr(item, 'provider', '')}/{getattr(item, 'model', '')}"
+                    for item in (value or [])
+                ]
+
+            def stage_for(run, key):
+                for stage in run.stage_results:
+                    if stage.outputs.get("workflow_stage_key") == key:
+                        return stage
+                return None
+
+            wanted = [
+                "scanned_candidates",
+                "accepted_candidates_count",
+                "stage1_accepted_candidate_count",
+                "candidate_rows_before_llm",
+                "active_position_rows_before_llm",
+                "llm_candidate_count",
+                "total_items",
+                "completed_items",
+                "llm_target_count",
+                "llm_provider_target_count",
+                "llm_selected_target_count",
+                "llm_started_provider_target_count",
+                "llm_completed_provider_target_count",
+                "llm_usable_provider_target_count",
+                "llm_passed_provider_target_count",
+                "llm_failed_provider_target_count",
+                "stage2_actionable_contract_authoritative",
+                "stage2_actionable_buy_count",
+                "stage2_actionable_exit_count",
+                "stage2_universe_complete",
+                "stage2_universe_blocker_code",
+                "stage2_candidate_only",
+                "blocked_by_stage1_wallet_refresh",
+            ]
+
+            with SyncSessionLocal() as session:
+                settings_rows = session.execute(
+                    select(PolymarketAutoLiveSettingsRecord)
+                ).scalars().all()
+                print("=== SETTINGS ===")
+                for record in settings_rows:
+                    settings = record_to_settings(record)
+                    if settings.strategy_profile != "bullpen_console_top10":
+                        continue
+                    print({
+                        "user_id": record.user_id,
+                        "auto_live_enabled": settings.auto_live_enabled,
+                        "target_count": len(settings.console_llm_targets),
+                        "targets": targets(settings.console_llm_targets),
+                        "start_at": settings.console_auto_start_at,
+                        "refresh_minutes": settings.console_auto_refresh_minutes,
+                    })
+
+                    latest = session.execute(
+                        select(PolymarketAutoLiveRunRecord)
+                        .where(PolymarketAutoLiveRunRecord.user_id == record.user_id)
+                        .order_by(PolymarketAutoLiveRunRecord.started_at.desc())
+                        .limit(6)
+                    ).scalars().all()
+                    print("=== LATEST RUNS user", record.user_id, "===")
+                    for run_record in latest:
+                        run = record_to_run(run_record)
+                        ctx = run.request_context.console_profile if run.request_context and run.request_context.console_profile else None
+                        print({
+                            "run_id": run.id,
+                            "started_at": run.started_at,
+                            "triggered_by": run.triggered_by,
+                            "status": run.status,
+                            "summary": run.summary[:220],
+                            "frozen_target_count": len(run.stage2_llm_targets_snapshot or []),
+                            "frozen_targets": targets(run.stage2_llm_targets_snapshot),
+                            "request_candidate_count": len(ctx.candidate_rows) if ctx else None,
+                            "request_prefiltered": ctx.candidate_rows_prefiltered if ctx else None,
+                            "request_reuse_llm": ctx.reuse_saved_llm_outputs if ctx else None,
+                        })
+                        for key in ("scan", "llm", "invest"):
+                            stage = stage_for(run, key)
+                            if stage is None:
+                                print(key, "MISSING")
+                                continue
+                            selected = {name: stage.outputs.get(name) for name in wanted if name in stage.outputs}
+                            if "llm_targets" in stage.outputs:
+                                selected["llm_targets"] = stage.outputs.get("llm_targets")
+                            print(key, {
+                                "stage_number": stage.stage_number,
+                                "status": stage.status,
+                                "phase": stage.outputs.get("phase_status"),
+                                "reason": stage.reason[:260],
+                                "completed_at": stage.completed_at,
+                                "outputs": selected,
+                            })
+            PY
