@@ -1,0 +1,136 @@
+name: Diagnose Bullpen Position Source FMD
+
+on:
+  push:
+    branches:
+      - fix/bullpen-position-source-fmd
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Inspect production Bullpen position sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Inspect production Bullpen sources over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 900s
+          command_timeout: 900s
+          script: |
+            set -euo pipefail
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            if [[ ! -d "$APP" && -d /srv/investor ]]; then
+              APP=/srv/investor
+            fi
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            if ! id "$APP_USER" >/dev/null 2>&1 && id investor >/dev/null 2>&1; then
+              APP_USER=investor
+            fi
+            echo "app=$APP user=$APP_USER"
+            echo "head=$(sudo -u "$APP_USER" -H git -C "$APP" rev-parse HEAD)"
+
+            echo "== operator CLI =="
+            sudo -u ubuntu -H env \
+              HOME=/home/ubuntu \
+              BULLPEN_HOME=/home/ubuntu/.bullpen \
+              BULLPEN_CREDENTIALS_HOME=/home/ubuntu/.bullpen \
+              BULLPEN_CONFIG=/home/ubuntu/.bullpen/config.toml \
+              BULLPEN_ENV=production \
+              BULLPEN_NON_INTERACTIVE=true \
+              /usr/local/bin/bullpen polymarket positions --output json \
+              2>/dev/null | "$APP/backend/.venv/bin/python" -c '
+            import json,sys
+            p=json.load(sys.stdin)
+            rows=p.get("positions") if isinstance(p,dict) else None
+            rows=rows if isinstance(rows,list) else []
+            s=p.get("summary") if isinstance(p,dict) and isinstance(p.get("summary"),dict) else {}
+            print("count=",len(rows),"summary=",{k:s.get(k) for k in ("cash_balance","total_value","wallet_value","unrealized_pnl")})
+            for r in rows:
+                if not isinstance(r,dict): continue
+                print({k:r.get(k) for k in ("market_title","question","title","outcome","side","shares","size","current_value","value","current_price","avg_price","average_price") if r.get(k) is not None})
+            '
+
+            echo "== Redis / runtime callers / public wallet =="
+            sudo -u "$APP_USER" -H env APP_ROOT="$APP" bash -c '
+              set -a
+              source /etc/investor/backend.env
+              set +a
+              export PYTHONPATH="$APP_ROOT/backend"
+              "$APP_ROOT/backend/.venv/bin/python" - <<"PY"
+            import asyncio
+            import hashlib
+            import json
+            import os
+            import redis.asyncio as aioredis
+            from app.domains.polymarket import runtime_broker as rb
+            from app.domains.polymarket import runtime_positions_refresh as rpr
+
+            def summarize_payload(payload):
+                if not isinstance(payload, dict): return {"count":None}
+                rows=payload.get("positions")
+                rows=rows if isinstance(rows,list) else []
+                summary=payload.get("summary") if isinstance(payload.get("summary"),dict) else {}
+                return {
+                    "count":len(rows),
+                    "summary":{k:summary.get(k) for k in ("cash_balance","total_value","wallet_value","unrealized_pnl")},
+                    "rows":[{k:r.get(k) for k in ("market_title","question","title","outcome","side","shares","size","current_value","value","current_price","avg_price","average_price") if r.get(k) is not None} for r in rows if isinstance(r,dict)],
+                }
+
+            async def main():
+                client=aioredis.from_url(os.environ["REDIS_URL"],decode_responses=True)
+                try:
+                    for label,key in (("execution",rb._POSITIONS_SNAPSHOT_KEY),("display",rb._POSITIONS_DISPLAY_LKG_KEY)):
+                        raw=await client.get(key)
+                        if not raw:
+                            print(label,{"available":False})
+                            continue
+                        try:
+                            snap=rb.BullpenPositionsSnapshot.model_validate_json(raw)
+                            print(label,{"available":True,"fetched_at":snap.fetched_at,"source":snap.source,"freshness":snap.freshness_state,"account_suffix":(snap.account_identity or "")[-6:],"producer":snap.diagnostics.snapshot_producer_source,"caller":snap.diagnostics.caller_source,**summarize_payload(snap.payload)})
+                        except Exception as exc:
+                            print(label,{"available":True,"parse_error":type(exc).__name__})
+                    identity_key=f"{rb._REDIS_PREFIX}:positions:display-wallet-identity"
+                    ident=(await client.get(identity_key) or "").strip().lower()
+                    print("durable_identity",{"available":bool(ident),"suffix":ident[-6:] if ident else None,"sha8":hashlib.sha256(ident.encode()).hexdigest()[:8] if ident else None})
+                finally:
+                    await client.aclose()
+
+                broker=rb.BullpenRuntimeBroker()
+                rpr.install_bullpen_ui_positions_refresh()
+                try:
+                    for label,kwargs in (
+                        ("passive",dict(force_fresh=False,allow_refresh=False,caller_source="ui-passive-refresh",max_age_seconds=20,timeout_seconds=15)),
+                        ("history_manual",dict(force_fresh=True,allow_refresh=True,caller_source="ui-history-portfolio-refresh",max_age_seconds=0,timeout_seconds=15)),
+                        ("portfolio_manual",dict(force_fresh=True,allow_refresh=True,caller_source="ui-portfolio-refresh",max_age_seconds=0,timeout_seconds=15)),
+                    ):
+                        try:
+                            snap=await broker.get_positions_snapshot(**kwargs)
+                            print("caller",label,{"fetched_at":snap.fetched_at,"source":snap.source,"freshness":snap.freshness_state,"producer":snap.diagnostics.snapshot_producer_source,**summarize_payload(snap.payload)})
+                        except Exception as exc:
+                            print("caller",label,{"error_type":type(exc).__name__,"classification":getattr(exc,"classification",None),"message":str(exc)[:300]})
+                    try:
+                        wallet=await rpr._status_wallet_address(broker)
+                        print("resolved_wallet",{"available":bool(wallet),"suffix":wallet[-6:] if wallet else None})
+                        if wallet:
+                            payload=await rpr._read_public_positions_payload(wallet)
+                            print("public",summarize_payload(payload))
+                    except Exception as exc:
+                        print("public",{"error_type":type(exc).__name__,"message":str(exc)[:300]})
+                finally:
+                    await broker.aclose()
+            asyncio.run(main())
+            PY
+            '
+
+            echo "== recent runtime-position requests =="
+            sudo journalctl -u investor-backend --since "30 min ago" --no-pager 2>/dev/null \
+              | grep -E 'polymarket/runtime/positions|request_performance' \
+              | tail -n 80 \
+              | sed -E 's/(access_token|refresh_token|authorization|cookie)[^ ,}]*/REDACTED/Ig' || true
