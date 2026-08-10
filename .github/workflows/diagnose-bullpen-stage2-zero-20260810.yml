@@ -22,14 +22,9 @@ jobs:
           fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
           timeout: 300s
           command_timeout: 300s
-          capture_stdout: true
           script: |
             set -euo pipefail
-            cd /srv/investor/backend
-            set -a
-            source /etc/investor/backend.env
-            set +a
-            .venv/bin/python - <<'PY'
+            cat >/tmp/diagnose-bullpen-stage2-zero.py <<'PY'
             from __future__ import annotations
 
             from sqlalchemy import select
@@ -104,7 +99,7 @@ jobs:
                         select(PolymarketAutoLiveRunRecord)
                         .where(PolymarketAutoLiveRunRecord.user_id == record.user_id)
                         .order_by(PolymarketAutoLiveRunRecord.started_at.desc())
-                        .limit(6)
+                        .limit(8)
                     ).scalars().all()
                     print("=== LATEST RUNS user", record.user_id, "===")
                     for run_record in latest:
@@ -139,3 +134,13 @@ jobs:
                                 "outputs": selected,
                             })
             PY
+            chmod 0644 /tmp/diagnose-bullpen-stage2-zero.py
+            sudo -u investor -H bash -lc '
+              set -euo pipefail
+              cd /srv/investor/backend
+              set -a
+              source /etc/investor/backend.env
+              set +a
+              .venv/bin/python /tmp/diagnose-bullpen-stage2-zero.py
+            '
+            rm -f /tmp/diagnose-bullpen-stage2-zero.py
