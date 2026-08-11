@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, GripVertical, X } from "lucide-react";
 
-import { buildBullpenMarketUrl, createBullpenQuestionRow, type BullpenQuestionLlmBreakdownItem, type BullpenQuestionRow } from "@/lib/bullpen-ai";
+import { createBullpenQuestionRow, type BullpenQuestionLlmBreakdownItem, type BullpenQuestionRow } from "@/lib/bullpen-ai";
+import { buildBullpenMarketUrl } from "@/lib/bullpenMarketLinks";
 import { formatApiTimestamp } from "@/lib/datetime";
 import type { BullpenAutoLiveEventTrend, BullpenAutoLiveLlmOutput } from "@/types/api";
 
