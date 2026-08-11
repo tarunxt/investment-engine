@@ -52,6 +52,43 @@ function resolveActivePositionSide(
   return outcome === "YES" || outcome === "NO" ? outcome : null;
 }
 
+function normalizeBullpenContractIdentity(value: string | null | undefined) {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeBullpenContractTitle(value: string | null | undefined) {
+  const normalized = normalizeBullpenContractIdentity(value);
+  return normalized
+    ? normalized.replace(/\s+/g, " ").replace(/[?!.]+$/, "")
+    : null;
+}
+
+function isSameBullpenContract(
+  event: BullpenAutoLiveEventTrend,
+  position: BullpenActivePositionView,
+) {
+  const eventMarketId = normalizeBullpenContractIdentity(event.market_id);
+  const conditionId = normalizeBullpenContractIdentity(position.conditionId);
+  const positionKey = normalizeBullpenContractIdentity(position.key);
+
+  // A Bullpen/Polymarket marketId can identify the parent event shared by
+  // several deadline/outcome contracts. Never use position.marketId alone to
+  // paint an active tick: that is what made sibling contracts (Aug 14/15/22,
+  // Aug 15/16/17, etc.) all look active when only one contract was actually held.
+  if (
+    eventMarketId &&
+    (eventMarketId === conditionId || eventMarketId === positionKey)
+  ) {
+    return true;
+  }
+
+  const eventTitle = normalizeBullpenContractTitle(event.market_title);
+  const positionTitle = normalizeBullpenContractTitle(position.marketTitle);
+  return Boolean(eventTitle && positionTitle && eventTitle === positionTitle);
+}
+
 export function applyCurrentBullpenPositionsToEventTrends(
   trends: BullpenAutoLiveEventTrendsResponse,
   positions: BullpenPositionsResponse,
@@ -66,9 +103,12 @@ export function applyCurrentBullpenPositionsToEventTrends(
       marketUrl: event.market_url ?? null,
       title: event.market_title,
     });
+    const contractCandidates = activePositions.filter((position) =>
+      isSameBullpenContract(event, position),
+    );
     const match = BullpenEventIdentityResolver.resolveMatch({
       target,
-      candidates: activePositions,
+      candidates: contractCandidates,
       getIdentity: BullpenEventIdentityResolver.fromPosition,
     });
     const activePosition =
