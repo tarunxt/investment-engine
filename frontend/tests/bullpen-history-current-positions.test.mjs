@@ -29,3 +29,19 @@ test("History active-event ticks are reconciled against current active positions
   assert.match(historyScreen, /active_position_side: activePosition/);
   assert.match(historyScreen, /hasUsableCurrentPositions && currentPositions/);
 });
+
+test("History does not treat a shared parent market id as an active contract match", () => {
+  assert.match(historyScreen, /function isSameBullpenContract/);
+  assert.match(historyScreen, /eventMarketId === conditionId/);
+  assert.match(historyScreen, /eventMarketId === positionKey/);
+  assert.match(historyScreen, /eventTitle === positionTitle/);
+  assert.doesNotMatch(
+    historyScreen,
+    /eventMarketId === normalizeBullpenContractIdentity\(position\.marketId\)/,
+  );
+  assert.match(
+    historyScreen,
+    /const contractCandidates = activePositions\.filter\(\(position\) =>\s*isSameBullpenContract\(event, position\)/,
+  );
+  assert.match(historyScreen, /candidates: contractCandidates/);
+});
