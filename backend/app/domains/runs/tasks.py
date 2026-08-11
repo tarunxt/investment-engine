@@ -13,6 +13,7 @@ from app.domains.auth.models import User
 from app.domains.runs.final_actionable_history import (
     backfill_user_history,
     final_actionable_history_backfill_key,
+    is_rebalance_run,
 )
 from app.domains.runs.models import Run, RunJob
 from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -309,6 +310,13 @@ def send_run_completion_email_task(self, run_id: int) -> None:
             if not run.user_id:
                 logger.info("Run completion email skipped: run %s has no user", run_id)
                 return
+
+            # Durable stock history must not depend on a browser-side POST succeeding.
+            # Queue the idempotent server reconstruction as soon as a rebalance run
+            # reaches a terminal state, before any optional email/user preference path.
+            if is_rebalance_run(run):
+                backfill_final_actionable_history_task.delay(run.user_id)
+
             user = db.execute(select(User).where(User.id == run.user_id)).scalar_one_or_none()
             if not user or not user.email:
                 logger.info("Run completion email skipped: user %s has no email", run.user_id)
