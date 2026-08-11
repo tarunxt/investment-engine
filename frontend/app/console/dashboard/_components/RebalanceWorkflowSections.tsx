@@ -2770,7 +2770,11 @@ function RunOutputDetails({ run }: { run: RunResponse }) {
 
 function getIdleStageRows(stage: WorkflowStageKey, info: StageInfo, now: number): StageTileRow[] {
   if (stage === "sync") {
-    return [{ label: "Latest sync", value: formatTimestamp(info.completedAt) }];
+    const rows: StageTileRow[] = [
+      { label: "Latest sync", value: formatTimestamp(info.completedAt) },
+    ];
+    if (info.error) rows.push({ label: "Error", value: info.error });
+    return rows;
   }
   if (LLM_STAGE_TILE_KEYS.has(stage)) {
     return getLlmStageTileRows(info, now);
@@ -6982,15 +6986,65 @@ ${zerodhaExecutionMode === "direct_market"
         window.alert("Select at least one stage to run.");
         return;
       }
-      const runMetadata = await reserveAutoRebalanceRunMetadata(portfolio);
+      const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
+        !runSpecificMode || stagesToRun.has(stage);
+      let currentStage: WorkflowStageKey = "sync";
+
+      // Zerodha authentication must be opened synchronously from the Run click.
+      // Waiting for the run-label reservation first loses the browser user gesture
+      // and Chrome/Safari can block the popup, making Run appear to do nothing.
+      const zerodhaPopup =
+        portfolio === "zerodha" && shouldRunCurrentStage("sync")
+          ? window.open("about:blank", "zerodha-connect", buildZerodhaPopupFeatures())
+          : null;
+
+      isWorkflowExecutingRef.current = true;
+      setRunningPortfolio(portfolio);
+      resetPortfolio(portfolio);
+      activeExecutionRefsRef.current = [];
+      cancelRequestedRef.current = false;
+      pauseRequestedRef.current = false;
+      setWorkflowPaused(false);
+
+      const startingStage =
+        STAGE_ORDER.find((stage) => shouldRunCurrentStage(stage)) ?? "sync";
+      currentStage = startingStage;
+      updateStage(portfolio, startingStage, {
+        state: "running",
+        startedAt: new Date().toISOString(),
+        runStatus:
+          portfolio === "zerodha"
+            ? "Starting Zerodha auto-rebalance"
+            : "Starting INDmoney auto-rebalance",
+        error: null,
+      });
+
+      let runMetadata: AutoRebalanceRunMetadata;
+      try {
+        runMetadata = await reserveAutoRebalanceRunMetadata(portfolio);
+      } catch (error) {
+        zerodhaPopup?.close();
+        const failedAt = new Date().toISOString();
+        const message = `Could not start ${
+          portfolio === "zerodha" ? "Zerodha" : "INDmoney"
+        } auto-rebalance: ${normalizeError(error)}`;
+        updateStage(portfolio, startingStage, {
+          state: "failed",
+          endedAt: failedAt,
+          runStatus: "start failed",
+          error: message,
+        });
+        isWorkflowExecutingRef.current = false;
+        setRunningPortfolio(null);
+        window.alert(message);
+        return;
+      }
+
       activeAutoRebalanceMetadataRef.current[portfolio] = runMetadata;
       setActiveAutoRebalanceMetadata((current) => ({
         ...current,
         [portfolio]: runMetadata,
       }));
-      const shouldRunCurrentStage = (stage: WorkflowStageKey) =>
-        !runSpecificMode || stagesToRun.has(stage);
-      let currentStage: WorkflowStageKey = "sync";
       const stopIfPaused = () => {
         if (!pauseRequestedRef.current) return false;
         const timestamp = new Date().toISOString();
@@ -7047,19 +7101,6 @@ ${zerodhaExecutionMode === "direct_market"
         // recorded in the run history.
         throw error;
       };
-      isWorkflowExecutingRef.current = true;
-      setRunningPortfolio(portfolio);
-      resetPortfolio(portfolio);
-      activeExecutionRefsRef.current = [];
-      cancelRequestedRef.current = false;
-      pauseRequestedRef.current = false;
-      setWorkflowPaused(false);
-
-      const zerodhaPopup =
-        portfolio === "zerodha" && shouldRunCurrentStage("sync")
-          ? window.open("about:blank", "zerodha-connect", buildZerodhaPopupFeatures())
-          : null;
-
       let generatedThreatMarkdown = "";
       let generatedSwingRun: RunResponse | null = null;
       let generatedRebalanceRun: RunResponse | null = null;

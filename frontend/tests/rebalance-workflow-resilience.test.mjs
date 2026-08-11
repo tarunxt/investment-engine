@@ -125,3 +125,27 @@ test("ambiguous threat starts reconcile against durable history instead of produ
   assert.match(recoverySource, /normalizeStartError/);
   assert.match(recoverySource, /\^\(null\|undefined\)\$/i);
 });
+test("Zerodha Run preserves the popup user gesture and surfaces start failures", () => {
+  const start = source.indexOf("const runWorkflow = useCallback");
+  const end = source.indexOf("const syncPortfolioNow = useCallback", start);
+  assert.ok(start >= 0 && end > start, "runWorkflow source should be present");
+  const runWorkflowSource = source.slice(start, end);
+  const popupIndex = runWorkflowSource.indexOf('window.open("about:blank"');
+  const reservationIndex = runWorkflowSource.indexOf(
+    "await reserveAutoRebalanceRunMetadata(portfolio)",
+  );
+  assert.ok(popupIndex >= 0, "Zerodha popup should be pre-opened");
+  assert.ok(reservationIndex >= 0, "run metadata should still be reserved");
+  assert.ok(
+    popupIndex < reservationIndex,
+    "Zerodha popup must open before the first awaited reservation so the browser does not block it",
+  );
+  assert.match(runWorkflowSource, /Starting Zerodha auto-rebalance/);
+  assert.match(runWorkflowSource, /zerodhaPopup\?\.close\(\)/);
+  assert.match(runWorkflowSource, /Could not start \$\{/);
+  assert.match(runWorkflowSource, /window\.alert\(message\)/);
+  assert.match(
+    source,
+    /if \(info\.error\) rows\.push\(\{ label: "Error", value: info\.error \}\);/,
+  );
+});
