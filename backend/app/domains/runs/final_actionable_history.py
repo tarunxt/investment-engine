@@ -35,7 +35,7 @@ ACTION_SCORE = {
     "Buy New": 2.0,
 }
 ACTION_PRIORITY = ["Sell All", "Trim", "Hold", "Add more", "Buy New"]
-FINAL_ACTIONABLE_HISTORY_BACKFILL_VERSION = 2
+FINAL_ACTIONABLE_HISTORY_BACKFILL_VERSION = 3
 
 
 def final_actionable_history_backfill_key(user_id: int) -> str:
