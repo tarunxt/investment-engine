@@ -22,7 +22,7 @@ test("History primes the shared portfolio from a forced current wallet refresh",
 
 test("History active-event ticks are reconciled against current active positions", () => {
   assert.match(historyScreen, /applyCurrentBullpenPositionsToEventTrends/);
-  assert.match(historyScreen, /\.filter\(\s*isActiveBullpenPosition/);
+  assert.match(historyScreen, /\.filter\(\s*isBullpenHistoryActivePosition/);
   assert.match(historyScreen, /BullpenEventIdentityResolver\.resolveMatch/);
   assert.match(historyScreen, /getIdentity: BullpenEventIdentityResolver\.fromPosition/);
   assert.match(historyScreen, /is_active_position: activePosition !== null/);
