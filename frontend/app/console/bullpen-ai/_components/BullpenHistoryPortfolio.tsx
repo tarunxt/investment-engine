@@ -292,7 +292,7 @@ export function BullpenHistoryPortfolio() {
       ? sumCurrentPositionValue(verifiedActivePositions)
       : accountValue;
     const currentPortfolioPositionsValue = hasActivePositionsSnapshot
-      ? currentInvestmentsValue + claimableAmount
+      ? (currentInvestmentsValue ?? 0) + claimableAmount
       : currentInvestmentsValue;
     const displayedTotalPortfolioValue = resolveBullpenTotalPortfolioValue({
       walletValue: activePositionsSummary?.walletValue,
