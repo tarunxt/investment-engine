@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 
 import { formatUnknownError } from "@/lib/apiErrors";
 import { BullpenEventIdentityResolver } from "@/lib/bullpenEventIdentityResolver";
+import { isBullpenHistoryActivePosition } from "@/lib/bullpenHistoryPositions";
 import {
-  isActiveBullpenPosition,
   isUsableBullpenPositionsSnapshot,
   type BullpenActivePositionView,
   type BullpenPositionsResponse,
@@ -94,7 +94,7 @@ export function applyCurrentBullpenPositionsToEventTrends(
   positions: BullpenPositionsResponse,
 ): BullpenAutoLiveEventTrendsResponse {
   const activePositions = (positions.positions ?? []).filter(
-    isActiveBullpenPosition,
+    isBullpenHistoryActivePosition,
   );
 
   const events = trends.events.map((event: BullpenAutoLiveEventTrend) => {
