@@ -80,7 +80,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Recurring Events Across the Last 20 Scans/);
   assert.match(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
   assert.match(trendsTable, /event\.scan_scores\.map\(\(score,i\) =>/);
-  assert.match(historyContent, /Grey = not covered/);
+  assert.match(historyContent, /Grey = not covered \/ no valid LLM score/);
+  assert.match(historyContent, /Latest saved run:/);
+  assert.match(historyContent, /Latest scored LLM scan:/);
+  assert.match(historyContent, /page\?\.page === 1 \? page\.items\[0\]\?\.started_at/);
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
   assert.match(trendsTable, /\(event\.scan_scores\[0\] \?\? -1\) >= 80/);
