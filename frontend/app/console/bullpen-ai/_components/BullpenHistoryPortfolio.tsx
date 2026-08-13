@@ -6,12 +6,13 @@ import { RefreshCw, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatApiTimestamp } from "@/lib/datetime";
 import {
-  isActiveBullpenPosition,
-  isClaimableBullpenPosition,
+  isBullpenHistoryActivePosition,
+  isBullpenHistoryClaimablePosition,
+} from "@/lib/bullpenHistoryPositions";
+import {
   isUsableBullpenPositionsSnapshot,
   resolveBullpenPreferredPortfolioValue,
   resolveBullpenTotalPortfolioValue,
-  sumBullpenPortfolioPositionValue,
   sumCurrentPositionValue,
   type BullpenPositionsResponse,
   type BullpenPositionsSnapshotLineage,
@@ -193,12 +194,14 @@ export function BullpenHistoryPortfolio() {
       liveSnapshotUsable ||
       useVerifiedStage1Fallback ||
       (!verifiedStage1Portfolio && activePositions.length > 0);
-    const verifiedActivePositions = activePositions.filter(
-      isActiveBullpenPosition,
-    );
-    const verifiedClaimablePositions = activePositions.filter(
-      isClaimableBullpenPosition,
-    );
+    const verifiedActivePositions =
+      useVerifiedStage1Fallback && verifiedStage1Portfolio
+        ? verifiedStage1Portfolio.activePositions
+        : activePositions.filter(isBullpenHistoryActivePosition);
+    const verifiedClaimablePositions =
+      useVerifiedStage1Fallback && verifiedStage1Portfolio
+        ? verifiedStage1Portfolio.claimablePositions
+        : activePositions.filter(isBullpenHistoryClaimablePosition);
     const liveBalance = botState?.live.balance ?? null;
     const balance =
       liveBalance?.status === "ready" ? liveBalance : lastUsableBalance;
@@ -289,7 +292,7 @@ export function BullpenHistoryPortfolio() {
       ? sumCurrentPositionValue(verifiedActivePositions)
       : accountValue;
     const currentPortfolioPositionsValue = hasActivePositionsSnapshot
-      ? sumBullpenPortfolioPositionValue(activePositions)
+      ? (currentInvestmentsValue ?? 0) + claimableAmount
       : currentInvestmentsValue;
     const displayedTotalPortfolioValue = resolveBullpenTotalPortfolioValue({
       walletValue: activePositionsSummary?.walletValue,
