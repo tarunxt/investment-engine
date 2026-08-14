@@ -724,64 +724,152 @@ async def fetch_market_by_slug(slug: str) -> ScannedMarket | None:
         return await _fetch_market_by_slug_with_client(client, slug)
 
 
+def _condition_id_like(value: str | None) -> bool:
+    return bool(
+        isinstance(value, str)
+        and re.fullmatch(r"0x[a-fA-F0-9]{64}", value.strip())
+    )
+
+
+async def _fetch_market_by_exact_identity_with_client(
+    client: httpx.AsyncClient,
+    *,
+    market_id: str | None,
+    condition_id: str | None,
+) -> ScannedMarket | None:
+    """Resolve one wallet position against Gamma's documented exact-ID filters."""
+
+    normalized_market_id = (
+        market_id.strip()
+        if isinstance(market_id, str) and market_id.strip()
+        else None
+    )
+    normalized_condition_id = (
+        condition_id.strip()
+        if isinstance(condition_id, str) and condition_id.strip()
+        else normalized_market_id
+        if _condition_id_like(normalized_market_id)
+        else None
+    )
+
+    # Gamma's List Markets API documents `condition_ids`, not the response-field
+    # spelling `conditionId`. The old query used `conditionId`, so exact wallet
+    # condition IDs silently returned no match after a slug lookup missed.
+    query_plan: list[tuple[dict[str, str], str, str, bool]] = []
+    if normalized_condition_id:
+        query_plan.extend(
+            [
+                (
+                    {
+                        "condition_ids": normalized_condition_id,
+                        "active": "true",
+                        "archived": "false",
+                        "closed": "false",
+                    },
+                    normalized_condition_id,
+                    "condition_id",
+                    True,
+                ),
+                (
+                    {"condition_ids": normalized_condition_id},
+                    normalized_condition_id,
+                    "condition_id",
+                    False,
+                ),
+            ]
+        )
+    if (
+        normalized_market_id
+        and normalized_market_id.isdigit()
+        and normalized_market_id != normalized_condition_id
+    ):
+        query_plan.extend(
+            [
+                (
+                    {
+                        "id": normalized_market_id,
+                        "active": "true",
+                        "archived": "false",
+                        "closed": "false",
+                    },
+                    normalized_market_id,
+                    "market_id",
+                    True,
+                ),
+                (
+                    {"id": normalized_market_id},
+                    normalized_market_id,
+                    "market_id",
+                    False,
+                ),
+            ]
+        )
+    if not query_plan:
+        return None
+
+    for params, requested_value, match_kind, active_query in query_plan:
+        response = await client.get(
+            POLYMARKET_GAMMA_MARKETS_URL,
+            params=params,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, list):
+            continue
+        requested_normalized = requested_value.strip().lower()
+        for row in payload:
+            if not isinstance(row, dict):
+                continue
+            if match_kind == "condition_id":
+                candidate = row.get("conditionId") or row.get("condition_id")
+            else:
+                candidate = (
+                    row.get("id")
+                    or row.get("marketId")
+                    or row.get("market_id")
+                )
+            if str(candidate or "").strip().lower() != requested_normalized:
+                continue
+            normalized = _normalize_market(
+                {
+                    **row,
+                    **(
+                        {
+                            "active": True,
+                            "archived": False,
+                            "closed": False,
+                        }
+                        if active_query
+                        else {}
+                    ),
+                },
+                force_include=True,
+            )
+            if normalized is not None:
+                return normalized
+    return None
+
+
 async def fetch_market_by_exact_identity(
     *,
     market_id: str | None,
     condition_id: str | None,
 ) -> ScannedMarket | None:
-    """Resolve legacy wallet rows that do not carry a market slug."""
-
-    query_plan: list[tuple[str, str, str]] = []
-    if isinstance(condition_id, str) and condition_id.strip():
-        query_plan.append(
-            ("conditionId", condition_id.strip(), "condition_id")
-        )
-    if isinstance(market_id, str) and market_id.strip():
-        query_plan.append(("id", market_id.strip(), "market_id"))
-    if not query_plan:
-        return None
-
-    async def fetch_with_client(
-        client: httpx.AsyncClient,
-    ) -> ScannedMarket | None:
-        for parameter, requested_value, match_kind in query_plan:
-            response = await client.get(
-                POLYMARKET_GAMMA_MARKETS_URL,
-                params={parameter: requested_value},
-            )
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, list):
-                continue
-            requested_normalized = requested_value.strip().lower()
-            for row in payload:
-                if not isinstance(row, dict):
-                    continue
-                if match_kind == "condition_id":
-                    candidate = row.get("conditionId") or row.get(
-                        "condition_id"
-                    )
-                else:
-                    candidate = (
-                        row.get("id")
-                        or row.get("marketId")
-                        or row.get("market_id")
-                    )
-                if (
-                    str(candidate or "").strip().lower()
-                    != requested_normalized
-                ):
-                    continue
-                normalized = _normalize_market(row, force_include=True)
-                if normalized is not None:
-                    return normalized
-        return None
+    """Resolve wallet rows by exact condition/market identity."""
 
     shared_client = _SHARED_GAMMA_CLIENT.get()
     if shared_client is not None:
-        return await fetch_with_client(shared_client)
+        return await _fetch_market_by_exact_identity_with_client(
+            shared_client,
+            market_id=market_id,
+            condition_id=condition_id,
+        )
     async with shared_gamma_market_client() as client:
-        return await fetch_with_client(client)
+        return await _fetch_market_by_exact_identity_with_client(
+            client,
+            market_id=market_id,
+            condition_id=condition_id,
+        )
 
 
 async def scan_candidate_markets(
