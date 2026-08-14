@@ -672,9 +672,19 @@ async def _fetch_market_by_slug_with_client(
     client: httpx.AsyncClient,
     slug: str,
 ) -> ScannedMarket | None:
+    # This lookup is only used to prove that a wallet holding is still a live
+    # market. Query the same active-only universe as the main scanner. If the
+    # active lookup misses, the caller can still use the unfiltered exact-ID
+    # lookup below to classify closed/settled positions without weakening
+    # execution safety.
     response = await client.get(
         POLYMARKET_GAMMA_MARKETS_URL,
-        params={"slug": slug},
+        params={
+            "slug": slug,
+            "active": "true",
+            "archived": "false",
+            "closed": "false",
+        },
     )
     response.raise_for_status()
     payload = response.json()
@@ -690,7 +700,17 @@ async def _fetch_market_by_slug_with_client(
             or candidate_slug.strip().lower() != requested_slug
         ):
             continue
-        normalized = _normalize_market(row, force_include=True)
+        # Gamma's active/closed filters are themselves authoritative evidence
+        # even when those booleans are omitted from a compact response row.
+        normalized = _normalize_market(
+            {
+                **row,
+                "active": True,
+                "archived": False,
+                "closed": False,
+            },
+            force_include=True,
+        )
         if normalized is not None:
             return normalized
     return None
