@@ -1,6 +1,7 @@
 import type { DashboardSummaryResponse } from "@/types/api";
 
 import { BullpenInteractiveIsland } from "./BullpenInteractiveIsland";
+import { BullpenScanFiltersPopupBridge } from "./BullpenScanFiltersPopupBridge";
 
 export function BullpenAiPageShell({
   summary,
@@ -55,6 +56,7 @@ export function BullpenAiPageShell({
         </div>
       </header>
       <BullpenInteractiveIsland />
+      <BullpenScanFiltersPopupBridge />
     </div>
   );
 }
