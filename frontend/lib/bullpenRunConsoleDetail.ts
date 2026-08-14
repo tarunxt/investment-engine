@@ -169,6 +169,41 @@ const COMPLETED_STAGE_METRIC_OUTPUT_KEYS = [
   "llms_completed",
 ] as const;
 
+// A compact status poll can race a richer progress response by one database
+// commit. These counters describe work already completed in the current Stage
+// 2 execution and therefore cannot legitimately move backwards until a new
+// stage generation starts.
+const MONOTONIC_STAGE_METRIC_OUTPUT_KEYS = [
+  "llm_completed_provider_target_count",
+  "llm_completed_model_count",
+  "llm_successful_provider_target_count",
+  "llm_passed_provider_target_count",
+  "llm_usable_provider_target_count",
+  "llm_failed_provider_target_count",
+  "llm_failed_model_count",
+  "llms_completed",
+] as const;
+
+function numericMetric(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function isSameStageExecutionGeneration(
+  existing: BullpenAutoLiveStageResult,
+  projected: BullpenAutoLiveStageResult,
+) {
+  return Boolean(
+    existing.started_at &&
+      projected.started_at &&
+      existing.started_at === projected.started_at,
+  );
+}
+
 function mergeStageProjection(
   existing: BullpenAutoLiveStageResult,
   projected: BullpenAutoLiveStageResult,
@@ -180,6 +215,18 @@ function mergeStageProjection(
   for (const key of AUTHORITATIVE_LIVE_OUTPUT_KEYS) {
     if (!Object.hasOwn(projected.outputs ?? {}, key)) {
       delete outputs[key];
+    }
+  }
+  if (isSameStageExecutionGeneration(existing, projected)) {
+    for (const key of MONOTONIC_STAGE_METRIC_OUTPUT_KEYS) {
+      const existingMetric = numericMetric(existing.outputs?.[key]);
+      const projectedMetric = numericMetric(projected.outputs?.[key]);
+      if (
+        existingMetric !== null &&
+        (projectedMetric === null || projectedMetric < existingMetric)
+      ) {
+        outputs[key] = existing.outputs?.[key];
+      }
     }
   }
   if (projected.completed_at) {
