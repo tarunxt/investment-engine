@@ -85,7 +85,7 @@ def _read_number(value: object) -> float | None:
 
 def _read_bool(value: object) -> bool | None:
     if isinstance(value, bool):
-        return None
+        return value
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return value != 0
     if isinstance(value, str):
