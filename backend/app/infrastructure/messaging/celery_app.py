@@ -7,9 +7,19 @@ from kombu import Queue
 from celery.schedules import crontab, schedule
 
 from app.core.config import settings
+from app.domains.polymarket.runtime_positions_refresh import (
+    install_bullpen_ui_positions_refresh,
+)
 from app.domains.polymarket_auto_live.run_lifecycle import AUTO_LIVE_QUEUE
 
 logger = logging.getLogger(__name__)
+
+# The position snapshot wrapper was originally installed only by FastAPI for UI
+# reads. Auto-Live Stage 1 runs in a Celery worker, so install the same wrapper
+# here as well. Non-Stage-1 execution callers still fall through to the original
+# authenticated broker path; only the explicit Stage 1 analysis callers may use
+# its same-wallet display/public reconciliation fallback.
+install_bullpen_ui_positions_refresh()
 
 _broker = settings.celery_broker_url or settings.redis_url
 _backend = settings.celery_result_backend or settings.redis_url

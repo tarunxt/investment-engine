@@ -28,6 +28,18 @@ _PASSIVE_UI_POSITION_REFRESH_CALLERS = frozenset(
         "ui-passive-refresh",
     }
 )
+# Stage 1 needs the current economic portfolio for analysis even when the
+# service-account execution snapshot is temporarily empty while the operator/
+# public wallet still has live holdings. These callers may use same-wallet
+# public evidence for Stage 1/2 analysis only. The returned snapshot remains
+# display-only (no auth lineage and never promoted to the execution cache), so
+# Stage 3 still fails closed until the authenticated runtime agrees.
+_STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS = frozenset(
+    {
+        "auto-live-stage1",
+        "auto-live-stage1-recovery",
+    }
+)
 
 _ORIGINAL_GET_POSITIONS_SNAPSHOT = (
     runtime_broker_module.BullpenRuntimeBroker.get_positions_snapshot
@@ -227,6 +239,17 @@ def _normalize_public_position(row: dict[str, Any]) -> dict[str, Any] | None:
         "unrealized_pnl": unrealized_pnl,
         "upstream_redeemable": redeemable,
     }
+
+
+def _snapshot_has_positive_wallet_rows(
+    snapshot: runtime_broker_module.BullpenPositionsSnapshot,
+) -> bool:
+    """Whether a snapshot contains any economically relevant wallet row."""
+
+    return any(
+        _normalize_public_position(row) is not None
+        for row in _collect_rows(snapshot.payload)
+    )
 
 
 def _build_public_summary(
@@ -601,6 +624,90 @@ async def _read_display_snapshot_without_deleting(
         return None
 
 
+async def _get_stage1_analysis_positions_snapshot(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+    *,
+    force_fresh: bool,
+    allow_refresh: bool,
+    caller_source: str | None,
+    max_age_seconds: int,
+    timeout_seconds: int,
+) -> runtime_broker_module.BullpenPositionsSnapshot:
+    """Reconcile a false-empty execution snapshot for Stage 1 analysis only.
+
+    The authenticated execution snapshot remains preferred. A current public
+    wallet snapshot is consulted only when that authoritative read is empty or
+    unavailable. Public evidence is accepted only for the same known wallet and
+    remains `redis-cache`/`cached` with no auth timestamp, so it cannot authorize
+    a Stage 3 write or be promoted into the execution snapshot.
+    """
+
+    canonical_snapshot: runtime_broker_module.BullpenPositionsSnapshot | None = None
+    canonical_error: Exception | None = None
+    try:
+        canonical_snapshot = await _ORIGINAL_GET_POSITIONS_SNAPSHOT(
+            broker,
+            force_fresh=force_fresh,
+            allow_refresh=allow_refresh,
+            caller_source=caller_source,
+            max_age_seconds=max_age_seconds,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        canonical_error = exc
+
+    if canonical_snapshot is not None and _snapshot_has_positive_wallet_rows(
+        canonical_snapshot
+    ):
+        return canonical_snapshot
+
+    try:
+        public_snapshot = await _refresh_public_wallet_snapshot(
+            broker,
+            caller_source=runtime_broker_module._normalize_caller_source(caller_source),
+        )
+    except Exception:
+        if canonical_snapshot is not None:
+            return canonical_snapshot
+        if canonical_error is not None:
+            raise canonical_error
+        raise
+
+    canonical_identity = _normalize_wallet_address(
+        canonical_snapshot.account_identity if canonical_snapshot is not None else None
+    )
+    public_identity = _normalize_wallet_address(public_snapshot.account_identity)
+    if (
+        canonical_identity is not None
+        and public_identity is not None
+        and canonical_identity != public_identity
+    ):
+        raise runtime_broker_module.BullpenRuntimeCommandError(
+            "Stage 1 public wallet identity did not match the authenticated execution account.",
+            classification="account_identity_mismatch",
+        )
+
+    if _snapshot_has_positive_wallet_rows(public_snapshot):
+        diagnostics = public_snapshot.diagnostics.model_copy(
+            update={
+                "caller_source": runtime_broker_module._normalize_caller_source(
+                    caller_source
+                ),
+                "snapshot_producer_source": (
+                    "polymarket-public-data-api-stage1-analysis"
+                ),
+                "error_classification": "stage1_analysis_public_fallback",
+            }
+        )
+        return public_snapshot.model_copy(update={"diagnostics": diagnostics})
+
+    if canonical_snapshot is not None:
+        return canonical_snapshot
+    if canonical_error is not None:
+        raise canonical_error
+    return public_snapshot
+
+
 async def _get_positions_snapshot_with_ui_read_fallback(
     self: runtime_broker_module.BullpenRuntimeBroker,
     *,
@@ -613,6 +720,16 @@ async def _get_positions_snapshot_with_ui_read_fallback(
     normalized_caller_source = runtime_broker_module._normalize_caller_source(
         caller_source
     )
+
+    if normalized_caller_source in _STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS:
+        return await _get_stage1_analysis_positions_snapshot(
+            self,
+            force_fresh=force_fresh,
+            allow_refresh=allow_refresh,
+            caller_source=caller_source,
+            max_age_seconds=max_age_seconds,
+            timeout_seconds=timeout_seconds,
+        )
 
     if normalized_caller_source in _MANUAL_UI_POSITION_REFRESH_CALLERS:
         if not force_fresh:
