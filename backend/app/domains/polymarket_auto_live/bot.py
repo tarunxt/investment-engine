@@ -82,6 +82,24 @@ logger = get_logger(__name__)
 
 CONSOLE_RUN_DETAIL_DECISION_LIMIT = 32
 CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT = 200
+_STAGE3_SUPPORT_PAUSE_MARKERS = (
+    "auto runs paused because bullpen requires support verification",
+    "auto runs are paused pending bullpen support verification",
+)
+_STAGE3_SUPPORT_ANALYSIS_RESUMED_ACTION = (
+    "Scheduled Stage 1/2 analysis remains active; Stage 3 remote writes remain "
+    "blocked pending Bullpen support verification of the Polymarket wallet route."
+)
+
+
+def _is_stage3_support_scheduler_pause(state: BullpenAutoLiveState) -> bool:
+    """Recognize only the legacy Stage 3 support gate that paused all analysis."""
+
+    action = str(state.last_action or "").strip().lower()
+    return bool(
+        state.paused
+        and any(marker in action for marker in _STAGE3_SUPPORT_PAUSE_MARKERS)
+    )
 
 
 def _summarize_run_for_list(run: BullpenAutoLiveRun) -> BullpenAutoLiveRun:
@@ -355,9 +373,6 @@ class BullpenAutoLiveBot:
 
         running_run = record_to_run(running_record)
         if running_run.status == "confirming":
-            # Planning has already handed execution to durable Stage 3
-            # intents. Planner recovery must never reinterpret or replace that
-            # payload; intent dispatch/reconciliation owns this lifecycle.
             confirming_state = self._synchronize_state(
                 settings,
                 state.model_copy(
@@ -375,9 +390,7 @@ class BullpenAutoLiveBot:
         if run_contains_historical_auth_error(
             running_run
         ) and not _auth_recovery_operator_resume_active(running_run):
-            from app.domains.polymarket.runtime_broker import (
-                get_bullpen_runtime_broker,
-            )
+            from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 
             try:
                 active_auth = await get_bullpen_runtime_broker().resolve_latest_active_auth_result(
@@ -432,12 +445,8 @@ class BullpenAutoLiveBot:
         )
         recovered_state = self._synchronize_state(settings, recovered_state)
         await repo.save_run(self.user_id, recovered_run)
-        # Auth recovery closes the current execution snapshot in place. Replacing
-        # its decisions would cascade-delete their durable order intents.
         if not recovered_auth_error:
-            await repo.replace_run_decisions_from_stage3_payload(
-                self.user_id, recovered_run
-            )
+            await repo.replace_run_decisions_from_stage3_payload(self.user_id, recovered_run)
         await repo.save_state(self.user_id, recovered_state)
         return None, recovered_state
 
@@ -445,9 +454,6 @@ class BullpenAutoLiveBot:
         self,
         repo: AsyncPolymarketAutoLiveRepository,
     ) -> BullpenAutoLiveRun | None:
-        # Serialize cancellation with a worker progress write.  Without this
-        # row lock, a worker holding an old in-memory run payload can write
-        # ``running`` back after the stop endpoint has committed.
         active_run_record = await repo.get_running_run_record(
             self.user_id,
             for_update=True,
@@ -495,15 +501,6 @@ class BullpenAutoLiveBot:
         self,
         session: AsyncSession | None = None,
     ) -> BullpenAutoLivePersistedStatus:
-        """Return only the persisted scheduler snapshot required for first paint.
-
-        This path must stay read-only.  In particular, it must not recover a
-        running workflow, enqueue a due run, inspect Celery, consult Redis, or
-        ask the Bullpen runtime to refresh authentication.  The richer
-        ``get_summary`` path remains available for deferred diagnostics and
-        history.
-        """
-
         if session is None:
             async with AsyncSessionLocal() as owned_session:
                 return await self.get_persisted_status(owned_session)
@@ -515,10 +512,6 @@ class BullpenAutoLiveBot:
 
         settings = record_to_settings(settings_record)
         persisted_state = record_to_state(state_record)
-        # This is a pure derivation from the rows already read above and the
-        # backend execution switch.  Do not persist it here: reads must not
-        # contend with worker state writes or create database rows on first
-        # page load.
         state = self._synchronize_persisted_scheduler_state(settings, persisted_state)
 
         def timestamp(value: datetime | None) -> str | None:
@@ -582,10 +575,7 @@ class BullpenAutoLiveBot:
             merged = settings.model_dump()
             merged.update(update.model_dump(exclude_unset=True))
             validated = BullpenAutoLiveSettings.model_validate(merged)
-            state = self._synchronize_state(
-                validated,
-                await repo.ensure_state(self.user_id),
-            )
+            state = self._synchronize_state(validated, await repo.ensure_state(self.user_id))
             await repo.save_settings(self.user_id, validated)
             await repo.save_state(self.user_id, state)
             await session.commit()
@@ -678,21 +668,12 @@ class BullpenAutoLiveBot:
             )
 
     async def get_summary(self) -> BullpenAutoLiveSummary:
-        """Return the legacy summary with its ten full run snapshots."""
-
         return await self._get_summary_with_run_limit(run_limit=10)
 
     async def get_dashboard_summary(
         self,
         session: AsyncSession | None = None,
     ) -> BullpenAutoLiveSummary:
-        """Return a read-only, bounded projection for the live console.
-
-        Unlike the legacy summary this path never creates scheduler rows,
-        performs stale-run recovery, publishes work, reconciles decisions, or
-        selects the full run/decision payload columns.
-        """
-
         if session is None:
             async with AsyncSessionLocal() as owned_session:
                 return await self.get_dashboard_summary(session=owned_session)
@@ -720,28 +701,14 @@ class BullpenAutoLiveBot:
         latest_run = latest_projection[0] if latest_projection else None
         verified_portfolio_snapshot = state.verified_portfolio_snapshot
         if verified_portfolio_snapshot is None and latest_run is not None:
-            verified_portfolio_snapshot = (
-                build_verified_stage1_portfolio_snapshot(latest_run)
-            )
+            verified_portfolio_snapshot = build_verified_stage1_portfolio_snapshot(latest_run)
         if verified_portfolio_snapshot is None:
-            verified_portfolio_snapshot = (
-                await repo.get_latest_verified_portfolio_snapshot(
-                    self.user_id
-                )
-            )
+            verified_portfolio_snapshot = await repo.get_latest_verified_portfolio_snapshot(self.user_id)
         if verified_portfolio_snapshot is not None:
-            # This copy is response-only for legacy state rows. A fresh
-            # Stage 1 progress write persists the same small DTO.
             state = state.model_copy(
-                update={
-                    "verified_portfolio_snapshot": (
-                        verified_portfolio_snapshot
-                    )
-                }
+                update={"verified_portfolio_snapshot": verified_portfolio_snapshot}
             )
-        projection_available = (
-            latest_projection[1] if latest_projection else True
-        )
+        projection_available = latest_projection[1] if latest_projection else True
         workflow_as_of = (
             latest_projection[2]
             if latest_projection
@@ -762,12 +729,7 @@ class BullpenAutoLiveBot:
         )
 
         database_duration_ms = (perf_counter() - query_started_at) * 1000
-        # Prompt text belongs to the explicit settings/editor read, not the
-        # two-second workflow poll. The legacy summary and settings routes keep
-        # returning it unchanged.
-        dashboard_settings = settings.model_copy(
-            update={"console_llm_prompt_template": None}
-        )
+        dashboard_settings = settings.model_copy(update={"console_llm_prompt_template": None})
         latest_guardrails = self._build_guardrail_checks(settings, state)
         degraded_sections = []
         workflow_status = "persisted"
@@ -783,11 +745,7 @@ class BullpenAutoLiveBot:
         return BullpenAutoLiveSummary(
             state=state,
             settings=dashboard_settings,
-            bot_card=self._build_bot_card_summary(
-                settings,
-                state,
-                latest_guardrails,
-            ),
+            bot_card=self._build_bot_card_summary(settings, state, latest_guardrails),
             latest_run=latest_run,
             recent_runs=[latest_run] if latest_run is not None else [],
             recent_decisions=decisions,
@@ -801,8 +759,7 @@ class BullpenAutoLiveBot:
                     status="persisted",
                     as_of=(
                         state_record.updated_at.isoformat()
-                        if state_record is not None
-                        and state_record.updated_at is not None
+                        if state_record is not None and state_record.updated_at is not None
                         else generated_at
                     ),
                     duration_ms=database_duration_ms,
@@ -812,14 +769,11 @@ class BullpenAutoLiveBot:
                     status="persisted",
                     as_of=(
                         settings_record.updated_at.isoformat()
-                        if settings_record is not None
-                        and settings_record.updated_at is not None
+                        if settings_record is not None and settings_record.updated_at is not None
                         else generated_at
                     ),
                     duration_ms=database_duration_ms,
-                    detail=(
-                        "The saved LLM prompt is loaded only when its editor opens."
-                    ),
+                    detail="The saved LLM prompt is loaded only when its editor opens.",
                 ),
                 "workflow": BullpenAutoLiveSummarySection(
                     source="postgresql_console_projection",
@@ -833,11 +787,7 @@ class BullpenAutoLiveBot:
                     status="persisted" if latest_run is not None else "unavailable",
                     as_of=workflow_as_of if latest_run is not None else None,
                     duration_ms=database_duration_ms,
-                    detail=(
-                        None
-                        if latest_run is not None
-                        else "No durable Auto-Live run exists yet."
-                    ),
+                    detail=None if latest_run is not None else "No durable Auto-Live run exists yet.",
                 ),
             },
         )
@@ -866,11 +816,7 @@ class BullpenAutoLiveBot:
     ) -> BullpenAutoLiveHistoryPage:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
-            return await repo.list_run_history_page(
-                self.user_id,
-                page=page,
-                size=size,
-            )
+            return await repo.list_run_history_page(self.user_id, page=page, size=size)
 
     async def list_recent_event_trends(self) -> BullpenAutoLiveEventTrendsResponse:
         async with AsyncSessionLocal() as session:
@@ -888,8 +834,6 @@ class BullpenAutoLiveBot:
         self,
         run_id: str,
     ) -> BullpenAutoLiveConsoleRunDetail:
-        """Return one exact user-owned run without selecting large payload rows."""
-
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
             snapshot = await repo.get_console_run_snapshot_for_user(
@@ -907,48 +851,29 @@ class BullpenAutoLiveBot:
                 decisions,
                 visible_decision_ids,
             ) = snapshot
-        visible_decision_ids_truncated = (
-            len(visible_decision_ids)
-            > CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT
-        )
-        visible_decision_ids = visible_decision_ids[
-            :CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT
-        ]
+        visible_decision_ids_truncated = len(visible_decision_ids) > CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT
+        visible_decision_ids = visible_decision_ids[:CONSOLE_RUN_DETAIL_VISIBLE_ID_LIMIT]
         if not visible_decision_ids_truncated:
-            run = run.model_copy(
-                update={"decisions_count": len(visible_decision_ids)}
-            )
+            run = run.model_copy(update={"decisions_count": len(visible_decision_ids)})
         return BullpenAutoLiveConsoleRunDetail(
             run=run,
             decisions=decisions,
             visible_decision_ids=visible_decision_ids,
-            visible_decision_ids_truncated=(
-                visible_decision_ids_truncated
-            ),
+            visible_decision_ids_truncated=visible_decision_ids_truncated,
             generated_at=utc_now(),
             as_of=as_of,
             projection_version=CONSOLE_PROJECTION_VERSION,
             projection_available=projection_available,
             decisions_limit=CONSOLE_RUN_DETAIL_DECISION_LIMIT,
-            decisions_truncated=(
-                visible_decision_ids_truncated
-                or len(visible_decision_ids) > len(decisions)
-            ),
+            decisions_truncated=(visible_decision_ids_truncated or len(visible_decision_ids) > len(decisions)),
         )
 
-    async def list_run_decisions(
-        self,
-        run_id: str,
-    ) -> list[BullpenAutoLiveDecision]:
+    async def list_run_decisions(self, run_id: str) -> list[BullpenAutoLiveDecision]:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
             if not await repo.run_exists_for_user(self.user_id, run_id):
                 raise ValueError("Auto-Live run not found.")
-            return await repo.list_decisions_for_run(
-                self.user_id,
-                run_id,
-                limit=200,
-            )
+            return await repo.list_decisions_for_run(self.user_id, run_id, limit=200)
 
     async def list_decisions(self) -> list[BullpenAutoLiveDecision]:
         async with AsyncSessionLocal() as session:
@@ -966,9 +891,7 @@ class BullpenAutoLiveBot:
         )
 
     async def reconcile_run_orders(self, run_id: str) -> BullpenAutoLiveRunOrdersResponse:
-        from app.domains.polymarket_auto_live.tasks import (
-            enqueue_auto_live_run_order_reconciliations_sync,
-        )
+        from app.domains.polymarket_auto_live.tasks import enqueue_auto_live_run_order_reconciliations_sync
 
         summary = await asyncio.to_thread(
             refresh_run_order_state_for_user_sync,
@@ -988,9 +911,7 @@ class BullpenAutoLiveBot:
         *,
         remote_absence_verified: bool = False,
     ) -> BullpenAutoLiveRunOrdersResponse:
-        from app.domains.polymarket_auto_live.tasks import (
-            enqueue_auto_live_order_intent_retry_sync,
-        )
+        from app.domains.polymarket_auto_live.tasks import enqueue_auto_live_order_intent_retry_sync
 
         summary = await asyncio.to_thread(
             retry_order_intent_for_user_sync,
@@ -1008,8 +929,6 @@ class BullpenAutoLiveBot:
     async def retry_failed_exits_and_continue_buys(
         self, run_id: str
     ) -> BullpenAutoLiveRunOrdersResponse:
-        """Resume the existing run's persisted intents without new analysis."""
-
         from app.domains.polymarket_auto_live.tasks import (
             enqueue_auto_live_order_intent_execution_sync,
             enqueue_auto_live_run_order_reconciliations_sync,
@@ -1047,14 +966,6 @@ class BullpenAutoLiveBot:
         triggered_by: str = "manual",
         request: BullpenAutoLiveRunOnceRequest | None = None,
     ) -> BullpenAutoLiveRun:
-        """Canonical full Auto-Live run template for every trigger source.
-
-        Calendar/custom schedules, the fixed-slot fallback schedule, and the
-        immediate UI action must call this method. ``triggered_by`` records how
-        the run was requested; it must not select a different execution path.
-        A request context remains supported for explicit operator stage actions.
-        """
-
         from app.domains.polymarket_auto_live.tasks import execute_polymarket_auto_live_run
 
         async with AsyncSessionLocal() as session:
@@ -1063,8 +974,6 @@ class BullpenAutoLiveBot:
             state = await repo.ensure_state(self.user_id)
             lock_state_record = getattr(repo, "lock_state_record", None)
             if callable(lock_state_record):
-                # Two concurrent HTTP deliveries for the same click must not
-                # both observe "no active run" and publish separate tasks.
                 state = await lock_state_record(self.user_id)
             state = self._synchronize_state(settings, state)
             requested_run_id = request.client_run_id if request else None
@@ -1077,17 +986,12 @@ class BullpenAutoLiveBot:
                 )
                 if existing_run is not None:
                     logger.info(
-                        "Returning idempotent Auto-Live run %s for user %s; "
-                        "the client start identity was already persisted.",
+                        "Returning idempotent Auto-Live run %s for user %s; the client start identity was already persisted.",
                         requested_run_id,
                         self.user_id,
                     )
                     return existing_run
-            running_run, state = await self._get_active_run_or_recover(
-                repo,
-                settings,
-                state,
-            )
+            running_run, state = await self._get_active_run_or_recover(repo, settings, state)
             if settings.emergency_stop:
                 run = BullpenAutoLiveRun(
                     id=requested_run_id or str(uuid4()),
@@ -1139,9 +1043,6 @@ class BullpenAutoLiveBot:
                 return run
 
             started_at = utc_now()
-            # Persist an explicit Celery task id before publishing.  This
-            # distinguishes queue wait from workflow execution even if the
-            # broker delivers before the API response returns.
             task_id = str(uuid4())
             run_id = requested_run_id or str(uuid4())
             run = BullpenAutoLiveRun(
@@ -1153,12 +1054,7 @@ class BullpenAutoLiveBot:
                 summary=build_initial_run_summary(request),
                 live_execution_requested=live_execution_requested(settings),
                 guardrail_checks=self._build_guardrail_checks(settings, state),
-                stage_results=[
-                    build_initial_scan_stage_result(
-                        request=request,
-                        started_at=started_at,
-                    )
-                ],
+                stage_results=[build_initial_scan_stage_result(request=request, started_at=started_at)],
                 stage2_llm_targets_snapshot=_stage2_llm_targets_snapshot(settings),
                 request_context=request,
                 audit_metadata=build_auto_live_run_audit_metadata(
@@ -1195,18 +1091,12 @@ class BullpenAutoLiveBot:
                     run.task_lifecycle = run.task_lifecycle.model_copy(
                         update={
                             "state": "FAILURE",
-                            "detail": (
-                                "Primary and fallback worker queues could not "
-                                "accept the task."
-                            ),
+                            "detail": "Primary and fallback worker queues could not accept the task.",
                         }
                     )
                 run.status = "failed"
                 run.completed_at = publish_error.failed_at
-                run.error_message = (
-                    "Could not enqueue Auto-Live worker task through the "
-                    "primary or fallback queue."
-                )
+                run.error_message = "Could not enqueue Auto-Live worker task through the primary or fallback queue."
                 run.summary = run.error_message
                 await repo.save_run(self.user_id, run)
                 await session.commit()
@@ -1262,10 +1152,7 @@ class BullpenAutoLiveBot:
                         run_id=cancelled_run.id,
                     )
                 except Exception:
-                    logger.exception(
-                        "Failed to cancel unsubmitted Stage 3 intents for run %s",
-                        cancelled_run.id,
-                    )
+                    logger.exception("Failed to cancel unsubmitted Stage 3 intents for run %s", cancelled_run.id)
                 await revoke_registered_auto_live_run_task(cancelled_run.id)
                 try:
                     await asyncio.to_thread(
@@ -1274,13 +1161,7 @@ class BullpenAutoLiveBot:
                         run_id=cancelled_run.id,
                     )
                 except Exception:
-                    # The terminal run record is already durable.  Keep the
-                    # cancellation successful if a later audit materialization
-                    # problem needs operational follow-up.
-                    logger.exception(
-                        "Failed to freeze Bullpen audit after cancelling run %s",
-                        cancelled_run.id,
-                    )
+                    logger.exception("Failed to freeze Bullpen audit after cancelling run %s", cancelled_run.id)
             return state
 
     async def pause(self) -> BullpenAutoLiveState:
@@ -1439,7 +1320,22 @@ class BullpenAutoLiveBot:
         settings: BullpenAutoLiveSettings,
         state: BullpenAutoLiveState,
     ) -> BullpenAutoLiveState:
+        support_pause = _is_stage3_support_scheduler_pause(state)
         synchronized = self._synchronize_persisted_scheduler_state(settings, state)
+        if support_pause and settings.auto_live_enabled and not settings.emergency_stop:
+            synchronized.running = True
+            synchronized.paused = False
+            synchronized.stopped_at = None
+            self._schedule_next_cycles(
+                settings,
+                synchronized,
+                reference_time=datetime.now(UTC),
+            )
+            synchronized.last_action = _STAGE3_SUPPORT_ANALYSIS_RESUMED_ACTION
+            synchronized = self._synchronize_persisted_scheduler_state(
+                settings,
+                synchronized,
+            )
         synchronized.server_now = utc_now()
         synchronized.latest_guardrail_checks = self._build_guardrail_checks(settings, synchronized)
         return synchronized
@@ -1449,14 +1345,16 @@ class BullpenAutoLiveBot:
         settings: BullpenAutoLiveSettings,
         state: BullpenAutoLiveState,
     ) -> BullpenAutoLiveState:
-        """Derive only in-memory scheduler fields needed by first paint.
-
-        The full synchronization method also constructs verbose guardrail
-        diagnostics, including runtime-environment detail, for the deferred
-        summary endpoint.  Keep those out of the fast persisted status read.
-        """
-
         synchronized = state.model_copy()
+        if (
+            _is_stage3_support_scheduler_pause(synchronized)
+            and settings.auto_live_enabled
+            and not settings.emergency_stop
+        ):
+            # Read-only projections should no longer advertise a global pause.
+            # The mutating synchronization path above restores the next cadence.
+            synchronized.running = True
+            synchronized.paused = False
         synchronized.dry_run = effective_dry_run(settings)
         synchronized.live_armed = live_execution_armed(settings)
         synchronized.live_execution_allowed = (
@@ -1499,7 +1397,11 @@ class BullpenAutoLiveBot:
         reference_time: datetime,
     ) -> None:
         if settings.strategy_profile == CONSOLE_PROFILE_ID:
-            next_run_at = next_custom_console_schedule_time(reference_time, start_at=settings.console_auto_start_at, refresh_minutes=settings.console_auto_refresh_minutes).isoformat()
+            next_run_at = next_custom_console_schedule_time(
+                reference_time,
+                start_at=settings.console_auto_start_at,
+                refresh_minutes=settings.console_auto_refresh_minutes,
+            ).isoformat()
             state.next_run_at = next_run_at
             state.next_scan_at = next_run_at
             state.next_llm_run_at = next_run_at
