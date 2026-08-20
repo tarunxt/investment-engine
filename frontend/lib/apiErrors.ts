@@ -110,10 +110,52 @@ export function stringifyErrorDetail(detail: unknown): string | null {
   return String(detail);
 }
 
+function deriveStructuredApiErrorMessage(
+  detail: Record<string, unknown>,
+): string | null {
+  const nested =
+    detail.detail && typeof detail.detail === "object" && !Array.isArray(detail.detail)
+      ? (detail.detail as Record<string, unknown>)
+      : null;
+  const envelope = nested ?? detail;
+  const baseMessage =
+    normalizeText(stringifyErrorDetail(envelope.message)) ||
+    normalizeText(stringifyErrorDetail(detail.message)) ||
+    normalizeText(stringifyErrorDetail(detail.detail));
+  if (!baseMessage) return null;
+
+  const parts: string[] = [baseMessage];
+  const seen = new Set(parts.map((item) => item.toLowerCase()));
+  const errorCode =
+    normalizeText(stringifyErrorDetail(envelope.error)) ||
+    normalizeText(stringifyErrorDetail(envelope.code)) ||
+    normalizeText(stringifyErrorDetail(detail.error)) ||
+    normalizeText(stringifyErrorDetail(detail.code));
+  if (errorCode) {
+    appendUniqueDetail(parts, seen, `Code: ${errorCode}`);
+  }
+
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(envelope.error_type));
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(envelope.correlation_id));
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(envelope.request_path));
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(envelope.resolution));
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(envelope.instructions));
+  appendUniqueDetail(parts, seen, stringifyErrorDetail(envelope.details));
+
+  return parts.join(" • ");
+}
+
 export function deriveApiErrorMessage(
   detail: unknown,
   fallback = "API request failed",
 ) {
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const structured = deriveStructuredApiErrorMessage(
+      detail as Record<string, unknown>,
+    );
+    if (structured) return structured;
+  }
+
   const message = stringifyErrorDetail(detail);
   if (!message) return fallback;
   if (message.toLowerCase() === "undefined") return fallback;
