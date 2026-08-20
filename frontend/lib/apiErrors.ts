@@ -118,19 +118,21 @@ function deriveStructuredApiErrorMessage(
       ? (detail.detail as Record<string, unknown>)
       : null;
   const envelope = nested ?? detail;
-  const baseMessage =
+  const explicitMessage =
     normalizeText(stringifyErrorDetail(envelope.message)) ||
-    normalizeText(stringifyErrorDetail(detail.message)) ||
-    normalizeText(stringifyErrorDetail(detail.detail));
+    normalizeText(stringifyErrorDetail(detail.message));
+  const baseMessage =
+    explicitMessage || normalizeText(stringifyErrorDetail(detail.detail));
   if (!baseMessage) return null;
 
   const parts: string[] = [baseMessage];
   const seen = new Set(parts.map((item) => item.toLowerCase()));
-  const errorCode =
-    normalizeText(stringifyErrorDetail(envelope.error)) ||
-    normalizeText(stringifyErrorDetail(envelope.code)) ||
-    normalizeText(stringifyErrorDetail(detail.error)) ||
-    normalizeText(stringifyErrorDetail(detail.code));
+  const errorCode = explicitMessage
+    ? normalizeText(stringifyErrorDetail(envelope.error)) ||
+      normalizeText(stringifyErrorDetail(envelope.code)) ||
+      normalizeText(stringifyErrorDetail(detail.error)) ||
+      normalizeText(stringifyErrorDetail(detail.code))
+    : null;
   if (errorCode) {
     appendUniqueDetail(parts, seen, `Code: ${errorCode}`);
   }
