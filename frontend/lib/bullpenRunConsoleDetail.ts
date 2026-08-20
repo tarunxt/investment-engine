@@ -126,6 +126,7 @@ const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
 // omitted from a recovered generation.
 const FROZEN_EVIDENCE_OUTPUT_KEYS = [
   "accepted_candidates",
+  "rejected_candidates",
   "active_positions_found",
   "available_for_claim",
   "settlement_pending_positions",
