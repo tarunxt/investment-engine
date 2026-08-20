@@ -46,6 +46,35 @@ function appendUniqueDetail(
   parts.push(normalized);
 }
 
+function diagnosticValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = normalizeText(stringifyErrorDetail(record[key]));
+    if (value) return value;
+  }
+  return null;
+}
+
+function extractSafeDiagnosticContext(detail: unknown) {
+  if (!detail || typeof detail !== "object" || Array.isArray(detail)) {
+    return { errorCode: null, correlationId: null };
+  }
+
+  const record = detail as Record<string, unknown>;
+  const nestedDetails =
+    record.details && typeof record.details === "object" && !Array.isArray(record.details)
+      ? (record.details as Record<string, unknown>)
+      : null;
+
+  return {
+    errorCode: diagnosticValue(record, ["error", "code", "error_code"]),
+    correlationId:
+      diagnosticValue(record, ["correlation_id", "request_id", "trace_id"]) ||
+      (nestedDetails
+        ? diagnosticValue(nestedDetails, ["correlation_id", "request_id", "trace_id"])
+        : null),
+  };
+}
+
 function collectApiErrorDetails(
   detail: unknown,
   baseMessage: string,
@@ -115,9 +144,24 @@ export function deriveApiErrorMessage(
   fallback = "API request failed",
 ) {
   const message = stringifyErrorDetail(detail);
-  if (!message) return fallback;
-  if (message.toLowerCase() === "undefined") return fallback;
-  return message;
+  const resolvedMessage =
+    message && message.toLowerCase() !== "undefined" ? message : fallback;
+  const { errorCode, correlationId } = extractSafeDiagnosticContext(detail);
+  const diagnostics: string[] = [];
+
+  if (errorCode && !resolvedMessage.toLowerCase().includes(errorCode.toLowerCase())) {
+    diagnostics.push(`Code: ${errorCode}`);
+  }
+  if (
+    correlationId &&
+    !resolvedMessage.toLowerCase().includes(correlationId.toLowerCase())
+  ) {
+    diagnostics.push(`Reference ID: ${correlationId}`);
+  }
+
+  return diagnostics.length > 0
+    ? `${resolvedMessage} (${diagnostics.join(" • ")})`
+    : resolvedMessage;
 }
 
 export function splitApiErrorSummary(
