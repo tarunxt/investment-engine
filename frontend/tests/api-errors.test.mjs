@@ -72,3 +72,25 @@ test("deriveApiErrorMessage handles nested and string payloads", async () => {
     },
   );
 });
+
+test("deriveApiErrorMessage preserves actionable server diagnostics", async () => {
+  const { deriveApiErrorMessage } = await loadApiErrorsModule();
+
+  const message = deriveApiErrorMessage({
+    error: "INTERNAL_SERVER_ERROR",
+    message: "Bullpen run audit could not be generated",
+    details: {
+      error_type: "IntegrityError",
+      correlation_id: "corr-123",
+      request_path: "/bullpen-ai/run-audits/run-123",
+      resolution: "Inspect backend logs using the correlation ID.",
+    },
+  });
+
+  assert.match(message, /Bullpen run audit could not be generated/);
+  assert.match(message, /Code: INTERNAL_SERVER_ERROR/);
+  assert.match(message, /IntegrityError/);
+  assert.match(message, /corr-123/);
+  assert.match(message, /\/bullpen-ai\/run-audits\/run-123/);
+  assert.match(message, /Inspect backend logs using the correlation ID\./);
+});
