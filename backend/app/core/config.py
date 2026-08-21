@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _TRUE_ENV_VALUES = {"1", "true", "t", "yes", "y", "on", "debug", "development", "dev"}
@@ -62,8 +62,16 @@ class Settings(BaseSettings):
     smtp_port: Optional[int] = 587
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
-    smtp_from_email: str = "noreply@example.com"
-    smtp_from_name: str = "AI Investment Platform"
+    # Accept both documented SMTP_* names and the legacy EMAILS_* names already
+    # present on older production hosts. Keep the SMTP_* fields canonical in code.
+    smtp_from_email: str = Field(
+        default="noreply@example.com",
+        validation_alias=AliasChoices("SMTP_FROM_EMAIL", "EMAILS_FROM_EMAIL"),
+    )
+    smtp_from_name: str = Field(
+        default="AI Investment Platform",
+        validation_alias=AliasChoices("SMTP_FROM_NAME", "EMAILS_FROM_NAME"),
+    )
     
     # Logging
     log_level: str = "INFO"
