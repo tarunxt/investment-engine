@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domains.auth.models import ActivityLog
-from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveRun
+from app.domains.polymarket_auto_live.schemas import (\n    BullpenAutoLiveRun,\n    BullpenAutoLiveStageResult,\n)
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.services.email import EmailSendResult, EmailService
 
@@ -58,7 +58,7 @@ class LoggedMailDelivery:
 
 
 def _utc_iso() -> str:
-    return datetime.utcnow().isoformat() + "Z"
+    return datetime.now(UTC).isoformat()
 
 
 def _as_probability(value: object) -> float | None:
@@ -73,7 +73,7 @@ def _as_probability(value: object) -> float | None:
     return round(probability, 2)
 
 
-def _completed_stage_two(run: BullpenAutoLiveRun) -> object | None:
+def _completed_stage_two(\n    run: BullpenAutoLiveRun,\n) -> BullpenAutoLiveStageResult | None:
     for stage in run.stage_results:
         if (
             stage.stage_number == 2

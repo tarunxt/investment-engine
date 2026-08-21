@@ -1,2 +1,0 @@
-"""Bullpen run audit domain."""
-

@@ -1,1 +1,0 @@
-"""INDmoney US portfolio domain."""

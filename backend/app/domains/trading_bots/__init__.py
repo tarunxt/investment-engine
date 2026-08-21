@@ -1,1 +1,0 @@
-"""Shared trading bot summaries."""

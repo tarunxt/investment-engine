@@ -141,7 +141,6 @@ export default function MailsPage() {
       }
 
       setSuccess(`Email sent successfully to ${RECIPIENT}.`);
-      await loadHistory();
     } catch (sendError) {
       setFailure({
         code: 'MAIL_API_UNREACHABLE',
@@ -155,6 +154,7 @@ export default function MailsPage() {
         ],
       });
     } finally {
+      await loadHistory();
       setSending(false);
     }
   }
