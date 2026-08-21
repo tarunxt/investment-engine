@@ -1,0 +1,219 @@
+name: Emergency Stop Polymarket Live Bots
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stop:
+    name: Disable live Polymarket automation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Disable live execution and restart services
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 1200s
+          command_timeout: 1200s
+          script: |
+            set -euo pipefail
+
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            LEGACY_APP_ROOT="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            LEGACY_APP_USER="investor"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+
+            resolve_systemd_service_name() {
+              local primary="$1"
+              local legacy="$2"
+
+              if systemctl is-active --quiet "$primary" >/dev/null 2>&1 || systemctl is-enabled --quiet "$primary" >/dev/null 2>&1; then
+                printf '%s\n' "$primary"
+                return
+              fi
+
+              if systemctl is-active --quiet "$legacy" >/dev/null 2>&1 || systemctl is-enabled --quiet "$legacy" >/dev/null 2>&1; then
+                printf '%s\n' "$legacy"
+                return
+              fi
+
+              if systemctl cat "$primary" >/dev/null 2>&1; then
+                printf '%s\n' "$primary"
+                return
+              fi
+
+              if systemctl cat "$legacy" >/dev/null 2>&1; then
+                printf '%s\n' "$legacy"
+                return
+              fi
+
+              printf '%s\n' "$primary"
+            }
+
+            restart_service_if_present() {
+              local service_name="$1"
+              if systemctl cat "$service_name" >/dev/null 2>&1; then
+                echo "==> Restarting $service_name"
+                sudo systemctl restart "$service_name"
+                sudo systemctl is-active "$service_name"
+              else
+                echo "==> Skipping missing service: $service_name"
+              fi
+            }
+
+            BACKEND_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-backend" "investment-engine-backend"
+            )"
+            WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-worker" "investment-engine-celery-worker"
+            )"
+            AUTO_LIVE_WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-auto-live-worker" "investment-engine-celery-auto-live-worker"
+            )"
+            BEAT_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-beat" "investment-engine-celery-beat"
+            )"
+            BEAT_WORKER_SERVICE_NAME="$(
+              resolve_systemd_service_name "investor-celery-beat-worker" "investment-engine-celery-beat-worker"
+            )"
+
+            echo "==> App root: $APP_ROOT"
+            echo "==> App user: $APP_USER"
+            echo "==> Backend env: $BACKEND_ENV_FILE"
+
+            sudo cp "$BACKEND_ENV_FILE" "$BACKEND_ENV_FILE.bak.$(date +%Y%m%d%H%M%S)"
+
+            echo "==> Writing kill-switch env flags"
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" python3 - <<'PY'
+            import os
+            from pathlib import Path
+
+            path = Path(os.environ["BACKEND_ENV_FILE"])
+            updates = {
+                "PAPER_TRADING": "true",
+                "LIVE_TRADING": "false",
+                "USE_LIVE_READS": "false",
+                "POLYMARKET_AUTO_START": "false",
+                "PAUSED": "true",
+                "LIVE_UNLOCK_MODE": "manual",
+                "POLYMARKET_DIRECT_PAPER_TRADING": "true",
+                "POLYMARKET_DIRECT_LIVE_TRADING": "false",
+                "POLYMARKET_DIRECT_USE_LIVE_READS": "false",
+                "POLYMARKET_DIRECT_AUTO_START": "false",
+                "POLYMARKET_DIRECT_PAUSED": "true",
+                "POLYMARKET_DIRECT_LIVE_UNLOCK_MODE": "manual",
+                "BULLPEN_AUTO_LIVE_ALLOW_EXECUTION": "false",
+            }
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+            written = set()
+            output = []
+
+            for line in lines:
+                stripped = line.lstrip()
+                if not stripped or stripped.startswith("#") or "=" not in line:
+                    output.append(line)
+                    continue
+
+                key, _ = line.split("=", 1)
+                if key in updates:
+                    output.append(f"{key}={updates[key]}")
+                    written.add(key)
+                    continue
+                output.append(line)
+
+            for key, value in updates.items():
+                if key not in written:
+                    output.append(f"{key}={value}")
+
+            path.write_text("\n".join(output) + "\n", encoding="utf-8")
+            PY
+
+            echo "==> Forcing persisted bot configs into stopped + paused state"
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" APP_ROOT="$APP_ROOT" python3 - <<'PY'
+            import json
+            import os
+            from pathlib import Path
+
+            def read_env(path: Path) -> dict[str, str]:
+                data: dict[str, str] = {}
+                for raw_line in path.read_text(encoding="utf-8").splitlines():
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in raw_line:
+                        continue
+                    key, value = raw_line.split("=", 1)
+                    data[key] = value
+                return data
+
+            env_path = Path(os.environ["BACKEND_ENV_FILE"])
+            env = read_env(env_path)
+            app_root = Path(os.environ["APP_ROOT"])
+            roots = [
+                Path(env.get("POLYMARKET_DATA_DIR", str(app_root / "backend" / "data" / "polymarket"))),
+                Path(env.get("POLYMARKET_DIRECT_DATA_DIR", str(app_root / "backend" / "data" / "polymarket-direct"))),
+            ]
+
+            changed: list[str] = []
+            for root in roots:
+                if not root.exists():
+                    continue
+                for config_path in sorted(root.glob("user-*/polymarket-config.json")):
+                    payload: dict[str, object]
+                    if config_path.exists():
+                        try:
+                            raw = config_path.read_text(encoding="utf-8").strip()
+                            loaded = json.loads(raw) if raw else {}
+                        except json.JSONDecodeError:
+                            loaded = {}
+                        payload = loaded if isinstance(loaded, dict) else {}
+                    else:
+                        payload = {}
+                    payload["auto_start"] = False
+                    payload["paused"] = True
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    config_path.write_text(
+                        json.dumps(payload, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+                    changed.append(str(config_path))
+
+            if changed:
+                print("Updated bot configs:")
+                for item in changed:
+                    print(item)
+            else:
+                print("No persisted Polymarket bot configs found to update.")
+            PY
+
+            restart_service_if_present "$BACKEND_SERVICE_NAME"
+            restart_service_if_present "$WORKER_SERVICE_NAME"
+            restart_service_if_present "$AUTO_LIVE_WORKER_SERVICE_NAME"
+            restart_service_if_present "$BEAT_SERVICE_NAME"
+            restart_service_if_present "$BEAT_WORKER_SERVICE_NAME"
+
+            echo "==> Effective Polymarket guard flags"
+            sudo env BACKEND_ENV_FILE="$BACKEND_ENV_FILE" bash -lc '
+              grep -E "^(PAPER_TRADING|LIVE_TRADING|USE_LIVE_READS|POLYMARKET_AUTO_START|PAUSED|LIVE_UNLOCK_MODE|POLYMARKET_DIRECT_PAPER_TRADING|POLYMARKET_DIRECT_LIVE_TRADING|POLYMARKET_DIRECT_USE_LIVE_READS|POLYMARKET_DIRECT_AUTO_START|POLYMARKET_DIRECT_PAUSED|POLYMARKET_DIRECT_LIVE_UNLOCK_MODE|BULLPEN_AUTO_LIVE_ALLOW_EXECUTION)=" "$BACKEND_ENV_FILE"
+            '
+
+            echo "==> Backend readiness"
+            curl --fail --silent --show-error --location --max-time 20 http://127.0.0.1:8000/health/ready
+
+            echo "==> Recent backend logs"
+            sudo journalctl -u "$BACKEND_SERVICE_NAME" -n 40 --no-pager

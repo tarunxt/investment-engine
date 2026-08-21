@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-26T10:48:41.750Z",
+  "baselineCommit": "8e3570642432e7ee7fffd4796e02561f6e6ee397",
+  "candidateBranch": "agent/runtime-performance-optimization",
+  "method": {
+    "runs": 3,
+    "browser": "Chromium",
+    "desktop": {
+      "viewport": "1440x1000"
+    },
+    "throttledMobile": {
+      "device": "Moto G4",
+      "cpuSlowdown": 4,
+      "latencyMs": 150,
+      "downloadMbps": 1.6,
+      "uploadKbps": 750
+    },
+    "authenticatedData": "local-synthetic-session-and-compact-intercepted-fixtures",
+    "productionCredentialsUsed": false,
+    "mutationsUsed": false
+  },
+  "publicProductionBaseline": {
+    "route": "/login",
+    "throttledMobileFirst": {
+      "lcpMs": 1884,
+      "tbtMs": 56,
+      "usableMs": 2086.5,
+      "javascriptTransferBytes": 179147,
+      "requests": 30,
+      "duplicateSessionRequests": 2
+    },
+    "lighthouseMobile": {
+      "performanceScore": 0.97,
+      "lcpMs": 2257
+    }
+  },
+  "equivalentProductionBuilds": {
+    "desktopFirstVisit": {
+      "login": {
+        "before": {
+          "usableMs": 84.4,
+          "lcpMs": 92,
+          "tbtMs": 0,
+          "javascriptTransferBytes": 180109,
+          "requests": 30,
+          "apiRequests": 2
+        },
+        "after": {
+          "usableMs": 77.1,
+          "lcpMs": 88,
+          "tbtMs": 0,
+          "javascriptTransferBytes": 176454,
+          "requests": 27,
+          "apiRequests": 0
+        }
+      },
+      "dashboard": {
+        "before": {
+          "usableMs": 340.5,
+          "lcpMs": 348,
+          "tbtMs": 97,
+          "javascriptTransferBytes": 630480,
+          "javascriptDecodedBytes": 1973762,
+          "requests": 68,
+          "apiRequests": 14
+        },
+        "after": {
+          "shellUsableMs": 149.4,
+          "meaningfulUsableMs": 150.9,
+          "criticalApiCompleteMs": 110.3,
+          "lcpMs": 180,
+          "tbtMs": 0,
+          "javascriptTransferBytes": 214493,
+          "javascriptDecodedBytes": 691089,
+          "requests": 21,
+          "apiRequests": 3
+        }
+      },
+      "bullpen": {
+        "before": {
+          "usableMs": 480.8,
+          "lcpMs": 432,
+          "tbtMs": 94,
+          "javascriptTransferBytes": 879502,
+          "javascriptDecodedBytes": 2902966,
+          "requests": 79,
+          "apiRequests": 8
+        },
+        "after": {
+          "shellUsableMs": 114.3,
+          "meaningfulUsableMs": 508.5,
+          "lcpMs": 520,
+          "tbtMs": 0,
+          "javascriptTransferBytes": 353360,
+          "javascriptDecodedBytes": 1217035,
+          "requests": 31,
+          "apiRequests": 8
+        }
+      }
+    },
+    "throttledMobileFirstVisit": {
+      "login": {
+        "before": {
+          "usableMs": 1820.7,
+          "lcpMs": 1776,
+          "tbtMs": 51,
+          "javascriptTransferBytes": 180109,
+          "requests": 30,
+          "apiRequests": 2
+        },
+        "after": {
+          "usableMs": 1842.9,
+          "lcpMs": 1592,
+          "tbtMs": 53,
+          "javascriptTransferBytes": 176454,
+          "requests": 27,
+          "apiRequests": 0
+        }
+      },
+      "dashboard": {
+        "before": {
+          "usableMs": 5013.8,
+          "lcpMs": 4756,
+          "tbtMs": 623,
+          "javascriptTransferBytes": 625268,
+          "javascriptDecodedBytes": 1958538,
+          "requests": 59,
+          "apiRequests": 14
+        },
+        "after": {
+          "shellUsableMs": 2366.8,
+          "meaningfulUsableMs": 2369.6,
+          "criticalApiCompleteMs": 2043.2,
+          "lcpMs": 2180,
+          "tbtMs": 57,
+          "javascriptTransferBytes": 214493,
+          "javascriptDecodedBytes": 691089,
+          "requests": 21,
+          "apiRequests": 3
+        }
+      },
+      "bullpen": {
+        "before": {
+          "usableMs": 3420,
+          "lcpMs": 3416,
+          "tbtMs": 633,
+          "javascriptTransferBytes": 775752,
+          "javascriptDecodedBytes": 2526276,
+          "requests": 61,
+          "apiRequests": 9
+        },
+        "after": {
+          "shellUsableMs": 2367.5,
+          "criticalApiCompleteMs": 3048.8,
+          "lcpMs": 3144,
+          "tbtMs": 88,
+          "javascriptTransferBytes": 353360,
+          "javascriptDecodedBytes": 1217035,
+          "requests": 31,
+          "apiRequests": 8,
+          "meaningfulUsableMs": null
+        }
+      }
+    },
+    "warmAuthenticatedNavigation": {
+      "desktop": {
+        "beforeMs": 74.1,
+        "afterMs": 108.7
+      },
+      "throttledMobile": {
+        "beforeMs": 624.5,
+        "afterMs": 569.7
+      }
+    }
+  },
+  "notes": [
+    "Bullpen mobile meaningful readiness was not observed by the explicit marker, so no value is claimed.",
+    "Authenticated production measurement still requires an authorized test-account secret.",
+    "The dashboard after-run included one session, one theme-profile, and one compact summary request."
+  ]
+}

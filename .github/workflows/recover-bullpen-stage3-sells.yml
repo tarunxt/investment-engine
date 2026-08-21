@@ -1,0 +1,480 @@
+name: Recover Bullpen Stage 3 Sell Orders
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Durable Auto-Live run ID whose existing sell intents should be inspected or retried
+        required: true
+        type: string
+      mode:
+        description: Inspect is read-only. Retry submits only existing, unsubmitted sell intents after Bullpen preflight passes.
+        required: true
+        default: inspect
+        type: choice
+        options:
+          - inspect
+          - retry
+      approve_missing_sell_operators:
+        description: During retry, submit Bullpen's standard Polymarket sell approvals before re-running preflight
+        required: true
+        default: false
+        type: boolean
+      confirm_live_sell_recovery:
+        description: For retry mode, type RETRY_EXISTING_STAGE3_SELLS
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate recovery scope
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate inputs
+        env:
+          RUN_ID: ${{ inputs.run_id }}
+          MODE: ${{ inputs.mode }}
+          CONFIRMATION: ${{ inputs.confirm_live_sell_recovery }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RUN_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "run_id must be a UUID." >&2
+            exit 1
+          fi
+          if [[ "$MODE" == "retry" && "$CONFIRMATION" != "RETRY_EXISTING_STAGE3_SELLS" ]]; then
+            echo "Retry mode requires the exact confirmation RETRY_EXISTING_STAGE3_SELLS." >&2
+            exit 1
+          fi
+
+  recover:
+    name: Inspect or retry persisted Stage 3 sells
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Recover sell intents over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 1200s
+          command_timeout: 1200s
+          script: |
+            set -euo pipefail
+
+            RUN_ID="${{ inputs.run_id }}"
+            MODE="${{ inputs.mode }}"
+            APPROVE_MISSING_SELL_OPERATORS="${{ inputs.approve_missing_sell_operators }}"
+            APP_ROOT="${{ vars.EC2_APP_PATH || '/srv/investor' }}"
+            LEGACY_APP_ROOT="/srv/investment-engine"
+            APP_USER="${{ vars.EC2_APP_USER || 'investor' }}"
+            LEGACY_APP_USER="investment-engine"
+            BACKEND_ENV_FILE="/etc/investor/backend.env"
+
+            if [[ ! -d "$APP_ROOT" && -d "$LEGACY_APP_ROOT" ]]; then
+              APP_ROOT="$LEGACY_APP_ROOT"
+            fi
+            if ! id "$APP_USER" >/dev/null 2>&1 && id "$LEGACY_APP_USER" >/dev/null 2>&1; then
+              APP_USER="$LEGACY_APP_USER"
+            fi
+
+            echo "==> Backend and Stage 3 worker readiness"
+            curl --fail --silent --show-error --location --max-time 20 \
+              http://127.0.0.1:8000/health/ready
+            echo
+
+            sudo -u "$APP_USER" -H bash -s -- \
+              "$APP_ROOT" \
+              "$BACKEND_ENV_FILE" \
+              "$RUN_ID" \
+              "$MODE" \
+              "$APPROVE_MISSING_SELL_OPERATORS" <<'RECOVER_SELLS'
+            set -euo pipefail
+            app_root="$1"
+            backend_env_file="$2"
+            run_id="$3"
+            mode="$4"
+            approve_missing_sell_operators="$5"
+
+            cd "$app_root/backend"
+            set -a
+            source "$backend_env_file"
+            set +a
+
+            .venv/bin/python - "$run_id" "$mode" "$approve_missing_sell_operators" <<'PYTHON'
+            from __future__ import annotations
+
+            import json
+            import sys
+            import time
+
+            from sqlalchemy import select
+
+            import app.infrastructure.database.all_models  # noqa: F401
+            from app.domains.polymarket.bullpen import BullpenLiveExecutor, run_bullpen
+            from app.domains.polymarket.runtime_broker import (
+                run_with_bullpen_runtime_cleanup,
+            )
+            from app.domains.polymarket_auto_live.models import (
+                PolymarketAutoLiveDecisionRecord,
+                PolymarketAutoLiveOrderIntentRecord,
+                PolymarketAutoLiveRunRecord,
+            )
+            from app.domains.polymarket_auto_live.order_intent_service import (
+                retry_order_intent_for_user_sync,
+            )
+            from app.domains.polymarket_auto_live.order_intents import sanitize_message
+            from app.domains.polymarket_auto_live.tasks import (
+                enqueue_auto_live_order_intent_execution_sync,
+                enqueue_auto_live_order_intent_reconciliation_sync,
+                enqueue_auto_live_order_intent_retry_sync,
+            )
+            from app.infrastructure.database.sync_session import SyncSessionLocal
+
+
+            run_id = sys.argv[1]
+            mode = sys.argv[2]
+            approve_missing_sell_operators = sys.argv[3].lower() == "true"
+            success_statuses = {"CONFIRMED", "FILLED"}
+            retryable_statuses = {
+                "RETRY_WAIT",
+                "WAITING_FOR_COLLATERAL",
+                "WAITING_FOR_EXIT",
+                "DEFERRED",
+                "FAILED_PERMANENT",
+                "REJECTED",
+                "CANCELLED",
+                "TIMED_OUT",
+            }
+            directly_executable_statuses = {"PLANNED", "READY"}
+            reconcilable_statuses = {
+                "SUBMITTING",
+                "SUBMITTED",
+                "CONFIRMING",
+                "PARTIALLY_FILLED",
+                "SETTLEMENT_PENDING",
+            }
+
+
+            def load_sell_rows() -> tuple[PolymarketAutoLiveRunRecord, list[dict[str, object]]]:
+                with SyncSessionLocal() as session:
+                    run = session.get(PolymarketAutoLiveRunRecord, run_id)
+                    if run is None:
+                        raise SystemExit(f"Run {run_id} was not found.")
+                    rows = session.execute(
+                        select(
+                            PolymarketAutoLiveOrderIntentRecord,
+                            PolymarketAutoLiveDecisionRecord.market_title,
+                        )
+                        .outerjoin(
+                            PolymarketAutoLiveDecisionRecord,
+                            PolymarketAutoLiveDecisionRecord.id
+                            == PolymarketAutoLiveOrderIntentRecord.decision_id,
+                        )
+                        .where(PolymarketAutoLiveOrderIntentRecord.run_id == run_id)
+                        .where(PolymarketAutoLiveOrderIntentRecord.action == "sell")
+                        .order_by(
+                            PolymarketAutoLiveOrderIntentRecord.created_at.asc()
+                        )
+                    ).all()
+                    return run, [
+                        {
+                            "intent_id": intent.id,
+                            "title": title or intent.slug or intent.market_id,
+                            "status": intent.status,
+                            "side": intent.side,
+                            "shares": intent.current_shares
+                            or intent.requested_shares,
+                            "min_price_cents": intent.current_limit_price_cents
+                            or intent.requested_limit_price_cents,
+                            "attempt_count": intent.attempt_count,
+                            "last_error_code": intent.last_error_code,
+                            "last_error_message": sanitize_message(
+                                intent.last_error_message
+                            ),
+                            "first_submitted_at": (
+                                intent.first_submitted_at.isoformat()
+                                if intent.first_submitted_at
+                                else None
+                            ),
+                            "remote_order_id_present": bool(intent.remote_order_id),
+                            "remote_transaction_hash_present": bool(
+                                intent.remote_transaction_hash
+                            ),
+                        }
+                        for intent, title in rows
+                    ]
+
+
+            def print_state(label: str) -> list[dict[str, object]]:
+                run, rows = load_sell_rows()
+                print(
+                    json.dumps(
+                        {
+                            "label": label,
+                            "run_id": run.id,
+                            "user_id": run.user_id,
+                            "run_status": run.status,
+                            "sell_intent_count": len(rows),
+                            "sell_intents": rows,
+                        },
+                        sort_keys=True,
+                    )
+                )
+                if not rows:
+                    raise SystemExit(
+                        f"Run {run_id} has no persisted Stage 3 sell intents."
+                    )
+                return rows
+
+
+            initial_rows = print_state("initial")
+
+            doctor = run_with_bullpen_runtime_cleanup(
+                BullpenLiveExecutor().doctor()
+            )
+            print(
+                json.dumps(
+                    {
+                        "bullpen_preflight_ok": doctor.ok,
+                        "bullpen_preflight_message": sanitize_message(doctor.message),
+                    },
+                    sort_keys=True,
+                )
+            )
+
+            recovery_plan = None
+            if not doctor.ok:
+                try:
+                    recovery_plan = run_with_bullpen_runtime_cleanup(
+                        run_bullpen(
+                            [
+                                "recover",
+                                "polymarket",
+                                "--refresh",
+                                "--output",
+                                "json",
+                            ],
+                            timeout_seconds=120,
+                            read_only=True,
+                        )
+                    )
+                except Exception as exc:
+                    recovery_plan = json.dumps(
+                        {"recovery_plan_error": sanitize_message(str(exc))}
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "polymarket_recovery_plan": sanitize_message(
+                                recovery_plan
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
+                try:
+                    wallet_audit = run_with_bullpen_runtime_cleanup(
+                        run_bullpen(
+                            [
+                                "polymarket",
+                                "wallet-audit",
+                                "--refresh",
+                                "--include-order-credit",
+                                "--output",
+                                "json",
+                            ],
+                            timeout_seconds=180,
+                            read_only=True,
+                        )
+                    )
+                except Exception as exc:
+                    wallet_audit = json.dumps(
+                        {"wallet_audit_error": sanitize_message(str(exc))}
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "polymarket_wallet_audit": sanitize_message(
+                                wallet_audit
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
+                doctor = run_with_bullpen_runtime_cleanup(
+                    BullpenLiveExecutor().doctor()
+                )
+                print(
+                    json.dumps(
+                        {
+                            "bullpen_preflight_after_wallet_audit_ok": doctor.ok,
+                            "bullpen_preflight_after_wallet_audit_message": (
+                                sanitize_message(doctor.message)
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
+            approval_check = None
+            if doctor.ok:
+                try:
+                    approval_check = run_with_bullpen_runtime_cleanup(
+                        run_bullpen(
+                            [
+                                "polymarket",
+                                "approve",
+                                "--check",
+                                "--output",
+                                "json",
+                            ],
+                            timeout_seconds=45,
+                            read_only=True,
+                        )
+                    )
+                except Exception as exc:
+                    approval_check = json.dumps(
+                        {"approval_check_error": sanitize_message(str(exc))}
+                    )
+                print(
+                    json.dumps(
+                        {
+                            "sell_approval_check": sanitize_message(
+                                approval_check
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
+            if mode == "inspect":
+                raise SystemExit(0)
+
+            if not doctor.ok:
+                raise SystemExit(
+                    "Bullpen preflight blocks live sell recovery. Follow the "
+                    "authoritative Polymarket recovery plan before retrying."
+                )
+
+            if approve_missing_sell_operators:
+                approval_result = run_with_bullpen_runtime_cleanup(
+                    run_bullpen(
+                        [
+                            "polymarket",
+                            "approve",
+                            "--yes",
+                            "--output",
+                            "json",
+                        ],
+                        timeout_seconds=120,
+                        read_only=False,
+                    )
+                )
+                print(
+                    json.dumps(
+                        {
+                            "sell_approval_result": sanitize_message(
+                                approval_result
+                            ),
+                        },
+                        sort_keys=True,
+                    )
+                )
+
+            doctor = run_with_bullpen_runtime_cleanup(
+                BullpenLiveExecutor().doctor()
+            )
+            if not doctor.ok:
+                raise SystemExit(
+                    "Bullpen preflight still blocks live sell recovery: "
+                    f"{sanitize_message(doctor.message)}"
+                )
+
+            with SyncSessionLocal() as session:
+                run = session.get(PolymarketAutoLiveRunRecord, run_id)
+                if run is None:
+                    raise SystemExit(f"Run {run_id} was not found.")
+                user_id = run.user_id
+
+            recovery_rows = print_state("pre-retry")
+            for row in recovery_rows:
+                intent_id = str(row["intent_id"])
+                status = str(row["status"])
+                has_remote_reference = bool(
+                    row["remote_order_id_present"]
+                    or row["remote_transaction_hash_present"]
+                    or row["first_submitted_at"]
+                )
+                if status in success_statuses:
+                    continue
+                if has_remote_reference or status in reconcilable_statuses:
+                    enqueue_auto_live_order_intent_reconciliation_sync(
+                        intent_id,
+                        source="operator-stage3-sell-recovery",
+                    )
+                    continue
+                if status in retryable_statuses:
+                    retry_order_intent_for_user_sync(
+                        user_id=user_id,
+                        intent_id=intent_id,
+                    )
+                    enqueue_auto_live_order_intent_retry_sync(
+                        intent_id,
+                        source="operator-stage3-sell-recovery",
+                    )
+                    continue
+                if status in directly_executable_statuses:
+                    enqueue_auto_live_order_intent_execution_sync(
+                        intent_id,
+                        source="operator-stage3-sell-recovery",
+                    )
+                    continue
+                raise SystemExit(
+                    f"Sell intent {intent_id} has unsafe recovery status {status}."
+                )
+
+            deadline = time.monotonic() + 480
+            last_snapshot = None
+            while time.monotonic() < deadline:
+                rows = print_state("monitor")
+                snapshot = tuple(
+                    (
+                        row["intent_id"],
+                        row["status"],
+                        row["attempt_count"],
+                        row["last_error_code"],
+                    )
+                    for row in rows
+                )
+                if all(str(row["status"]) in success_statuses for row in rows):
+                    print(
+                        json.dumps(
+                            {
+                                "result": "all_sell_intents_completed",
+                                "run_id": run_id,
+                                "sell_intent_count": len(rows),
+                            },
+                            sort_keys=True,
+                        )
+                    )
+                    raise SystemExit(0)
+                if snapshot != last_snapshot:
+                    last_snapshot = snapshot
+                time.sleep(10)
+
+            final_rows = print_state("timeout")
+            raise SystemExit(
+                "Timed out waiting for every sell intent to complete. "
+                f"Final statuses: {[row['status'] for row in final_rows]}"
+            )
+            PYTHON
+            RECOVER_SELLS

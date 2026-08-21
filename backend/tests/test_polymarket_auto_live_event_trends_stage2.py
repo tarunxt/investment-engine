@@ -1,0 +1,104 @@
+import os
+from datetime import UTC, datetime
+from types import SimpleNamespace
+
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+asyncpg://test:test@localhost:5432/testdb",
+)
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+
+import pytest
+
+from app.domains.polymarket_auto_live.repository import (
+    AsyncPolymarketAutoLiveRepository,
+)
+
+
+class _RowsResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _StageTwoOnlySession:
+    def __init__(self):
+        self.calls = 0
+
+    async def execute(self, _statement):
+        self.calls += 1
+        if self.calls == 1:
+            return _RowsResult([
+                SimpleNamespace(
+                    id="run-stage2-only",
+                    trend_stage_results=[
+                        {
+                            "stage_number": 2,
+                            "stage_name": "Stage 2 - LLM",
+                            "status": "pass",
+                            "reason": "LLM review complete",
+                            "outputs": {
+                                "workflow_stage_key": "llm",
+                                "llm_reviewed_candidates": [
+                                    {
+                                        "market_id": "market-1",
+                                        "question_id": "question-1",
+                                        "question": "Will event one happen?",
+                                        "market_url": "https://example.com/market-1",
+                                        "close_time": "2026-08-12T12:00:00+00:00",
+                                        "current_yes_odds": 55.5,
+                                        "current_no_odds": 44.5,
+                                        "fair_yes_probability_pct": 74,
+                                        "fair_no_probability_pct": 26,
+                                        "returns_per_day": 13,
+                                        "llm_completed_at": "2026-08-10T02:45:00+00:00",
+                                        "llm_outputs": [
+                                            {
+                                                "provider": "deepseek",
+                                                "model": "deepseek-v4-flash",
+                                                "status": "completed",
+                                                "llm_yes_odds": 74,
+                                                "llm_no_odds": 26,
+                                                "completed_at": "2026-08-10T02:45:00+00:00",
+                                            }
+                                        ],
+                                    }
+                                ],
+                            },
+                            "started_at": "2026-08-10T02:40:00+00:00",
+                            "completed_at": "2026-08-10T02:45:00+00:00",
+                        }
+                    ],
+                    started_at=datetime(2026, 8, 10, 2, 40, tzinfo=UTC),
+                    completed_at=datetime(2026, 8, 10, 2, 45, tzinfo=UTC),
+                    updated_at=datetime(2026, 8, 10, 2, 45, tzinfo=UTC),
+                )
+            ])
+        return _RowsResult([])
+
+
+@pytest.mark.anyio
+async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions():
+    session = _StageTwoOnlySession()
+    response = await AsyncPolymarketAutoLiveRepository(session).list_recent_event_trends(
+        7
+    )
+
+    assert session.calls == 2
+    assert len(response.events) == 1
+    event = response.events[0]
+    assert event.market_id == "market-1"
+    assert event.market_title == "Will event one happen?"
+    assert event.scan_scores[0] == 74
+    assert event.scan_sides[0] == "YES"
+    assert event.scan_timestamps[0] == "2026-08-10T02:45:00+00:00"
+    assert event.llm_yes_odds == 74
+    assert event.llm_no_odds == 26
+    assert event.current_yes_odds == 55.5
+    assert event.current_no_odds == 44.5
+    assert event.market_url == "https://example.com/market-1"
+    assert event.scan_llm_outputs[0][0].provider == "deepseek"
+    assert event.score == 74
+    assert len(event.scan_scores) == 20

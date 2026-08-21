@@ -1,0 +1,43 @@
+[TASK]
+Analyse major short-term threats, weaknesses, vulnerabilities, and downside risks in the current INDmoney US portfolio.
+
+[ROLE]
+Act as a top-tier US portfolio risk analyst, aggressive swing-trading strategist, technical analyst, macro strategist, and sector-risk manager.
+
+[OBJECTIVE]
+Produce a practical 1–3 month portfolio risk report covering portfolio-level risk, stock-level threats, technical risk, event risk, profit protection, weak positions, scenario risk, final risk ranking, and urgent actionables.
+
+[MARKET + TIME HORIZON]
+Market: US equities. Exchange scope: NASDAQ, NYSE, AMEX. Time horizon: 1–3 months. Use verified upcoming event dates wherever available.
+
+[INPUTS]
+`{{SNAPSHOT_DATE}}`
+`{{PORTFOLIO_SNAPSHOT_AND_HOLDINGS_TABLES}}`
+Portfolio snapshot may include exchange, symbol, name, sector, live price, units, average buy price, current value, gain/loss %, and cash.
+
+[DATA + SOURCE RULES]
+Use latest online market trend, earnings timing, newsflow, sector rotation, macro conditions, technicals, valuation, analyst commentary, institutional flows, and exchange/company filings where relevant.
+
+[COVERAGE RULES]
+Cover every holding. Every stock-specific row must include Exchange, Stock Symbol, and Stock Name.
+
+[ANALYSIS RULES]
+Analyse concentration, crowding, liquidity, technical trend, support/resistance, moving averages, valuation, earnings/event risk, volume confirmation, gap-down risk, profit-booking risk, and opportunity-cost drag.
+
+[DECISION RULES]
+Use severity labels Low, Medium, High, Very High. Use action labels only where appropriate: Trim, Partial Profit Booking, Tighten Stop-Loss, Avoid Fresh Buying, Watch for Exit, Reduce Before Earnings/Event, Shift to Trailing Stop, Urgent Sell, Sell All.
+
+[CAPITAL / UNIT RULES]
+Use actual portfolio weights, values, gains/losses, and units from pasted snapshot. Do not invent units, prices, weights, or holding values.
+
+[OUTPUT FORMAT]
+Use exactly these sections: Summary; Tables 1-10 for Portfolio-Level Risk Snapshot, Concentration Analysis, Stock-Level Threat Map, Technical Risk Map, Event/Earnings Risk, Profit-Protection Candidates, Weak/Drag Positions, Scenario Risk, Final Risk Ranking, Urgent Actionables; Bottom Line. Preserve stock identity columns in all stock-specific tables.
+
+[FALLBACK RULES]
+If exact event date cannot be verified, write `Not found` or closest verified timing window. If no urgent actionables exist, Table 10 must contain one row saying `No urgent action required`.
+
+[VALIDATION CHECKLIST]
+Verify every holding is covered; all single-stock rows include Exchange, Stock Symbol, Stock Name; exact dates are used where public; Table 10 includes only actionable stocks.
+
+[FINAL OUTPUT RESTRICTION]
+Return plain markdown only. No code fences. Follow the exact section order. Do not add extra sections.

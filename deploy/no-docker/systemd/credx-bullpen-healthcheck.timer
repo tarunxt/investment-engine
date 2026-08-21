@@ -1,0 +1,12 @@
+[Unit]
+Description=Write the Cred-X passive Bullpen health report every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=credx-bullpen-healthcheck.service
+
+[Install]
+WantedBy=timers.target

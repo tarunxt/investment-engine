@@ -1,0 +1,24 @@
+[Unit]
+Description=Cred-X passive Bullpen runtime health snapshot
+After=network-online.target redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__APP_ROOT__/backend
+EnvironmentFile=__BACKEND_ENV_FILE__
+Environment=HOME=/home/__APP_USER__
+ExecStart=__APP_ROOT__/backend/.venv/bin/python -m app.domains.polymarket.passive_healthcheck
+User=__APP_USER__
+Group=__APP_USER__
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

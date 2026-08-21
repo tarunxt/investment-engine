@@ -1,0 +1,107 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# Development Environment Overrides
+#
+# Usage: docker compose -f docker-compose.dev.yml up
+#        docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# This extends the base docker-compose.yml with development-specific overrides
+# ═════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - ./frontend:/frontend
+      - /frontend/node_modules
+      - /frontend/.next
+
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_DISABLE_AUTH: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      NODE_OPTIONS: "--max-old-space-size=8192"
+
+    command: npm run dev
+
+    healthcheck:
+      disable: true
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./backend:/backend
+
+    environment:
+      ENVIRONMENT: development
+      AUTH_DISABLED: "true"
+      DEBUG: "true"
+
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+    healthcheck:
+      disable: true
+
+  celery_worker:
+    build: ./backend
+    volumes:
+      - ./backend:/backend
+
+    environment:
+      ENVIRONMENT: development
+
+    command: celery -A app.infrastructure.messaging.celery_app worker -Q ai,email,beat --loglevel=debug --concurrency=${CELERY_WORKER_CONCURRENCY:-2} --prefetch-multiplier=1 --max-tasks-per-child=${CELERY_WORKER_MAX_TASKS_PER_CHILD:-25} --max-memory-per-child=${CELERY_WORKER_MAX_MEMORY_PER_CHILD_KB:-800000}
+
+    healthcheck:
+      disable: true
+
+  celery_auto_live_worker:
+    build: ./backend
+    volumes:
+      - ./backend:/backend
+
+    environment:
+      ENVIRONMENT: development
+
+    command: celery -A app.infrastructure.messaging.celery_app worker -n auto-live-worker@%h -Q ${CELERY_AUTO_LIVE_WORKER_QUEUE:-auto_live} --loglevel=debug --concurrency=1 --prefetch-multiplier=1 --max-tasks-per-child=${CELERY_AUTO_LIVE_MAX_TASKS_PER_CHILD:-1}
+
+    healthcheck:
+      disable: true
+
+  celery_beat:
+    build: ./backend
+    volumes:
+      - ./backend:/backend
+
+    environment:
+      ENVIRONMENT: development
+
+    command: celery -A app.infrastructure.messaging.celery_app beat --loglevel=debug
+
+    healthcheck:
+      disable: true
+
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+    command: redis-server --appendonly no
+
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
