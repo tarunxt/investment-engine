@@ -1,4 +1,5 @@
 import json
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import httpx
@@ -27,6 +28,7 @@ from app.domains.bullpen_run_audit.repository import (
 )
 from app.domains.bullpen_run_audit.router import router as run_audit_router
 from app.domains.bullpen_run_audit.service import (
+    _as_utc,
     _build_bundle,
     _build_formula_records,
     _serialize_stage_records,
@@ -98,6 +100,30 @@ def _feedback_report_payload() -> dict[str, object]:
         "priority_plan": [],
         "codex_prompt": "Fix the pipeline",
     }
+
+
+def test_audit_timestamp_normalization_compares_legacy_naive_and_aware_values():
+    legacy_naive_utc = datetime(2026, 8, 21, 9, 30, 0)
+    aware_utc = datetime(2026, 8, 21, 9, 30, 0, tzinfo=UTC)
+    aware_india = datetime(
+        2026,
+        8,
+        21,
+        15,
+        0,
+        0,
+        tzinfo=timezone(timedelta(hours=5, minutes=30)),
+    )
+
+    normalized_naive = _as_utc(legacy_naive_utc)
+    normalized_aware = _as_utc(aware_utc)
+
+    assert normalized_naive == aware_utc
+    assert normalized_aware == aware_utc
+    assert _as_utc(None) is None
+    assert normalized_naive is not None and normalized_aware is not None
+    assert normalized_naive >= normalized_aware
+    assert _as_utc(aware_india) == aware_utc
 
 
 def test_audit_decision_capture_filters_superseded_reconciliation_rows():
