@@ -63,7 +63,8 @@ class Settings(BaseSettings):
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
     # Accept both documented SMTP_* names and the legacy EMAILS_* names already
-    # present on older production hosts. Keep the SMTP_* fields canonical in code.
+    # present on older production hosts. Keep SMTP_* canonical while deployed
+    # hosts migrate without interrupting mail delivery.
     smtp_from_email: str = Field(
         default="noreply@example.com",
         validation_alias=AliasChoices("SMTP_FROM_EMAIL", "EMAILS_FROM_EMAIL"),
