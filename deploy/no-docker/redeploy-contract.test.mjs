@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
+const envLoaderPath = fileURLToPath(
+  new URL("./load-env-file.sh", import.meta.url),
+);
 
 const redeploy = await readFile(
   new URL("./redeploy.sh", import.meta.url),
@@ -26,6 +36,35 @@ function section(start, end) {
   assert.notEqual(endIndex, -1, `missing section end: ${end}`);
   return redeploy.slice(startIndex, endIndex);
 }
+
+test("environment files are loaded literally instead of executed as shell code", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "investor-env-loader-"));
+  const envPath = join(directory, "backend.env");
+  const markerPath = join(directory, "executed");
+
+  try {
+    await writeFile(
+      envPath,
+      `UNQUOTED_SECRET=alpha beta $(touch ${markerPath})\nQUOTED_SECRET="hello world"\n`,
+    );
+    const { stdout } = await execFileAsync("bash", [
+      "-c",
+      'source "$1"; load_env_file "$2"; printf "%s\\n%s\\n" "$UNQUOTED_SECRET" "$QUOTED_SECRET"',
+      "--",
+      envLoaderPath,
+      envPath,
+    ]);
+
+    assert.equal(
+      stdout,
+      `alpha beta $(touch ${markerPath})\nhello world\n`,
+    );
+    await assert.rejects(access(markerPath));
+    assert.doesNotMatch(redeploy, /source '\$(?:BACKEND|FRONTEND)_ENV_FILE'/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("deployment updates the host-named Nginx sites that are actually enabled", () => {
   const nginxInstaller = section(
