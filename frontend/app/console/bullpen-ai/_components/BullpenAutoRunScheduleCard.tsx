@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import dynamic from "next/dynamic";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   CalendarClock,
   CheckCircle2,
@@ -9616,6 +9617,10 @@ export function BullpenAutoRunScheduleCard({
   onSummaryUpdated,
   onOpenScanFilters,
 }: BullpenAutoRunScheduleCardProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedRunDetailId = searchParams.get("runDetails")?.trim() || null;
+  const returnRunDetailToHistory = searchParams.get("returnTo") === "history";
   const { user, loading: authLoading } = useAuth();
   const autoRunStatusCacheKey = getBullpenAutoRunStatusCacheKey(user?.id);
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(
@@ -9724,6 +9729,7 @@ export function BullpenAutoRunScheduleCard({
     useRef<AbortController | null>(null);
   const runDetailRefreshAbortControllerRef =
     useRef<AbortController | null>(null);
+  const handledRequestedRunDetailIdRef = useRef<string | null>(null);
   const [runDetailDialog, setRunDetailDialog] =
     useState<RunDetailDialogState | null>(null);
   const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
@@ -10703,7 +10709,9 @@ export function BullpenAutoRunScheduleCard({
     }
   }, [autoRunStatusCacheKey]);
 
-  async function openHistoryRunDetail(item: BullpenAutoLiveHistoryItem) {
+  async function openHistoryRunDetail(
+    item: Pick<BullpenAutoLiveHistoryItem, "id">,
+  ) {
       runHistoryDetailAbortControllerRef.current?.abort();
       const controller = new AbortController();
       runHistoryDetailAbortControllerRef.current = controller;
@@ -10795,14 +10803,46 @@ export function BullpenAutoRunScheduleCard({
         closeRunHistoryDialog();
       } catch (nextError) {
         if (controller.signal.aborted || isRequestAbort(nextError)) return;
-        setRunHistoryError(
-          `Run ${item.id} details could not be loaded. ${formatUnknownError(nextError)}`,
-        );
+        const message =
+          `Run ${item.id} details could not be loaded. ` +
+          formatUnknownError(nextError);
+        setRunHistoryError(message);
+        if (requestedRunDetailId === item.id) {
+          setRuntimeErrorDialog(message);
+        }
       } finally {
         if (!controller.signal.aborted) {
           setRunHistoryDetailLoadingId(null);
         }
       }
+  }
+
+  const openRequestedRunDetail = useEffectEvent((runId: string) => {
+    void openHistoryRunDetail({ id: runId });
+  });
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    if (!requestedRunDetailId) {
+      handledRequestedRunDetailIdRef.current = null;
+      return;
+    }
+    if (handledRequestedRunDetailIdRef.current === requestedRunDetailId) {
+      return;
+    }
+    handledRequestedRunDetailIdRef.current = requestedRunDetailId;
+    openRequestedRunDetail(requestedRunDetailId);
+  }, [authLoading, requestedRunDetailId, user]);
+
+  function closeRunDetailDialog() {
+    setRunDetailDialog(null);
+    if (!requestedRunDetailId) return;
+    handledRequestedRunDetailIdRef.current = null;
+    router.replace(
+      returnRunDetailToHistory
+        ? "/console/bullpen-ai/history"
+        : "/console/bullpen-ai",
+    );
   }
 
   function closeRunHistoryDialog() {
@@ -13678,7 +13718,7 @@ export function BullpenAutoRunScheduleCard({
         {runDetailDialog ? (
           <RunDetailDialog
             state={runDetailDialog}
-            onClose={() => setRunDetailDialog(null)}
+            onClose={closeRunDetailDialog}
             onOpenScanFilters={onOpenScanFilters}
             onOpenStageTwoInvestEvents={setStageTwoInvestEventsDialog}
             onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}

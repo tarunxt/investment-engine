@@ -9,6 +9,36 @@ const historyScreen = readFileSync(
   ),
   "utf8",
 );
+const scheduleCard = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+test("History opens the original run-details workspace instead of the audit", () => {
+  assert.match(
+    historyScreen,
+    /\/console\/bullpen-ai\?runDetails=\$\{encodeURIComponent\(run\.id\)\}&returnTo=history/,
+  );
+  assert.doesNotMatch(
+    historyScreen,
+    /analyse-runs\/\$\{encodeURIComponent\(run\.id\)\}/,
+  );
+  assert.match(scheduleCard, /searchParams\.get\("runDetails"\)/);
+  assert.match(scheduleCard, /openHistoryRunDetail\(\{ id: runId \}\)/);
+  assert.match(scheduleCard, /<RunDetailDialog/);
+  assert.match(scheduleCard, /router\.replace\([\s\S]*\/console\/bullpen-ai\/history/);
+});
+
+test("History keeps usable run or trend data when the sibling request times out", () => {
+  assert.match(historyScreen, /Promise\.allSettled/);
+  assert.match(historyScreen, /historyRequestOptions = \{ timeoutMs: 10_000 \}/);
+  assert.match(historyScreen, /pageResult\.status === "fulfilled"/);
+  assert.match(historyScreen, /trendsResult\.status === "fulfilled"/);
+  assert.match(historyScreen, /setTrendsError/);
+});
 
 test("History primes the shared portfolio from a forced current wallet refresh", () => {
   assert.match(historyScreen, /caller_source: "ui-history-portfolio-refresh"/);

@@ -133,17 +133,27 @@ export function BullpenRunHistoryScreen() {
     useState<BullpenAutoLiveEventTrendsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trendsError, setTrendsError] = useState<string | null>(null);
   const [portfolioReady, setPortfolioReady] = useState(false);
   const [portfolioVersion, setPortfolioVersion] = useState(0);
 
   const load = useCallback(async (pageNumber = 1) => {
     setLoading(true);
     setError(null);
+    setTrendsError(null);
     try {
       const positionsPromise = fetchCurrentBullpenPositions().catch(() => null);
-      const [nextPage, nextTrends, currentPositions] = await Promise.all([
-        apiService.getBullpenAutoLiveHistory({ page: pageNumber, size: 20 }),
-        apiService.getBullpenAutoLiveHistoryEventTrends(),
+      const historyRequestOptions = { timeoutMs: 10_000 };
+      const [[pageResult, trendsResult], currentPositions] = await Promise.all([
+        Promise.allSettled([
+          apiService.getBullpenAutoLiveHistory(
+            { page: pageNumber, size: 20 },
+            historyRequestOptions,
+          ),
+          apiService.getBullpenAutoLiveHistoryEventTrends(
+            historyRequestOptions,
+          ),
+        ]),
         positionsPromise,
       ]);
       const hasUsableCurrentPositions = Boolean(
@@ -153,15 +163,27 @@ export function BullpenRunHistoryScreen() {
             liveAvailable: currentPositions.liveAvailable,
           }),
       );
-      setPage(nextPage);
-      setTrends(
-        hasUsableCurrentPositions && currentPositions
-          ? applyCurrentBullpenPositionsToEventTrends(
-              nextTrends,
-              currentPositions,
-            )
-          : nextTrends,
-      );
+      if (pageResult.status === "fulfilled") {
+        setPage(pageResult.value);
+      } else {
+        setError(
+          `Run history is temporarily unavailable. ${formatUnknownError(pageResult.reason)}`,
+        );
+      }
+      if (trendsResult.status === "fulfilled") {
+        setTrends(
+          hasUsableCurrentPositions && currentPositions
+            ? applyCurrentBullpenPositionsToEventTrends(
+                trendsResult.value,
+                currentPositions,
+              )
+            : trendsResult.value,
+        );
+      } else {
+        setTrendsError(
+          `Event trends are temporarily unavailable. ${formatUnknownError(trendsResult.reason)}`,
+        );
+      }
       setPortfolioVersion((version) => version + 1);
     } catch (cause) {
       setError(
@@ -179,7 +201,7 @@ export function BullpenRunHistoryScreen() {
 
   const openRun = (run: BullpenAutoLiveHistoryItem) =>
     router.push(
-      `/console/bullpen-ai/analyse-runs/${encodeURIComponent(run.id)}`,
+      `/console/bullpen-ai?runDetails=${encodeURIComponent(run.id)}&returnTo=history`,
     );
 
   return (
@@ -198,7 +220,7 @@ export function BullpenRunHistoryScreen() {
           loading={loading}
           trendsLoading={loading}
           error={error}
-          trendsError={null}
+          trendsError={trendsError}
           onRefresh={() => void load(page?.page ?? 1)}
           onPage={(next) => void load(next)}
           onOpenRun={openRun}
