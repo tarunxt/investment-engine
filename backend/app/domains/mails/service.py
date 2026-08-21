@@ -79,8 +79,6 @@ def _as_probability(value: object) -> float | None:
 def _completed_stage_two(
     run: BullpenAutoLiveRun,
 ) -> BullpenAutoLiveStageResult | None:
-    run: BullpenAutoLiveRun,
-) -> BullpenAutoLiveStageResult | None: BullpenAutoLiveRun,\n) -> BullpenAutoLiveStageResult | None:
     for stage in run.stage_results:
         if (
             stage.stage_number == 2
