@@ -17,7 +17,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { URLs } from "@/lib/urls";
-import { apiService } from "@/services/api";
+import { formatApiErrorSummary } from "@/lib/apiErrors";
+import { APIError, apiService } from "@/services/api";
 import type {
   BullpenRunAuditDetailResponse,
   BullpenRunAuditFeedbackDetail,
@@ -939,9 +940,11 @@ export function RunAuditDetailClient() {
       } catch (nextError) {
         if (!cancelled) {
           setError(
-            nextError instanceof Error
-              ? nextError.message
-              : "Failed to load Bullpen run audit detail.",
+            nextError instanceof APIError
+              ? formatApiErrorSummary(nextError)
+              : nextError instanceof Error
+                ? nextError.message
+                : "Failed to load Bullpen run audit detail.",
           );
         }
       } finally {

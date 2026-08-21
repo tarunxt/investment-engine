@@ -5,6 +5,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import SQLAlchemyError
 
 import app.infrastructure.database.all_models  # noqa: F401
 from app.domains.auth.dependencies import get_current_user
@@ -56,6 +57,19 @@ def _build_test_app() -> FastAPI:
     app.include_router(run_audit_router)
     app.dependency_overrides[get_current_user] = _current_user
     return app
+
+
+class _DummySession:
+    def commit(self) -> None:
+        return None
+
+
+class _DummySessionContext:
+    def __enter__(self):
+        return _DummySession()
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
 
 
 def _feedback_report_payload() -> dict[str, object]:
@@ -3414,6 +3428,58 @@ def test_stage1_degraded_portfolio_skips_verified_formula_findings():
     assert "STAGE1_VERIFIED_POSITION_COUNT_MISMATCH" not in codes
     assert "STAGE1_VERIFIED_AVAILABLE_SLOTS_MISMATCH" not in codes
     assert "STAGE1_VERIFIED_TRADE_AMOUNT_MISMATCH" not in codes
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_code"),
+    [
+        (
+            SQLAlchemyError("relation bullpen_run_audit_snapshots does not exist"),
+            503,
+            "RUN_AUDIT_DATABASE_UNAVAILABLE",
+        ),
+        (RuntimeError("legacy audit payload failed"), 500, "RUN_AUDIT_MATERIALIZATION_FAILED"),
+    ],
+)
+async def test_run_audit_detail_returns_actionable_sanitized_failures(
+    monkeypatch,
+    failure,
+    expected_status,
+    expected_code,
+):
+    app = _build_test_app()
+
+    async def fake_to_thread(func):
+        return func()
+
+    def fail_detail(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.SyncSessionLocal",
+        _DummySessionContext,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.asyncio.to_thread",
+        fake_to_thread,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.get_run_audit_detail_sync",
+        fail_detail,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/bullpen-ai/run-audits/run-123")
+
+    assert response.status_code == expected_status
+    detail = response.json()["detail"]
+    assert detail["error"] == expected_code
+    assert detail["run_id"] == "run-123"
+    assert "legacy audit payload failed" not in response.text
+    if expected_status == 503:
+        assert detail["required_migration"].startswith("u7v8w9x0y1z2")
 
 
 @pytest.mark.anyio

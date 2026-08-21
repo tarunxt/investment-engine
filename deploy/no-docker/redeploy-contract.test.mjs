@@ -76,6 +76,7 @@ test("frontend-only deployment cannot install or restart backend services", () =
   );
   assert.match(backendTransaction, /\bpip install -r requirements\.txt/);
   assert.match(backendTransaction, /\balembic upgrade head/);
+  assert.match(backendTransaction, /\balembic current --check-heads/);
   assert.match(backendTransaction, /\$BACKEND_SERVICE_NAME/);
   assert.match(
     backendTransaction,

@@ -4,7 +4,9 @@ import asyncio
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.logging import get_logger
 from app.domains.ai_providers.factory import ProviderFactory
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
@@ -36,6 +38,24 @@ from app.domains.bullpen_run_audit.service import (
 from app.infrastructure.database.sync_session import SyncSessionLocal
 
 router = APIRouter(prefix="/bullpen-ai/run-audits", tags=["bullpen-ai"])
+logger = get_logger(__name__)
+
+
+def _run_audit_failure_detail(*, run_id: str, database_error: bool) -> dict[str, str]:
+    if database_error:
+        return {
+            "error": "RUN_AUDIT_DATABASE_UNAVAILABLE",
+            "message": (
+                "The run audit database is unavailable or its schema migration is incomplete."
+            ),
+            "run_id": run_id,
+            "required_migration": "u7v8w9x0y1z2_add_bullpen_run_audit_tables",
+        }
+    return {
+        "error": "RUN_AUDIT_MATERIALIZATION_FAILED",
+        "message": "The run audit snapshot could not be prepared.",
+        "run_id": run_id,
+    }
 
 
 def _parse_date(value: str | None, *, end_of_day: bool = False) -> datetime | None:
@@ -138,6 +158,26 @@ async def get_run_audit_detail(
         return await asyncio.to_thread(_load)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        logger.exception(
+            "Bullpen run audit detail database failure run_id=%s user_id=%s",
+            run_id,
+            current_user.id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=_run_audit_failure_detail(run_id=run_id, database_error=True),
+        ) from exc
+    except Exception as exc:
+        logger.exception(
+            "Bullpen run audit detail materialization failed run_id=%s user_id=%s",
+            run_id,
+            current_user.id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=_run_audit_failure_detail(run_id=run_id, database_error=False),
+        ) from exc
 
 
 @router.get("/{run_id}/sections/{section}", response_model=BullpenRunAuditSectionResponse)
@@ -301,4 +341,3 @@ async def export_run_audit_bundle(
         return await asyncio.to_thread(_export)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
