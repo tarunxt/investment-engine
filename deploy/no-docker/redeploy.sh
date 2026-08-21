@@ -316,9 +316,8 @@ validate_required_env_var() {
 validate_frontend_env_file() {
   run_as_app_user "
     set -euo pipefail
-    set -a
-    source '$FRONTEND_ENV_FILE'
-    set +a
+    source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+    load_env_file '$FRONTEND_ENV_FILE'
 
     if [[ -z \"\${NEXTAUTH_URL:-}\" ]]; then
       echo 'Required environment variable missing: NEXTAUTH_URL' >&2
@@ -353,9 +352,8 @@ validate_frontend_env_file() {
 validate_backend_env_file() {
   run_as_app_user "
     set -euo pipefail
-    set -a
-    source '$BACKEND_ENV_FILE'
-    set +a
+    source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+    load_env_file '$BACKEND_ENV_FILE'
 
     if [[ -z \"\${DATABASE_URL:-}\" ]]; then
       echo 'Required environment variable missing: DATABASE_URL' >&2
@@ -382,10 +380,8 @@ validate_backend_env_file() {
 validate_canonical_bullpen_backend_env() {
   run_as_app_user "
     set -euo pipefail
-
-    set -a
-    source '$BACKEND_ENV_FILE'
-    set +a
+    source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+    load_env_file '$BACKEND_ENV_FILE'
 
     require_effective_setting() {
       local name=\"\$1\"
@@ -723,13 +719,12 @@ select_frontend_build_slots() {
 resolve_frontend_launch_target_as_app_user() {
   sudo -u "$APP_USER" -H -- bash -c '
     set -euo pipefail
-    set -a
-    source "$1"
-    set +a
-    exec node "$2" resolve-launch "$3"
+    source "$2/deploy/no-docker/load-env-file.sh"
+    load_env_file "$1"
+    exec node "$2/deploy/no-docker/frontend-artifact.mjs" resolve-launch "$3"
   ' -- \
     "$FRONTEND_ENV_FILE" \
-    "$APP_ROOT/deploy/no-docker/frontend-artifact.mjs" \
+    "$APP_ROOT" \
     "$FRONTEND_ROOT"
 }
 
@@ -810,9 +805,8 @@ prepare_frontend_candidate_artifact() {
 
   start_phase "frontend-candidate-verification"
   run_as_app_user "
-    set -a
-    source '$FRONTEND_ENV_FILE'
-    set +a
+    source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+    load_env_file '$FRONTEND_ENV_FILE'
     node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' \
       validate-host \
       '$FRONTEND_CANDIDATE_BUILD_DIR' \
@@ -872,9 +866,8 @@ prepare_frontend_candidate_build_on_host() {
     printf '%s\\n' \"\$lock_hash\" > \"\$lock_marker\"
 
     rm -rf '$FRONTEND_CANDIDATE_BUILD_DIR'
-    set -a
-    source '$FRONTEND_ENV_FILE'
-    set +a
+    source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+    load_env_file '$FRONTEND_ENV_FILE'
     NEXT_DIST_DIR='$FRONTEND_CANDIDATE_BUILD_NAME' npm run build
 
     test -f '$FRONTEND_CANDIDATE_BUILD_DIR/BUILD_ID'
@@ -911,9 +904,8 @@ promote_frontend_candidate_build() {
   # disappear or become incomplete between extraction and promotion.
   if [[ "$FRONTEND_CANDIDATE_IS_STANDALONE" == "true" ]]; then
     run_as_app_user "
-      set -a
-      source '$FRONTEND_ENV_FILE'
-      set +a
+      source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+      load_env_file '$FRONTEND_ENV_FILE'
       node '$APP_ROOT/deploy/no-docker/frontend-artifact.mjs' \
         validate-host \
         '$FRONTEND_CANDIDATE_BUILD_DIR' \
@@ -1617,9 +1609,8 @@ install_bullpen_cli_if_needed() {
   bullpen_bin="$(
     run_as_app_user "
       set -euo pipefail
-      set -a
-      source '$BACKEND_ENV_FILE'
-      set +a
+      source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+      load_env_file '$BACKEND_ENV_FILE'
       printf '%s' \"\${BULLPEN_BIN:-/usr/local/bin/bullpen}\"
     "
   )"
@@ -1854,9 +1845,8 @@ if [[ "$DEPLOY_BACKEND" == "true" ]]; then
     cd '$APP_ROOT/backend'
     source .venv/bin/activate
     pip install -r requirements.txt
-    set -a
-    source '$BACKEND_ENV_FILE'
-    set +a
+    source '$APP_ROOT/deploy/no-docker/load-env-file.sh'
+    load_env_file '$BACKEND_ENV_FILE'
     alembic upgrade head
     alembic current --check-heads
   "
