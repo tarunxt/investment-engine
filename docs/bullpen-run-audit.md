@@ -1482,3 +1482,8 @@ materialization uses the same diagnostic contract. Backend-capable production de
 cannot report success while the database revision is behind the repository head.
 This is diagnostic-only and does not rewrite frozen snapshots or change their
 schema or response shape on successful requests.
+
+Snapshot freshness checks normalize both legacy offset-naive database timestamps
+and offset-aware ORM timestamps to UTC before comparing them. This preserves
+existing frozen snapshots, avoids a data backfill, and allows older durable run
+records to materialize under the current timezone-aware runtime.
