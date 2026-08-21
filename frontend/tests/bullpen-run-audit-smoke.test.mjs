@@ -40,8 +40,14 @@ test("detail client keeps the shared single-select model picker and three sectio
   assert.match(source, /Run Audit Feedback/);
   assert.match(source, /Stage 2 to Stage 3 Handoff Checkpoint/);
   assert.match(source, /handoff_checkpoint/);
-  assert.match(source, /nextError instanceof APIError/);
-  assert.match(source, /formatApiErrorSummary\(nextError\)/);
+  assert.match(source, /error instanceof APIError/);
+  assert.match(source, /formatApiErrorSummary\(error\)/);
+  assert.match(source, /Run audit could not be opened/);
+  assert.match(source, /Technical detail/);
+  assert.match(source, /Likely cause/);
+  assert.match(source, /Steps to fix/);
+  assert.match(source, /Diagnostic ID/);
+  assert.match(source, /Rematerialize/);
 });
 
 test("detail client distinguishes verified, degraded, and unavailable Stage 1 portfolios", async () => {
