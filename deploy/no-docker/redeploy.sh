@@ -1858,6 +1858,7 @@ if [[ "$DEPLOY_BACKEND" == "true" ]]; then
     source '$BACKEND_ENV_FILE'
     set +a
     alembic upgrade head
+    alembic current --check-heads
   "
   finish_phase "backend-dependencies-migrations"
 
