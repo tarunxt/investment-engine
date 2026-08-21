@@ -70,7 +70,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const [scoreEvent, setScoreEvent] = useState<BullpenAutoLiveEventTrend | null>(null);
   const [llmQuestion, setLlmQuestion] = useState<BullpenQuestionRow | null>(null);
   const [returnsQuestion, setReturnsQuestion] = useState<BullpenQuestionRow | null>(null);
-  const [showStrongestOnly, setShowStrongestOnly] = useState(false);
+  const [showStrongestOnly, setShowStrongestOnly] = useState(true);
   const latestScoredScanAt = trends?.events.flatMap(event => event.scan_timestamps ?? []).find(Boolean) ?? null;
   const latestSavedRunAt = page?.page === 1 ? page.items[0]?.started_at ?? null : null;
   return <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,.45)]">
