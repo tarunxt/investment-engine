@@ -3477,9 +3477,48 @@ async def test_run_audit_detail_returns_actionable_sanitized_failures(
     detail = response.json()["detail"]
     assert detail["error"] == expected_code
     assert detail["run_id"] == "run-123"
-    assert "legacy audit payload failed" not in response.text
+    assert detail["diagnostic_id"]
+    assert detail["failed_phase"]
+    assert detail["cause_type"] == type(failure).__name__
+    assert detail["technical_detail"].startswith(type(failure).__name__)
+    assert detail["likely_cause"]
+    assert len(detail["fix_steps"]) >= 4
     if expected_status == 503:
         assert detail["required_migration"].startswith("u7v8w9x0y1z2")
+
+
+@pytest.mark.anyio
+async def test_forced_materialization_returns_same_actionable_failure_contract(monkeypatch):
+    app = _build_test_app()
+
+    async def fake_to_thread(func):
+        return func()
+
+    def fail_materialization(*_args, **_kwargs):
+        raise TypeError("legacy stage payload is not a mapping")
+
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.SyncSessionLocal",
+        _DummySessionContext,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.asyncio.to_thread",
+        fake_to_thread,
+    )
+    monkeypatch.setattr(
+        "app.domains.bullpen_run_audit.router.materialize_run_audit_snapshot_sync",
+        fail_materialization,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post("/bullpen-ai/run-audits/run-123/materialize")
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["error"] == "RUN_AUDIT_MATERIALIZATION_FAILED"
+    assert detail["cause_type"] == "TypeError"
+    assert "legacy stage payload is not a mapping" in detail["technical_detail"]
 
 
 @pytest.mark.anyio

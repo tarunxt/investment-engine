@@ -1473,8 +1473,11 @@ and preserves the full exception stack in backend service logs. Database-layer
 failures return a sanitized `503 RUN_AUDIT_DATABASE_UNAVAILABLE` response that
 identifies the required audit-table migration; other materialization failures
 return `500 RUN_AUDIT_MATERIALIZATION_FAILED`. The console displays the HTTP
-status, structured error code, run ID, and migration hint instead of replacing
-the response with a generic message. Backend-capable production deployments run
+status, structured error code, run ID, failed phase, safe exception type and
+message, diagnostic ID, likely cause, server-generated remediation steps, and
+migration hint instead of replacing the response with a generic message. The
+error state also offers Retry and forced Rematerialize actions; a failed forced
+materialization uses the same diagnostic contract. Backend-capable production deployments run
 `alembic upgrade head` followed by `alembic current --check-heads`, so a deployment
 cannot report success while the database revision is behind the repository head.
 This is diagnostic-only and does not rewrite frozen snapshots or change their
