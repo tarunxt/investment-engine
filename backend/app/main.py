@@ -33,6 +33,7 @@ from app.domains.indmoney_us.router import router as indmoney_us_router
 from app.domains.indmoney_us.threats_router import router as indmoney_us_threats_router
 from app.domains.health.router import router as health_router
 from app.domains.jobs.router import router as jobs_router
+from app.domains.mails.router import router as mails_router
 from app.domains.jobs.ws_router import router as jobs_ws_router
 from app.domains.polymarket.router import router as polymarket_router
 from app.domains.polymarket.runtime_broker import (
@@ -287,6 +288,7 @@ app.include_router(indmoney_us_router)
 app.include_router(indmoney_us_threats_router)
 app.include_router(jobs_router)
 app.include_router(jobs_ws_router)
+app.include_router(mails_router)
 app.include_router(polymarket_router)
 app.include_router(polymarket_auto_live_router)
 app.include_router(polymarket_direct_router)

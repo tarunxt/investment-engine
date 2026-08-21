@@ -5,6 +5,7 @@ import {
     Database,
     LayoutDashboard,
     LogOut,
+    Mail,
     Plug2,
     ReceiptText,
     ScanSearch,
@@ -240,6 +241,14 @@ export const SIDEBAR_SECTIONS = [
                         matchMode: 'prefix',
                     },
                 ],
+            },
+            {
+                type: 'item',
+                id: 'mails',
+                name: 'Mails',
+                href: URLs.routes.console.mails(),
+                icon: Mail,
+                matchMode: 'prefix',
             },
             {
                 type: 'item',

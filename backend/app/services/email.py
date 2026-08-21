@@ -18,15 +18,12 @@ class EmailService:
         """Send an email using SMTP."""
         
         if not settings.smtp_host:
-            logger.warning("SMTP host not configured, skipping email sending")
-            logger.info(f"Email that would have been sent to {email_to}:")
-            logger.info(f"Subject: {subject}")
-            logger.info(f"Content: {html_content[:100]}...")
-            return True
+            logger.error("SMTP host is not configured; email was not sent")
+            return False
 
         message = MIMEMultipart("alternative")
         message["Subject"] = subject
-        message["From"] = f"{settings.emails_from_name} <{settings.emails_from_email}>"
+        message["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
         message["To"] = email_to
 
         if text_content:
@@ -42,7 +39,7 @@ class EmailService:
                     server.starttls()
                     server.login(settings.smtp_user, settings.smtp_password)
                 server.sendmail(
-                    settings.emails_from_email, email_to, message.as_string()
+                    settings.smtp_from_email, email_to, message.as_string()
                 )
             logger.info(f"Email sent to {email_to}")
             return True

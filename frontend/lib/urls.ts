@@ -324,6 +324,10 @@ export const URLs = {
     summary: () => `${resolveApiBaseUrl()}/dashboard/summary`,
   },
 
+  mails: {
+    sendTest: () => `${resolveApiBaseUrl()}/mails/send-test`,
+  },
+
   // Health Check endpoints
   health: {
     ping: () => `${resolveApiBaseUrl()}/health`,
@@ -599,6 +603,7 @@ export const URLs = {
       apis: () => "/console/apis",
       llms: () => "/console/llms",
       technicalSetups: () => "/console/technical-setups",
+      mails: () => "/console/mails",
     },
 
     profile: {

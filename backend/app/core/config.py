@@ -62,8 +62,8 @@ class Settings(BaseSettings):
     smtp_port: Optional[int] = 587
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
-    emails_from_email: str = "noreply@example.com"
-    emails_from_name: str = "AI Investment Platform"
+    smtp_from_email: str = "noreply@example.com"
+    smtp_from_name: str = "AI Investment Platform"
     
     # Logging
     log_level: str = "INFO"
