@@ -11,7 +11,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.domains.auth.models import ActivityLog
-from app.domains.polymarket_auto_live.schemas import (\n    BullpenAutoLiveRun,\n    BullpenAutoLiveStageResult,\n)
+from app.domains.polymarket_auto_live.schemas import (
+    BullpenAutoLiveRun,
+    BullpenAutoLiveStageResult,
+)
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.services.email import EmailSendResult, EmailService
 
