@@ -25,6 +25,26 @@ run. It combines:
 The audit system is read-oriented. It must never alter live-trading behavior or
 recompute business decisions on page load.
 
+### Stage 2 active-position risk mail
+
+Immediately after the final Stage 2 result is persisted, and before Stage 3
+starts, the planner evaluates each serialized `active_position` review row
+against the position's held side. A held YES position breaches when consolidated
+YES odds are strictly below 80%; a held NO position breaches when consolidated
+NO odds are strictly below 80%. Candidate rows, missing odds, and values equal
+to 80% do not trigger the warning.
+
+All breached active positions for a run are consolidated into one actionable
+email. The delivery is reserved in the existing durable activity log before
+SMTP is called, using a deterministic run/threshold idempotency key, so Celery
+redelivery cannot send a duplicate. Sent, failed, and in-flight attempts remain
+visible through `GET /mails/history` and the Mails console, including the
+message, affected events, held-side odds, provider diagnostics, and operator
+remarks. Delivery metadata is also attached additively to
+`run.audit_metadata.stage2_position_warning_mail`; historical run payloads
+without this field remain valid. Mail failure is recorded and logged but does
+not block Stage 3 or alter trading decisions.
+
 ### Operator Stage 3 retries
 
 The Stage 3 worker card exposes an explicit retry control while Stage 3 is working.
