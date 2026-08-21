@@ -13,6 +13,7 @@ from app.domains.bullpen_trade_analysis.service import (
     sync_auto_live_position_snapshots_sync,
 )
 from app.domains.bullpen_run_audit.service import materialize_run_audit_snapshot_sync
+from app.domains.mails.service import notify_stage2_position_warnings_sync
 from app.domains.polymarket.logger import redact_secrets
 from app.domains.polymarket.runtime_broker import run_with_bullpen_runtime_cleanup
 from app.domains.polymarket_auto_live.bot import (
@@ -1028,6 +1029,26 @@ def _execute_polymarket_auto_live_run_with_lease(
                     run=current_run,
                     state=current_state,
                 )
+
+                # The engine invokes this callback immediately after finalizing
+                # Stage 2 and before it enters Stage 3. Reserve the delivery
+                # record before SMTP so worker redelivery cannot duplicate mail.
+                try:
+                    mail_metadata = notify_stage2_position_warnings_sync(
+                        session,
+                        user_id=user_id,
+                        run=current_run,
+                    )
+                    if mail_metadata.get("status") != "stage2_not_complete":
+                        repo.save_run(user_id, current_run)
+                        session.commit()
+                except Exception:
+                    session.rollback()
+                    logger.exception(
+                        "Stage 2 position-warning mail processing failed for run %s; "
+                        "the trading workflow will continue.",
+                        current_run.id,
+                    )
 
             engine_result = run_with_bullpen_runtime_cleanup(
                 BullpenAutoLiveEngine().execute(
