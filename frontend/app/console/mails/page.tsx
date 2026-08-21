@@ -1,25 +1,69 @@
 'use client';
 
 import { useState } from 'react';
-import { CheckCircle2, Mail, Send } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Mail, Send, Wrench } from 'lucide-react';
 
 import { URLs } from '@/lib/urls';
 
 const RECIPIENT = 'tarun.singh6893@gmail.com';
 const MESSAGE = "Hi, this a message from Tarun's Cred-X";
 
+type MailFailure = {
+  code: string;
+  summary: string;
+  provider_message?: string | null;
+  how_to_fix: string[];
+  configuration?: {
+    host: string;
+    port?: number | null;
+    username_configured: boolean;
+    password_configured: boolean;
+    from_email: string;
+    from_name: string;
+  };
+};
+
+function normalizeFailure(payload: unknown): MailFailure {
+  const candidate =
+    payload && typeof payload === 'object' && 'detail' in payload
+      ? (payload as { detail?: unknown }).detail
+      : payload;
+
+  if (candidate && typeof candidate === 'object' && 'code' in candidate) {
+    const detail = candidate as Partial<MailFailure>;
+    return {
+      code: detail.code || 'EMAIL_SEND_FAILED',
+      summary: detail.summary || 'The email could not be sent.',
+      provider_message: detail.provider_message,
+      how_to_fix: Array.isArray(detail.how_to_fix) ? detail.how_to_fix : [],
+      configuration: detail.configuration,
+    };
+  }
+
+  return {
+    code: 'EMAIL_SEND_FAILED',
+    summary:
+      typeof candidate === 'string'
+        ? candidate
+        : 'The email could not be sent.',
+    how_to_fix: [
+      'Check the investor-backend logs and verify the SMTP configuration.',
+    ],
+  };
+}
+
 export default function MailsPage() {
   const [selected, setSelected] = useState(true);
   const [sending, setSending] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<MailFailure | null>(null);
 
   async function sendMail() {
     if (!selected || sending) return;
 
     setSending(true);
     setSuccess(null);
-    setError(null);
+    setFailure(null);
 
     try {
       const response = await fetch(URLs.mails.sendTest(), {
@@ -29,18 +73,23 @@ export default function MailsPage() {
       const payload = await response.json().catch(() => null);
 
       if (!response.ok) {
-        throw new Error(
-          payload?.detail || payload?.message || 'The email could not be sent.',
-        );
+        setFailure(normalizeFailure(payload));
+        return;
       }
 
       setSuccess(`Email sent successfully to ${RECIPIENT}.`);
     } catch (sendError) {
-      setError(
-        sendError instanceof Error
-          ? sendError.message
-          : 'The email could not be sent.',
-      );
+      setFailure({
+        code: 'MAIL_API_UNREACHABLE',
+        summary:
+          sendError instanceof Error
+            ? sendError.message
+            : 'The mail API could not be reached.',
+        how_to_fix: [
+          'Reload the page and try once more.',
+          'If it continues, verify that investor-backend is running and inspect its logs.',
+        ],
+      });
     } finally {
       setSending(false);
     }
@@ -101,9 +150,45 @@ export default function MailsPage() {
             </div>
           ) : null}
 
-          {error ? (
-            <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
-              {error}
+          {failure ? (
+            <div role="alert" className="space-y-4 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-950">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+                <div>
+                  <p className="text-sm font-bold">{failure.summary}</p>
+                  <p className="mt-1 font-mono text-xs font-semibold text-red-700">
+                    Error code: {failure.code}
+                  </p>
+                  {failure.provider_message ? (
+                    <p className="mt-2 rounded-lg bg-white/70 px-3 py-2 font-mono text-xs leading-5 text-red-800">
+                      Provider response: {failure.provider_message}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              {failure.configuration ? (
+                <div className="grid gap-2 rounded-xl border border-red-200 bg-white/70 p-3 text-xs sm:grid-cols-2">
+                  <p><span className="font-semibold">SMTP server:</span> {failure.configuration.host}:{failure.configuration.port ?? 'not set'}</p>
+                  <p><span className="font-semibold">Sender:</span> {failure.configuration.from_name} &lt;{failure.configuration.from_email}&gt;</p>
+                  <p><span className="font-semibold">Username:</span> {failure.configuration.username_configured ? 'Configured' : 'Missing'}</p>
+                  <p><span className="font-semibold">Password:</span> {failure.configuration.password_configured ? 'Configured (hidden)' : 'Missing'}</p>
+                </div>
+              ) : null}
+
+              {failure.how_to_fix.length ? (
+                <div>
+                  <div className="flex items-center gap-2 text-sm font-bold">
+                    <Wrench className="h-4 w-4" />
+                    How to fix
+                  </div>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm leading-5">
+                    {failure.how_to_fix.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
