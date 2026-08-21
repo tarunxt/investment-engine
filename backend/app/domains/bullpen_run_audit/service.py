@@ -94,6 +94,19 @@ def _parse_iso(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Normalize legacy naive and current aware database timestamps for comparison."""
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        # PostgreSQL timestamp columns historically returned naive UTC values
+        # for some audit rows. Treat those stored values as UTC rather than
+        # comparing them directly with aware ORM timestamps.
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 def _duration_seconds(started_at: str | None, completed_at: str | None) -> float | None:
     start = _parse_iso(started_at)
     end = _parse_iso(completed_at)
@@ -1473,13 +1486,20 @@ def materialize_run_audit_snapshot_sync(
         and getattr(current_snapshot, "lifecycle_status", None)
         == SNAPSHOT_STATUS_FROZEN
     )
+    snapshot_source_updated_at = _as_utc(
+        current_snapshot.source_run_updated_at if current_snapshot is not None else None
+    )
+    durable_run_updated_at = _as_utc(run_record.updated_at)
+    snapshot_covers_durable_run = (
+        snapshot_source_updated_at is not None
+        and durable_run_updated_at is not None
+        and snapshot_source_updated_at >= durable_run_updated_at
+    )
     frozen_snapshot_is_unchanged = (
         current_is_frozen
         and current_snapshot.snapshot_schema_version
         == BULLPEN_RUN_AUDIT_SCHEMA_VERSION
-        and current_snapshot.source_run_updated_at is not None
-        and run_record.updated_at is not None
-        and current_snapshot.source_run_updated_at >= run_record.updated_at
+        and snapshot_covers_durable_run
     )
     # A frozen snapshot is immutable evidence.  ``force=True`` means "observe
     # the latest durable run state", not "rewrite history".  Return the
@@ -1492,9 +1512,7 @@ def materialize_run_audit_snapshot_sync(
         current_snapshot is not None
         and not force
         and current_snapshot.snapshot_schema_version == BULLPEN_RUN_AUDIT_SCHEMA_VERSION
-        and current_snapshot.source_run_updated_at is not None
-        and run_record.updated_at is not None
-        and current_snapshot.source_run_updated_at >= run_record.updated_at
+        and snapshot_covers_durable_run
     ):
         return _materialized_snapshot_from_record(current_snapshot)
 
