@@ -11971,9 +11971,13 @@ export function BullpenAutoRunScheduleCard({
       pendingRunId !== null ||
       isActivelyWorkingRunStatus(visibleRun?.status) ||
       hasActiveWorkflowStage);
+  // Keep using the reconciled terminal copy after Stage 3. The compact
+  // `latest_run` payload can contain zero placeholders and omit frozen rows;
+  // selecting it here used to reset Stage 1/2 figures and left their dialogs
+  // without the evidence needed to open correctly.
   const latestTerminalRun =
-    summary?.latest_run && !isActivelyWorkingRunStatus(summary.latest_run.status)
-      ? summary.latest_run
+    latestRun && !isActivelyWorkingRunStatus(latestRun.status)
+      ? latestRun
       : summary?.recent_runs.find(
           (run) => !isActivelyWorkingRunStatus(run.status),
         ) ?? null;
