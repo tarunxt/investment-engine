@@ -256,19 +256,15 @@ export function BullpenStage2ActionablesDialog({
           "Persisted by Stage 2 as an authoritative Event Exit actionable.",
       };
     });
-    const exitKeys = new Set(
-      eventExits.flatMap((item) =>
-        [item.title, item.slug, item.marketUrl]
-          .filter((value): value is string => Boolean(value))
-          .map((value) => value.trim().toLowerCase()),
-      ),
+    // Event URLs group multiple dated markets, so URL/parent-event slug is
+    // deliberately not an exit identity. The canonical Gamma question is the
+    // exact market-level bridge available for legacy retained runs.
+    const exitTitles = new Set(
+      eventExits.map((item) => item.title.trim().toLowerCase()),
     );
     const hold = actionables.hold.filter(
       (item) =>
-        ![item.title, item.slug, item.marketUrl]
-          .filter((value): value is string => Boolean(value))
-          .map((value) => value.trim().toLowerCase())
-          .some((value) => exitKeys.has(value)),
+        !exitTitles.has(item.title.trim().toLowerCase()),
     );
     return { ...actionables, eventExits, hold };
   }, [actionables, marketMetadata]);
