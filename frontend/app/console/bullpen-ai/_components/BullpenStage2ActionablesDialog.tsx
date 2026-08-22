@@ -262,12 +262,25 @@ export function BullpenStage2ActionablesDialog({
     const exitTitles = new Set(
       eventExits.map((item) => item.title.trim().toLowerCase()),
     );
-    const hold = actionables.hold.filter(
+    const matchedHold = actionables.hold.filter(
       (item) =>
         !exitTitles.has(item.title.trim().toLowerCase()),
     );
+    // A legacy budget-trimmed run starts with every preserved active position
+    // in Hold because its exit rows lost metadata. The live wallet may have
+    // changed since that scan (for example, one exited market disappeared),
+    // so reconcile the row count to the frozen run aggregate instead of
+    // allowing today's portfolio to rewrite the historical result.
+    const historicalHoldCount = Math.max(
+      0,
+      actionables.hold.length - actionables.eventExits.length,
+    );
+    const hold =
+      unresolvedMarketIds.length > 0
+        ? matchedHold.slice(0, historicalHoldCount)
+        : matchedHold;
     return { ...actionables, eventExits, hold };
-  }, [actionables, marketMetadata]);
+  }, [actionables, marketMetadata, unresolvedMarketIds.length]);
 
   useEffect(() => {
     closeButtonRef.current?.focus();
