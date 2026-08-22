@@ -2789,6 +2789,7 @@ export interface BullpenAutoLiveRun {
   guardrail_checks: BullpenAutoLiveGuardrailCheck[];
   decision_ids: string[];
   order_intent_ids?: string[];
+  stage2_llm_targets_snapshot?: ProviderModelTarget[] | null;
   request_context?: BullpenAutoLiveRunOnceRequest | null;
   audit_metadata?: Record<string, unknown>;
   task_lifecycle?: BullpenAutoLiveTaskLifecycle | null;

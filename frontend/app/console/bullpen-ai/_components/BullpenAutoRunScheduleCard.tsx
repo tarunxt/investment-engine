@@ -1313,6 +1313,30 @@ function isWorkflowActivePosition(position: WorkflowStageView["activePositionsFo
   return !position.isClaimable && (position.classification === null || position.classification === "active");
 }
 
+function buildWorkflowPortfolioPositionFallback(
+  positions: BullpenActivePositionView[],
+): WorkflowStageView["activePositionsFound"] {
+  return positions.map((position) => ({
+    positionKey: position.key,
+    marketId: position.marketId,
+    marketTitle: position.marketTitle,
+    marketUrl: position.marketUrl,
+    slug: position.slug,
+    theme: null,
+    side: position.heldSide ?? position.outcome ?? null,
+    shares: position.shares,
+    exposureUsd: position.currentValue ?? position.costBasis,
+    averagePriceCents:
+      position.averagePrice === null ? null : position.averagePrice * 100,
+    currentYesOdds: position.yesOdds,
+    currentNoOdds: position.noOdds,
+    closeTime: position.closeTime,
+    conditionId: position.conditionId,
+    isClaimable: position.isClaimable,
+    classification: position.economicClassification,
+  }));
+}
+
 function getStageActivePositionCounts(stage: WorkflowStageView) {
   const claimableFromOutputs = Array.isArray(stage.outputs.available_for_claim)
     ? stage.outputs.available_for_claim.length
@@ -1427,9 +1451,10 @@ function buildStageTwoInvestEventsDialogState({
 
   const scanStageResult = getRunWorkflowStageResult(run, "scan", 1);
   const llmStageResult = getRunWorkflowStageResult(run, "llm", 2);
-  const reviewedRows = getHistoricalStageTwoLlmReviewedRows(
+  const reviewedRows = getStageTwoLlmReviewedRows(
     llmWorkflowStage,
     scanWorkflowStage?.scanCandidates ?? [],
+    decisions,
   );
   const eventsSummaryAsOfTimestamp = resolveStageTwoHistoricalAsOfTimestamp({
     reviewedRows,
@@ -2011,12 +2036,14 @@ function StageTwoRunStats({
   onOpenLlmRunDetails,
   onOpenScanCandidateDialog,
   scanStageForPositionSnapshot,
+  activePositionRowsFallback = [],
 }: {
   run: BullpenAutoLiveRun | null;
   stage: WorkflowStageView;
   hideNumbers?: boolean;
   decisions?: BullpenAutoLiveDecision[];
   scanStageForPositionSnapshot?: WorkflowStageView;
+  activePositionRowsFallback?: WorkflowStageView["activePositionsFound"];
   onOpenInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenScanCandidateDialog?: (
@@ -2032,6 +2059,10 @@ function StageTwoRunStats({
   });
   const stats = getStageTwoStats(stage, decisions, run);
   const positionDialogStage = scanStageForPositionSnapshot ?? stage;
+  const actionableActivePositions =
+    positionDialogStage.activePositionsFound.length > 0
+      ? positionDialogStage.activePositionsFound
+      : activePositionRowsFallback;
   const positionStats = scanStageForPositionSnapshot
     ? getStageOneStats(scanStageForPositionSnapshot)
     : {
@@ -2047,8 +2078,8 @@ function StageTwoRunStats({
   const hasActionableDisplay = actionableContract.hasDisplayCounts;
   const canOpenActionablesDialog = actionableContract.hasExactMarketIds;
   const actionables = canOpenActionablesDialog
-    ? buildBullpenStage2Actionables({
-        activePositions: positionDialogStage.activePositionsFound,
+      ? buildBullpenStage2Actionables({
+        activePositions: actionableActivePositions,
         decisions,
         selectedRows: stage2InvestEventsState?.rows ?? [],
         authoritativeActionables: {
@@ -3812,6 +3843,10 @@ function StageOneOutputDialog({
     return <AllScannedEventsDialog state={state} onClose={onClose} />;
   }
   const showActivePositionsFirst = state.mode === "active-positions";
+  const retainedCandidateCount = Math.max(
+    state.passedFilterCount,
+    state.candidates.length,
+  );
   const claimablePositions = state.activePositions.filter(
     (position) => position.isClaimable,
   );
@@ -3829,7 +3864,7 @@ function StageOneOutputDialog({
             <h2 className="text-xl font-semibold text-slate-950">
               {showActivePositionsFirst
                 ? `Positions (${state.activePositionCount})`
-                : `Fresh Bullpen Opportunities (${state.candidates.length})`}
+                : `Fresh Bullpen Opportunities (${retainedCandidateCount})`}
             </h2>
             <p className="text-sm text-slate-600">
               Latest Bullpen Scan Stage 1 completed at{" "}
@@ -3869,7 +3904,7 @@ function StageOneOutputDialog({
                 Fresh Bullpen Opportunities
               </p>
               <p className="mt-2 text-2xl font-semibold text-pink-950">
-                {state.candidates.length}
+                {retainedCandidateCount}
               </p>
             </div>
           </div>
@@ -4067,8 +4102,8 @@ function StageOneOutputDialog({
                   </p>
                 </div>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-                  {state.candidates.length}{" "}
-                  {state.candidates.length === 1 ? "candidate" : "candidates"}
+                  {retainedCandidateCount}{" "}
+                  {retainedCandidateCount === 1 ? "candidate" : "candidates"}
                 </span>
               </div>
 
@@ -5616,8 +5651,36 @@ function readLlmContextArray(
 function getStageTwoLlmReviewedRows(
   stage: WorkflowStageView,
   scanCandidates: WorkflowStageView["scanCandidates"] = [],
+  decisions: BullpenAutoLiveDecision[] = [],
 ) {
-  return getHistoricalStageTwoLlmReviewedRows(stage, scanCandidates);
+  const retainedRows = getHistoricalStageTwoLlmReviewedRows(
+    stage,
+    scanCandidates,
+  );
+  if (retainedRows.length > 0 || decisions.length === 0) return retainedRows;
+
+  // Terminal compact projections can retain exact aggregate counts while the
+  // large Stage 2 row array is omitted. Persisted decisions still carry the
+  // market identity, odds, rationale, and any surviving LLM evidence, so use
+  // them as the dialog's honest row-level fallback instead of showing an empty
+  // table beneath a non-zero "LLM ran on" total.
+  return decisions.map((decision) => ({
+    market_id: decision.market_id,
+    slug: decision.slug ?? undefined,
+    market_url: decision.market_url ?? undefined,
+    question: decision.market_title,
+    market_title: decision.market_title,
+    close_time: decision.close_time ?? undefined,
+    category: decision.theme,
+    theme: decision.theme,
+    current_yes_odds: decision.current_yes_odds ?? undefined,
+    current_no_odds: decision.current_no_odds ?? undefined,
+    fair_yes_probability_pct:
+      decision.fair_yes_probability_pct ?? undefined,
+    fair_no_probability_pct:
+      decision.fair_no_probability_pct ?? undefined,
+    llm_outputs: decision.llm_outputs,
+  }));
 }
 
 function getStageTwoLlmTableRows(
@@ -5630,9 +5693,10 @@ function getStageTwoLlmTableRows(
           (workflowStage) => workflowStage.key === "scan",
         )?.scanCandidates ?? [])
       : [];
-  const reviewedRows = getHistoricalStageTwoLlmReviewedRows(
+  const reviewedRows = getStageTwoLlmReviewedRows(
     state.stage,
     scanCandidates,
+    state.decisions,
   );
   return getHistoricalStageTwoLlmTableRows({
     reviewedRows,
@@ -6338,7 +6402,11 @@ export function StageTwoLlmRunDetailsDialog({
   const scanCandidates = scanWorkflowStage?.scanCandidates ?? [];
   const scanStageResult = getRunWorkflowStageResult(state.run, "scan", 1);
   const llmStageResult = getRunWorkflowStageResult(state.run, "llm", 2);
-  const reviewedRows = getStageTwoLlmReviewedRows(state.stage, scanCandidates);
+  const reviewedRows = getStageTwoLlmReviewedRows(
+    state.stage,
+    scanCandidates,
+    state.decisions,
+  );
   const eventsSummaryAsOfTimestamp = resolveStageTwoHistoricalAsOfTimestamp({
     reviewedRows,
     scanCompletedAt:
@@ -6366,11 +6434,42 @@ export function StageTwoLlmRunDetailsDialog({
     (row) => row.output && !readLlmContextString(row.output, "error"),
   );
   const llmModelGroups = groupStageTwoLlmRowsByModel(llmTableRows);
-  const summaryRows = getStageTwoLlmRunSummaryRows(
+  const retainedSummaryRows = getStageTwoLlmRunSummaryRows(
     state.stage,
     llmModelGroups,
     dialogNowMs,
   );
+  const savedTargets = state.run?.stage2_llm_targets_snapshot ?? [];
+  const summaryRows: StageTwoLlmRunSummaryRow[] =
+    retainedSummaryRows.length > 0
+      ? retainedSummaryRows
+      : savedTargets.map((target, index) => ({
+          key: `${target.provider}::${target.model}::recovered-${index}`,
+          provider: target.provider,
+          model: target.model,
+          displayModel: target.model,
+          requestedModel: target.model,
+          status:
+            index < stats.llmsPassed
+              ? "completed"
+              : index < stats.llmsPassed + stats.llmsFailed
+                ? "failed"
+                : state.stage.state === "finished"
+                  ? "completed"
+                  : "pending",
+          runtime: "—",
+          cost: null,
+          error: null,
+          failureCategory: null,
+          firstError: null,
+          lastError: null,
+          batchErrors: [],
+          failedEventCount: null,
+          invalidEventCount: null,
+          blockedEventCount: null,
+          retryRequestCount: null,
+          recoveryBatchCount: null,
+        }));
   const completedSummaryCount = summaryRows.filter(
     (row) => row.status === "completed",
   ).length;
@@ -11865,6 +11964,8 @@ export function BullpenAutoRunScheduleCard({
     hasActivePositionsSnapshot ||
     useVerifiedStage1Fallback ||
     (!verifiedStage1Portfolio && activePositions.length > 0);
+  const workflowPortfolioPositionFallback =
+    buildWorkflowPortfolioPositionFallback(portfolioActivePositions);
   const {
     activePositionQuestionByKey: stage3PreviewQuestionByKey,
     activePositionsNeedingAttention: stage3PreviewAttentionEntries,
@@ -11933,6 +12034,12 @@ export function BullpenAutoRunScheduleCard({
   ) => {
     const activePositionCounts = getStageActivePositionCounts(stage);
     const stageOneStats = getStageOneStats(stage);
+    const retainedActivePositionRows =
+      stage.activePositionsFound.length > 0
+        ? stage.activePositionsFound
+        : activePositionCounts.open === workflowPortfolioPositionFallback.length
+          ? workflowPortfolioPositionFallback
+          : [];
     const rejectedFilterCount =
       readStageOutputNumber(stage.outputs.rejected_candidates_count) ??
       (Array.isArray(stage.outputs.rejected_candidates)
@@ -11959,7 +12066,7 @@ export function BullpenAutoRunScheduleCard({
         run: workflowRunForMonitor,
         decisions: summary?.recent_decisions ?? [],
       }),
-      activePositions: stage.activePositionsFound,
+      activePositions: retainedActivePositionRows,
       activePositionCount: activePositionCounts.open,
       claimablePositionCount: activePositionCounts.claimable,
     });
@@ -13289,6 +13396,9 @@ export function BullpenAutoRunScheduleCard({
                           scanStageForPositionSnapshot={workflowView.stages.find(
                             (item) => item.key === "scan",
                           )}
+                          activePositionRowsFallback={
+                            workflowPortfolioPositionFallback
+                          }
                         />
                       ) : null}
                     </div>
