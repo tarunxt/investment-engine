@@ -304,4 +304,11 @@ test("the Stage 2 monitor renders the clickable Actionables line below New Event
     scheduleCardSource,
     /getBullpenTopTenStrongestLlmOddsRows/,
   );
+  assert.match(scheduleCardSource, /HistoricalPlannedContractRows/);
+  assert.match(scheduleCardSource, /stage2_actionable_exit_market_ids/);
+  assert.match(scheduleCardSource, /stage2_actionable_buy_market_ids/);
+  assert.match(
+    scheduleCardSource,
+    /Preserved from the completed Stage 2 actionable contract/,
+  );
 });
