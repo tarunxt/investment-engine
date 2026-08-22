@@ -38,6 +38,8 @@ type MailHistoryItem = {
   provider_message?: string | null;
 };
 
+type MailHistoryTab = 'alerts' | 'runs';
+
 type MailFailure = {
   code: string;
   summary: string;
@@ -82,6 +84,13 @@ function normalizeFailure(payload: unknown): MailFailure {
   };
 }
 
+function isRunNotification(item: MailHistoryItem) {
+  return (
+    item.trigger === 'Run completion' ||
+    item.trigger === 'Auto-rebalance completion'
+  );
+}
+
 export default function MailsPage() {
   const [selected, setSelected] = useState(true);
   const [sending, setSending] = useState(false);
@@ -90,6 +99,7 @@ export default function MailsPage() {
   const [history, setHistory] = useState<MailHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyTab, setHistoryTab] = useState<MailHistoryTab>('runs');
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -158,6 +168,10 @@ export default function MailsPage() {
       setSending(false);
     }
   }
+
+  const runHistory = history.filter(isRunNotification);
+  const alertsHistory = history.filter((item) => !isRunNotification(item));
+  const visibleHistory = historyTab === 'runs' ? runHistory : alertsHistory;
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
@@ -276,7 +290,7 @@ export default function MailsPage() {
             </p>
             <h2 className="mt-1 text-xl font-bold text-foreground">Sent mail history</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Automatic Stage 2 warnings and manual tests, including failures and remarks.
+              All Cred-X mail attempts, separated into automated run notifications and alerts/tests.
             </p>
           </div>
           <button
@@ -290,6 +304,43 @@ export default function MailsPage() {
           </button>
         </div>
 
+        <div className="border-b border-border px-6 pt-4">
+          <div className="flex gap-1" role="tablist" aria-label="Mail history categories">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={historyTab === 'runs'}
+              onClick={() => setHistoryTab('runs')}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
+                historyTab === 'runs'
+                  ? 'border-violet-600 text-violet-700'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Run notifications
+              <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">
+                {runHistory.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={historyTab === 'alerts'}
+              onClick={() => setHistoryTab('alerts')}
+              className={`border-b-2 px-4 py-3 text-sm font-semibold transition ${
+                historyTab === 'alerts'
+                  ? 'border-violet-600 text-violet-700'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Alerts &amp; tests
+              <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs">
+                {alertsHistory.length}
+              </span>
+            </button>
+          </div>
+        </div>
+
         <div className="space-y-4 p-6">
           {historyError ? (
             <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -297,13 +348,15 @@ export default function MailsPage() {
             </div>
           ) : null}
 
-          {!historyLoading && history.length === 0 ? (
+          {!historyLoading && visibleHistory.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              No mail attempts have been recorded yet.
+              {historyTab === 'runs'
+                ? 'No automated run notification mails have been recorded yet.'
+                : 'No alert or manual-test mail attempts have been recorded yet.'}
             </div>
           ) : null}
 
-          {history.map((item) => {
+          {visibleHistory.map((item) => {
             const statusTone =
               item.status === 'sent'
                 ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
