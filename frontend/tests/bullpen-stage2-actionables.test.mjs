@@ -208,6 +208,47 @@ test("explicit empty Stage 2 contract never invents exits or buys", async () => 
   assert.deepEqual(result.hold.map((item) => item.marketId), ["active-hold"]);
 });
 
+test("authoritative exit IDs resolve through saved active-position question identities", async () => {
+  const { buildBullpenStage2Actionables } = await loadActionablesModule();
+  const exitPosition = activePosition({
+    marketId: "condition-exit",
+    title: "Named Active Exit",
+  });
+  const holdPosition = activePosition({
+    marketId: "condition-hold",
+    title: "Named Active Hold",
+  });
+  const result = buildBullpenStage2Actionables({
+    activePositions: [exitPosition, holdPosition],
+    activePositionQuestions: [
+      {
+        ...selectedRow({ marketId: "3253026", title: "Named Active Exit" }),
+        id: exitPosition.positionKey,
+        positionKey: exitPosition.positionKey,
+        conditionId: "condition-exit",
+      },
+      {
+        ...selectedRow({ marketId: "3253027", title: "Named Active Hold" }),
+        id: holdPosition.positionKey,
+        positionKey: holdPosition.positionKey,
+        conditionId: "condition-hold",
+      },
+    ],
+    decisions: [],
+    selectedRows: [],
+    authoritativeActionables: {
+      exitMarketIds: ["3253026"],
+      buyMarketIds: [],
+    },
+  });
+
+  assert.deepEqual(result.eventExits.map((item) => item.title), [
+    "Named Active Exit",
+  ]);
+  assert.deepEqual(result.hold.map((item) => item.title), ["Named Active Hold"]);
+  assert.doesNotMatch(JSON.stringify(result.eventExits), /metadata is unavailable/);
+});
+
 test("the actionables dialog keeps the required red, green, and yellow sections", () => {
   const dialogSource = readFileSync(
     new URL(
