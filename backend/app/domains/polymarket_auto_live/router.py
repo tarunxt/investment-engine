@@ -30,7 +30,6 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRun,
-    BullpenAutoLiveRunDiagnostics,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveSettings,
@@ -355,8 +354,12 @@ def _fit_dashboard_response_budget(
                 "guardrail_checks": [],
                 "decision_ids": [],
                 "order_intent_ids": [],
-                "diagnostics": BullpenAutoLiveRunDiagnostics(),
-                "stage2_llm_targets_snapshot": [],
+                # Diagnostics and the selected-target snapshot are compact,
+                # durable aggregates. Keeping them lets the browser render the
+                # completed scan's real counts while the expandable row arrays
+                # are loaded from the exact-run console endpoint.
+                "diagnostics": latest_run.diagnostics,
+                "stage2_llm_targets_snapshot": latest_run.stage2_llm_targets_snapshot,
             }
         )
     sections = dict(bounded.sections)

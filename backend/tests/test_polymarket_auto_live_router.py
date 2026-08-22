@@ -441,13 +441,24 @@ def test_dashboard_summary_hard_bounds_oversized_optional_workflow_detail():
         dry_run=True,
         started_at="2026-07-26T10:00:00+00:00",
         summary="Working",
+        diagnostics={
+            "scanned_candidates": 1592,
+            "candidate_rows_before_llm": 12,
+            "active_wallet_positions": 13,
+            "llm_candidate_count": 17,
+        },
         stage_results=[
             BullpenAutoLiveStageResult(
                 stage_number=1,
                 stage_name="Stage 1",
                 status="pass",
                 reason="Complete",
-                outputs={"oversized": "x" * 250_000},
+                outputs={
+                    "oversized": "x" * 250_000,
+                    "scanned_candidates": 1592,
+                    "accepted_candidates_count": 12,
+                    "active_position_rows_before_llm": 13,
+                },
                 started_at="2026-07-26T10:00:00+00:00",
             )
         ],
@@ -474,7 +485,16 @@ def test_dashboard_summary_hard_bounds_oversized_optional_workflow_detail():
     compact_stage = bounded.latest_run.stage_results[0]
     assert compact_stage.stage_number == 1
     assert compact_stage.status == "pass"
-    assert compact_stage.outputs == {"workflow_stage_key": "scan"}
+    assert compact_stage.outputs == {
+        "workflow_stage_key": "scan",
+        "scanned_candidates": 1592,
+        "accepted_candidates_count": 12,
+        "active_position_rows_before_llm": 13,
+    }
+    assert bounded.latest_run.diagnostics.scanned_candidates == 1592
+    assert bounded.latest_run.diagnostics.candidate_rows_before_llm == 12
+    assert bounded.latest_run.diagnostics.active_wallet_positions == 13
+    assert bounded.latest_run.diagnostics.llm_candidate_count == 17
     assert "workflow" in bounded.degraded_sections
 
 

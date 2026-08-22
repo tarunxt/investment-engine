@@ -292,7 +292,8 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunCardSource, /active_position_rows_before_llm/);
   assert.match(autoRunCardSource, /Math\.max\(0, llmRanOn - activePositions\)/);
   assert.match(autoRunCardSource, /terminalRunEvidenceRef/);
-  assert.match(autoRunCardSource, /getBullpenAutoLiveRun\(run\.id/);
+  assert.match(autoRunCardSource, /getBullpenAutoLiveRunConsole\(run\.id/);
+  assert.match(autoRunCardSource, /runDetail\.projection_available/);
   assert.match(
     autoRunCardSource,
     /bullpen_auto_run_terminal_evidence_hydration_failed/,
