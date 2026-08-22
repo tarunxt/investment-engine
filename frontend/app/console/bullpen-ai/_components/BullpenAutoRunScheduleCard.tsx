@@ -10484,8 +10484,8 @@ export function BullpenAutoRunScheduleCard({
 
     const task = (async () => {
       try {
-        const [fullRun, fullDecisions] = await Promise.all([
-          apiService.getBullpenAutoLiveRun(run.id, {
+        const [runDetail, fullDecisions] = await Promise.all([
+          apiService.getBullpenAutoLiveRunConsole(run.id, {
             signal,
             timeoutMs: 15_000,
           }),
@@ -10496,10 +10496,17 @@ export function BullpenAutoRunScheduleCard({
         ]);
         if (signal?.aborted) return;
 
+        const fullRun = runDetail.projection_available
+          ? runDetail.run
+          : await apiService.getBullpenAutoLiveRun(run.id, {
+              signal,
+              timeoutMs: 15_000,
+            });
+        if (signal?.aborted) return;
         const mergedRun = mergeBullpenConsoleRunProjection({
           existing: fullRun,
           projected: run,
-          projectionAvailable: true,
+          projectionAvailable: runDetail.projection_available,
         });
         const projectedDecisions = nextSummary.recent_decisions.filter(
           (decision) => decision.run_id === run.id,
