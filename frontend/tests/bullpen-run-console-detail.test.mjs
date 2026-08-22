@@ -242,6 +242,46 @@ test("completed stage metrics survive later compact workflow projections", async
   assert.equal(merged.stage_results[0].outputs.llm_candidate_count, 17);
 });
 
+test("completed stage metrics do not regress to compact zero placeholders", async () => {
+  const { mergeBullpenConsoleRunProjection } = await loadModule();
+  const completedAt = "2026-08-02T14:08:10Z";
+  const existing = run({
+    ...stage("pass", {
+      scanned_candidates: [{ market_id: "one" }, { market_id: "two" }],
+      active_position_rows: 13,
+      accepted_candidates_count: 12,
+      llm_candidate_count: 17,
+      llm_completed_provider_target_count: 3,
+    }),
+    completed_at: completedAt,
+  });
+  const projected = run({
+    ...stage("pass", {
+      scanned_candidates: [],
+      active_position_rows: 0,
+      accepted_candidates_count: 0,
+      llm_candidate_count: 0,
+      llm_completed_provider_target_count: 0,
+    }),
+    completed_at: completedAt,
+  });
+
+  const merged = mergeBullpenConsoleRunProjection({
+    existing,
+    projected,
+    projectionAvailable: true,
+  });
+
+  assert.equal(merged.stage_results[0].outputs.scanned_candidates.length, 2);
+  assert.equal(merged.stage_results[0].outputs.active_position_rows, 13);
+  assert.equal(merged.stage_results[0].outputs.accepted_candidates_count, 12);
+  assert.equal(merged.stage_results[0].outputs.llm_candidate_count, 17);
+  assert.equal(
+    merged.stage_results[0].outputs.llm_completed_provider_target_count,
+    3,
+  );
+});
+
 test("duplicate summary copies retain completed metrics from the richer run", async () => {
   const { reconcileBullpenConsoleRunCopies } = await loadModule();
   const completedAt = "2026-08-03T10:25:10Z";
