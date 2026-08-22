@@ -268,6 +268,8 @@ test("the actionables dialog keeps the required red, green, and yellow sections"
   assert.match(dialogSource, /marketTitles/);
   assert.match(dialogSource, /market-urls/);
   assert.match(dialogSource, /visibleActionables\.hold/);
+  assert.match(dialogSource, /Event URLs group multiple dated markets/);
+  assert.doesNotMatch(dialogSource, /exitKeys\.has/);
 });
 
 test("the Stage 2 monitor renders the clickable Actionables line below New Events", () => {
