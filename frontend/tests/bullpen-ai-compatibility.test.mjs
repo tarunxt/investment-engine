@@ -1108,6 +1108,14 @@ test("Bullpen auto-run summary sync keeps completed run visible after refresh", 
   );
   assert.match(
     scheduleCardSource,
+    /const latestTerminalRun =\s+latestRun && !isActivelyWorkingRunStatus\(latestRun\.status\)/,
+  );
+  assert.match(
+    scheduleCardSource,
+    /openRunDetailDialog\(latestTerminalRun\)/,
+  );
+  assert.match(
+    scheduleCardSource,
     /recent_runs\.find\(\(run\) => run\.status === "completed"\)/,
   );
 });

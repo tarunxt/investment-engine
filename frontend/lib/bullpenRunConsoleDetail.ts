@@ -194,6 +194,23 @@ function numericMetric(value: unknown) {
   return null;
 }
 
+function preserveRicherCompletedMetric(
+  existing: unknown,
+  projected: unknown,
+) {
+  const existingMetric = numericMetric(existing);
+  const projectedMetric = numericMetric(projected);
+  if (existingMetric !== null && projectedMetric !== null) {
+    return projectedMetric < existingMetric ? existing : projected;
+  }
+
+  if (Array.isArray(existing) && Array.isArray(projected)) {
+    return projected.length < existing.length ? existing : projected;
+  }
+
+  return projected === undefined ? existing : projected;
+}
+
 function isSameStageExecutionGeneration(
   existing: BullpenAutoLiveStageResult,
   projected: BullpenAutoLiveStageResult,
@@ -232,12 +249,11 @@ function mergeStageProjection(
   }
   if (projected.completed_at) {
     for (const key of COMPLETED_STAGE_METRIC_OUTPUT_KEYS) {
-      if (
-        !Object.hasOwn(projected.outputs ?? {}, key) &&
-        Object.hasOwn(existing.outputs ?? {}, key)
-      ) {
-        outputs[key] = existing.outputs[key];
-      }
+      if (!Object.hasOwn(existing.outputs ?? {}, key)) continue;
+      outputs[key] = preserveRicherCompletedMetric(
+        existing.outputs[key],
+        projected.outputs?.[key],
+      );
     }
   }
   for (const key of FROZEN_EVIDENCE_OUTPUT_KEYS) {
