@@ -2037,6 +2037,7 @@ function StageTwoRunStats({
   onOpenScanCandidateDialog,
   scanStageForPositionSnapshot,
   activePositionRowsFallback = [],
+  activePositionQuestions = [],
 }: {
   run: BullpenAutoLiveRun | null;
   stage: WorkflowStageView;
@@ -2044,6 +2045,7 @@ function StageTwoRunStats({
   decisions?: BullpenAutoLiveDecision[];
   scanStageForPositionSnapshot?: WorkflowStageView;
   activePositionRowsFallback?: WorkflowStageView["activePositionsFound"];
+  activePositionQuestions?: BullpenQuestionRow[];
   onOpenInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenScanCandidateDialog?: (
@@ -2080,6 +2082,7 @@ function StageTwoRunStats({
   const actionables = canOpenActionablesDialog
       ? buildBullpenStage2Actionables({
         activePositions: actionableActivePositions,
+        activePositionQuestions,
         decisions,
         selectedRows: stage2InvestEventsState?.rows ?? [],
         authoritativeActionables: {
@@ -13402,6 +13405,7 @@ export function BullpenAutoRunScheduleCard({
                           activePositionRowsFallback={
                             workflowPortfolioPositionFallback
                           }
+                          activePositionQuestions={activePositionQuestions}
                         />
                       ) : null}
                     </div>
