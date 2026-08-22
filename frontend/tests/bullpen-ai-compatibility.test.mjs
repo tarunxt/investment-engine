@@ -296,6 +296,7 @@ test("Bullpen x AI shows selectable auto-run schedule tiles without the manual r
   assert.match(autoRunCardSource, /runDetail\.projection_available/);
   assert.match(autoRunCardSource, /retainedCandidateCount/);
   assert.match(autoRunCardSource, /stage2_llm_targets_snapshot/);
+  assert.match(autoRunCardSource, /identifiedRetainedSummaryRows/);
   assert.match(autoRunCardSource, /workflowPortfolioPositionFallback/);
   assert.match(autoRunCardSource, /Persisted decisions still carry the/);
   assert.match(
