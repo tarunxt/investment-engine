@@ -8050,6 +8050,17 @@ function InvestMetricDetailsDialog({
     }
     return left.market_title.localeCompare(right.market_title);
   });
+  const historicalPlannedContractRows =
+    state.kind === "planned" && tableRows.length === 0 && state.stage
+      ? [
+          ...readStageOutputStringList(
+            state.stage.outputs.stage2_actionable_exit_market_ids,
+          ).map((marketId) => ({ marketId, action: "Exit" as const })),
+          ...readStageOutputStringList(
+            state.stage.outputs.stage2_actionable_buy_market_ids,
+          ).map((marketId) => ({ marketId, action: "Buy" as const })),
+        ]
+      : [];
   const selectedStepKey = state.kind.startsWith("sell-")
     ? "sell"
     : state.kind.startsWith("buy-")
@@ -8242,8 +8253,8 @@ function InvestMetricDetailsDialog({
                 Selected filter
               </p>
               <p className="mt-2 text-sm font-semibold text-slate-950">
-                {tableRows.length.toLocaleString("en-IN")} rows ·{" "}
-                {filteredPlannedCount.toLocaleString("en-IN")} planned ·{" "}
+                {(tableRows.length || historicalPlannedContractRows.length).toLocaleString("en-IN")} rows ·{" "}
+                {(filteredPlannedCount || historicalPlannedContractRows.length).toLocaleString("en-IN")} planned ·{" "}
                 {filteredProcessedCount.toLocaleString("en-IN")} processed ·{" "}
                 {filteredSubmittedCount.toLocaleString("en-IN")} submitted
               </p>
@@ -8561,6 +8572,10 @@ function InvestMetricDetailsDialog({
                     </tbody>
                   </table>
                 </div>
+              ) : historicalPlannedContractRows.length > 0 ? (
+                <HistoricalPlannedContractRows
+                  rows={historicalPlannedContractRows}
+                />
               ) : (
                 <div className="bg-slate-50 px-4 py-8 text-sm text-slate-600">
                   Stage 3 has not emitted any decision rows for this metric yet.
@@ -8584,6 +8599,84 @@ function InvestMetricDetailsDialog({
           onClose={() => setReturnsPerDayQuestion(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function HistoricalPlannedContractRows({
+  rows,
+}: {
+  rows: Array<{ marketId: string; action: "Exit" | "Buy" }>;
+}) {
+  const [titles, setTitles] = useState<Record<string, string | null>>({});
+  const rowsKey = rows.map((row) => `${row.action}:${row.marketId}`).join("|");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/bullpen-ai/market-urls", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+          body: JSON.stringify({
+            questions: rows.map((row) => ({
+              id: row.marketId,
+              slug: null,
+              marketUrl: null,
+              question: null,
+              category: null,
+            })),
+          }),
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          marketTitles?: Record<string, string | null>;
+        };
+        if (!controller.signal.aborted) {
+          setTitles(payload.marketTitles ?? {});
+        }
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          console.warn("Unable to enrich historical Stage 3 plans", error);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [rowsKey]);
+
+  return (
+    <div className="divide-y divide-slate-200 bg-white">
+      {rows.map((row, index) => (
+        <div
+          key={`${row.action}-${row.marketId}`}
+          className="flex items-start justify-between gap-4 px-4 py-3 text-sm"
+        >
+          <div>
+            <p className="font-semibold text-slate-950">
+              {titles[row.marketId] ?? row.marketId}
+            </p>
+            <p className="mt-1 text-xs text-slate-600">
+              Preserved from the completed Stage 2 actionable contract.
+            </p>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500">
+              #{index + 1}
+            </span>
+            <span
+              className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                row.action === "Exit"
+                  ? "border-rose-200 bg-rose-50 text-rose-800"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+              }`}
+            >
+              {row.action}
+            </span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
