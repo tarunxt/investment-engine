@@ -28,6 +28,7 @@ type SearchableCanonicalizableQuestion = CanonicalizableQuestion & {
 
 export type ResolvedPolymarketMarket = {
   id: string;
+  title: string | null;
   conditionId: string | null;
   slug: string | null;
   marketSlug: string | null;
@@ -554,6 +555,7 @@ function normalizeResolvedMarket(
 
   return {
     id,
+    title: readString(record, ["question", "title"]),
     conditionId,
     slug,
     marketSlug: slug,
@@ -774,6 +776,7 @@ async function searchBullpenMarketByQuestion(
 
     return {
       id: fallbackMarket.id,
+      title: matchedMarket.question || null,
       conditionId: matchedMarket.conditionId || null,
       slug: fallbackMarket.slug,
       marketSlug: fallbackMarket.slug,

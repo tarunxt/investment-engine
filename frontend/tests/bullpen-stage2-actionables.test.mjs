@@ -265,6 +265,9 @@ test("the actionables dialog keeps the required red, green, and yellow sections"
   assert.match(dialogSource, /title="Hold"/);
   assert.match(dialogSource, /tone="hold"/);
   assert.match(dialogSource, /Active Bullpen positions not included in Event Exits/);
+  assert.match(dialogSource, /marketTitles/);
+  assert.match(dialogSource, /market-urls/);
+  assert.match(dialogSource, /visibleActionables\.hold/);
 });
 
 test("the Stage 2 monitor renders the clickable Actionables line below New Events", () => {
