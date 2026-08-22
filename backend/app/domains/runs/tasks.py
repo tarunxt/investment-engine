@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.auth.models import User
+from app.domains.mails.service import send_logged_email_sync
 from app.domains.runs.final_actionable_history import (
     backfill_user_history,
     final_actionable_history_backfill_key,
@@ -18,7 +19,6 @@ from app.domains.runs.final_actionable_history import (
 from app.domains.runs.models import Run, RunJob
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
-from app.services.email import EmailService
 from app.shared.types import JobStatus
 
 logger = get_logger(__name__)
@@ -260,14 +260,29 @@ def send_auto_rebalance_success_email_task(
                 total_llm_time=total_llm_time,
                 stages_completed=stages_completed,
             )
-            success = EmailService.send_email(
-                email_to=user.email,
+            delivery = send_logged_email_sync(
+                db,
+                user_id=user_id,
+                action="mail.auto_rebalance_success",
+                trigger="Auto-rebalance completion",
+                recipients=(str(user.email),),
                 subject=subject,
                 html_content=html_content,
                 text_content=text_content,
+                remarks=(
+                    f"Automatic {portfolio.upper()} auto-rebalance completion notification "
+                    f"for {label}."
+                ),
+                idempotency_key=(
+                    f"auto-rebalance-success:{user_id}:{portfolio}:{label}:"
+                    f"{completed_at}:attempt:{self.request.retries}"
+                ),
             )
-            if not success:
-                raise RuntimeError("Auto-rebalance success email send returned failure")
+            if not delivery.result.sent:
+                raise RuntimeError(
+                    "Auto-rebalance success email send returned failure: "
+                    f"{delivery.result.code} — {delivery.result.summary}"
+                )
             logger.info(
                 "Auto-rebalance success email sent to user %s for %s",
                 user_id,
@@ -323,14 +338,27 @@ def send_run_completion_email_task(self, run_id: int) -> None:
                 return
 
             subject, html_content, text_content = _build_run_completion_email(run)
-            success = EmailService.send_email(
-                email_to=user.email,
+            delivery = send_logged_email_sync(
+                db,
+                user_id=int(run.user_id),
+                action="mail.run_completion",
+                trigger="Run completion",
+                recipients=(str(user.email),),
                 subject=subject,
                 html_content=html_content,
                 text_content=text_content,
+                remarks=f"Automatic run completion notification for {_run_label(run)}.",
+                idempotency_key=(
+                    f"run-completion:{run.id}:{_status_value(run.status)}:"
+                    f"attempt:{self.request.retries}"
+                ),
+                run_id=str(run.id),
             )
-            if not success:
-                raise RuntimeError("Run completion email send returned failure")
+            if not delivery.result.sent:
+                raise RuntimeError(
+                    "Run completion email send returned failure: "
+                    f"{delivery.result.code} — {delivery.result.summary}"
+                )
             logger.info("Run completion email sent for run %s to user %s", run_id, run.user_id)
         except Exception as exc:
             logger.exception("Run completion email failed for run %s", run_id)
