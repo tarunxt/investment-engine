@@ -6439,10 +6439,13 @@ export function StageTwoLlmRunDetailsDialog({
     llmModelGroups,
     dialogNowMs,
   );
+  const identifiedRetainedSummaryRows = retainedSummaryRows.filter(
+    (row) => row.provider !== "—" && row.model !== "—",
+  );
   const savedTargets = state.run?.stage2_llm_targets_snapshot ?? [];
   const summaryRows: StageTwoLlmRunSummaryRow[] =
-    retainedSummaryRows.length > 0
-      ? retainedSummaryRows
+    identifiedRetainedSummaryRows.length > 0
+      ? identifiedRetainedSummaryRows
       : savedTargets.map((target, index) => ({
           key: `${target.provider}::${target.model}::recovered-${index}`,
           provider: target.provider,
