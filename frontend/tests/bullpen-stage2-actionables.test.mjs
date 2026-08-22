@@ -269,6 +269,8 @@ test("the actionables dialog keeps the required red, green, and yellow sections"
   assert.match(dialogSource, /market-urls/);
   assert.match(dialogSource, /visibleActionables\.hold/);
   assert.match(dialogSource, /Event URLs group multiple dated markets/);
+  assert.match(dialogSource, /historicalHoldCount/);
+  assert.match(dialogSource, /matchedHold\.slice\(0, historicalHoldCount\)/);
   assert.doesNotMatch(dialogSource, /exitKeys\.has/);
 });
 
