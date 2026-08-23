@@ -402,7 +402,7 @@ async def test_gamma_page_uses_active_event_catalog_and_flattens_markets():
         "archived": "false",
         "closed": "false",
         "end_date_min": "2026-08-24T00:00:00+00:00",
-        "limit": "500",
+        "limit": "100",
         "offset": "1500",
     }
 
@@ -434,7 +434,7 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
         assert end_date_min
         requested_offsets.append(offset)
         if offset < 2_000:
-            return [row(index) for index in range(offset, offset + 500)], 500
+            return [row(index) for index in range(offset, offset + 100)], 100
         if offset == 2_000:
             return [row(2_000, question=target_question)], 1
         return [], 0
@@ -446,7 +446,10 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
 
     result = await scan_candidate_markets(min_liquidity_usd=0)
 
-    assert requested_offsets == [0, 500, 1_000, 1_500, 2_000, 2_001]
+    assert requested_offsets == [
+        *range(0, 2_001, 100),
+        2_001,
+    ]
     assert len(result.accepted) == 2_001
     assert any(market.question == target_question for market in result.accepted)
 
