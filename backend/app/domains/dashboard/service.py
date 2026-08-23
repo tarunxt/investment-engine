@@ -288,7 +288,14 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
     # launch the Bullpen CLI, refresh credentials, or contact Polymarket.
     redis_started_at = monotonic()
     try:
-        snapshot = await get_bullpen_runtime_broker().read_cached_positions_snapshot()
+        broker = get_bullpen_runtime_broker()
+        snapshot = await broker.read_display_positions_snapshot(
+            delete_invalid=False,
+        )
+        if snapshot is None:
+            snapshot = await broker.read_cached_positions_snapshot(
+                delete_invalid=False,
+            )
     finally:
         add_redis_duration((monotonic() - redis_started_at) * 1000)
     if snapshot is None:
