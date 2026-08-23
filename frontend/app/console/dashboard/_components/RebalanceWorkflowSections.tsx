@@ -3108,7 +3108,12 @@ function WorkflowStageTile({
             : undefined
         }
       >
-        <span className="font-semibold text-slate-600">
+        <span
+          className={cn(
+            "font-semibold text-slate-600",
+            row.label === "LLMs completed" && "pointer-events-auto",
+          )}
+        >
           {row.label}:
         </span>{" "}
         {row.label === "Error" && row.detail ? (
@@ -3502,7 +3507,7 @@ function ZerodhaBasketPreviewDialog({
               type="button"
               onClick={onClose}
               className="rounded-full border border-slate-200 p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              aria-label="Close Zerodha basket preview"
+              aria-label={`Close ${basketBrokerLabel} basket preview`}
             >
               <X className="size-5" />
             </button>
@@ -8237,10 +8242,14 @@ ${zerodhaExecutionMode === "direct_market"
               onCalculationsClick={
                 stage === "actionables"
                   ? () => {
-                      window.dispatchEvent(new CustomEvent("open-actionables-calculations", {
-                        detail: { market: section.portfolio === "zerodha" ? "india" : "us" },
-                      }));
                       window.location.hash = "final-actionables";
+                      void showStageOutput(section.portfolio, "actionables").then(() => {
+                        window.setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent("open-actionables-calculations", {
+                            detail: { market: section.portfolio === "zerodha" ? "india" : "us" },
+                          }));
+                        }, 100);
+                      });
                     }
                   : undefined
               }

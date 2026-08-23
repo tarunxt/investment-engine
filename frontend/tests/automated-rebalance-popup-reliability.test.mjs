@@ -73,6 +73,21 @@ test("Actionables View Output renders the shared widget natively instead of fram
   );
 });
 
+test("Actionables Calculations mounts its output widget before dispatching the open event", () => {
+  assert.match(
+    workflowSource,
+    /showStageOutput\(section\.portfolio, "actionables"\)\.then\(\(\) => \{[\s\S]*?open-actionables-calculations/,
+  );
+});
+
+test("shared order previews expose the correct broker in the close action", () => {
+  assert.match(
+    workflowSource,
+    /aria-label=\{`Close \$\{basketBrokerLabel\} basket preview`\}/,
+  );
+  assert.doesNotMatch(workflowSource, /aria-label="Close Zerodha basket preview"/);
+});
+
 test("stage cards keep every shortcut as an independent native button", () => {
   const tileStart = workflowSource.indexOf("function WorkflowStageTile");
   const tileEnd = workflowSource.indexOf("function ZerodhaBasketPreviewDialog", tileStart);
@@ -88,6 +103,10 @@ test("stage cards keep every shortcut as an independent native button", () => {
   ]) {
     assert.match(tileSource, new RegExp(label));
   }
+  assert.match(
+    tileSource,
+    /row\.label === "LLMs completed" && "pointer-events-auto"/,
+  );
 });
 
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {
