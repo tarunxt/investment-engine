@@ -1207,10 +1207,12 @@ async function fetchGammaMarkets() {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   let cursor: string | null = null;
   const seenCursors = new Set<string>();
+  const currentUniverseStart = new Date().toISOString();
 
   while (true) {
     const params = new URLSearchParams({
       closed: "false",
+      end_date_min: currentUniverseStart,
       limit: String(GAMMA_PAGE_SIZE),
     });
     if (cursor) params.set("after_cursor", cursor);
