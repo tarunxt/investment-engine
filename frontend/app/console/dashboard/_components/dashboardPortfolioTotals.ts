@@ -133,3 +133,29 @@ export function buildDashboardPortfolioTrend(
     ? uniquePoints
     : [];
 }
+
+
+export function buildPersistedDashboardTrend(
+  points: Array<{ captured_at: string; value: number }>,
+): GenuinePortfolioPoint[] {
+  const normalized = points
+    .map((point) => ({
+      timestamp: Date.parse(point.captured_at),
+      value: roundMoney(point.value),
+    }))
+    .filter(
+      (point) =>
+        Number.isFinite(point.timestamp) &&
+        Number.isFinite(point.value) &&
+        point.value >= 0,
+    )
+    .sort((left, right) => left.timestamp - right.timestamp);
+
+  const uniquePoints = normalized.filter(
+    (point, index) =>
+      index === 0 || point.timestamp !== normalized[index - 1].timestamp,
+  );
+  return uniquePoints.length >= MIN_DASHBOARD_PORTFOLIO_POINTS
+    ? uniquePoints
+    : [];
+}

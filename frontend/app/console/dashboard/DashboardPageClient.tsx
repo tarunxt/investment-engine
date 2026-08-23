@@ -75,6 +75,7 @@ import {
 } from "./_components/dashboardOverviewUtils";
 import {
   buildDashboardPortfolioTrend,
+  buildPersistedDashboardTrend,
   convertDashboardUsdTotalToInr,
   resolveBullpenPortfolioPlusCash,
 } from "./_components/dashboardPortfolioTotals";
@@ -100,6 +101,7 @@ type DashboardState = {
   indmoneyThreat: IndMoneyUsThreatAnalysis | null;
   polymarketState: PolymarketBotState | null;
   bullpenPositions: BullpenPositionsResponse | null;
+  portfolioHistory: DashboardSummaryResponse["portfolio_history"] | null;
 };
 
 const INITIAL_STATE: DashboardState = {
@@ -111,6 +113,7 @@ const INITIAL_STATE: DashboardState = {
   indmoneyThreat: null,
   polymarketState: null,
   bullpenPositions: null,
+  portfolioHistory: null,
 };
 
 const DASHBOARD_OVERVIEW_CACHE_KEY_PREFIX =
@@ -1009,6 +1012,7 @@ function dashboardSummaryToState(
       : null,
     zerodhaOverview,
     indmoneyOverview,
+    portfolioHistory: summary.portfolio_history,
     bullpenPositions: summary.bullpen
       ? {
           summary: {
@@ -1385,20 +1389,37 @@ function DashboardPageForUser({
         ? null
         : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
-  const portfolioCommandTrend = buildGenuineInrPortfolioTrend(
-    dashboard.zerodhaOverview?.history ?? [],
+  const persistedIndiaTrend = buildPersistedDashboardTrend(
+    dashboard.portfolioHistory?.india ?? [],
+  );
+  const portfolioCommandTrend =
+    persistedIndiaTrend.length > 0
+      ? persistedIndiaTrend
+      : buildGenuineInrPortfolioTrend(
+          dashboard.zerodhaOverview?.history ?? [],
+        );
+  const persistedIndmoneyTrend = buildPersistedDashboardTrend(
+    dashboard.portfolioHistory?.indmoney ?? [],
   );
   const indmoneyCommandTrend =
-    usdInrRate == null
-      ? []
-      : buildDashboardPortfolioTrend(
-          (dashboard.indmoneyOverview?.history ?? []).map((snapshot) => ({
-            capturedAt: snapshot.captured_at,
-            portfolioValue: snapshot.current_value,
-            cashValue: snapshot.wallet_balance,
-          })),
-          usdInrRate,
-        );
+    persistedIndmoneyTrend.length > 0
+      ? persistedIndmoneyTrend
+      : usdInrRate == null
+        ? []
+        : buildDashboardPortfolioTrend(
+            (dashboard.indmoneyOverview?.history ?? []).map((snapshot) => ({
+              capturedAt: snapshot.captured_at,
+              portfolioValue: snapshot.current_value,
+              cashValue: snapshot.wallet_balance,
+            })),
+            usdInrRate,
+          );
+  const bullpenCommandTrend = buildPersistedDashboardTrend(
+    dashboard.portfolioHistory?.bullpen ?? [],
+  );
+  const combinedCommandTrend = buildPersistedDashboardTrend(
+    dashboard.portfolioHistory?.combined ?? [],
+  );
   const showHeroSkeleton =
     !hasCriticalDashboardContent(dashboard) &&
     DASHBOARD_CRITICAL_KEYS.some((key) => pendingSections[key]);
@@ -1438,13 +1459,13 @@ function DashboardPageForUser({
     bullpen: {
       label: "Bullpen portfolio value",
       currentValue: usdInrRate == null ? null : (bullpenTotalValue ?? null),
-      trendPoints: [],
+      trendPoints: bullpenCommandTrend,
       capturedAt: bullpenUpdatedAt,
     },
     combined: {
       label: "Combined portfolio value",
       currentValue: totalCommandValue,
-      trendPoints: [],
+      trendPoints: combinedCommandTrend,
       capturedAt: combinedChartCapturedAt,
     },
   };

@@ -16,11 +16,13 @@ from app.domains.dashboard.schemas import (
     DashboardHolding,
     DashboardIndMoneySection,
     DashboardIndMoneySnapshot,
+    DashboardPortfolioHistory,
     DashboardSectionMeta,
     DashboardSummaryResponse,
     DashboardZerodhaSection,
     DashboardZerodhaSnapshot,
 )
+from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
@@ -341,6 +343,48 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
     )
 
 
+async def _load_portfolio_history(
+    user_id: int,
+) -> DashboardPortfolioHistory:
+    async with AsyncSessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(
+                    DashboardPortfolioDailySnapshot.captured_at,
+                    DashboardPortfolioDailySnapshot.zerodha_total_inr,
+                    DashboardPortfolioDailySnapshot.indmoney_total_inr,
+                    DashboardPortfolioDailySnapshot.bullpen_total_inr,
+                    DashboardPortfolioDailySnapshot.combined_total_inr,
+                )
+                .where(DashboardPortfolioDailySnapshot.user_id == user_id)
+                .order_by(
+                    desc(DashboardPortfolioDailySnapshot.snapshot_date),
+                    desc(DashboardPortfolioDailySnapshot.captured_at),
+                )
+                .limit(400)
+            )
+        ).all()
+
+    rows = list(reversed(rows))
+
+    def points(field: str) -> list[DashboardHistoryPoint]:
+        return [
+            DashboardHistoryPoint(
+                captured_at=row.captured_at,
+                value=float(value),
+            )
+            for row in rows
+            if (value := getattr(row, field)) is not None
+        ]
+
+    return DashboardPortfolioHistory(
+        india=points("zerodha_total_inr"),
+        indmoney=points("indmoney_total_inr"),
+        bullpen=points("bullpen_total_inr"),
+        combined=points("combined_total_inr"),
+    )
+
+
 async def _load_fx(_user_id: int) -> DashboardFxRate:
     assessment = await load_persisted_usd_inr_rate()
     return DashboardFxRate(
@@ -399,6 +443,7 @@ async def build_dashboard_summary(
     loaders = [
         _timed_section("zerodha", _load_zerodha, user_id),
         _timed_section("indmoney_us", _load_indmoney, user_id),
+        _timed_section("portfolio_history", _load_portfolio_history, user_id),
         _timed_section("fx", _load_fx, user_id),
     ]
     if include_singleton_bullpen:
@@ -430,5 +475,10 @@ async def build_dashboard_summary(
         zerodha=values["zerodha"],
         indmoney_us=values["indmoney_us"],
         bullpen=values["bullpen"],
+        portfolio_history=(
+            values["portfolio_history"]
+            if isinstance(values["portfolio_history"], DashboardPortfolioHistory)
+            else DashboardPortfolioHistory()
+        ),
         sections=sections,
     )

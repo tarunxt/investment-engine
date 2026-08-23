@@ -10,18 +10,23 @@ from fastapi import Response
 
 from app.domains.dashboard import service
 from app.domains.dashboard import router as dashboard_router
+from app.domains.dashboard.models import DashboardPortfolioDailySnapshot
 from app.domains.dashboard.schemas import (
     DashboardBullpenSection,
     DashboardFxRate,
     DashboardHistoryPoint,
     DashboardHolding,
     DashboardIndMoneySection,
+    DashboardIndMoneySnapshot,
+    DashboardPortfolioHistory,
     DashboardSectionMeta,
     DashboardSummaryResponse,
     DashboardZerodhaSection,
     DashboardZerodhaSnapshot,
 )
+from app.domains.dashboard.tasks import _is_carried_forward, _portfolio_values
 from app.domains.auth.models import UserRole
+from app.domains.zerodha.tasks import is_weekend_snapshot_date
 
 
 def _summary_fixture() -> DashboardSummaryResponse:
@@ -119,6 +124,10 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
         await asyncio.sleep(0.05)
         return DashboardBullpenSection()
 
+    async def load_portfolio_history(_user_id: int):
+        await asyncio.sleep(0.05)
+        return DashboardPortfolioHistory()
+
     async def load_fx(_user_id: int):
         await asyncio.sleep(0.05)
         return DashboardFxRate(
@@ -133,6 +142,11 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
     monkeypatch.setattr(service, "_load_zerodha", load_zerodha)
     monkeypatch.setattr(service, "_load_indmoney", load_indmoney)
     monkeypatch.setattr(service, "_load_bullpen", load_bullpen)
+    monkeypatch.setattr(
+        service,
+        "_load_portfolio_history",
+        load_portfolio_history,
+    )
     monkeypatch.setattr(service, "_load_fx", load_fx)
 
     started = monotonic()
@@ -288,6 +302,25 @@ def test_dashboard_summary_response_stays_below_150kb_and_excludes_raw_data():
     assert b"order_history" not in payload
 
 
+def test_full_daily_portfolio_history_stays_below_150kb():
+    summary = _summary_fixture()
+    history = [
+        DashboardHistoryPoint(
+            captured_at=summary.generated_at,
+            value=100_000 + index,
+        )
+        for index in range(400)
+    ]
+    summary.portfolio_history = DashboardPortfolioHistory(
+        india=history,
+        indmoney=history,
+        bullpen=history,
+        combined=history,
+    )
+
+    assert len(summary.model_dump_json().encode()) < 150_000
+
+
 def test_top_holdings_and_history_have_hard_schema_budgets():
     summary = _summary_fixture()
 
@@ -334,3 +367,62 @@ async def test_dashboard_summary_etag_is_private_and_revalidates(monkeypatch):
     )
     assert not_modified.status_code == 304
     assert not_modified.headers["etag"] == etag
+
+
+def test_daily_portfolio_values_include_cash_once_and_convert_to_inr():
+    summary = _summary_fixture()
+    now = summary.generated_at
+    summary.usd_inr_rate = 100
+    summary.fx.value = 100
+    summary.zerodha.snapshot.holdings_market_value = 100
+    summary.zerodha.snapshot.available_margin = 20
+    summary.indmoney_us = DashboardIndMoneySection(
+        snapshot=DashboardIndMoneySnapshot(
+            snapshot_date=date(2026, 8, 21),
+            captured_at=now,
+            source="manual",
+            parse_status="parsed",
+            holdings_count=1,
+            wallet_balance=2,
+            current_value=10,
+            top_holdings=[],
+            history=[],
+        )
+    )
+    summary.bullpen = DashboardBullpenSection(
+        cash_balance=5,
+        total_value=49,
+        wallet_value=50,
+        fetched_at=now,
+    )
+
+    values = _portfolio_values(summary)
+
+    assert values["zerodha_total_inr"] == 120
+    assert values["indmoney_total_usd"] == 12
+    assert values["indmoney_total_inr"] == 1200
+    assert values["bullpen_total_usd"] == 50
+    assert values["bullpen_total_inr"] == 5000
+    assert values["combined_total_inr"] == 6320
+
+
+def test_weekend_market_values_are_carried_forward_and_sync_is_skipped():
+    friday = date(2026, 8, 21)
+    saturday = date(2026, 8, 22)
+    sunday = date(2026, 8, 23)
+
+    assert _is_carried_forward(friday, saturday) is True
+    assert _is_carried_forward(friday, sunday) is True
+    assert _is_carried_forward(friday, friday) is False
+    assert is_weekend_snapshot_date(friday) is False
+    assert is_weekend_snapshot_date(saturday) is True
+    assert is_weekend_snapshot_date(sunday) is True
+
+
+def test_daily_portfolio_snapshot_is_idempotent_per_user_and_date():
+    constraint_names = {
+        constraint.name
+        for constraint in DashboardPortfolioDailySnapshot.__table__.constraints
+    }
+
+    assert "uq_dashboard_portfolio_daily_snapshots_user_date" in constraint_names

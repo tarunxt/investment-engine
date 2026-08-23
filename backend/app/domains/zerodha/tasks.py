@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 from celery.exceptions import MaxRetriesExceededError
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.core.logging import get_logger
 from app.domains.zerodha.audit import SyncZerodhaAuditRepository
@@ -170,8 +170,24 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
                 return {"status": "failed", "reason": reason}
 
 
+def is_weekend_snapshot_date(value: date) -> bool:
+    return value.weekday() >= 5
+
+
 @celery.task(bind=True, max_retries=2, soft_time_limit=120, time_limit=180)
 def enqueue_daily_portfolio_sync(self):
+    snapshot_date = current_snapshot_date()
+    if is_weekend_snapshot_date(snapshot_date):
+        logger.info(
+            "Skipped Zerodha daily portfolio sync on closed weekend %s",
+            snapshot_date,
+        )
+        return {
+            "status": "skipped",
+            "reason": "market_closed_weekend",
+            "snapshot_date": snapshot_date.isoformat(),
+        }
+
     with SyncSessionLocal() as db:
         cred_repo = SyncZerodhaCredentialRepository(db)
         active_user_ids = cred_repo.list_active_user_ids(datetime.now(tz=timezone.utc))
@@ -182,10 +198,10 @@ def enqueue_daily_portfolio_sync(self):
     logger.info(
         "Queued daily Zerodha portfolio sync for %s users on %s",
         len(active_user_ids),
-        current_snapshot_date(),
+        snapshot_date,
     )
     return {
         "status": "queued",
         "users": len(active_user_ids),
-        "snapshot_date": current_snapshot_date().isoformat(),
+        "snapshot_date": snapshot_date.isoformat(),
     }

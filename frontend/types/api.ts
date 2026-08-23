@@ -1292,6 +1292,12 @@ export interface DashboardSummaryResponse {
     fetched_at: string | null;
     source: 'redis-cache';
   } | null;
+  portfolio_history: {
+    india: DashboardHistoryPoint[];
+    indmoney: DashboardHistoryPoint[];
+    bullpen: DashboardHistoryPoint[];
+    combined: DashboardHistoryPoint[];
+  };
   sections: Record<string, DashboardSectionMeta>;
 }
 
