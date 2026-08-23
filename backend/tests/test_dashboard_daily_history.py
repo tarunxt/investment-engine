@@ -16,6 +16,7 @@ from app.domains.dashboard.tasks import (
     _is_carried_forward,
     _portfolio_values,
 )
+from app.domains.zerodha.tasks import is_weekend_snapshot_date
 
 
 def _summary() -> DashboardSummaryResponse:
@@ -102,3 +103,9 @@ def test_daily_snapshot_is_idempotent_per_user_and_date():
         for constraint in DashboardPortfolioDailySnapshot.__table__.constraints
     }
     assert "uq_dashboard_portfolio_daily_snapshots_user_date" in constraint_names
+
+
+def test_zerodha_daily_sync_skips_saturday_and_sunday():
+    assert is_weekend_snapshot_date(date(2026, 8, 21)) is False
+    assert is_weekend_snapshot_date(date(2026, 8, 22)) is True
+    assert is_weekend_snapshot_date(date(2026, 8, 23)) is True
