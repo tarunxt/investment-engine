@@ -160,15 +160,23 @@ test("Sidebar component keeps the accessibility, footer, and reorder hooks requi
   const utilsSource = readSource(
     "../app/console/_components/sidebarNavigationUtils.ts",
   );
+  const preferencesSource = readSource(
+    "../app/console/_components/sidebarNavigationPreferences.ts",
+  );
 
   assert.match(sidebarSource, /aria-label="Console navigation"/);
   assert.match(sidebarSource, /aria-current=\{active \? 'page' : undefined\}/);
   assert.match(sidebarSource, /aria-expanded=\{expanded\}/);
-  assert.match(sidebarSource, /Drag the handle to reorder items within each section\./);
+  assert.match(sidebarSource, /Drag folders or items within their current section\./);
+  assert.match(sidebarSource, /Nested items can be reordered inside their folder\./);
+  assert.match(sidebarSource, /Restore default name/);
+  assert.match(sidebarSource, /onContextMenu/);
   assert.match(sidebarSource, /SidebarThemeToggle/);
   assert.match(sidebarSource, /ACCOUNT_ACTIONS\.logout\.label/);
   assert.match(sidebarSource, /buildSidebarOrderStorageKey\(userId\)/);
   assert.match(utilsSource, /console-sidebar-order:user:\$\{userId \?\? 'guest'\}:v2/);
+  assert.match(preferencesSource, /console-sidebar-names:user:\$\{userId \?\? 'guest'\}:v1/);
+  assert.match(preferencesSource, /console-sidebar-child-order:user:\$\{userId \?\? 'guest'\}:v1/);
   assert.doesNotMatch(sidebarSource, /isPortfolioActive|isTradingBotsActive|onTogglePortfolio|onToggleTradingBots/);
 });
 
