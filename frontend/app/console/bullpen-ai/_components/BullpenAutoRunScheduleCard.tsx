@@ -11080,8 +11080,13 @@ export function BullpenAutoRunScheduleCard({
     if (!isRunHistoryDialogOpen) {
       runHistoryAbortControllerRef.current?.abort();
       runHistoryAbortControllerRef.current = null;
-      runHistoryDetailAbortControllerRef.current?.abort();
-      runHistoryDetailAbortControllerRef.current = null;
+      // A run selected on the full-screen history page uses this same detail
+      // loader after navigating back to the console. Do not let the closed
+      // in-page history-dialog cleanup abort that direct URL request.
+      if (!requestedRunDetailId) {
+        runHistoryDetailAbortControllerRef.current?.abort();
+        runHistoryDetailAbortControllerRef.current = null;
+      }
       return;
     }
 
@@ -11096,7 +11101,12 @@ export function BullpenAutoRunScheduleCard({
       runHistoryAbortControllerRef.current?.abort();
       runHistoryDetailAbortControllerRef.current?.abort();
     };
-  }, [autoRunStatusCacheKey, isRunHistoryDialogOpen, loadRunHistory]);
+  }, [
+    autoRunStatusCacheKey,
+    isRunHistoryDialogOpen,
+    loadRunHistory,
+    requestedRunDetailId,
+  ]);
 
   const runDetailRefreshRunId = runDetailDialog?.run.id ?? null;
   const runDetailRefreshRunStatus = runDetailDialog?.run.status ?? null;

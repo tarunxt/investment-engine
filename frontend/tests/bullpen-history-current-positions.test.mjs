@@ -35,6 +35,10 @@ test("History opens the original run-details workspace instead of the audit", ()
     scheduleCard,
     /if \(authLoading \|\| !user\) return;[\s\S]{0,500}openRequestedRunDetail/,
   );
+  assert.match(
+    scheduleCard,
+    /if \(!requestedRunDetailId\) \{\s*runHistoryDetailAbortControllerRef\.current\?\.abort\(\)/,
+  );
 });
 
 test("History keeps usable run or trend data when the sibling request times out", () => {
