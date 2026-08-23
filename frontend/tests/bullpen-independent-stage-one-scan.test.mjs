@@ -61,6 +61,7 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   );
   assert.match(routeSource, /const effectivePageSize = firstPage\.length/);
   assert.match(routeSource, /Promise\.all\(offsets\.map\(fetchEventPage\)\)/);
+  assert.match(routeSource, /response\.status === 422 && offset > 0/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.doesNotMatch(routeSource, /earliestOutsideWindow/);
