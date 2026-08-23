@@ -13,7 +13,8 @@ import {
   buildConsensusRows,
   buildDashboardActionRows,
   buildTechnicalScanMap,
-  fetchDashboardRecentFullRuns,
+  extractRebalanceInputFingerprint,
+  fetchAllFullRuns,
   isCompletedRebalanceRun,
   type ScoreMatrixFormulaConfig,
   type StockConsensus,
@@ -26,7 +27,12 @@ import {
 import { inferRebalanceMarketFromPrompt } from "@/lib/rebalance";
 import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
-import type { RunResponse } from "@/types/api";
+import { apiService } from "@/services/api";
+import type {
+  IndMoneyUsPortfolioSnapshotDetail,
+  RunResponse,
+  ZerodhaPortfolioSnapshotDetail,
+} from "@/types/api";
 import { cn } from "@/lib/utils";
 
 export type RebalanceStockFlowPortfolio = "zerodha" | "indmoneyUs";
@@ -44,6 +50,23 @@ function newest(runs: RunResponse[]) {
   return [...runs].sort(
     (a, b) => Date.parse(b.created_at || "") - Date.parse(a.created_at || ""),
   )[0];
+}
+
+function latestMatchingRebalanceRuns(
+  runs: RunResponse[],
+  market: SwingTradeMarket,
+) {
+  const marketRuns = runs
+    .filter((run) => isCompletedRebalanceRun(run, market))
+    .sort(
+      (a, b) => Date.parse(b.created_at || "") - Date.parse(a.created_at || ""),
+    );
+  const latestRun = marketRuns[0];
+  if (!latestRun) return [];
+  const fingerprint = extractRebalanceInputFingerprint(latestRun.prompt);
+  return marketRuns.filter(
+    (run) => extractRebalanceInputFingerprint(run.prompt) === fingerprint,
+  );
 }
 
 function consensusLabel(stock: StockConsensus) {
@@ -82,6 +105,31 @@ function compareFinalActionables(
     sensitivity: "base",
     numeric: true,
   });
+}
+
+function isAboveBuyThreshold(
+  row: ReturnType<typeof buildDashboardActionRows>[number],
+  buyThreshold: number,
+) {
+  return (
+    (row.formulaAction === "Buy New" || row.formulaAction === "Add more")
+    && row.formulaScore !== null
+    && Number.isFinite(row.formulaScore)
+    && row.formulaScore > buyThreshold
+  );
+}
+
+function compareFinalActionablesForThreshold(
+  buyThreshold: number,
+) {
+  return (
+    left: ReturnType<typeof buildDashboardActionRows>[number],
+    right: ReturnType<typeof buildDashboardActionRows>[number],
+  ) => {
+    const eligibilityComparison = Number(isAboveBuyThreshold(right, buyThreshold))
+      - Number(isAboveBuyThreshold(left, buyThreshold));
+    return eligibilityComparison || compareFinalActionables(left, right);
+  };
 }
 
 function stageRunMeta(run: RunResponse | undefined) {
@@ -176,16 +224,31 @@ function buildStageJobOutputs(stocks: StockConsensus[], run: RunResponse | undef
 type RebalanceStockFlowWidgetProps = {
   formulaConfig: ScoreMatrixFormulaConfig;
   initialPortfolio?: RebalanceStockFlowPortfolio;
+  buyThresholds: Record<RebalanceStockFlowPortfolio, number>;
+  buyThresholdDrafts: Record<RebalanceStockFlowPortfolio, string>;
+  onBuyThresholdDraftChange: (
+    portfolio: RebalanceStockFlowPortfolio,
+    value: string,
+  ) => void;
+  buyThresholdSaveError?: string | null;
 };
 
 type RebalanceStockFlowSubwidgetProps = {
   formulaConfig: ScoreMatrixFormulaConfig;
   portfolio: RebalanceStockFlowPortfolio;
+  buyThreshold: number;
+  buyThresholdDraft: string;
+  onBuyThresholdDraftChange: (value: string) => void;
+  buyThresholdSaveError?: string | null;
 };
 
 export function RebalanceStockFlowWidget({
   formulaConfig,
   initialPortfolio = "zerodha",
+  buyThresholds,
+  buyThresholdDrafts,
+  onBuyThresholdDraftChange,
+  buyThresholdSaveError,
 }: RebalanceStockFlowWidgetProps) {
   const [active, setActive] = useState<RebalanceStockFlowPortfolio>(initialPortfolio);
 
@@ -233,9 +296,21 @@ export function RebalanceStockFlowWidget({
 
       <div className="mt-4">
         {active === "zerodha" ? (
-          <ZerodhaRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+          <ZerodhaRebalanceStockFlowWidget
+            formulaConfig={formulaConfig}
+            buyThreshold={buyThresholds.zerodha}
+            buyThresholdDraft={buyThresholdDrafts.zerodha}
+            onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("zerodha", value)}
+            buyThresholdSaveError={buyThresholdSaveError}
+          />
         ) : (
-          <IndMoneyRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+          <IndMoneyRebalanceStockFlowWidget
+            formulaConfig={formulaConfig}
+            buyThreshold={buyThresholds.indmoneyUs}
+            buyThresholdDraft={buyThresholdDrafts.indmoneyUs}
+            onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("indmoneyUs", value)}
+            buyThresholdSaveError={buyThresholdSaveError}
+          />
         )}
       </div>
     </section>
@@ -244,22 +319,38 @@ export function RebalanceStockFlowWidget({
 
 export function ZerodhaRebalanceStockFlowWidget({
   formulaConfig,
-}: Pick<RebalanceStockFlowSubwidgetProps, "formulaConfig">) {
+  buyThreshold,
+  buyThresholdDraft,
+  onBuyThresholdDraftChange,
+  buyThresholdSaveError,
+}: Omit<RebalanceStockFlowSubwidgetProps, "portfolio">) {
   return (
     <RebalanceStockFlowSubwidget
       formulaConfig={formulaConfig}
       portfolio="zerodha"
+      buyThreshold={buyThreshold}
+      buyThresholdDraft={buyThresholdDraft}
+      onBuyThresholdDraftChange={onBuyThresholdDraftChange}
+      buyThresholdSaveError={buyThresholdSaveError}
     />
   );
 }
 
 export function IndMoneyRebalanceStockFlowWidget({
   formulaConfig,
-}: Pick<RebalanceStockFlowSubwidgetProps, "formulaConfig">) {
+  buyThreshold,
+  buyThresholdDraft,
+  onBuyThresholdDraftChange,
+  buyThresholdSaveError,
+}: Omit<RebalanceStockFlowSubwidgetProps, "portfolio">) {
   return (
     <RebalanceStockFlowSubwidget
       formulaConfig={formulaConfig}
       portfolio="indmoneyUs"
+      buyThreshold={buyThreshold}
+      buyThresholdDraft={buyThresholdDraft}
+      onBuyThresholdDraftChange={onBuyThresholdDraftChange}
+      buyThresholdSaveError={buyThresholdSaveError}
     />
   );
 }
@@ -267,35 +358,55 @@ export function IndMoneyRebalanceStockFlowWidget({
 function RebalanceStockFlowSubwidget({
   formulaConfig,
   portfolio: portfolioId,
+  buyThreshold,
+  buyThresholdDraft,
+  onBuyThresholdDraftChange,
+  buyThresholdSaveError,
 }: RebalanceStockFlowSubwidgetProps) {
   const [detailed, setDetailed] = useState(false);
   const [runs, setRuns] = useState<RunResponse[]>([]);
+  const [portfolioSnapshot, setPortfolioSnapshot] = useState<
+    ZerodhaPortfolioSnapshotDetail | IndMoneyUsPortfolioSnapshotDetail | null
+  >(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void fetchDashboardRecentFullRuns()
-      .then((result) => { if (!cancelled) setRuns(result); })
+    void Promise.all([
+      fetchAllFullRuns(),
+      portfolioId === "zerodha"
+        ? apiService.zerodhaPortfolioOverview()
+        : apiService.indmoneyUsPortfolioOverview(),
+    ])
+      .then(([result, overview]) => {
+        if (!cancelled) {
+          setRuns(result);
+          setPortfolioSnapshot(overview.latest);
+        }
+      })
       .catch((reason: unknown) => {
         if (!cancelled) setError(reason instanceof Error ? reason.message : "Unable to load stock flow.");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [portfolioId]);
 
   const flow = useMemo(() => {
     const portfolio = PORTFOLIOS.find((item) => item.id === portfolioId)!;
     const swingRun = newest(runs.filter((run) => isRunInSwingTradeMarket(run.prompt, portfolio.market)));
-    const rebalanceRun = newest(runs.filter((run) => isCompletedRebalanceRun(run, portfolio.market)));
-    const swing = swingRun ? buildConsensusRows([swingRun], portfolio.market, null, runs) : [];
-    const rebalance = rebalanceRun ? buildConsensusRows([rebalanceRun], portfolio.market, null, runs) : [];
+    const matchingRebalanceRuns = latestMatchingRebalanceRuns(runs, portfolio.market);
+    const rebalanceRun = newest(matchingRebalanceRuns);
+    const swing = swingRun ? buildConsensusRows([swingRun], portfolio.market, portfolioSnapshot, runs) : [];
+    const rebalance = matchingRebalanceRuns.length
+      ? buildConsensusRows(matchingRebalanceRuns, portfolio.market, portfolioSnapshot, runs)
+      : [];
     const actionables = buildDashboardActionRows(
       rebalance,
       portfolio.market,
       buildTechnicalScanMap(runs),
       formulaConfig,
-    ).sort(compareFinalActionables);
+    ).sort(compareFinalActionablesForThreshold(buyThreshold));
     const swingJobOutputs = buildStageJobOutputs(swing, swingRun);
     const rebalanceJobOutputs = buildStageJobOutputs(rebalance, rebalanceRun);
     return {
@@ -309,7 +420,7 @@ function RebalanceStockFlowSubwidget({
       swingMeta: stageRunMeta(swingRun),
       rebalanceMeta: stageRunMeta(rebalanceRun),
     };
-  }, [formulaConfig, portfolioId, runs]);
+  }, [buyThreshold, formulaConfig, portfolioId, portfolioSnapshot, runs]);
 
   return (
     <section
@@ -343,9 +454,22 @@ function RebalanceStockFlowSubwidget({
                   <StockRow key={stock.key} name={stock.symbol} action={stock.consensusAction} detailed details={[`Consensus: ${consensusLabel(stock)}`, `Exchange: ${stock.exchange || "—"}`]} />
                 )) : <EmptyStage />}
               </Stage>
-              <Stage title="Final Actionables" count={flow.actionables.length} meta={flow.rebalanceMeta}>
+              <Stage
+                title="Final Actionables"
+                count={flow.actionables.length}
+                meta={flow.rebalanceMeta}
+                toolbar={(
+                  <BuyThresholdEditor
+                    portfolio={portfolioId}
+                    value={buyThresholdDraft}
+                    threshold={buyThreshold}
+                    onChange={onBuyThresholdDraftChange}
+                    saveError={buyThresholdSaveError}
+                  />
+                )}
+              >
                 {flow.actionables.length ? flow.actionables.map((row) => (
-                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${inferRebalanceMarketFromPrompt(flow.rebalanceRun?.prompt || "") ? "Latest rebalance scan" : "Rebalance scan"}`]} />
+                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed highlighted={isAboveBuyThreshold(row, buyThreshold)} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${inferRebalanceMarketFromPrompt(flow.rebalanceRun?.prompt || "") ? "Latest rebalance scan" : "Rebalance scan"}`]} />
                 )) : <EmptyStage />}
               </Stage>
             </div>
@@ -366,7 +490,20 @@ function RebalanceStockFlowSubwidget({
                   outputs={flow.rebalanceJobOutputs}
                 />
 
-                <SummaryStage title="Final Actionables" count={flow.actionables.length} meta={flow.rebalanceMeta}>
+                <SummaryStage
+                  title="Final Actionables"
+                  count={flow.actionables.length}
+                  meta={flow.rebalanceMeta}
+                  toolbar={(
+                    <BuyThresholdEditor
+                      portfolio={portfolioId}
+                      value={buyThresholdDraft}
+                      threshold={buyThreshold}
+                      onChange={onBuyThresholdDraftChange}
+                      saveError={buyThresholdSaveError}
+                    />
+                  )}
+                >
                   <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
                     <tr>
                       <th className="px-4 py-3 font-semibold">Stock Symbol</th>
@@ -377,9 +514,20 @@ function RebalanceStockFlowSubwidget({
                   </thead>
                   <tbody className="divide-y divide-slate-200 bg-white">
                     {flow.actionables.length ? flow.actionables.map((row) => (
-                      <tr key={row.id}>
+                      <tr
+                        key={row.id}
+                        data-buy-threshold-eligible={isAboveBuyThreshold(row, buyThreshold) ? "true" : undefined}
+                        className={isAboveBuyThreshold(row, buyThreshold) ? "bg-emerald-50" : undefined}
+                      >
                         <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.symbol}</td>
-                        <td className="px-4 py-3"><ActionBadge action={row.formulaAction} /></td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <ActionBadge action={row.formulaAction} />
+                            {isAboveBuyThreshold(row, buyThreshold) ? (
+                              <span className="whitespace-nowrap rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Above threshold</span>
+                            ) : null}
+                          </div>
+                        </td>
                         <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-slate-700">{row.formulaScore === null ? "—" : row.formulaScore.toFixed(2)}</td>
                         <td className="px-4 py-3 text-center text-sm font-semibold tabular-nums text-slate-700">{consensusLabel(row.stock)}</td>
                       </tr>
@@ -418,10 +566,21 @@ export function RebalanceStockFlowTrigger({
 export function RebalanceStockFlowDialog({
   portfolio,
   formulaConfig,
+  buyThresholds,
+  buyThresholdDrafts,
+  onBuyThresholdDraftChange,
+  buyThresholdSaveError,
   onClose,
 }: {
   portfolio: RebalanceStockFlowPortfolio | null;
   formulaConfig: ScoreMatrixFormulaConfig;
+  buyThresholds: Record<RebalanceStockFlowPortfolio, number>;
+  buyThresholdDrafts: Record<RebalanceStockFlowPortfolio, string>;
+  onBuyThresholdDraftChange: (
+    portfolio: RebalanceStockFlowPortfolio,
+    value: string,
+  ) => void;
+  buyThresholdSaveError?: string | null;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -473,9 +632,21 @@ export function RebalanceStockFlowDialog({
         </header>
         <div className="min-h-0 overflow-auto p-3 sm:p-5">
           {portfolio === "zerodha" ? (
-            <ZerodhaRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+            <ZerodhaRebalanceStockFlowWidget
+              formulaConfig={formulaConfig}
+              buyThreshold={buyThresholds.zerodha}
+              buyThresholdDraft={buyThresholdDrafts.zerodha}
+              onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("zerodha", value)}
+              buyThresholdSaveError={buyThresholdSaveError}
+            />
           ) : (
-            <IndMoneyRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+            <IndMoneyRebalanceStockFlowWidget
+              formulaConfig={formulaConfig}
+              buyThreshold={buyThresholds.indmoneyUs}
+              buyThresholdDraft={buyThresholdDrafts.indmoneyUs}
+              onBuyThresholdDraftChange={(value) => onBuyThresholdDraftChange("indmoneyUs", value)}
+              buyThresholdSaveError={buyThresholdSaveError}
+            />
           )}
         </div>
       </section>
@@ -488,12 +659,12 @@ export function StockFlowTabs(props: RebalanceStockFlowWidgetProps) {
   return <RebalanceStockFlowWidget {...props} />;
 }
 
-function Stage({ title, count, meta, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; children: ReactNode }) {
-  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60"><StageHeader title={title} count={count} meta={meta} /><div className="max-h-[min(58vh,36rem)] min-h-0 divide-y divide-slate-200 overflow-auto overscroll-contain">{children}</div></article>;
+function Stage({ title, count, meta, toolbar, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; toolbar?: ReactNode; children: ReactNode }) {
+  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60"><StageHeader title={title} count={count} meta={meta} />{toolbar}<div className="max-h-[min(58vh,36rem)] min-h-0 divide-y divide-slate-200 overflow-auto overscroll-contain">{children}</div></article>;
 }
 
-function StockRow({ name, action, score, consensus, detailed, details = [] }: { name: string; action?: string; score?: number | null; consensus?: string; detailed: boolean; details?: string[] }) {
-  return <div className="bg-white px-4 py-3"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><strong className="text-sm text-slate-950">{name}</strong>{action ? <ActionBadge action={action} /> : null}{score !== undefined ? <span className="text-xs text-slate-600">Final Score: <b>{score === null ? "—" : score.toFixed(2)}</b></span> : null}{consensus ? <span className="text-xs text-slate-600">Consensus: <b>{consensus}</b></span> : null}</div>{detailed ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">{details.map((detail) => <span key={detail}>{detail}</span>)}</div> : null}</div>;
+function StockRow({ name, action, score, consensus, detailed, highlighted = false, details = [] }: { name: string; action?: string; score?: number | null; consensus?: string; detailed: boolean; highlighted?: boolean; details?: string[] }) {
+  return <div className={cn("px-4 py-3", highlighted ? "bg-emerald-50" : "bg-white")}><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><strong className="text-sm text-slate-950">{name}</strong>{action ? <ActionBadge action={action} /> : null}{highlighted ? <span className="rounded-full bg-emerald-600 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">Above threshold</span> : null}{score !== undefined ? <span className="text-xs text-slate-600">Final Score: <b>{score === null ? "—" : score.toFixed(2)}</b></span> : null}{consensus ? <span className="text-xs text-slate-600">Consensus: <b>{consensus}</b></span> : null}</div>{detailed ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">{details.map((detail) => <span key={detail}>{detail}</span>)}</div> : null}</div>;
 }
 
 function StageHeader({ title, count, meta }: { title: string; count: number; meta: { models: string; timestamp: string } | null }) {
@@ -572,8 +743,48 @@ function RebalanceJobOutputsStage({ count, meta, stocks, outputs }: { count: num
   );
 }
 
-function SummaryStage({ title, count, meta, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; children: ReactNode }) {
-  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm"><StageHeader title={title} count={count} meta={meta} /><div className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain"><table className="w-full min-w-max border-collapse">{children}</table></div></article>;
+function SummaryStage({ title, count, meta, toolbar, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; toolbar?: ReactNode; children: ReactNode }) {
+  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm"><StageHeader title={title} count={count} meta={meta} />{toolbar}<div className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain"><table className="w-full min-w-max border-collapse">{children}</table></div></article>;
+}
+
+function BuyThresholdEditor({
+  portfolio,
+  value,
+  threshold,
+  onChange,
+  saveError,
+}: {
+  portfolio: RebalanceStockFlowPortfolio;
+  value: string;
+  threshold: number;
+  onChange: (value: string) => void;
+  saveError?: string | null;
+}) {
+  const id = `${portfolio}-stock-flow-buy-threshold`;
+  return (
+    <div className="shrink-0 border-b border-blue-100 bg-blue-50 px-4 py-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <label className="block text-xs font-bold uppercase tracking-wide text-blue-700" htmlFor={id}>
+            Buy Threshold
+          </label>
+          <p className="mt-1 text-[11px] leading-4 text-blue-800">
+            Buy New and Buy More rows are highlighted when Final Score is greater than {threshold.toFixed(2)}.
+          </p>
+        </div>
+        <input
+          id={id}
+          type="number"
+          step="0.01"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-28 rounded-xl border border-blue-200 bg-white px-3 py-2 text-base font-black text-slate-950 shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+          aria-label={`${portfolio === "zerodha" ? "Zerodha" : "IndMoney"} stock flow buy threshold`}
+        />
+      </div>
+      {saveError ? <p className="mt-2 text-xs font-semibold text-red-700">{saveError}</p> : null}
+    </div>
+  );
 }
 
 function ActionBadge({ action }: { action: string }) {
