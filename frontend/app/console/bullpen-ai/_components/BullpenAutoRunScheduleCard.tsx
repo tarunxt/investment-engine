@@ -4327,9 +4327,35 @@ function AllScannedEventsDialog({
   onClose: () => void;
 }) {
   const retainedRowCount = state.candidates.length;
+  const eventRowsPerPage = 100;
+  const [eventQuery, setEventQuery] = useState("");
+  const [eventPage, setEventPage] = useState(1);
   const omittedRowCount = Math.max(0, state.totalScanned - retainedRowCount);
   const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
   const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
+  const normalizedEventQuery = eventQuery.trim().toLowerCase();
+  const matchingCandidates = normalizedEventQuery
+    ? state.candidates.filter((candidate) =>
+        [
+          candidate.question,
+          candidate.slug ?? "",
+          candidate.filterReasons.join(" "),
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedEventQuery),
+      )
+    : state.candidates;
+  const eventPageCount = Math.max(
+    1,
+    Math.ceil(matchingCandidates.length / eventRowsPerPage),
+  );
+  const boundedEventPage = Math.min(eventPage, eventPageCount);
+  const eventPageStart = (boundedEventPage - 1) * eventRowsPerPage;
+  const visibleCandidates = matchingCandidates.slice(
+    eventPageStart,
+    eventPageStart + eventRowsPerPage,
+  );
   const filteredCandidates = state.candidates.filter(
     (candidate) => candidate.filterReasons.length > 0,
   );
@@ -4458,15 +4484,40 @@ function AllScannedEventsDialog({
                 <p className="py-4 text-center text-sm text-amber-700">Analysis covers the {retainedRowCount.toLocaleString("en-IN")} retained event rows. {omittedRowCount.toLocaleString("en-IN")} additional rows were not retained in the saved run.</p>
               ) : null}
             </>
-          ) : <><div className="overflow-hidden rounded-2xl border border-slate-200">
+          ) : <>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <label className="min-w-64 flex-1">
+              <span className="sr-only">Search scanned events</span>
+              <input
+                type="search"
+                aria-label="Search scanned events"
+                value={eventQuery}
+                onChange={(event) => {
+                  setEventQuery(event.target.value);
+                  setEventPage(1);
+                }}
+                placeholder="Search question, slug, or filter reason"
+                className="h-10 w-full rounded-xl border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+              />
+            </label>
+            <p className="text-sm text-slate-600">
+              {matchingCandidates.length === 0
+                ? "No matching rows."
+                : `Showing ${eventPageStart + 1}–${Math.min(
+                    eventPageStart + visibleCandidates.length,
+                    matchingCandidates.length,
+                  )} of ${matchingCandidates.length.toLocaleString("en-IN")} matching rows.`}
+            </p>
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-slate-200">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {state.candidates.map((candidate, index) => (
+                {visibleCandidates.map((candidate, index) => (
                   <tr key={`${candidate.marketId ?? candidate.slug ?? candidate.question}-${index}`}>
-                    <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                    <td className="px-4 py-3 text-slate-500">{eventPageStart + index + 1}</td>
                     <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
                     <td className="px-4 py-3"><span title={candidate.filterReasons.join("; ") || undefined} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${candidate.scanStatus === "passed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{candidate.scanStatus === "passed" ? "Passed" : "Filtered"}</span></td>
                     <td className="max-w-xs px-4 py-3 text-slate-600">{candidate.filterReasons.join("; ") || "Passed all Stage 1 filters."}</td>
@@ -4480,6 +4531,31 @@ function AllScannedEventsDialog({
               </tbody>
             </table>
           </div>
+          {matchingCandidates.length > eventRowsPerPage ? (
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                disabled={boundedEventPage <= 1}
+                onClick={() => setEventPage((page) => Math.max(1, page - 1))}
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-slate-600">
+                Page {boundedEventPage} of {eventPageCount}
+              </span>
+              <button
+                type="button"
+                disabled={boundedEventPage >= eventPageCount}
+                onClick={() =>
+                  setEventPage((page) => Math.min(eventPageCount, page + 1))
+                }
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          ) : null}
           {retainedRowCount === 0 ? (
             <div className="mx-auto max-w-2xl py-8 text-center">
               <p className="font-semibold text-slate-800">No detailed event rows are available.</p>

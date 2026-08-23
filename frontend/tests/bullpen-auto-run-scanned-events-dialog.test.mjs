@@ -36,3 +36,10 @@ test("scanned events dialog analyses every filter reason with event drill-down",
   assert.match(source, /Stage 1 filter drill-down/);
   assert.match(source, /Back to all scanned events/);
 });
+
+test("scanned events dialog searches and paginates large exhaustive scans", () => {
+  assert.match(source, /aria-label="Search scanned events"/);
+  assert.match(source, /const eventRowsPerPage = 100/);
+  assert.match(source, /visibleCandidates\.map/);
+  assert.match(source, /Page \{boundedEventPage\} of \{eventPageCount\}/);
+});
