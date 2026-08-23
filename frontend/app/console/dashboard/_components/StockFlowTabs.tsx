@@ -242,6 +242,43 @@ type RebalanceStockFlowSubwidgetProps = {
   buyThresholdSaveError?: string | null;
 };
 
+type StockFlowSourceData = {
+  runs: RunResponse[];
+  portfolioSnapshot:
+    | ZerodhaPortfolioSnapshotDetail
+    | IndMoneyUsPortfolioSnapshotDetail
+    | null;
+};
+
+const stockFlowSourcePromises = new Map<
+  RebalanceStockFlowPortfolio,
+  Promise<StockFlowSourceData>
+>();
+
+function fetchStockFlowSource(
+  portfolio: RebalanceStockFlowPortfolio,
+): Promise<StockFlowSourceData> {
+  const cached = stockFlowSourcePromises.get(portfolio);
+  if (cached) return cached;
+
+  const request = Promise.all([
+    fetchAllFullRuns(),
+    portfolio === "zerodha"
+      ? apiService.zerodhaPortfolioOverview()
+      : apiService.indmoneyUsPortfolioOverview(),
+  ])
+    .then(([runs, overview]) => ({
+      runs,
+      portfolioSnapshot: overview.latest,
+    }))
+    .catch((error) => {
+      stockFlowSourcePromises.delete(portfolio);
+      throw error;
+    });
+  stockFlowSourcePromises.set(portfolio, request);
+  return request;
+}
+
 export function RebalanceStockFlowWidget({
   formulaConfig,
   initialPortfolio = "zerodha",
@@ -373,16 +410,11 @@ function RebalanceStockFlowSubwidget({
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([
-      fetchAllFullRuns(),
-      portfolioId === "zerodha"
-        ? apiService.zerodhaPortfolioOverview()
-        : apiService.indmoneyUsPortfolioOverview(),
-    ])
-      .then(([result, overview]) => {
+    void fetchStockFlowSource(portfolioId)
+      .then(({ runs: result, portfolioSnapshot: snapshot }) => {
         if (!cancelled) {
           setRuns(result);
-          setPortfolioSnapshot(overview.latest);
+          setPortfolioSnapshot(snapshot);
         }
       })
       .catch((reason: unknown) => {
