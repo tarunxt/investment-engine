@@ -5865,8 +5865,8 @@ ${zerodhaExecutionMode === "direct_market"
       apiService.zerodhaThreatsLatest(),
       apiService.indmoneyUsThreatsLatest(),
       fetchDashboardRecentFullRuns(),
-      apiService.getAutoRebalanceHistory("india", { limit: 1 }),
-      apiService.getAutoRebalanceHistory("indmoney_us", { limit: 1 }),
+      apiService.getAutoRebalanceHistory("india", { limit: 25 }),
+      apiService.getAutoRebalanceHistory("indmoney_us", { limit: 25 }),
     ]);
 
     const zerodhaOverview =
