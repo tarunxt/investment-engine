@@ -1,0 +1,10 @@
+/*
+ * The Stage 1 active-position table renders an internal Polymarket condition
+ * identifier beneath each market title. Those 0x… values are operational
+ * metadata rather than user-facing content and can spill into adjacent cells.
+ * Hide that metadata row so the position, side/size, odds, and close-time
+ * columns remain visually isolated.
+ */
+div[class="mt-1 flex gap-2 overflow-hidden whitespace-nowrap text-[11px] text-slate-500"] {
+  display: none;
+}
