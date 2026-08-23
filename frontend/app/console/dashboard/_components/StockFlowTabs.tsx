@@ -255,7 +255,7 @@ const stockFlowSourcePromises = new Map<
   Promise<StockFlowSourceData>
 >();
 
-function fetchStockFlowSource(
+export function fetchRebalanceStockFlowSource(
   portfolio: RebalanceStockFlowPortfolio,
 ): Promise<StockFlowSourceData> {
   const cached = stockFlowSourcePromises.get(portfolio);
@@ -410,7 +410,7 @@ function RebalanceStockFlowSubwidget({
 
   useEffect(() => {
     let cancelled = false;
-    void fetchStockFlowSource(portfolioId)
+    void fetchRebalanceStockFlowSource(portfolioId)
       .then(({ runs: result, portfolioSnapshot: snapshot }) => {
         if (!cancelled) {
           setRuns(result);
