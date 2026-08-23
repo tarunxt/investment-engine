@@ -35,6 +35,8 @@ const devUser: UserResponse = {
     timezone: "UTC",
     notification_preferences: "all",
     theme_preference: "light",
+    zerodha_buy_threshold: 2.5,
+    indmoney_buy_threshold: 2.5,
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
   },
