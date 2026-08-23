@@ -40,6 +40,22 @@ test("History opens a dedicated run-details screen instead of a popup", () => {
   assert.match(scheduleCard, /presentation="page"/);
   assert.match(scheduleCard, /Back to run history/);
   assert.match(scheduleCard, /isPage[\\s\\S]*min-h-screen bg-slate-100/);
+  assert.match(
+    scheduleCard,
+    /onOpenScanCandidateDialog=\\{openScanCandidateDialog\\}/,
+  );
+  assert.match(
+    scheduleCard,
+    /onOpenStageTwoLlmRunDetails=\\{setStageTwoLlmRunDialog\\}/,
+  );
+  assert.match(
+    scheduleCard,
+    /onOpenMetricDetails=\\{openInvestMetricDialog\\}/,
+  );
+  assert.match(scheduleCard, /<StageOneOutputDialog/);
+  assert.match(scheduleCard, /<StageTwoLlmRunDetailsDialog/);
+  assert.match(scheduleCard, /<InvestMetricDetailsDialog/);
+  assert.match(scheduleCard, /renderInteractiveRows/);
 });
 test("History keeps usable run or trend data when the sibling request times out", () => {
   assert.match(historyScreen, /Promise\.allSettled/);
