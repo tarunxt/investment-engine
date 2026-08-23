@@ -2953,16 +2953,17 @@ function BullpenAiPageContent() {
 
   function syncBullpenScanSnapshot(
     snapshot: BullpenScanSnapshot,
-    options?: { resetSelections?: boolean },
+    options?: { resetSelections?: boolean; archivePrevious?: boolean },
   ) {
     const resetSelections = options?.resetSelections ?? true;
+    const archivePrevious = options?.archivePrevious ?? true;
     setSnapshotsByMode((current) => {
       const previousCurrent = current[activeMode].current;
       return {
         ...current,
         [activeMode]: {
           current: snapshot,
-          history: previousCurrent
+          history: previousCurrent && archivePrevious
             ? [
                 archiveBullpenScanSnapshot(previousCurrent),
                 ...current[activeMode].history,
@@ -2984,7 +2985,10 @@ function BullpenAiPageContent() {
     }));
   }
 
-  async function executeBullpenScan(options?: { resetSelections?: boolean }) {
+  async function executeBullpenScan(options?: {
+    resetSelections?: boolean;
+    archivePrevious?: boolean;
+  }) {
     const params = buildBullpenScanQueryParams(activeMode, activeFilters);
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
@@ -3013,6 +3017,7 @@ function BullpenAiPageContent() {
       if (nextSnapshot) {
         syncBullpenScanSnapshot(nextSnapshot, {
           resetSelections: options?.resetSelections,
+          archivePrevious: options?.archivePrevious,
         });
       }
 
@@ -4233,6 +4238,14 @@ function BullpenAiPageContent() {
       ) : null}
 
       <BullpenAutoRunScheduleCard
+        independentScanSnapshot={activeCurrentSnapshot}
+        onRunIndependentStageOne={async () => {
+          const result = await executeBullpenScan({
+            resetSelections: true,
+            archivePrevious: false,
+          });
+          return result;
+        }}
         buildRunNowRequest={buildRunNowRequest}
         activePositions={openActivePositions}
         activePositionsSummary={activePositionsSummary}
