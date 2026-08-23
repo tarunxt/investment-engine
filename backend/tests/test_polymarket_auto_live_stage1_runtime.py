@@ -370,6 +370,7 @@ async def test_gamma_page_uses_keyset_cursor_without_offset():
     rows, next_cursor = await _fetch_gamma_page(
         FakeClient(),
         cursor="cursor-1500",
+        end_date_min="2026-08-24T00:00:00+00:00",
     )
 
     assert rows == []
@@ -377,6 +378,7 @@ async def test_gamma_page_uses_keyset_cursor_without_offset():
     assert captured["url"] == "https://gamma-api.polymarket.com/markets/keyset"
     assert captured["params"] == {
         "closed": "false",
+        "end_date_min": "2026-08-24T00:00:00+00:00",
         "limit": "100",
         "after_cursor": "cursor-1500",
     }
@@ -400,7 +402,13 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
             "closed": False,
         }
 
-    async def fake_fetch_gamma_page(_client, *, cursor: str | None):
+    async def fake_fetch_gamma_page(
+        _client,
+        *,
+        cursor: str | None,
+        end_date_min: str,
+    ):
+        assert end_date_min
         requested_cursors.append(cursor)
         start = 0 if cursor is None else int(cursor.removeprefix("cursor-"))
         if start < 2_000:
