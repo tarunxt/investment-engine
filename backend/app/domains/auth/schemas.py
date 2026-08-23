@@ -65,6 +65,8 @@ class UpdateProfileRequest(BaseModel):
     timezone: Optional[str] = None
     notification_preferences: Optional[str] = None  # all, important, none
     theme_preference: Optional[str] = None  # light, dark
+    zerodha_buy_threshold: Optional[float] = Field(None, ge=-100, le=100)
+    indmoney_buy_threshold: Optional[float] = Field(None, ge=-100, le=100)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -102,6 +104,8 @@ class UserProfileResponse(BaseModel):
     timezone: str
     notification_preferences: str
     theme_preference: str
+    zerodha_buy_threshold: float
+    indmoney_buy_threshold: float
     created_at: datetime
     updated_at: datetime
     
