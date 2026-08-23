@@ -6,7 +6,7 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
-  Github,
+  GitBranch,
   Mail,
   RefreshCw,
   Send,
@@ -410,7 +410,7 @@ export default function MailsPage() {
             <>
               <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
                 <div className="flex items-center gap-2 font-bold">
-                  <Github className="h-4 w-4" />
+                  <GitBranch className="h-4 w-4" />
                   GitHub-generated notifications
                 </div>
                 <p className="mt-1">
