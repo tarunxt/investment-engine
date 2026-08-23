@@ -149,6 +149,46 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
     )
 
 
+@pytest.mark.anyio
+async def test_load_bullpen_prefers_display_snapshot_without_mutating_cache(
+    monkeypatch,
+):
+    fetched_at = datetime.now(UTC)
+    display_snapshot = SimpleNamespace(
+        payload={
+            "summary": {
+                "active_count": 13,
+                "claimable_count": 0,
+                "claimable_value": 0,
+                "cash_balance": 4.44,
+                "total_value": 68.64,
+                "unrealized_pnl": -0.81,
+                "wallet_value": 68.64,
+            },
+            "positions": [{"id": index} for index in range(13)],
+        },
+        fetched_at=fetched_at.isoformat(),
+    )
+
+    class Broker:
+        async def read_display_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return display_snapshot
+
+        async def read_cached_positions_snapshot(self, *, delete_invalid: bool):
+            raise AssertionError("display snapshot should be preferred")
+
+    monkeypatch.setattr(service, "get_bullpen_runtime_broker", lambda: Broker())
+
+    result = await service._load_bullpen(17)
+
+    assert result.active_count == 13
+    assert result.claimable_count == 0
+    assert result.cash_balance == 4.44
+    assert result.total_value == 68.64
+    assert result.fetched_at == fetched_at
+
+
 def test_dashboard_summary_response_stays_below_150kb_and_excludes_raw_data():
     payload = _summary_fixture().model_dump_json().encode()
 
