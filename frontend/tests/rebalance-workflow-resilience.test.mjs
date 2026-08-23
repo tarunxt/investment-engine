@@ -89,6 +89,29 @@ test("auto-rebalance idle tiles include active run progress", () => {
   assert.match(source, /activeLlms > 0/);
 });
 
+test("last completed auto-rebalance audit repopulates every idle stage tile", () => {
+  assert.match(source, /function summarizeAutoRebalanceHistoryStage/);
+  assert.match(source, /apiService\.getAutoRebalanceHistory\("india", \{ limit: 1 \}\)/);
+  assert.match(
+    source,
+    /apiService\.getAutoRebalanceHistory\("indmoney_us", \{ limit: 1 \}\)/,
+  );
+  for (const stage of [
+    "sync",
+    "threats",
+    "swing",
+    "rebalance",
+    "technical",
+    "actionables",
+  ]) {
+    assert.match(source, new RegExp(`historyInfo\\("${stage}"\\)`));
+  }
+  assert.match(source, /recommended_stocks/);
+  assert.match(source, /rebalance_inputs/);
+  assert.match(source, /completed_provider_count/);
+  assert.match(source, /estimated_cost/);
+});
+
 test("each auto-rebalance stage writes a durable audit update", () => {
   assert.match(source, /const activeAutoRebalanceMetadataRef = useRef/);
   assert.match(source, /const recordAutoRebalanceStage = useCallback/);
