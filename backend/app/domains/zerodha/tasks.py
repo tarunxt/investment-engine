@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 from celery.exceptions import MaxRetriesExceededError
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from app.core.logging import get_logger
 from app.domains.zerodha.audit import SyncZerodhaAuditRepository
@@ -170,7 +170,7 @@ def sync_portfolio_snapshot_task(self, user_id: int, source: str = "manual"):
                 return {"status": "failed", "reason": reason}
 
 
-def is_weekend_snapshot_date(value) -> bool:
+def is_weekend_snapshot_date(value: date) -> bool:
     return value.weekday() >= 5
 
 
