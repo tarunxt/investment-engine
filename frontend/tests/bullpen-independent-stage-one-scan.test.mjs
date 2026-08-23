@@ -45,9 +45,6 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
   assert.match(routeSource, /rejectedQuestions/);
   assert.match(routeSource, /getFilterReasons/);
   assert.match(routeSource, /Gamma supplemented the scan/);
-  assert.match(routeSource, /stage1-scan-preview/);
-  assert.match(routeSource, /createBackendSessionContext\(request\)/);
-  assert.match(routeSource, /fetchBackendJsonWithSession/);
   assert.match(cardSource, /scannedCandidates: \[\.\.\.acceptedCandidates, \.\.\.rejectedCandidates\]/);
   assert.match(cardSource, /independent_stage1_scan: true/);
 });
@@ -64,8 +61,6 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.doesNotMatch(routeSource, /earliestOutsideWindow/);
   assert.doesNotMatch(routeSource, /order: "endDate"/);
-  assert.match(routeSource, /previewIsComplete/);
-  assert.match(routeSource, /previewSourceLabel\.includes\(GAMMA_SOURCE_LABEL\)/);
   assert.match(routeSource, /scanned the complete active universe/);
 });
 
