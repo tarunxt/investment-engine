@@ -323,37 +323,42 @@ async def _build_auto_rebalance_history(
     *,
     user_id: int,
     portfolio: str,
+    sequences: set[int] | None = None,
 ) -> list[tuple[AutoRebalanceHistoryItemResponse, list[Run], list[Job]]]:
-    workflows = list(
-        (await db.execute(
-            select(AutoRebalanceWorkflow)
-            .where(
-                AutoRebalanceWorkflow.user_id == user_id,
-                AutoRebalanceWorkflow.portfolio == portfolio,
-            )
-            .options(selectinload(AutoRebalanceWorkflow.stages))
-        )).scalars().all()
+    workflow_query = (
+        select(AutoRebalanceWorkflow)
+        .where(
+            AutoRebalanceWorkflow.user_id == user_id,
+            AutoRebalanceWorkflow.portfolio == portfolio,
+        )
+        .options(selectinload(AutoRebalanceWorkflow.stages))
     )
-    runs = list(
-        (await db.execute(
-            select(Run)
-            .where(
-                Run.user_id == user_id,
-                Run.auto_rebalance_portfolio == portfolio,
-                Run.auto_rebalance_sequence.is_not(None),
-            )
-            .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
-        )).scalars().all()
+    run_query = (
+        select(Run)
+        .where(
+            Run.user_id == user_id,
+            Run.auto_rebalance_portfolio == portfolio,
+            Run.auto_rebalance_sequence.is_not(None),
+        )
+        .options(selectinload(Run.run_jobs).selectinload(RunJob.job))
     )
-    jobs = list(
-        (await db.execute(
-            select(Job).where(
-                Job.user_id == user_id,
-                Job.auto_rebalance_portfolio == portfolio,
-                Job.auto_rebalance_sequence.is_not(None),
-            )
-        )).scalars().all()
+    job_query = select(Job).where(
+        Job.user_id == user_id,
+        Job.auto_rebalance_portfolio == portfolio,
+        Job.auto_rebalance_sequence.is_not(None),
     )
+    if sequences is not None:
+        if not sequences:
+            return []
+        workflow_query = workflow_query.where(
+            AutoRebalanceWorkflow.sequence.in_(sequences),
+        )
+        run_query = run_query.where(Run.auto_rebalance_sequence.in_(sequences))
+        job_query = job_query.where(Job.auto_rebalance_sequence.in_(sequences))
+
+    workflows = list((await db.execute(workflow_query)).scalars().all())
+    runs = list((await db.execute(run_query)).scalars().all())
+    jobs = list((await db.execute(job_query)).scalars().all())
 
     grouped: dict[int, dict] = {}
     for workflow in workflows:
@@ -565,10 +570,27 @@ async def list_auto_rebalance_history(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
+    recent_sequences = set(
+        (
+            await db.execute(
+                select(AutoRebalanceWorkflow.sequence)
+                .where(
+                    AutoRebalanceWorkflow.user_id == current_user.id,
+                    AutoRebalanceWorkflow.portfolio == portfolio,
+                )
+                .order_by(
+                    AutoRebalanceWorkflow.sequence.desc(),
+                    AutoRebalanceWorkflow.updated_at.desc(),
+                )
+                .limit(limit)
+            )
+        ).scalars().all()
+    )
     history = await _build_auto_rebalance_history(
         db,
         user_id=current_user.id,
         portfolio=portfolio,
+        sequences=recent_sequences or None,
     )
     return AutoRebalanceHistoryListResponse(
         items=[item for item, _, _ in history[:limit]],
@@ -592,6 +614,7 @@ async def get_auto_rebalance_history_detail(
         db,
         user_id=current_user.id,
         portfolio=portfolio,
+        sequences={sequence},
     )
     match = next((entry for entry in history if entry[0].sequence == sequence), None)
     if not match:
@@ -724,6 +747,7 @@ async def update_auto_rebalance_stage(
         db,
         user_id=current_user.id,
         portfolio=portfolio,
+        sequences={sequence},
     )
     item = next((entry[0] for entry in history if entry[0].sequence == sequence), None)
     if not item:
