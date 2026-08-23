@@ -182,6 +182,9 @@ test("Sidebar component keeps the accessibility, footer, and reorder hooks requi
   assert.match(sidebarSource, /Nested items can be reordered inside their folder\./);
   assert.match(sidebarSource, /Restore default name/);
   assert.match(sidebarSource, /onContextMenu/);
+  assert.match(sidebarSource, /aria-labelledby="sidebar-rename-title"/);
+  assert.match(sidebarSource, /Save name/);
+  assert.doesNotMatch(sidebarSource, /window\.prompt/);
   assert.match(sidebarSource, /SidebarThemeToggle/);
   assert.match(sidebarSource, /ACCOUNT_ACTIONS\.logout\.label/);
   assert.match(sidebarSource, /buildSidebarOrderStorageKey\(userId\)/);
