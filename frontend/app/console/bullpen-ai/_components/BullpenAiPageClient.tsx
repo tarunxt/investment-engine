@@ -244,6 +244,7 @@ const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
 const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 90_000;
+const BULLPEN_SCAN_POLL_MS = 1_500;
 
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
@@ -3006,14 +3007,45 @@ function BullpenAiPageContent() {
     }));
 
     try {
-      const { response, payload } = await fetchBullpenUiJson<ScanResult>(
-        `/api/bullpen-ai?${params.toString()}`,
-        {
-          cache: "no-store",
-          signal: pageRequestAbortControllerRef.current?.signal,
-        },
-        BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
-      );
+      const scanRequestStartedAt = Date.now();
+      let scanResponse: { response: Response; payload: ScanResult };
+      while (true) {
+        scanResponse = await fetchBullpenUiJson<ScanResult>(
+          `/api/bullpen-ai?${params.toString()}`,
+          {
+            cache: "no-store",
+            signal: pageRequestAbortControllerRef.current?.signal,
+          },
+          BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
+        );
+        const pendingPayload = scanResponse.payload as ScanResult & {
+          status?: string;
+          retryAfterMs?: number;
+        };
+        if (
+          scanResponse.response.status !== 202 ||
+          pendingPayload.status !== "scanning"
+        ) {
+          break;
+        }
+        if (
+          Date.now() - scanRequestStartedAt >=
+          BULLPEN_SCAN_REQUEST_TIMEOUT_MS
+        ) {
+          throw new RequestTimeoutError(
+            "GET",
+            `/api/bullpen-ai?${params.toString()}`,
+            BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
+          );
+        }
+        await new Promise((resolve) =>
+          window.setTimeout(
+            resolve,
+            pendingPayload.retryAfterMs ?? BULLPEN_SCAN_POLL_MS,
+          ),
+        );
+      }
+      const { response, payload } = scanResponse;
       const isSuccessfulScan = response.ok && !payload.error;
 
       void positionsRefreshTask;
