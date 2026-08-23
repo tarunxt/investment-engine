@@ -31,6 +31,17 @@ test("stock-flow tabs expose all stages and summary-detail switching", () => {
   assert.match(stockFlowSource, /Consensus:/);
 });
 
+test("summary view uses scrollable stage tables and standard action colours", () => {
+  assert.match(stockFlowSource, /<table/);
+  assert.match(stockFlowSource, /Stock Symbol/);
+  assert.match(stockFlowSource, /Final Score/);
+  assert.match(stockFlowSource, /sticky top-0/);
+  assert.match(stockFlowSource, /overflow-auto overscroll-contain/);
+  assert.match(stockFlowSource, /getStandardActionBadgeClass/);
+  assert.match(stockFlowSource, /<ActionBadge action=\{stock\.consensusAction\}/);
+  assert.match(stockFlowSource, /<ActionBadge action=\{row\.formulaAction\}/);
+});
+
 test("each auto-rebalance card opens its stock-flow subwidget in the shared dialog", () => {
   assert.match(workflowSource, /<RebalanceStockFlowTrigger/);
   assert.match(workflowSource, /setStockFlowPortfolio\(section\.portfolio\)/);
