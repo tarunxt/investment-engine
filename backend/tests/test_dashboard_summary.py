@@ -223,6 +223,60 @@ async def test_load_bullpen_falls_back_when_display_snapshot_read_fails(
     assert result.fetched_at == fetched_at
 
 
+@pytest.mark.anyio
+async def test_load_bullpen_refreshes_presentation_data_when_caches_are_empty(
+    monkeypatch,
+):
+    fetched_at = datetime.now(UTC)
+    refreshed_snapshot = SimpleNamespace(
+        payload={
+            "summary": {
+                "active_count": 13,
+                "claimable_count": 0,
+                "cash_balance": 4.44,
+                "total_value": 68.74,
+            },
+            "positions": [{"id": index} for index in range(13)],
+        },
+        fetched_at=fetched_at.isoformat(),
+    )
+
+    class Broker:
+        async def read_display_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return None
+
+        async def read_cached_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return None
+
+        async def get_positions_snapshot(
+            self,
+            *,
+            force_fresh: bool,
+            allow_refresh: bool,
+            caller_source: str,
+            max_age_seconds: int,
+            timeout_seconds: int,
+        ):
+            assert force_fresh is False
+            assert allow_refresh is False
+            assert caller_source == "ui-passive-refresh"
+            assert max_age_seconds == 20
+            assert timeout_seconds == 10
+            return refreshed_snapshot
+
+    monkeypatch.setattr(service, "get_bullpen_runtime_broker", lambda: Broker())
+
+    result = await service._load_bullpen(17)
+
+    assert result.active_count == 13
+    assert result.claimable_count == 0
+    assert result.cash_balance == 4.44
+    assert result.total_value == 68.74
+    assert result.fetched_at == fetched_at
+
+
 def test_dashboard_summary_response_stays_below_150kb_and_excludes_raw_data():
     payload = _summary_fixture().model_dump_json().encode()
 
