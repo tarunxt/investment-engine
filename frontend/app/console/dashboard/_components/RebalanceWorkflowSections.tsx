@@ -3507,7 +3507,7 @@ function ZerodhaBasketPreviewDialog({
               type="button"
               onClick={onClose}
               className="rounded-full border border-slate-200 p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              aria-label="Close Zerodha basket preview"
+              aria-label={`Close ${basketBrokerLabel} basket preview`}
             >
               <X className="size-5" />
             </button>
