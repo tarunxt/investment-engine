@@ -1085,33 +1085,66 @@ function passesTimeFilter(
   );
 }
 
-function passesFilters(
+function getFilterReasons(
   question: FilterableBullpenQuestion,
   mode: ScanMode,
   filters: BullpenScanFilters,
 ) {
-  if (!passesTimeFilter(question, mode, filters)) return false;
-  if (filters.excludeSports && isSportsQuestion(question)) return false;
-  if (filters.excludeWeather && isWeatherQuestion(question)) return false;
-  if (filters.excludeMarketPredictions && isMarketPredictionQuestion(question))
-    return false;
-  if (filters.excludeTweetCountQuestions && isTweetCountQuestion(question))
-    return false;
-  if (filters.excludeReleasedByEvents && isReleasedByEventQuestion(question))
-    return false;
-  if (isInsultMarket(question)) return false;
-  if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) return false;
+  const reasons: string[] = [];
+  if (!passesTimeFilter(question, mode, filters)) {
+    reasons.push("Excluded market outside the selected scan window.");
+  }
+  if (filters.excludeSports && isSportsQuestion(question)) {
+    reasons.push("Excluded sports market.");
+  }
+  if (filters.excludeWeather && isWeatherQuestion(question)) {
+    reasons.push("Excluded weather market.");
+  }
+  if (
+    filters.excludeMarketPredictions &&
+    isMarketPredictionQuestion(question)
+  ) {
+    reasons.push("Excluded market-prediction or finance market.");
+  }
+  if (
+    filters.excludeTweetCountQuestions &&
+    isTweetCountQuestion(question)
+  ) {
+    reasons.push("Excluded tweet-count or social-post-count market.");
+  }
+  if (
+    filters.excludeReleasedByEvents &&
+    isReleasedByEventQuestion(question)
+  ) {
+    reasons.push("Excluded release-by event market.");
+  }
+  if (isInsultMarket(question)) {
+    reasons.push("Excluded insult or name-calling market.");
+  }
+  if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) {
+    reasons.push("Excluded unclear non-binary market.");
+  }
   if (
     filters.minYesOdds > 0 &&
     (question.yesOdds === null || question.yesOdds < filters.minYesOdds)
-  )
-    return false;
+  ) {
+    reasons.push(
+      question.yesOdds === null
+        ? "Excluded market without Yes odds."
+        : `Excluded market below the ${filters.minYesOdds}% Yes odds floor.`,
+    );
+  }
   if (
     filters.minNoOdds > 0 &&
     (question.noOdds === null || question.noOdds < filters.minNoOdds)
-  )
-    return false;
-  return true;
+  ) {
+    reasons.push(
+      question.noOdds === null
+        ? "Excluded market without No odds."
+        : `Excluded market below the ${filters.minNoOdds}% No odds floor.`,
+    );
+  }
+  return reasons;
 }
 
 function collectQuestions(payloads: unknown[], sourceUrl: string) {
@@ -1152,27 +1185,6 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
       ) ??
       POLYMARKET_DEFAULT_CATEGORY,
   };
-}
-
-function applyFilters(
-  candidates: FilterableBullpenQuestion[],
-  mode: ScanMode,
-  filters: BullpenScanFilters,
-) {
-  return sortQuestions(
-    candidates
-      .map((question) => ({
-        ...question,
-        _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
-        _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
-        _customExcludeMarketPredictionsKeywords:
-          filters.customExcludeMarketPredictionsKeywords,
-        _customExcludeTweetCountQuestionsKeywords:
-          filters.customExcludeTweetCountQuestionsKeywords,
-      }))
-      .filter((question) => passesFilters(question, mode, filters))
-      .map((question) => stripFilterMetadata(question)),
-  );
 }
 
 function sourceHasFutureCandidates<
@@ -1301,8 +1313,29 @@ async function buildResponse({
   warning?: string;
   details?: string;
 }) {
+  const candidatesWithFilters = candidates.map((question) => ({
+    ...question,
+    _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
+    _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
+    _customExcludeMarketPredictionsKeywords:
+      filters.customExcludeMarketPredictionsKeywords,
+    _customExcludeTweetCountQuestionsKeywords:
+      filters.customExcludeTweetCountQuestionsKeywords,
+  }));
+  const acceptedCandidates = candidatesWithFilters.filter(
+    (question) => getFilterReasons(question, mode, filters).length === 0,
+  );
+  const rejectedCandidates = candidatesWithFilters.filter(
+    (question) => getFilterReasons(question, mode, filters).length > 0,
+  );
   const questions = await applyCanonicalPolymarketMarketUrls(
-    applyFilters(candidates, mode, filters),
+    sortQuestions(acceptedCandidates.map((question) => stripFilterMetadata(question))),
+  );
+  const rejectedQuestions = sortQuestions(
+    rejectedCandidates.map((question) => ({
+      ...stripFilterMetadata(question),
+      filterReasons: getFilterReasons(question, mode, filters),
+    })),
   );
 
   return {
@@ -1313,6 +1346,7 @@ async function buildResponse({
     filters,
     totalCandidates: candidates.length,
     questions,
+    rejectedQuestions,
     ...(warning ? { warning } : {}),
     ...(details ? { details } : {}),
   };

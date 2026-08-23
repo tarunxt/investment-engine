@@ -131,6 +131,11 @@ export type ScanResult = {
   filters: BullpenScanFilters;
   totalCandidates: number;
   questions: BullpenQuestion[];
+  rejectedQuestions?: Array<
+    BullpenQuestion & {
+      filterReasons: string[];
+    }
+  >;
   error?: string;
   warning?: string;
   details?: string;

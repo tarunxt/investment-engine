@@ -40,7 +40,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
+  type BullpenQuestion,
   type BullpenQuestionRow,
+  type BullpenScanSnapshot,
   getBullpenAmountToBeInvestedBreakdown,
   getBullpenReturnsPerDayBreakdown,
 } from "@/lib/bullpen-ai";
@@ -248,6 +250,11 @@ type BullpenAutoRunScheduleCardProps = {
   hasActivePositionsSnapshot?: boolean;
   recentDecisions?: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
+  independentScanSnapshot?: BullpenScanSnapshot | null;
+  onRunIndependentStageOne?: () => Promise<{
+    snapshot: BullpenScanSnapshot | null;
+    error: string | null;
+  }>;
   onSummaryUpdated?: (payload: {
     summary: BullpenAutoLiveSummaryResponse;
     run: BullpenAutoLiveRun | null;
@@ -1336,6 +1343,81 @@ function buildWorkflowPortfolioPositionFallback(
     isClaimable: position.isClaimable,
     classification: position.economicClassification,
   }));
+}
+
+function readIndependentScanNumber(value: string | null) {
+  if (!value) return null;
+  const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildIndependentStageOneView(
+  snapshot: BullpenScanSnapshot,
+  positions: BullpenActivePositionView[],
+): WorkflowStageView {
+  const toCandidate = (
+    question: BullpenQuestion,
+    scanStatus: "passed" | "filtered",
+    filterReasons: string[] = [],
+  ): WorkflowStageView["scanCandidates"][number] => ({
+    questionId: question.questionId ?? question.id,
+    marketId: question.marketId ?? question.id,
+    question: question.question,
+    marketUrl: question.marketUrl ?? question.sourceUrl ?? null,
+    slug: question.slug,
+    closeTime: question.closeTime,
+    theme: question.category || null,
+    currentYesOdds: question.yesOdds,
+    currentNoOdds: question.noOdds,
+    volumeUsd: readIndependentScanNumber(question.volume),
+    liquidityUsd: readIndependentScanNumber(question.liquidity),
+    forceInclude: false,
+    scanStatus,
+    filterReasons,
+  });
+  const acceptedCandidates = snapshot.questions.map((question) =>
+    toCandidate(question, "passed"),
+  );
+  const rejectedCandidates = (snapshot.rejectedQuestions ?? []).map(
+    (question) =>
+      toCandidate(question, "filtered", question.filterReasons),
+  );
+
+  return {
+    key: "scan",
+    title: "Stage 1 · Bullpen Scan",
+    subtitle: "Independent Stage 1 scan",
+    tone: "green",
+    state: "finished",
+    detail: "Independent Stage 1 scan completed without running Stage 2 or Stage 3.",
+    progressCommentary: [
+      `${snapshot.totalCandidates} Bullpen events scanned.`,
+      `${acceptedCandidates.length} events passed the saved filters.`,
+      `${rejectedCandidates.length} events were filtered out.`,
+    ],
+    progressLabel: `${snapshot.totalCandidates}/${snapshot.totalCandidates} events`,
+    progressPercent: 100,
+    isCurrent: false,
+    timerStartedAt: snapshot.scannedAt,
+    timerCompletedAt: snapshot.scannedAt,
+    scanCandidates: acceptedCandidates,
+    scannedCandidates: [...acceptedCandidates, ...rejectedCandidates],
+    activePositionsFound: buildWorkflowPortfolioPositionFallback(positions),
+    inputs: { filters: snapshot.filters },
+    outputs: {
+      independent_stage1_scan: true,
+      scanned_at: snapshot.scannedAt,
+      scanned_candidates: snapshot.totalCandidates,
+      total_items: snapshot.totalCandidates,
+      accepted_candidates_count: acceptedCandidates.length,
+      rejected_candidates_count: rejectedCandidates.length,
+      accepted_candidates: acceptedCandidates,
+      rejected_candidates: rejectedCandidates,
+      scan_source_label: snapshot.sourceLabel,
+      scan_source_url: snapshot.sourceUrl,
+      active_positions_total: positions.length,
+    },
+  };
 }
 
 function getStageActivePositionCounts(stage: WorkflowStageView) {
@@ -10296,6 +10378,8 @@ export function BullpenAutoRunScheduleCard({
   recentDecisions = [],
   onSummaryUpdated,
   onOpenScanFilters,
+  independentScanSnapshot = null,
+  onRunIndependentStageOne,
 }: BullpenAutoRunScheduleCardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -10391,6 +10475,14 @@ export function BullpenAutoRunScheduleCard({
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
+  const [stageOneResultSource, setStageOneResultSource] = useState<
+    "original" | "independent"
+  >("original");
+  const [isIndependentStageOneScanning, setIsIndependentStageOneScanning] =
+    useState(false);
+  const [independentStageOneError, setIndependentStageOneError] = useState<
+    string | null
+  >(null);
   const [openStageKey, setOpenStageKey] = useState<
     "scan" | "llm" | "invest" | null
   >(null);
@@ -12638,12 +12730,38 @@ export function BullpenAutoRunScheduleCard({
     pendingRunId ?? (action === "start-now" ? "start-now-pending" : null),
     runTimerStartedAt,
   );
+  const independentStageOneView = independentScanSnapshot
+    ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
+    : null;
+  const handleIndependentStageOneScan = async () => {
+    if (!onRunIndependentStageOne || isIndependentStageOneScanning) return;
+    setIsIndependentStageOneScanning(true);
+    setIndependentStageOneError(null);
+    try {
+      const result = await onRunIndependentStageOne();
+      if (result.snapshot) {
+        setStageOneResultSource("independent");
+      }
+      if (result.error) {
+        setIndependentStageOneError(result.error);
+      }
+    } catch (scanError) {
+      setIndependentStageOneError(formatUnknownError(scanError));
+    } finally {
+      setIsIndependentStageOneScanning(false);
+    }
+  };
   const openScanCandidateDialog = (
     stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
     mode: ScanCandidateDialogMode,
   ) => {
-    const sourceRun = workflowRunForMonitor;
-    const sourceDecisions = summary?.recent_decisions ?? [];
+    const isIndependentStage = Boolean(
+      stage.outputs.independent_stage1_scan,
+    );
+    const sourceRun = isIndependentStage ? null : workflowRunForMonitor;
+    const sourceDecisions = isIndependentStage
+      ? []
+      : summary?.recent_decisions ?? [];
 
     // Open the shared Stage 1 widget immediately from the best locally
     // available projection, then hydrate that same widget with this run's
@@ -12661,7 +12779,7 @@ export function BullpenAutoRunScheduleCard({
       }),
     );
 
-    if (!sourceRun?.id) return;
+    if (!sourceRun?.id || isIndependentStage) return;
 
     void Promise.all([
       apiService.getBullpenAutoLiveRun(sourceRun.id, { timeoutMs: 10_000 }),
@@ -13735,7 +13853,13 @@ export function BullpenAutoRunScheduleCard({
           </div>
 
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
-            {workflowView.stages.map((stage) => {
+            {workflowView.stages.map((workflowStage) => {
+              const stage =
+                workflowStage.key === "scan" &&
+                stageOneResultSource === "independent" &&
+                independentStageOneView
+                  ? independentStageOneView
+                  : workflowStage;
               const immediateSuccess = getInvestStageImmediateSuccess(stage);
               const canOpenInputs =
                 (stage.key === "llm" || stage.key === "invest") &&
@@ -13903,6 +14027,58 @@ export function BullpenAutoRunScheduleCard({
                         <p className={`text-xs leading-5 ${toneClasses.muted}`}>
                           {stage.subtitle}
                         </p>
+                      ) : null}
+                      {stage.key === "scan" && onRunIndependentStageOne ? (
+                        <div className="flex max-w-full flex-wrap items-center gap-2 pt-2">
+                          {independentScanSnapshot ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setStageOneResultSource("original")}
+                                disabled={isIndependentStageOneScanning}
+                                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  stageOneResultSource === "original"
+                                    ? "border-blue-700 bg-blue-700 text-white shadow-sm"
+                                    : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
+                                }`}
+                              >
+                                Original
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setStageOneResultSource("independent")
+                                }
+                                disabled={isIndependentStageOneScanning}
+                                className={`max-w-full rounded-lg border border-emerald-700 bg-emerald-600 px-3 py-1.5 text-left text-xs font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                  stageOneResultSource === "independent"
+                                    ? "ring-2 ring-emerald-300 ring-offset-1"
+                                    : ""
+                                }`}
+                              >
+                                Scan dated {formatIstDateTime(independentScanSnapshot.scannedAt)}
+                              </button>
+                            </>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => void handleIndependentStageOneScan()}
+                            disabled={isIndependentStageOneScanning}
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 disabled:cursor-wait ${
+                              isIndependentStageOneScanning
+                                ? "border-red-700 bg-red-600 focus:ring-red-300"
+                                : "border-blue-700 bg-blue-600 hover:bg-blue-700 focus:ring-blue-300"
+                            }`}
+                            aria-live="polite"
+                          >
+                            {isIndependentStageOneScanning ? "Scanning" : "Scan"}
+                          </button>
+                          {independentStageOneError ? (
+                            <p className="basis-full text-[11px] font-semibold leading-4 text-red-700">
+                              {independentStageOneError}
+                            </p>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                     <div className="flex flex-col items-end gap-2">

@@ -1,5 +1,15 @@
 # Bullpen Run Audit
 
+## Independent Stage 1 scans
+
+The console Stage 1 card can run an independent Bullpen market and active-position
+scan without starting the Auto-Live Stage 2 or Stage 3 worker stages. Its latest
+snapshot is stored separately from the frozen full Auto Run projection and replaces
+only the previous independent snapshot. The Stage 1 output widget retains accepted
+and rejected event rows plus their filter reasons. Selecting **Original** always
+returns to the latest persisted full Auto Run Stage 1 evidence, so independent scans
+do not rewrite historical run-audit facts or become an Auto Run audit record.
+
 Stage 1 console projections retain both accepted and rejected candidate
 summaries so the run monitor can display the complete scanned-event list
 without changing frozen audit snapshots. Older snapshots that do not contain
