@@ -151,3 +151,38 @@ test("USD portfolio history is converted to portfolio-plus-cash INR totals", () 
     [1200, 1300, 1400, 1500],
   );
 });
+
+
+test("persisted server history drives Bullpen and combined charts", () => {
+  const { buildPersistedDashboardTrend } = loadTotalsModule();
+  const trend = buildPersistedDashboardTrend(
+    [
+      ["2026-08-23T18:25:00Z", 100],
+      ["2026-08-24T18:25:00Z", 101],
+      ["2026-08-25T18:25:00Z", 102],
+      ["2026-08-26T18:25:00Z", 103],
+    ].map(([captured_at, value]) => ({ captured_at, value })),
+  );
+  assert.deepEqual(
+    trend.map((point) => point.value),
+    [100, 101, 102, 103],
+  );
+
+  const dashboardSource = readFileSync(
+    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    dashboardSource,
+    /dashboard\.portfolioHistory\?\.bullpen/,
+  );
+  assert.match(
+    dashboardSource,
+    /dashboard\.portfolioHistory\?\.combined/,
+  );
+  assert.match(sourceForDailyHistoryType(), /portfolio_history:/);
+});
+
+function sourceForDailyHistoryType() {
+  return readFileSync(new URL("../types/api.ts", import.meta.url), "utf8");
+}
