@@ -58,8 +58,8 @@ const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const POLYMARKET_GAMMA_EVENTS_KEYSET_URL = "https://gamma-api.polymarket.com/events/keyset";
-const GAMMA_EVENT_PAGE_SIZE = 25;
+const POLYMARKET_GAMMA_MARKETS_KEYSET_URL = `${POLYMARKET_GAMMA_MARKETS_URL}/keyset`;
+const GAMMA_MARKET_PAGE_SIZE = 100;
 const GAMMA_SCAN_JOB_TTL_MS = 15 * 60 * 1000;
 
 type GammaScanJob = {
@@ -1257,12 +1257,12 @@ async function fetchGammaMarketPage({
   const params = new URLSearchParams({
     closed: "false",
     end_date_min: currentUniverseStart.toISOString(),
-    limit: String(GAMMA_EVENT_PAGE_SIZE),
+    limit: String(GAMMA_MARKET_PAGE_SIZE),
   });
   if (cursor) params.set("after_cursor", cursor);
 
   const response = await fetch(
-    `${POLYMARKET_GAMMA_EVENTS_KEYSET_URL}?${params.toString()}`,
+    `${POLYMARKET_GAMMA_MARKETS_KEYSET_URL}?${params.toString()}`,
     {
       cache: "no-store",
       headers: { accept: "application/json" },
@@ -1273,49 +1273,44 @@ async function fetchGammaMarketPage({
   }
 
   const payload = (await response.json()) as Record<string, unknown>;
-  const events = Array.isArray(payload.events) ? payload.events : [];
-  for (const eventValue of events) {
-    if (!eventValue || typeof eventValue !== "object") continue;
-    const event = eventValue as Record<string, unknown>;
+  const markets = Array.isArray(payload.markets) ? payload.markets : [];
+  for (const marketValue of markets) {
+    if (!marketValue || typeof marketValue !== "object") continue;
+    const market = marketValue as Record<string, unknown>;
     if (
-      event.closed === true ||
-      event.active === false ||
-      event.archived === true
+      market.closed === true ||
+      market.active === false ||
+      market.archived === true
     ) {
       continue;
     }
-    const eventIdentity = {
-      id: event.id,
-      slug: event.slug,
-      title: event.title,
-    };
-    for (const marketValue of toArray(event.markets)) {
-      if (!marketValue || typeof marketValue !== "object") continue;
-      const market = marketValue as Record<string, unknown>;
-      if (
-        market.closed === true ||
-        market.active === false ||
-        market.archived === true
-      ) {
-        continue;
-      }
-      const marketForNormalization = Object.fromEntries(
-        GAMMA_MARKET_NORMALIZATION_KEYS.flatMap((key) =>
-          key in market ? [[key, market[key]]] : [],
-        ),
-      );
-      marketForNormalization.events = [eventIdentity];
-      const normalized = normalizeGammaMarket(
-        marketForNormalization,
-        POLYMARKET_GAMMA_MARKETS_URL,
-      );
-      if (!normalized) continue;
-      const closeDate = toValidDate(normalized.closeTime);
-      if (closeDate && closeDate.getTime() < currentUniverseStart.getTime()) {
-        continue;
-      }
-      candidates.set(normalized.id, normalized);
+    const parentEvent = toArray(market.events).find(
+      (value): value is Record<string, unknown> =>
+        Boolean(value) && typeof value === "object",
+    );
+    const eventIdentity = parentEvent
+      ? {
+          id: parentEvent.id,
+          slug: parentEvent.slug,
+          title: parentEvent.title,
+        }
+      : null;
+    const marketForNormalization = Object.fromEntries(
+      GAMMA_MARKET_NORMALIZATION_KEYS.flatMap((key) =>
+        key in market ? [[key, market[key]]] : [],
+      ),
+    );
+    marketForNormalization.events = eventIdentity ? [eventIdentity] : [];
+    const normalized = normalizeGammaMarket(
+      marketForNormalization,
+      POLYMARKET_GAMMA_MARKETS_URL,
+    );
+    if (!normalized) continue;
+    const closeDate = toValidDate(normalized.closeTime);
+    if (closeDate && closeDate.getTime() < currentUniverseStart.getTime()) {
+      continue;
     }
+    candidates.set(normalized.id, normalized);
   }
 
   const nextCursor =
