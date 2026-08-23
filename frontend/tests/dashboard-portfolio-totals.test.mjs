@@ -86,3 +86,68 @@ test("command-center heading spans above the two expanded dashboard panels", () 
     /bullpenSummary\?\.walletValue \?\?[\s\S]*?bullpenSummary\?\.totalValue/,
   );
 });
+
+
+test("portfolio command chart supports and remembers every portfolio view", () => {
+  const dashboardSource = readFileSync(
+    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    "utf8",
+  );
+  const chartSource = readFileSync(
+    new URL(
+      "../app/console/dashboard/_components/PortfolioCommandChart.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  for (const label of [
+    "India portfolio value",
+    "IndMoney portfolio value",
+    "Bullpen portfolio value",
+    "Combined portfolio value",
+  ]) {
+    assert.match(dashboardSource, new RegExp(label));
+  }
+  assert.match(chartSource, /aria-label="Choose portfolio chart"/);
+  assert.match(chartSource, /dashboard-command-chart:v1:user:/);
+  assert.match(chartSource, /window\.localStorage\.setItem/);
+  assert.match(chartSource, /dashboard-command-chart-history:v1:user:/);
+});
+
+test("Refresh Board preserves last-known-good Bullpen and requests a live refresh", () => {
+  const source = readFileSync(
+    new URL("../app/console/dashboard/DashboardPageClient.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /bullpenPositions:\s*current\.bullpenPositions \?\? update\.bullpenPositions \?\? null/,
+  );
+  assert.match(
+    source,
+    /Promise\.allSettled\(\[\s*loadDashboard\(false\),\s*refreshBullpenTile\(true\),/,
+  );
+});
+
+test("USD portfolio history is converted to portfolio-plus-cash INR totals", () => {
+  const { buildDashboardPortfolioTrend } = loadTotalsModule();
+  const trend = buildDashboardPortfolioTrend(
+    [
+      ["2026-08-20T10:00:00Z", 10, 2],
+      ["2026-08-21T10:00:00Z", 11, 2],
+      ["2026-08-22T10:00:00Z", 12, 2],
+      ["2026-08-23T10:00:00Z", 13, 2],
+    ].map(([capturedAt, portfolioValue, cashValue]) => ({
+      capturedAt,
+      portfolioValue,
+      cashValue,
+    })),
+    100,
+  );
+  assert.deepEqual(
+    trend.map((point) => point.value),
+    [1200, 1300, 1400, 1500],
+  );
+});
