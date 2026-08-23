@@ -60,7 +60,7 @@ const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_KEYSET_URL = "https://gamma-api.polymarket.com/events/keyset";
-const GAMMA_EVENT_PAGE_SIZE = 500;
+const GAMMA_EVENT_PAGE_SIZE = 100;
 const GAMMA_SCAN_JOB_TTL_MS = 15 * 60 * 1000;
 
 type GammaScanJob = {
@@ -1285,6 +1285,7 @@ async function fetchGammaMarkets() {
         }
         candidates.set(normalized.id, normalized);
       }
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     const nextCursor =
