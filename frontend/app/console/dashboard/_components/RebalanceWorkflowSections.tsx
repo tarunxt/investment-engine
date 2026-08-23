@@ -19,6 +19,7 @@ import {
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FileSpreadsheet, History, Info, Loader2, Pause, Play, X } from "lucide-react";
 
 import {
+  FinalActionablesConsole,
   buildConsensusRows,
   buildDashboardActionRows,
   buildHistoricalDashboardActionRows,
@@ -6844,7 +6845,7 @@ ${zerodhaExecutionMode === "direct_market"
   const showStageOutput = useCallback(
     async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
       const title = `${portfolio === "zerodha" ? "Zerodha India" : "INDmoney US"} · ${STAGE_METADATA[stage].idle} Output`;
-      const routeUrl = ["swing", "rebalance", "technical"].includes(stage)
+      const routeUrl = ["swing", "rebalance", "technical", "actionables"].includes(stage)
         ? null
         : getStageOutputRoute(portfolio, stage);
       setOutputDialog({
@@ -8552,6 +8553,13 @@ ${zerodhaExecutionMode === "direct_market"
               ) : outputDialog.error ? (
                 <div className="m-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                   {outputDialog.error}
+                </div>
+              ) : outputDialog.stage === "actionables" ? (
+                <div className="max-h-[72vh] overflow-auto bg-slate-50 p-4">
+                  <FinalActionablesConsole
+                    portfolio={outputDialog.portfolio}
+                    market={outputDialog.portfolio === "zerodha" ? "india" : "us"}
+                  />
                 </div>
               ) : outputDialog.routeUrl ? (
                 <iframe
