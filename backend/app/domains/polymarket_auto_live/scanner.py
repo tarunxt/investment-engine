@@ -14,6 +14,7 @@ import httpx
 from app.domains.polymarket_auto_live.category import read_polymarket_theme
 
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
+POLYMARKET_GAMMA_MARKETS_KEYSET_URL = f"{POLYMARKET_GAMMA_MARKETS_URL}/keyset"
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_PAGE_SIZE = 100
 DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
@@ -620,21 +621,28 @@ def _normalize_market(
 async def _fetch_gamma_page(
     client: httpx.AsyncClient,
     *,
-    offset: int,
-) -> list[dict[str, Any]]:
+    cursor: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    params = {
+        "closed": "false",
+        "limit": str(GAMMA_PAGE_SIZE),
+    }
+    if cursor:
+        params["after_cursor"] = cursor
     response = await client.get(
-        POLYMARKET_GAMMA_MARKETS_URL,
-        params={
-            "active": "true",
-            "archived": "false",
-            "closed": "false",
-            "limit": str(GAMMA_PAGE_SIZE),
-            "offset": str(offset),
-        },
+        POLYMARKET_GAMMA_MARKETS_KEYSET_URL,
+        params=params,
     )
     response.raise_for_status()
     payload = response.json()
-    return payload if isinstance(payload, list) else []
+    if not isinstance(payload, dict):
+        return [], None
+    rows = payload.get("markets")
+    next_cursor = payload.get("next_cursor")
+    return (
+        rows if isinstance(rows, list) else [],
+        next_cursor if isinstance(next_cursor, str) and next_cursor else None,
+    )
 
 
 @asynccontextmanager
@@ -883,11 +891,18 @@ async def scan_candidate_markets(
         timeout=20,
         headers=POLYMARKET_HTTP_HEADERS,
     ) as client:
-        offset = 0
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
         while True:
-            rows = await _fetch_gamma_page(client, offset=offset)
+            rows, next_cursor = await _fetch_gamma_page(client, cursor=cursor)
             for row in rows:
                 if not isinstance(row, dict):
+                    continue
+                if (
+                    row.get("closed") is True
+                    or row.get("active") is False
+                    or row.get("archived") is True
+                ):
                     continue
                 normalized = _normalize_market(
                     row,
@@ -915,9 +930,12 @@ async def scan_candidate_markets(
                     )
                     continue
                 accepted.append(normalized)
-            if len(rows) < GAMMA_PAGE_SIZE:
+            if next_cursor is None:
                 break
-            offset += GAMMA_PAGE_SIZE
+            if next_cursor in seen_cursors:
+                raise RuntimeError("Polymarket Gamma repeated a keyset cursor")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
 
     for slug in sorted(existing_position_slugs):
         if slug in {market.slug for market in accepted if market.slug}:
