@@ -45,9 +45,6 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
   assert.match(routeSource, /rejectedQuestions/);
   assert.match(routeSource, /getFilterReasons/);
   assert.match(routeSource, /Gamma supplemented the scan/);
-  assert.match(routeSource, /stage1-scan-preview/);
-  assert.match(routeSource, /createBackendSessionContext\(request\)/);
-  assert.match(routeSource, /fetchBackendJsonWithSession/);
   assert.match(cardSource, /scannedCandidates: \[\.\.\.acceptedCandidates, \.\.\.rejectedCandidates\]/);
   assert.match(cardSource, /independent_stage1_scan: true/);
 });
@@ -64,8 +61,6 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.doesNotMatch(routeSource, /earliestOutsideWindow/);
   assert.doesNotMatch(routeSource, /order: "endDate"/);
-  assert.match(routeSource, /previewIsComplete/);
-  assert.match(routeSource, /previewSourceLabel\.includes\(GAMMA_SOURCE_LABEL\)/);
   assert.match(routeSource, /scanned the complete active universe/);
 });
 
@@ -79,14 +74,13 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 });
 
 
-test("independent Stage 1 starts the complete Gamma scan before backend recovery", () => {
-  const primaryGammaIndex = routeSource.indexOf(
-    "const primaryGammaCandidates = await fetchGammaMarkets()",
-  );
-  const backendPreviewIndex = routeSource.indexOf(
-    "const backendSession = await createBackendSessionContext(request)",
-  );
-  assert.ok(primaryGammaIndex > 0);
-  assert.ok(backendPreviewIndex > primaryGammaIndex);
+test("independent Stage 1 runs the complete catalog as a polled server job", () => {
+  assert.match(routeSource, /__bullpenGammaScanJobs/);
+  assert.match(routeSource, /status: "scanning", retryAfterMs: 1_500/);
+  assert.match(routeSource, /void \(async \(\) =>/);
+  assert.match(routeSource, /gammaJob\.result = result/);
+  assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 1_500/);
+  assert.match(pageSource, /scanResponse\.response\.status !== 202/);
+  assert.match(pageSource, /pendingPayload\.status !== "scanning"/);
   assert.match(routeSource, /complete current universe/);
 });
