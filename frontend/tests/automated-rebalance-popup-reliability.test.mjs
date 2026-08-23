@@ -88,6 +88,10 @@ test("stage cards keep every shortcut as an independent native button", () => {
   ]) {
     assert.match(tileSource, new RegExp(label));
   }
+  assert.match(
+    tileSource,
+    /row\.label === "LLMs completed" && "pointer-events-auto"/,
+  );
 });
 
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {
