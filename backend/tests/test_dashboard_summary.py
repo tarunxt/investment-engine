@@ -189,6 +189,40 @@ async def test_load_bullpen_prefers_display_snapshot_without_mutating_cache(
     assert result.fetched_at == fetched_at
 
 
+@pytest.mark.anyio
+async def test_load_bullpen_falls_back_when_display_snapshot_read_fails(
+    monkeypatch,
+):
+    fetched_at = datetime.now(UTC)
+    execution_snapshot = SimpleNamespace(
+        payload={
+            "summary": {
+                "active_count": 13,
+                "claimable_count": 0,
+            },
+            "positions": [{"id": index} for index in range(13)],
+        },
+        fetched_at=fetched_at.isoformat(),
+    )
+
+    class Broker:
+        async def read_display_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            raise RuntimeError("display cache validation failed")
+
+        async def read_cached_positions_snapshot(self, *, delete_invalid: bool):
+            assert delete_invalid is False
+            return execution_snapshot
+
+    monkeypatch.setattr(service, "get_bullpen_runtime_broker", lambda: Broker())
+
+    result = await service._load_bullpen(17)
+
+    assert result.active_count == 13
+    assert result.claimable_count == 0
+    assert result.fetched_at == fetched_at
+
+
 def test_dashboard_summary_response_stays_below_150kb_and_excludes_raw_data():
     payload = _summary_fixture().model_dump_json().encode()
 

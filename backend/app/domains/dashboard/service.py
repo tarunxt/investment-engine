@@ -289,9 +289,16 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
     redis_started_at = monotonic()
     try:
         broker = get_bullpen_runtime_broker()
-        snapshot = await broker.read_display_positions_snapshot(
-            delete_invalid=False,
-        )
+        try:
+            snapshot = await broker.read_display_positions_snapshot(
+                delete_invalid=False,
+            )
+        except Exception:
+            logger.warning(
+                "Bullpen display snapshot read failed; using execution cache fallback",
+                exc_info=True,
+            )
+            snapshot = None
         if snapshot is None:
             snapshot = await broker.read_cached_positions_snapshot(
                 delete_invalid=False,
