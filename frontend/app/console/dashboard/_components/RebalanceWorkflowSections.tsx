@@ -8242,10 +8242,14 @@ ${zerodhaExecutionMode === "direct_market"
               onCalculationsClick={
                 stage === "actionables"
                   ? () => {
-                      window.dispatchEvent(new CustomEvent("open-actionables-calculations", {
-                        detail: { market: section.portfolio === "zerodha" ? "india" : "us" },
-                      }));
                       window.location.hash = "final-actionables";
+                      void showStageOutput(section.portfolio, "actionables").then(() => {
+                        window.setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent("open-actionables-calculations", {
+                            detail: { market: section.portfolio === "zerodha" ? "india" : "us" },
+                          }));
+                        }, 100);
+                      });
                     }
                   : undefined
               }
