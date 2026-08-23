@@ -4216,7 +4216,7 @@ function StageOneOutputDialog({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {visibleCandidates.map((candidate, index) => (
+                      {state.candidates.map((candidate, index) => (
                         <tr
                           key={`${candidate.slug || candidate.question}-${index}`}
                         >
@@ -4515,7 +4515,7 @@ function AllScannedEventsDialog({
                 <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
-                {state.candidates.map((candidate, index) => (
+                {visibleCandidates.map((candidate, index) => (
                   <tr key={`${candidate.marketId ?? candidate.slug ?? candidate.question}-${index}`}>
                     <td className="px-4 py-3 text-slate-500">{eventPageStart + index + 1}</td>
                     <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
