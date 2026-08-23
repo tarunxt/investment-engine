@@ -115,7 +115,7 @@ async function assertDelayedBootstrapDoesNotGateContent(browser, baseUrl) {
     waitUntil: "domcontentloaded",
   });
   await page.locator('[data-console-shell="authenticated"]').waitFor();
-  await page.locator('[data-performance-usable="dashboard-server-summary"]').waitFor();
+  await page.locator('[data-dashboard-analytics="mounted"]').waitFor();
   const visibleAt = performance.now() - startedAt;
   if (visibleAt > 1_500) {
     throw new Error(`Server-authenticated dashboard content took ${visibleAt}ms`);

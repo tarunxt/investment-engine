@@ -1,3 +1,8 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+import { apiService } from "@/services/api";
 import type { DashboardSummaryResponse } from "@/types/api";
 
 import { BullpenInteractiveIsland } from "./BullpenInteractiveIsland";
@@ -8,6 +13,29 @@ export function BullpenAiPageShell({
 }: {
   summary: DashboardSummaryResponse["bullpen"] | null;
 }) {
+  const [liveSummary, setLiveSummary] = useState(summary);
+
+  useEffect(() => {
+    let active = true;
+
+    apiService
+      .getDashboardSummary()
+      .then((dashboardSummary) => {
+        if (active && dashboardSummary.bullpen) {
+          setLiveSummary(dashboardSummary.bullpen);
+        }
+      })
+      .catch((error: unknown) => {
+        console.warn("Bullpen passive summary refresh was unavailable.", {
+          error_type: error instanceof Error ? error.name : "UnknownError",
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
       <header
@@ -30,7 +58,7 @@ export function BullpenAiPageShell({
               Active positions
             </p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">
-              {summary?.active_count ?? "Unavailable"}
+              {liveSummary?.active_count ?? "Loading…"}
             </p>
           </div>
           <div className="rounded-2xl bg-slate-50 p-4">
@@ -38,7 +66,7 @@ export function BullpenAiPageShell({
               Claimable
             </p>
             <p className="mt-2 text-2xl font-semibold text-slate-950">
-              {summary?.claimable_count ?? "Unavailable"}
+              {liveSummary?.claimable_count ?? "Loading…"}
             </p>
           </div>
           <div className="rounded-2xl bg-slate-50 p-4">
@@ -46,11 +74,11 @@ export function BullpenAiPageShell({
               Stored snapshot
             </p>
             <p className="mt-2 text-sm font-semibold text-slate-950">
-              {summary?.fetched_at
-                ? new Date(summary.fetched_at).toLocaleString("en-IN", {
+              {liveSummary?.fetched_at
+                ? new Date(liveSummary.fetched_at).toLocaleString("en-IN", {
                     timeZone: "Asia/Kolkata",
                   })
-                : "Unavailable"}
+                : "Loading…"}
             </p>
           </div>
         </div>
