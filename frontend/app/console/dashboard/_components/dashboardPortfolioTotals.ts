@@ -1,3 +1,8 @@
+import {
+  MIN_GENUINE_PORTFOLIO_POINTS,
+  type GenuinePortfolioPoint,
+} from "@/lib/portfolioHistory";
+
 export type DashboardPortfolioTotal = {
   portfolioValue: number | null;
   cashValue: number | null;
@@ -89,4 +94,43 @@ export function convertDashboardUsdTotalToInr(
     cashValue: convert(total.cashValue),
     totalValue: convert(total.totalValue),
   };
+}
+
+
+export function buildDashboardPortfolioTrend(
+  snapshots: Array<{
+    capturedAt: string;
+    portfolioValue: number | null | undefined;
+    cashValue: number | null | undefined;
+  }>,
+  multiplier = 1,
+): GenuinePortfolioPoint[] {
+  if (!Number.isFinite(multiplier) || multiplier <= 0) return [];
+
+  const points = snapshots
+    .map((snapshot) => {
+      const total = resolvePortfolioPlusCash({
+        portfolioValue: snapshot.portfolioValue,
+        cashValue: snapshot.cashValue,
+      }).totalValue;
+      return {
+        timestamp: Date.parse(snapshot.capturedAt),
+        value: total == null ? Number.NaN : roundMoney(total * multiplier),
+      };
+    })
+    .filter(
+      (point) =>
+        Number.isFinite(point.timestamp) &&
+        Number.isFinite(point.value) &&
+        point.value >= 0,
+    )
+    .sort((left, right) => left.timestamp - right.timestamp);
+
+  const uniquePoints = points.filter(
+    (point, index) =>
+      index === 0 || point.timestamp !== points[index - 1].timestamp,
+  );
+  return uniquePoints.length >= MIN_GENUINE_PORTFOLIO_POINTS
+    ? uniquePoints
+    : [];
 }
