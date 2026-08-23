@@ -1365,6 +1365,76 @@ export async function GET(request: NextRequest) {
   const scannedAt = new Date().toISOString();
 
   try {
+    const preview = (await fetchBackendRuntimeJson(
+      "/polymarket/auto-live/stage1-scan-preview",
+    )) as Record<string, unknown>;
+    const acceptedRows = toArray(preview.accepted).filter(
+      (row): row is Record<string, unknown> => Boolean(row && typeof row === "object"),
+    );
+    const rejectedRows = toArray(preview.rejected).filter(
+      (row): row is Record<string, unknown> => Boolean(row && typeof row === "object"),
+    );
+    if (acceptedRows.length + rejectedRows.length > 0) {
+      const mapPreviewQuestion = (row: Record<string, unknown>): BullpenQuestion => {
+        const id = readString(row, ["id", "market_id"]) ?? crypto.randomUUID();
+        const yesOdds = readNumber(row, ["yes_odds"]);
+        const noOdds = readNumber(row, ["no_odds"]);
+        const outcomeLabels = toArray(row.outcome_labels)
+          .map((value) => (typeof value === "string" ? value : ""))
+          .filter(Boolean);
+        return {
+          id,
+          question: readString(row, ["question"]) ?? "Unnamed Bullpen event",
+          marketId: readString(row, ["market_id", "id"]),
+          questionId: id,
+          closeTime: readString(row, ["close_time"]),
+          category: readString(row, ["category"]) ?? POLYMARKET_DEFAULT_CATEGORY,
+          yesOdds,
+          noOdds,
+          volume: readDisplayValue(row, ["volume"]),
+          liquidity: readDisplayValue(row, ["liquidity"]),
+          sourceUrl: readString(preview, ["source_url"]) ?? sourceUrl,
+          slug: readString(row, ["slug"]),
+          marketUrl: readString(row, ["market_url"]),
+          outcomeLabels,
+          outcomeCount: outcomeLabels.length || (yesOdds !== null && noOdds !== null ? 2 : null),
+          isBinaryYesNo: isBinaryYesNoQuestion(outcomeLabels, yesOdds, noOdds),
+          daysUntilClose: getDaysUntilClose(readString(row, ["close_time"])),
+          rules: readString(row, ["description"]),
+          marketContext: null,
+          resolutionSource: null,
+        };
+      };
+      return NextResponse.json({
+        mode,
+        sourceUrl: readString(preview, ["source_url"]) ?? sourceUrl,
+        sourceLabel: readString(preview, ["source_label"]) ?? CLI_SOURCE_LABEL,
+        scannedAt: readString(preview, ["scanned_at"]) ?? scannedAt,
+        filters,
+        totalCandidates:
+          readNumber(preview, ["total_candidates"]) ??
+          acceptedRows.length + rejectedRows.length,
+        questions: acceptedRows.map(mapPreviewQuestion),
+        rejectedQuestions: rejectedRows.map((row) => ({
+          ...mapPreviewQuestion(row),
+          filterReasons: toArray(row.reasons)
+            .map((value) => (typeof value === "string" ? value : ""))
+            .filter(Boolean),
+        })),
+        ...(readString(preview, ["warning"])
+          ? { warning: readString(preview, ["warning"]) }
+          : {}),
+        ...(readString(preview, ["details"])
+          ? { details: readString(preview, ["details"]) }
+          : {}),
+      });
+    }
+  } catch {
+    // Fall through to the legacy direct sources when the new backend preview
+    // route has not reached every production instance yet.
+  }
+
+  try {
     const cliPayload = await runBullpenDiscover();
     const candidates = collectQuestions([cliPayload], sourceUrl);
     if (!sourceHasFutureCandidates(candidates)) {

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import time
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
@@ -23,6 +24,9 @@ from app.domains.auth.models import User
 from app.domains.polymarket.runtime_broker import get_bullpen_runtime_broker
 from app.domains.polymarket_auto_live.console_projection import (
     build_minimal_workflow_stage_results,
+)
+from app.domains.polymarket_auto_live.console_profile import (
+    scan_console_profile_markets,
 )
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveConsoleRunDetail,
@@ -437,6 +441,54 @@ async def get_auto_live_settings(current_user: User = Depends(get_current_user))
         return await bot.get_settings()
     except SQLAlchemyError as exc:
         raise _database_not_ready_error(exc) from exc
+
+
+@router.get("/stage1-scan-preview")
+async def get_stage1_scan_preview(current_user: User = Depends(get_current_user)):
+    """Run the canonical Stage 1 market filters without starting Stage 2/3."""
+    bot = await _get_bot(current_user)
+    settings = await bot.get_settings()
+    scan = await scan_console_profile_markets(
+        now=datetime.now(UTC),
+        min_market_odds=settings.console_min_market_odds,
+    )
+    return {
+        "source_label": scan.source_label,
+        "source_url": scan.source_url,
+        "scanned_at": scan.scanned_at,
+        "total_candidates": scan.total_candidates,
+        "warning": scan.warning,
+        "details": scan.details,
+        "accepted": [
+            {
+                "id": market.market_id,
+                "question": market.question,
+                "market_id": market.market_id,
+                "close_time": market.close_time,
+                "category": market.theme,
+                "yes_odds": market.current_yes_odds,
+                "no_odds": market.current_no_odds,
+                "volume": market.volume_usd,
+                "liquidity": market.liquidity_usd,
+                "slug": market.slug,
+                "market_url": market.market_url,
+                "outcome_labels": market.outcome_labels,
+                "description": market.description,
+            }
+            for market in scan.accepted
+        ],
+        "rejected": [
+            {
+                "id": market.market_id,
+                "question": market.question,
+                "market_id": market.market_id,
+                "slug": market.slug,
+                "market_url": market.market_url,
+                "reasons": market.reasons,
+            }
+            for market in scan.rejected
+        ],
+    }
 
 
 @router.put("/settings", response_model=BullpenAutoLiveSettings)

@@ -45,6 +45,7 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
   assert.match(routeSource, /rejectedQuestions/);
   assert.match(routeSource, /getFilterReasons/);
   assert.match(routeSource, /Gamma supplemented the scan/);
+  assert.match(routeSource, /stage1-scan-preview/);
   assert.match(cardSource, /scannedCandidates: \[\.\.\.acceptedCandidates, \.\.\.rejectedCandidates\]/);
   assert.match(cardSource, /independent_stage1_scan: true/);
 });
