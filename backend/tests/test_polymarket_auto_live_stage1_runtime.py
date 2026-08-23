@@ -19,6 +19,11 @@ from app.domains.polymarket_auto_live.console_profile import (
     scan_console_profile_markets,
 )
 from app.domains.polymarket_auto_live.execution import refresh_balance
+from app.domains.polymarket_auto_live.scanner import (
+    ScanResult,
+    ScannedMarket,
+    scan_candidate_markets,
+)
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveRun,
     BullpenAutoLiveState,
@@ -342,3 +347,105 @@ def test_persist_auto_live_progress_sync_rejects_user_cancelled_run():
 
     assert saved_calls == []
     assert session.committed is False
+
+
+@pytest.mark.anyio
+async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
+    requested_offsets: list[int] = []
+    target_question = "Will Iran target a Arab country on August 30, 2026?"
+
+    def row(index: int, *, question: str | None = None) -> dict[str, object]:
+        return {
+            "id": f"market-{index}",
+            "question": question or f"Will candidate {index} happen?",
+            "slug": f"market-{index}",
+            "endDate": "2026-08-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+            "active": True,
+            "archived": False,
+            "closed": False,
+        }
+
+    async def fake_fetch_gamma_page(_client, *, offset: int):
+        requested_offsets.append(offset)
+        if offset < 2_000:
+            return [row(index) for index in range(offset, offset + 500)]
+        if offset == 2_000:
+            return [row(2_000, question=target_question)]
+        return []
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_page",
+        fake_fetch_gamma_page,
+    )
+
+    result = await scan_candidate_markets(min_liquidity_usd=0)
+
+    assert requested_offsets == [0, 500, 1_000, 1_500, 2_000]
+    assert len(result.accepted) == 2_001
+    assert any(market.question == target_question for market in result.accepted)
+
+
+@pytest.mark.anyio
+async def test_console_scan_does_not_treat_large_cli_payload_as_complete(monkeypatch):
+    target_question = "Will Iran target a Arab country on August 30, 2026?"
+    cli_rows = [
+        {
+            "id": f"cli-market-{index}",
+            "question": f"Will CLI candidate {index} happen?",
+            "slug": f"cli-market-{index}",
+            "endDate": "2026-08-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+        }
+        for index in range(1_000)
+    ]
+
+    async def fake_run_first_bullpen_json(*_args, **_kwargs):
+        return {"markets": cli_rows}
+
+    target_market = ScannedMarket(
+        market_id="iran-arab-country-august-30",
+        question=target_question,
+        market_url="https://polymarket.com/event/will-iran-target-a-arab-country-onptptpt-20260801004719118",
+        slug="will-iran-target-a-arab-country-on-august-30-2026",
+        close_time="2026-08-30T20:59:59+00:00",
+        theme="World",
+        current_yes_odds=10.0,
+        current_no_odds=90.0,
+        volume_usd=7_000.0,
+        liquidity_usd=1_000.0,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug="will-iran-target-a-arab-country-onptptpt-20260801004719118",
+        best_bid_cents=9.0,
+        best_ask_cents=11.0,
+        spread_cents=2.0,
+    )
+
+    async def fake_scan_candidate_markets(**_kwargs):
+        return ScanResult(
+            source_label="Polymarket Gamma API",
+            source_url="https://gamma-api.polymarket.com/markets",
+            scanned_at="2026-08-24T00:00:00+00:00",
+            accepted=[target_market],
+            rejected=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        fake_run_first_bullpen_json,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+
+    result = await scan_console_profile_markets(
+        now=datetime(2026, 8, 24, 0, 0, tzinfo=UTC),
+    )
+
+    assert result.source_label == "Polymarket Gamma API"
+    assert result.total_candidates == 1
+    assert [market.question for market in result.accepted] == [target_question]
