@@ -29,6 +29,10 @@ import {
   sumCurrentPositionValue,
   type BullpenPositionsResponse,
 } from "@/lib/bullpenPositions";
+import {
+  isBullpenHistoryActivePosition,
+  isBullpenHistoryClaimablePosition,
+} from "@/lib/bullpenHistoryPositions";
 import { validDashboardFxRate } from "@/lib/fxPresentation";
 import {
   MIN_GENUINE_PORTFOLIO_POINTS,
@@ -1594,13 +1598,31 @@ function DashboardPageForUser({
   const indmoneyCommandValue =
     (indmoneyPortfolioValue ?? 0) + (indmoneyAvailableFundsValue ?? 0);
   const bullpenSummary = dashboard.bullpenPositions?.summary;
+  const bullpenPositionRows = dashboard.bullpenPositions?.positions;
+  const bullpenVerifiedActivePositions =
+    bullpenPositionRows?.filter(isBullpenHistoryActivePosition) ?? [];
+  const bullpenVerifiedClaimablePositions =
+    bullpenPositionRows?.filter(isBullpenHistoryClaimablePosition) ?? [];
+  const bullpenClaimableValueUsd = bullpenVerifiedClaimablePositions.reduce(
+    (total, position) =>
+      total +
+      Math.max(
+        0,
+        position.claimableValue ??
+          position.expectedPayoutUsd ??
+          position.currentValue ??
+          0,
+      ),
+    0,
+  );
   const bullpenPositionsValueUsd =
-    bullpenSummary?.totalValue ??
-    (dashboard.bullpenPositions?.positions?.length
-      ? sumCurrentPositionValue(dashboard.bullpenPositions.positions)
-      : null);
+    bullpenPositionRows !== undefined
+      ? (sumCurrentPositionValue(bullpenVerifiedActivePositions) ?? 0) +
+        bullpenClaimableValueUsd
+      : null;
   const bullpenWalletValueUsd =
     bullpenSummary?.walletValue ??
+    bullpenSummary?.totalValue ??
     dashboard.polymarketState?.live.balance.account_value_usd ??
     parseBullpenAccountValueUsd(
       dashboard.polymarketState?.live.balance.message,
