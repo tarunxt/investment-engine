@@ -22,6 +22,7 @@ from app.domains.polymarket_auto_live.execution import refresh_balance
 from app.domains.polymarket_auto_live.scanner import (
     ScanResult,
     ScannedMarket,
+    _fetch_gamma_page,
     scan_candidate_markets,
 )
 from app.domains.polymarket_auto_live.schemas import (
@@ -347,6 +348,36 @@ def test_persist_auto_live_progress_sync_rejects_user_cancelled_run():
 
     assert saved_calls == []
     assert session.committed is False
+
+
+@pytest.mark.anyio
+async def test_gamma_page_uses_supported_filters_without_ordering_field():
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return []
+
+    class FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            captured["params"] = params
+            return FakeResponse()
+
+    rows = await _fetch_gamma_page(FakeClient(), offset=1_500)
+
+    assert rows == []
+    assert captured["url"] == "https://gamma-api.polymarket.com/markets"
+    assert captured["params"] == {
+        "active": "true",
+        "archived": "false",
+        "closed": "false",
+        "limit": "500",
+        "offset": "1500",
+    }
 
 
 @pytest.mark.anyio
