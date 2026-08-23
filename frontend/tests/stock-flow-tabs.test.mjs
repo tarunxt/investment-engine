@@ -29,9 +29,26 @@ test("stock-flow tabs expose all stages and summary-detail switching", () => {
   assert.match(stockFlowSource, /Summary View/);
   assert.match(stockFlowSource, /Final Score:/);
   assert.match(stockFlowSource, /Consensus:/);
-  assert.match(stockFlowSource, /max-h-\[34rem\]/);
-  assert.match(stockFlowSource, /overflow-y-auto/);
-  assert.match(stockFlowSource, /getStandardActionBadgeClass\(action\)/);
+});
+
+test("summary view uses scrollable stage tables and standard action colours", () => {
+  assert.match(stockFlowSource, /<table/);
+  assert.match(stockFlowSource, /Stock Symbol/);
+  assert.match(stockFlowSource, /Final Score/);
+  assert.match(stockFlowSource, /sticky top-0/);
+  assert.match(stockFlowSource, /overflow-auto overscroll-contain/);
+  assert.match(stockFlowSource, /getStandardActionBadgeClass/);
+  assert.match(stockFlowSource, /<ActionBadge action=\{stock\.consensusAction\}/);
+  assert.match(stockFlowSource, /<ActionBadge action=\{row\.formulaAction\}/);
+});
+
+test("summary preserves each LLM job output instead of only showing consensus", () => {
+  assert.match(stockFlowSource, /buildStageJobOutputs/);
+  assert.match(stockFlowSource, /SwingJobOutputsStage/);
+  assert.match(stockFlowSource, /RebalanceJobOutputsStage/);
+  assert.match(stockFlowSource, /Job #\{output\.jobId\}/);
+  assert.match(stockFlowSource, /output\.actions\.get\(stock\.key\)/);
+  assert.match(stockFlowSource, /Not covered/);
 });
 
 test("each auto-rebalance card opens its stock-flow subwidget in the shared dialog", () => {
