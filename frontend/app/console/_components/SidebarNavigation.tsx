@@ -5,6 +5,7 @@ import {
     useMemo,
     useState,
     useSyncExternalStore,
+    type FormEvent,
     type MouseEvent as ReactMouseEvent,
 } from 'react';
 import Link from 'next/link';
@@ -164,6 +165,10 @@ type NavigationContextTarget = {
 type NavigationContextMenuState = NavigationContextTarget & {
     x: number;
     y: number;
+};
+
+type NavigationRenameState = NavigationContextTarget & {
+    value: string;
 };
 
 const SIDEBAR_ORDER_UPDATED_EVENT = 'investment-engine:sidebar-order-updated';
@@ -779,6 +784,7 @@ export function SidebarNavigation({
 }: SidebarNavigationProps) {
     const [isReordering, setIsReordering] = useState(false);
     const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
+    const [renameEditor, setRenameEditor] = useState<NavigationRenameState | null>(null);
     const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
     const defaultChildOrder = useMemo(() => createDefaultChildOrder(), []);
     const entrySectionById = useMemo(() => collectEntrySectionIds(SIDEBAR_SECTIONS), []);
@@ -913,23 +919,36 @@ export function SidebarNavigation({
         });
     };
 
-    const renameContextTarget = () => {
+    const openRenameEditor = () => {
         if (!contextMenu) {
             return;
         }
 
-        const nextName = window.prompt(`Rename ${contextMenu.kind}`, contextMenu.name)?.trim();
+        setRenameEditor({
+            ...contextMenu,
+            value: contextMenu.name,
+        });
+        setContextMenu(null);
+    };
+
+    const saveRenamedTarget = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!renameEditor) {
+            return;
+        }
+
+        const nextName = renameEditor.value.trim();
 
         if (!nextName) {
-            setContextMenu(null);
             return;
         }
 
         persistNameOverrides({
             ...nameOverrides,
-            [getNavigationNameKey(contextMenu)]: nextName.slice(0, 48),
+            [getNavigationNameKey(renameEditor)]: nextName.slice(0, 48),
         });
-        setContextMenu(null);
+        setRenameEditor(null);
     };
 
     const resetContextTargetName = () => {
@@ -1105,7 +1124,7 @@ export function SidebarNavigation({
                         <button
                             type="button"
                             role="menuitem"
-                            onClick={renameContextTarget}
+                            onClick={openRenameEditor}
                             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent"
                         >
                             <Pencil className="h-4 w-4" />
@@ -1136,6 +1155,63 @@ export function SidebarNavigation({
                         </button>
                     </div>
                 </>
+            ) : null}
+
+            {renameEditor ? (
+                <div className="fixed inset-0 z-60 flex items-center justify-center px-4">
+                    <button
+                        type="button"
+                        aria-label="Close rename dialog"
+                        onClick={() => setRenameEditor(null)}
+                        className="absolute inset-0 bg-black/35 backdrop-blur-[1px]"
+                    />
+                    <form
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="sidebar-rename-title"
+                        onSubmit={saveRenamedTarget}
+                        className="relative w-full max-w-sm rounded-2xl border border-sidebar-border bg-sidebar p-5 text-sidebar-foreground shadow-2xl"
+                    >
+                        <h2 id="sidebar-rename-title" className="text-base font-semibold">
+                            Rename {renameEditor.kind}
+                        </h2>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                            This changes only the label in your sidebar. The destination and route stay unchanged.
+                        </p>
+                        <label
+                            htmlFor="sidebar-rename-input"
+                            className="mt-4 block text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                        >
+                            Display name
+                        </label>
+                        <input
+                            id="sidebar-rename-input"
+                            autoFocus
+                            maxLength={48}
+                            value={renameEditor.value}
+                            onChange={(event) => setRenameEditor((current) => (
+                                current ? { ...current, value: event.target.value } : current
+                            ))}
+                            className="mt-2 w-full rounded-xl border border-sidebar-border bg-sidebar-accent px-3 py-2.5 text-sm outline-none transition focus:border-sidebar-ring focus:ring-2 focus:ring-sidebar-ring/30"
+                        />
+                        <div className="mt-5 flex justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setRenameEditor(null)}
+                                className="rounded-xl border border-sidebar-border px-3.5 py-2 text-sm font-medium transition hover:bg-sidebar-accent"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={!renameEditor.value.trim()}
+                                className="rounded-xl bg-sidebar-primary px-3.5 py-2 text-sm font-semibold text-sidebar-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                Save name
+                            </button>
+                        </div>
+                    </form>
+                </div>
             ) : null}
         </div>
     );
