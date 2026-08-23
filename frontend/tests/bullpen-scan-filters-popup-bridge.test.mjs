@@ -31,3 +31,12 @@ test("Bullpen page shell always mounts the scan filter popup bridge", () => {
   assert.match(shellSource, /import \{ BullpenScanFiltersPopupBridge \}/);
   assert.match(shellSource, /<BullpenScanFiltersPopupBridge \/>/);
 });
+
+test("Bullpen summary cards hydrate from the live dashboard summary", () => {
+  assert.match(shellSource, /apiService\s*\.getDashboardSummary\(\)/);
+  assert.match(shellSource, /setLiveSummary\(dashboardSummary\.bullpen\)/);
+  assert.match(shellSource, /liveSummary\?\.active_count/);
+  assert.match(shellSource, /liveSummary\?\.claimable_count/);
+  assert.match(shellSource, /liveSummary\?\.fetched_at/);
+  assert.doesNotMatch(shellSource, /"Unavailable"/);
+});
