@@ -32,6 +32,13 @@ def _multiply(value: float | None, multiplier: float | None) -> float | None:
     return round(value * multiplier, 2)
 
 
+def _is_carried_forward(
+    source_date: date | None,
+    snapshot_date: date,
+) -> bool:
+    return bool(source_date and source_date < snapshot_date)
+
+
 def _portfolio_values(summary: DashboardSummaryResponse) -> dict[str, object]:
     rate = summary.usd_inr_rate if summary.usd_inr_status == "valid" else None
 
@@ -126,21 +133,36 @@ def _upsert_daily_snapshot(
         row.usd_inr_rate = values["usd_inr_rate"]
         row.zerodha_total_inr = values["zerodha_total_inr"]
         row.zerodha_source_date = values["zerodha_source_date"]
-        row.zerodha_carried_forward = bool(
-            row.zerodha_source_date
-            and row.zerodha_source_date < snapshot_date
+        row.zerodha_carried_forward = _is_carried_forward(
+            row.zerodha_source_date,
+            snapshot_date,
         )
         row.indmoney_total_usd = values["indmoney_total_usd"]
         row.indmoney_total_inr = values["indmoney_total_inr"]
         row.indmoney_source_date = values["indmoney_source_date"]
-        row.indmoney_carried_forward = bool(
-            row.indmoney_source_date
-            and row.indmoney_source_date < snapshot_date
+        row.indmoney_carried_forward = _is_carried_forward(
+            row.indmoney_source_date,
+            snapshot_date,
         )
         row.bullpen_total_usd = values["bullpen_total_usd"]
         row.bullpen_total_inr = values["bullpen_total_inr"]
         row.combined_total_inr = values["combined_total_inr"]
         db.commit()
+
+
+async def _build_user_summaries(
+    users: list[User],
+) -> list[tuple[int, DashboardSummaryResponse]]:
+    summaries: list[tuple[int, DashboardSummaryResponse]] = []
+    for user in users:
+        summary = await build_dashboard_summary(
+            user.id,
+            include_singleton_bullpen=(
+                user_can_access_singleton_bullpen_runtime(user)
+            ),
+        )
+        summaries.append((user.id, summary))
+    return summaries
 
 
 @celery.task(
@@ -168,23 +190,16 @@ def capture_daily_dashboard_portfolios(
             db.scalars(select(User).where(User.is_active.is_(True))).all()
         )
 
+    summaries = asyncio.run(_build_user_summaries(users))
     saved_user_ids: list[int] = []
-    for user in users:
-        summary = asyncio.run(
-            build_dashboard_summary(
-                user.id,
-                include_singleton_bullpen=(
-                    user_can_access_singleton_bullpen_runtime(user)
-                ),
-            )
-        )
+    for user_id, summary in summaries:
         _upsert_daily_snapshot(
-            user_id=user.id,
+            user_id=user_id,
             snapshot_date=snapshot_date,
             captured_at=captured_at,
             values=_portfolio_values(summary),
         )
-        saved_user_ids.append(user.id)
+        saved_user_ids.append(user_id)
 
     logger.info(
         "Saved daily dashboard portfolio snapshot for %s users on %s",
