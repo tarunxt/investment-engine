@@ -54,7 +54,11 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 100/);
   assert.match(routeSource, /GAMMA_EVENT_PAGE_CONCURRENCY = 32/);
   assert.match(routeSource, /POLYMARKET_GAMMA_EVENTS_URL/);
-  assert.match(routeSource, /end_date_min: currentUniverseStart/);
+  assert.doesNotMatch(routeSource, /end_date_min/);
+  assert.match(
+    routeSource,
+    /closeDate\.getTime\(\) < new Date\(currentUniverseStart\)\.getTime\(\)/,
+  );
   assert.match(routeSource, /const effectivePageSize = firstPage\.length/);
   assert.match(routeSource, /Promise\.all\(offsets\.map\(fetchEventPage\)\)/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
