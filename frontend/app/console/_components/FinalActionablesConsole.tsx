@@ -8097,9 +8097,11 @@ export function DashboardFinalActionablesTables() {
 export function FinalActionablesConsole({
   portfolio,
   market,
+  openCalculationsOnMount = false,
 }: {
   portfolio: RebalancePortfolioKey;
   market: SwingTradeMarket;
+  openCalculationsOnMount?: boolean;
 }) {
   const runCacheKey = useMemo(
     () => buildFinalActionablesCacheKey(portfolio, market),
@@ -8117,7 +8119,7 @@ export function FinalActionablesConsole({
   const [selectedSetupGroup, setSelectedSetupGroup] = useState<SetupStockGroup | null>(null);
   const [selectedMatrixDetail, setSelectedMatrixDetail] = useState<ScoreMatrixDetail | null>(null);
   const [scoreMatrixFormulaConfig, setScoreMatrixFormulaConfig] = useState<ScoreMatrixFormulaConfig>(() => loadScoreMatrixFormulaConfig());
-  const [calculationsOpen, setCalculationsOpen] = useState(false);
+  const [calculationsOpen, setCalculationsOpen] = useState(openCalculationsOnMount);
   const [calculationFocusTarget, setCalculationFocusTarget] = useState<ActionablesCalculationFocusTarget | null>(null);
   const [technicalScanRunning, setTechnicalScanRunning] = useState(false);
   const [detailsData, setDetailsData] = useState<StockDetailsData>({
