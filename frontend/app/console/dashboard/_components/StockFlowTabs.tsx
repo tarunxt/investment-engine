@@ -15,19 +15,17 @@ import {
   buildTechnicalScanMap,
   fetchDashboardRecentFullRuns,
   isCompletedRebalanceRun,
+  type ActionCategory,
   type ScoreMatrixFormulaConfig,
   type StockConsensus,
 } from "@/app/console/_components/FinalActionablesConsole";
 import { Button } from "@/components/ui/button";
-import {
-  getStandardActionBadgeClass,
-  type StandardActionCategory,
-} from "@/lib/actionColorScheme";
 import { inferRebalanceMarketFromPrompt } from "@/lib/rebalance";
 import { isRunInSwingTradeMarket } from "@/lib/runPresentation";
 import type { SwingTradeMarket } from "@/lib/swingTrade";
 import type { RunResponse } from "@/types/api";
 import { cn } from "@/lib/utils";
+import { getStandardActionBadgeClass } from "@/lib/actionColorScheme";
 
 export type RebalanceStockFlowPortfolio = "zerodha" | "indmoneyUs";
 
@@ -96,13 +94,6 @@ function stageRunMeta(run: RunResponse | undefined) {
 
 function EmptyStage() {
   return <p className="py-8 text-center text-sm text-slate-500">No stocks found in the latest completed scan.</p>;
-}
-
-function actionBadgeClass(action: string) {
-  if (BASKET_ACTION_ORDER.includes(action)) {
-    return getStandardActionBadgeClass(action as StandardActionCategory);
-  }
-  return "border-slate-200 bg-slate-100 text-slate-700";
 }
 
 type RebalanceStockFlowWidgetProps = {
@@ -259,74 +250,23 @@ function RebalanceStockFlowSubwidget({
 
           {loading ? <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500"><Loader2 className="size-4 animate-spin" /> Loading stock flow…</div>
           : error ? <p className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</p>
-          : detailed ? (
-            <div className="mt-5 grid min-h-0 gap-4 xl:grid-cols-3">
+          : (
+            <div className="mt-5 grid gap-4 xl:grid-cols-3">
               <Stage title="Swing Scan" count={flow.swing.length} meta={flow.swingMeta}>
                 {flow.swing.length ? flow.swing.map((stock) => (
-                  <StockRow key={stock.key} name={stock.symbol} detailed details={[`Exchange: ${stock.exchange || "—"}`, `Suggestions: ${stock.totalSuggestions}`]} />
+                  <StockRow key={stock.key} name={stock.symbol} detailed={detailed} details={[`Exchange: ${stock.exchange || "—"}`, `Suggestions: ${stock.totalSuggestions}`]} />
                 )) : <EmptyStage />}
               </Stage>
               <Stage title="Rebalance Scan" count={flow.rebalance.length} meta={flow.rebalanceMeta}>
                 {flow.rebalance.length ? flow.rebalance.map((stock) => (
-                  <StockRow key={stock.key} name={stock.symbol} action={stock.consensusAction} detailed details={[`Consensus: ${consensusLabel(stock)}`, `Exchange: ${stock.exchange || "—"}`]} />
+                  <StockRow key={stock.key} name={stock.symbol} action={stock.consensusAction} detailed={detailed} details={[`Consensus: ${consensusLabel(stock)}`, `Exchange: ${stock.exchange || "—"}`]} />
                 )) : <EmptyStage />}
               </Stage>
               <Stage title="Final Actionables" count={flow.actionables.length} meta={flow.rebalanceMeta}>
                 {flow.actionables.length ? flow.actionables.map((row) => (
-                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${inferRebalanceMarketFromPrompt(flow.rebalanceRun?.prompt || "") ? "Latest rebalance scan" : "Rebalance scan"}`]} />
+                  <StockRow key={row.id} name={row.stock.symbol} action={row.formulaAction} score={row.formulaScore} consensus={consensusLabel(row.stock)} detailed={detailed} details={[`Exchange: ${row.stock.exchange || "—"}`, `Suggestions: ${row.stock.totalSuggestions}`, `Source: ${inferRebalanceMarketFromPrompt(flow.rebalanceRun?.prompt || "") ? "Latest rebalance scan" : "Rebalance scan"}`]} />
                 )) : <EmptyStage />}
               </Stage>
-            </div>
-          ) : (
-            <div className="mt-5">
-              <h3 className="mb-4 text-center text-xl font-bold uppercase tracking-[0.08em] text-slate-950">Summary View</h3>
-              <div className="grid min-h-0 gap-4 xl:grid-cols-[0.72fr_1.08fr_1.4fr]">
-                <SummaryStage title="Swing Scan" count={flow.swing.length} meta={flow.swingMeta}>
-                  <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
-                    <tr><th className="px-4 py-3 font-semibold">Stock Symbol</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 bg-white">
-                    {flow.swing.length ? flow.swing.map((stock) => (
-                      <tr key={stock.key}><td className="px-4 py-3 text-sm font-semibold text-slate-950">{stock.symbol}</td></tr>
-                    )) : <EmptyTableRow colSpan={1} />}
-                  </tbody>
-                </SummaryStage>
-
-                <SummaryStage title="Rebalance Scan" count={flow.rebalance.length} meta={flow.rebalanceMeta}>
-                  <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
-                    <tr><th className="px-4 py-3 font-semibold">Stock Symbol</th><th className="px-4 py-3 font-semibold">Action</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 bg-white">
-                    {flow.rebalance.length ? flow.rebalance.map((stock) => (
-                      <tr key={stock.key}>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-950">{stock.symbol}</td>
-                        <td className="px-4 py-3"><ActionBadge action={stock.consensusAction} /></td>
-                      </tr>
-                    )) : <EmptyTableRow colSpan={2} />}
-                  </tbody>
-                </SummaryStage>
-
-                <SummaryStage title="Final Actionables" count={flow.actionables.length} meta={flow.rebalanceMeta}>
-                  <thead className="sticky top-0 z-10 bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">Stock Symbol</th>
-                      <th className="px-4 py-3 font-semibold">Action</th>
-                      <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Final Score</th>
-                      <th className="px-4 py-3 text-center font-semibold">Consensus</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 bg-white">
-                    {flow.actionables.length ? flow.actionables.map((row) => (
-                      <tr key={row.id}>
-                        <td className="px-4 py-3 text-sm font-semibold text-slate-950">{row.stock.symbol}</td>
-                        <td className="px-4 py-3"><ActionBadge action={row.formulaAction} /></td>
-                        <td className="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-slate-700">{row.formulaScore === null ? "—" : row.formulaScore.toFixed(2)}</td>
-                        <td className="px-4 py-3 text-center text-sm font-semibold tabular-nums text-slate-700">{consensusLabel(row.stock)}</td>
-                      </tr>
-                    )) : <EmptyTableRow colSpan={4} />}
-                  </tbody>
-                </SummaryStage>
-              </div>
             </div>
           )}
     </section>
@@ -429,25 +369,9 @@ export function StockFlowTabs(props: RebalanceStockFlowWidgetProps) {
 }
 
 function Stage({ title, count, meta, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; children: ReactNode }) {
-  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60"><StageHeader title={title} count={count} meta={meta} /><div className="max-h-[min(58vh,36rem)] min-h-0 divide-y divide-slate-200 overflow-auto overscroll-contain">{children}</div></article>;
+  return <article className="flex max-h-[34rem] min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60"><header className="shrink-0 border-b border-slate-200 bg-slate-100 px-4 py-3"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-950">{title}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{count}</span></div>{meta ? <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500"><span><b className="font-semibold text-slate-700">LLM:</b> {meta.models}</span><time><b className="font-semibold text-slate-700">Run:</b> {meta.timestamp}</time></div> : <p className="mt-1.5 text-[11px] text-slate-500">No completed run metadata</p>}</header><div className="min-h-0 overflow-y-auto divide-y divide-slate-200">{children}</div></article>;
 }
 
-function StockRow({ name, action, score, consensus, detailed, details = [] }: { name: string; action?: string; score?: number | null; consensus?: string; detailed: boolean; details?: string[] }) {
-  return <div className="bg-white px-4 py-3"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><strong className="text-sm text-slate-950">{name}</strong>{action ? <ActionBadge action={action} /> : null}{score !== undefined ? <span className="text-xs text-slate-600">Final Score: <b>{score === null ? "—" : score.toFixed(2)}</b></span> : null}{consensus ? <span className="text-xs text-slate-600">Consensus: <b>{consensus}</b></span> : null}</div>{detailed ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">{details.map((detail) => <span key={detail}>{detail}</span>)}</div> : null}</div>;
-}
-
-function StageHeader({ title, count, meta }: { title: string; count: number; meta: { models: string; timestamp: string } | null }) {
-  return <header className="shrink-0 border-b border-slate-200 bg-slate-100 px-4 py-3"><div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-slate-950">{title}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-600">{count}</span></div>{meta ? <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-500"><span><b className="font-semibold text-slate-700">LLM:</b> {meta.models}</span><time><b className="font-semibold text-slate-700">Run:</b> {meta.timestamp}</time></div> : <p className="mt-1.5 text-[11px] text-slate-500">No completed run metadata</p>}</header>;
-}
-
-function SummaryStage({ title, count, meta, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; children: ReactNode }) {
-  return <article className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm"><StageHeader title={title} count={count} meta={meta} /><div className="max-h-[min(58vh,36rem)] min-h-0 overflow-auto overscroll-contain"><table className="w-full min-w-max border-collapse">{children}</table></div></article>;
-}
-
-function ActionBadge({ action }: { action: string }) {
-  return <span className={cn("inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold", actionBadgeClass(action))}>{action}</span>;
-}
-
-function EmptyTableRow({ colSpan }: { colSpan: number }) {
-  return <tr><td colSpan={colSpan} className="px-4 py-8 text-center text-sm text-slate-500">No stocks found in the latest completed scan.</td></tr>;
+function StockRow({ name, action, score, consensus, detailed, details = [] }: { name: string; action?: ActionCategory; score?: number | null; consensus?: string; detailed: boolean; details?: string[] }) {
+  return <div className="bg-white px-4 py-3"><div className="flex flex-wrap items-center gap-x-3 gap-y-1"><strong className="text-sm text-slate-950">{name}</strong>{action ? <span className={cn("rounded-full border px-2 py-0.5 text-xs font-semibold", getStandardActionBadgeClass(action))}>{action}</span> : null}{score !== undefined ? <span className="text-xs text-slate-600">Final Score: <b>{score === null ? "—" : score.toFixed(2)}</b></span> : null}{consensus ? <span className="text-xs text-slate-600">Consensus: <b>{consensus}</b></span> : null}</div>{detailed ? <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">{details.map((detail) => <span key={detail}>{detail}</span>)}</div> : null}</div>;
 }
