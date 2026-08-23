@@ -80,6 +80,14 @@ test("Actionables Calculations mounts its output widget before dispatching the o
   );
 });
 
+test("shared order previews expose the correct broker in the close action", () => {
+  assert.match(
+    workflowSource,
+    /aria-label=\{`Close \$\{basketBrokerLabel\} basket preview`\}/,
+  );
+  assert.doesNotMatch(workflowSource, /aria-label="Close Zerodha basket preview"/);
+});
+
 test("stage cards keep every shortcut as an independent native button", () => {
   const tileStart = workflowSource.indexOf("function WorkflowStageTile");
   const tileEnd = workflowSource.indexOf("function ZerodhaBasketPreviewDialog", tileStart);
