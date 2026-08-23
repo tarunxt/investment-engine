@@ -3108,7 +3108,12 @@ function WorkflowStageTile({
             : undefined
         }
       >
-        <span className="font-semibold text-slate-600">
+        <span
+          className={cn(
+            "font-semibold text-slate-600",
+            row.label === "LLMs completed" && "pointer-events-auto",
+          )}
+        >
           {row.label}:
         </span>{" "}
         {row.label === "Error" && row.detail ? (
