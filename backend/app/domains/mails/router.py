@@ -26,6 +26,7 @@ class MailHistoryItem(BaseModel):
     id: int
     created_at: str
     status: str
+    category: str
     trigger: str
     recipients: list[str]
     subject: str

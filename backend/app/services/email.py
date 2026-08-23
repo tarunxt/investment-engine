@@ -251,8 +251,8 @@ class EmailService:
         ).sent
 
     @staticmethod
-    def send_reset_password_email(email_to: str, token: str) -> bool:
-        """Send a password reset email."""
+    def build_reset_password_email(token: str) -> tuple[str, str, str]:
+        """Build the password-reset subject and bodies for audited delivery."""
         project_name = settings.app_name
         subject = f"{project_name} - Password Reset"
         reset_link = f"{settings.frontend_url}/reset-password/{token}"
@@ -285,6 +285,12 @@ class EmailService:
         {project_name} Team
         """
 
+        return subject, html_content, text_content
+
+    @staticmethod
+    def send_reset_password_email(email_to: str, token: str) -> bool:
+        """Backward-compatible password reset sender."""
+        subject, html_content, text_content = EmailService.build_reset_password_email(token)
         return EmailService.send_email(
             email_to=email_to,
             subject=subject,
