@@ -23,19 +23,20 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
   ).groups.body;
 
   for (const label of [
-    "Overview",
+    "Dashboard",
     "Portfolios",
     "India Portfolio",
     "US Portfolio",
     "Trading Bots",
     "Bot Overview",
-    "Bullpen AI Review",
-    "Bullpen AI Live",
-    "Bullpen Copy Trader",
+    "Bullpen Review",
+    "Bullpen Live",
+    "Copy Trader",
     "Polymarket Direct",
     "Market Scanner",
     "AI Studio",
     "Run History",
+    "Alerts & Emails",
     "Prompt Library",
     "AI Models",
     "Integrations",
@@ -47,16 +48,17 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
   }
 
   for (const sectionLabel of [
-    "label: 'Overview'",
+    "label: 'Home'",
     "label: 'Investing'",
-    "label: 'AI Workspace'",
-    "label: 'Platform'",
+    "label: 'AI & Automation'",
+    "label: 'Monitoring'",
+    "label: 'Data & Integrations'",
   ]) {
     assert.match(configSource, new RegExp(sectionLabel));
   }
 
   for (const legacyLabel of [
-    "name: 'Dashboard'",
+    "name: 'Overview'",
     "name: 'Portfolio'",
     "name: 'Zerodha'",
     "name: 'IndMoney US'",
@@ -69,6 +71,9 @@ test("Sidebar navigation config defines the redesigned sections, labels, and rou
     "name: 'Settings'",
     "name: 'Bullpen x AI'",
     "name: 'Bullpen AI Auto-Live'",
+    "name: 'Bullpen AI Review'",
+    "name: 'Bullpen AI Live'",
+    "name: 'Bullpen Copy Trader'",
     "name: 'Bullpen x Polymarket'",
   ]) {
     assert.doesNotMatch(sidebarSectionsSource, new RegExp(legacyLabel));
@@ -153,6 +158,12 @@ test("Trading Bots is a sibling group with explicit Bot Overview and badges, whi
   assert.doesNotMatch(sidebarSectionsSource, /name: 'Profile'|name: 'Preferences'/);
   assert.match(accountNavigationSource, /name: 'Profile'/);
   assert.match(accountNavigationSource, /name: 'Preferences'/);
+  assert.match(accountNavigationSource, /name: 'Usage & Costs'/);
+  assert.doesNotMatch(sidebarSectionsSource, /name: 'Usage & Costs'/);
+  assert.match(
+    sidebarSectionsSource,
+    /id: 'monitoring'[\s\S]*?id: 'run-history'[\s\S]*?id: 'mails'[\s\S]*?name: 'Alerts & Emails'/,
+  );
 });
 
 test("Sidebar component keeps the accessibility, footer, and reorder hooks required by the redesign", () => {
