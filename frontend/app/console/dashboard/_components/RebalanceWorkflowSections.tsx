@@ -106,6 +106,7 @@ import {
   RebalanceStockFlowDialog,
   RebalanceStockFlowTrigger,
   RebalanceStockFlowWidget,
+  fetchRebalanceStockFlowSource,
   type RebalanceStockFlowPortfolio,
 } from "./StockFlowTabs";
 
@@ -5350,12 +5351,12 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketLtpRefreshedAt(null);
     setZerodhaDirectMarketAvailable(false);
     try {
-      const [runs, overview, status, login] = await Promise.all([
-        fetchAllFullRuns(),
-        apiService.zerodhaPortfolioOverview(),
+      const [stockFlowSource, status, login] = await Promise.all([
+        fetchRebalanceStockFlowSource("zerodha"),
         apiService.zerodhaStatus(),
         apiService.zerodhaLoginUrl(),
       ]);
+      const { runs, portfolioSnapshot } = stockFlowSource;
       setZerodhaBasketHistoryRuns(runs);
       const directMarketEnabled = Boolean(
         status.connected
@@ -5374,16 +5375,20 @@ export function RebalanceWorkflowSections({
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "india"),
         "india",
-        overview.latest,
+        portfolioSnapshot,
       );
       const technicalScans = buildTechnicalScanMap(runs);
       const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, scoreMatrixFormulaConfig);
-      const orders = buildZerodhaBasketPreviewOrders(actionRows, technicalScans, overview.latest);
+      const orders = buildZerodhaBasketPreviewOrders(
+        actionRows,
+        technicalScans,
+        portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null,
+      );
       const capturedDetailsErrors = [eventsResult, threatsResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => normalizeError(result.reason));
       setZerodhaBasketDetailsData({
-        portfolioSnapshot: overview.latest,
+        portfolioSnapshot,
         eventsAnalysis: eventsResult.status === "fulfilled" ? eventsResult.value.analysis : null,
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
@@ -5416,17 +5421,17 @@ export function RebalanceWorkflowSections({
     setIndmoneyBasketLoading(true);
     setIndmoneyBasketError(null);
     try {
-      const [runs, overview, eventsResult, threatsResult] = await Promise.all([
-        fetchAllFullRuns(),
-        apiService.indmoneyUsPortfolioOverview(),
+      const [stockFlowSource, eventsResult, threatsResult] = await Promise.all([
+        fetchRebalanceStockFlowSource("indmoneyUs"),
         apiService.indmoneyUsEventsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
         apiService.indmoneyUsThreatsLatest().then((value) => ({ status: "fulfilled" as const, value })).catch((reason) => ({ status: "rejected" as const, reason })),
       ]);
+      const { runs, portfolioSnapshot } = stockFlowSource;
       setIndmoneyBasketHistoryRuns(runs);
       const stocks = buildConsensusRows(
         getLatestMatchingRebalanceRuns(runs, "us"),
         "us",
-        overview.latest,
+        portfolioSnapshot,
       );
       const technicalScans = buildTechnicalScanMap(runs);
       const actionRows = buildDashboardActionRows(stocks, "us", technicalScans, scoreMatrixFormulaConfig);
@@ -5440,7 +5445,7 @@ export function RebalanceWorkflowSections({
         .filter((result) => result.status === "rejected")
         .map((result) => normalizeError(result.reason));
       setIndmoneyBasketDetailsData({
-        portfolioSnapshot: overview.latest as IndMoneyUsPortfolioSnapshotDetail | null,
+        portfolioSnapshot,
         eventsAnalysis: eventsResult.status === "fulfilled" ? eventsResult.value.analysis : null,
         threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : null,
         error: capturedDetailsErrors.length ? capturedDetailsErrors.join("; ") : null,
