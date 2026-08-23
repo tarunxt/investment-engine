@@ -91,10 +91,10 @@ test("auto-rebalance idle tiles include active run progress", () => {
 
 test("last completed auto-rebalance audit repopulates every idle stage tile", () => {
   assert.match(source, /function summarizeAutoRebalanceHistoryStage/);
-  assert.match(source, /apiService\.getAutoRebalanceHistory\("india", \{ limit: 1 \}\)/);
+  assert.match(source, /apiService\.getAutoRebalanceHistory\("india", \{ limit: 25 \}\)/);
   assert.match(
     source,
-    /apiService\.getAutoRebalanceHistory\("indmoney_us", \{ limit: 1 \}\)/,
+    /apiService\.getAutoRebalanceHistory\("indmoney_us", \{ limit: 25 \}\)/,
   );
   for (const stage of [
     "sync",
