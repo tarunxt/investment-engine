@@ -73,6 +73,23 @@ test("Actionables View Output renders the shared widget natively instead of fram
   );
 });
 
+test("stage cards keep every shortcut as an independent native button", () => {
+  const tileStart = workflowSource.indexOf("function WorkflowStageTile");
+  const tileEnd = workflowSource.indexOf("function ZerodhaBasketPreviewDialog", tileStart);
+  const tileSource = workflowSource.slice(tileStart, tileEnd);
+
+  assert.match(tileSource, /<article[\s\S]*?aria-label=\{`\$\{selectable/);
+  assert.doesNotMatch(tileSource, /<button[\s\S]*?role="button"/);
+  for (const label of [
+    "Select inputs for",
+    "Show duration breakdown for",
+    "Open prompt for",
+    "View output for",
+  ]) {
+    assert.match(tileSource, new RegExp(label));
+  }
+});
+
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {
   assert.match(workflowSource, /totalLlms: jobs\.length/);
   assert.match(workflowSource, /getRunJobDisplayModels\(jobs\)/);

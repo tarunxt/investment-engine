@@ -3080,9 +3080,8 @@ function WorkflowStageTile({
     if (row.label === "Duration") {
       return (
         <p key={row.label}>
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             aria-haspopup="dialog"
             aria-label={`Show duration breakdown for ${stageMeta.idle}`}
             title="Show duration breakdown"
@@ -3091,18 +3090,11 @@ function WorkflowStageTile({
               event.stopPropagation();
               setDurationDialogOpen(true);
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                setDurationDialogOpen(true);
-              }
-            }}
-            className="inline-flex cursor-pointer items-baseline rounded px-0.5 text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            className="pointer-events-auto inline-flex cursor-pointer items-baseline rounded px-0.5 text-blue-700 underline decoration-blue-300 underline-offset-2 transition hover:text-blue-800 hover:decoration-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
           >
             <span className="font-semibold">{row.label}:</span>{" "}
             {row.value}
-          </span>
+          </button>
         </p>
       );
     }
@@ -3121,9 +3113,8 @@ function WorkflowStageTile({
         </span>{" "}
         {row.label === "Error" && row.detail ? (
           <span className="relative inline-flex align-middle">
-            <span
-              role="button"
-              tabIndex={0}
+            <button
+              type="button"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -3131,21 +3122,12 @@ function WorkflowStageTile({
                   current === row.detail ? null : (row.detail ?? null),
                 );
               }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setOpenErrorDetail((current) =>
-                    current === row.detail ? null : (row.detail ?? null),
-                  );
-                }
-              }}
-              className="cursor-pointer rounded text-red-700 underline decoration-red-300 underline-offset-2 transition hover:text-red-800 hover:decoration-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
+              className="pointer-events-auto cursor-pointer rounded text-left text-red-700 underline decoration-red-300 underline-offset-2 transition hover:text-red-800 hover:decoration-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
               aria-label="Show detailed LLM error"
               title="Show detailed LLM error"
             >
               {row.value}
-            </span>
+            </button>
             {openErrorDetail === row.detail ? (
               <span className="absolute left-0 top-6 z-30 w-96 max-w-[calc(100vw-4rem)] rounded-2xl border border-red-100 bg-white p-4 text-xs leading-5 text-slate-700 shadow-xl shadow-slate-900/10">
                 <span className="block font-bold text-red-700">
@@ -3196,83 +3178,65 @@ function WorkflowStageTile({
 
   return (
     <>
-    <button
-      type="button"
-      onClick={() => {
-        onClick?.();
-      }}
-      disabled={!onClick}
+    <article
       className={`relative flex min-h-[17rem] flex-col items-start justify-start rounded-2xl border p-5 text-left align-top shadow-sm transition hover:-translate-y-0.5 hover:shadow-md disabled:cursor-default disabled:hover:translate-y-0 ${getStageClasses(info.state)} ${selectionClasses}`}
     >
+      <button
+        type="button"
+        onClick={() => {
+          onClick?.();
+        }}
+        disabled={!onClick}
+        className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-default"
+        aria-label={`${selectable ? (selected ? "Deselect" : "Select") : "Open"} ${stageMeta.idle} stage`}
+      >
+        <span className="sr-only">{stageMeta.idle}</span>
+      </button>
       {onInputClick ? (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={(event) => {
             event.stopPropagation();
             onInputClick();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onInputClick();
-            }
-          }}
-          className={`absolute left-5 top-5 ${iconButtonClasses}`}
+          className={`absolute left-5 top-5 z-20 ${iconButtonClasses}`}
           aria-label={`Select inputs for ${stageMeta.idle}`}
           title="Select Inputs"
         >
           <SelectInputsIcon className="size-6" />
-        </span>
+        </button>
       ) : null}
       {onInfoClick ? (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={(event) => {
             event.stopPropagation();
             onInfoClick();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onInfoClick();
-            }
-          }}
-          className={`absolute right-5 top-5 ${iconButtonClasses}`}
+          className={`absolute right-5 top-5 z-20 ${iconButtonClasses}`}
           aria-label={`Show ${stageMeta.idle} LLM details`}
           title="LLM models and expected cost"
         >
           <LlmDetailsIcon className="size-6" />
-        </span>
+        </button>
       ) : null}
 
       {onCalculationsClick ? (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={(event) => {
             event.stopPropagation();
             onCalculationsClick();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onCalculationsClick();
-            }
-          }}
-          className={`absolute right-5 top-5 ${iconButtonClasses}`}
+          className={`absolute right-5 top-5 z-20 ${iconButtonClasses}`}
           aria-label={`Open ${stageMeta.idle} Actionables Calculations`}
           title="Actionables Calculations"
         >
           <FileSpreadsheet className="size-6" />
-        </span>
+        </button>
       ) : null}
 
-      <div className="w-full px-10 text-center text-base font-semibold text-slate-950">
+      <div className="pointer-events-none relative z-10 w-full px-10 text-center text-base font-semibold text-slate-950">
         <div className="flex min-w-0 items-center justify-center gap-2">
           {isRunning ? (
             <Loader2 className="size-4 shrink-0 animate-spin text-amber-600" />
@@ -3285,106 +3249,74 @@ function WorkflowStageTile({
         </div>
       </div>
 
-      <div className="mt-6 w-full space-y-2 text-sm leading-5 text-slate-600">
+      <div className="pointer-events-none relative z-10 mt-6 w-full space-y-2 text-sm leading-5 text-slate-600">
         {stageRows.map(renderStageRow)}
       </div>
 
       {onSyncNowClick && stage === "sync" ? (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={(event) => {
             event.stopPropagation();
             onSyncNowClick();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onSyncNowClick();
-            }
-          }}
-          className="mt-6 inline-flex h-10 items-center justify-center self-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
+          className="relative z-20 mt-6 inline-flex h-10 items-center justify-center self-center rounded-full bg-blue-600 px-6 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition hover:bg-blue-700"
         >
           Sync Now
-        </span>
+        </button>
       ) : null}
 
       {onPlaceOrderClick && stage === "actionables" ? (
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={(event) => {
             event.stopPropagation();
             onPlaceOrderClick();
           }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onPlaceOrderClick();
-            }
-          }}
           className={cn(
-            "mt-6 inline-flex h-10 items-center justify-center self-center rounded-full px-6 text-sm font-semibold text-white shadow-md transition",
+            "relative z-20 mt-6 inline-flex h-10 items-center justify-center self-center rounded-full px-6 text-sm font-semibold text-white shadow-md transition",
             isFreshActionables
               ? "bg-emerald-600 shadow-emerald-600/25 hover:bg-emerald-700"
               : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700",
           )}
         >
           {placeOrderLabel}
-        </span>
+        </button>
       ) : null}
 
-      <div className="mt-auto flex w-full items-end justify-between gap-3 pt-5">
+      <div className="pointer-events-none relative z-10 mt-auto flex w-full items-end justify-between gap-3 pt-5">
         {showPromptShortcut ? (
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={(event) => {
               event.stopPropagation();
               onPromptClick?.();
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                onPromptClick?.();
-              }
-            }}
-            className="inline-flex size-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-950 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+            className="pointer-events-auto inline-flex size-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-950 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             aria-label={`Open prompt for ${stageMeta.idle}`}
             title="Prompt"
           >
             <PromptIcon className="size-6" />
-          </span>
+          </button>
         ) : (
           <span aria-hidden="true" />
         )}
         {onOutputClick ? (
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={(event) => {
               event.stopPropagation();
               onOutputClick();
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                event.stopPropagation();
-                onOutputClick();
-              }
-            }}
-            className={iconButtonClasses}
+            className={`pointer-events-auto ${iconButtonClasses}`}
             aria-label={`View output for ${stageMeta.idle}`}
             title="View Output"
           >
             <ViewOutputIcon className="size-6" />
-          </span>
+          </button>
         ) : null}
       </div>
-    </button>
+    </article>
     <StageDurationBreakdownDialog
       open={durationDialogOpen}
       stageLabel={stageMeta.idle}
