@@ -201,7 +201,7 @@ export function BullpenRunHistoryScreen() {
 
   const openRun = (run: BullpenAutoLiveHistoryItem) =>
     router.push(
-      `/console/bullpen-ai?runDetails=${encodeURIComponent(run.id)}&returnTo=history`,
+      `/console/bullpen-ai/runs/${encodeURIComponent(run.id)}`,
     );
 
   return (

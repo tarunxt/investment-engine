@@ -16,31 +16,31 @@ const scheduleCard = readFileSync(
   ),
   "utf8",
 );
+const dedicatedRunPage = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/runs/[runId]/RunDetailClient.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
-test("History opens the original run-details workspace instead of the audit", () => {
+test("History opens a dedicated run-details screen instead of a popup", () => {
   assert.match(
     historyScreen,
-    /\/console\/bullpen-ai\?runDetails=\$\{encodeURIComponent\(run\.id\)\}&returnTo=history/,
+    /\\/console\\/bullpen-ai\\/runs\\/\\$\\{encodeURIComponent\\(run\\.id\\)\\}/,
   );
+  assert.doesNotMatch(historyScreen, /runDetails=/);
   assert.doesNotMatch(
     historyScreen,
-    /analyse-runs\/\$\{encodeURIComponent\(run\.id\)\}/,
+    /analyse-runs\\/\\$\\{encodeURIComponent\\(run\\.id\\)\\}/,
   );
-  assert.match(scheduleCard, /searchParams\.get\("runDetails"\)/);
-  assert.match(scheduleCard, /openHistoryRunDetail\(\{ id: runId \}\)/);
-  assert.match(scheduleCard, /<RunDetailDialog/);
-  assert.match(scheduleCard, /router\.replace\([\s\S]*\/console\/bullpen-ai\/history/);
-  assert.match(scheduleCard, /new URLSearchParams\(window\.location\.search\)/);
-  assert.doesNotMatch(
-    scheduleCard,
-    /if \(authLoading \|\| !user\) return;[\s\S]{0,500}openRequestedRunDetail/,
-  );
-  assert.match(
-    scheduleCard,
-    /if \(!requestedRunDetailId\) \{\s*runHistoryDetailAbortControllerRef\.current\?\.abort\(\)/,
-  );
+  assert.match(dedicatedRunPage, /useParams/);
+  assert.match(dedicatedRunPage, /<BullpenRunDetailScreen runId=\\{runId\\} \\/>/);
+  assert.match(scheduleCard, /export function BullpenRunDetailScreen/);
+  assert.match(scheduleCard, /presentation="page"/);
+  assert.match(scheduleCard, /Back to run history/);
+  assert.match(scheduleCard, /isPage[\\s\\S]*min-h-screen bg-slate-100/);
 });
-
 test("History keeps usable run or trend data when the sibling request times out", () => {
   assert.match(historyScreen, /Promise\.allSettled/);
   assert.match(historyScreen, /historyRequestOptions = \{ timeoutMs: 10_000 \}/);
