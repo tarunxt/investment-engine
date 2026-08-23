@@ -3,6 +3,7 @@ import {
     Bot,
     BriefcaseBusiness,
     Database,
+    History,
     LayoutDashboard,
     LogOut,
     Mail,
@@ -45,7 +46,7 @@ export type NavigationGroup = {
 };
 
 export type NavigationEntry = NavigationLeaf | NavigationGroup;
-export type SidebarSectionId = 'overview' | 'investing' | 'ai-workspace' | 'platform';
+export type SidebarSectionId = 'overview' | 'investing' | 'ai-workspace' | 'monitoring' | 'platform';
 
 export type NavigationSection = {
     id: SidebarSectionId;
@@ -60,12 +61,12 @@ export type AccountNavigationItem = NavigationLeaf & {
 export const SIDEBAR_SECTIONS = [
     {
         id: 'overview',
-        label: 'Overview',
+        label: 'Home',
         entries: [
             {
                 type: 'item',
                 id: 'overview',
-                name: 'Overview',
+                name: 'Dashboard',
                 href: URLs.routes.console.dashboard(),
                 icon: LayoutDashboard,
                 matchMode: 'exact',
@@ -123,7 +124,7 @@ export const SIDEBAR_SECTIONS = [
                     {
                         type: 'item',
                         id: 'bullpen-ai-review',
-                        name: 'Bullpen AI Review',
+                        name: 'Bullpen Review',
                         href: URLs.routes.console.bullpenAi(),
                         matchMode: 'prefix',
                         badge: {
@@ -134,7 +135,7 @@ export const SIDEBAR_SECTIONS = [
                     {
                         type: 'item',
                         id: 'bullpen-ai-live',
-                        name: 'Bullpen AI Live',
+                        name: 'Bullpen Live',
                         href: URLs.routes.console.bullpenAiAutoLive(),
                         matchMode: 'prefix',
                         badge: {
@@ -145,7 +146,7 @@ export const SIDEBAR_SECTIONS = [
                     {
                         type: 'item',
                         id: 'bullpen-copy-trader',
-                        name: 'Bullpen Copy Trader',
+                        name: 'Copy Trader',
                         href: URLs.routes.console.polymarketBot(),
                         matchMode: 'prefix',
                     },
@@ -174,7 +175,7 @@ export const SIDEBAR_SECTIONS = [
     },
     {
         id: 'ai-workspace',
-        label: 'AI Workspace',
+        label: 'AI & Automation',
         entries: [
             {
                 type: 'group',
@@ -182,13 +183,6 @@ export const SIDEBAR_SECTIONS = [
                 name: 'AI Studio',
                 icon: Sparkles,
                 children: [
-                    {
-                        type: 'item',
-                        id: 'run-history',
-                        name: 'Run History',
-                        href: URLs.routes.console.runs(),
-                        matchMode: 'prefix',
-                    },
                     {
                         type: 'item',
                         id: 'prompt-library',
@@ -208,8 +202,30 @@ export const SIDEBAR_SECTIONS = [
         ],
     },
     {
+        id: 'monitoring',
+        label: 'Monitoring',
+        entries: [
+            {
+                type: 'item',
+                id: 'run-history',
+                name: 'Run History',
+                href: URLs.routes.console.runs(),
+                icon: History,
+                matchMode: 'prefix',
+            },
+            {
+                type: 'item',
+                id: 'mails',
+                name: 'Alerts & Emails',
+                href: URLs.routes.console.mails(),
+                icon: Mail,
+                matchMode: 'prefix',
+            },
+        ],
+    },
+    {
         id: 'platform',
-        label: 'Platform',
+        label: 'Data & Integrations',
         entries: [
             {
                 type: 'item',
@@ -242,22 +258,6 @@ export const SIDEBAR_SECTIONS = [
                     },
                 ],
             },
-            {
-                type: 'item',
-                id: 'mails',
-                name: 'Mails',
-                href: URLs.routes.console.mails(),
-                icon: Mail,
-                matchMode: 'prefix',
-            },
-            {
-                type: 'item',
-                id: 'usage-costs',
-                name: 'Usage & Costs',
-                href: URLs.routes.profile.costDrivers(),
-                icon: ReceiptText,
-                matchMode: 'prefix',
-            },
         ],
     },
 ] satisfies readonly NavigationSection[];
@@ -277,6 +277,14 @@ export const ACCOUNT_NAVIGATION = [
         name: 'Preferences',
         href: URLs.routes.profile.preferences(),
         icon: Settings2,
+        matchMode: 'prefix',
+    },
+    {
+        type: 'item',
+        id: 'usage-costs',
+        name: 'Usage & Costs',
+        href: URLs.routes.profile.costDrivers(),
+        icon: ReceiptText,
         matchMode: 'prefix',
     },
 ] satisfies readonly AccountNavigationItem[];
