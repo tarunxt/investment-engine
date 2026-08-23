@@ -1,6 +1,12 @@
 'use client';
 
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import {
+    useEffect,
+    useMemo,
+    useState,
+    useSyncExternalStore,
+    type MouseEvent as ReactMouseEvent,
+} from 'react';
 import Link from 'next/link';
 import {
     DndContext,
@@ -25,6 +31,8 @@ import {
     ChevronDown,
     ChevronRight,
     GripVertical,
+    Pencil,
+    RotateCcw,
 } from 'lucide-react';
 
 import type { User } from '@/hooks/useAuth';
@@ -53,6 +61,20 @@ import {
     type SidebarOrder,
     orderNavigationSections,
 } from './sidebarNavigationUtils';
+import {
+    DEFAULT_NAVIGATION_NAMES,
+    EMPTY_NAVIGATION_NAME_OVERRIDES,
+    buildSidebarChildOrderStorageKey,
+    buildSidebarNamesStorageKey,
+    createDefaultChildOrder,
+    persistNavigationChildOrder,
+    persistNavigationNameOverrides,
+    readNavigationChildOrder,
+    readNavigationNameOverrides,
+    subscribeToNavigationChildOrder,
+    subscribeToNavigationNames,
+    type NavigationNameOverrides,
+} from './sidebarNavigationPreferences';
 
 type SidebarNavigationProps = {
     pathname: string;
@@ -78,6 +100,7 @@ type DragHandleProps = {
 type NavigationLeafLinkProps = {
     leaf: NavigationLeaf;
     active: boolean;
+    onContextMenu?: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
     onNavigate: () => void;
     depth?: 'root' | 'child';
 };
@@ -86,6 +109,7 @@ type NavigationGroupRowProps = {
     active: boolean;
     expanded: boolean;
     group: NavigationGroup;
+    onContextMenu: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
     onNavigate: () => void;
     onToggle: () => void;
     pathname: string;
@@ -95,15 +119,23 @@ type SortableNavigationEntryProps = {
     entry: NavigationEntry;
     expandedGroupIds: ReadonlySet<string>;
     isReordering: boolean;
+    onContextMenu: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
     onNavigate: () => void;
     onToggleGroup: (groupId: string) => void;
     pathname: string;
     sectionLabel: string;
 };
 
+type SortableNavigationChildProps = {
+    child: NavigationLeaf;
+    groupName: string;
+    onContextMenu: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
+};
+
 type SidebarSectionProps = {
     expandedGroupIds: ReadonlySet<string>;
     isReordering: boolean;
+    onContextMenu: (target: NavigationContextTarget, event: ReactMouseEvent<HTMLElement>) => void;
     onNavigate: () => void;
     onToggleGroup: (groupId: string) => void;
     pathname: string;
@@ -122,8 +154,24 @@ type NavigationExpansionState = {
     expandedGroupId: string | null;
 };
 
+type NavigationContextTarget = {
+    defaultName: string;
+    id: string;
+    kind: 'section' | 'folder' | 'item';
+    name: string;
+};
+
+type NavigationContextMenuState = NavigationContextTarget & {
+    x: number;
+    y: number;
+};
+
 const SIDEBAR_ORDER_UPDATED_EVENT = 'investment-engine:sidebar-order-updated';
 const navigationOrderSnapshotCache = new Map<string, NavigationOrderSnapshot>();
+
+function getNavigationNameKey(target: Pick<NavigationContextTarget, 'id' | 'kind'>) {
+    return `${target.kind}:${target.id}`;
+}
 
 function cloneSidebarOrder(order: Record<string, readonly string[]>) {
     return Object.fromEntries(
@@ -312,6 +360,7 @@ function DragHandle({
 function NavigationLeafLink({
     leaf,
     active,
+    onContextMenu,
     onNavigate,
     depth = 'root',
 }: NavigationLeafLinkProps) {
@@ -322,6 +371,12 @@ function NavigationLeafLink({
             href={leaf.href}
             prefetch={false}
             onClick={onNavigate}
+            onContextMenu={onContextMenu ? (event) => onContextMenu({
+                id: leaf.id,
+                kind: 'item',
+                name: leaf.name,
+                defaultName: DEFAULT_NAVIGATION_NAMES[`item:${leaf.id}`] ?? leaf.name,
+            }, event) : undefined}
             aria-current={active ? 'page' : undefined}
             title={leaf.title ?? leaf.name}
             className={cn(
@@ -360,6 +415,7 @@ function NavigationGroupRow({
     active,
     expanded,
     group,
+    onContextMenu,
     onNavigate,
     onToggle,
     pathname,
@@ -374,6 +430,12 @@ function NavigationGroupRow({
                 aria-controls={childrenId}
                 title={group.name}
                 onClick={onToggle}
+                onContextMenu={(event) => onContextMenu({
+                    id: group.id,
+                    kind: 'folder',
+                    name: group.name,
+                    defaultName: DEFAULT_NAVIGATION_NAMES[`folder:${group.id}`] ?? group.name,
+                }, event)}
                 className={cn(
                     'flex w-full items-center gap-3 rounded-2xl px-3.5 py-3 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar',
                     active
@@ -409,6 +471,7 @@ function NavigationGroupRow({
                             key={child.id}
                             leaf={child}
                             active={isLeafActive(pathname, child)}
+                            onContextMenu={onContextMenu}
                             onNavigate={onNavigate}
                             depth="child"
                         />
@@ -419,10 +482,60 @@ function NavigationGroupRow({
     );
 }
 
+function SortableNavigationChild({
+    child,
+    groupName,
+    onContextMenu,
+}: SortableNavigationChildProps) {
+    const {
+        attributes,
+        isDragging,
+        listeners,
+        setActivatorNodeRef,
+        setNodeRef,
+        transform,
+        transition,
+    } = useSortable({ id: child.id });
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={{ transform: CSS.Transform.toString(transform), transition }}
+            className={cn(
+                'flex items-center gap-2 rounded-xl border border-transparent bg-sidebar-accent/45 px-2 py-1.5 text-sm text-sidebar-foreground/75',
+                isDragging ? 'relative z-20 border-sidebar-border bg-sidebar shadow-lg' : '',
+            )}
+        >
+            <DragHandle
+                attributes={attributes}
+                listeners={listeners}
+                setActivatorNodeRef={setActivatorNodeRef}
+                label={`Drag to reorder ${child.name} within ${groupName}`}
+            />
+            <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/45" />
+            <span className="min-w-0 flex-1 truncate">{child.name}</span>
+            <button
+                type="button"
+                aria-label={`Options for ${child.name}`}
+                onClick={(event) => onContextMenu({
+                    id: child.id,
+                    kind: 'item',
+                    name: child.name,
+                    defaultName: DEFAULT_NAVIGATION_NAMES[`item:${child.id}`] ?? child.name,
+                }, event)}
+                className="rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground"
+            >
+                &hellip;
+            </button>
+        </div>
+    );
+}
+
 function SortableNavigationEntry({
     entry,
     expandedGroupIds,
     isReordering,
+    onContextMenu,
     onNavigate,
     onToggleGroup,
     pathname,
@@ -462,28 +575,61 @@ function SortableNavigationEntry({
             className={isDragging ? 'relative z-20' : undefined}
         >
             {isReordering ? (
-                <div className={rowClassName}>
-                    <DragHandle
-                        attributes={attributes}
-                        listeners={listeners}
-                        setActivatorNodeRef={setActivatorNodeRef}
-                        label={`Drag to reorder ${entry.name} within ${sectionLabel}`}
-                    />
-                    {entry.icon ? (
-                        <entry.icon
-                            className={cn(
-                                'h-5 w-5 shrink-0',
-                                active ? 'text-sidebar-primary' : 'text-muted-foreground',
-                            )}
+                <div className="space-y-1.5">
+                    <div className={rowClassName}>
+                        <DragHandle
+                            attributes={attributes}
+                            listeners={listeners}
+                            setActivatorNodeRef={setActivatorNodeRef}
+                            label={`Drag to reorder ${entry.name} within ${sectionLabel}`}
                         />
+                        {entry.icon ? (
+                            <entry.icon
+                                className={cn(
+                                    'h-5 w-5 shrink-0',
+                                    active ? 'text-sidebar-primary' : 'text-muted-foreground',
+                                )}
+                            />
+                        ) : null}
+                        <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                        <button
+                            type="button"
+                            aria-label={`Options for ${entry.name}`}
+                            onClick={(event) => onContextMenu({
+                                id: entry.id,
+                                kind: isNavigationGroup(entry) ? 'folder' : 'item',
+                                name: entry.name,
+                                defaultName: DEFAULT_NAVIGATION_NAMES[`${isNavigationGroup(entry) ? 'folder' : 'item'}:${entry.id}`] ?? entry.name,
+                            }, event)}
+                            className="rounded-md px-2 py-1 text-lg leading-none text-muted-foreground hover:bg-sidebar hover:text-sidebar-foreground"
+                        >
+                            &hellip;
+                        </button>
+                    </div>
+                    {isNavigationGroup(entry) ? (
+                        <SortableContext
+                            items={entry.children.map((child) => child.id)}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            <div className="ml-7 space-y-1 border-l border-sidebar-border pl-2">
+                                {entry.children.map((child) => (
+                                    <SortableNavigationChild
+                                        key={child.id}
+                                        child={child}
+                                        groupName={entry.name}
+                                        onContextMenu={onContextMenu}
+                                    />
+                                ))}
+                            </div>
+                        </SortableContext>
                     ) : null}
-                    <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 </div>
             ) : isNavigationGroup(entry) ? (
                 <NavigationGroupRow
                     active={active}
                     expanded={expandedGroupIds.has(entry.id)}
                     group={entry}
+                    onContextMenu={onContextMenu}
                     onNavigate={onNavigate}
                     onToggle={() => onToggleGroup(entry.id)}
                     pathname={pathname}
@@ -492,6 +638,7 @@ function SortableNavigationEntry({
                 <NavigationLeafLink
                     leaf={entry}
                     active={active}
+                    onContextMenu={onContextMenu}
                     onNavigate={onNavigate}
                 />
             )}
@@ -502,6 +649,7 @@ function SortableNavigationEntry({
 function SidebarSection({
     expandedGroupIds,
     isReordering,
+    onContextMenu,
     onNavigate,
     onToggleGroup,
     pathname,
@@ -511,7 +659,15 @@ function SidebarSection({
 
     return (
         <section aria-labelledby={headingId} className="space-y-2">
-            <div className="px-1">
+            <div
+                className="px-1"
+                onContextMenu={(event) => onContextMenu({
+                    id: section.id,
+                    kind: 'section',
+                    name: section.label,
+                    defaultName: DEFAULT_NAVIGATION_NAMES[`section:${section.id}`] ?? section.label,
+                }, event)}
+            >
                 <h2
                     id={headingId}
                     className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground"
@@ -530,6 +686,7 @@ function SidebarSection({
                             entry={entry}
                             expandedGroupIds={expandedGroupIds}
                             isReordering={isReordering}
+                            onContextMenu={onContextMenu}
                             onNavigate={onNavigate}
                             onToggleGroup={onToggleGroup}
                             pathname={pathname}
@@ -617,18 +774,89 @@ export function SidebarNavigation({
     onNavigate,
 }: SidebarNavigationProps) {
     const [isReordering, setIsReordering] = useState(false);
+    const [contextMenu, setContextMenu] = useState<NavigationContextMenuState | null>(null);
     const defaultOrder = useMemo(() => createDefaultSidebarOrder(SIDEBAR_SECTIONS), []);
+    const defaultChildOrder = useMemo(() => createDefaultChildOrder(), []);
     const entrySectionById = useMemo(() => collectEntrySectionIds(SIDEBAR_SECTIONS), []);
+    const childGroupById = useMemo(() => Object.fromEntries(
+        Object.entries(defaultChildOrder).flatMap(([groupId, childIds]) => (
+            childIds.map((childId) => [childId, groupId])
+        )),
+    ) as Record<string, string>, [defaultChildOrder]);
     const storageKey = useMemo(() => buildSidebarOrderStorageKey(userId), [userId]);
+    const namesStorageKey = useMemo(() => buildSidebarNamesStorageKey(userId), [userId]);
+    const childOrderStorageKey = useMemo(
+        () => buildSidebarChildOrderStorageKey(userId),
+        [userId],
+    );
+    const nameOverrides = useSyncExternalStore(
+        (onStoreChange) => subscribeToNavigationNames(namesStorageKey, onStoreChange),
+        () => readNavigationNameOverrides(namesStorageKey),
+        () => EMPTY_NAVIGATION_NAME_OVERRIDES,
+    );
+    const childOrder = useSyncExternalStore(
+        (onStoreChange) => subscribeToNavigationChildOrder(childOrderStorageKey, onStoreChange),
+        () => readNavigationChildOrder(childOrderStorageKey, defaultChildOrder),
+        () => defaultChildOrder,
+    );
+
+    useEffect(() => {
+        if (!contextMenu) {
+            return;
+        }
+
+        const closeMenu = () => setContextMenu(null);
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                closeMenu();
+            }
+        };
+
+        window.addEventListener('resize', closeMenu);
+        window.addEventListener('scroll', closeMenu, true);
+        window.addEventListener('keydown', closeOnEscape);
+
+        return () => {
+            window.removeEventListener('resize', closeMenu);
+            window.removeEventListener('scroll', closeMenu, true);
+            window.removeEventListener('keydown', closeOnEscape);
+        };
+    }, [contextMenu]);
     const navigationOrder = useSyncExternalStore(
         (onStoreChange) => subscribeToNavigationOrder(storageKey, onStoreChange),
         () => readNavigationOrder(storageKey, defaultOrder, entrySectionById),
         () => cloneSidebarOrder(defaultOrder),
     );
-    const sections = useMemo(
-        () => orderNavigationSections(SIDEBAR_SECTIONS, navigationOrder),
-        [navigationOrder],
-    );
+    const sections = useMemo(() => (
+        orderNavigationSections(SIDEBAR_SECTIONS, navigationOrder).map((section) => ({
+            ...section,
+            label: nameOverrides[`section:${section.id}`] ?? section.label,
+            entries: section.entries.map((entry) => {
+                const kind = isNavigationGroup(entry) ? 'folder' : 'item';
+
+                if (isNavigationGroup(entry)) {
+                    const childrenById = new Map(entry.children.map((child) => [child.id, child]));
+                    const orderedChildren = (childOrder[entry.id] ?? defaultChildOrder[entry.id])
+                        .map((childId) => childrenById.get(childId))
+                        .filter((child): child is NavigationLeaf => Boolean(child));
+
+                    return {
+                        ...entry,
+                        name: nameOverrides[`${kind}:${entry.id}`] ?? entry.name,
+                        children: orderedChildren.map((child) => ({
+                            ...child,
+                            name: nameOverrides[`item:${child.id}`] ?? child.name,
+                        })),
+                    };
+                }
+
+                return {
+                    ...entry,
+                    name: nameOverrides[`${kind}:${entry.id}`] ?? entry.name,
+                };
+            }),
+        }))
+    ), [childOrder, defaultChildOrder, nameOverrides, navigationOrder]);
     const activeGroupId = useMemo(
         () => findActiveGroupIds(pathname, sections)[0] ?? null,
         [pathname, sections],
@@ -664,21 +892,97 @@ export function SidebarNavigation({
         }),
     );
 
+    const persistNameOverrides = (next: NavigationNameOverrides) => {
+        persistNavigationNameOverrides(namesStorageKey, next);
+    };
+
+    const openContextMenu = (
+        target: NavigationContextTarget,
+        event: ReactMouseEvent<HTMLElement>,
+    ) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setContextMenu({
+            ...target,
+            x: Math.min(event.clientX, window.innerWidth - 220),
+            y: Math.min(event.clientY, window.innerHeight - 180),
+        });
+    };
+
+    const renameContextTarget = () => {
+        if (!contextMenu) {
+            return;
+        }
+
+        const nextName = window.prompt(`Rename ${contextMenu.kind}`, contextMenu.name)?.trim();
+
+        if (!nextName) {
+            setContextMenu(null);
+            return;
+        }
+
+        persistNameOverrides({
+            ...nameOverrides,
+            [getNavigationNameKey(contextMenu)]: nextName.slice(0, 48),
+        });
+        setContextMenu(null);
+    };
+
+    const resetContextTargetName = () => {
+        if (!contextMenu) {
+            return;
+        }
+
+        const next = { ...nameOverrides };
+        delete next[getNavigationNameKey(contextMenu)];
+        persistNameOverrides(next);
+        setContextMenu(null);
+    };
+
     const handleDragEnd = ({ active, over }: DragEndEvent) => {
         if (!over || active.id === over.id) {
             return;
         }
 
-        const activeSectionId = entrySectionById[String(active.id)];
-        const overSectionId = entrySectionById[String(over.id)];
+        const activeId = String(active.id);
+        const overId = String(over.id);
+        const activeGroupId = childGroupById[activeId];
+        const overGroupId = childGroupById[overId];
+
+        if (activeGroupId || overGroupId) {
+            if (!activeGroupId || activeGroupId !== overGroupId) {
+                return;
+            }
+
+            const currentGroupOrder = childOrder[activeGroupId] ?? defaultChildOrder[activeGroupId];
+            const oldIndex = currentGroupOrder.indexOf(activeId);
+            const newIndex = currentGroupOrder.indexOf(overId);
+
+            if (oldIndex === -1 || newIndex === -1) {
+                return;
+            }
+
+            persistNavigationChildOrder(
+                childOrderStorageKey,
+                {
+                    ...childOrder,
+                    [activeGroupId]: arrayMove(currentGroupOrder, oldIndex, newIndex),
+                },
+                defaultChildOrder,
+            );
+            return;
+        }
+
+        const activeSectionId = entrySectionById[activeId];
+        const overSectionId = entrySectionById[overId];
 
         if (!activeSectionId || activeSectionId !== overSectionId) {
             return;
         }
 
         const currentSectionOrder = navigationOrder[activeSectionId] ?? defaultOrder[activeSectionId];
-        const oldIndex = currentSectionOrder.indexOf(String(active.id));
-        const newIndex = currentSectionOrder.indexOf(String(over.id));
+        const oldIndex = currentSectionOrder.indexOf(activeId);
+        const newIndex = currentSectionOrder.indexOf(overId);
 
         if (oldIndex === -1 || newIndex === -1) {
             return;
@@ -706,7 +1010,11 @@ export function SidebarNavigation({
                         {isReordering ? (
                             <button
                                 type="button"
-                                onClick={() => persistNavigationOrder(storageKey, cloneSidebarOrder(defaultOrder), defaultOrder, entrySectionById)}
+                                onClick={() => {
+                                    persistNavigationOrder(storageKey, cloneSidebarOrder(defaultOrder), defaultOrder, entrySectionById);
+                                    persistNavigationChildOrder(childOrderStorageKey, defaultChildOrder, defaultChildOrder);
+                                    persistNameOverrides({});
+                                }}
                                 className="text-xs font-medium text-muted-foreground transition hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                             >
                                 Reset
@@ -730,7 +1038,7 @@ export function SidebarNavigation({
                 </div>
                 {isReordering ? (
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        Drag the handle to reorder items within each section. Your order saves automatically for this account on this browser.
+                        Drag folders or items within their current section. Nested items can be reordered inside their folder. Changes save automatically for this account on this browser.
                     </p>
                 ) : null}
             </div>
@@ -748,6 +1056,7 @@ export function SidebarNavigation({
                                     key={section.id}
                                     expandedGroupIds={expandedGroupIds}
                                     isReordering={isReordering}
+                                    onContextMenu={openContextMenu}
                                     onNavigate={onNavigate}
                                     onToggleGroup={(groupId) => {
                                         setNavigationExpansion({
@@ -774,6 +1083,56 @@ export function SidebarNavigation({
                     user={user}
                 />
             </div>
+
+            {contextMenu ? (
+                <>
+                    <button
+                        type="button"
+                        aria-label="Close navigation options"
+                        onClick={() => setContextMenu(null)}
+                        className="fixed inset-0 z-40 cursor-default"
+                    />
+                    <div
+                        role="menu"
+                        aria-label={`Options for ${contextMenu.name}`}
+                        className="fixed z-50 w-52 overflow-hidden rounded-xl border border-sidebar-border bg-sidebar p-1.5 text-sm text-sidebar-foreground shadow-2xl"
+                        style={{ left: contextMenu.x, top: contextMenu.y }}
+                    >
+                        <button
+                            type="button"
+                            role="menuitem"
+                            onClick={renameContextTarget}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent"
+                        >
+                            <Pencil className="h-4 w-4" />
+                            Rename
+                        </button>
+                        <button
+                            type="button"
+                            role="menuitem"
+                            disabled={contextMenu.name === contextMenu.defaultName}
+                            onClick={resetContextTargetName}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                            <RotateCcw className="h-4 w-4" />
+                            Restore default name
+                        </button>
+                        <div className="my-1 border-t border-sidebar-border" />
+                        <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                                setContextMenu(null);
+                                setIsReordering(true);
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition hover:bg-sidebar-accent"
+                        >
+                            <GripVertical className="h-4 w-4" />
+                            Reorder this section
+                        </button>
+                    </div>
+                </>
+            ) : null}
         </div>
     );
 }
