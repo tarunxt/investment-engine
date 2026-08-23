@@ -1,7 +1,6 @@
-import {
-  MIN_GENUINE_PORTFOLIO_POINTS,
-  type GenuinePortfolioPoint,
-} from "@/lib/portfolioHistory";
+import type { GenuinePortfolioPoint } from "@/lib/portfolioHistory";
+
+const MIN_DASHBOARD_PORTFOLIO_POINTS = 4;
 
 export type DashboardPortfolioTotal = {
   portfolioValue: number | null;
@@ -130,7 +129,7 @@ export function buildDashboardPortfolioTrend(
     (point, index) =>
       index === 0 || point.timestamp !== points[index - 1].timestamp,
   );
-  return uniquePoints.length >= MIN_GENUINE_PORTFOLIO_POINTS
+  return uniquePoints.length >= MIN_DASHBOARD_PORTFOLIO_POINTS
     ? uniquePoints
     : [];
 }
