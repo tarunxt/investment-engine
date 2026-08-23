@@ -57,6 +57,8 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /next_cursor/);
   assert.match(routeSource, /end_date_min: currentUniverseStart\.toISOString\(\)/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
+  assert.match(routeSource, /events: \[eventIdentity\]/);
+  assert.doesNotMatch(routeSource, /Array\.isArray\(market\.events\)/);
   assert.match(routeSource, /setImmediate\\(resolve\\)/);
   assert.match(routeSource, /seenCursors/);
   assert.doesNotMatch(routeSource, /offset: String\(offset\)/);

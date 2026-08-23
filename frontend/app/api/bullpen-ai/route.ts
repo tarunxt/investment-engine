@@ -1272,9 +1272,7 @@ async function fetchGammaMarkets() {
         const normalized = normalizeGammaMarket(
           {
             ...market,
-            events: Array.isArray(market.events)
-              ? market.events
-              : [eventIdentity],
+            events: [eventIdentity],
           },
           POLYMARKET_GAMMA_MARKETS_URL,
         );
