@@ -733,12 +733,16 @@ function AccountFooter({
 
                 <div className="mt-3 grid grid-cols-2 gap-2">
                     {ACCOUNT_NAVIGATION.map((item) => (
-                        <NavigationLeafLink
+                        <div
                             key={item.id}
-                            leaf={item}
-                            active={isLeafActive(pathname, item)}
-                            onNavigate={onNavigate}
-                        />
+                            className={item.id === 'usage-costs' ? 'col-span-2' : undefined}
+                        >
+                            <NavigationLeafLink
+                                leaf={item}
+                                active={isLeafActive(pathname, item)}
+                                onNavigate={onNavigate}
+                            />
+                        </div>
                     ))}
                 </div>
             </div>
