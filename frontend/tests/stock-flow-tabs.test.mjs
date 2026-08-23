@@ -13,12 +13,33 @@ const stockFlowSource = readFileSync(
 
 test("legacy stock-flow tabs are composed as one reusable rebalance widget", () => {
   assert.doesNotMatch(workflowSource, /ZerodhaRebalanceFlowCard|Zerodha Rebalance Flow/);
-  assert.match(workflowSource, /<RebalanceStockFlowWidget formulaConfig=\{scoreMatrixFormulaConfig\} \/>/);
+  assert.match(workflowSource, /<RebalanceStockFlowWidget/);
+  assert.match(workflowSource, /buyThresholds=\{\{/);
   assert.match(stockFlowSource, /Rebalance Stock Flow/);
   assert.match(stockFlowSource, /Zerodha Rebalance Stock Flow/);
   assert.match(stockFlowSource, /IndMoney Rebalance Stock Flow/);
   assert.match(stockFlowSource, /function ZerodhaRebalanceStockFlowWidget/);
   assert.match(stockFlowSource, /function IndMoneyRebalanceStockFlowWidget/);
+});
+
+test("stock flow and basket preview share score inputs and persisted thresholds", () => {
+  assert.match(stockFlowSource, /fetchAllFullRuns/);
+  assert.match(stockFlowSource, /apiService\.zerodhaPortfolioOverview\(\)/);
+  assert.match(stockFlowSource, /apiService\.indmoneyUsPortfolioOverview\(\)/);
+  assert.match(stockFlowSource, /latestMatchingRebalanceRuns/);
+  assert.match(stockFlowSource, /buildConsensusRows\(matchingRebalanceRuns, portfolio\.market, portfolioSnapshot, runs\)/);
+  assert.match(workflowSource, /apiService\.getProfile\(\)/);
+  assert.match(workflowSource, /zerodha_buy_threshold/);
+  assert.match(workflowSource, /indmoney_buy_threshold/);
+  assert.match(workflowSource, /apiService\.updateProfile/);
+});
+
+test("final actionables prioritize and highlight buys above the shared threshold", () => {
+  assert.match(stockFlowSource, /compareFinalActionablesForThreshold\(buyThreshold\)/);
+  assert.match(stockFlowSource, /isAboveBuyThreshold/);
+  assert.match(stockFlowSource, /data-buy-threshold-eligible/);
+  assert.match(stockFlowSource, /Above threshold/);
+  assert.match(stockFlowSource, /BuyThresholdEditor/);
 });
 
 test("stock-flow tabs expose all stages and summary-detail switching", () => {
@@ -38,7 +59,7 @@ test("summary view uses scrollable stage tables and standard action colours", ()
   assert.match(stockFlowSource, /sticky top-0/);
   assert.match(stockFlowSource, /overflow-auto overscroll-contain/);
   assert.match(stockFlowSource, /getStandardActionBadgeClass/);
-  assert.match(stockFlowSource, /<ActionBadge action=\{stock\.consensusAction\}/);
+  assert.match(stockFlowSource, /action=\{stock\.consensusAction\}/);
   assert.match(stockFlowSource, /<ActionBadge action=\{row\.formulaAction\}/);
 });
 
