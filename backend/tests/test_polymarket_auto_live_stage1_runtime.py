@@ -375,7 +375,7 @@ async def test_gamma_page_uses_supported_filters_without_ordering_field():
         "active": "true",
         "archived": "false",
         "closed": "false",
-        "limit": "500",
+        "limit": "100",
         "offset": "1500",
     }
 
@@ -401,7 +401,7 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
     async def fake_fetch_gamma_page(_client, *, offset: int):
         requested_offsets.append(offset)
         if offset < 2_000:
-            return [row(index) for index in range(offset, offset + 500)]
+            return [row(index) for index in range(offset, offset + 100)]
         if offset == 2_000:
             return [row(2_000, question=target_question)]
         return []
@@ -413,7 +413,7 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
 
     result = await scan_candidate_markets(min_liquidity_usd=0)
 
-    assert requested_offsets == [0, 500, 1_000, 1_500, 2_000]
+    assert requested_offsets == list(range(0, 2_001, 100))
     assert len(result.accepted) == 2_001
     assert any(market.question == target_question for market in result.accepted)
 
