@@ -20,6 +20,10 @@ from app.services.email import EmailSendResult, EmailService
 
 MAIL_ACTION_PREFIX = "mail."
 MAIL_RESOURCE_TYPE = "cred_x_mail"
+MAIL_CATEGORY_ALL = "all"
+MAIL_CATEGORY_RUNS = "runs"
+MAIL_CATEGORY_ALERTS = "alerts"
+MAIL_CATEGORY_ACCOUNT = "account"
 STAGE2_WARNING_ACTION = "mail.stage2_position_warning"
 MANUAL_TEST_ACTION = "mail.manual_test"
 STAGE2_WARNING_THRESHOLD = 80.0
@@ -263,6 +267,8 @@ def send_logged_email_sync(
     run_id: str | None = None,
     threshold: float | None = None,
     warnings: list[dict[str, object]] | None = None,
+    category: str = MAIL_CATEGORY_ALERTS,
+    audit_message: str | None = None,
 ) -> LoggedMailDelivery:
     """Reserve, send, and finalize a user-visible delivery record.
 
@@ -293,10 +299,11 @@ def send_logged_email_sync(
         "schema_version": 1,
         "idempotency_key": idempotency_key,
         "status": "sending",
+        "category": category,
         "trigger": trigger,
         "recipients": list(recipients),
         "subject": subject,
-        "message": text_content,
+        "message": audit_message if audit_message is not None else text_content,
         "remarks": remarks,
         "run_id": run_id,
         "threshold": threshold,
@@ -433,6 +440,17 @@ def notify_stage2_position_warnings_sync(
     return metadata
 
 
+def _mail_category(action: str, details: dict[str, Any]) -> str:
+    explicit = str(details.get("category") or "").strip().lower()
+    if explicit in {MAIL_CATEGORY_RUNS, MAIL_CATEGORY_ALERTS, MAIL_CATEGORY_ACCOUNT}:
+        return explicit
+    if action in {"mail.run_completion", "mail.auto_rebalance_success"}:
+        return MAIL_CATEGORY_RUNS
+    if action == "mail.password_reset":
+        return MAIL_CATEGORY_ACCOUNT
+    return MAIL_CATEGORY_ALERTS
+
+
 def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, object]]:
     bounded_limit = max(1, min(limit, 200))
     with SyncSessionLocal() as session:
@@ -456,6 +474,7 @@ def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, 
                     "id": int(row.id),
                     "created_at": row.created_at.isoformat(),
                     "status": str(details.get("status") or "unknown"),
+                    "category": _mail_category(row.action, details),
                     "trigger": str(details.get("trigger") or row.action),
                     "recipients": details.get("recipients") or [],
                     "subject": str(details.get("subject") or ""),
