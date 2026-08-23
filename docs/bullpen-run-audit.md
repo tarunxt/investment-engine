@@ -12,6 +12,14 @@ normalized scan text contains the phrase "released by" so release-deadline
 markets are consistently represented in new run-audit snapshots without
 rewriting historical frozen snapshots.
 
+The Yes/No market-odds floor is a persisted per-user Auto-Live setting. New
+Stage 1 scans use that saved value for both Yes and No sides, include the exact
+configured percentage in every matching rejection reason, and retain it in the
+run's immutable settings snapshot. The console aggregates all retained
+per-event reasons for analysis; a market rejected by multiple rules is counted
+once under each matching rule. Historical snapshots keep their original reason
+text and remain backward compatible.
+
 ## Purpose
 
 Bullpen Run Audit captures an immutable, reviewable record of each Bullpen AI auto-live

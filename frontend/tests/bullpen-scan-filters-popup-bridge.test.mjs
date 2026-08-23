@@ -25,6 +25,9 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /setIsOpen\(true\)/);
   assert.match(bridgeSource, /aria-labelledby="bullpen-stage-one-scan-filters-title"/);
   assert.match(bridgeSource, />\s*Scan Filters\s*</);
+  assert.match(bridgeSource, /console_min_market_odds/);
+  assert.match(bridgeSource, /Save floor/);
+  assert.match(bridgeSource, /updateBullpenAutoLiveSettings/);
 });
 
 test("Bullpen page shell always mounts the scan filter popup bridge", () => {

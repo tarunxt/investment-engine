@@ -4246,22 +4246,137 @@ function AllScannedEventsDialog({
 }) {
   const retainedRowCount = state.candidates.length;
   const omittedRowCount = Math.max(0, state.totalScanned - retainedRowCount);
+  const [activeTab, setActiveTab] = useState<"events" | "analysis">("events");
+  const [selectedFilterReason, setSelectedFilterReason] = useState<string | null>(null);
+  const filteredCandidates = state.candidates.filter(
+    (candidate) => candidate.filterReasons.length > 0,
+  );
+  const filterReasonGroups = Array.from(
+    state.candidates.reduce((groups, candidate) => {
+      candidate.filterReasons.forEach((reason) => {
+        const matching = groups.get(reason) ?? [];
+        matching.push(candidate);
+        groups.set(reason, matching);
+      });
+      return groups;
+    }, new Map<string, typeof state.candidates>()),
+  )
+    .map(([reason, candidates]) => ({ reason, candidates }))
+    .sort(
+      (left, right) =>
+        right.candidates.length - left.candidates.length ||
+        left.reason.localeCompare(right.reason),
+    );
+  const selectedFilterCandidates = selectedFilterReason
+    ? filterReasonGroups.find((group) => group.reason === selectedFilterReason)
+        ?.candidates ?? []
+    : [];
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">Stage 1 scan</p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">All Events Scanned ({state.totalScanned})</h2>
-            <p className="mt-2 text-sm text-slate-600">Scanned at {formatIstDateTime(state.scanCompletedAt)}. Filtered rows are included.</p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {activeTab === "analysis" ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("events")}
+                  className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  aria-label="Back to all scanned events"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back
+                </button>
+              ) : null}
+              <h2 className="text-xl font-semibold text-slate-950">
+                {activeTab === "analysis" ? (
+                  "Filtered Events Analysis"
+                ) : (
+                  <>All Events Scanned ({state.totalScanned})</>
+                )}
+              </h2>
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              {activeTab === "analysis"
+                ? "Every assigned filter reason is counted. An event can appear under more than one reason."
+                : `Scanned at ${formatIstDateTime(state.scanCompletedAt)}. Filtered rows are included.`}
+            </p>
           </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close all scanned events">
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {activeTab === "events" ? (
+              <button
+                type="button"
+                onClick={() => setActiveTab("analysis")}
+                className="inline-flex h-10 items-center rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              >
+                Analyse Filtered Events
+              </button>
+            ) : null}
+            <button type="button" onClick={onClose} className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close all scanned events">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-auto p-6">
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
+          {activeTab === "analysis" ? (
+            <>
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Filtered events</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950">{filteredCandidates.length.toLocaleString("en-IN")}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Distinct reasons</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.length.toLocaleString("en-IN")}</p>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Total reason hits</p>
+                  <p className="mt-1 text-2xl font-semibold text-slate-950">{filterReasonGroups.reduce((total, group) => total + group.candidates.length, 0).toLocaleString("en-IN")}</p>
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">#</th>
+                      <th className="px-4 py-3">Filter reason</th>
+                      <th className="px-4 py-3 text-right">Events caught</th>
+                      <th className="px-4 py-3 text-right">% of scanned</th>
+                      <th className="px-4 py-3 text-right">% of filtered</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {filterReasonGroups.map((group, index) => (
+                      <tr key={group.reason}>
+                        <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                        <td className="px-4 py-3 font-medium text-slate-800">{group.reason}</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedFilterReason(group.reason)}
+                            className="inline-flex min-w-12 justify-center rounded-full bg-sky-50 px-3 py-1 font-semibold text-sky-700 transition hover:bg-sky-100 hover:underline"
+                            aria-label={`Show ${group.candidates.length} events caught by ${group.reason}`}
+                          >
+                            {group.candidates.length.toLocaleString("en-IN")}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-right text-slate-600">{state.totalScanned > 0 ? `${((group.candidates.length / state.totalScanned) * 100).toFixed(1)}%` : "—"}</td>
+                        <td className="px-4 py-3 text-right text-slate-600">{filteredCandidates.length > 0 ? `${((group.candidates.length / filteredCandidates.length) * 100).toFixed(1)}%` : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {filterReasonGroups.length === 0 ? (
+                <div className="py-10 text-center text-sm text-slate-600">No per-event filter reasons are available for this run.</div>
+              ) : null}
+              {omittedRowCount > 0 ? (
+                <p className="py-4 text-center text-sm text-amber-700">Analysis covers the {retainedRowCount.toLocaleString("en-IN")} retained event rows. {omittedRowCount.toLocaleString("en-IN")} additional rows were not retained in the saved run.</p>
+              ) : null}
+            </>
+          ) : <><div className="overflow-hidden rounded-2xl border border-slate-200">
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                 <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Reason</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th><th className="px-4 py-3">Volume</th><th className="px-4 py-3">Liquidity</th></tr>
@@ -4298,9 +4413,45 @@ function AllScannedEventsDialog({
             </div>
           ) : omittedRowCount > 0 ? (
             <p className="py-4 text-center text-sm text-amber-700">Showing {retainedRowCount.toLocaleString("en-IN")} retained rows. {omittedRowCount.toLocaleString("en-IN")} additional scanned rows were not retained in the console payload.</p>
-          ) : null}
+          ) : null}</>}
         </div>
       </div>
+      {selectedFilterReason ? (
+        <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/45 p-4">
+          <div className="flex max-h-[82vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">Stage 1 filter drill-down</p>
+                <h3 className="mt-2 text-lg font-semibold text-slate-950">{selectedFilterReason}</h3>
+                <p className="mt-1 text-sm text-slate-600">{selectedFilterCandidates.length.toLocaleString("en-IN")} event(s) caught by this filter.</p>
+              </div>
+              <button type="button" onClick={() => setSelectedFilterReason(null)} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" aria-label="Close filtered event list">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <table className="min-w-full divide-y divide-slate-200 text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    <tr><th className="px-4 py-3">#</th><th className="px-4 py-3">Event</th><th className="px-4 py-3">Yes odds</th><th className="px-4 py-3">No odds</th><th className="px-4 py-3">Close time</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {selectedFilterCandidates.map((candidate, index) => (
+                      <tr key={`${candidate.marketId ?? candidate.slug ?? candidate.question}-${index}`}>
+                        <td className="px-4 py-3 text-slate-500">{index + 1}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-950">{candidate.marketUrl ? <a className="hover:text-sky-700 hover:underline" href={candidate.marketUrl} target="_blank" rel="noreferrer">{candidate.question}</a> : candidate.question}</td>
+                        <td className="px-4 py-3">{formatOddsPercent(candidate.currentYesOdds)}</td>
+                        <td className="px-4 py-3">{formatOddsPercent(candidate.currentNoOdds)}</td>
+                        <td className="px-4 py-3">{formatIstDateTime(candidate.closeTime)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
