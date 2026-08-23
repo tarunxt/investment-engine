@@ -13,6 +13,8 @@ export interface UserProfileResponse {
   timezone: string;
   notification_preferences: string;
   theme_preference: string;
+  zerodha_buy_threshold: number;
+  indmoney_buy_threshold: number;
   created_at: string;
   updated_at: string;
 }
@@ -83,6 +85,8 @@ export interface UpdateProfileRequest {
   timezone?: string | null;
   notification_preferences?: string | null;
   theme_preference?: string | null;
+  zerodha_buy_threshold?: number | null;
+  indmoney_buy_threshold?: number | null;
 }
 
 // ==================== Prompt Types ====================
