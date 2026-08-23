@@ -12491,44 +12491,61 @@ export function BullpenAutoRunScheduleCard({
     stage: ReturnType<typeof buildBullpenAutoRunWorkflowView>["stages"][number],
     mode: ScanCandidateDialogMode,
   ) => {
-    const activePositionCounts = getStageActivePositionCounts(stage);
-    const stageOneStats = getStageOneStats(stage);
-    const retainedActivePositionRows =
-      stage.activePositionsFound.length > 0
-        ? stage.activePositionsFound
-        : activePositionCounts.open === workflowPortfolioPositionFallback.length
-          ? workflowPortfolioPositionFallback
-          : [];
-    const rejectedFilterCount =
-      readStageOutputNumber(stage.outputs.rejected_candidates_count) ??
-      (Array.isArray(stage.outputs.rejected_candidates)
-        ? stage.outputs.rejected_candidates.length
-        : null);
-    const detailedRows =
-      mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
-    const emptyRowsReason = detailedRows.length > 0
-      ? null
-      : stage.state === "current"
-        ? "Stage 1 has reported its scan total, but the detailed rows have not been published yet. This dialog updates after the run refreshes."
-        : stageOneStats.totalScanned > 0
-          ? "This saved run retained aggregate scan counts only. Individual event names and per-event filter reasons cannot be reconstructed from those counts."
-          : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
-    setScanCandidateDialog({
-      mode,
-      scanCompletedAt: stage.timerCompletedAt,
-      totalScanned: stageOneStats.totalScanned,
-      passedFilterCount: stageOneStats.passedFilters,
-      rejectedFilterCount,
-      emptyRowsReason,
-      candidates: buildScanCandidateDialogRows({
-        candidates: detailedRows,
-        run: workflowRunForMonitor,
-        decisions: summary?.recent_decisions ?? [],
+    const sourceRun = workflowRunForMonitor;
+    const sourceDecisions = summary?.recent_decisions ?? [];
+
+    // Open the shared Stage 1 widget immediately from the best locally
+    // available projection, then hydrate that same widget with this run's
+    // complete frozen evidence. The summary endpoint intentionally compacts
+    // accepted/rejected candidate arrays, so rendering only from the summary
+    // can show the authoritative count while incorrectly leaving the table
+    // empty.
+    setScanCandidateDialog(
+      buildRunDetailScanCandidateDialogState({
+        run: sourceRun,
+        decisions: sourceDecisions,
+        stage,
+        mode,
+        activePositionsFallback: workflowPortfolioPositionFallback,
       }),
-      activePositions: retainedActivePositionRows,
-      activePositionCount: activePositionCounts.open,
-      claimablePositionCount: activePositionCounts.claimable,
-    });
+    );
+
+    if (!sourceRun?.id) return;
+
+    void Promise.all([
+      apiService.getBullpenAutoLiveRun(sourceRun.id, { timeoutMs: 10_000 }),
+      apiService.getBullpenAutoLiveRunDecisions(sourceRun.id, {
+        timeoutMs: 10_000,
+      }),
+    ])
+      .then(([exactRun, exactDecisions]) => {
+        const exactStage =
+          buildBullpenAutoRunWorkflowView(exactRun).stages.find(
+            (candidateStage) => candidateStage.key === stage.key,
+          ) ?? null;
+        if (!exactStage) return;
+
+        setScanCandidateDialog(
+          buildRunDetailScanCandidateDialogState({
+            run: exactRun,
+            decisions: exactDecisions,
+            stage: exactStage,
+            mode,
+            activePositionsFallback: workflowPortfolioPositionFallback,
+          }),
+        );
+      })
+      .catch((nextError) => {
+        // Keep the already-open projection usable if the evidence refresh
+        // fails; the regular console refresh/error surface will report API
+        // health independently.
+        if (process.env.NODE_ENV !== "production") {
+          console.warn(
+            "Could not hydrate the Stage 1 scan popup with exact run evidence.",
+            nextError,
+          );
+        }
+      });
   };
   const liveWorkflowSettled = isBullpenAutoRunWorkflowSettled(liveWorkflowView);
   const hasActiveWorkflowStage = liveWorkflowView.stages.some(
