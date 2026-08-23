@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.auth.models import User
-from app.domains.mails.service import send_logged_email_sync
+from app.domains.mails.service import MAIL_CATEGORY_RUNS, send_logged_email_sync
 from app.domains.runs.final_actionable_history import (
     backfill_user_history,
     final_actionable_history_backfill_key,
@@ -265,6 +265,7 @@ def send_auto_rebalance_success_email_task(
                 user_id=user_id,
                 action="mail.auto_rebalance_success",
                 trigger="Auto-rebalance completion",
+                category=MAIL_CATEGORY_RUNS,
                 recipients=(str(user.email),),
                 subject=subject,
                 html_content=html_content,
@@ -343,6 +344,7 @@ def send_run_completion_email_task(self, run_id: int) -> None:
                 user_id=int(run.user_id),
                 action="mail.run_completion",
                 trigger="Run completion",
+                category=MAIL_CATEGORY_RUNS,
                 recipients=(str(user.email),),
                 subject=subject,
                 html_content=html_content,
