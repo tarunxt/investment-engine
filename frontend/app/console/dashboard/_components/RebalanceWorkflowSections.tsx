@@ -1980,12 +1980,18 @@ function summarizeAutoRebalanceHistoryStage(
 
 function getLatestAutoRebalanceHistoryItem(
   items: AutoRebalanceHistoryItemResponse[] | undefined,
+  stage?: WorkflowStageKey,
 ) {
-  return [...(items ?? [])].sort(
-    (a, b) =>
-      parseTimestampMs(b.completed_at ?? b.updated_at ?? b.created_at) -
-      parseTimestampMs(a.completed_at ?? a.updated_at ?? a.created_at),
-  )[0] ?? null;
+  return [...(items ?? [])]
+    .filter(
+      (item) =>
+        !stage || item.stages.some((stageItem) => stageItem.stage === stage),
+    )
+    .sort(
+      (a, b) =>
+        parseTimestampMs(b.completed_at ?? b.updated_at ?? b.created_at) -
+        parseTimestampMs(a.completed_at ?? a.updated_at ?? a.created_at),
+    )[0] ?? null;
 }
 
 function formatInrCost(value?: number | null) {
@@ -5878,18 +5884,18 @@ ${zerodhaExecutionMode === "direct_market"
         ? indmoneyThreatResult.value
         : null;
     const runs = runsResult.status === "fulfilled" ? runsResult.value : [];
-    const latestHistoryByPortfolio: Record<
+    const historyByPortfolio: Record<
       WorkflowPortfolio,
-      AutoRebalanceHistoryItemResponse | null
+      AutoRebalanceHistoryItemResponse[]
     > = {
       zerodha:
         zerodhaHistoryResult.status === "fulfilled"
-          ? getLatestAutoRebalanceHistoryItem(zerodhaHistoryResult.value.items)
-          : null,
+          ? zerodhaHistoryResult.value.items
+          : [],
       indmoneyUs:
         indmoneyHistoryResult.status === "fulfilled"
-          ? getLatestAutoRebalanceHistoryItem(indmoneyHistoryResult.value.items)
-          : null,
+          ? indmoneyHistoryResult.value.items
+          : [],
     };
 
     const nextByPortfolio = (
@@ -5925,13 +5931,25 @@ ${zerodhaExecutionMode === "direct_market"
             ? "last synced portfolio"
             : (indmoneyOverview?.latest?.parse_status ?? "last snapshot");
 
-        const latestHistory = latestHistoryByPortfolio[portfolio];
         const historyInfo = (stage: WorkflowStageKey) =>
           summarizeAutoRebalanceHistoryStage(
-            latestHistory,
+            getLatestAutoRebalanceHistoryItem(
+              historyByPortfolio[portfolio],
+              stage,
+            ),
             stage,
             usdInrRate,
           );
+        const latestHistoryRebalance = historyInfo("rebalance");
+        const latestHistoryTechnical = historyInfo("technical");
+        const latestHistoryActionables = historyInfo("actionables");
+        const historyActionablesTimestamp = [
+          latestHistoryActionables.completedAt,
+          latestHistoryTechnical.completedAt,
+          latestHistoryRebalance.completedAt,
+        ]
+          .filter((value): value is string => Boolean(value))
+          .sort((a, b) => parseTimestampMs(b) - parseTimestampMs(a))[0] ?? null;
 
         acc[portfolio] = {
           sync: {
@@ -5986,13 +6004,21 @@ ${zerodhaExecutionMode === "direct_market"
             ...historyInfo("technical"),
           },
           actionables: {
-            completedAt: latestActionablesTimestamp ?? null,
-            runStatus: latestActionablesTimestamp
-              ? "derived from latest rebalance/technical scan"
-              : null,
-            rebalanceInputs: latestRebalanceRuns.length || null,
-            recommendedStocks: latestActionableStocks.length || null,
-            ...historyInfo("actionables"),
+            completedAt:
+              latestActionablesTimestamp ?? historyActionablesTimestamp,
+            runStatus:
+              latestActionablesTimestamp || historyActionablesTimestamp
+                ? "derived from latest rebalance/technical scan"
+                : null,
+            rebalanceInputs:
+              latestRebalanceRuns.length ||
+              (latestHistoryRebalance.completedAt ? 1 : null),
+            recommendedStocks:
+              latestActionableStocks.length ||
+              latestHistoryRebalance.recommendedStocks ||
+              latestHistoryTechnical.recommendedStocks ||
+              null,
+            ...latestHistoryActionables,
           },
         };
         return acc;
