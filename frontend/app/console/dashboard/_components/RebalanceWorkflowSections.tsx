@@ -3183,7 +3183,9 @@ function WorkflowStageTile({
     >
       <button
         type="button"
-        onClick={onClick}
+        onClick={() => {
+          onClick?.();
+        }}
         disabled={!onClick}
         className="absolute inset-0 z-0 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-default"
         aria-label={`${selectable ? (selected ? "Deselect" : "Select") : "Open"} ${stageMeta.idle} stage`}
