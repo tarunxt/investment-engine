@@ -351,7 +351,7 @@ def test_persist_auto_live_progress_sync_rejects_user_cancelled_run():
 
 
 @pytest.mark.anyio
-async def test_gamma_page_uses_supported_filters_without_ordering_field():
+async def test_gamma_page_uses_keyset_cursor_without_offset():
     captured: dict[str, object] = {}
 
     class FakeResponse:
@@ -359,7 +359,7 @@ async def test_gamma_page_uses_supported_filters_without_ordering_field():
             return None
 
         def json(self):
-            return []
+            return {"markets": [], "next_cursor": "next-page"}
 
     class FakeClient:
         async def get(self, url, *, params):
@@ -367,22 +367,24 @@ async def test_gamma_page_uses_supported_filters_without_ordering_field():
             captured["params"] = params
             return FakeResponse()
 
-    rows = await _fetch_gamma_page(FakeClient(), offset=1_500)
+    rows, next_cursor = await _fetch_gamma_page(
+        FakeClient(),
+        cursor="cursor-1500",
+    )
 
     assert rows == []
-    assert captured["url"] == "https://gamma-api.polymarket.com/markets"
+    assert next_cursor == "next-page"
+    assert captured["url"] == "https://gamma-api.polymarket.com/markets/keyset"
     assert captured["params"] == {
-        "active": "true",
-        "archived": "false",
         "closed": "false",
         "limit": "100",
-        "offset": "1500",
+        "after_cursor": "cursor-1500",
     }
 
 
 @pytest.mark.anyio
 async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
-    requested_offsets: list[int] = []
+    requested_cursors: list[str | None] = []
     target_question = "Will Iran target a Arab country on August 30, 2026?"
 
     def row(index: int, *, question: str | None = None) -> dict[str, object]:
@@ -398,13 +400,17 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
             "closed": False,
         }
 
-    async def fake_fetch_gamma_page(_client, *, offset: int):
-        requested_offsets.append(offset)
-        if offset < 2_000:
-            return [row(index) for index in range(offset, offset + 100)]
-        if offset == 2_000:
-            return [row(2_000, question=target_question)]
-        return []
+    async def fake_fetch_gamma_page(_client, *, cursor: str | None):
+        requested_cursors.append(cursor)
+        start = 0 if cursor is None else int(cursor.removeprefix("cursor-"))
+        if start < 2_000:
+            return (
+                [row(index) for index in range(start, start + 100)],
+                f"cursor-{start + 100}",
+            )
+        if start == 2_000:
+            return [row(2_000, question=target_question)], None
+        return [], None
 
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.scanner._fetch_gamma_page",
@@ -413,7 +419,10 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
 
     result = await scan_candidate_markets(min_liquidity_usd=0)
 
-    assert requested_offsets == list(range(0, 2_001, 100))
+    assert requested_cursors == [
+        None,
+        *[f"cursor-{offset}" for offset in range(100, 2_001, 100)],
+    ]
     assert len(result.accepted) == 2_001
     assert any(market.question == target_question for market in result.accepted)
 
