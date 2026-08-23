@@ -59,8 +59,6 @@ const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const CLI_DISCOVER_LIMIT = 1_000;
-const DISCOVER_FALLBACK_LIMIT = 10_000;
 const GAMMA_PAGE_SIZE = 500;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
@@ -1204,19 +1202,17 @@ async function runBullpenDiscover() {
   return fetchBackendRuntimeJson("/polymarket/runtime/discover");
 }
 
-async function fetchGammaMarkets(mode: ScanMode, filters: BullpenScanFilters) {
+async function fetchGammaMarkets() {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   let offset = 0;
 
-  while (offset < DISCOVER_FALLBACK_LIMIT) {
+  while (true) {
     const params = new URLSearchParams({
       active: "true",
       archived: "false",
       closed: "false",
       limit: String(GAMMA_PAGE_SIZE),
       offset: String(offset),
-      order: "endDate",
-      ascending: "true",
     });
 
     const response = await fetch(
@@ -1244,30 +1240,6 @@ async function fetchGammaMarkets(mode: ScanMode, filters: BullpenScanFilters) {
 
     if (rows.length < GAMMA_PAGE_SIZE) break;
     offset += GAMMA_PAGE_SIZE;
-
-    const earliestOutsideWindow = rows.every((row) => {
-      if (!row || typeof row !== "object") return false;
-      const closeTime = readString(
-        row as Record<string, unknown>,
-        CLOSE_TIME_KEYS,
-      );
-      if (!closeTime) return false;
-      const closeDate = new Date(closeTime);
-      if (Number.isNaN(closeDate.getTime())) return false;
-
-      if (mode === "end-of-month") {
-        const targetDate = filters.targetDate;
-        const rowDate = getDateKey(closeTime);
-        return rowDate !== null && rowDate > targetDate;
-      }
-
-      return (
-        closeDate.getTime() - Date.now() >=
-        filters.maxClosingDays * MILLISECONDS_PER_DAY
-      );
-    });
-
-    if (earliestOutsideWindow) break;
   }
 
   return sortQuestions(Array.from(candidates.values()));
@@ -1380,7 +1352,13 @@ export async function GET(request: NextRequest) {
     const rejectedRows = toArray(preview.rejected).filter(
       (row): row is Record<string, unknown> => Boolean(row && typeof row === "object"),
     );
-    if (acceptedRows.length + rejectedRows.length > 0) {
+    const previewSourceLabel =
+      readString(preview, ["source_label"]) ?? CLI_SOURCE_LABEL;
+    const previewIsComplete = previewSourceLabel.includes(GAMMA_SOURCE_LABEL);
+    if (
+      previewIsComplete &&
+      acceptedRows.length + rejectedRows.length > 0
+    ) {
       const mapPreviewQuestion = (row: Record<string, unknown>): BullpenQuestion => {
         const id = readString(row, ["id", "market_id"]) ?? crypto.randomUUID();
         const yesOdds = readNumber(row, ["yes_odds"]);
@@ -1449,39 +1427,19 @@ export async function GET(request: NextRequest) {
       );
     }
     if (candidates.length > 0) {
-      let completeCandidates = candidates;
-      let sourceLabel = CLI_SOURCE_LABEL;
-      let sourceDetails: string | undefined;
-      if (candidates.length < CLI_DISCOVER_LIMIT) {
-        try {
-          const gammaCandidates = await fetchGammaMarkets(mode, filters);
-          const mergedCandidates = new Map(
-            candidates.map((candidate) => [candidate.id, candidate]),
-          );
-          gammaCandidates.forEach((candidate) => {
-            if (!mergedCandidates.has(candidate.id)) {
-              mergedCandidates.set(candidate.id, candidate);
-            }
-          });
-          completeCandidates = sortQuestions(Array.from(mergedCandidates.values()));
-          sourceLabel = `${CLI_SOURCE_LABEL} + ${GAMMA_SOURCE_LABEL}`;
-          sourceDetails = `Bullpen CLI returned ${candidates.length} rows; Polymarket Gamma supplemented the scan to ${completeCandidates.length} unique active events.`;
-        } catch (gammaSupplementError) {
-          sourceDetails =
-            gammaSupplementError instanceof Error
-              ? `Bullpen CLI returned ${candidates.length} rows. Gamma supplementation failed: ${gammaSupplementError.message}`
-              : `Bullpen CLI returned ${candidates.length} rows. Gamma supplementation failed.`;
-        }
+      const gammaCandidates = await fetchGammaMarkets();
+      if (gammaCandidates.length === 0) {
+        throw new Error("Polymarket Gamma returned no active markets");
       }
       return NextResponse.json(
         await buildResponse({
           mode,
-          sourceUrl,
-          sourceLabel,
+          sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+          sourceLabel: GAMMA_SOURCE_LABEL,
           scannedAt,
           filters,
-          candidates: completeCandidates,
-          details: sourceDetails,
+          candidates: gammaCandidates,
+          details: `Bullpen CLI returned ${candidates.length} rows; Polymarket Gamma scanned the complete active universe of ${gammaCandidates.length} markets before filters were applied.`,
         }),
       );
     }
@@ -1496,25 +1454,30 @@ export async function GET(request: NextRequest) {
         );
       }
       if (candidates.length > 0) {
+        const gammaCandidates = await fetchGammaMarkets();
+        if (gammaCandidates.length === 0) {
+          throw new Error("Polymarket Gamma returned no active markets");
+        }
         return NextResponse.json(
           await buildResponse({
             mode,
-            sourceUrl,
-            sourceLabel: WEB_SOURCE_LABEL,
+            sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+            sourceLabel: GAMMA_SOURCE_LABEL,
             scannedAt,
             filters,
-            candidates,
+            candidates: gammaCandidates,
             warning:
               cliError instanceof Error
-                ? `Using Bullpen web fallback because the CLI scan failed. ${cliError.message}`
-                : "Using Bullpen web fallback because the CLI scan failed.",
+                ? `Using the complete Polymarket Gamma universe because the Bullpen CLI scan failed. ${cliError.message}`
+                : "Using the complete Polymarket Gamma universe because the Bullpen CLI scan failed.",
+            details: `Bullpen web exposed ${candidates.length} rows; Polymarket Gamma scanned all ${gammaCandidates.length} active markets before filters were applied.`,
           }),
         );
       }
       throw new Error("Bullpen web returned no discoverable markets");
     } catch (webError) {
       try {
-        const candidates = await fetchGammaMarkets(mode, filters);
+        const candidates = await fetchGammaMarkets();
         if (candidates.length > 0) {
           return NextResponse.json(
             await buildResponse({
