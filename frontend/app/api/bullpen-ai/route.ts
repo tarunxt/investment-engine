@@ -61,7 +61,7 @@ const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 100;
-const GAMMA_EVENT_PAGE_CONCURRENCY = 8;
+const GAMMA_EVENT_PAGE_CONCURRENCY = 32;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
   "category",
