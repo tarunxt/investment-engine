@@ -5118,6 +5118,8 @@ export function RebalanceWorkflowSections({
   const [zerodhaBasketBuyThresholdDraft, setZerodhaBasketBuyThresholdDraft] = useState(
     DEFAULT_ZERODHA_BUY_THRESHOLD.toFixed(2),
   );
+  const [buyThresholdPreferencesLoaded, setBuyThresholdPreferencesLoaded] = useState(false);
+  const [buyThresholdSaveError, setBuyThresholdSaveError] = useState<string | null>(null);
   const [selectedZerodhaBasketIds, setSelectedZerodhaBasketIds] = useState<Set<string>>(new Set());
   const [indmoneyBasketOpen, setIndmoneyBasketOpen] = useState(false);
   const [indmoneyBasketLoading, setIndmoneyBasketLoading] = useState(false);
@@ -5213,6 +5215,51 @@ export function RebalanceWorkflowSections({
   useEffect(() => {
     saveScoreMatrixFormulaConfig(scoreMatrixFormulaConfig);
   }, [scoreMatrixFormulaConfig]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void apiService.getProfile()
+      .then((profile) => {
+        if (cancelled) return;
+        const zerodhaThreshold = Number(profile.zerodha_buy_threshold);
+        const indmoneyThreshold = Number(profile.indmoney_buy_threshold);
+        if (Number.isFinite(zerodhaThreshold)) {
+          setZerodhaBasketBuyThreshold(zerodhaThreshold);
+          setZerodhaBasketBuyThresholdDraft(zerodhaThreshold.toFixed(2));
+        }
+        if (Number.isFinite(indmoneyThreshold)) {
+          setIndmoneyBasketBuyThreshold(indmoneyThreshold);
+          setIndmoneyBasketBuyThresholdDraft(indmoneyThreshold.toFixed(2));
+        }
+        setBuyThresholdPreferencesLoaded(true);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setBuyThresholdSaveError(`Could not load saved Buy Threshold: ${normalizeError(error)}`);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!buyThresholdPreferencesLoaded) return;
+    const timer = window.setTimeout(() => {
+      setBuyThresholdSaveError(null);
+      void apiService.updateProfile({
+        zerodha_buy_threshold: zerodhaBasketBuyThreshold,
+        indmoney_buy_threshold: indmoneyBasketBuyThreshold,
+      }).catch((error) => {
+        setBuyThresholdSaveError(`Could not save Buy Threshold: ${normalizeError(error)}`);
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [
+    buyThresholdPreferencesLoaded,
+    indmoneyBasketBuyThreshold,
+    zerodhaBasketBuyThreshold,
+  ]);
 
   const zerodhaBasketHistoricalRows = useMemo(
     () => buildHistoricalDashboardActionRows(
@@ -8296,12 +8343,40 @@ ${zerodhaExecutionMode === "direct_market"
       </section>
 
       <section className="mt-6">
-        <RebalanceStockFlowWidget formulaConfig={scoreMatrixFormulaConfig} />
+        <RebalanceStockFlowWidget
+          formulaConfig={scoreMatrixFormulaConfig}
+          buyThresholds={{
+            zerodha: zerodhaBasketBuyThreshold,
+            indmoneyUs: indmoneyBasketBuyThreshold,
+          }}
+          buyThresholdDrafts={{
+            zerodha: zerodhaBasketBuyThresholdDraft,
+            indmoneyUs: indmoneyBasketBuyThresholdDraft,
+          }}
+          onBuyThresholdDraftChange={(portfolio, value) => {
+            if (portfolio === "zerodha") updateZerodhaBasketBuyThresholdDraft(value);
+            else updateIndmoneyBasketBuyThresholdDraft(value);
+          }}
+          buyThresholdSaveError={buyThresholdSaveError}
+        />
       </section>
 
       <RebalanceStockFlowDialog
         portfolio={stockFlowPortfolio}
         formulaConfig={scoreMatrixFormulaConfig}
+        buyThresholds={{
+          zerodha: zerodhaBasketBuyThreshold,
+          indmoneyUs: indmoneyBasketBuyThreshold,
+        }}
+        buyThresholdDrafts={{
+          zerodha: zerodhaBasketBuyThresholdDraft,
+          indmoneyUs: indmoneyBasketBuyThresholdDraft,
+        }}
+        onBuyThresholdDraftChange={(portfolio, value) => {
+          if (portfolio === "zerodha") updateZerodhaBasketBuyThresholdDraft(value);
+          else updateIndmoneyBasketBuyThresholdDraft(value);
+        }}
+        buyThresholdSaveError={buyThresholdSaveError}
         onClose={() => setStockFlowPortfolio(null)}
       />
 
