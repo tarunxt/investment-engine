@@ -93,6 +93,7 @@ import type {
   ProviderInfo,
   ProviderModelTarget,
   RunCreate,
+  AutoRebalanceHistoryItemResponse,
   AutoRebalanceRunMetadata,
   AutoRebalanceStageKey,
   RunResponse,
@@ -1903,6 +1904,88 @@ function summarizeRunForIdleTile(
     },
     usdInrRate,
   );
+}
+
+function getAutoRebalanceSummaryNumber(
+  summary: Record<string, unknown>,
+  key: string,
+) {
+  const value = summary[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function summarizeAutoRebalanceHistoryStage(
+  history: AutoRebalanceHistoryItemResponse | null,
+  stage: WorkflowStageKey,
+  usdInrRate: number,
+): Partial<StageInfo> {
+  const item = history?.stages.find((entry) => entry.stage === stage);
+  if (!item) return {};
+  const summary = item.summary ?? {};
+  const completedLlms =
+    getAutoRebalanceSummaryNumber(summary, "completed_llms") ??
+    item.completed_provider_count ??
+    null;
+  const failedLlms =
+    getAutoRebalanceSummaryNumber(summary, "failed_llms") ??
+    item.failed_provider_count ??
+    null;
+  const totalLlms =
+    getAutoRebalanceSummaryNumber(summary, "total_llms") ??
+    item.provider_count ??
+    null;
+  const costUsd =
+    getAutoRebalanceSummaryNumber(summary, "cost_usd") ??
+    (item.estimated_cost > 0 ? item.estimated_cost : null);
+  return withInrCost(
+    {
+      startedAt: item.started_at ?? history?.created_at ?? null,
+      endedAt:
+        item.completed_at ??
+        history?.completed_at ??
+        history?.updated_at ??
+        null,
+      completedAt:
+        item.completed_at ??
+        history?.completed_at ??
+        history?.updated_at ??
+        null,
+      runStatus:
+        (typeof summary.run_status === "string" && summary.run_status.trim()
+          ? summary.run_status
+          : item.status) ?? null,
+      provider:
+        typeof summary.provider === "string" ? summary.provider : null,
+      model: typeof summary.model === "string" ? summary.model : null,
+      costUsd,
+      costInr: getAutoRebalanceSummaryNumber(summary, "cost_inr"),
+      error: item.error_message ?? history?.error_message ?? null,
+      lastRunId: item.run_id ?? null,
+      completedLlms,
+      passedLlms: completedLlms,
+      failedLlms,
+      totalLlms,
+      recommendedStocks: getAutoRebalanceSummaryNumber(
+        summary,
+        "recommended_stocks",
+      ),
+      rebalanceInputs: getAutoRebalanceSummaryNumber(
+        summary,
+        "rebalance_inputs",
+      ),
+    },
+    usdInrRate,
+  );
+}
+
+function getLatestAutoRebalanceHistoryItem(
+  items: AutoRebalanceHistoryItemResponse[] | undefined,
+) {
+  return [...(items ?? [])].sort(
+    (a, b) =>
+      parseTimestampMs(b.completed_at ?? b.updated_at ?? b.created_at) -
+      parseTimestampMs(a.completed_at ?? a.updated_at ?? a.created_at),
+  )[0] ?? null;
 }
 
 function formatInrCost(value?: number | null) {
@@ -5768,12 +5851,16 @@ ${zerodhaExecutionMode === "direct_market"
       zerodhaThreatResult,
       indmoneyThreatResult,
       runsResult,
+      zerodhaHistoryResult,
+      indmoneyHistoryResult,
     ] = await Promise.allSettled([
       apiService.zerodhaPortfolioOverview(),
       apiService.indmoneyUsPortfolioOverview(),
       apiService.zerodhaThreatsLatest(),
       apiService.indmoneyUsThreatsLatest(),
       fetchDashboardRecentFullRuns(),
+      apiService.getAutoRebalanceHistory("india", { limit: 1 }),
+      apiService.getAutoRebalanceHistory("indmoney_us", { limit: 1 }),
     ]);
 
     const zerodhaOverview =
@@ -5791,6 +5878,19 @@ ${zerodhaExecutionMode === "direct_market"
         ? indmoneyThreatResult.value
         : null;
     const runs = runsResult.status === "fulfilled" ? runsResult.value : [];
+    const latestHistoryByPortfolio: Record<
+      WorkflowPortfolio,
+      AutoRebalanceHistoryItemResponse | null
+    > = {
+      zerodha:
+        zerodhaHistoryResult.status === "fulfilled"
+          ? getLatestAutoRebalanceHistoryItem(zerodhaHistoryResult.value.items)
+          : null,
+      indmoneyUs:
+        indmoneyHistoryResult.status === "fulfilled"
+          ? getLatestAutoRebalanceHistoryItem(indmoneyHistoryResult.value.items)
+          : null,
+    };
 
     const nextByPortfolio = (
       ["zerodha", "indmoneyUs"] as WorkflowPortfolio[]
@@ -5825,43 +5925,66 @@ ${zerodhaExecutionMode === "direct_market"
             ? "last synced portfolio"
             : (indmoneyOverview?.latest?.parse_status ?? "last snapshot");
 
+        const latestHistory = latestHistoryByPortfolio[portfolio];
+        const historyInfo = (stage: WorkflowStageKey) =>
+          summarizeAutoRebalanceHistoryStage(
+            latestHistory,
+            stage,
+            usdInrRate,
+          );
+
         acc[portfolio] = {
           sync: {
             completedAt: overview?.latest?.captured_at ?? null,
             runStatus: overview?.latest ? syncStatus : null,
+            ...historyInfo("sync"),
           },
-          swing: summarizeRunForIdleTile(
-            latestSwingRun,
-            usdInrRate,
-            latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
-          ),
-          threats: threat
-            ? withInrCost(
-                {
-                  ...summarizeThreat(threat),
-                  completedLlms:
-                    (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
-                  passedLlms:
-                    (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
-                  failedLlms:
-                    (threat.status || "").toLowerCase() === "failed" ? 1 : 0,
-                  totalLlms: 1,
-                },
-                usdInrRate,
-              )
-            : {},
-          rebalance: summarizeRunForIdleTile(
-            latestRebalanceRun,
-            usdInrRate,
-            latestRebalanceRuns.length
-              ? buildConsensusRows(latestRebalanceRuns, market).length
-              : null,
-          ),
-          technical: summarizeRunForIdleTile(
-            latestTechnicalRun,
-            usdInrRate,
-            latestTechnicalRun ? countUniqueStocksFromRun(latestTechnicalRun) : null,
-          ),
+          swing: {
+            ...summarizeRunForIdleTile(
+              latestSwingRun,
+              usdInrRate,
+              latestSwingRun ? countUniqueStocksFromRun(latestSwingRun) : null,
+            ),
+            ...historyInfo("swing"),
+          },
+          threats: {
+            ...(threat
+              ? withInrCost(
+                  {
+                    ...summarizeThreat(threat),
+                    completedLlms:
+                      (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
+                    passedLlms:
+                      (threat.status || "").toLowerCase() === "completed" ? 1 : 0,
+                    failedLlms:
+                      (threat.status || "").toLowerCase() === "failed" ? 1 : 0,
+                    totalLlms: 1,
+                  },
+                  usdInrRate,
+                )
+              : {}),
+            ...historyInfo("threats"),
+          },
+          rebalance: {
+            ...summarizeRunForIdleTile(
+              latestRebalanceRun,
+              usdInrRate,
+              latestRebalanceRuns.length
+                ? buildConsensusRows(latestRebalanceRuns, market).length
+                : null,
+            ),
+            ...historyInfo("rebalance"),
+          },
+          technical: {
+            ...summarizeRunForIdleTile(
+              latestTechnicalRun,
+              usdInrRate,
+              latestTechnicalRun
+                ? countUniqueStocksFromRun(latestTechnicalRun)
+                : null,
+            ),
+            ...historyInfo("technical"),
+          },
           actionables: {
             completedAt: latestActionablesTimestamp ?? null,
             runStatus: latestActionablesTimestamp
@@ -5869,6 +5992,7 @@ ${zerodhaExecutionMode === "direct_market"
               : null,
             rebalanceInputs: latestRebalanceRuns.length || null,
             recommendedStocks: latestActionableStocks.length || null,
+            ...historyInfo("actionables"),
           },
         };
         return acc;
