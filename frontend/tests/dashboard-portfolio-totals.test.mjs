@@ -79,4 +79,10 @@ test("command-center heading spans above the two expanded dashboard panels", () 
     /Portfolio Command Center[\s\S]*?mt-7 grid gap-6 xl:grid-cols-2 xl:items-stretch[\s\S]*?<PortfolioCommandSummary[\s\S]*?<PortfolioCommandChart/,
   );
   assert.match(source, /refreshBullpenTile\(false\)/);
+  assert.match(source, /filter\(isBullpenHistoryActivePosition\)/);
+  assert.match(source, /filter\(isBullpenHistoryClaimablePosition\)/);
+  assert.match(
+    source,
+    /bullpenSummary\?\.walletValue \?\?[\s\S]*?bullpenSummary\?\.totalValue/,
+  );
 });
