@@ -9817,8 +9817,24 @@ export function BullpenAutoRunScheduleCard({
 }: BullpenAutoRunScheduleCardProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const requestedRunDetailId = searchParams.get("runDetails")?.trim() || null;
-  const returnRunDetailToHistory = searchParams.get("returnTo") === "history";
+  const requestedRunDetailIdFromSearchParams =
+    searchParams.get("runDetails")?.trim() || null;
+  // Full-screen history lives outside this long-lived interactive island.
+  // Read the browser URL as a fallback so a history tile always activates the
+  // requested detail even when Next's search-param snapshot has not refreshed
+  // by the time the dynamically imported workspace mounts.
+  const requestedRunDetailId =
+    requestedRunDetailIdFromSearchParams ||
+    (typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+          .get("runDetails")
+          ?.trim() || null
+      : null);
+  const returnRunDetailToHistory =
+    searchParams.get("returnTo") === "history" ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("returnTo") ===
+        "history");
   const { user, loading: authLoading } = useAuth();
   const autoRunStatusCacheKey = getBullpenAutoRunStatusCacheKey(user?.id);
   const [summary, setSummary] = useState<BullpenAutoLiveSummaryResponse | null>(
@@ -11027,7 +11043,6 @@ export function BullpenAutoRunScheduleCard({
   });
 
   useEffect(() => {
-    if (authLoading || !user) return;
     if (!requestedRunDetailId) {
       handledRequestedRunDetailIdRef.current = null;
       return;
@@ -11035,9 +11050,13 @@ export function BullpenAutoRunScheduleCard({
     if (handledRequestedRunDetailIdRef.current === requestedRunDetailId) {
       return;
     }
+    // The console route is already server-protected. Do not make run-detail
+    // activation depend on the client auth provider finishing a second session
+    // bootstrap; that gate could leave the URL correct while showing the
+    // ordinary latest-run workspace forever.
     handledRequestedRunDetailIdRef.current = requestedRunDetailId;
     openRequestedRunDetail(requestedRunDetailId);
-  }, [authLoading, requestedRunDetailId, user]);
+  }, [requestedRunDetailId]);
 
   function closeRunDetailDialog() {
     setRunDetailDialog(null);
