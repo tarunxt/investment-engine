@@ -19,7 +19,6 @@ import {
   RefreshCw,
   Sparkles,
   Target,
-  Upload,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,13 +33,7 @@ import {
   isBullpenHistoryClaimablePosition,
 } from "@/lib/bullpenHistoryPositions";
 import { validDashboardFxRate } from "@/lib/fxPresentation";
-import {
-  MIN_GENUINE_PORTFOLIO_POINTS,
-  buildGenuineInrPortfolioTrend,
-  filterGenuinePortfolioTrend,
-  type GenuinePortfolioPoint,
-  type PortfolioHistoryRange,
-} from "@/lib/portfolioHistory";
+import { buildGenuineInrPortfolioTrend } from "@/lib/portfolioHistory";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 import type {
@@ -81,9 +74,14 @@ import {
   toneClass,
 } from "./_components/dashboardOverviewUtils";
 import {
+  buildDashboardPortfolioTrend,
   convertDashboardUsdTotalToInr,
   resolveBullpenPortfolioPlusCash,
 } from "./_components/dashboardPortfolioTotals";
+import {
+  PortfolioCommandChart,
+  type PortfolioCommandChartOption,
+} from "./_components/PortfolioCommandChart";
 
 const ThreatMarketCard = dynamic(
   () =>
@@ -798,276 +796,6 @@ function PortfolioCommandSummary({
   );
 }
 
-const PORTFOLIO_COMMAND_RANGES: PortfolioHistoryRange[] = [
-  "1D",
-  "1W",
-  "1M",
-  "1Y",
-  "YTD",
-  "ALL",
-];
-
-const PORTFOLIO_COMMAND_RANGE_LABELS: Record<PortfolioHistoryRange, string> = {
-  "1D": "Past Day",
-  "1W": "Past Week",
-  "1M": "Past Month",
-  "1Y": "Past Year",
-  YTD: "Year to Date",
-  ALL: "All Time",
-};
-
-function buildCommandChartCoordinates(
-  values: number[],
-  width: number,
-  height: number,
-) {
-  const minValue = Math.min(...values);
-  const maxValue = Math.max(...values);
-  const valueRange = maxValue - minValue || 1;
-  const xStep = width / (values.length - 1 || 1);
-
-  return values.map((value, index) => ({
-    x: index * xStep,
-    y: height - ((value - minValue) / valueRange) * height,
-  }));
-}
-
-function formatCommandChartTooltipDate(timestamp: number) {
-  return new Intl.DateTimeFormat("en-IN", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-  }).format(new Date(timestamp));
-}
-
-function PortfolioCommandChart({
-  profitLossValue,
-  trendPoints,
-}: {
-  profitLossValue: number;
-  trendPoints: GenuinePortfolioPoint[];
-}) {
-  const [selectedRange, setSelectedRange] =
-    useState<PortfolioHistoryRange>("ALL");
-  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(
-    null,
-  );
-  const chartWidth = 420;
-  const chartHeight = 80;
-  const visibleTrendPoints = useMemo(
-    () => filterGenuinePortfolioTrend(trendPoints, selectedRange),
-    [selectedRange, trendPoints],
-  );
-  const displayedRangeLabel = PORTFOLIO_COMMAND_RANGE_LABELS[selectedRange];
-  if (visibleTrendPoints.length < MIN_GENUINE_PORTFOLIO_POINTS) {
-    return (
-      <div className="rounded-[30px] border border-white/15 bg-slate-950/70 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
-        <div className="text-lg font-semibold text-slate-200">
-          India portfolio history
-        </div>
-        <div className="mt-5 text-4xl font-semibold tracking-tight text-white md:text-5xl">
-          {formatInr(profitLossValue)}
-        </div>
-        <div className="mt-2 text-xs uppercase tracking-[0.16em] text-slate-400">
-          Current reported P/L
-        </div>
-        <div
-          className="mt-5 rounded-2xl border border-white/10 bg-white/5 px-4 py-5 text-sm leading-6 text-slate-300"
-          data-portfolio-history-state="insufficient"
-        >
-          Insufficient genuine snapshot history for {displayedRangeLabel}. The
-          chart appears after at least {MIN_GENUINE_PORTFOLIO_POINTS} verified
-          portfolio snapshots are available.
-        </div>
-      </div>
-    );
-  }
-  const visibleTrendValues = visibleTrendPoints.map((point) => point.value);
-  const chartCoordinates = buildCommandChartCoordinates(
-    visibleTrendValues,
-    chartWidth,
-    chartHeight,
-  );
-  const linePath = chartCoordinates
-    .map(
-      (point, index) =>
-        `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`,
-    )
-    .join(" ");
-  const areaPath = `${linePath} L ${chartWidth} ${chartHeight} L 0 ${chartHeight} Z`;
-  const firstTrendValue = visibleTrendValues[0];
-  const latestTrendValue = visibleTrendValues[visibleTrendValues.length - 1];
-  const selectedRangeChangeValue =
-    firstTrendValue != null && latestTrendValue != null
-      ? latestTrendValue - firstTrendValue
-      : 0;
-  const hoveredPoint =
-    hoveredPointIndex == null ? null : visibleTrendPoints[hoveredPointIndex];
-  const hoveredCoordinates =
-    hoveredPointIndex == null ? null : chartCoordinates[hoveredPointIndex];
-  const hoveredPreviousValue =
-    hoveredPointIndex == null
-      ? null
-      : visibleTrendValues[Math.max(0, hoveredPointIndex - 1)];
-  const hoveredSnapshotChange =
-    hoveredPoint == null || hoveredPreviousValue == null
-      ? null
-      : hoveredPoint.value - hoveredPreviousValue;
-
-  const handleChartMouseMove = (event: React.MouseEvent<SVGSVGElement>) => {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const relativeX = Math.min(
-      Math.max(event.clientX - bounds.left, 0),
-      bounds.width,
-    );
-    const chartX = (relativeX / bounds.width) * chartWidth;
-    const nearestPointIndex = chartCoordinates.reduce(
-      (nearestIndex, point, index) =>
-        Math.abs(point.x - chartX) <
-        Math.abs(chartCoordinates[nearestIndex].x - chartX)
-          ? index
-          : nearestIndex,
-      0,
-    );
-
-    setHoveredPointIndex(nearestPointIndex);
-  };
-
-  return (
-    <div className="rounded-[30px] border border-white/15 bg-slate-950/70 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur xl:min-w-[430px]">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3 text-lg font-semibold text-slate-200">
-            India portfolio value
-          </div>
-          <div className="mt-5 flex items-center gap-4">
-            <div className="text-4xl font-semibold tracking-tight text-white md:text-5xl">
-              {formatInr(latestTrendValue)}
-            </div>
-            <Upload className="size-6 text-slate-200" aria-hidden="true" />
-          </div>
-          <div
-            className={`mt-3 text-base font-semibold ${
-              selectedRangeChangeValue >= 0
-                ? "text-emerald-300"
-                : "text-rose-300"
-            }`}
-          >
-            {formatInr(selectedRangeChangeValue)} {displayedRangeLabel}
-          </div>
-        </div>
-
-        <div
-          className="flex max-w-[17rem] flex-wrap items-center justify-end gap-1 text-sm font-semibold text-slate-400 sm:max-w-none"
-          aria-label="Portfolio chart time range"
-        >
-          {PORTFOLIO_COMMAND_RANGES.map((range) => {
-            const selected = range === selectedRange;
-
-            return (
-              <button
-                key={range}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setSelectedRange(range)}
-                className={
-                  selected
-                    ? "rounded-2xl border border-white/60 bg-blue-500/35 px-2.5 py-2 text-white shadow-sm shadow-blue-950/30 transition hover:bg-blue-500/45 sm:px-3 sm:py-2.5"
-                    : "rounded-2xl px-2 py-2 text-slate-300 transition hover:bg-white/10 hover:text-white sm:py-2.5"
-                }
-              >
-                {range}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <svg
-        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
-        preserveAspectRatio="none"
-        className="mt-4 h-20 w-full cursor-crosshair overflow-visible"
-        role="img"
-        aria-label={`${displayedRangeLabel} genuine India portfolio value history`}
-        onMouseMove={handleChartMouseMove}
-        onMouseLeave={() => setHoveredPointIndex(null)}
-      >
-        <defs>
-          <linearGradient id="commandChartLine" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#a855f7" />
-            <stop offset="55%" stopColor="#6366f1" />
-            <stop offset="100%" stopColor="#0ea5e9" />
-          </linearGradient>
-          <linearGradient id="commandChartArea" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="#2563eb" stopOpacity="0.34" />
-            <stop offset="100%" stopColor="#1e293b" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path d={areaPath} fill="url(#commandChartArea)" />
-        <path
-          d={linePath}
-          fill="none"
-          stroke="url(#commandChartLine)"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="4"
-        />
-        {hoveredCoordinates && hoveredPoint && hoveredSnapshotChange != null ? (
-          <g className="pointer-events-none">
-            <line
-              x1={hoveredCoordinates.x}
-              x2={hoveredCoordinates.x}
-              y1="0"
-              y2={chartHeight}
-              stroke="rgba(248,250,252,0.95)"
-              strokeWidth="2"
-            />
-            <circle
-              cx={hoveredCoordinates.x}
-              cy={hoveredCoordinates.y}
-              r="4"
-              fill="#3b82f6"
-              stroke="#bfdbfe"
-              strokeWidth="1.5"
-            />
-            <foreignObject
-              x={Math.min(
-                Math.max(hoveredCoordinates.x - 92, 4),
-                chartWidth - 188,
-              )}
-              y={
-                hoveredCoordinates.y > 38
-                  ? hoveredCoordinates.y - 48
-                  : hoveredCoordinates.y + 14
-              }
-              width="184"
-              height="44"
-            >
-              <div className="rounded-lg border border-white/30 bg-slate-950/95 px-3 py-2 text-xs font-semibold leading-tight text-white shadow-2xl shadow-black/40 backdrop-blur">
-                <div
-                  className={
-                    hoveredSnapshotChange >= 0
-                      ? "text-emerald-300"
-                      : "text-rose-300"
-                  }
-                >
-                  Snapshot change {formatInr(hoveredSnapshotChange)}
-                </div>
-                <div className="mt-1 text-slate-200">
-                  {formatCommandChartTooltipDate(hoveredPoint.timestamp)}
-                </div>
-              </div>
-            </foreignObject>
-          </g>
-        ) : null}
-      </svg>
-    </div>
-  );
-}
-
 function buildUsTopHoldings(
   overview: IndMoneyUsPortfolioOverviewResponse | null,
   usdInrRate: number | null,
@@ -1400,7 +1128,14 @@ function DashboardPageForUser({
           asOf: Date.parse(summary.generated_at),
         });
         setDashboard((current) => {
-          const nextState = { ...current, ...update };
+          const nextState = {
+            ...current,
+            ...update,
+            // A temporarily unavailable summary must never erase a verified
+            // Bullpen snapshot already displayed or cached in this browser.
+            bullpenPositions:
+              current.bullpenPositions ?? update.bullpenPositions ?? null,
+          };
           for (const key of DASHBOARD_CRITICAL_KEYS) {
             writeDashboardOverviewCacheEntry(userId, key, nextState[key]);
           }
@@ -1650,14 +1385,20 @@ function DashboardPageForUser({
         ? null
         : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
-  const totalProfitLossValue =
-    (indiaSnapshot?.holdings_pnl ?? 0) +
-    (usdInrRate == null || usSnapshot?.total_return_value == null
-      ? 0
-      : usSnapshot.total_return_value * usdInrRate);
   const portfolioCommandTrend = buildGenuineInrPortfolioTrend(
     dashboard.zerodhaOverview?.history ?? [],
   );
+  const indmoneyCommandTrend =
+    usdInrRate == null
+      ? []
+      : buildDashboardPortfolioTrend(
+          (dashboard.indmoneyOverview?.history ?? []).map((snapshot) => ({
+            capturedAt: snapshot.captured_at,
+            portfolioValue: snapshot.current_value,
+            cashValue: snapshot.wallet_balance,
+          })),
+          usdInrRate,
+        );
   const showHeroSkeleton =
     !hasCriticalDashboardContent(dashboard) &&
     DASHBOARD_CRITICAL_KEYS.some((key) => pendingSections[key]);
@@ -1674,6 +1415,39 @@ function DashboardPageForUser({
     dashboard.bullpenPositions?.lastSuccessfulLiveSnapshot?.fetchedAt ??
     dashboard.bullpenPositions?.health?.timestamp ??
     null;
+  const combinedChartCapturedAt =
+    [indiaSnapshot?.captured_at, usSnapshot?.captured_at, bullpenUpdatedAt]
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => Date.parse(right) - Date.parse(left))[0] ?? null;
+  const portfolioChartOptions: Record<
+    "india" | "indmoney" | "bullpen" | "combined",
+    PortfolioCommandChartOption
+  > = {
+    india: {
+      label: "India portfolio value",
+      currentValue: zerodhaCommandValue,
+      trendPoints: portfolioCommandTrend,
+      capturedAt: indiaSnapshot?.captured_at,
+    },
+    indmoney: {
+      label: "IndMoney portfolio value",
+      currentValue: usdInrRate == null ? null : indmoneyCommandValue,
+      trendPoints: indmoneyCommandTrend,
+      capturedAt: usSnapshot?.captured_at,
+    },
+    bullpen: {
+      label: "Bullpen portfolio value",
+      currentValue: usdInrRate == null ? null : (bullpenTotalValue ?? null),
+      trendPoints: [],
+      capturedAt: bullpenUpdatedAt,
+    },
+    combined: {
+      label: "Combined portfolio value",
+      currentValue: totalCommandValue,
+      trendPoints: [],
+      capturedAt: combinedChartCapturedAt,
+    },
+  };
   const refreshBullpenTile = useCallback(async (forceFresh = true) => {
     setRefreshingBullpenTile(true);
     try {
@@ -1815,7 +1589,10 @@ function DashboardPageForUser({
                     window.dispatchEvent(
                       new Event(ZERODHA_DASHBOARD_SYNC_NOW_EVENT),
                     );
-                    loadDashboard(false);
+                    void Promise.allSettled([
+                      loadDashboard(false),
+                      refreshBullpenTile(true),
+                    ]);
                   }}
                   disabled={refreshing}
                   className="rounded-full bg-amber-400 text-slate-950 hover:bg-amber-300"
@@ -1857,8 +1634,8 @@ function DashboardPageForUser({
               />
 
               <PortfolioCommandChart
-                profitLossValue={totalProfitLossValue}
-                trendPoints={portfolioCommandTrend}
+                userId={userId}
+                options={portfolioChartOptions}
               />
             </div>
           </div>
