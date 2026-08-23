@@ -54,11 +54,12 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
 
 
 test("Stage 1 scans the complete active Gamma universe before applying filters", () => {
-  assert.match(routeSource, /while \(true\)/);
-  assert.match(routeSource, /const GAMMA_EVENT_PAGE_SIZE = 500/);
+  assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 500/);
+  assert.match(routeSource, /GAMMA_EVENT_PAGE_CONCURRENCY = 8/);
   assert.match(routeSource, /POLYMARKET_GAMMA_EVENTS_URL/);
   assert.match(routeSource, /end_date_min: currentUniverseStart/);
-  assert.match(routeSource, /offset \+= events\.length/);
+  assert.match(routeSource, /const effectivePageSize = firstPage\.length/);
+  assert.match(routeSource, /Promise\.all\(offsets\.map\(fetchEventPage\)\)/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.doesNotMatch(routeSource, /earliestOutsideWindow/);
