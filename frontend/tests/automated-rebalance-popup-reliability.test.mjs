@@ -73,10 +73,14 @@ test("Actionables View Output renders the shared widget natively instead of fram
   );
 });
 
-test("Actionables Calculations mounts its output widget before dispatching the open event", () => {
+test("Actionables Calculations explicitly opens in the dedicated output widget", () => {
   assert.match(
     workflowSource,
-    /showStageOutput\(section\.portfolio, "actionables"\)\.then\(\(\) => \{[\s\S]*?open-actionables-calculations/,
+    /setActionablesCalculationsPortfolio\(section\.portfolio\);[\s\S]*?showStageOutput\(section\.portfolio, "actionables"\)/,
+  );
+  assert.match(
+    workflowSource,
+    /openCalculationsOnMount=\{[\s\S]*?actionablesCalculationsPortfolio === outputDialog\.portfolio/,
   );
 });
 
