@@ -1959,7 +1959,7 @@ function summarizeAutoRebalanceHistoryStage(
       model: typeof summary.model === "string" ? summary.model : null,
       costUsd,
       costInr: getAutoRebalanceSummaryNumber(summary, "cost_inr"),
-      error: item.error_message ?? history?.error_message ?? null,
+      error: item.error_message ?? null,
       lastRunId: item.run_id ?? null,
       completedLlms,
       passedLlms: completedLlms,
@@ -5932,14 +5932,18 @@ ${zerodhaExecutionMode === "direct_market"
             : (indmoneyOverview?.latest?.parse_status ?? "last snapshot");
 
         const historyInfo = (stage: WorkflowStageKey) =>
-          summarizeAutoRebalanceHistoryStage(
-            getLatestAutoRebalanceHistoryItem(
-              historyByPortfolio[portfolio],
-              stage,
-            ),
-            stage,
-            usdInrRate,
-          );
+          Object.fromEntries(
+            Object.entries(
+              summarizeAutoRebalanceHistoryStage(
+                getLatestAutoRebalanceHistoryItem(
+                  historyByPortfolio[portfolio],
+                  stage,
+                ),
+                stage,
+                usdInrRate,
+              ),
+            ).filter(([, value]) => value !== null && value !== undefined),
+          ) as Partial<StageInfo>;
         const latestHistoryRebalance = historyInfo("rebalance");
         const latestHistoryTechnical = historyInfo("technical");
         const latestHistoryActionables = historyInfo("actionables");
