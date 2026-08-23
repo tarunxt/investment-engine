@@ -13,6 +13,10 @@ import {
 } from "./_lib/polymarketCategory";
 import { fetchBackendRuntimeJson } from "./_lib/backendBullpenRuntime";
 import {
+  createBackendSessionContext,
+  fetchBackendJsonWithSession,
+} from "./_lib/serverBackendSession";
+import {
   BULLPEN_SOURCE_URLS,
   normalizeBullpenScanFilters,
   type BullpenQuestion,
@@ -1365,7 +1369,9 @@ export async function GET(request: NextRequest) {
   const scannedAt = new Date().toISOString();
 
   try {
-    const preview = (await fetchBackendRuntimeJson(
+    const backendSession = await createBackendSessionContext(request);
+    const preview = (await fetchBackendJsonWithSession(
+      backendSession,
       "/polymarket/auto-live/stage1-scan-preview",
     )) as Record<string, unknown>;
     const acceptedRows = toArray(preview.accepted).filter(
