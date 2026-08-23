@@ -25,7 +25,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { LazyMount } from "@/components/shared/LazyMount";
 import { useAuth } from "@/hooks/useAuth";
-import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
+import {
+  sumCurrentPositionValue,
+  type BullpenPositionsResponse,
+} from "@/lib/bullpenPositions";
 import { validDashboardFxRate } from "@/lib/fxPresentation";
 import {
   MIN_GENUINE_PORTFOLIO_POINTS,
@@ -73,6 +76,10 @@ import {
   sortUrgentActionRows,
   toneClass,
 } from "./_components/dashboardOverviewUtils";
+import {
+  convertDashboardUsdTotalToInr,
+  resolveBullpenPortfolioPlusCash,
+} from "./_components/dashboardPortfolioTotals";
 
 const ThreatMarketCard = dynamic(
   () =>
@@ -1082,9 +1089,19 @@ function buildUsTopHoldings(
   }));
 }
 
-async function fetchBullpenPositions(): Promise<BullpenPositionsResponse> {
-  const response = await fetch("/api/bullpen-ai/positions", {
+async function fetchBullpenPositions(
+  forceFresh = false,
+): Promise<BullpenPositionsResponse> {
+  const params = new URLSearchParams({
+    caller_source: forceFresh ? "ui-dashboard-refresh" : "ui-passive-refresh",
+    max_age_seconds: forceFresh ? "0" : "20",
+    request_id: crypto.randomUUID(),
+  });
+  params.set(forceFresh ? "force_fresh" : "passive", "true");
+  const response = await fetch(`/api/bullpen-ai/positions?${params}`, {
     cache: "no-store",
+    credentials: "same-origin",
+    headers: { "Cache-Control": "no-cache" },
   });
   if (!response.ok) {
     const message = await response.text();
@@ -1095,10 +1112,11 @@ async function fetchBullpenPositions(): Promise<BullpenPositionsResponse> {
 }
 
 function parseBullpenAccountValueUsd(message?: string | null) {
-  if (!message) return 0;
+  if (!message) return null;
   const match = message.match(/(-?\d[\d,]*(?:\.\d+)?)/);
-  if (!match) return 0;
-  return Number.parseFloat(match[1].replace(/,/g, "")) || 0;
+  if (!match) return null;
+  const parsed = Number.parseFloat(match[1].replace(/,/g, ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function dashboardSummaryToState(
@@ -1576,9 +1594,13 @@ function DashboardPageForUser({
   const indmoneyCommandValue =
     (indmoneyPortfolioValue ?? 0) + (indmoneyAvailableFundsValue ?? 0);
   const bullpenSummary = dashboard.bullpenPositions?.summary;
-  const bullpenAccountValueUsd =
-    bullpenSummary?.walletValue ??
+  const bullpenPositionsValueUsd =
     bullpenSummary?.totalValue ??
+    (dashboard.bullpenPositions?.positions?.length
+      ? sumCurrentPositionValue(dashboard.bullpenPositions.positions)
+      : null);
+  const bullpenWalletValueUsd =
+    bullpenSummary?.walletValue ??
     dashboard.polymarketState?.live.balance.account_value_usd ??
     parseBullpenAccountValueUsd(
       dashboard.polymarketState?.live.balance.message,
@@ -1586,16 +1608,25 @@ function DashboardPageForUser({
   const bullpenCashValueUsd =
     bullpenSummary?.cashBalance ??
     dashboard.polymarketState?.live.balance.available_balance_usd ??
-    0;
-  const bullpenTotalValueUsd = bullpenAccountValueUsd + bullpenCashValueUsd;
-  const bullpenAccountValue =
-    bullpenAccountValueUsd * (usdInrRate ?? 1);
-  const bullpenCashValue = bullpenCashValueUsd * (usdInrRate ?? 1);
-  const bullpenTotalValue = bullpenTotalValueUsd * (usdInrRate ?? 1);
+    null;
+  const bullpenNativeValues = resolveBullpenPortfolioPlusCash({
+    positionsValue: bullpenPositionsValueUsd,
+    cashValue: bullpenCashValueUsd,
+    walletValue: bullpenWalletValueUsd,
+  });
+  const bullpenDisplayValues =
+    usdInrRate == null
+      ? bullpenNativeValues
+      : convertDashboardUsdTotalToInr(bullpenNativeValues, usdInrRate);
+  const bullpenPortfolioValue = bullpenDisplayValues.portfolioValue;
+  const bullpenCashValue = bullpenDisplayValues.cashValue;
+  const bullpenTotalValue = bullpenDisplayValues.totalValue;
   const totalCommandValue =
     usdInrRate == null
       ? null
-      : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
+      : bullpenTotalValue == null
+        ? null
+        : zerodhaCommandValue + indmoneyCommandValue + bullpenTotalValue;
   const indmoneyAvailableFunds = usSnapshot?.wallet_balance ?? 0;
   const totalProfitLossValue =
     (indiaSnapshot?.holdings_pnl ?? 0) +
@@ -1621,10 +1652,10 @@ function DashboardPageForUser({
     dashboard.bullpenPositions?.lastSuccessfulLiveSnapshot?.fetchedAt ??
     dashboard.bullpenPositions?.health?.timestamp ??
     null;
-  const refreshBullpenTile = async () => {
+  const refreshBullpenTile = useCallback(async (forceFresh = true) => {
     setRefreshingBullpenTile(true);
     try {
-      const positions = await fetchBullpenPositions();
+      const positions = await fetchBullpenPositions(forceFresh);
       setDashboard((current) => {
         const nextState = { ...current, bullpenPositions: positions };
         writeDashboardOverviewCacheEntry(
@@ -1648,7 +1679,14 @@ function DashboardPageForUser({
     } finally {
       setRefreshingBullpenTile(false);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void refreshBullpenTile(false);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [refreshBullpenTile]);
 
   useEffect(() => {
     if (!showHeroSkeleton && dataProvenance) {
@@ -1663,6 +1701,54 @@ function DashboardPageForUser({
         showHeroSkeleton ? undefined : "dashboard-summary"
       }
     >
+      <section
+        className="rounded-3xl border border-indigo-100 bg-white p-6 shadow-sm"
+        data-performance-usable="dashboard-portfolio-summary"
+      >
+        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-indigo-600">
+          Portfolio overview
+        </p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">
+          Dashboard
+        </h1>
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              label: "India total (portfolio + cash)",
+              value: formatInr(zerodhaCommandValue),
+            },
+            {
+              label: "INDmoney total (portfolio + cash)",
+              value:
+                usdInrRate == null
+                  ? "Unavailable"
+                  : formatInr(indmoneyCommandValue),
+            },
+            {
+              label: "Bullpen total (portfolio + cash)",
+              value:
+                usdInrRate == null || bullpenTotalValue == null
+                  ? "Unavailable"
+                  : formatInr(bullpenTotalValue),
+            },
+          ].map((metric) => (
+            <div key={metric.label} className="rounded-2xl bg-slate-50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {metric.label}
+              </p>
+              <p className="mt-2 text-2xl font-semibold text-slate-950">
+                {metric.value}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 text-xs text-slate-500">
+          {usdInrRate != null && effectiveFx?.source && effectiveFx.as_of
+            ? `USD/INR ${usdInrRate.toFixed(4)} from ${effectiveFx.source}; as of ${formatTs(effectiveFx.as_of)}.`
+            : "USD/INR conversion unavailable or stale. INDmoney and Bullpen INR totals are omitted until a verified rate is available."}
+        </p>
+      </section>
+
       {dataProvenance ? (
         <div
           className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600 shadow-sm"
@@ -1690,16 +1776,18 @@ function DashboardPageForUser({
         <section className="relative overflow-hidden rounded-[36px] border border-slate-200 bg-linear-to-br from-slate-950 via-slate-900 to-slate-800 text-white shadow-lg">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(245,158,11,0.22),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(59,130,246,0.22),_transparent_35%)]" />
 
-          <div className="relative grid gap-6 px-6 py-7 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.85fr)] lg:items-center lg:px-8 2xl:grid-cols-[minmax(0,1fr)_minmax(420px,0.75fr)_minmax(430px,0.9fr)]">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
-                <Sparkles className="size-3.5" />
-                Investments Control Room
+          <div className="relative px-6 py-7 lg:px-8">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-100">
+                  <Sparkles className="size-3.5" />
+                  Investments Control Room
+                </div>
+                <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
+                  Portfolio Command Center
+                </h1>
               </div>
-              <h1 className="mt-4 max-w-3xl font-serif text-3xl tracking-tight text-white md:text-4xl">
-                Portfolio Command Center
-              </h1>
-              <div className="mt-5 flex flex-wrap gap-3">
+              <div className="flex shrink-0 flex-wrap gap-3">
                 <Button
                   onClick={() => {
                     window.dispatchEvent(
@@ -1720,35 +1808,37 @@ function DashboardPageForUser({
               </div>
             </div>
 
-            <PortfolioCommandSummary
-              totalValue={totalCommandValue}
-              zerodhaValue={zerodhaCommandValue}
-              zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
-              zerodhaMargin={zerodhaAvailableMargin}
-              indmoneyValue={indmoneyCommandValue}
-              indmoneyPortfolioValue={indmoneyPortfolioValue}
-              indmoneyFundsValue={indmoneyAvailableFundsValue}
-              bullpenTotalValueInr={bullpenTotalValue}
-              bullpenAccountValueInr={bullpenAccountValue}
-              bullpenCashValueInr={bullpenCashValue}
-              zerodhaUpdatedAt={indiaSnapshot?.captured_at}
-              indmoneyUpdatedAt={usSnapshot?.captured_at}
-              bullpenUpdatedAt={bullpenUpdatedAt}
-              onRefreshZerodha={refreshZerodhaTile}
-              onRefreshIndmoney={refreshIndmoneyTile}
-              onRefreshBullpen={() => void refreshBullpenTile()}
-              refreshingZerodha={pendingSections.zerodhaOverview}
-              refreshingIndmoney={pendingSections.indmoneyOverview}
-              refreshingBullpen={
-                refreshingBullpenTile || pendingSections.bullpenPositions
-              }
-              fx={effectiveFx}
-            />
+            <div className="mt-7 grid gap-6 xl:grid-cols-2 xl:items-stretch">
+              <PortfolioCommandSummary
+                totalValue={totalCommandValue}
+                zerodhaValue={zerodhaCommandValue}
+                zerodhaPortfolioValue={indiaSnapshot?.holdings_market_value}
+                zerodhaMargin={zerodhaAvailableMargin}
+                indmoneyValue={indmoneyCommandValue}
+                indmoneyPortfolioValue={indmoneyPortfolioValue}
+                indmoneyFundsValue={indmoneyAvailableFundsValue}
+                bullpenTotalValueInr={bullpenTotalValue}
+                bullpenAccountValueInr={bullpenPortfolioValue}
+                bullpenCashValueInr={bullpenCashValue}
+                zerodhaUpdatedAt={indiaSnapshot?.captured_at}
+                indmoneyUpdatedAt={usSnapshot?.captured_at}
+                bullpenUpdatedAt={bullpenUpdatedAt}
+                onRefreshZerodha={refreshZerodhaTile}
+                onRefreshIndmoney={refreshIndmoneyTile}
+                onRefreshBullpen={() => void refreshBullpenTile(true)}
+                refreshingZerodha={pendingSections.zerodhaOverview}
+                refreshingIndmoney={pendingSections.indmoneyOverview}
+                refreshingBullpen={
+                  refreshingBullpenTile || pendingSections.bullpenPositions
+                }
+                fx={effectiveFx}
+              />
 
-            <PortfolioCommandChart
-              profitLossValue={totalProfitLossValue}
-              trendPoints={portfolioCommandTrend}
-            />
+              <PortfolioCommandChart
+                profitLossValue={totalProfitLossValue}
+                trendPoints={portfolioCommandTrend}
+              />
+            </div>
           </div>
         </section>
       )}
