@@ -248,6 +248,8 @@ async def get_profile(
         timezone=profile.timezone,
         notification_preferences=profile.notification_preferences,
         theme_preference=profile.theme_preference,
+        zerodha_buy_threshold=profile.zerodha_buy_threshold,
+        indmoney_buy_threshold=profile.indmoney_buy_threshold,
     )
 
 
@@ -268,7 +270,15 @@ async def update_profile(
         profile = UserProfile(user_id=current_user.id)
         db.add(profile)
 
-    for field in ("avatar_url", "bio", "timezone", "notification_preferences", "theme_preference"):
+    for field in (
+        "avatar_url",
+        "bio",
+        "timezone",
+        "notification_preferences",
+        "theme_preference",
+        "zerodha_buy_threshold",
+        "indmoney_buy_threshold",
+    ):
         val = getattr(request, field)
         if val is not None:
             setattr(profile, field, val)
