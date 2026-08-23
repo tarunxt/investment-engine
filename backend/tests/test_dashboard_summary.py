@@ -16,6 +16,7 @@ from app.domains.dashboard.schemas import (
     DashboardHistoryPoint,
     DashboardHolding,
     DashboardIndMoneySection,
+    DashboardPortfolioHistory,
     DashboardSectionMeta,
     DashboardSummaryResponse,
     DashboardZerodhaSection,
@@ -119,6 +120,10 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
         await asyncio.sleep(0.05)
         return DashboardBullpenSection()
 
+    async def load_portfolio_history(_user_id: int):
+        await asyncio.sleep(0.05)
+        return DashboardPortfolioHistory()
+
     async def load_fx(_user_id: int):
         await asyncio.sleep(0.05)
         return DashboardFxRate(
@@ -133,6 +138,11 @@ async def test_dashboard_summary_loads_sections_concurrently_and_degrades_one(
     monkeypatch.setattr(service, "_load_zerodha", load_zerodha)
     monkeypatch.setattr(service, "_load_indmoney", load_indmoney)
     monkeypatch.setattr(service, "_load_bullpen", load_bullpen)
+    monkeypatch.setattr(
+        service,
+        "_load_portfolio_history",
+        load_portfolio_history,
+    )
     monkeypatch.setattr(service, "_load_fx", load_fx)
 
     started = monotonic()
