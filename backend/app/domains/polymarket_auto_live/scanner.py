@@ -15,7 +15,7 @@ from app.domains.polymarket_auto_live.category import read_polymarket_theme
 
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
-GAMMA_PAGE_SIZE = 500
+GAMMA_PAGE_SIZE = 100
 DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
 
 _SHARED_GAMMA_CLIENT: ContextVar[httpx.AsyncClient | None] = ContextVar(
