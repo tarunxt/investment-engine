@@ -4,7 +4,7 @@ import enum
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.infrastructure.database.base import Base, TimestampMixin
@@ -67,6 +67,8 @@ class UserProfile(Base, TimestampMixin):
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", nullable=False)
     notification_preferences: Mapped[str] = mapped_column(String(500), default="all", nullable=False)
     theme_preference: Mapped[str] = mapped_column(String(20), default="light", nullable=False)
+    zerodha_buy_threshold: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
+    indmoney_buy_threshold: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
     google_sheets_master_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     user: Mapped[User] = relationship(back_populates="profile")
