@@ -6960,6 +6960,27 @@ def test_console_market_filter_reasons_block_player_prop_ou_markets():
     assert "Excluded sports market." in reasons
 
 
+def test_console_market_filter_reasons_use_saved_odds_floor():
+    market = _market(
+        question="Will candidate X win the primary?",
+        current_yes_odds=7,
+        current_no_odds=93,
+    )
+
+    default_reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
+    configured_reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+        min_market_odds=8.5,
+    )
+
+    assert not any("odds floor" in reason for reason in default_reasons)
+    assert "Excluded market below the 8.5% Yes/No odds floor." in configured_reasons
+
+
 def test_candidate_filter_reasons_block_trump_insult_markets():
     market = _market(
         question="Will Donald Trump publicly insult someone on June 27, 2026?",

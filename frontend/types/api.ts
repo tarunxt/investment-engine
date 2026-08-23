@@ -2342,6 +2342,7 @@ export interface BullpenAutoLiveSettings {
   min_order_usd: number;
   max_order_usd: number;
   console_order_usd: number;
+  console_min_market_odds: number;
   min_liquidity_usd: number;
   min_independent_active_markets: number;
   target_active_markets: number;

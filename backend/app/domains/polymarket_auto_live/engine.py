@@ -5657,7 +5657,11 @@ class BullpenAutoLiveEngine:
             else:
                 accepted_manual_pairs = []
                 for row, market in zip(manual_console_rows, manual_markets, strict=False):
-                    rejection_reasons = console_market_filter_reasons(market, now=now)
+                    rejection_reasons = console_market_filter_reasons(
+                        market,
+                        now=now,
+                        min_market_odds=settings.console_min_market_odds,
+                    )
                     if rejection_reasons:
                         rejected = ScanRejectedMarket(
                             market_id=market.market_id,
@@ -5902,7 +5906,10 @@ class BullpenAutoLiveEngine:
                     "used_manual_console_rows": False,
                 },
             )
-            scanned = await scan_console_profile_markets(now=now)
+            scanned = await scan_console_profile_markets(
+                now=now,
+                min_market_odds=settings.console_min_market_odds,
+            )
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
             scan_warning = getattr(scanned, "warning", None)

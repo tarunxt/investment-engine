@@ -653,6 +653,7 @@ def console_market_filter_reasons(
     market: ScannedMarket,
     *,
     now: datetime,
+    min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
 ) -> list[str]:
     reasons: list[str] = []
     search_text = build_market_filter_search_text(market)
@@ -681,11 +682,11 @@ def console_market_filter_reasons(
     if market.current_yes_odds is None or market.current_no_odds is None:
         reasons.append("Excluded market without both Yes and No odds.")
     elif (
-        market.current_yes_odds < CONSOLE_MIN_MARKET_ODDS
-        or market.current_no_odds < CONSOLE_MIN_MARKET_ODDS
+        market.current_yes_odds < min_market_odds
+        or market.current_no_odds < min_market_odds
     ):
         reasons.append(
-            f"Excluded market below the {CONSOLE_MIN_MARKET_ODDS:.0f}% Yes/No odds floor."
+            f"Excluded market below the {min_market_odds:g}% Yes/No odds floor."
         )
     if not market.close_time:
         reasons.append("Excluded market without a close time.")
@@ -847,6 +848,7 @@ def _build_cli_console_scan_result(
     *,
     now: datetime,
     scanned_at: str,
+    min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
 ) -> ConsoleScanResult:
     normalized_by_market_id: dict[str, ScannedMarket] = {}
     for discovered in rows:
@@ -862,7 +864,11 @@ def _build_cli_console_scan_result(
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     for market in normalized_by_market_id.values():
-        reasons = console_market_filter_reasons(market, now=now)
+        reasons = console_market_filter_reasons(
+            market,
+            now=now,
+            min_market_odds=min_market_odds,
+        )
         if reasons:
             rejected.append(
                 ScanRejectedMarket(
@@ -888,7 +894,11 @@ def _build_cli_console_scan_result(
     )
 
 
-async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
+async def scan_console_profile_markets(
+    *,
+    now: datetime,
+    min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     try:
         parsed = await run_first_bullpen_json(
@@ -900,6 +910,7 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
             _collect_console_discover_rows(parsed),
             now=now,
             scanned_at=scanned_at,
+            min_market_odds=min_market_odds,
         )
     except Exception as cli_exc:
         try:
@@ -939,7 +950,11 @@ async def scan_console_profile_markets(*, now: datetime) -> ConsoleScanResult:
         accepted: list[ScannedMarket] = []
         rejected = list(gamma_scan.rejected)
         for market in gamma_scan.accepted:
-            reasons = console_market_filter_reasons(market, now=now)
+            reasons = console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+            )
             if reasons:
                 rejected.append(
                     ScanRejectedMarket(
