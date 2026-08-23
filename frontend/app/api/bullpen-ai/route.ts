@@ -1228,7 +1228,6 @@ async function fetchGammaMarkets() {
       active: "true",
       archived: "false",
       closed: "false",
-      end_date_min: currentUniverseStart,
       limit: String(GAMMA_EVENT_PAGE_SIZE),
       offset: String(offset),
     });
@@ -1294,7 +1293,16 @@ async function fetchGammaMarkets() {
           },
           POLYMARKET_GAMMA_MARKETS_URL,
         );
-        if (normalized) candidates.set(normalized.id, normalized);
+        if (normalized) {
+          const closeDate = toValidDate(normalized.closeTime);
+          if (
+            closeDate &&
+            closeDate.getTime() < new Date(currentUniverseStart).getTime()
+          ) {
+            continue;
+          }
+          candidates.set(normalized.id, normalized);
+        }
       }
     }
   };
