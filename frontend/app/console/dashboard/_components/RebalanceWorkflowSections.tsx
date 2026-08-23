@@ -5088,6 +5088,8 @@ export function RebalanceWorkflowSections({
     routeUrl?: string | null;
     run?: RunResponse | null;
   } | null>(null);
+  const [actionablesCalculationsPortfolio, setActionablesCalculationsPortfolio] =
+    useState<WorkflowPortfolio | null>(null);
   const [promptDialog, setPromptDialog] = useState<{
     portfolio: WorkflowPortfolio;
     stage: PromptPreviewStage;
@@ -8215,9 +8217,10 @@ ${zerodhaExecutionMode === "direct_market"
                   ? () => showStagePrompt(section.portfolio, stage)
                   : undefined
               }
-              onOutputClick={() =>
-                void showStageOutput(section.portfolio, stage)
-              }
+              onOutputClick={() => {
+                setActionablesCalculationsPortfolio(null);
+                void showStageOutput(section.portfolio, stage);
+              }}
               onSyncNowClick={
                 stage === "sync"
                   ? () => {
@@ -8243,13 +8246,8 @@ ${zerodhaExecutionMode === "direct_market"
                 stage === "actionables"
                   ? () => {
                       window.location.hash = "final-actionables";
-                      void showStageOutput(section.portfolio, "actionables").then(() => {
-                        window.setTimeout(() => {
-                          window.dispatchEvent(new CustomEvent("open-actionables-calculations", {
-                            detail: { market: section.portfolio === "zerodha" ? "india" : "us" },
-                          }));
-                        }, 100);
-                      });
+                      setActionablesCalculationsPortfolio(section.portfolio);
+                      void showStageOutput(section.portfolio, "actionables");
                     }
                   : undefined
               }
@@ -8466,7 +8464,10 @@ ${zerodhaExecutionMode === "direct_market"
       ) : null}
 
       {outputDialog ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4" onClick={() => setOutputDialog(null)}>
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4" onClick={() => {
+          setOutputDialog(null);
+          setActionablesCalculationsPortfolio(null);
+        }}>
           <div className="max-h-[85vh] w-full max-w-[calc(100vw-2rem)] overflow-hidden rounded-3xl bg-white shadow-2xl xl:max-w-[95vw]" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
               <div>
@@ -8479,7 +8480,10 @@ ${zerodhaExecutionMode === "direct_market"
               </div>
               <button
                 type="button"
-                onClick={() => setOutputDialog(null)}
+                onClick={() => {
+                  setOutputDialog(null);
+                  setActionablesCalculationsPortfolio(null);
+                }}
                 className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                 aria-label="Close output view"
               >
@@ -8500,6 +8504,9 @@ ${zerodhaExecutionMode === "direct_market"
                   <FinalActionablesConsole
                     portfolio={outputDialog.portfolio}
                     market={outputDialog.portfolio === "zerodha" ? "india" : "us"}
+                    openCalculationsOnMount={
+                      actionablesCalculationsPortfolio === outputDialog.portfolio
+                    }
                   />
                 </div>
               ) : outputDialog.routeUrl ? (
