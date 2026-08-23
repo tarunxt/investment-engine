@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import type { BullpenPositionsResponse } from "@/lib/bullpenPositions";
 import { apiService } from "@/services/api";
 import type { DashboardSummaryResponse } from "@/types/api";
 
@@ -18,18 +19,67 @@ export function BullpenAiPageShell({
   useEffect(() => {
     let active = true;
 
-    apiService
-      .getDashboardSummary()
-      .then((dashboardSummary) => {
-        if (active && dashboardSummary.bullpen) {
-          setLiveSummary(dashboardSummary.bullpen);
-        }
-      })
-      .catch((error: unknown) => {
-        console.warn("Bullpen passive summary refresh was unavailable.", {
-          error_type: error instanceof Error ? error.name : "UnknownError",
-        });
+    async function refreshSummary() {
+      const positionsParams = new URLSearchParams({
+        caller_source: "ui-passive-refresh",
+        max_age_seconds: "20",
+        passive: "true",
       });
+      const [dashboardResult, positionsResult] = await Promise.allSettled([
+        apiService.getDashboardSummary(),
+        fetch(`/api/bullpen-ai/positions?${positionsParams.toString()}`, {
+          cache: "no-store",
+        }).then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Bullpen positions request failed with ${response.status}`);
+          }
+          return (await response.json()) as BullpenPositionsResponse;
+        }),
+      ]);
+      if (!active) return;
+
+      if (
+        dashboardResult.status === "fulfilled" &&
+        dashboardResult.value.bullpen
+      ) {
+        setLiveSummary(dashboardResult.value.bullpen);
+        return;
+      }
+
+      if (positionsResult.status === "fulfilled") {
+        const payload = positionsResult.value;
+        const positionsSummary =
+          payload.summary ?? payload.lastSuccessfulLiveSnapshot?.summary;
+        const fetchedAt =
+          payload.fetchedAt ?? payload.lastSuccessfulLiveSnapshot?.fetchedAt;
+        if (positionsSummary && fetchedAt) {
+          setLiveSummary({
+            active_count: positionsSummary.activeCount,
+            claimable_count: positionsSummary.claimableCount,
+            claimable_value: positionsSummary.claimableValue,
+            cash_balance: positionsSummary.cashBalance,
+            total_value: positionsSummary.totalValue,
+            unrealized_pnl: positionsSummary.unrealizedPnl,
+            wallet_value: positionsSummary.walletValue,
+            fetched_at: fetchedAt,
+            source: "redis-cache",
+          });
+          return;
+        }
+      }
+
+      const failure =
+        dashboardResult.status === "rejected"
+          ? dashboardResult.reason
+          : positionsResult.status === "rejected"
+            ? positionsResult.reason
+            : null;
+      console.warn("Bullpen passive summary refresh was unavailable.", {
+        error_type: failure instanceof Error ? failure.name : "UnknownError",
+      });
+    }
+
+    void refreshSummary();
 
     return () => {
       active = false;

@@ -32,9 +32,13 @@ test("Bullpen page shell always mounts the scan filter popup bridge", () => {
   assert.match(shellSource, /<BullpenScanFiltersPopupBridge \/>/);
 });
 
-test("Bullpen summary cards hydrate from the live dashboard summary", () => {
-  assert.match(shellSource, /apiService\s*\.getDashboardSummary\(\)/);
-  assert.match(shellSource, /setLiveSummary\(dashboardSummary\.bullpen\)/);
+test("Bullpen summary cards hydrate from live dashboard or positions data", () => {
+  assert.match(shellSource, /apiService\.getDashboardSummary\(\)/);
+  assert.match(shellSource, /\/api\/bullpen-ai\/positions\?/);
+  assert.match(shellSource, /positionsSummary\.activeCount/);
+  assert.match(shellSource, /positionsSummary\.claimableCount/);
+  assert.match(shellSource, /payload\.fetchedAt/);
+  assert.match(shellSource, /setLiveSummary\(/);
   assert.match(shellSource, /liveSummary\?\.active_count/);
   assert.match(shellSource, /liveSummary\?\.claimable_count/);
   assert.match(shellSource, /liveSummary\?\.fetched_at/);
