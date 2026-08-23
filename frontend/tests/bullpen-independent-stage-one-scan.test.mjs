@@ -61,7 +61,6 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /GAMMA_MARKET_NORMALIZATION_KEYS/);
   assert.match(routeSource, /marketForNormalization/);
   assert.doesNotMatch(routeSource, /Array\.isArray\(market\.events\)/);
-  assert.match(routeSource, /setImmediate\\(resolve\\)/);
   assert.match(routeSource, /seenCursors/);
   assert.doesNotMatch(routeSource, /offset: String\(offset\)/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
@@ -79,11 +78,13 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 });
 
 
-test("independent Stage 1 runs the complete catalog as a polled server job", () => {
+test("independent Stage 1 advances one bounded catalog page per poll", () => {
   assert.match(routeSource, /__bullpenGammaScanJobs/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 1_500/);
-  assert.match(routeSource, /void \(async \(\) =>/);
-  assert.match(routeSource, /gammaJob\.result = result/);
+  assert.match(routeSource, /fetchGammaMarketPage/);
+  assert.match(routeSource, /gammaJob\.candidates\.set/);
+  assert.match(routeSource, /gammaJob\.cursor = nextCursor/);
+  assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 1_500/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
   assert.match(pageSource, /pendingPayload\.status !== "scanning"/);
