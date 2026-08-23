@@ -622,9 +622,11 @@ async def _fetch_gamma_page(
     client: httpx.AsyncClient,
     *,
     cursor: str | None,
+    end_date_min: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
     params = {
         "closed": "false",
+        "end_date_min": end_date_min,
         "limit": str(GAMMA_PAGE_SIZE),
     }
     if cursor:
@@ -886,6 +888,7 @@ async def scan_candidate_markets(
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     seen_market_ids: set[str] = set()
+    current_universe_start = _now_iso()
 
     async with httpx.AsyncClient(
         timeout=20,
@@ -894,7 +897,11 @@ async def scan_candidate_markets(
         cursor: str | None = None
         seen_cursors: set[str] = set()
         while True:
-            rows, next_cursor = await _fetch_gamma_page(client, cursor=cursor)
+            rows, next_cursor = await _fetch_gamma_page(
+                client,
+                cursor=cursor,
+                end_date_min=current_universe_start,
+            )
             for row in rows:
                 if not isinstance(row, dict):
                     continue
