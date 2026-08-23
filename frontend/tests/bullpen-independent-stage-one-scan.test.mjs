@@ -59,6 +59,7 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /POLYMARKET_GAMMA_MARKETS_KEYSET_URL/);
   assert.match(routeSource, /after_cursor/);
   assert.match(routeSource, /next_cursor/);
+  assert.match(routeSource, /end_date_min: currentUniverseStart/);
   assert.doesNotMatch(routeSource, /offset: String\(offset\)/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.doesNotMatch(routeSource, /earliestOutsideWindow/);
