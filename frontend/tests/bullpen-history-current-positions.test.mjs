@@ -30,6 +30,11 @@ test("History opens the original run-details workspace instead of the audit", ()
   assert.match(scheduleCard, /openHistoryRunDetail\(\{ id: runId \}\)/);
   assert.match(scheduleCard, /<RunDetailDialog/);
   assert.match(scheduleCard, /router\.replace\([\s\S]*\/console\/bullpen-ai\/history/);
+  assert.match(scheduleCard, /new URLSearchParams\(window\.location\.search\)/);
+  assert.doesNotMatch(
+    scheduleCard,
+    /if \(authLoading \|\| !user\) return;[\s\S]{0,500}openRequestedRunDetail/,
+  );
 });
 
 test("History keeps usable run or trend data when the sibling request times out", () => {
