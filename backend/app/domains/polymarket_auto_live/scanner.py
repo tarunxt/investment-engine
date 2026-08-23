@@ -630,8 +630,6 @@ async def _fetch_gamma_page(
             "closed": "false",
             "limit": str(GAMMA_PAGE_SIZE),
             "offset": str(offset),
-            "order": "endDate",
-            "ascending": "true",
         },
     )
     response.raise_for_status()
