@@ -62,6 +62,20 @@ const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 100;
 const GAMMA_EVENT_PAGE_CONCURRENCY = 32;
+const GAMMA_SCAN_JOB_TTL_MS = 5 * 60 * 1000;
+
+type GammaScanJob = {
+  startedAt: number;
+  result?: Record<string, unknown>;
+  error?: string;
+};
+
+const gammaScanJobGlobal = globalThis as typeof globalThis & {
+  __bullpenGammaScanJobs?: Map<string, GammaScanJob>;
+};
+const gammaScanJobs =
+  gammaScanJobGlobal.__bullpenGammaScanJobs ??
+  (gammaScanJobGlobal.__bullpenGammaScanJobs = new Map<string, GammaScanJob>());
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
   "category",
@@ -1410,24 +1424,72 @@ export async function GET(request: NextRequest) {
   const sourceUrl = BULLPEN_SOURCE_URLS[mode];
   const scannedAt = new Date().toISOString();
 
-  try {
-    const primaryGammaCandidates = await fetchGammaMarkets();
-    if (primaryGammaCandidates.length > 0) {
-      return NextResponse.json(
-        await buildResponse({
-          mode,
-          sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
-          sourceLabel: GAMMA_SOURCE_LABEL,
-          scannedAt,
-          filters,
-          candidates: primaryGammaCandidates,
-          details: `Polymarket Gamma scanned the complete current universe of ${primaryGammaCandidates.length} active markets before filters were applied.`,
-        }),
-      );
+  const gammaScanJobKey = `${mode}:${searchParams.toString()}`;
+  const nowMs = Date.now();
+  for (const [jobKey, job] of gammaScanJobs) {
+    if (nowMs - job.startedAt > GAMMA_SCAN_JOB_TTL_MS) {
+      gammaScanJobs.delete(jobKey);
     }
-  } catch {
-    // Continue through the authenticated backend and legacy recovery paths.
   }
+
+  const existingGammaJob = gammaScanJobs.get(gammaScanJobKey);
+  if (existingGammaJob?.result) {
+    gammaScanJobs.delete(gammaScanJobKey);
+    return NextResponse.json(existingGammaJob.result);
+  }
+  if (existingGammaJob?.error) {
+    gammaScanJobs.delete(gammaScanJobKey);
+    return NextResponse.json(
+      {
+        mode,
+        sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+        sourceLabel: GAMMA_SOURCE_LABEL,
+        scannedAt,
+        filters,
+        totalCandidates: 0,
+        questions: [],
+        rejectedQuestions: [],
+        error: existingGammaJob.error,
+      },
+      { status: 502 },
+    );
+  }
+  if (existingGammaJob) {
+    return NextResponse.json(
+      { status: "scanning", retryAfterMs: 1_500 },
+      { status: 202 },
+    );
+  }
+
+  const gammaJob: GammaScanJob = { startedAt: nowMs };
+  gammaScanJobs.set(gammaScanJobKey, gammaJob);
+  void (async () => {
+    const candidates = await fetchGammaMarkets();
+    if (candidates.length === 0) {
+      throw new Error("Polymarket Gamma returned no active current markets");
+    }
+    return buildResponse({
+      mode,
+      sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+      sourceLabel: GAMMA_SOURCE_LABEL,
+      scannedAt,
+      filters,
+      candidates,
+      details: `Polymarket Gamma scanned the complete current universe of ${candidates.length} active markets before filters were applied.`,
+    });
+  })()
+    .then((result) => {
+      gammaJob.result = result;
+    })
+    .catch((error: unknown) => {
+      gammaJob.error =
+        error instanceof Error ? error.message : "Complete Gamma scan failed";
+    });
+
+  return NextResponse.json(
+    { status: "scanning", retryAfterMs: 1_500 },
+    { status: 202 },
+  );
 
   try {
     const backendSession = await createBackendSessionContext(request);
