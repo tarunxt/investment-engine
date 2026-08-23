@@ -63,3 +63,12 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /previewSourceLabel\.includes\(GAMMA_SOURCE_LABEL\)/);
   assert.match(routeSource, /scanned the complete active universe/);
 });
+
+
+test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
+  assert.match(pageSource, /BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 90_000/);
+  assert.match(
+    pageSource,
+    /fetchBullpenUiJson<ScanResult>[\s\S]{0,500}BULLPEN_SCAN_REQUEST_TIMEOUT_MS/,
+  );
+});
