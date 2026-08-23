@@ -51,24 +51,22 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
 
 
 test("Stage 1 scans the complete active Gamma universe before applying filters", () => {
-  assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
-  assert.match(routeSource, /POLYMARKET_GAMMA_MARKETS_KEYSET_URL/);
-  assert.match(routeSource, /after_cursor/);
-  assert.match(routeSource, /next_cursor/);
-  assert.match(routeSource, /end_date_min: currentUniverseStart\.toISOString\(\)/);
-  assert.match(routeSource, /toArray\(market\.events\)\.find/);
-  assert.match(routeSource, /eventIdentity \? \[eventIdentity\] : \[\]/);
+  assert.match(routeSource, /POLYMARKET_GAMMA_EVENTS_URL/);
+  assert.match(routeSource, /active: "true"/);
+  assert.match(routeSource, /end_date_min: window\.start/);
+  assert.match(routeSource, /end_date_max: window\.end/);
+  assert.match(routeSource, /buildGammaScanWindows/);
+  assert.match(routeSource, /splitGammaScanWindow/);
+  assert.match(routeSource, /response\.status === 422 && window\.offset > 0/);
+  assert.match(routeSource, /toArray\(event\.markets\)/);
   assert.match(routeSource, /GAMMA_MARKET_NORMALIZATION_KEYS/);
-  assert.match(routeSource, /marketForNormalization/);
-  assert.match(routeSource, /seenCursors/);
-  assert.doesNotMatch(routeSource, /offset: String\(offset\)/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.match(routeSource, /scanned the complete current universe/);
 });
 
 
 test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
-  assert.match(pageSource, /BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 300_000/);
+  assert.match(pageSource, /BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 1_800_000/);
   assert.match(
     pageSource,
     /fetchBullpenUiJson<ScanResult>[\s\S]{0,500}BULLPEN_SCAN_REQUEST_TIMEOUT_MS/,
@@ -76,15 +74,15 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 });
 
 
-test("independent Stage 1 advances one bounded catalog page per poll", () => {
+test("independent Stage 1 advances one partitioned catalog page per poll", () => {
   assert.match(routeSource, /__bullpenGammaScanJobs/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 1_500/);
-  assert.match(routeSource, /fetchGammaMarketPage/);
+  assert.match(routeSource, /fetchGammaMarketPage\(currentWindow\)/);
   assert.match(routeSource, /gammaJob\.candidates\.set/);
-  assert.match(routeSource, /gammaJob\.cursor = nextCursor/);
+  assert.match(routeSource, /gammaJob\.windows\.splice/);
+  assert.match(routeSource, /currentWindow\.offset \+= GAMMA_EVENT_PAGE_SIZE/);
   assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 1_500/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
-  assert.match(pageSource, /pendingPayload\.status !== "scanning"/);
   assert.match(routeSource, /complete current universe/);
 });
