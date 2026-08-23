@@ -284,8 +284,9 @@ def _position_rows(payload: Any) -> list[Any]:
 
 
 async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
-    # This is a passive cache read by design. Initial page rendering must never
-    # launch the Bullpen CLI, refresh credentials, or contact Polymarket.
+    # Prefer passive caches so initial rendering stays fast. When both bounded
+    # caches are unavailable, use the same presentation-only public-wallet
+    # refresh as the interactive portfolio. This never authorizes execution.
     redis_started_at = monotonic()
     try:
         broker = get_bullpen_runtime_broker()
@@ -300,8 +301,23 @@ async def _load_bullpen(_user_id: int) -> DashboardBullpenSection:
             )
             snapshot = None
         if snapshot is None:
-            snapshot = await broker.read_cached_positions_snapshot(
-                delete_invalid=False,
+            try:
+                snapshot = await broker.read_cached_positions_snapshot(
+                    delete_invalid=False,
+                )
+            except Exception:
+                logger.warning(
+                    "Bullpen execution snapshot read failed; using passive display refresh",
+                    exc_info=True,
+                )
+                snapshot = None
+        if snapshot is None:
+            snapshot = await broker.get_positions_snapshot(
+                force_fresh=False,
+                allow_refresh=False,
+                caller_source="ui-passive-refresh",
+                max_age_seconds=20,
+                timeout_seconds=10,
             )
     finally:
         add_redis_duration((monotonic() - redis_started_at) * 1000)
