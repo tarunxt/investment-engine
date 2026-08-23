@@ -60,7 +60,7 @@ const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_KEYSET_URL = "https://gamma-api.polymarket.com/events/keyset";
-const GAMMA_EVENT_PAGE_SIZE = 100;
+const GAMMA_EVENT_PAGE_SIZE = 25;
 const GAMMA_SCAN_JOB_TTL_MS = 15 * 60 * 1000;
 
 type GammaScanJob = {
@@ -157,6 +157,34 @@ const FILTER_TEXT_KEYS = [
   "breadcrumbs",
   "breadcrumb",
 ];
+const GAMMA_MARKET_NORMALIZATION_KEYS = Array.from(
+  new Set([
+    "id",
+    "marketId",
+    "conditionId",
+    "questionID",
+    ...QUESTION_KEYS,
+    ...MARKET_SLUG_KEYS,
+    ...CLOSE_TIME_KEYS,
+    ...CATEGORY_KEYS,
+    ...FILTER_TEXT_KEYS,
+    "outcomes",
+    "options",
+    "tokens",
+    "outcomePrices",
+    "volume",
+    "volume24hr",
+    "volume24h",
+    "totalVolume",
+    "volumeNum",
+    "volumeUsd",
+    "volumeUSD",
+    "liquidity",
+    "liquidityNum",
+    "liquidityUsd",
+    "liquidityUSD",
+  ]),
+);
 const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
 const INSULT_MARKET_PATTERNS = [
   /\b(?:donald\s+)?trump\b.{0,80}\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\b/i,
@@ -1269,11 +1297,14 @@ async function fetchGammaMarkets() {
         ) {
           continue;
         }
+        const marketForNormalization = Object.fromEntries(
+          GAMMA_MARKET_NORMALIZATION_KEYS.flatMap((key) =>
+            key in market ? [[key, market[key]]] : [],
+          ),
+        );
+        marketForNormalization.events = [eventIdentity];
         const normalized = normalizeGammaMarket(
-          {
-            ...market,
-            events: [eventIdentity],
-          },
+          marketForNormalization,
           POLYMARKET_GAMMA_MARKETS_URL,
         );
         if (!normalized) continue;
