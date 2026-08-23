@@ -62,6 +62,17 @@ test("LLMs completed opens an inline provider/model dialog with layered saved-da
   }
 });
 
+test("Actionables View Output renders the shared widget natively instead of framing the dashboard", () => {
+  assert.match(
+    workflowSource,
+    /\["swing", "rebalance", "technical", "actionables"\]\.includes\(stage\)/,
+  );
+  assert.match(
+    workflowSource,
+    /outputDialog\.stage === "actionables"[\s\S]*?<FinalActionablesConsole[\s\S]*?portfolio=\{outputDialog\.portfolio\}[\s\S]*?market=\{outputDialog\.portfolio === "zerodha" \? "india" : "us"\}/,
+  );
+});
+
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {
   assert.match(workflowSource, /totalLlms: jobs\.length/);
   assert.match(workflowSource, /getRunJobDisplayModels\(jobs\)/);
