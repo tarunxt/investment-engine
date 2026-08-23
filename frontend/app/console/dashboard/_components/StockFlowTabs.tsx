@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  GitCompareArrows,
+  Loader2,
+  X,
+} from "lucide-react";
 
 import {
   buildConsensusRows,
@@ -19,11 +25,15 @@ import type { SwingTradeMarket } from "@/lib/swingTrade";
 import type { RunResponse } from "@/types/api";
 import { cn } from "@/lib/utils";
 
-type StockFlowPortfolio = "zerodha" | "indmoneyUs";
+export type RebalanceStockFlowPortfolio = "zerodha" | "indmoneyUs";
 
-const PORTFOLIOS: Array<{ id: StockFlowPortfolio; title: string; market: SwingTradeMarket }> = [
-  { id: "zerodha", title: "Zerodha Stock Flow", market: "india" },
-  { id: "indmoneyUs", title: "IndMoney Stock Flow", market: "us" },
+const PORTFOLIOS: Array<{
+  id: RebalanceStockFlowPortfolio;
+  title: string;
+  market: SwingTradeMarket;
+}> = [
+  { id: "zerodha", title: "Zerodha Rebalance Stock Flow", market: "india" },
+  { id: "indmoneyUs", title: "IndMoney Rebalance Stock Flow", market: "us" },
 ];
 
 function newest(runs: RunResponse[]) {
@@ -84,15 +94,107 @@ function EmptyStage() {
   return <p className="py-8 text-center text-sm text-slate-500">No stocks found in the latest completed scan.</p>;
 }
 
-export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFormulaConfig }) {
-  const [active, setActive] = useState<StockFlowPortfolio | null>(null);
+type RebalanceStockFlowWidgetProps = {
+  formulaConfig: ScoreMatrixFormulaConfig;
+  initialPortfolio?: RebalanceStockFlowPortfolio;
+};
+
+type RebalanceStockFlowSubwidgetProps = {
+  formulaConfig: ScoreMatrixFormulaConfig;
+  portfolio: RebalanceStockFlowPortfolio;
+};
+
+export function RebalanceStockFlowWidget({
+  formulaConfig,
+  initialPortfolio = "zerodha",
+}: RebalanceStockFlowWidgetProps) {
+  const [active, setActive] = useState<RebalanceStockFlowPortfolio>(initialPortfolio);
+
+  return (
+    <section
+      aria-labelledby="rebalance-stock-flow-title"
+      className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div>
+        <h2
+          id="rebalance-stock-flow-title"
+          className="text-xl font-bold text-slate-950"
+        >
+          Rebalance Stock Flow
+        </h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Track each portfolio from Swing Scan through the final rebalance actionables.
+        </p>
+      </div>
+
+      <div
+        className="mt-4 flex flex-wrap gap-2"
+        role="tablist"
+        aria-label="Rebalance stock flow portfolio"
+      >
+        {PORTFOLIOS.map((portfolio) => (
+          <button
+            key={portfolio.id}
+            type="button"
+            role="tab"
+            aria-selected={active === portfolio.id}
+            aria-controls={`${portfolio.id}-rebalance-stock-flow`}
+            onClick={() => setActive(portfolio.id)}
+            className={cn(
+              "rounded-full border px-5 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-500",
+              active === portfolio.id
+                ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:text-blue-700",
+            )}
+          >
+            {portfolio.title}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        {active === "zerodha" ? (
+          <ZerodhaRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+        ) : (
+          <IndMoneyRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function ZerodhaRebalanceStockFlowWidget({
+  formulaConfig,
+}: Pick<RebalanceStockFlowSubwidgetProps, "formulaConfig">) {
+  return (
+    <RebalanceStockFlowSubwidget
+      formulaConfig={formulaConfig}
+      portfolio="zerodha"
+    />
+  );
+}
+
+export function IndMoneyRebalanceStockFlowWidget({
+  formulaConfig,
+}: Pick<RebalanceStockFlowSubwidgetProps, "formulaConfig">) {
+  return (
+    <RebalanceStockFlowSubwidget
+      formulaConfig={formulaConfig}
+      portfolio="indmoneyUs"
+    />
+  );
+}
+
+function RebalanceStockFlowSubwidget({
+  formulaConfig,
+  portfolio: portfolioId,
+}: RebalanceStockFlowSubwidgetProps) {
   const [detailed, setDetailed] = useState(false);
   const [runs, setRuns] = useState<RunResponse[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!active || runs.length) return;
     let cancelled = false;
     void fetchDashboardRecentFullRuns()
       .then((result) => { if (!cancelled) setRuns(result); })
@@ -101,11 +203,10 @@ export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFor
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [active, runs.length]);
+  }, []);
 
   const flow = useMemo(() => {
-    const portfolio = PORTFOLIOS.find((item) => item.id === active);
-    if (!portfolio) return null;
+    const portfolio = PORTFOLIOS.find((item) => item.id === portfolioId)!;
     const swingRun = newest(runs.filter((run) => isRunInSwingTradeMarket(run.prompt, portfolio.market)));
     const rebalanceRun = newest(runs.filter((run) => isCompletedRebalanceRun(run, portfolio.market)));
     const swing = swingRun ? buildConsensusRows([swingRun], portfolio.market, null, runs) : [];
@@ -125,39 +226,15 @@ export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFor
       swingMeta: stageRunMeta(swingRun),
       rebalanceMeta: stageRunMeta(rebalanceRun),
     };
-  }, [active, formulaConfig, runs]);
+  }, [formulaConfig, portfolioId, runs]);
 
   return (
-    <section aria-label="Portfolio stock flows">
-      <div className="flex flex-wrap gap-2" role="tablist" aria-label="Stock flow portfolio">
-        {PORTFOLIOS.map((portfolio) => (
-          <button
-            key={portfolio.id}
-            type="button"
-            role="tab"
-            aria-selected={active === portfolio.id}
-            aria-controls={`${portfolio.id}-stock-flow`}
-            onClick={() => {
-              setActive((current) => current === portfolio.id ? null : portfolio.id);
-              if (!runs.length) {
-                setLoading(true);
-                setError(null);
-              }
-            }}
-            className={cn(
-              "rounded-full border px-5 py-2.5 text-sm font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-500",
-              active === portfolio.id
-                ? "border-blue-600 bg-blue-600 text-white shadow-sm"
-                : "border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:text-blue-700",
-            )}
-          >
-            {portfolio.title}
-          </button>
-        ))}
-      </div>
-
-      {active && flow ? (
-        <div id={`${active}-stock-flow`} role="tabpanel" className="mt-4 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+    <section
+      id={`${portfolioId}-rebalance-stock-flow`}
+      role="tabpanel"
+      aria-label={flow.portfolio.title}
+      className="rounded-2xl border border-slate-200 bg-white p-5"
+    >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">{flow.portfolio.title}</h2>
@@ -190,10 +267,103 @@ export function StockFlowTabs({ formulaConfig }: { formulaConfig: ScoreMatrixFor
               </Stage>
             </div>
           )}
-        </div>
-      ) : null}
     </section>
   );
+}
+
+export function RebalanceStockFlowTrigger({
+  portfolio,
+  onClick,
+}: {
+  portfolio: RebalanceStockFlowPortfolio;
+  onClick: () => void;
+}) {
+  const portfolioLabel = portfolio === "zerodha" ? "Zerodha" : "IndMoney";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex shrink-0 items-center gap-2 rounded-full border border-emerald-200 bg-white px-3.5 py-2 text-sm font-semibold text-emerald-800 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+      aria-label={`Open ${portfolioLabel} Rebalance Stock Flow`}
+      title={`Open ${portfolioLabel} Rebalance Stock Flow`}
+    >
+      <GitCompareArrows className="size-4" />
+      Stock Flow
+    </button>
+  );
+}
+
+export function RebalanceStockFlowDialog({
+  portfolio,
+  formulaConfig,
+  onClose,
+}: {
+  portfolio: RebalanceStockFlowPortfolio | null;
+  formulaConfig: ScoreMatrixFormulaConfig;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!portfolio) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onClose, portfolio]);
+
+  if (!portfolio) return null;
+  const title = PORTFOLIOS.find((item) => item.id === portfolio)!.title;
+
+  return (
+    <div
+      className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-3 sm:p-5"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rebalance-stock-flow-dialog-title"
+        className="flex max-h-[92vh] w-full max-w-[96rem] flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-slate-50 shadow-2xl"
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">
+              Rebalance Stock Flow
+            </p>
+            <h2
+              id="rebalance-stock-flow-dialog-title"
+              className="mt-1 text-xl font-bold text-slate-950"
+            >
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border border-slate-200 bg-white p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            aria-label="Close Rebalance Stock Flow"
+          >
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="min-h-0 overflow-auto p-3 sm:p-5">
+          {portfolio === "zerodha" ? (
+            <ZerodhaRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+          ) : (
+            <IndMoneyRebalanceStockFlowWidget formulaConfig={formulaConfig} />
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/** @deprecated Use RebalanceStockFlowWidget. */
+export function StockFlowTabs(props: RebalanceStockFlowWidgetProps) {
+  return <RebalanceStockFlowWidget {...props} />;
 }
 
 function Stage({ title, count, meta, children }: { title: string; count: number; meta: { models: string; timestamp: string } | null; children: ReactNode }) {

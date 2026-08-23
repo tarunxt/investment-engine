@@ -101,7 +101,12 @@ import type {
 } from "@/types/api";
 import { normalizeError } from "./dashboardOverviewUtils";
 import { StageDurationBreakdownDialog } from "./StageDurationBreakdownDialog";
-import { StockFlowTabs } from "./StockFlowTabs";
+import {
+  RebalanceStockFlowDialog,
+  RebalanceStockFlowTrigger,
+  RebalanceStockFlowWidget,
+  type RebalanceStockFlowPortfolio,
+} from "./StockFlowTabs";
 
 type WorkflowPortfolio = "zerodha" | "indmoneyUs";
 type WorkflowStageKey =
@@ -5129,6 +5134,8 @@ export function RebalanceWorkflowSections({
   const [llmDialogHistoricalCosts, setLlmDialogHistoricalCosts] =
     useState<HistoricalLlmCostMapInr>({});
   const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
+  const [stockFlowPortfolio, setStockFlowPortfolio] =
+    useState<RebalanceStockFlowPortfolio | null>(null);
   const [costHistoryGroups, setCostHistoryGroups] = useState<AutoRebalanceScanGroup[]>([]);
   const [costHistoryLoading, setCostHistoryLoading] = useState(false);
   const [costHistoryError, setCostHistoryError] = useState<string | null>(null);
@@ -8308,15 +8315,21 @@ ${zerodhaExecutionMode === "direct_market"
           ))}
         </div>
         <div className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-base font-normal text-emerald-950">
-          <div>
-            {getWorkflowRunDuration(states[section.portfolio], now)
-              ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
-              : ""}
-            Total cost incurred in last Auto-rebalance:{" "}
-            {formatInrCost(
-              getWorkflowRunCost(states[section.portfolio], usdInrRate) ||
-                lastAutoRebalanceCosts[section.portfolio],
-            )}
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <RebalanceStockFlowTrigger
+              portfolio={section.portfolio}
+              onClick={() => setStockFlowPortfolio(section.portfolio)}
+            />
+            <div>
+              {getWorkflowRunDuration(states[section.portfolio], now)
+                ? `Cumulative LLM time: ${getWorkflowRunDuration(states[section.portfolio], now)} · `
+                : ""}
+              Total cost incurred in last Auto-rebalance:{" "}
+              {formatInrCost(
+                getWorkflowRunCost(states[section.portfolio], usdInrRate) ||
+                  lastAutoRebalanceCosts[section.portfolio],
+              )}
+            </div>
           </div>
           <button
             type="button"
@@ -8343,8 +8356,14 @@ ${zerodhaExecutionMode === "direct_market"
       </section>
 
       <section className="mt-6">
-        <StockFlowTabs formulaConfig={scoreMatrixFormulaConfig} />
+        <RebalanceStockFlowWidget formulaConfig={scoreMatrixFormulaConfig} />
       </section>
+
+      <RebalanceStockFlowDialog
+        portfolio={stockFlowPortfolio}
+        formulaConfig={scoreMatrixFormulaConfig}
+        onClose={() => setStockFlowPortfolio(null)}
+      />
 
       <AutoRebalanceCostHistoryDialog
         open={Boolean(costHistoryPortfolio)}
