@@ -57,6 +57,7 @@ type PortfolioTab = Exclude<RunTab, 'bullpen'>;
 
 const PAGE_SIZE = 20;
 const API_PAGE_SIZE = 100;
+const BULLPEN_API_PAGE_SIZE = 50;
 
 function normalizeError(error: unknown) {
   if (error instanceof APIError) return error.message;
@@ -135,7 +136,7 @@ async function loadAllPortfolioRuns() {
 async function loadAllBullpenRuns() {
   const first = await apiService.getBullpenAutoLiveHistory({
     page: 1,
-    size: API_PAGE_SIZE,
+    size: BULLPEN_API_PAGE_SIZE,
   });
   if (!first.has_next) return first.items;
 
@@ -143,7 +144,7 @@ async function loadAllBullpenRuns() {
     Array.from({ length: Math.max(0, first.pages - 1) }, (_, index) =>
       apiService.getBullpenAutoLiveHistory({
         page: index + 2,
-        size: API_PAGE_SIZE,
+        size: BULLPEN_API_PAGE_SIZE,
       }),
     ),
   );
