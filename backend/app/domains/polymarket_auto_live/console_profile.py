@@ -914,11 +914,10 @@ async def scan_console_profile_markets(
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
         )
-        # The Bullpen CLI can silently cap discover at 100 rows even when a
-        # larger --limit is requested. A complete Stage 1 must not accept that
-        # truncated payload as the entire active market universe.
-        if cli_result.total_candidates >= 1_000:
-            return cli_result
+        # Bullpen CLI limits parent discovery rows, while one parent can contain
+        # multiple markets. The normalized count can therefore exceed the CLI
+        # limit without representing the complete active market universe. Always
+        # complete the scan through Gamma before treating Stage 1 as exhaustive.
     except Exception as exc:
         cli_exc = exc
 
@@ -1000,8 +999,6 @@ async def scan_console_profile_markets(
         ),
         details=redact_secrets(str(cli_exc)) if cli_exc else None,
     )
-    if cli_result is not None and gamma_result.total_candidates <= cli_result.total_candidates:
-        return cli_result
     return gamma_result
 
 
