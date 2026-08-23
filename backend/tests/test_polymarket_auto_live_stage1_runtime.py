@@ -513,3 +513,11 @@ async def test_console_scan_does_not_treat_large_cli_payload_as_complete(monkeyp
     assert result.source_label == "Polymarket Gamma API"
     assert result.total_candidates == 1
     assert [market.question for market in result.accepted] == [target_question]
+
+
+def test_console_gamma_scan_budget_allows_full_event_catalog():
+    from app.domains.polymarket_auto_live.console_profile import (
+        CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+    )
+
+    assert CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS == 90

@@ -1388,6 +1388,25 @@ export async function GET(request: NextRequest) {
   const scannedAt = new Date().toISOString();
 
   try {
+    const primaryGammaCandidates = await fetchGammaMarkets();
+    if (primaryGammaCandidates.length > 0) {
+      return NextResponse.json(
+        await buildResponse({
+          mode,
+          sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+          sourceLabel: GAMMA_SOURCE_LABEL,
+          scannedAt,
+          filters,
+          candidates: primaryGammaCandidates,
+          details: `Polymarket Gamma scanned the complete current universe of ${primaryGammaCandidates.length} active markets before filters were applied.`,
+        }),
+      );
+    }
+  } catch {
+    // Continue through the authenticated backend and legacy recovery paths.
+  }
+
+  try {
     const backendSession = await createBackendSessionContext(request);
     const preview = (await fetchBackendJsonWithSession(
       backendSession,

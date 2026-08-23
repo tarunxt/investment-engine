@@ -76,3 +76,16 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
     /fetchBullpenUiJson<ScanResult>[\s\S]{0,500}BULLPEN_SCAN_REQUEST_TIMEOUT_MS/,
   );
 });
+
+
+test("independent Stage 1 starts the complete Gamma scan before backend recovery", () => {
+  const primaryGammaIndex = routeSource.indexOf(
+    "const primaryGammaCandidates = await fetchGammaMarkets()",
+  );
+  const backendPreviewIndex = routeSource.indexOf(
+    "const backendSession = await createBackendSessionContext(request)",
+  );
+  assert.ok(primaryGammaIndex > 0);
+  assert.ok(backendPreviewIndex > primaryGammaIndex);
+  assert.match(routeSource, /complete current universe/);
+});
