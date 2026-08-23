@@ -61,7 +61,7 @@ const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_MARKETS_KEYSET_URL = `${POLYMARKET_GAMMA_MARKETS_URL}/keyset`;
 const GAMMA_PAGE_SIZE = 100;
-const GAMMA_SCAN_JOB_TTL_MS = 5 * 60 * 1000;
+const GAMMA_SCAN_JOB_TTL_MS = 15 * 60 * 1000;
 
 type GammaScanJob = {
   startedAt: number;
