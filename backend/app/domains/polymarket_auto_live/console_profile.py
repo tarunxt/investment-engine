@@ -900,28 +900,45 @@ async def scan_console_profile_markets(
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
+    cli_result: ConsoleScanResult | None = None
+    cli_exc: Exception | None = None
     try:
         parsed = await run_first_bullpen_json(
             _DISCOVER_COMMAND_VARIANTS,
             timeout_seconds=CONSOLE_DISCOVER_TIMEOUT_SECONDS,
             wait_for_login=False,
         )
-        return _build_cli_console_scan_result(
+        cli_result = _build_cli_console_scan_result(
             _collect_console_discover_rows(parsed),
             now=now,
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
         )
-    except Exception as cli_exc:
-        try:
-            gamma_scan = await asyncio.wait_for(
-                scan_candidate_markets(
-                    min_liquidity_usd=0,
-                    existing_position_slugs=set(),
-                ),
-                timeout=CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+        # The Bullpen CLI can silently cap discover at 100 rows even when a
+        # larger --limit is requested. A complete Stage 1 must not accept that
+        # truncated payload as the entire active market universe.
+        if cli_result.total_candidates >= 1_000:
+            return cli_result
+    except Exception as exc:
+        cli_exc = exc
+
+    try:
+        gamma_scan = await asyncio.wait_for(
+            scan_candidate_markets(
+                min_liquidity_usd=0,
+                existing_position_slugs=set(),
+            ),
+            timeout=CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+        )
+    except Exception as gamma_exc:
+        if cli_result is not None:
+            cli_result.warning = (
+                f"Bullpen CLI returned only {cli_result.total_candidates} rows; "
+                "the complete-market supplement was unavailable."
             )
-        except Exception as gamma_exc:
+            cli_result.details = redact_secrets(str(gamma_exc))
+            return cli_result
+        else:
             # A scan failure is safe to degrade to an empty candidate set: no
             # Stage 2 rows means no LLM calls or orders.  Most importantly,
             # do not leave the shared Auto-Live worker parked in Stage 1 while
@@ -947,39 +964,45 @@ async def scan_console_profile_markets(
                     f"CLI error: {cli_exc}; Gamma error: {gamma_exc}"
                 ),
             )
-        accepted: list[ScannedMarket] = []
-        rejected = list(gamma_scan.rejected)
-        for market in gamma_scan.accepted:
-            reasons = console_market_filter_reasons(
-                market,
-                now=now,
-                min_market_odds=min_market_odds,
-            )
-            if reasons:
-                rejected.append(
-                    ScanRejectedMarket(
-                        market_id=market.market_id,
-                        question=market.question,
-                        slug=market.slug,
-                        market_url=market.market_url,
-                        reasons=reasons,
-                    )
-                )
-                continue
-            accepted.append(market)
-        accepted.sort(key=lambda market: (market.close_time or "", market.question))
-        return ConsoleScanResult(
-            source_label=CONSOLE_GAMMA_SOURCE_LABEL,
-            source_url=gamma_scan.source_url,
-            scanned_at=gamma_scan.scanned_at,
-            accepted=accepted,
-            rejected=rejected,
-            total_candidates=len(gamma_scan.accepted) + len(gamma_scan.rejected),
-            warning=(
-                "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
-            ),
-            details=redact_secrets(str(cli_exc)),
+
+    accepted: list[ScannedMarket] = []
+    rejected = list(gamma_scan.rejected)
+    for market in gamma_scan.accepted:
+        reasons = console_market_filter_reasons(
+            market,
+            now=now,
+            min_market_odds=min_market_odds,
         )
+        if reasons:
+            rejected.append(
+                ScanRejectedMarket(
+                    market_id=market.market_id,
+                    question=market.question,
+                    slug=market.slug,
+                    market_url=market.market_url,
+                    reasons=reasons,
+                )
+            )
+            continue
+        accepted.append(market)
+    accepted.sort(key=lambda market: (market.close_time or "", market.question))
+    gamma_result = ConsoleScanResult(
+        source_label=CONSOLE_GAMMA_SOURCE_LABEL,
+        source_url=gamma_scan.source_url,
+        scanned_at=gamma_scan.scanned_at,
+        accepted=accepted,
+        rejected=rejected,
+        total_candidates=len(gamma_scan.accepted) + len(gamma_scan.rejected),
+        warning=(
+            f"Bullpen CLI returned only {cli_result.total_candidates} rows; Polymarket Gamma completed the market universe."
+            if cli_result is not None
+            else "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
+        ),
+        details=redact_secrets(str(cli_exc)) if cli_exc else None,
+    )
+    if cli_result is not None and gamma_result.total_candidates <= cli_result.total_candidates:
+        return cli_result
+    return gamma_result
 
 
 def _position_yes_no_odds(
