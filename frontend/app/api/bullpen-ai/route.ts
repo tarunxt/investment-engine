@@ -1226,6 +1226,7 @@ async function fetchGammaMarkets() {
   while (true) {
     const params = new URLSearchParams({
       closed: "false",
+      end_date_min: new Date(currentUniverseStart).toISOString(),
       limit: String(GAMMA_PAGE_SIZE),
     });
     if (cursor) params.set("after_cursor", cursor);
