@@ -73,6 +73,13 @@ test("Actionables View Output renders the shared widget natively instead of fram
   );
 });
 
+test("Actionables Calculations mounts its output widget before dispatching the open event", () => {
+  assert.match(
+    workflowSource,
+    /showStageOutput\(section\.portfolio, "actionables"\)\.then\(\(\) => \{[\s\S]*?open-actionables-calculations/,
+  );
+});
+
 test("stage cards keep every shortcut as an independent native button", () => {
   const tileStart = workflowSource.indexOf("function WorkflowStageTile");
   const tileEnd = workflowSource.indexOf("function ZerodhaBasketPreviewDialog", tileStart);
