@@ -243,6 +243,7 @@ const DEFAULT_SORT_STATE: BullpenTableSortState = {
 const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
+const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 90_000;
 
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
@@ -3005,10 +3006,14 @@ function BullpenAiPageContent() {
     }));
 
     try {
-      const { response, payload } = await fetchBullpenUiJson<ScanResult>(`/api/bullpen-ai?${params.toString()}`, {
-        cache: "no-store",
-        signal: pageRequestAbortControllerRef.current?.signal,
-      });
+      const { response, payload } = await fetchBullpenUiJson<ScanResult>(
+        `/api/bullpen-ai?${params.toString()}`,
+        {
+          cache: "no-store",
+          signal: pageRequestAbortControllerRef.current?.signal,
+        },
+        BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
+      );
       const isSuccessfulScan = response.ok && !payload.error;
 
       void positionsRefreshTask;
