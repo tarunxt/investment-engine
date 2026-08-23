@@ -1238,6 +1238,9 @@ async function fetchGammaMarkets() {
         headers: { accept: "application/json" },
       },
     );
+    if (response.status === 422 && offset > 0) {
+      return [];
+    }
     if (!response.ok) {
       throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
     }
