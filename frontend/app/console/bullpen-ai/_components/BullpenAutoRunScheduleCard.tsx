@@ -4494,10 +4494,67 @@ function Stage2TransferQueueMetricInfoDialog({
   );
 }
 
+
+function buildRunDetailScanCandidateDialogState({
+  run,
+  decisions,
+  stage,
+  mode,
+  activePositionsFallback = [],
+}: {
+  run: BullpenAutoLiveRun | null;
+  decisions: BullpenAutoLiveDecision[];
+  stage: WorkflowStageView;
+  mode: ScanCandidateDialogMode;
+  activePositionsFallback?: WorkflowStageView["activePositionsFound"];
+}): ScanCandidateDialogState {
+  const activePositionCounts = getStageActivePositionCounts(stage);
+  const stageOneStats = getStageOneStats(stage);
+  const retainedActivePositionRows =
+    stage.activePositionsFound.length > 0
+      ? stage.activePositionsFound
+      : activePositionCounts.open === activePositionsFallback.length
+        ? activePositionsFallback
+        : [];
+  const rejectedFilterCount =
+    readStageOutputNumber(stage.outputs.rejected_candidates_count) ??
+    (Array.isArray(stage.outputs.rejected_candidates)
+      ? stage.outputs.rejected_candidates.length
+      : null);
+  const detailedRows =
+    mode === "all-scanned" ? stage.scannedCandidates : stage.scanCandidates;
+  const emptyRowsReason =
+    detailedRows.length > 0
+      ? null
+      : stage.state === "current"
+        ? "Stage 1 has reported its scan total, but the detailed rows have not been published yet. This dialog updates after the run refreshes."
+        : stageOneStats.totalScanned > 0
+          ? "This saved run retained aggregate scan counts only. Individual event names and per-event filter reasons cannot be reconstructed from those counts."
+          : "No events were returned by the Stage 1 scan, so there are no event rows or per-event filter reasons to display.";
+
+  return {
+    mode,
+    scanCompletedAt: stage.timerCompletedAt,
+    totalScanned: stageOneStats.totalScanned,
+    passedFilterCount: stageOneStats.passedFilters,
+    rejectedFilterCount,
+    emptyRowsReason,
+    candidates: buildScanCandidateDialogRows({
+      candidates: detailedRows,
+      run,
+      decisions,
+    }),
+    activePositions: retainedActivePositionRows,
+    activePositionCount: activePositionCounts.open,
+    claimablePositionCount: activePositionCounts.claimable,
+  };
+}
+
 function RunDetailWorkerStages({
   run,
   decisions,
   onOpenScanFilters,
+  onOpenScanCandidateDialog,
   onOpenStageTwoInvestEvents,
   onOpenStageTwoLlmRunDetails,
   onOpenMetricDetails,
@@ -4505,11 +4562,17 @@ function RunDetailWorkerStages({
   run: BullpenAutoLiveRun;
   decisions: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
   onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenMetricDetails?: (kind: InvestMetricDialogKind) => void;
 }) {
   const workflowView = buildBullpenAutoRunWorkflowView(run);
+  const scanStage =
+    workflowView.stages.find((stage) => stage.key === "scan") ?? undefined;
   const timerNowMs = Date.parse(run.completed_at ?? run.started_at ?? "");
   const stableTimerNowMs = Number.isFinite(timerNowMs) ? timerNowMs : 0;
 
@@ -4628,6 +4691,8 @@ function RunDetailWorkerStages({
                 {stage.key === "scan" ? (
                   <StageOneRunStats
                     stage={stage}
+                    renderInteractiveRows
+                    onOpenScanCandidateDialog={onOpenScanCandidateDialog}
                     onOpenScanFilters={onOpenScanFilters}
                   />
                 ) : null}
@@ -4638,6 +4703,8 @@ function RunDetailWorkerStages({
                     decisions={decisions}
                     onOpenInvestEvents={onOpenStageTwoInvestEvents}
                     onOpenLlmRunDetails={onOpenStageTwoLlmRunDetails}
+                    onOpenScanCandidateDialog={onOpenScanCandidateDialog}
+                    scanStageForPositionSnapshot={scanStage}
                   />
                 ) : null}
               </div>
@@ -4729,6 +4796,7 @@ function RunDetailDialog({
   onClose,
   presentation = "dialog",
   onOpenScanFilters,
+  onOpenScanCandidateDialog,
   onOpenStageTwoInvestEvents,
   onOpenStageTwoLlmRunDetails,
   onOpenMetricDetails,
@@ -4737,6 +4805,10 @@ function RunDetailDialog({
   onClose: () => void;
   presentation?: "dialog" | "page";
   onOpenScanFilters?: () => void;
+  onOpenScanCandidateDialog?: (
+    stage: WorkflowStageView,
+    mode: ScanCandidateDialogMode,
+  ) => void;
   onOpenStageTwoInvestEvents?: (state: StageTwoInvestEventsDialogState) => void;
   onOpenStageTwoLlmRunDetails?: (state: StageTwoLlmRunDialogState) => void;
   onOpenMetricDetails?: (
@@ -4868,6 +4940,7 @@ function RunDetailDialog({
             run={run}
             decisions={decisions}
             onOpenScanFilters={onOpenScanFilters}
+            onOpenScanCandidateDialog={onOpenScanCandidateDialog}
             onOpenStageTwoInvestEvents={onOpenStageTwoInvestEvents}
             onOpenStageTwoLlmRunDetails={onOpenStageTwoLlmRunDetails}
             onOpenMetricDetails={
@@ -4937,6 +5010,14 @@ export function BullpenRunDetailScreen({ runId }: { runId: string }) {
   const [state, setState] = useState<RunDetailDialogState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [scanCandidateDialog, setScanCandidateDialog] =
+    useState<ScanCandidateDialogState | null>(null);
+  const [stageTwoInvestEventsDialog, setStageTwoInvestEventsDialog] =
+    useState<StageTwoInvestEventsDialogState | null>(null);
+  const [stageTwoLlmRunDialog, setStageTwoLlmRunDialog] =
+    useState<StageTwoLlmRunDialogState | null>(null);
+  const [investMetricDialog, setInvestMetricDialog] =
+    useState<InvestMetricDialogState | null>(null);
   const normalizedRunId = runId.trim();
 
   useEffect(() => {
@@ -5044,12 +5125,79 @@ export function BullpenRunDetailScreen({ runId }: { runId: string }) {
   const returnToHistory = () => router.push("/console/bullpen-ai/history");
 
   if (state) {
+    const openScanCandidateDialog = (
+      stage: WorkflowStageView,
+      mode: ScanCandidateDialogMode,
+    ) =>
+      setScanCandidateDialog(
+        buildRunDetailScanCandidateDialogState({
+          run: state.run,
+          decisions: state.decisions,
+          stage,
+          mode,
+        }),
+      );
+    const openInvestMetricDialog = (
+      run: BullpenAutoLiveRun,
+      kind: InvestMetricDialogKind,
+      detailDecisions: BullpenAutoLiveDecision[] = state.decisions,
+    ) => {
+      const stage =
+        buildBullpenAutoRunWorkflowView(run).stages.find(
+          (workflowStage) => workflowStage.key === "invest",
+        ) ?? null;
+      setInvestMetricDialog({
+        kind,
+        run,
+        stage,
+        decisions: mergeInvestStageDecisionRows({
+          stage,
+          persistedDecisions: detailDecisions,
+        }),
+      });
+    };
+
     return (
-      <RunDetailDialog
-        state={state}
-        presentation="page"
-        onClose={returnToHistory}
-      />
+      <>
+        <RunDetailDialog
+          state={state}
+          presentation="page"
+          onClose={returnToHistory}
+          onOpenScanCandidateDialog={openScanCandidateDialog}
+          onOpenStageTwoInvestEvents={setStageTwoInvestEventsDialog}
+          onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
+          onOpenMetricDetails={openInvestMetricDialog}
+        />
+        {scanCandidateDialog ? (
+          <StageOneOutputDialog
+            state={scanCandidateDialog}
+            onClose={() => setScanCandidateDialog(null)}
+          />
+        ) : null}
+        {stageTwoInvestEventsDialog ? (
+          <StageTwoInvestEventsDialog
+            state={stageTwoInvestEventsDialog}
+            onClose={() => setStageTwoInvestEventsDialog(null)}
+          />
+        ) : null}
+        {stageTwoLlmRunDialog ? (
+          <StageTwoLlmRunDetailsDialog
+            state={stageTwoLlmRunDialog}
+            onClose={() => setStageTwoLlmRunDialog(null)}
+          />
+        ) : null}
+        {investMetricDialog ? (
+          <InvestMetricDetailsDialog
+            state={investMetricDialog}
+            onClose={() => setInvestMetricDialog(null)}
+            onSelectKind={(kind) =>
+              setInvestMetricDialog((current) =>
+                current ? { ...current, kind } : null,
+              )
+            }
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -14153,6 +14301,7 @@ export function BullpenAutoRunScheduleCard({
             state={runDetailDialog}
             onClose={closeRunDetailDialog}
             onOpenScanFilters={onOpenScanFilters}
+            onOpenScanCandidateDialog={openScanCandidateDialog}
             onOpenStageTwoInvestEvents={setStageTwoInvestEventsDialog}
             onOpenStageTwoLlmRunDetails={setStageTwoLlmRunDialog}
             onOpenMetricDetails={openRunInvestMetricDialog}
