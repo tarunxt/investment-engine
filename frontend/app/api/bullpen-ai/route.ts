@@ -61,6 +61,7 @@ const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 500;
+const GAMMA_EVENT_PAGE_CONCURRENCY = 8;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
   "category",
@@ -1207,9 +1208,8 @@ async function fetchGammaMarkets() {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   const currentUniverseStart = new Date().toISOString();
   const seenEventPages = new Set<string>();
-  let offset = 0;
 
-  while (true) {
+  const fetchEventPage = async (offset: number) => {
     const params = new URLSearchParams({
       active: "true",
       archived: "false",
@@ -1218,7 +1218,6 @@ async function fetchGammaMarkets() {
       limit: String(GAMMA_EVENT_PAGE_SIZE),
       offset: String(offset),
     });
-
     const response = await fetch(
       `${POLYMARKET_GAMMA_EVENTS_URL}?${params.toString()}`,
       {
@@ -1226,15 +1225,14 @@ async function fetchGammaMarkets() {
         headers: { accept: "application/json" },
       },
     );
-
     if (!response.ok) {
       throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
     }
-
     const payload = await response.json();
-    const events = Array.isArray(payload) ? payload : [];
-    if (events.length === 0) break;
+    return Array.isArray(payload) ? payload : [];
+  };
 
+  const collectEventPage = (events: unknown[]) => {
     const pageSignature = events
       .map((event) =>
         event && typeof event === "object"
@@ -1285,8 +1283,33 @@ async function fetchGammaMarkets() {
         if (normalized) candidates.set(normalized.id, normalized);
       }
     }
+  };
 
-    offset += events.length;
+  const firstPage = await fetchEventPage(0);
+  if (firstPage.length === 0) return [];
+  collectEventPage(firstPage);
+
+  const effectivePageSize = firstPage.length;
+  let nextOffset = effectivePageSize;
+  let reachedFinalPage = false;
+  while (!reachedFinalPage) {
+    const offsets = Array.from(
+      { length: GAMMA_EVENT_PAGE_CONCURRENCY },
+      (_, index) => nextOffset + index * effectivePageSize,
+    );
+    const pages = await Promise.all(offsets.map(fetchEventPage));
+    for (const events of pages) {
+      if (events.length === 0) {
+        reachedFinalPage = true;
+        break;
+      }
+      collectEventPage(events);
+      if (events.length < effectivePageSize) {
+        reachedFinalPage = true;
+        break;
+      }
+    }
+    nextOffset += effectivePageSize * GAMMA_EVENT_PAGE_CONCURRENCY;
   }
 
   return sortQuestions(Array.from(candidates.values()));
