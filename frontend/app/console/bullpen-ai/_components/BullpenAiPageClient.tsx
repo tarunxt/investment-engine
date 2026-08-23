@@ -2988,8 +2988,10 @@ function BullpenAiPageContent() {
   async function executeBullpenScan(options?: {
     resetSelections?: boolean;
     archivePrevious?: boolean;
+    filtersOverride?: BullpenScanFilters;
   }) {
-    const params = buildBullpenScanQueryParams(activeMode, activeFilters);
+    const scanFilters = options?.filtersOverride ?? activeFilters;
+    const params = buildBullpenScanQueryParams(activeMode, scanFilters);
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
@@ -4240,9 +4242,22 @@ function BullpenAiPageContent() {
       <BullpenAutoRunScheduleCard
         independentScanSnapshot={activeCurrentSnapshot}
         onRunIndependentStageOne={async () => {
+          let independentFilters = activeFilters;
+          try {
+            const settings = await apiService.getBullpenAutoLiveSettings();
+            independentFilters = {
+              ...activeFilters,
+              minYesOdds: settings.console_min_market_odds,
+              minNoOdds: settings.console_min_market_odds,
+            };
+          } catch {
+            // The scan route still has safe filter defaults when the settings
+            // request is temporarily unavailable.
+          }
           const result = await executeBullpenScan({
             resetSelections: true,
             archivePrevious: false,
+            filtersOverride: independentFilters,
           });
           return result;
         }}

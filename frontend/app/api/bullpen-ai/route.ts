@@ -1322,19 +1322,23 @@ async function buildResponse({
     _customExcludeTweetCountQuestionsKeywords:
       filters.customExcludeTweetCountQuestionsKeywords,
   }));
-  const acceptedCandidates = candidatesWithFilters.filter(
-    (question) => getFilterReasons(question, mode, filters).length === 0,
-  );
-  const rejectedCandidates = candidatesWithFilters.filter(
-    (question) => getFilterReasons(question, mode, filters).length > 0,
+  const evaluatedCandidates = candidatesWithFilters.map((question) => ({
+    question,
+    filterReasons: getFilterReasons(question, mode, filters),
+  }));
+  const acceptedCandidates = evaluatedCandidates
+    .filter(({ filterReasons }) => filterReasons.length === 0)
+    .map(({ question }) => question);
+  const rejectedCandidates = evaluatedCandidates.filter(
+    ({ filterReasons }) => filterReasons.length > 0,
   );
   const questions = await applyCanonicalPolymarketMarketUrls(
     sortQuestions(acceptedCandidates.map((question) => stripFilterMetadata(question))),
   );
   const rejectedQuestions = sortQuestions(
-    rejectedCandidates.map((question) => ({
+    rejectedCandidates.map(({ question, filterReasons }) => ({
       ...stripFilterMetadata(question),
-      filterReasons: getFilterReasons(question, mode, filters),
+      filterReasons,
     })),
   );
 
@@ -1369,14 +1373,39 @@ export async function GET(request: NextRequest) {
       );
     }
     if (candidates.length > 0) {
+      let completeCandidates = candidates;
+      let sourceLabel = CLI_SOURCE_LABEL;
+      let sourceDetails: string | undefined;
+      if (candidates.length < CLI_DISCOVER_LIMIT) {
+        try {
+          const gammaCandidates = await fetchGammaMarkets(mode, filters);
+          const mergedCandidates = new Map(
+            candidates.map((candidate) => [candidate.id, candidate]),
+          );
+          gammaCandidates.forEach((candidate) => {
+            if (!mergedCandidates.has(candidate.id)) {
+              mergedCandidates.set(candidate.id, candidate);
+            }
+          });
+          completeCandidates = sortQuestions(Array.from(mergedCandidates.values()));
+          sourceLabel = `${CLI_SOURCE_LABEL} + ${GAMMA_SOURCE_LABEL}`;
+          sourceDetails = `Bullpen CLI returned ${candidates.length} rows; Polymarket Gamma supplemented the scan to ${completeCandidates.length} unique active events.`;
+        } catch (gammaSupplementError) {
+          sourceDetails =
+            gammaSupplementError instanceof Error
+              ? `Bullpen CLI returned ${candidates.length} rows. Gamma supplementation failed: ${gammaSupplementError.message}`
+              : `Bullpen CLI returned ${candidates.length} rows. Gamma supplementation failed.`;
+        }
+      }
       return NextResponse.json(
         await buildResponse({
           mode,
           sourceUrl,
-          sourceLabel: CLI_SOURCE_LABEL,
+          sourceLabel,
           scannedAt,
           filters,
-          candidates,
+          candidates: completeCandidates,
+          details: sourceDetails,
         }),
       );
     }

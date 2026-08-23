@@ -33,6 +33,8 @@ test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () =>
 test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
   assert.match(pageSource, /archivePrevious: false/);
   assert.match(pageSource, /onRunIndependentStageOne/);
+  assert.match(pageSource, /console_min_market_odds/);
+  assert.match(pageSource, /filtersOverride: independentFilters/);
   assert.doesNotMatch(
     cardSource,
     /handleIndependentStageOneScan[\s\S]{0,500}handleInvestOnly/,
@@ -42,6 +44,7 @@ test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
 test("independent scan retains filtered rows and reasons for Stage 1 output dialogs", () => {
   assert.match(routeSource, /rejectedQuestions/);
   assert.match(routeSource, /getFilterReasons/);
+  assert.match(routeSource, /Gamma supplemented the scan/);
   assert.match(cardSource, /scannedCandidates: \[\.\.\.acceptedCandidates, \.\.\.rejectedCandidates\]/);
   assert.match(cardSource, /independent_stage1_scan: true/);
 });
