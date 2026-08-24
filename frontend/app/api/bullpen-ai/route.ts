@@ -1380,7 +1380,6 @@ async function fetchGammaMarketPage(window: GammaScanWindow) {
       const market = marketValue as Record<string, unknown>;
       if (
         market.closed === true ||
-        market.active === false ||
         market.archived === true
       ) {
         continue;
