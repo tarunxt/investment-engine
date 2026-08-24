@@ -1480,23 +1480,34 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    for (let page = 0; page < GAMMA_PAGES_PER_POLL; page += 1) {
-      const currentWindow = gammaJob.windows[0];
-      if (!currentWindow) break;
+    const currentWindow = gammaJob.windows[0];
+    if (currentWindow) {
+      const pages = await Promise.all(
+        Array.from({ length: GAMMA_PAGES_PER_POLL }, (_, page) =>
+          fetchGammaMarketPage({
+            ...currentWindow,
+            offset:
+              currentWindow.offset + page * GAMMA_EVENT_PAGE_SIZE,
+          }),
+        ),
+      );
 
-      const { candidates, eventCount, offsetLimited } =
-        await fetchGammaMarketPage(currentWindow);
-      for (const candidate of candidates.values()) {
-        gammaJob.candidates.set(candidate.id, candidate);
+      for (const { candidates } of pages) {
+        for (const candidate of candidates.values()) {
+          gammaJob.candidates.set(candidate.id, candidate);
+        }
       }
 
-      if (offsetLimited) {
+      if (pages.some(({ offsetLimited }) => offsetLimited)) {
         const [leftWindow, rightWindow] = splitGammaScanWindow(currentWindow);
         gammaJob.windows.splice(0, 1, leftWindow, rightWindow);
-      } else if (eventCount < GAMMA_EVENT_PAGE_SIZE) {
+      } else if (
+        pages.some(({ eventCount }) => eventCount < GAMMA_EVENT_PAGE_SIZE)
+      ) {
         gammaJob.windows.shift();
       } else {
-        currentWindow.offset += GAMMA_EVENT_PAGE_SIZE;
+        currentWindow.offset +=
+          GAMMA_EVENT_PAGE_SIZE * GAMMA_PAGES_PER_POLL;
       }
     }
 
