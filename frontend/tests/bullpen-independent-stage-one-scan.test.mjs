@@ -78,7 +78,7 @@ test("independent Stage 1 advances a bounded parallel catalog batch per poll", (
   assert.match(routeSource, /__bullpenGammaScanJobs/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
   assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 25/);
-  assert.match(routeSource, /GAMMA_PAGES_PER_POLL = 1/);
+  assert.match(routeSource, /GAMMA_PAGES_PER_POLL = 3/);
   assert.match(routeSource, /Promise\.all/);
   assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 4_000/);
   assert.match(routeSource, /GAMMA_RESULT_CHUNK_SIZE = 250/);
