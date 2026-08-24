@@ -76,13 +76,13 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 
 test("independent Stage 1 advances one partitioned catalog page per poll", () => {
   assert.match(routeSource, /__bullpenGammaScanJobs/);
-  assert.match(routeSource, /status: "scanning", retryAfterMs: 1_500/);
+  assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
   assert.match(routeSource, /fetchGammaMarketPage\(currentWindow\)/);
   assert.match(routeSource, /gammaJob\.candidates\.set/);
   assert.match(routeSource, /gammaJob\.windows\.splice/);
   assert.match(routeSource, /currentWindow\.offset \+= GAMMA_EVENT_PAGE_SIZE/);
   assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
-  assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 1_500/);
+  assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
   assert.match(routeSource, /complete current universe/);
 });
