@@ -81,6 +81,11 @@ test("independent Stage 1 advances a bounded parallel catalog batch per poll", (
   assert.match(routeSource, /GAMMA_PAGES_PER_POLL = 3/);
   assert.match(routeSource, /Promise\.all/);
   assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 15_000/);
+  assert.match(routeSource, /GAMMA_RESULT_CHUNK_SIZE = 250/);
+  assert.match(routeSource, /resultChunk: true/);
+  assert.match(routeSource, /result\.questions\.slice/);
+  assert.match(pageSource, /receivedResultChunk/);
+  assert.match(pageSource, /chunkedRejectedQuestions/);
   assert.match(routeSource, /AbortSignal\.timeout\(GAMMA_PAGE_TIMEOUT_MS\)/);
   assert.match(routeSource, /retryableFailure/);
   assert.match(routeSource, /page \* GAMMA_EVENT_PAGE_SIZE/);
