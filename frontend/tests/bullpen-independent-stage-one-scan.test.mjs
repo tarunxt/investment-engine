@@ -77,9 +77,10 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 test("independent Stage 1 advances a bounded parallel catalog batch per poll", () => {
   assert.match(routeSource, /__bullpenGammaScanJobs/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
+  assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 25/);
   assert.match(routeSource, /GAMMA_PAGES_PER_POLL = 3/);
   assert.match(routeSource, /Promise\.all/);
-  assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 8_000/);
+  assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 15_000/);
   assert.match(routeSource, /AbortSignal\.timeout\(GAMMA_PAGE_TIMEOUT_MS\)/);
   assert.match(routeSource, /retryableFailure/);
   assert.match(routeSource, /page \* GAMMA_EVENT_PAGE_SIZE/);
