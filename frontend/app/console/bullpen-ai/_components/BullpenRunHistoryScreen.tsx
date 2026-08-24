@@ -21,6 +21,28 @@ import type {
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 
+const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
+
+function readCachedEventTrends(): BullpenAutoLiveEventTrendsResponse | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(EVENT_TRENDS_CACHE_KEY) || "null",
+    ) as BullpenAutoLiveEventTrendsResponse | null;
+    return parsed && Array.isArray(parsed.events) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheEventTrends(trends: BullpenAutoLiveEventTrendsResponse) {
+  try {
+    window.localStorage.setItem(EVENT_TRENDS_CACHE_KEY, JSON.stringify(trends));
+  } catch {
+    // Storage can be unavailable in private/restricted browser contexts.
+  }
+}
+
 async function fetchCurrentBullpenPositions() {
   const params = new URLSearchParams({
     caller_source: "ui-history-portfolio-refresh",
@@ -130,7 +152,9 @@ export function BullpenRunHistoryScreen() {
   const router = useRouter();
   const [page, setPage] = useState<BullpenAutoLiveHistoryPage | null>(null);
   const [trends, setTrends] =
-    useState<BullpenAutoLiveEventTrendsResponse | null>(null);
+    useState<BullpenAutoLiveEventTrendsResponse | null>(() =>
+      readCachedEventTrends(),
+    );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [trendsError, setTrendsError] = useState<string | null>(null);
@@ -171,18 +195,24 @@ export function BullpenRunHistoryScreen() {
         );
       }
       if (trendsResult.status === "fulfilled") {
-        setTrends(
+        const nextTrends =
           hasUsableCurrentPositions && currentPositions
             ? applyCurrentBullpenPositionsToEventTrends(
                 trendsResult.value,
                 currentPositions,
               )
-            : trendsResult.value,
-        );
+            : trendsResult.value;
+        setTrends(nextTrends);
+        cacheEventTrends(nextTrends);
       } else {
-        setTrendsError(
-          `Event trends are temporarily unavailable. ${formatUnknownError(trendsResult.reason)}`,
-        );
+        const cachedTrends = readCachedEventTrends();
+        if (cachedTrends) {
+          setTrends(cachedTrends);
+        } else {
+          setTrendsError(
+            `Event trends are temporarily unavailable. ${formatUnknownError(trendsResult.reason)}`,
+          );
+        }
       }
       setPortfolioVersion((version) => version + 1);
     } catch (cause) {
