@@ -77,6 +77,12 @@ type GammaScanJob = {
   windows: GammaScanWindow[];
   candidates: Map<string, FilterableBullpenQuestion>;
   result?: Awaited<ReturnType<typeof buildResponse>>;
+  evaluationCandidates?: FilterableBullpenQuestion[];
+  evaluationOffset: number;
+  evaluatedQuestions: Awaited<ReturnType<typeof buildResponse>>["questions"];
+  evaluatedRejectedQuestions: Awaited<
+    ReturnType<typeof buildResponse>
+  >["rejectedQuestions"];
   acceptedOffset: number;
   rejectedOffset: number;
 };
@@ -1509,6 +1515,9 @@ export async function GET(request: NextRequest) {
       scannedAt,
       windows: buildGammaScanWindows(scannedAt),
       candidates: new Map<string, FilterableBullpenQuestion>(),
+      evaluationOffset: 0,
+      evaluatedQuestions: [],
+      evaluatedRejectedQuestions: [],
       acceptedOffset: 0,
       rejectedOffset: 0,
     };
@@ -1574,21 +1583,51 @@ export async function GET(request: NextRequest) {
     }
 
     if (!gammaJob.result) {
-      const allCandidates = sortQuestions(
-        Array.from(gammaJob.candidates.values()),
-      );
+      const allCandidates =
+        gammaJob.evaluationCandidates ??
+        sortQuestions(Array.from(gammaJob.candidates.values()));
       if (allCandidates.length === 0) {
         throw new Error("Polymarket Gamma returned no active current markets");
       }
-      gammaJob.result = await buildResponse({
+      gammaJob.evaluationCandidates = allCandidates;
+      const evaluationCandidates = allCandidates.slice(
+        gammaJob.evaluationOffset,
+        gammaJob.evaluationOffset + GAMMA_RESULT_CHUNK_SIZE,
+      );
+      const partialResult = await buildResponse({
         mode,
         sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
         sourceLabel: GAMMA_SOURCE_LABEL,
         scannedAt: gammaJob.scannedAt,
         filters,
-        candidates: allCandidates,
-        details: `Polymarket Gamma scanned the complete current universe of ${allCandidates.length} active markets before filters were applied.`,
+        candidates: evaluationCandidates,
       });
+      gammaJob.evaluatedQuestions.push(...partialResult.questions);
+      gammaJob.evaluatedRejectedQuestions.push(
+        ...partialResult.rejectedQuestions,
+      );
+      gammaJob.evaluationOffset += evaluationCandidates.length;
+
+      if (gammaJob.evaluationOffset < allCandidates.length) {
+        return NextResponse.json(
+          {
+            status: "scanning",
+            retryAfterMs: 50,
+            phase: "evaluating",
+            candidateCount: allCandidates.length,
+            evaluatedCount: gammaJob.evaluationOffset,
+          },
+          { status: 202 },
+        );
+      }
+
+      gammaJob.result = {
+        ...partialResult,
+        totalCandidates: allCandidates.length,
+        questions: gammaJob.evaluatedQuestions,
+        rejectedQuestions: gammaJob.evaluatedRejectedQuestions,
+        details: `Polymarket Gamma scanned the complete current universe of ${allCandidates.length} active markets before filters were applied.`,
+      };
     }
 
     const result = gammaJob.result;
