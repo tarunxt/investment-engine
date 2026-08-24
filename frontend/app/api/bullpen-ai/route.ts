@@ -61,6 +61,7 @@ const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 100;
 const GAMMA_PAGES_PER_POLL = 3;
+const GAMMA_PAGE_TIMEOUT_MS = 8_000;
 const GAMMA_SCAN_JOB_TTL_MS = 45 * 60 * 1000;
 
 type GammaScanWindow = {
@@ -1301,15 +1302,47 @@ async function fetchGammaMarketPage(window: GammaScanWindow) {
     offset: String(window.offset),
   });
 
-  const response = await fetch(
-    `${POLYMARKET_GAMMA_EVENTS_URL}?${params.toString()}`,
-    {
-      cache: "no-store",
-      headers: { accept: "application/json" },
-    },
-  );
+  let response: Response;
+  try {
+    response = await fetch(
+      `${POLYMARKET_GAMMA_EVENTS_URL}?${params.toString()}`,
+      {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(GAMMA_PAGE_TIMEOUT_MS),
+      },
+    );
+  } catch (error: unknown) {
+    const name = error instanceof Error ? error.name : "";
+    if (
+      error instanceof TypeError ||
+      name === "AbortError" ||
+      name === "TimeoutError"
+    ) {
+      return {
+        candidates,
+        eventCount: 0,
+        offsetLimited: false,
+        retryableFailure: true,
+      };
+    }
+    throw error;
+  }
   if (response.status === 422 && window.offset > 0) {
-    return { candidates, eventCount: 0, offsetLimited: true };
+    return {
+      candidates,
+      eventCount: 0,
+      offsetLimited: true,
+      retryableFailure: false,
+    };
+  }
+  if (response.status === 429 || response.status >= 500) {
+    return {
+      candidates,
+      eventCount: 0,
+      offsetLimited: false,
+      retryableFailure: true,
+    };
   }
   if (!response.ok) {
     throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
@@ -1359,6 +1392,7 @@ async function fetchGammaMarketPage(window: GammaScanWindow) {
     candidates,
     eventCount: events.length,
     offsetLimited: false,
+    retryableFailure: false,
   };
 }
 
@@ -1498,7 +1532,17 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      if (pages.some(({ offsetLimited }) => offsetLimited)) {
+      if (pages.some(({ retryableFailure }) => retryableFailure)) {
+        return NextResponse.json(
+          {
+            status: "scanning",
+            retryAfterMs: 1_000,
+            candidateCount: gammaJob.candidates.size,
+            windowsRemaining: gammaJob.windows.length,
+          },
+          { status: 202 },
+        );
+      } else if (pages.some(({ offsetLimited }) => offsetLimited)) {
         const [leftWindow, rightWindow] = splitGammaScanWindow(currentWindow);
         gammaJob.windows.splice(0, 1, leftWindow, rightWindow);
       } else if (
