@@ -61,7 +61,7 @@ const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 25;
 const GAMMA_PAGES_PER_POLL = 3;
-const GAMMA_PAGE_TIMEOUT_MS = 15_000;
+const GAMMA_PAGE_TIMEOUT_MS = 8_000;
 const GAMMA_RESULT_CHUNK_SIZE = 250;
 const GAMMA_SCAN_JOB_TTL_MS = 45 * 60 * 1000;
 
