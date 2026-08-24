@@ -84,7 +84,11 @@ test("independent Stage 1 carries stateless keyset progress in each poll", () =>
   assert.match(routeSource, /searchParams\.get\("scanStartedAt"\)/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
   assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
-  assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 8_000/);
+  assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 20_000/);
+  assert.match(routeSource, /GAMMA_TERMINAL_CURSOR = "LTE="/);
+  assert.match(routeSource, /markets\.length < GAMMA_MARKET_PAGE_SIZE/);
+  assert.match(routeSource, /rawNextCursor === GAMMA_TERMINAL_CURSOR/);
+  assert.match(routeSource, /rawNextCursor === cursor/);
   assert.match(routeSource, /resultChunk: true/);
   assert.match(routeSource, /nextCursor/);
   assert.match(routeSource, /scanStartedAt: scannedAt/);
