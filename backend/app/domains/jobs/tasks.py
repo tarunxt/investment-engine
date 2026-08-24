@@ -693,10 +693,15 @@ def _classify_exc(exc: Exception, attempt: int = 0) -> tuple[bool, int]:
         for marker in (
             "returned malformed table output",
             "returned insufficient recommendations",
-            "returned empty output after generation",
         )
     ):
         return False, 0
+
+    # An HTTP-success response with no generated content is transient. The
+    # provider already performs bounded in-call recovery; allow Celery to retry
+    # the whole idempotent job if those attempts are also empty.
+    if "returned empty output after generation" in text:
+        return (attempt < 3), 30 * (2 ** attempt)
 
     if attempt >= 3:
         return False, 0  # don't retry after max attempts

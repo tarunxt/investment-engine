@@ -59,6 +59,7 @@ _SYSTEM_MESSAGE: dict = {
 
 _MAX_TOOL_ROUNDS = 8
 _MAX_DSML_RECOVERY_SEARCHES = 4
+_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS = 2
 _DISABLE_TOOL_MARKER = "[STAGE2_SHARED_EVIDENCE_ONLY]"
 
 
@@ -420,29 +421,44 @@ class DeepSeekProvider(BaseAIProvider):
         # If tool loop did not produce final content, force a final assistant turn
         # without tools so we don't silently return empty output.
         if not content:
-            final_response = self.client.chat.completions.create(
-                model=model,
-                messages=messages
-                + [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Stop calling tools now. Produce the final answer immediately "
-                            "in the exact format requested by the user."
-                        ),
-                    }
-                ],
-                tool_choice="none",
-            )
-            final_usage = getattr(final_response, "usage", None)
-            final_token_usage = self._token_usage_from_response_usage(final_usage)
-            total_tokens_in += final_token_usage["tokens_in"]
-            total_tokens_out += final_token_usage["tokens_out"]
-            total_cache_hit_tokens += final_token_usage["cache_hit_tokens"]
-            total_cache_miss_tokens += final_token_usage["cache_miss_tokens"]
-            final_choices = getattr(final_response, "choices", []) or []
-            if final_choices:
-                content = getattr(final_choices[0].message, "content", "") or ""
+            # DeepSeek can occasionally return HTTP 200 with an empty choice/content,
+            # especially after a tool round. Treat that as a transient provider
+            # response and make bounded no-tool recovery attempts before handing the
+            # job back to Celery's retry policy.
+            for recovery_attempt in range(_MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS):
+                final_response = self.client.chat.completions.create(
+                    model=model,
+                    messages=messages
+                    + [
+                        {
+                            "role": "system",
+                            "content": (
+                                "The previous generation returned no final content. "
+                                "Do not call tools. Produce the complete final answer now "
+                                "in the exact format requested by the user."
+                            ),
+                        }
+                    ],
+                    tool_choice="none",
+                )
+                final_usage = getattr(final_response, "usage", None)
+                final_token_usage = self._token_usage_from_response_usage(final_usage)
+                total_tokens_in += final_token_usage["tokens_in"]
+                total_tokens_out += final_token_usage["tokens_out"]
+                total_cache_hit_tokens += final_token_usage["cache_hit_tokens"]
+                total_cache_miss_tokens += final_token_usage["cache_miss_tokens"]
+                final_choices = getattr(final_response, "choices", []) or []
+                if final_choices:
+                    content = (
+                        getattr(final_choices[0].message, "content", "") or ""
+                    ).strip()
+                if content:
+                    break
+                logger.warning(
+                    "DeepSeek returned empty final content on recovery attempt %d/%d",
+                    recovery_attempt + 1,
+                    _MAX_EMPTY_FINAL_RECOVERY_ATTEMPTS,
+                )
 
         cleaned = content.strip()
         if _looks_like_tool_trace(cleaned):
