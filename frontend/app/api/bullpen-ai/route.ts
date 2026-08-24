@@ -1546,7 +1546,30 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      if (pages.some(({ retryableFailure }) => retryableFailure)) {
+      const firstRetryablePageIndex = pages.findIndex(
+        ({ retryableFailure }) => retryableFailure,
+      );
+      const completedPageCount =
+        firstRetryablePageIndex === -1
+          ? pages.length
+          : firstRetryablePageIndex;
+      const completedPages = pages.slice(0, completedPageCount);
+
+      if (completedPages.some(({ offsetLimited }) => offsetLimited)) {
+        const [leftWindow, rightWindow] = splitGammaScanWindow(currentWindow);
+        gammaJob.windows.splice(0, 1, leftWindow, rightWindow);
+      } else if (
+        completedPages.some(
+          ({ eventCount }) => eventCount < GAMMA_EVENT_PAGE_SIZE,
+        )
+      ) {
+        gammaJob.windows.shift();
+      } else if (completedPageCount > 0) {
+        currentWindow.offset +=
+          GAMMA_EVENT_PAGE_SIZE * completedPageCount;
+      }
+
+      if (firstRetryablePageIndex !== -1) {
         return NextResponse.json(
           {
             status: "scanning",
@@ -1556,16 +1579,6 @@ export async function GET(request: NextRequest) {
           },
           { status: 202 },
         );
-      } else if (pages.some(({ offsetLimited }) => offsetLimited)) {
-        const [leftWindow, rightWindow] = splitGammaScanWindow(currentWindow);
-        gammaJob.windows.splice(0, 1, leftWindow, rightWindow);
-      } else if (
-        pages.some(({ eventCount }) => eventCount < GAMMA_EVENT_PAGE_SIZE)
-      ) {
-        gammaJob.windows.shift();
-      } else {
-        currentWindow.offset +=
-          GAMMA_EVENT_PAGE_SIZE * GAMMA_PAGES_PER_POLL;
       }
     }
 
