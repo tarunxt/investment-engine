@@ -18,6 +18,41 @@ from app.domains.ai_providers.deepseek import (
 
 
 class DeepSeekProviderTests(unittest.TestCase):
+    @patch("app.domains.ai_providers.deepseek.OpenAI")
+    def test_generate_recovers_when_first_final_responses_are_empty(
+        self, openai_cls_mock
+    ):
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = [
+            SimpleNamespace(usage=None, choices=[]),
+            SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=0),
+                choices=[SimpleNamespace(message=SimpleNamespace(content=""))],
+            ),
+            SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=20, completion_tokens=8),
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Recovered final answer", tool_calls=None
+                        )
+                    )
+                ],
+            ),
+        ]
+        openai_cls_mock.return_value = mock_client
+
+        result = DeepSeekProvider().generate(
+            prompt="Return a concise answer", model="deepseek-v4-flash"
+        )
+
+        self.assertEqual(result.content, "Recovered final answer")
+        self.assertEqual(mock_client.chat.completions.create.call_count, 3)
+        self.assertEqual(
+            mock_client.chat.completions.create.call_args_list[-1].kwargs["tool_choice"],
+            "none",
+        )
+
     def test_extract_dsml_web_search_calls_parses_queries(self):
         dsml = (
             "<｜｜DSML｜｜tool_calls>\n"
