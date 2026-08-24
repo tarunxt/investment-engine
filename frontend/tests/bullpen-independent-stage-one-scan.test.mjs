@@ -98,7 +98,13 @@ test("independent Stage 1 advances a bounded parallel catalog batch per poll", (
   assert.match(routeSource, /fetchGammaMarketPage\(\{/);
   assert.match(routeSource, /gammaJob\.candidates\.set/);
   assert.match(routeSource, /gammaJob\.windows\.splice/);
-  assert.match(routeSource, /currentWindow\.offset \+= GAMMA_EVENT_PAGE_SIZE/);
+  assert.match(routeSource, /firstRetryablePageIndex/);
+  assert.match(routeSource, /completedPageCount/);
+  assert.match(routeSource, /pages\.slice\(0, completedPageCount\)/);
+  assert.match(
+    routeSource,
+    /currentWindow\.offset \+=[\s\S]{0,80}GAMMA_EVENT_PAGE_SIZE \* completedPageCount/,
+  );
   assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
   assert.match(pageSource, /BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000/);
