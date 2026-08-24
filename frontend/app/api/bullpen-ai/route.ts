@@ -1473,7 +1473,7 @@ export async function GET(request: NextRequest) {
     };
     gammaScanJobs.set(gammaScanJobKey, gammaJob);
     return NextResponse.json(
-      { status: "scanning", retryAfterMs: 1_500 },
+      { status: "scanning", retryAfterMs: 250 },
       { status: 202 },
     );
   }
@@ -1497,7 +1497,7 @@ export async function GET(request: NextRequest) {
       }
 
       return NextResponse.json(
-        { status: "scanning", retryAfterMs: 1_500 },
+        { status: "scanning", retryAfterMs: 250 },
         { status: 202 },
       );
     }
