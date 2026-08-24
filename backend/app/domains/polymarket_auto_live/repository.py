@@ -1254,7 +1254,7 @@ class AsyncPolymarketAutoLiveRepository:
         run_rows = (await self.session.execute(
             select(
                 run.id,
-                run.payload["stage_results"].label("trend_stage_results"),
+                run.console_projection["stage_results"].label("trend_stage_results"),
                 run.started_at,
                 run.completed_at,
                 run.updated_at,
@@ -1312,8 +1312,10 @@ class AsyncPolymarketAutoLiveRepository:
                 entry["title"] = title
             return entry
 
-        # Stage 2 is the source of truth for the scan circles. Read only the
-        # stage_results JSON slice so History does not hydrate complete run payloads.
+        # Stage 2 is the source of truth for the scan circles. Read the bounded
+        # console projection rather than the immutable full run payload: the latter
+        # can contain the complete market universe and provider evidence for every
+        # scan, which makes this first-paint query exceed its browser budget.
         for run_row in run_rows:
             index = run_index[str(run_row.id)]
             raw_stages = run_row.trend_stage_results
@@ -1490,7 +1492,7 @@ class AsyncPolymarketAutoLiveRepository:
             decision.market_title, decision.side, decision.decision,
             decision.risk_status, decision.edge_pp, decision.score,
             decision.console_projection,
-            decision.payload["llm_outputs"].label("trend_llm_outputs"),
+            decision.console_projection["llm_outputs"].label("trend_llm_outputs"),
             decision.created_at, decision.updated_at,
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
           .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
