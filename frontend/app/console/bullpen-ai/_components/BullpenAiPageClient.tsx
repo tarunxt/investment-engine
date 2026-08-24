@@ -244,7 +244,7 @@ const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
 const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 1_800_000;
-const BULLPEN_SCAN_POLL_MS = 1_500;
+const BULLPEN_SCAN_POLL_MS = 250;
 
 const AWS_EC2_TERMINAL_URL =
   "https://ap-south-1.console.aws.amazon.com/ec2-instance-connect/ssh/home?addressFamily=ipv4&connType=standard&instanceId=i-0b8ad0aebce8510cb&osUser=ubuntu&region=ap-south-1&sshPort=22";
