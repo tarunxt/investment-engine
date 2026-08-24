@@ -62,6 +62,7 @@ const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 25;
 const GAMMA_PAGES_PER_POLL = 3;
 const GAMMA_PAGE_TIMEOUT_MS = 15_000;
+const GAMMA_RESULT_CHUNK_SIZE = 250;
 const GAMMA_SCAN_JOB_TTL_MS = 45 * 60 * 1000;
 
 type GammaScanWindow = {
@@ -75,6 +76,9 @@ type GammaScanJob = {
   scannedAt: string;
   windows: GammaScanWindow[];
   candidates: Map<string, FilterableBullpenQuestion>;
+  result?: Awaited<ReturnType<typeof buildResponse>>;
+  acceptedOffset: number;
+  rejectedOffset: number;
 };
 
 const gammaScanJobGlobal = globalThis as typeof globalThis & {
@@ -1505,6 +1509,8 @@ export async function GET(request: NextRequest) {
       scannedAt,
       windows: buildGammaScanWindows(scannedAt),
       candidates: new Map<string, FilterableBullpenQuestion>(),
+      acceptedOffset: 0,
+      rejectedOffset: 0,
     };
     gammaScanJobs.set(gammaScanJobKey, gammaJob);
     return NextResponse.json(
@@ -1567,23 +1573,57 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const allCandidates = sortQuestions(
-      Array.from(gammaJob.candidates.values()),
-    );
-    if (allCandidates.length === 0) {
-      throw new Error("Polymarket Gamma returned no active current markets");
+    if (!gammaJob.result) {
+      const allCandidates = sortQuestions(
+        Array.from(gammaJob.candidates.values()),
+      );
+      if (allCandidates.length === 0) {
+        throw new Error("Polymarket Gamma returned no active current markets");
+      }
+      gammaJob.result = await buildResponse({
+        mode,
+        sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+        sourceLabel: GAMMA_SOURCE_LABEL,
+        scannedAt: gammaJob.scannedAt,
+        filters,
+        candidates: allCandidates,
+        details: `Polymarket Gamma scanned the complete current universe of ${allCandidates.length} active markets before filters were applied.`,
+      });
     }
-    const result = await buildResponse({
-      mode,
-      sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
-      sourceLabel: GAMMA_SOURCE_LABEL,
-      scannedAt: gammaJob.scannedAt,
-      filters,
-      candidates: allCandidates,
-      details: `Polymarket Gamma scanned the complete current universe of ${allCandidates.length} active markets before filters were applied.`,
-    });
-    gammaScanJobs.delete(gammaScanJobKey);
-    return NextResponse.json(result);
+
+    const result = gammaJob.result;
+    const questions = result.questions.slice(
+      gammaJob.acceptedOffset,
+      gammaJob.acceptedOffset + GAMMA_RESULT_CHUNK_SIZE,
+    );
+    gammaJob.acceptedOffset += questions.length;
+    const remainingChunkCapacity =
+      GAMMA_RESULT_CHUNK_SIZE - questions.length;
+    const rejectedQuestions = result.rejectedQuestions.slice(
+      gammaJob.rejectedOffset,
+      gammaJob.rejectedOffset + remainingChunkCapacity,
+    );
+    gammaJob.rejectedOffset += rejectedQuestions.length;
+    const complete =
+      gammaJob.acceptedOffset >= result.questions.length &&
+      gammaJob.rejectedOffset >= result.rejectedQuestions.length;
+    const chunk = {
+      ...result,
+      questions,
+      rejectedQuestions,
+      resultChunk: true,
+      ...(complete
+        ? {}
+        : {
+            status: "scanning",
+            retryAfterMs: 50,
+          }),
+    };
+
+    if (complete) {
+      gammaScanJobs.delete(gammaScanJobKey);
+    }
+    return NextResponse.json(chunk, { status: complete ? 200 : 202 });
   } catch (error: unknown) {
     gammaScanJobs.delete(gammaScanJobKey);
     const message =
