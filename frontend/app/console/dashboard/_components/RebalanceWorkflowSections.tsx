@@ -2132,12 +2132,12 @@ function isSheetExportError(error?: string | null) {
 }
 
 function isInsufficientBalanceError(error?: string | null) {
-  return /insufficient\s+balance/i.test(error ?? "");
+  return /insufficient\s+(?:balance|quota)|no\s+credits?\s+remaining|add\s+credits?\s+to\s+continue/i.test(error ?? "");
 }
 
 function formatBriefTileError(error?: string | null) {
   if (!error?.trim() || isSheetExportError(error)) return "None";
-  if (isInsufficientBalanceError(error)) return "Error: Deepseek- insifficent balance";
+  if (isInsufficientBalanceError(error)) return "DeepSeek credits were insufficient for this run";
   const trimmed = error.trim().replace(/\s+/g, " ");
   return trimmed.length > 96 ? `${trimmed.slice(0, 93)}…` : trimmed;
 }
@@ -2463,7 +2463,7 @@ function isRunForStageHistory(
   const prompt = run.prompt || "";
   if (stage === "swing") return isRunInSwingTradeMarket(prompt, market);
   if (stage === "rebalance") return isCompletedRebalanceRun(run, market);
-  if (stage === "technical") return isCompletedTechnicalScanRun(run, market);
+  if (stage === "technical") return isTechnicalScanRun(run, market);
   if (stage === "threats") {
     const marker = portfolio === "zerodha" ? "[ZERODHA_THREATS]" : "[INDMONEY_US_THREATS]";
     return prompt.includes(marker) || /Threat Scan Flow/i.test(prompt);
@@ -6882,7 +6882,7 @@ ${zerodhaExecutionMode === "direct_market"
               if (stage === "rebalance")
                 return isCompletedRebalanceRun(run, market);
               if (stage === "technical")
-                return isCompletedTechnicalScanRun(run, market);
+                return isTechnicalScanRun(run, market);
               return false;
             }),
           )[0];
