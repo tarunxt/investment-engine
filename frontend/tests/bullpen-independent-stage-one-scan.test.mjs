@@ -50,17 +50,15 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
 });
 
 
-test("Stage 1 scans the complete active Gamma universe before applying filters", () => {
-  assert.match(routeSource, /POLYMARKET_GAMMA_EVENTS_URL/);
+test("Stage 1 scans the complete open Gamma universe before applying filters", () => {
+  assert.match(routeSource, /POLYMARKET_GAMMA_MARKETS_KEYSET_URL/);
+  assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
+  assert.match(routeSource, /after_cursor/);
+  assert.match(routeSource, /next_cursor/);
+  assert.match(routeSource, /end_date_min: currentUniverseStart\.toISOString\(\)/);
+  assert.match(routeSource, /toArray\(market\.events\)\.find/);
+  assert.match(routeSource, /eventIdentity \? \[eventIdentity\] : \[\]/);
   assert.doesNotMatch(routeSource, /active: "true"/);
-  assert.match(routeSource, /end_date_min: window\.start/);
-  assert.match(routeSource, /end_date_max: window\.end/);
-  assert.match(routeSource, /buildGammaScanWindows/);
-  assert.match(routeSource, /let spanYears = 1/);
-  assert.match(routeSource, /spanYears = Math\.min\(spanYears \* 2, 32\)/);
-  assert.match(routeSource, /splitGammaScanWindow/);
-  assert.match(routeSource, /response\.status === 422 && window\.offset > 0/);
-  assert.match(routeSource, /toArray\(event\.markets\)/);
   assert.doesNotMatch(routeSource, /event\.active === false/);
   assert.doesNotMatch(routeSource, /market\.active === false/);
   assert.match(routeSource, /market\.closed === true/);
@@ -69,7 +67,6 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.match(routeSource, /scanned the complete current universe/);
 });
-
 
 test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
   assert.match(pageSource, /BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 3_600_000/);
@@ -80,12 +77,10 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 });
 
 
-test("independent Stage 1 advances a bounded parallel catalog batch per poll", () => {
+test("independent Stage 1 advances proxy-safe keyset pages per poll", () => {
   assert.match(routeSource, /__bullpenGammaScanJobs/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
-  assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 10/);
-  assert.match(routeSource, /GAMMA_PAGES_PER_POLL = 6/);
-  assert.match(routeSource, /Promise\.all/);
+  assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
   assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 8_000/);
   assert.match(routeSource, /GAMMA_RESULT_CHUNK_SIZE = 250/);
   assert.match(routeSource, /resultChunk: true/);
@@ -97,17 +92,11 @@ test("independent Stage 1 advances a bounded parallel catalog batch per poll", (
   assert.match(pageSource, /chunkedRejectedQuestions/);
   assert.match(routeSource, /AbortSignal\.timeout\(GAMMA_PAGE_TIMEOUT_MS\)/);
   assert.match(routeSource, /retryableFailure/);
-  assert.match(routeSource, /page \* GAMMA_EVENT_PAGE_SIZE/);
   assert.match(routeSource, /fetchGammaMarketPage\(\{/);
   assert.match(routeSource, /gammaJob\.candidates\.set/);
-  assert.match(routeSource, /gammaJob\.windows\.splice/);
-  assert.match(routeSource, /firstRetryablePageIndex/);
-  assert.match(routeSource, /completedPageCount/);
-  assert.match(routeSource, /pages\.slice\(0, completedPageCount\)/);
-  assert.match(
-    routeSource,
-    /currentWindow\.offset \+=[\s\S]{0,80}GAMMA_EVENT_PAGE_SIZE \* completedPageCount/,
-  );
+  assert.match(routeSource, /gammaJob\.cursor = nextCursor/);
+  assert.match(routeSource, /seenCursors/);
+  assert.doesNotMatch(routeSource, /GAMMA_PAGES_PER_POLL/);
   assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
   assert.match(pageSource, /BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000/);

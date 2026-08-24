@@ -58,23 +58,17 @@ const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
-const GAMMA_EVENT_PAGE_SIZE = 10;
-const GAMMA_PAGES_PER_POLL = 6;
+const POLYMARKET_GAMMA_MARKETS_KEYSET_URL = `${POLYMARKET_GAMMA_MARKETS_URL}/keyset`;
+const GAMMA_MARKET_PAGE_SIZE = 100;
 const GAMMA_PAGE_TIMEOUT_MS = 8_000;
 const GAMMA_RESULT_CHUNK_SIZE = 250;
 const GAMMA_SCAN_JOB_TTL_MS = 90 * 60 * 1000;
 
-type GammaScanWindow = {
-  start: string;
-  end: string;
-  offset: number;
-};
-
 type GammaScanJob = {
   startedAt: number;
   scannedAt: string;
-  windows: GammaScanWindow[];
+  cursor: string | null;
+  seenCursors: Set<string>;
   candidates: Map<string, FilterableBullpenQuestion>;
   result?: Awaited<ReturnType<typeof buildResponse>>;
   evaluationCandidates?: FilterableBullpenQuestion[];
@@ -1263,60 +1257,26 @@ async function runBullpenDiscover() {
   return fetchBackendRuntimeJson("/polymarket/runtime/discover");
 }
 
-function buildGammaScanWindows(scannedAt: string) {
-  const windows: GammaScanWindow[] = [];
-  let start = new Date(scannedAt);
-  const horizon = new Date(Date.UTC(2101, 0, 1));
-  let spanYears = 1;
-
-  while (start < horizon) {
-    const end = new Date(
-      Date.UTC(
-        Math.min(start.getUTCFullYear() + spanYears, 2101),
-        start.getUTCMonth(),
-        start.getUTCDate(),
-        start.getUTCHours(),
-        start.getUTCMinutes(),
-        start.getUTCSeconds(),
-        start.getUTCMilliseconds(),
-      ),
-    );
-    windows.push({
-      start: start.toISOString(),
-      end: (end < horizon ? end : horizon).toISOString(),
-      offset: 0,
-    });
-    start = end;
-    spanYears = Math.min(spanYears * 2, 32);
-  }
-  return windows;
-}
-
-function splitGammaScanWindow(window: GammaScanWindow) {
-  const startMs = new Date(window.start).getTime();
-  const endMs = new Date(window.end).getTime();
-  const midpoint = new Date(startMs + Math.floor((endMs - startMs) / 2));
-  return [
-    { start: window.start, end: midpoint.toISOString(), offset: 0 },
-    { start: midpoint.toISOString(), end: window.end, offset: 0 },
-  ];
-}
-
-async function fetchGammaMarketPage(window: GammaScanWindow) {
+async function fetchGammaMarketPage({
+  cursor,
+  currentUniverseStart,
+}: {
+  cursor: string | null;
+  currentUniverseStart: Date;
+}) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   const params = new URLSearchParams({
     archived: "false",
     closed: "false",
-    end_date_min: window.start,
-    end_date_max: window.end,
-    limit: String(GAMMA_EVENT_PAGE_SIZE),
-    offset: String(window.offset),
+    end_date_min: currentUniverseStart.toISOString(),
+    limit: String(GAMMA_MARKET_PAGE_SIZE),
   });
+  if (cursor) params.set("after_cursor", cursor);
 
   let response: Response;
   try {
     response = await fetch(
-      `${POLYMARKET_GAMMA_EVENTS_URL}?${params.toString()}`,
+      `${POLYMARKET_GAMMA_MARKETS_KEYSET_URL}?${params.toString()}`,
       {
         cache: "no-store",
         headers: { accept: "application/json" },
@@ -1330,79 +1290,58 @@ async function fetchGammaMarketPage(window: GammaScanWindow) {
       name === "AbortError" ||
       name === "TimeoutError"
     ) {
-      return {
-        candidates,
-        eventCount: 0,
-        offsetLimited: false,
-        retryableFailure: true,
-      };
+      return { candidates, nextCursor: cursor, retryableFailure: true };
     }
     throw error;
   }
-  if (response.status === 422 && window.offset > 0) {
-    return {
-      candidates,
-      eventCount: 0,
-      offsetLimited: true,
-      retryableFailure: false,
-    };
-  }
   if (response.status === 429 || response.status >= 500) {
-    return {
-      candidates,
-      eventCount: 0,
-      offsetLimited: false,
-      retryableFailure: true,
-    };
+    return { candidates, nextCursor: cursor, retryableFailure: true };
   }
   if (!response.ok) {
     throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
   }
 
-  const payload = await response.json();
-  const events = Array.isArray(payload) ? payload : [];
-  for (const eventValue of events) {
-    if (!eventValue || typeof eventValue !== "object") continue;
-    const event = eventValue as Record<string, unknown>;
-    if (
-      event.closed === true ||
-      event.archived === true
-    ) {
+  const payload = (await response.json()) as Record<string, unknown>;
+  const markets = Array.isArray(payload.markets) ? payload.markets : [];
+  for (const marketValue of markets) {
+    if (!marketValue || typeof marketValue !== "object") continue;
+    const market = marketValue as Record<string, unknown>;
+    if (market.closed === true || market.archived === true) continue;
+
+    const parentEvent = toArray(market.events).find(
+      (value): value is Record<string, unknown> =>
+        Boolean(value) && typeof value === "object",
+    );
+    const eventIdentity = parentEvent
+      ? {
+          id: parentEvent.id,
+          slug: parentEvent.slug,
+          title: parentEvent.title,
+        }
+      : null;
+    const marketForNormalization = Object.fromEntries(
+      GAMMA_MARKET_NORMALIZATION_KEYS.flatMap((key) =>
+        key in market ? [[key, market[key]]] : [],
+      ),
+    );
+    marketForNormalization.events = eventIdentity ? [eventIdentity] : [];
+    const normalized = normalizeGammaMarket(
+      marketForNormalization,
+      POLYMARKET_GAMMA_MARKETS_URL,
+    );
+    if (!normalized) continue;
+    const closeDate = toValidDate(normalized.closeTime);
+    if (closeDate && closeDate.getTime() < currentUniverseStart.getTime()) {
       continue;
     }
-    const eventIdentity = {
-      id: event.id,
-      slug: event.slug,
-      title: event.title,
-    };
-    for (const marketValue of toArray(event.markets)) {
-      if (!marketValue || typeof marketValue !== "object") continue;
-      const market = marketValue as Record<string, unknown>;
-      if (
-        market.closed === true ||
-        market.archived === true
-      ) {
-        continue;
-      }
-      const marketForNormalization = Object.fromEntries(
-        GAMMA_MARKET_NORMALIZATION_KEYS.flatMap((key) =>
-          key in market ? [[key, market[key]]] : [],
-        ),
-      );
-      marketForNormalization.events = [eventIdentity];
-      const normalized = normalizeGammaMarket(
-        marketForNormalization,
-        POLYMARKET_GAMMA_MARKETS_URL,
-      );
-      if (normalized) candidates.set(normalized.id, normalized);
-    }
+    candidates.set(normalized.id, normalized);
   }
-  return {
-    candidates,
-    eventCount: events.length,
-    offsetLimited: false,
-    retryableFailure: false,
-  };
+
+  const nextCursor =
+    typeof payload.next_cursor === "string" && payload.next_cursor
+      ? payload.next_cursor
+      : null;
+  return { candidates, nextCursor, retryableFailure: false };
 }
 
 function isVercelSecurityCheckpoint(html: string) {
@@ -1512,7 +1451,8 @@ export async function GET(request: NextRequest) {
     gammaJob = {
       startedAt: nowMs,
       scannedAt,
-      windows: buildGammaScanWindows(scannedAt),
+      cursor: null,
+      seenCursors: new Set<string>(),
       candidates: new Map<string, FilterableBullpenQuestion>(),
       evaluationOffset: 0,
       evaluatedQuestions: [],
@@ -1528,67 +1468,40 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const currentWindow = gammaJob.windows[0];
-    if (currentWindow) {
-      const pages = await Promise.all(
-        Array.from({ length: GAMMA_PAGES_PER_POLL }, (_, page) =>
-          fetchGammaMarketPage({
-            ...currentWindow,
-            offset:
-              currentWindow.offset + page * GAMMA_EVENT_PAGE_SIZE,
-          }),
-        ),
-      );
-
-      for (const { candidates } of pages) {
-        for (const candidate of candidates.values()) {
-          gammaJob.candidates.set(candidate.id, candidate);
-        }
-      }
-
-      const firstRetryablePageIndex = pages.findIndex(
-        ({ retryableFailure }) => retryableFailure,
-      );
-      const completedPageCount =
-        firstRetryablePageIndex === -1
-          ? pages.length
-          : firstRetryablePageIndex;
-      const completedPages = pages.slice(0, completedPageCount);
-
-      if (completedPages.some(({ offsetLimited }) => offsetLimited)) {
-        const [leftWindow, rightWindow] = splitGammaScanWindow(currentWindow);
-        gammaJob.windows.splice(0, 1, leftWindow, rightWindow);
-      } else if (
-        completedPages.some(
-          ({ eventCount }) => eventCount < GAMMA_EVENT_PAGE_SIZE,
-        )
-      ) {
-        gammaJob.windows.shift();
-      } else if (completedPageCount > 0) {
-        currentWindow.offset +=
-          GAMMA_EVENT_PAGE_SIZE * completedPageCount;
-      }
-
-      if (firstRetryablePageIndex !== -1) {
-        return NextResponse.json(
-          {
-            status: "scanning",
-            retryAfterMs: 1_000,
-            candidateCount: gammaJob.candidates.size,
-            windowsRemaining: gammaJob.windows.length,
-          },
-          { status: 202 },
-        );
-      }
+    const {
+      candidates,
+      nextCursor,
+      retryableFailure,
+    } = await fetchGammaMarketPage({
+      cursor: gammaJob.cursor,
+      currentUniverseStart: new Date(gammaJob.scannedAt),
+    });
+    for (const candidate of candidates.values()) {
+      gammaJob.candidates.set(candidate.id, candidate);
     }
 
-    if (gammaJob.windows.length > 0) {
+    if (retryableFailure) {
+      return NextResponse.json(
+        {
+          status: "scanning",
+          retryAfterMs: 1_000,
+          candidateCount: gammaJob.candidates.size,
+        },
+        { status: 202 },
+      );
+    }
+
+    if (nextCursor) {
+      if (gammaJob.seenCursors.has(nextCursor)) {
+        throw new Error("Polymarket Gamma repeated a keyset cursor");
+      }
+      gammaJob.seenCursors.add(nextCursor);
+      gammaJob.cursor = nextCursor;
       return NextResponse.json(
         {
           status: "scanning",
           retryAfterMs: 250,
           candidateCount: gammaJob.candidates.size,
-          windowsRemaining: gammaJob.windows.length,
         },
         { status: 202 },
       );
