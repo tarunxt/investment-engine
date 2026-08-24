@@ -59,6 +59,9 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /splitGammaScanWindow/);
   assert.match(routeSource, /response\.status === 422 && window\.offset > 0/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
+  assert.doesNotMatch(routeSource, /market\.active === false/);
+  assert.match(routeSource, /market\.closed === true/);
+  assert.match(routeSource, /market\.archived === true/);
   assert.match(routeSource, /GAMMA_MARKET_NORMALIZATION_KEYS/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.match(routeSource, /scanned the complete current universe/);
