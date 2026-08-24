@@ -60,6 +60,7 @@ const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
 const GAMMA_EVENT_PAGE_SIZE = 100;
+const GAMMA_PAGES_PER_POLL = 3;
 const GAMMA_SCAN_JOB_TTL_MS = 45 * 60 * 1000;
 
 type GammaScanWindow = {
@@ -1479,8 +1480,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const currentWindow = gammaJob.windows[0];
-    if (currentWindow) {
+    for (let page = 0; page < GAMMA_PAGES_PER_POLL; page += 1) {
+      const currentWindow = gammaJob.windows[0];
+      if (!currentWindow) break;
+
       const { candidates, eventCount, offsetLimited } =
         await fetchGammaMarketPage(currentWindow);
       for (const candidate of candidates.values()) {
@@ -1495,9 +1498,16 @@ export async function GET(request: NextRequest) {
       } else {
         currentWindow.offset += GAMMA_EVENT_PAGE_SIZE;
       }
+    }
 
+    if (gammaJob.windows.length > 0) {
       return NextResponse.json(
-        { status: "scanning", retryAfterMs: 250 },
+        {
+          status: "scanning",
+          retryAfterMs: 250,
+          candidateCount: gammaJob.candidates.size,
+          windowsRemaining: gammaJob.windows.length,
+        },
         { status: 202 },
       );
     }
