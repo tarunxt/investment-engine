@@ -139,6 +139,15 @@ test("automated-rebalance LLM detail loading has threat and recent-run fallbacks
   assert.doesNotMatch(bridgeSource, /window\.alert|globalThis\.alert/);
 });
 
+test("technical output opens the exact latest run even when that run failed", () => {
+  assert.match(
+    source,
+    /if \(stage === "technical"\)\s+return isTechnicalScanRun\(run, market\);/,
+  );
+  assert.match(source, /DeepSeek credits were insufficient for this run/);
+  assert.match(source, /no\\s\+credits\?\\s\+remaining/);
+});
+
 test("ambiguous threat starts reconcile against durable history instead of producing Error null", () => {
   assert.match(clientSource, /installAutomatedRebalanceStartRecovery\(\);/);
   assert.match(recoverySource, /RECONCILIATION_DELAYS_MS/);
