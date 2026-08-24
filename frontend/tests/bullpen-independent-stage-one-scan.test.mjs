@@ -98,6 +98,9 @@ test("independent Stage 1 advances a bounded parallel catalog batch per poll", (
   assert.match(routeSource, /currentWindow\.offset \+= GAMMA_EVENT_PAGE_SIZE/);
   assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
+  assert.match(pageSource, /BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000/);
+  assert.match(pageSource, /retryablePollFailure/);
+  assert.match(pageSource, /unexpected token\|not valid json\|http/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
   assert.match(routeSource, /complete current universe/);
 });
