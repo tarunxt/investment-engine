@@ -3008,6 +3008,11 @@ function BullpenAiPageContent() {
 
     try {
       const scanRequestStartedAt = Date.now();
+      const chunkedQuestions: ScanResult["questions"] = [];
+      const chunkedRejectedQuestions: NonNullable<
+        ScanResult["rejectedQuestions"]
+      > = [];
+      let receivedResultChunk = false;
       let scanResponse: { response: Response; payload: ScanResult };
       while (true) {
         scanResponse = await fetchBullpenUiJson<ScanResult>(
@@ -3021,7 +3026,15 @@ function BullpenAiPageContent() {
         const pendingPayload = scanResponse.payload as ScanResult & {
           status?: string;
           retryAfterMs?: number;
+          resultChunk?: boolean;
         };
+        if (pendingPayload.resultChunk) {
+          receivedResultChunk = true;
+          chunkedQuestions.push(...(pendingPayload.questions || []));
+          chunkedRejectedQuestions.push(
+            ...(pendingPayload.rejectedQuestions || []),
+          );
+        }
         if (
           scanResponse.response.status !== 202 ||
           pendingPayload.status !== "scanning"
@@ -3045,7 +3058,14 @@ function BullpenAiPageContent() {
           ),
         );
       }
-      const { response, payload } = scanResponse;
+      const { response } = scanResponse;
+      const payload = receivedResultChunk
+        ? {
+            ...scanResponse.payload,
+            questions: chunkedQuestions,
+            rejectedQuestions: chunkedRejectedQuestions,
+          }
+        : scanResponse.payload;
       const isSuccessfulScan = response.ok && !payload.error;
 
       void positionsRefreshTask;
