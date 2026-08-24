@@ -3014,11 +3014,17 @@ function BullpenAiPageContent() {
         ScanResult["rejectedQuestions"]
       > = [];
       let receivedResultChunk = false;
+      let chunkedTotalCandidates = 0;
+      let scanCursor: string | null = null;
+      let scanStartedAt: string | null = null;
       let scanResponse: { response: Response; payload: ScanResult };
       while (true) {
+        const scanParams = new URLSearchParams(params);
+        if (scanCursor) scanParams.set("scanCursor", scanCursor);
+        if (scanStartedAt) scanParams.set("scanStartedAt", scanStartedAt);
         try {
           scanResponse = await fetchBullpenUiJson<ScanResult>(
-            `/api/bullpen-ai?${params.toString()}`,
+            `/api/bullpen-ai?${scanParams.toString()}`,
             {
               cache: "no-store",
               signal: pageRequestAbortControllerRef.current?.signal,
@@ -3053,14 +3059,19 @@ function BullpenAiPageContent() {
           status?: string;
           retryAfterMs?: number;
           resultChunk?: boolean;
+          nextCursor?: string | null;
+          scanStartedAt?: string | null;
         };
         if (pendingPayload.resultChunk) {
           receivedResultChunk = true;
+          chunkedTotalCandidates += pendingPayload.totalCandidates || 0;
           chunkedQuestions.push(...(pendingPayload.questions || []));
           chunkedRejectedQuestions.push(
             ...(pendingPayload.rejectedQuestions || []),
           );
         }
+        scanCursor = pendingPayload.nextCursor ?? null;
+        scanStartedAt = pendingPayload.scanStartedAt ?? scanStartedAt;
         if (
           scanResponse.response.status !== 202 ||
           pendingPayload.status !== "scanning"
@@ -3088,6 +3099,7 @@ function BullpenAiPageContent() {
       const payload = receivedResultChunk
         ? {
             ...scanResponse.payload,
+            totalCandidates: chunkedTotalCandidates,
             questions: chunkedQuestions,
             rejectedQuestions: chunkedRejectedQuestions,
           }

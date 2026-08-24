@@ -61,32 +61,7 @@ const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_MARKETS_KEYSET_URL = `${POLYMARKET_GAMMA_MARKETS_URL}/keyset`;
 const GAMMA_MARKET_PAGE_SIZE = 100;
 const GAMMA_PAGE_TIMEOUT_MS = 8_000;
-const GAMMA_RESULT_CHUNK_SIZE = 250;
-const GAMMA_SCAN_JOB_TTL_MS = 90 * 60 * 1000;
 
-type GammaScanJob = {
-  startedAt: number;
-  scannedAt: string;
-  cursor: string | null;
-  seenCursors: Set<string>;
-  candidates: Map<string, FilterableBullpenQuestion>;
-  result?: Awaited<ReturnType<typeof buildResponse>>;
-  evaluationCandidates?: FilterableBullpenQuestion[];
-  evaluationOffset: number;
-  evaluatedQuestions: Awaited<ReturnType<typeof buildResponse>>["questions"];
-  evaluatedRejectedQuestions: Awaited<
-    ReturnType<typeof buildResponse>
-  >["rejectedQuestions"];
-  acceptedOffset: number;
-  rejectedOffset: number;
-};
-
-const gammaScanJobGlobal = globalThis as typeof globalThis & {
-  __bullpenGammaScanJobs?: Map<string, GammaScanJob>;
-};
-const gammaScanJobs =
-  gammaScanJobGlobal.__bullpenGammaScanJobs ??
-  (gammaScanJobGlobal.__bullpenGammaScanJobs = new Map<string, GammaScanJob>());
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
   "category",
@@ -1436,36 +1411,16 @@ export async function GET(request: NextRequest) {
   const mode: ScanMode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
   const filters = normalizeBullpenScanFilters(mode, searchParams);
-  const scannedAt = new Date().toISOString();
-
-  const gammaScanJobKey = `${mode}:${searchParams.toString()}`;
-  const nowMs = Date.now();
-  for (const [jobKey, job] of gammaScanJobs) {
-    if (nowMs - job.startedAt > GAMMA_SCAN_JOB_TTL_MS) {
-      gammaScanJobs.delete(jobKey);
-    }
-  }
-
-  let gammaJob = gammaScanJobs.get(gammaScanJobKey);
-  if (!gammaJob) {
-    gammaJob = {
-      startedAt: nowMs,
-      scannedAt,
-      cursor: null,
-      seenCursors: new Set<string>(),
-      candidates: new Map<string, FilterableBullpenQuestion>(),
-      evaluationOffset: 0,
-      evaluatedQuestions: [],
-      evaluatedRejectedQuestions: [],
-      acceptedOffset: 0,
-      rejectedOffset: 0,
-    };
-    gammaScanJobs.set(gammaScanJobKey, gammaJob);
-    return NextResponse.json(
-      { status: "scanning", retryAfterMs: 250 },
-      { status: 202 },
-    );
-  }
+  const requestedScannedAt = searchParams.get("scanStartedAt");
+  const requestedScannedAtDate = requestedScannedAt
+    ? new Date(requestedScannedAt)
+    : null;
+  const scannedAt =
+    requestedScannedAtDate &&
+    !Number.isNaN(requestedScannedAtDate.getTime())
+      ? requestedScannedAtDate.toISOString()
+      : new Date().toISOString();
+  const cursor = searchParams.get("scanCursor");
 
   try {
     const {
@@ -1473,123 +1428,55 @@ export async function GET(request: NextRequest) {
       nextCursor,
       retryableFailure,
     } = await fetchGammaMarketPage({
-      cursor: gammaJob.cursor,
-      currentUniverseStart: new Date(gammaJob.scannedAt),
+      cursor,
+      currentUniverseStart: new Date(scannedAt),
     });
-    for (const candidate of candidates.values()) {
-      gammaJob.candidates.set(candidate.id, candidate);
-    }
 
     if (retryableFailure) {
       return NextResponse.json(
         {
           status: "scanning",
           retryAfterMs: 1_000,
-          candidateCount: gammaJob.candidates.size,
+          resultChunk: true,
+          scanStartedAt: scannedAt,
+          nextCursor: cursor,
+          totalCandidates: 0,
+          questions: [],
+          rejectedQuestions: [],
         },
         { status: 202 },
       );
     }
 
-    if (nextCursor) {
-      if (gammaJob.seenCursors.has(nextCursor)) {
-        throw new Error("Polymarket Gamma repeated a keyset cursor");
-      }
-      gammaJob.seenCursors.add(nextCursor);
-      gammaJob.cursor = nextCursor;
-      return NextResponse.json(
-        {
-          status: "scanning",
-          retryAfterMs: 250,
-          candidateCount: gammaJob.candidates.size,
-        },
-        { status: 202 },
-      );
-    }
-
-    if (!gammaJob.result) {
-      const allCandidates =
-        gammaJob.evaluationCandidates ??
-        sortQuestions(Array.from(gammaJob.candidates.values()));
-      if (allCandidates.length === 0) {
-        throw new Error("Polymarket Gamma returned no active current markets");
-      }
-      gammaJob.evaluationCandidates = allCandidates;
-      const evaluationCandidates = allCandidates.slice(
-        gammaJob.evaluationOffset,
-        gammaJob.evaluationOffset + GAMMA_RESULT_CHUNK_SIZE,
-      );
-      const partialResult = await buildResponse({
-        mode,
-        sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
-        sourceLabel: GAMMA_SOURCE_LABEL,
-        scannedAt: gammaJob.scannedAt,
-        filters,
-        candidates: evaluationCandidates,
-      });
-      gammaJob.evaluatedQuestions.push(...partialResult.questions);
-      gammaJob.evaluatedRejectedQuestions.push(
-        ...partialResult.rejectedQuestions,
-      );
-      gammaJob.evaluationOffset += evaluationCandidates.length;
-
-      if (gammaJob.evaluationOffset < allCandidates.length) {
-        return NextResponse.json(
-          {
-            status: "scanning",
-            retryAfterMs: 50,
-            phase: "evaluating",
-            candidateCount: allCandidates.length,
-            evaluatedCount: gammaJob.evaluationOffset,
-          },
-          { status: 202 },
-        );
-      }
-
-      gammaJob.result = {
-        ...partialResult,
-        totalCandidates: allCandidates.length,
-        questions: gammaJob.evaluatedQuestions,
-        rejectedQuestions: gammaJob.evaluatedRejectedQuestions,
-        details: `Polymarket Gamma scanned the complete current universe of ${allCandidates.length} active markets before filters were applied.`,
-      };
-    }
-
-    const result = gammaJob.result;
-    const questions = result.questions.slice(
-      gammaJob.acceptedOffset,
-      gammaJob.acceptedOffset + GAMMA_RESULT_CHUNK_SIZE,
-    );
-    gammaJob.acceptedOffset += questions.length;
-    const remainingChunkCapacity =
-      GAMMA_RESULT_CHUNK_SIZE - questions.length;
-    const rejectedQuestions = result.rejectedQuestions.slice(
-      gammaJob.rejectedOffset,
-      gammaJob.rejectedOffset + remainingChunkCapacity,
-    );
-    gammaJob.rejectedOffset += rejectedQuestions.length;
-    const complete =
-      gammaJob.acceptedOffset >= result.questions.length &&
-      gammaJob.rejectedOffset >= result.rejectedQuestions.length;
-    const chunk = {
-      ...result,
-      questions,
-      rejectedQuestions,
-      resultChunk: true,
-      ...(complete
+    const result = await buildResponse({
+      mode,
+      sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+      sourceLabel: GAMMA_SOURCE_LABEL,
+      scannedAt,
+      filters,
+      candidates: sortQuestions(Array.from(candidates.values())),
+      ...(nextCursor
         ? {}
         : {
-            status: "scanning",
-            retryAfterMs: 50,
+            details:
+              "Polymarket Gamma scanned the complete current universe of open markets before filters were applied.",
           }),
+    });
+    const chunk = {
+      ...result,
+      resultChunk: true,
+      scanStartedAt: scannedAt,
+      nextCursor,
+      ...(nextCursor
+        ? {
+            status: "scanning",
+            retryAfterMs: 250,
+          }
+        : {}),
     };
 
-    if (complete) {
-      gammaScanJobs.delete(gammaScanJobKey);
-    }
-    return NextResponse.json(chunk, { status: complete ? 200 : 202 });
+    return NextResponse.json(chunk, { status: nextCursor ? 202 : 200 });
   } catch (error: unknown) {
-    gammaScanJobs.delete(gammaScanJobKey);
     const message =
       error instanceof Error ? error.message : "Complete Gamma scan failed";
     return NextResponse.json(
@@ -1597,7 +1484,7 @@ export async function GET(request: NextRequest) {
         mode,
         sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
         sourceLabel: GAMMA_SOURCE_LABEL,
-        scannedAt: gammaJob.scannedAt,
+        scannedAt,
         filters,
         totalCandidates: 0,
         questions: [],
