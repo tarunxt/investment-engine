@@ -63,7 +63,7 @@ const GAMMA_EVENT_PAGE_SIZE = 10;
 const GAMMA_PAGES_PER_POLL = 3;
 const GAMMA_PAGE_TIMEOUT_MS = 8_000;
 const GAMMA_RESULT_CHUNK_SIZE = 250;
-const GAMMA_SCAN_JOB_TTL_MS = 45 * 60 * 1000;
+const GAMMA_SCAN_JOB_TTL_MS = 90 * 60 * 1000;
 
 type GammaScanWindow = {
   start: string;
@@ -1305,7 +1305,6 @@ function splitGammaScanWindow(window: GammaScanWindow) {
 async function fetchGammaMarketPage(window: GammaScanWindow) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   const params = new URLSearchParams({
-    active: "true",
     archived: "false",
     closed: "false",
     end_date_min: window.start,
@@ -1367,7 +1366,6 @@ async function fetchGammaMarketPage(window: GammaScanWindow) {
     const event = eventValue as Record<string, unknown>;
     if (
       event.closed === true ||
-      event.active === false ||
       event.archived === true
     ) {
       continue;
