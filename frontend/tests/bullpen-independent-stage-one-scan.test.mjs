@@ -52,7 +52,7 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
 
 test("Stage 1 scans the complete active Gamma universe before applying filters", () => {
   assert.match(routeSource, /POLYMARKET_GAMMA_EVENTS_URL/);
-  assert.match(routeSource, /active: "true"/);
+  assert.doesNotMatch(routeSource, /active: "true"/);
   assert.match(routeSource, /end_date_min: window\.start/);
   assert.match(routeSource, /end_date_max: window\.end/);
   assert.match(routeSource, /buildGammaScanWindows/);
@@ -61,6 +61,7 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /splitGammaScanWindow/);
   assert.match(routeSource, /response\.status === 422 && window\.offset > 0/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
+  assert.doesNotMatch(routeSource, /event\.active === false/);
   assert.doesNotMatch(routeSource, /market\.active === false/);
   assert.match(routeSource, /market\.closed === true/);
   assert.match(routeSource, /market\.archived === true/);
@@ -71,7 +72,7 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
 
 
 test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
-  assert.match(pageSource, /BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 1_800_000/);
+  assert.match(pageSource, /BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 3_600_000/);
   assert.match(
     pageSource,
     /fetchBullpenUiJson<ScanResult>[\s\S]{0,500}BULLPEN_SCAN_REQUEST_TIMEOUT_MS/,
