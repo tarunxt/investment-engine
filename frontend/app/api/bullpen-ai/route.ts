@@ -60,7 +60,8 @@ const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const POLYMARKET_GAMMA_MARKETS_KEYSET_URL = `${POLYMARKET_GAMMA_MARKETS_URL}/keyset`;
 const GAMMA_MARKET_PAGE_SIZE = 100;
-const GAMMA_PAGE_TIMEOUT_MS = 8_000;
+const GAMMA_PAGE_TIMEOUT_MS = 20_000;
+const GAMMA_TERMINAL_CURSOR = "LTE=";
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const CATEGORY_KEYS = [
@@ -1312,10 +1313,16 @@ async function fetchGammaMarketPage({
     candidates.set(normalized.id, normalized);
   }
 
-  const nextCursor =
+  const rawNextCursor =
     typeof payload.next_cursor === "string" && payload.next_cursor
       ? payload.next_cursor
       : null;
+  const reachedEnd =
+    markets.length < GAMMA_MARKET_PAGE_SIZE ||
+    !rawNextCursor ||
+    rawNextCursor === GAMMA_TERMINAL_CURSOR ||
+    rawNextCursor === cursor;
+  const nextCursor = reachedEnd ? null : rawNextCursor;
   return { candidates, nextCursor, retryableFailure: false };
 }
 
