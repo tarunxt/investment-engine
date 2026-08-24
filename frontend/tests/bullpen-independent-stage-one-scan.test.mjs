@@ -77,27 +77,27 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 });
 
 
-test("independent Stage 1 advances proxy-safe keyset pages per poll", () => {
-  assert.match(routeSource, /__bullpenGammaScanJobs/);
+test("independent Stage 1 carries stateless keyset progress in each poll", () => {
+  assert.doesNotMatch(routeSource, /__bullpenGammaScanJobs/);
+  assert.doesNotMatch(routeSource, /GammaScanJob/);
+  assert.match(routeSource, /searchParams\.get\("scanCursor"\)/);
+  assert.match(routeSource, /searchParams\.get\("scanStartedAt"\)/);
   assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
   assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
   assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 8_000/);
-  assert.match(routeSource, /GAMMA_RESULT_CHUNK_SIZE = 250/);
   assert.match(routeSource, /resultChunk: true/);
-  assert.match(routeSource, /result\.questions\.slice/);
-  assert.match(routeSource, /phase: "evaluating"/);
-  assert.match(routeSource, /evaluationCandidates = allCandidates\.slice/);
-  assert.match(routeSource, /evaluatedRejectedQuestions\.push/);
-  assert.match(pageSource, /receivedResultChunk/);
-  assert.match(pageSource, /chunkedRejectedQuestions/);
+  assert.match(routeSource, /nextCursor/);
+  assert.match(routeSource, /scanStartedAt: scannedAt/);
   assert.match(routeSource, /AbortSignal\.timeout\(GAMMA_PAGE_TIMEOUT_MS\)/);
   assert.match(routeSource, /retryableFailure/);
-  assert.match(routeSource, /fetchGammaMarketPage\(\{/);
-  assert.match(routeSource, /gammaJob\.candidates\.set/);
-  assert.match(routeSource, /gammaJob\.cursor = nextCursor/);
-  assert.match(routeSource, /seenCursors/);
   assert.doesNotMatch(routeSource, /GAMMA_PAGES_PER_POLL/);
   assert.doesNotMatch(routeSource, /void \(async \(\) =>/);
+  assert.match(pageSource, /let chunkedTotalCandidates = 0/);
+  assert.match(pageSource, /let scanCursor: string \| null = null/);
+  assert.match(pageSource, /scanParams\.set\("scanCursor", scanCursor\)/);
+  assert.match(pageSource, /scanParams\.set\("scanStartedAt", scanStartedAt\)/);
+  assert.match(pageSource, /chunkedTotalCandidates \+= pendingPayload\.totalCandidates/);
+  assert.match(pageSource, /totalCandidates: chunkedTotalCandidates/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
   assert.match(pageSource, /BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000/);
   assert.match(pageSource, /retryablePollFailure/);
