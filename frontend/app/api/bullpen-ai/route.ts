@@ -1267,11 +1267,12 @@ function buildGammaScanWindows(scannedAt: string) {
   const windows: GammaScanWindow[] = [];
   let start = new Date(scannedAt);
   const horizon = new Date(Date.UTC(2101, 0, 1));
+  let spanYears = 1;
 
   while (start < horizon) {
     const end = new Date(
       Date.UTC(
-        Math.min(start.getUTCFullYear() + 1, 2101),
+        Math.min(start.getUTCFullYear() + spanYears, 2101),
         start.getUTCMonth(),
         start.getUTCDate(),
         start.getUTCHours(),
@@ -1286,6 +1287,7 @@ function buildGammaScanWindows(scannedAt: string) {
       offset: 0,
     });
     start = end;
+    spanYears = Math.min(spanYears * 2, 32);
   }
   return windows;
 }
