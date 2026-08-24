@@ -56,6 +56,8 @@ test("Stage 1 scans the complete active Gamma universe before applying filters",
   assert.match(routeSource, /end_date_min: window\.start/);
   assert.match(routeSource, /end_date_max: window\.end/);
   assert.match(routeSource, /buildGammaScanWindows/);
+  assert.match(routeSource, /let spanYears = 1/);
+  assert.match(routeSource, /spanYears = Math\.min\(spanYears \* 2, 32\)/);
   assert.match(routeSource, /splitGammaScanWindow/);
   assert.match(routeSource, /response\.status === 422 && window\.offset > 0/);
   assert.match(routeSource, /toArray\(event\.markets\)/);
