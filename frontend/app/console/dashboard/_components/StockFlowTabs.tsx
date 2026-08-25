@@ -14,7 +14,7 @@ import {
   buildDashboardActionRows,
   buildTechnicalScanMap,
   extractRebalanceInputFingerprint,
-  fetchAllFullRuns,
+  fetchDashboardRecentFullRuns,
   isCompletedRebalanceRun,
   type ScoreMatrixFormulaConfig,
   type StockConsensus,
@@ -262,7 +262,7 @@ export function fetchRebalanceStockFlowSource(
   if (cached) return cached;
 
   const request = Promise.all([
-    fetchAllFullRuns(),
+    fetchDashboardRecentFullRuns(),
     portfolio === "zerodha"
       ? apiService.zerodhaPortfolioOverview()
       : apiService.indmoneyUsPortfolioOverview(),
