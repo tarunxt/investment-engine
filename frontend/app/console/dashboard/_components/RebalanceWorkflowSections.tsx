@@ -5388,16 +5388,19 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketScoreScanCompletedAt(null);
     setZerodhaDirectMarketAvailable(false);
     try {
-      const [stockFlowSource, status, login] = await Promise.all([
+      const [stockFlowResult, statusResult, loginResult] = await Promise.allSettled([
         fetchRebalanceStockFlowSource("zerodha"),
         apiService.zerodhaStatus(),
         apiService.zerodhaLoginUrl(),
       ]);
-      const { runs, portfolioSnapshot } = stockFlowSource;
+      if (stockFlowResult.status === "rejected") throw stockFlowResult.reason;
+      const { runs, portfolioSnapshot } = stockFlowResult.value;
       setZerodhaBasketHistoryRuns(runs);
+      const status = statusResult.status === "fulfilled" ? statusResult.value : null;
+      const login = loginResult.status === "fulfilled" ? loginResult.value : null;
       const directMarketEnabled = Boolean(
-        status.connected
-          && login.configured
+        status?.connected
+          && login?.configured
           && status.direct_market_orders_enabled
           && login.direct_market_orders_enabled,
       );
