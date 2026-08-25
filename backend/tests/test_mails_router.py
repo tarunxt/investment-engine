@@ -91,3 +91,61 @@ async def test_send_test_mail_returns_actionable_safe_diagnostics(
         "from_name": "Cred-X",
     }
     assert "secret-value" not in str(detail)
+
+
+@pytest.mark.anyio
+async def test_get_mail_preferences_returns_all_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    items = [
+        {
+            "key": "run_completion",
+            "label": "Stage and scan completion",
+            "description": "Individual run-completion emails.",
+            "category": "runs",
+            "enabled": False,
+        }
+    ]
+    monkeypatch.setattr(
+        mails_router,
+        "list_mail_preferences_sync",
+        lambda user_id: items if user_id == 7 else [],
+    )
+
+    response = await mails_router.get_mail_preferences(
+        current_user=SimpleNamespace(id=7),
+    )
+
+    assert len(response.items) == 1
+    assert response.items[0].key == "run_completion"
+    assert response.items[0].enabled is False
+
+
+@pytest.mark.anyio
+async def test_update_mail_preferences_saves_checkbox_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[int, dict[str, bool]]] = []
+
+    def save(user_id: int, preferences: dict[str, bool]):
+        observed.append((user_id, preferences))
+        return [
+            {
+                "key": "run_completion",
+                "label": "Stage and scan completion",
+                "description": "Individual run-completion emails.",
+                "category": "runs",
+                "enabled": preferences["run_completion"],
+            }
+        ]
+
+    monkeypatch.setattr(mails_router, "update_mail_preferences_sync", save)
+    response = await mails_router.update_mail_preferences(
+        request=mails_router.UpdateMailPreferencesRequest(
+            preferences={"run_completion": False},
+        ),
+        current_user=SimpleNamespace(id=7),
+    )
+
+    assert observed == [(7, {"run_completion": False})]
+    assert response.items[0].enabled is False

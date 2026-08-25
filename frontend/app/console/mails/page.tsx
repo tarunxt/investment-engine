@@ -9,6 +9,7 @@ import {
   GitBranch,
   Mail,
   RefreshCw,
+  Save,
   Send,
   Wrench,
 } from 'lucide-react';
@@ -42,6 +43,14 @@ type MailHistoryItem = {
 };
 
 type MailHistoryTab = 'all' | 'runs' | 'alerts' | 'account' | 'github';
+
+type MailPreference = {
+  key: string;
+  label: string;
+  description: string;
+  category: 'runs' | 'alerts' | 'account';
+  enabled: boolean;
+};
 
 type GitHubWorkflowRun = {
   id: number;
@@ -114,6 +123,95 @@ export default function MailsPage() {
   const [githubLoading, setGithubLoading] = useState(true);
   const [githubError, setGithubError] = useState<string | null>(null);
   const [historyTab, setHistoryTab] = useState<MailHistoryTab>('all');
+  const [preferences, setPreferences] = useState<MailPreference[]>([]);
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [preferencesDirty, setPreferencesDirty] = useState(false);
+  const [preferencesError, setPreferencesError] = useState<string | null>(null);
+  const [preferencesSaved, setPreferencesSaved] = useState(false);
+
+  const loadPreferences = useCallback(async () => {
+    setPreferencesLoading(true);
+    setPreferencesError(null);
+    try {
+      const response = await fetch(URLs.mails.preferences(), {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { items?: MailPreference[] }
+        | null;
+      if (!response.ok || !Array.isArray(payload?.items)) {
+        throw new Error('Mail preferences could not be loaded.');
+      }
+      setPreferences(payload.items);
+      setPreferencesDirty(false);
+    } catch (preferenceFailure) {
+      setPreferencesError(
+        preferenceFailure instanceof Error
+          ? preferenceFailure.message
+          : 'Mail preferences could not be loaded.',
+      );
+    } finally {
+      setPreferencesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPreferences();
+  }, [loadPreferences]);
+
+  function setPreference(key: string, enabled: boolean) {
+    setPreferences((current) =>
+      current.map((item) => (item.key === key ? { ...item, enabled } : item)),
+    );
+    setPreferencesDirty(true);
+    setPreferencesSaved(false);
+  }
+
+  function setAllPreferences(enabled: boolean) {
+    setPreferences((current) => current.map((item) => ({ ...item, enabled })));
+    setPreferencesDirty(true);
+    setPreferencesSaved(false);
+  }
+
+  async function savePreferences() {
+    if (preferencesSaving || !preferencesDirty) return;
+    setPreferencesSaving(true);
+    setPreferencesError(null);
+    setPreferencesSaved(false);
+    try {
+      const response = await fetch(URLs.mails.preferences(), {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          preferences: Object.fromEntries(
+            preferences.map((item) => [item.key, item.enabled]),
+          ),
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { items?: MailPreference[] }
+        | null;
+      if (!response.ok || !Array.isArray(payload?.items)) {
+        throw new Error('Mail preferences could not be saved.');
+      }
+      setPreferences(payload.items);
+      setPreferencesDirty(false);
+      setPreferencesSaved(true);
+    } catch (preferenceFailure) {
+      setPreferencesError(
+        preferenceFailure instanceof Error
+          ? preferenceFailure.message
+          : 'Mail preferences could not be saved.',
+      );
+    } finally {
+      setPreferencesSaving(false);
+    }
+  }
 
   const loadHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -266,11 +364,96 @@ export default function MailsPage() {
             </div>
           </div>
           <p className="mt-4 max-w-2xl text-sm leading-6 text-white/80">
-            Send the first fixed test message now. Trigger-based recipients and dedicated messages can be added here later.
+            Choose exactly which automatic Cred-X emails you want to receive, then review every delivery below.
           </p>
         </div>
 
         <div className="space-y-6 p-6 sm:p-8">
+          <section className="rounded-2xl border border-border bg-muted/20 p-5" aria-labelledby="mail-preferences-heading">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 id="mail-preferences-heading" className="text-base font-bold text-foreground">
+                  Email notification settings
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Checked mail types are sent. Unchecked types are stopped before SMTP delivery. Changes apply to future emails only.
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAllPreferences(true)}
+                  disabled={preferencesLoading || preferencesSaving}
+                  className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllPreferences(false)}
+                  disabled={preferencesLoading || preferencesSaving}
+                  className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground transition hover:bg-muted disabled:opacity-50"
+                >
+                  Deselect all
+                </button>
+              </div>
+            </div>
+
+            {preferencesLoading ? (
+              <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Loading notification settings…
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {preferences.map((preference) => (
+                  <label
+                    key={preference.key}
+                    className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-4 transition hover:bg-muted/40"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={preference.enabled}
+                      onChange={(event) => setPreference(preference.key, event.target.checked)}
+                      disabled={preferencesSaving}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-violet-600"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold text-foreground">
+                        {preference.label}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                        {preference.description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {preferencesError ? (
+              <div role="alert" className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                {preferencesError}
+              </div>
+            ) : null}
+            {preferencesSaved ? (
+              <div role="status" className="mt-4 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+                <CheckCircle2 className="h-4 w-4" />
+                Mail preferences saved. Disabled mail types will no longer be sent.
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => void savePreferences()}
+              disabled={preferencesLoading || preferencesSaving || !preferencesDirty}
+              className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Save className="h-4 w-4" />
+              {preferencesSaving ? 'Saving…' : 'Save preferences'}
+            </button>
+          </section>
+
           <div>
             <h2 className="text-sm font-semibold text-foreground">Recipients</h2>
             <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-2xl border border-border bg-muted/35 p-4 transition hover:bg-muted/60">

@@ -9,7 +9,9 @@ from app.domains.mails.service import (
     TEST_MESSAGE,
     TEST_RECIPIENTS,
     list_mail_history_sync,
+    list_mail_preferences_sync,
     send_manual_test_mail_sync,
+    update_mail_preferences_sync,
 )
 
 router = APIRouter(prefix="/mails", tags=["mails"])
@@ -47,6 +49,22 @@ class MailHistoryResponse(BaseModel):
     items: list[MailHistoryItem]
 
 
+class MailPreferenceItem(BaseModel):
+    key: str
+    label: str
+    description: str
+    category: str
+    enabled: bool
+
+
+class MailPreferencesResponse(BaseModel):
+    items: list[MailPreferenceItem]
+
+
+class UpdateMailPreferencesRequest(BaseModel):
+    preferences: dict[str, bool]
+
+
 def _safe_smtp_config() -> dict[str, object]:
     return {
         "host": settings.smtp_host or "(not set)",
@@ -56,6 +74,34 @@ def _safe_smtp_config() -> dict[str, object]:
         "from_email": settings.smtp_from_email,
         "from_name": settings.smtp_from_name,
     }
+
+
+@router.get("/preferences", response_model=MailPreferencesResponse)
+async def get_mail_preferences(
+    current_user: User = Depends(get_current_user),
+) -> MailPreferencesResponse:
+    items = await run_in_threadpool(
+        list_mail_preferences_sync,
+        int(current_user.id),
+    )
+    return MailPreferencesResponse(
+        items=[MailPreferenceItem.model_validate(item) for item in items]
+    )
+
+
+@router.put("/preferences", response_model=MailPreferencesResponse)
+async def update_mail_preferences(
+    request: UpdateMailPreferencesRequest,
+    current_user: User = Depends(get_current_user),
+) -> MailPreferencesResponse:
+    items = await run_in_threadpool(
+        update_mail_preferences_sync,
+        int(current_user.id),
+        request.preferences,
+    )
+    return MailPreferencesResponse(
+        items=[MailPreferenceItem.model_validate(item) for item in items]
+    )
 
 
 @router.get("/history", response_model=MailHistoryResponse)

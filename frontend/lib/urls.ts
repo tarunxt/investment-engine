@@ -327,6 +327,7 @@ export const URLs = {
   mails: {
     sendTest: () => `${resolveApiBaseUrl()}/mails/send-test`,
     history: () => `${resolveApiBaseUrl()}/mails/history`,
+    preferences: () => `${resolveApiBaseUrl()}/mails/preferences`,
   },
 
   // Health Check endpoints

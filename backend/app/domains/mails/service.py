@@ -32,6 +32,47 @@ TEST_RECIPIENTS = ("tarun.singh6893@gmail.com",)
 TEST_SUBJECT = "Message from Tarun's Cred-X"
 TEST_MESSAGE = "Hi, this a message from Tarun's Cred-X"
 
+MAIL_PREFERENCES_RESOURCE_TYPE = "cred_x_mail_preferences"
+MAIL_PREFERENCES_ACTION = "mail.preferences_updated"
+MAIL_PREFERENCE_CATALOG: tuple[dict[str, str], ...] = (
+    {
+        "key": "run_completion",
+        "label": "Stage and scan completion",
+        "description": "Swing Scan, Rebalance Scan, Technical Scan and other individual run-completion emails.",
+        "category": MAIL_CATEGORY_RUNS,
+    },
+    {
+        "key": "auto_rebalance_success",
+        "label": "Final auto-rebalance completion",
+        "description": "One final success email after every selected auto-rebalance stage has finished.",
+        "category": MAIL_CATEGORY_RUNS,
+    },
+    {
+        "key": "stage2_position_warning",
+        "label": "Stage 2 position-risk alerts",
+        "description": "Urgent warnings when held-side consolidated LLM odds fall below the configured safety threshold.",
+        "category": MAIL_CATEGORY_ALERTS,
+    },
+    {
+        "key": "password_reset",
+        "label": "Password reset and account security",
+        "description": "Requested password-reset and account-security messages. Disabling this can prevent password recovery emails.",
+        "category": MAIL_CATEGORY_ACCOUNT,
+    },
+)
+DEFAULT_MAIL_PREFERENCES: dict[str, bool] = {
+    "run_completion": False,
+    "auto_rebalance_success": True,
+    "stage2_position_warning": True,
+    "password_reset": True,
+}
+MAIL_PREFERENCE_BY_ACTION: dict[str, str] = {
+    "mail.run_completion": "run_completion",
+    "mail.auto_rebalance_success": "auto_rebalance_success",
+    STAGE2_WARNING_ACTION: "stage2_position_warning",
+    "mail.password_reset": "password_reset",
+}
+
 
 @dataclass(frozen=True)
 class Stage2PositionWarning:
@@ -66,6 +107,80 @@ class LoggedMailDelivery:
 
 def _utc_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def get_mail_preferences_from_session(
+    session: Session,
+    user_id: int,
+) -> dict[str, bool]:
+    preferences = dict(DEFAULT_MAIL_PREFERENCES)
+    row = session.execute(
+        select(ActivityLog)
+        .where(ActivityLog.user_id == user_id)
+        .where(ActivityLog.action == MAIL_PREFERENCES_ACTION)
+        .where(ActivityLog.resource_type == MAIL_PREFERENCES_RESOURCE_TYPE)
+        .order_by(ActivityLog.created_at.desc(), ActivityLog.id.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return preferences
+    saved = _details_from_row(row).get("preferences")
+    if isinstance(saved, dict):
+        for key in preferences:
+            value = saved.get(key)
+            if isinstance(value, bool):
+                preferences[key] = value
+    return preferences
+
+
+def list_mail_preferences_sync(user_id: int) -> list[dict[str, object]]:
+    with SyncSessionLocal() as session:
+        saved = get_mail_preferences_from_session(session, user_id)
+    return [
+        {**item, "enabled": saved[item["key"]]}
+        for item in MAIL_PREFERENCE_CATALOG
+    ]
+
+
+def update_mail_preferences_sync(
+    user_id: int,
+    updates: dict[str, bool],
+) -> list[dict[str, object]]:
+    with SyncSessionLocal() as session:
+        preferences = get_mail_preferences_from_session(session, user_id)
+        for key, value in updates.items():
+            if key in preferences and isinstance(value, bool):
+                preferences[key] = value
+        row = ActivityLog(
+            user_id=user_id,
+            action=MAIL_PREFERENCES_ACTION,
+            resource_type=MAIL_PREFERENCES_RESOURCE_TYPE,
+            resource_id=None,
+            details=json.dumps(
+                {
+                    "schema_version": 1,
+                    "preferences": preferences,
+                    "updated_at": _utc_iso(),
+                },
+                ensure_ascii=False,
+            ),
+        )
+        session.add(row)
+        session.commit()
+    return [
+        {**item, "enabled": preferences[item["key"]]}
+        for item in MAIL_PREFERENCE_CATALOG
+    ]
+
+
+def _mail_type_enabled(session: Session, user_id: int, action: str) -> bool:
+    preference_key = MAIL_PREFERENCE_BY_ACTION.get(action)
+    if preference_key is None:
+        return True
+    return get_mail_preferences_from_session(session, user_id).get(
+        preference_key,
+        True,
+    )
 
 
 def _as_probability(value: object) -> float | None:
@@ -275,6 +390,24 @@ def send_logged_email_sync(
     The reservation is committed before SMTP. A redelivered Stage 2 task therefore
     observes the existing idempotency key and never sends a duplicate message.
     """
+    if not _mail_type_enabled(session, user_id, action):
+        details: dict[str, object] = {
+            "status": "skipped",
+            "provider_code": "EMAIL_DISABLED_BY_USER",
+            "provider_summary": "This email type is disabled in Mail settings.",
+            "preference_key": MAIL_PREFERENCE_BY_ACTION.get(action),
+        }
+        return LoggedMailDelivery(
+            history_id=0,
+            result=EmailSendResult(
+                sent=True,
+                code="EMAIL_DISABLED_BY_USER",
+                summary="This email type is disabled in Mail settings.",
+            ),
+            details=details,
+            deduplicated=True,
+        )
+
     marker = f'"idempotency_key": "{idempotency_key}"'
     existing = session.execute(
         select(ActivityLog)
