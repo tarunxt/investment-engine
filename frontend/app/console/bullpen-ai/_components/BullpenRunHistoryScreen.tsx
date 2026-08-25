@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { formatUnknownError } from "@/lib/apiErrors";
 import { BullpenEventIdentityResolver } from "@/lib/bullpenEventIdentityResolver";
-import { isBullpenHistoryActivePosition } from "@/lib/bullpenHistoryPositions";
+import { isBullpenHistoryActivePosition, isBullpenHistoryClaimablePosition } from "@/lib/bullpenHistoryPositions";
 import {
   isUsableBullpenPositionsSnapshot,
   type BullpenActivePositionView,
@@ -115,8 +115,10 @@ export function applyCurrentBullpenPositionsToEventTrends(
   trends: BullpenAutoLiveEventTrendsResponse,
   positions: BullpenPositionsResponse,
 ): BullpenAutoLiveEventTrendsResponse {
-  const activePositions = (positions.positions ?? []).filter(
-    isBullpenHistoryActivePosition,
+  const currentPositions = positions.positions ?? [];
+  const activePositions = currentPositions.filter(isBullpenHistoryActivePosition);
+  const claimablePositions = currentPositions.filter(
+    isBullpenHistoryClaimablePosition,
   );
 
   const events = trends.events.map((event: BullpenAutoLiveEventTrend) => {
@@ -135,10 +137,22 @@ export function applyCurrentBullpenPositionsToEventTrends(
     });
     const activePosition =
       match.status === "matched" ? (match.match?.item ?? null) : null;
+    const claimableMatch = BullpenEventIdentityResolver.resolveMatch({
+      target,
+      candidates: claimablePositions.filter((position) =>
+        isSameBullpenContract(event, position),
+      ),
+      getIdentity: BullpenEventIdentityResolver.fromPosition,
+    });
+    const claimablePosition =
+      claimableMatch.status === "matched"
+        ? (claimableMatch.match?.item ?? null)
+        : null;
 
     return {
       ...event,
       is_active_position: activePosition !== null,
+      is_claimable_position: claimablePosition !== null,
       active_position_side: activePosition
         ? resolveActivePositionSide(activePosition)
         : null,
