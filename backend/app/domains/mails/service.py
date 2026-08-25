@@ -40,24 +40,28 @@ MAIL_PREFERENCE_CATALOG: tuple[dict[str, str], ...] = (
         "label": "Stage and scan completion",
         "description": "Swing Scan, Rebalance Scan, Technical Scan and other individual run-completion emails.",
         "category": MAIL_CATEGORY_RUNS,
+        "segments": ("Zerodha", "IndMoney"),
     },
     {
         "key": "auto_rebalance_success",
         "label": "Final auto-rebalance completion",
         "description": "One final success email after every selected auto-rebalance stage has finished.",
         "category": MAIL_CATEGORY_RUNS,
+        "segments": ("Zerodha", "IndMoney"),
     },
     {
         "key": "stage2_position_warning",
         "label": "Stage 2 position-risk alerts",
         "description": "Urgent warnings when held-side consolidated LLM odds fall below the configured safety threshold.",
         "category": MAIL_CATEGORY_ALERTS,
+        "segments": ("Bullpen",),
     },
     {
         "key": "password_reset",
         "label": "Password reset and account security",
         "description": "Requested password-reset and account-security messages. Disabling this can prevent password recovery emails.",
         "category": MAIL_CATEGORY_ACCOUNT,
+        "segments": ("All",),
     },
 )
 DEFAULT_MAIL_PREFERENCES: dict[str, bool] = {
