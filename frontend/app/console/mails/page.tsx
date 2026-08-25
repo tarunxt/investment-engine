@@ -19,6 +19,13 @@ import { URLs } from '@/lib/urls';
 const RECIPIENT = 'tarun.singh6893@gmail.com';
 const MESSAGE = "Hi, this a message from Tarun's Cred-X";
 
+const SEGMENT_BADGE_STYLES: Record<string, string> = {
+  Zerodha: 'border-blue-200 bg-blue-50 text-blue-700',
+  IndMoney: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  Bullpen: 'border-amber-200 bg-amber-50 text-amber-800',
+  All: 'border-violet-200 bg-violet-50 text-violet-700',
+};
+
 type MailHistoryItem = {
   id: number;
   created_at: string;
@@ -49,6 +56,7 @@ type MailPreference = {
   label: string;
   description: string;
   category: 'runs' | 'alerts' | 'account';
+  segments: Array<'Zerodha' | 'IndMoney' | 'Bullpen' | 'All'>;
   enabled: boolean;
 };
 
@@ -419,8 +427,20 @@ export default function MailsPage() {
                       className="mt-0.5 h-4 w-4 shrink-0 accent-violet-600"
                     />
                     <span>
-                      <span className="block text-sm font-semibold text-foreground">
-                        {preference.label}
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold text-foreground">
+                          {preference.label}
+                        </span>
+                        <span className="flex flex-wrap gap-1.5" aria-label="Applicable segments">
+                          {preference.segments.map((segment) => (
+                            <span
+                              key={segment}
+                              className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${SEGMENT_BADGE_STYLES[segment] || SEGMENT_BADGE_STYLES.All}`}
+                            >
+                              {segment}
+                            </span>
+                          ))}
+                        </span>
                       </span>
                       <span className="mt-1 block text-xs leading-5 text-muted-foreground">
                         {preference.description}
