@@ -266,15 +266,21 @@ export function fetchRebalanceStockFlowSource(
     portfolio === "zerodha"
       ? apiService.zerodhaPortfolioOverview()
       : apiService.indmoneyUsPortfolioOverview(),
-  ])
-    .then(([runs, overview]) => ({
-      runs,
-      portfolioSnapshot: overview.latest,
-    }))
-    .catch((error) => {
+  ]).then(
+    ([runs, overview]) => {
+      stockFlowSourcePromises.delete(portfolio);
+      return {
+        runs,
+        portfolioSnapshot: overview.latest,
+      };
+    },
+    (error) => {
       stockFlowSourcePromises.delete(portfolio);
       throw error;
-    });
+    },
+  );
+  // Coalesce only concurrent requests. A settled response must never survive a
+  // later scan or portfolio sync, otherwise reopening the popup shows stale data.
   stockFlowSourcePromises.set(portfolio, request);
   return request;
 }
@@ -438,7 +444,29 @@ function RebalanceStockFlowSubwidget({
       portfolio.market,
       buildTechnicalScanMap(runs),
       formulaConfig,
-    ).sort(compareFinalActionablesForThreshold(buyThreshold));
+    )
+      .filter((row) => {
+        if (
+          portfolioId !== "zerodha"
+          || (row.formulaAction !== "Sell All" && row.formulaAction !== "Trim")
+        ) {
+          return true;
+        }
+        const symbol = row.stock.symbol
+          .trim()
+          .toUpperCase()
+          .replace(/^(?:NSE|BSE):/, "")
+          .replace(/\.(?:NS|BO|NSE|BSE)$/i, "");
+        const zerodhaSnapshot = portfolioSnapshot as ZerodhaPortfolioSnapshotDetail | null;
+        return Boolean(
+          zerodhaSnapshot?.holdings.some(
+            (holding) =>
+              holding.tradingsymbol.trim().toUpperCase() === symbol
+              && holding.quantity > 0,
+          ),
+        );
+      })
+      .sort(compareFinalActionablesForThreshold(buyThreshold));
     const swingJobOutputs = buildStageJobOutputs(swing, swingRun);
     const rebalanceJobOutputs = buildStageJobOutputs(rebalance, rebalanceRun);
     return {
