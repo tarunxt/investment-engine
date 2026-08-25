@@ -54,6 +54,7 @@ class MailPreferenceItem(BaseModel):
     label: str
     description: str
     category: str
+    segments: list[str]
     enabled: bool
 
 
