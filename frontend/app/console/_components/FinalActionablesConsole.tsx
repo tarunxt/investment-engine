@@ -2726,7 +2726,7 @@ export function buildTechnicalScanMap(runs: RunResponse[]): TechnicalScanMap {
           jobId: link.job_id,
           provider: job.provider,
           model: job.model,
-          createdAt: job.created_at,
+          createdAt: job.updated_at ?? job.created_at,
           runLabel: getAutoRebalanceRunDisplayLabel(run),
         });
       }),
