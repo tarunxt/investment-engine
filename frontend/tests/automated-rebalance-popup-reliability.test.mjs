@@ -137,6 +137,8 @@ test("duplicate LLM runs retain the full denominator and receive ordinal summary
 test("stock-flow reloads after completed requests and hides impossible Zerodha sells", () => {
   assert.match(stockFlowSource, /fetchDashboardRecentFullRuns\(\)/);
   assert.doesNotMatch(stockFlowSource, /fetchAllFullRuns\(\)/);
+  assert.match(stockFlowSource, /STOCK_FLOW_TRANSIENT_FALLBACK_MAX_AGE_MS = 5 \* 60 \* 1000/);
+  assert.match(stockFlowSource, /stockFlowLastSuccessfulSources\.get\(portfolio\)/);
   assert.match(
     stockFlowSource,
     /stockFlowSourcePromises\.delete\(portfolio\);[\s\S]*?portfolioSnapshot: overview\.latest/,
