@@ -3025,6 +3025,7 @@ export interface BullpenAutoLiveEventTrend {
   llm_no_odds?: number | null;
   returns_per_day?: number | null;
   is_active_position?: boolean;
+  is_claimable_position?: boolean;
   active_position_side?: BullpenAutoLiveOutcomeSide | null;
 }
 
