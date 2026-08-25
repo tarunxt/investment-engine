@@ -268,6 +268,10 @@ const AUTO_REBALANCE_MIX_ALIASES = [
 const GPT_4O_MINI_MODEL = "gpt-4o-mini";
 const POLL_INTERVAL_MS = 3000;
 const MAX_ZERODHA_SYNC_POLLS = 30;
+const ZERODHA_AUTH_STATUS_POLL_MS = 500;
+const ZERODHA_AUTH_CLOSE_GRACE_MS = 15_000;
+const ZERODHA_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
+const ZERODHA_SYNC_AUTH_RETRY_DELAY_MS = 1_000;
 const WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
@@ -465,6 +469,50 @@ function getQueuedStages(
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isZerodhaAuthPropagationError(error: unknown) {
+  if (error instanceof APIError && [401, 403, 409, 425].includes(error.status)) {
+    return true;
+  }
+  return /(?:zerodha|kite).*(?:session|token|connect|login)|(?:session|token).*(?:expired|missing|not\s+found|not\s+connected)/i.test(
+    normalizeError(error),
+  );
+}
+
+async function confirmZerodhaConnectionReady(
+  timeoutMs = ZERODHA_AUTH_CLOSE_GRACE_MS,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const status = await apiService.zerodhaStatus();
+      if (status.connected) return status;
+      lastError = new Error(
+        "Kite login returned successfully, but the Zerodha session is not active yet.",
+      );
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(ZERODHA_AUTH_STATUS_POLL_MS);
+  }
+
+  throw new Error(
+    `Kite login could not be confirmed by Cred-X within ${Math.round(timeoutMs / 1000)} seconds: ${normalizeError(lastError)}`,
+  );
+}
+
+async function queueZerodhaPortfolioSyncWithAuthRetry() {
+  try {
+    return await apiService.zerodhaSyncPortfolio();
+  } catch (error) {
+    if (!isZerodhaAuthPropagationError(error)) throw error;
+    await confirmZerodhaConnectionReady();
+    await sleep(ZERODHA_SYNC_AUTH_RETRY_DELAY_MS);
+    return apiService.zerodhaSyncPortfolio();
+  }
 }
 
 function parseTimestampMs(value?: string | null) {
@@ -7137,15 +7185,31 @@ ${zerodhaExecutionMode === "direct_market"
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      const timeoutMs = 5 * 60 * 1000;
+      let statusCheckInFlight = false;
+      let popupClosedAt: number | null = null;
       const finish = (error?: Error) => {
         if (settled) return;
         settled = true;
         window.removeEventListener("message", handleMessage);
         window.clearInterval(popupPoll);
         window.clearTimeout(timeout);
+        if (!popup.closed) popup.close();
         if (error) reject(error);
         else resolve();
+      };
+      const confirmConnection = async () => {
+        if (settled || statusCheckInFlight) return;
+        statusCheckInFlight = true;
+        try {
+          const latestStatus = await apiService.zerodhaStatus();
+          if (latestStatus.connected) finish();
+        } catch (error) {
+          // The callback may still be committing or a gateway read may be
+          // transiently unavailable. Keep polling until the bounded deadline.
+          console.warn("Waiting for Cred-X to confirm the Zerodha login.", error);
+        } finally {
+          statusCheckInFlight = false;
+        }
       };
       const handleMessage = (event: MessageEvent) => {
         if (event.origin !== window.location.origin) return;
@@ -7154,23 +7218,33 @@ ${zerodhaExecutionMode === "direct_market"
           | null
           | undefined;
         if (data?.type === "zerodha_connected") {
-          finish();
+          void confirmConnection();
         } else if (data?.type === "zerodha_error") {
           finish(new Error(data.message || "Zerodha connection failed."));
         }
       };
       const popupPoll = window.setInterval(() => {
-        if (popup.closed) {
-          finish(new Error("Zerodha login popup was closed before connection completed."));
+        void confirmConnection();
+        if (popup.closed && popupClosedAt === null) {
+          popupClosedAt = Date.now();
         }
-      }, 500);
+        if (
+          popupClosedAt !== null &&
+          Date.now() - popupClosedAt >= ZERODHA_AUTH_CLOSE_GRACE_MS
+        ) {
+          finish(
+            new Error(
+              "The Kite login window closed, but Cred-X could not confirm that the Zerodha token was saved. Please retry the login.",
+            ),
+          );
+        }
+      }, ZERODHA_AUTH_STATUS_POLL_MS);
       const timeout = window.setTimeout(() => {
         finish(new Error("Zerodha login timed out before connection completed."));
-      }, timeoutMs);
+      }, ZERODHA_AUTH_TIMEOUT_MS);
       window.addEventListener("message", handleMessage);
+      void confirmConnection();
     });
-
-    await sleep(1200);
   }, [buildZerodhaPopupFeatures]);
 
   const runWorkflow = useCallback(
@@ -7311,7 +7385,7 @@ ${zerodhaExecutionMode === "direct_market"
           if (portfolio === "zerodha") {
             await ensureZerodhaConnectedForSync(zerodhaPopup);
             const previousOverview = await apiService.zerodhaPortfolioOverview();
-            const synced = await apiService.zerodhaSyncPortfolio();
+            const synced = await queueZerodhaPortfolioSyncWithAuthRetry();
             const overview = await waitForZerodhaPortfolioSync(
               previousOverview.latest?.captured_at,
               () => cancelRequestedRef.current,
@@ -7942,7 +8016,7 @@ ${zerodhaExecutionMode === "direct_market"
         if (portfolio === "zerodha") {
           await ensureZerodhaConnectedForSync(zerodhaPopup);
           const previousOverview = await apiService.zerodhaPortfolioOverview();
-          const synced = await apiService.zerodhaSyncPortfolio();
+          const synced = await queueZerodhaPortfolioSyncWithAuthRetry();
           const overview = await waitForZerodhaPortfolioSync(
             previousOverview.latest?.captured_at,
           );
