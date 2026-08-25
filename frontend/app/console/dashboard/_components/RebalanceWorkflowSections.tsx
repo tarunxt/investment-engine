@@ -3388,6 +3388,7 @@ function ZerodhaBasketPreviewDialog({
   tradingViewTitle = "Zerodha India Basket TradingView URLs",
   tradingViewAriaLabel = "Open Zerodha India basket TradingView URL list",
   loadingLabel = "Preparing Zerodha basket…",
+  scoreScanCompletedAt: scoreScanCompletedAtOverride = null,
   primaryButtonLabel,
   basketInfoText = "Sell All and Trim actionables are pre-selected. Buy New and Buy More rows auto-select only when the Final Score is greater than the Buy threshold. Review the basket here, use protected MARKET for all selected stocks by default whenever direct Kite Connect access is enabled during regular market hours, or switch back to the Publisher-safe protected LIMIT basket when needed.",
   basketCurrency = "INR",
@@ -3427,6 +3428,7 @@ function ZerodhaBasketPreviewDialog({
   tradingViewTitle?: string;
   tradingViewAriaLabel?: string;
   loadingLabel?: string;
+  scoreScanCompletedAt?: string | null;
   primaryButtonLabel?: string;
   basketInfoText?: ReactNode;
   basketCurrency?: "INR" | "USD";
@@ -3458,10 +3460,12 @@ function ZerodhaBasketPreviewDialog({
   const placedOrderIds = new Set(submission?.placedOrderIds ?? []);
   const skippedOrderIds = new Set(submission?.skippedOrderIds ?? []);
   const executionPricesByOrderId = submission?.executionPricesByOrderId ?? {};
-  const scoreScanCompletedAt = orders
-    .map((order) => order.technicalScan?.createdAt ?? null)
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null;
+  const scoreScanCompletedAt = scoreScanCompletedAtOverride ?? (
+    orders
+      .map((order) => order.technicalScan?.createdAt ?? null)
+      .filter((value): value is string => Boolean(value))
+      .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null
+  );
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -5139,6 +5143,7 @@ export function RebalanceWorkflowSections({
   const [zerodhaDirectMarketAvailable, setZerodhaDirectMarketAvailable] = useState(false);
   const [zerodhaBasketLtpRefreshing, setZerodhaBasketLtpRefreshing] = useState(false);
   const [zerodhaBasketLtpRefreshedAt, setZerodhaBasketLtpRefreshedAt] = useState<string | null>(null);
+  const [zerodhaBasketScoreScanCompletedAt, setZerodhaBasketScoreScanCompletedAt] = useState<string | null>(null);
   const [zerodhaBasketDetailsData, setZerodhaBasketDetailsData] = useState<StockDetailsData>({
     portfolioSnapshot: null,
     eventsAnalysis: null,
@@ -5380,6 +5385,7 @@ export function RebalanceWorkflowSections({
     setZerodhaBasketError(null);
     setZerodhaBasketSubmission(null);
     setZerodhaBasketLtpRefreshedAt(null);
+    setZerodhaBasketScoreScanCompletedAt(null);
     setZerodhaDirectMarketAvailable(false);
     try {
       const [stockFlowSource, status, login] = await Promise.all([
@@ -5409,6 +5415,12 @@ export function RebalanceWorkflowSections({
         portfolioSnapshot,
       );
       const technicalScans = buildTechnicalScanMap(runs);
+      setZerodhaBasketScoreScanCompletedAt(
+        Object.values(technicalScans)
+          .map((scan) => scan.createdAt)
+          .filter((value): value is string => Boolean(value))
+          .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null,
+      );
       const actionRows = buildDashboardActionRows(stocks, "india", technicalScans, scoreMatrixFormulaConfig);
       const orders = buildZerodhaBasketPreviewOrders(
         actionRows,
@@ -8495,6 +8507,7 @@ ${zerodhaExecutionMode === "direct_market"
         onRefreshLtp={refreshZerodhaBasketLtp}
         ltpRefreshing={zerodhaBasketLtpRefreshing}
         ltpRefreshedAt={zerodhaBasketLtpRefreshedAt}
+        scoreScanCompletedAt={zerodhaBasketScoreScanCompletedAt}
         submission={zerodhaBasketSubmission}
         detailsData={zerodhaBasketDetailsData}
         historicalRows={zerodhaBasketHistoricalRows}
