@@ -144,8 +144,20 @@ function truncateErrorMessage(message: string) {
 }
 
 export function normalizeError(error: unknown) {
-  const rawMessage = error instanceof Error ? error.message : String(error);
+  if (error === null || error === undefined) {
+    return "The request failed without an error message. Check the server logs for the request correlation ID.";
+  }
+  const errorObject = readErrorObject(error);
+  const rawMessage =
+    (error instanceof Error ? readErrorText(error.message) : null) ||
+    readErrorText(errorObject?.detail) ||
+    readErrorText(errorObject?.error) ||
+    readErrorText(errorObject?.message) ||
+    String(error);
   const message = extractStructuredErrorMessage(rawMessage) || rawMessage;
+  if (/^(?:null|undefined|\[object Object\])$/i.test(message.trim())) {
+    return "The request failed without a usable error message. Check the server logs for the request correlation ID.";
+  }
   if (/<(?:!doctype\s+html|html|head|body)[\s>]/i.test(message)) {
     const titleMatch = message.match(/<title[^>]*>([^<]+)<\/title>/i);
     const headingMatch = message.match(/<h1[^>]*>([^<]+)<\/h1>/i);
