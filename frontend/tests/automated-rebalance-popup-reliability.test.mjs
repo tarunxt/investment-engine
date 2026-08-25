@@ -23,6 +23,13 @@ const workflowSource = readFileSync(
   ),
   "utf8",
 );
+const stockFlowSource = readFileSync(
+  new URL(
+    "../app/console/dashboard/_components/StockFlowTabs.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("automated rebalance clamps run history and hydrates only a bounded recent set", () => {
   assert.match(bridgeSource, /const BACKEND_RUN_PAGE_LIMIT = 100;/);
@@ -117,4 +124,28 @@ test("duplicate LLM runs retain the full denominator and receive ordinal summary
   assert.match(workflowSource, /totalLlms: jobs\.length/);
   assert.match(workflowSource, /getRunJobDisplayModels\(jobs\)/);
   assert.match(workflowSource, /\$\{model\} \$\{ordinal\}/);
+});
+
+
+test("stock-flow reloads after completed requests and hides impossible Zerodha sells", () => {
+  assert.match(
+    stockFlowSource,
+    /stockFlowSourcePromises\.delete\(portfolio\);[\s\S]*?portfolioSnapshot: overview\.latest/,
+  );
+  assert.match(
+    stockFlowSource,
+    /portfolioId !== "zerodha"[\s\S]*?holding\.quantity > 0/,
+  );
+});
+
+test("Zerodha basket validates sells against live holdings and labels the score scan time", () => {
+  assert.match(workflowSource, /buildZerodhaHoldingUnitsMap/);
+  assert.match(
+    workflowSource,
+    /holdingUnitsBySymbol\.get\(symbol\)[\s\S]*?> 0/,
+  );
+  assert.match(
+    workflowSource,
+    /Stock score scan completed: \{formatTimestamp\(scoreScanCompletedAt\)\}/,
+  );
 });
