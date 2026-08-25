@@ -254,6 +254,11 @@ const stockFlowSourcePromises = new Map<
   RebalanceStockFlowPortfolio,
   Promise<StockFlowSourceData>
 >();
+const stockFlowLastSuccessfulSources = new Map<
+  RebalanceStockFlowPortfolio,
+  { data: StockFlowSourceData; cachedAt: number }
+>();
+const STOCK_FLOW_TRANSIENT_FALLBACK_MAX_AGE_MS = 5 * 60 * 1000;
 
 export function fetchRebalanceStockFlowSource(
   portfolio: RebalanceStockFlowPortfolio,
@@ -269,13 +274,25 @@ export function fetchRebalanceStockFlowSource(
   ]).then(
     ([runs, overview]) => {
       stockFlowSourcePromises.delete(portfolio);
-      return {
+      const data = {
         runs,
         portfolioSnapshot: overview.latest,
       };
+      stockFlowLastSuccessfulSources.set(portfolio, {
+        data,
+        cachedAt: Date.now(),
+      });
+      return data;
     },
     (error) => {
       stockFlowSourcePromises.delete(portfolio);
+      const fallback = stockFlowLastSuccessfulSources.get(portfolio);
+      if (
+        fallback
+        && Date.now() - fallback.cachedAt <= STOCK_FLOW_TRANSIENT_FALLBACK_MAX_AGE_MS
+      ) {
+        return fallback.data;
+      }
       throw error;
     },
   );
