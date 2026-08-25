@@ -34,7 +34,7 @@ TEST_MESSAGE = "Hi, this a message from Tarun's Cred-X"
 
 MAIL_PREFERENCES_RESOURCE_TYPE = "cred_x_mail_preferences"
 MAIL_PREFERENCES_ACTION = "mail.preferences_updated"
-MAIL_PREFERENCE_CATALOG: tuple[dict[str, str], ...] = (
+MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
     {
         "key": "run_completion",
         "label": "Stage and scan completion",
