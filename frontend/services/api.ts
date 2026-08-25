@@ -1212,7 +1212,13 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaSyncPortfolio(): Promise<ZerodhaPortfolioSyncResponse> {
-    return this.post<ZerodhaPortfolioSyncResponse>(URLs.zerodha.portfolioSync(), {});
+    // A 401 from this broker-specific endpoint means the Kite token has not
+    // propagated (or expired); it must not sign the user out of Cred-X.
+    return this.post<ZerodhaPortfolioSyncResponse>(
+      URLs.zerodha.portfolioSync(),
+      {},
+      { skipUnauthorizedRefresh: true },
+    );
   }
 
   zerodhaOrders(): Promise<{ data: ZerodhaOrder[] }> {

@@ -30,6 +30,21 @@ const clientSource = readFileSync(
   ),
   "utf8",
 );
+const apiSource = readFileSync(
+  new URL("../services/api.ts", import.meta.url),
+  "utf8",
+);
+const callbackSource = readFileSync(
+  new URL("../app/zerodha/callback/page.tsx", import.meta.url),
+  "utf8",
+);
+const dashboardUtilsSource = readFileSync(
+  new URL(
+    "../app/console/dashboard/_components/dashboardOverviewUtils.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("auto-rebalance keeps polling active jobs until they reach a terminal status", () => {
   assert.match(
@@ -180,4 +195,36 @@ test("Zerodha Run preserves the popup user gesture and surfaces start failures",
     source,
     /if \(info\.error\) rows\.push\(\{ label: "Error", value: info\.error \}\);/,
   );
+});
+
+test("Zerodha login waits for durable token readiness and retries sync only once", () => {
+  assert.match(source, /async function confirmZerodhaConnectionReady/);
+  assert.match(source, /await apiService\.zerodhaStatus\(\)/);
+  assert.match(source, /ZERODHA_AUTH_CLOSE_GRACE_MS/);
+  assert.match(source, /async function queueZerodhaPortfolioSyncWithAuthRetry/);
+  assert.match(source, /if \(!isZerodhaAuthPropagationError\(error\)\) throw error/);
+  assert.match(source, /await confirmZerodhaConnectionReady\(\)/);
+  assert.equal(
+    (source.match(/queueZerodhaPortfolioSyncWithAuthRetry\(\)/g) ?? []).length,
+    3,
+    "the helper plus full-run and Sync Now callers should be present",
+  );
+  assert.match(apiSource, /zerodhaSyncPortfolio\(\)[\s\S]*?skipUnauthorizedRefresh: true/);
+});
+
+test("Zerodha callback and workflow close the popup on every terminal outcome", () => {
+  assert.match(callbackSource, /const closePopupSoon/);
+  assert.match(callbackSource, /notifyHost\(\{ type: 'zerodha_connected' \}\);[\s\S]*?closePopupSoon\(900\)/);
+  assert.equal(
+    (callbackSource.match(/closePopupSoon\(1_500\)/g) ?? []).length,
+    2,
+    "both callback error paths should close the popup after showing the error",
+  );
+  assert.match(source, /if \(!popup\.closed\) popup\.close\(\)/);
+});
+
+test("dashboard errors never render literal null or undefined", () => {
+  assert.match(dashboardUtilsSource, /error === null \|\| error === undefined/);
+  assert.match(dashboardUtilsSource, /request correlation ID/);
+  assert.match(dashboardUtilsSource, /\[object Object\\\]/);
 });
