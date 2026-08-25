@@ -1350,6 +1350,15 @@ function buildZerodhaHoldingExchangeMap(snapshot?: ZerodhaPortfolioSnapshotDetai
   return map;
 }
 
+function buildZerodhaHoldingUnitsMap(snapshot?: ZerodhaPortfolioSnapshotDetail | null) {
+  const map = new Map<string, number>();
+  snapshot?.holdings.forEach((holding) => {
+    const symbol = normalizeZerodhaBasketSymbol(holding.tradingsymbol);
+    if (symbol) map.set(symbol, Math.max(0, holding.quantity));
+  });
+  return map;
+}
+
 function buildZerodhaSnapshotPriceMap(snapshot?: ZerodhaPortfolioSnapshotDetail | null) {
   const map = new Map<string, number>();
   snapshot?.holdings.forEach((holding) => {
@@ -1385,12 +1394,20 @@ function buildZerodhaBasketPreviewOrders(
   options: { allowFractionalSellUnits?: boolean } = {},
 ): ZerodhaBasketPreviewOrder[] {
   const holdingExchangeBySymbol = buildZerodhaHoldingExchangeMap(snapshot);
+  const holdingUnitsBySymbol = buildZerodhaHoldingUnitsMap(snapshot);
   const snapshotPriceBySymbol = buildZerodhaSnapshotPriceMap(snapshot);
   const availableBalance = snapshot?.available_margin ?? null;
-  const eligibleSellAmount = rows
+  const basketRows = rows
+    .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
+    .filter((row) => {
+      if (row.formulaAction !== "Sell All" && row.formulaAction !== "Trim") return true;
+      const symbol = normalizeZerodhaBasketSymbol(row.stock.symbol);
+      return (holdingUnitsBySymbol.get(symbol) ?? 0) > 0;
+    });
+  const eligibleSellAmount = basketRows
     .filter((row) => row.formulaAction === "Sell All" || row.formulaAction === "Trim")
     .reduce((sum, row) => sum + Math.abs(row.formulaEstimate.amount ?? 0), 0);
-  const requestedBuyAmount = rows
+  const requestedBuyAmount = basketRows
     .filter((row) => row.formulaAction === "Buy New" || row.formulaAction === "Add more")
     .reduce((sum, row) => sum + Math.abs(row.formulaEstimate.amount ?? 0), 0);
   const safetyBuffer = requestedBuyAmount > 0 ? Math.max(50, requestedBuyAmount * 0.01) : 0;
@@ -1398,16 +1415,18 @@ function buildZerodhaBasketPreviewOrders(
     ? Math.max(0, availableBalance + eligibleSellAmount - safetyBuffer)
     : availableBalance;
 
-  return rows
-    .filter((row) => ZERODHA_BASKET_ACTIONS.has(row.formulaAction))
+  return basketRows
     .map((row) => {
       const { stock } = row;
       const action = row.formulaAction;
       const estimate = row.formulaEstimate;
       const side: "BUY" | "SELL" = action === "Sell All" || action === "Trim" ? "SELL" : "BUY";
       const requestedPercent: ZerodhaBasketOrderPercent = action === "Trim" ? 50 : 100;
-      const baseUnits = getZerodhaBasketBaseUnits(action, estimate);
       const normalizedSymbol = normalizeZerodhaBasketSymbol(stock.symbol) || stock.symbol;
+      const currentHoldingUnits = holdingUnitsBySymbol.get(normalizedSymbol) ?? null;
+      const baseUnits = side === "SELL"
+        ? currentHoldingUnits
+        : getZerodhaBasketBaseUnits(action, estimate);
       const snapshotPrice = snapshotPriceBySymbol.get(normalizedSymbol) ?? null;
       const price = getBasketPrice(stock, estimate.amount, estimate.units, snapshotPrice);
       const allowFractionalUnits = side === "SELL" && Boolean(options.allowFractionalSellUnits);
@@ -1433,7 +1452,7 @@ function buildZerodhaBasketPreviewOrders(
         side,
         units,
         baseUnits,
-        currentUnits: estimate.currentUnits,
+        currentUnits: side === "SELL" ? currentHoldingUnits : estimate.currentUnits,
         price,
         amount,
         lastPrice: snapshotPrice,
@@ -3439,6 +3458,10 @@ function ZerodhaBasketPreviewDialog({
   const placedOrderIds = new Set(submission?.placedOrderIds ?? []);
   const skippedOrderIds = new Set(submission?.skippedOrderIds ?? []);
   const executionPricesByOrderId = submission?.executionPricesByOrderId ?? {};
+  const scoreScanCompletedAt = orders
+    .map((order) => order.technicalScan?.createdAt ?? null)
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => parseTimestampMs(right) - parseTimestampMs(left))[0] ?? null;
   const sectionGroups = ZERODHA_BASKET_SECTION_ORDER.map((action) => ({
     action,
     label: ZERODHA_BASKET_SECTION_LABELS[action] ?? action,
@@ -3501,6 +3524,14 @@ function ZerodhaBasketPreviewDialog({
                 ariaLabel={tradingViewAriaLabel}
               />
             </div>
+            {scoreScanCompletedAt ? (
+              <p
+                className="mt-2 text-xs font-semibold text-slate-600"
+                data-testid="basket-score-scan-completed-at"
+              >
+                Stock score scan completed: {formatTimestamp(scoreScanCompletedAt)}
+              </p>
+            ) : null}
           </div>
           <div className="flex items-center gap-3">
             {renderPlaceOrderButton()}
