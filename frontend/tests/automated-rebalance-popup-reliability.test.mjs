@@ -151,6 +151,10 @@ test("Zerodha basket validates sells against live holdings and labels the score 
   assert.match(workflowSource, /buildZerodhaHoldingUnitsMap/);
   assert.match(
     workflowSource,
+    /Promise\.allSettled\(\[[\s\S]*?fetchRebalanceStockFlowSource\("zerodha"\)[\s\S]*?apiService\.zerodhaStatus\(\)[\s\S]*?apiService\.zerodhaLoginUrl\(\)/,
+  );
+  assert.match(
+    workflowSource,
     /scoreScanCompletedAt=\{zerodhaBasketScoreScanCompletedAt\}/,
   );
   assert.match(
