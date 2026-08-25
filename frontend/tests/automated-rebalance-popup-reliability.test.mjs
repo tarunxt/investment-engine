@@ -151,6 +151,10 @@ test("Zerodha basket validates sells against live holdings and labels the score 
   assert.match(workflowSource, /buildZerodhaHoldingUnitsMap/);
   assert.match(
     workflowSource,
+    /scoreScanCompletedAt=\{zerodhaBasketScoreScanCompletedAt\}/,
+  );
+  assert.match(
+    workflowSource,
     /holdingUnitsBySymbol\.get\(symbol\)[\s\S]*?> 0/,
   );
   assert.match(
