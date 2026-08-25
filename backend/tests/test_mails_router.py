@@ -103,6 +103,7 @@ async def test_get_mail_preferences_returns_all_types(
             "label": "Stage and scan completion",
             "description": "Individual run-completion emails.",
             "category": "runs",
+            "segments": ["Zerodha", "IndMoney"],
             "enabled": False,
         }
     ]
@@ -135,6 +136,7 @@ async def test_update_mail_preferences_saves_checkbox_values(
                 "label": "Stage and scan completion",
                 "description": "Individual run-completion emails.",
                 "category": "runs",
+                "segments": ["Zerodha", "IndMoney"],
                 "enabled": preferences["run_completion"],
             }
         ]
