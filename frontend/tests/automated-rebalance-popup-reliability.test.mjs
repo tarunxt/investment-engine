@@ -30,6 +30,13 @@ const stockFlowSource = readFileSync(
   ),
   "utf8",
 );
+const finalActionablesSource = readFileSync(
+  new URL(
+    "../app/console/_components/FinalActionablesConsole.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("automated rebalance clamps run history and hydrates only a bounded recent set", () => {
   assert.match(bridgeSource, /const BACKEND_RUN_PAGE_LIMIT = 100;/);
@@ -147,5 +154,9 @@ test("Zerodha basket validates sells against live holdings and labels the score 
   assert.match(
     workflowSource,
     /Stock score scan completed: \{formatTimestamp\(scoreScanCompletedAt\)\}/,
+  );
+  assert.match(
+    finalActionablesSource,
+    /createdAt: job\.updated_at \?\? job\.created_at/,
   );
 });
