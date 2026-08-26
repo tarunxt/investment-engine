@@ -10712,6 +10712,11 @@ export function BullpenAutoRunScheduleCard({
     );
   }
 
+  function clearClaimedAction() {
+    actionInFlightRef.current = null;
+    setAction(null);
+  }
+
   function scheduleAutoRunStatusRetry() {
     const controller = autoRunStatusAbortControllerRef.current;
     if (
@@ -12073,7 +12078,10 @@ export function BullpenAutoRunScheduleCard({
     if (pendingRunId === runId) {
       setPendingRunId(null);
       setRunNowStartedAt(null);
-      setAction(null);
+      // Keep the rendered action state and the synchronous action lock in
+      // sync. Clearing only the React state makes the button look enabled
+      // while claimAction still rejects every click as already in flight.
+      clearClaimedAction();
       setNotice(matchingRun.summary);
       if (onRunCompleted) {
         await onRunCompleted();
@@ -13247,7 +13255,7 @@ export function BullpenAutoRunScheduleCard({
         setRunNowStartedAt(null);
       }
       if (action === "invest-now") {
-        setAction(null);
+        clearClaimedAction();
       }
     });
   }, [action, pendingRunId, runNowStartedAt, workflowSettled]);
