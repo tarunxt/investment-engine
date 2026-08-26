@@ -75,6 +75,7 @@ from app.infrastructure.database.session import AsyncSessionLocal
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.task_registry import (
     register_auto_live_run_task,
+    revoke_auto_live_run_task_sync,
     revoke_registered_auto_live_run_task,
 )
 
@@ -1126,6 +1127,30 @@ class BullpenAutoLiveBot:
     async def stop(self) -> BullpenAutoLiveState:
         async with AsyncSessionLocal() as session:
             repo = AsyncPolymarketAutoLiveRepository(session)
+            # The planner can hold the run row lock while Stage 3 is executing.
+            # Revoke its worker before requesting that same lock; otherwise the
+            # stop request waits behind the worker it is supposed to terminate
+            # and the HTTP request eventually returns 504.
+            preempted_run_id: str | None = None
+            active_run_record = await repo.get_running_run_record(self.user_id)
+            if active_run_record is not None:
+                active_run = record_to_run(active_run_record)
+                revoked_task_id = await revoke_registered_auto_live_run_task(
+                    active_run.id
+                )
+                if (
+                    revoked_task_id is None
+                    and active_run.task_lifecycle is not None
+                ):
+                    revoked_task_id = active_run.task_lifecycle.task_id
+                    if revoked_task_id:
+                        await asyncio.to_thread(
+                            revoke_auto_live_run_task_sync,
+                            revoked_task_id,
+                        )
+                if revoked_task_id:
+                    preempted_run_id = active_run.id
+
             settings = await repo.ensure_settings(self.user_id)
             state = self._synchronize_state(settings, await repo.ensure_state(self.user_id))
             cancelled_run = await self._cancel_active_run_if_needed(repo)
@@ -1153,7 +1178,8 @@ class BullpenAutoLiveBot:
                     )
                 except Exception:
                     logger.exception("Failed to cancel unsubmitted Stage 3 intents for run %s", cancelled_run.id)
-                await revoke_registered_auto_live_run_task(cancelled_run.id)
+                if cancelled_run.id != preempted_run_id:
+                    await revoke_registered_auto_live_run_task(cancelled_run.id)
                 try:
                     await asyncio.to_thread(
                         _freeze_cancelled_run_audit_sync,

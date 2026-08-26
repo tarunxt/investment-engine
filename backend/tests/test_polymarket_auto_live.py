@@ -974,6 +974,7 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
     saved: dict[str, object] = {}
     revoked_run_ids: list[str] = []
     cancelled_intent_runs: list[tuple[int, str]] = []
+    stop_events: list[str] = []
 
     class _FakeSession:
         def __init__(self) -> None:
@@ -1004,7 +1005,7 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
 
         async def get_running_run_record(self, user_id: int, *, for_update: bool = False):
             assert user_id == 7
-            assert for_update is True
+            stop_events.append("locked-read" if for_update else "probe-read")
             return object()
 
         async def save_run(self, user_id: int, next_run: BullpenAutoLiveRun) -> None:
@@ -1017,6 +1018,7 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
 
     async def _fake_revoke(run_id: str):
         revoked_run_ids.append(run_id)
+        stop_events.append("revoke")
         return "task-run-stop-test"
 
     monkeypatch.setattr(
@@ -1065,6 +1067,7 @@ async def test_stop_cancels_active_auto_live_run_immediately(monkeypatch):
     assert "cancelled" in saved_state.last_action.lower()
     assert cancelled_intent_runs == [(7, "run-stop-test")]
     assert revoked_run_ids == ["run-stop-test"]
+    assert stop_events[:3] == ["probe-read", "revoke", "locked-read"]
     assert result.status == "stopped"
 
 
