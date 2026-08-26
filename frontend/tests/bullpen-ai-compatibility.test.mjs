@@ -638,9 +638,18 @@ test("Bullpen x AI serializes active-run control mutations", () => {
   );
   assert.match(autoRunCardSource, /function claimAction\(nextAction:/);
   assert.match(autoRunCardSource, /actionInFlightRef\.current !== null \|\| action !== null/);
+  assert.match(
+    autoRunCardSource,
+    /function clearClaimedAction\(\) \{\s*actionInFlightRef\.current = null;\s*setAction\(null\);\s*\}/,
+  );
+  assert.equal(
+    [...autoRunCardSource.matchAll(/setAction\(null\);/g)].length,
+    1,
+    "every unconditional action reset must also clear the synchronous action lock",
+  );
   assert.match(autoRunCardSource, /disabled=\{action !== null\}/);
   assert.match(autoRunCardSource, /action === "start-now" \? "start-now-pending" : null/);
-  assert.match(autoRunCardSource, /setAction\(null\);\s*\n\s*\}/);
+  assert.match(autoRunCardSource, /clearClaimedAction\(\);/);
   assert.doesNotMatch(autoRunCardSource, /Run Scans and Invest Now/);
   assert.match(autoRunCardSource, /Status: \{autoRunStatusBadges\.statusLabel\}/);
   assert.match(autoRunCardSource, /Mode: \{mode\}/);
