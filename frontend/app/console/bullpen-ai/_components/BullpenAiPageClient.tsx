@@ -25,6 +25,7 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  UserRound,
   X,
 } from "lucide-react";
 
@@ -259,6 +260,15 @@ const DEFAULT_EC2_COMMANDS = [
   "sudo systemctl status investor-celery-worker --no-pager",
 ];
 const EC2_COMMANDS_STORAGE_KEY = "bullpenAi.ec2Commands";
+const BULLPEN_ACCOUNT_USERNAME = "intrepid_crane_3";
+const BULLPEN_ACCOUNT_WALLET_FALLBACK =
+  "0xa70b18abdebf0704b41901c33e8477ea1085afdf";
+const CHANGE_BULLPEN_ACCOUNT_COMMANDS = [
+  "sudo -u investor -H bullpen logout",
+  "sudo -u investor -H bullpen login",
+  "sudo -u investor -H bullpen polymarket positions --output json",
+  "sudo systemctl restart investor-backend investor-celery-worker investor-celery-beat investor-frontend",
+];
 
 async function fetchBullpenUiJson<T>(
   input: string,
@@ -4034,6 +4044,8 @@ function BullpenAiPageContent() {
         : "No auto scan results yet. Run Scans and Invest Now above to populate this tab.";
   const [isBullpenIntroDialogOpen, setIsBullpenIntroDialogOpen] = useState(false);
   const [ec2CommandMenuOpen, setEc2CommandMenuOpen] = useState(false);
+  const [isBullpenAccountDialogOpen, setIsBullpenAccountDialogOpen] =
+    useState(false);
   const [ec2Commands, setEc2Commands] = useState(getInitialEc2Commands);
   const [newEc2Command, setNewEc2Command] = useState("");
   const [editingEc2CommandIndex, setEditingEc2CommandIndex] = useState<
@@ -4135,6 +4147,38 @@ function BullpenAiPageContent() {
             >
               <Info className="h-4 w-4" />
             </button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-stretch gap-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-purple-100 bg-purple-50/60 px-4 py-3 text-sm">
+              <div className="flex items-center gap-2">
+                <UserRound className="size-4 text-purple-700" aria-hidden="true" />
+                <span className="text-slate-500">Username</span>
+                <strong className="font-mono text-slate-950">
+                  {BULLPEN_ACCOUNT_USERNAME}
+                </strong>
+              </div>
+              <div className="min-w-0">
+                <span className="mr-2 text-slate-500">Wallet address</span>
+                <strong
+                  className="break-all font-mono text-xs text-slate-950"
+                  title={
+                    lastSuccessfulLiveSnapshot?.lineage?.accountIdentity ??
+                    BULLPEN_ACCOUNT_WALLET_FALLBACK
+                  }
+                >
+                  {lastSuccessfulLiveSnapshot?.lineage?.accountIdentity ??
+                    BULLPEN_ACCOUNT_WALLET_FALLBACK}
+                </strong>
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="border-purple-300 bg-white text-purple-800 hover:bg-purple-50"
+              onClick={() => setIsBullpenAccountDialogOpen(true)}
+            >
+              Change Bullpen Account
+            </Button>
           </div>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -5134,6 +5178,91 @@ function BullpenAiPageContent() {
             onToggleQuestion={toggleQuestionSelection}
             onToggleSelectAll={toggleSelectAllQuestions}
           />
+
+      {isBullpenAccountDialogOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsBullpenAccountDialogOpen(false);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="change-bullpen-account-title"
+            className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-purple-600">
+                  Bullpen account access
+                </p>
+                <h2
+                  id="change-bullpen-account-title"
+                  className="mt-1 text-2xl font-bold text-slate-950"
+                >
+                  Change Bullpen Account
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Open the production EC2 terminal, then run these commands in
+                  order. Bullpen will print a new one-time device URL and code;
+                  complete that sign-in before running the verification command.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBullpenAccountDialogOpen(false)}
+                className="rounded-full p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-950"
+                aria-label="Close Change Bullpen Account dialog"
+              >
+                <X className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+            <a
+              href={AWS_EC2_TERMINAL_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 hover:bg-amber-100"
+            >
+              <span className="min-w-0 break-all">{AWS_EC2_TERMINAL_URL}</span>
+              <ExternalLink className="size-4 shrink-0" aria-hidden="true" />
+            </a>
+            <ol className="mt-5 space-y-3">
+              {CHANGE_BULLPEN_ACCOUNT_COMMANDS.map((command, index) => (
+                <li
+                  key={command}
+                  className="rounded-2xl border border-slate-200 bg-slate-950 p-4 text-white"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                      Step {index + 1}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void navigator.clipboard.writeText(command)}
+                      className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-slate-300 hover:bg-white/10 hover:text-white"
+                    >
+                      <Copy className="size-3.5" aria-hidden="true" />
+                      Copy
+                    </button>
+                  </div>
+                  <code className="block break-all text-xs leading-5 text-emerald-300">
+                    {command}
+                  </code>
+                </li>
+              ))}
+            </ol>
+            <div className="mt-5 rounded-2xl border border-sky-200 bg-sky-50 p-4 text-sm leading-6 text-sky-950">
+              Do not reuse the login code shown in an old screenshot. Every
+              login creates a fresh one-time code. This server uses systemd, so
+              use the listed investor services instead of PM2.
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {isPromptEditorOpen ? (
         <BullpenPromptEditorDialog
