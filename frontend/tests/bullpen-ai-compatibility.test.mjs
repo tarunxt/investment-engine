@@ -401,6 +401,14 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   assert.match(autoRunCardSource, /Run and Enable Auto Runs/);
   assert.match(autoRunCardSource, /Start Auto Run Now/);
   assert.match(autoRunCardSource, /handleStartAutoRunNow/);
+  assert.match(
+    autoRunCardSource,
+    /function resolvePositiveConsoleOrderUsd\([\s\S]*?candidate > 0,[\s\S]*?DEFAULT_CONSOLE_ORDER_USD/,
+  );
+  assert.match(
+    autoRunCardSource,
+    /const latestConsoleOrderUsd = resolvePositiveConsoleOrderUsd\(\s*tradeAmountView\.tradeAmountUsd,\s*persistedConsoleOrderUsd,\s*\);/,
+  );
   assert.match(autoRunCardSource, /const normalizedStart = startWasNow \? "" : scheduleStartInput\.trim\(\);/);
   assert.match(
     autoRunCardSource,

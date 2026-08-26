@@ -1120,6 +1120,19 @@ function calculateConsoleTradeAmountUsd(
   return Number((cashInHandUsd / availableSlots).toFixed(2));
 }
 
+function resolvePositiveConsoleOrderUsd(
+  ...candidates: Array<number | null | undefined>
+) {
+  return (
+    candidates.find(
+      (candidate): candidate is number =>
+        typeof candidate === "number" &&
+        Number.isFinite(candidate) &&
+        candidate > 0,
+    ) ?? DEFAULT_CONSOLE_ORDER_USD
+  );
+}
+
 function buildConsoleTradeAmountView({
   cashInHandUsd,
   activePositions,
@@ -9458,7 +9471,10 @@ function buildConsoleSettingsUpdate(
 ) {
   return {
     strategy_profile: "bullpen_console_top10" as const,
-    console_order_usd: consoleOrderUsd,
+    // The live portfolio formula legitimately returns zero when every slot is
+    // occupied. Settings require a positive baseline, while the worker will
+    // recalculate the actual buy amount after claims and exits.
+    console_order_usd: resolvePositiveConsoleOrderUsd(consoleOrderUsd),
     console_auto_start_at: startAt ?? null,
     console_auto_refresh_minutes: refreshMinutes ?? null,
     ...(consoleLlmTargets ? { console_llm_targets: consoleLlmTargets } : {}),
@@ -10999,11 +11015,11 @@ export function BullpenAutoRunScheduleCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRunStatusCacheKey, authLoading]);
 
-  const persistedConsoleOrderUsd =
-    summary?.state.last_console_trade_amount_usd ??
-    summary?.settings.console_order_usd ??
-    visiblePersistedAutoRunStatus?.settings.console_order_usd ??
-    DEFAULT_CONSOLE_ORDER_USD;
+  const persistedConsoleOrderUsd = resolvePositiveConsoleOrderUsd(
+    summary?.state.last_console_trade_amount_usd,
+    summary?.settings.console_order_usd,
+    visiblePersistedAutoRunStatus?.settings.console_order_usd,
+  );
 
   useEffect(() => {
     if (scheduleSettingsDirty) return;
@@ -12321,8 +12337,10 @@ export function BullpenAutoRunScheduleCard({
 
       const startWasNow = scheduleStartInput.trim().toLowerCase() === "now";
       const normalizedStart = startWasNow ? "" : scheduleStartInput.trim();
-      const latestConsoleOrderUsd =
-        tradeAmountView.tradeAmountUsd ?? persistedConsoleOrderUsd;
+      const latestConsoleOrderUsd = resolvePositiveConsoleOrderUsd(
+        tradeAmountView.tradeAmountUsd,
+        persistedConsoleOrderUsd,
+      );
       const consoleLlmTargets = await ensureCanonicalStage2LlmTargets({
         requireNonEmpty: true,
       });
