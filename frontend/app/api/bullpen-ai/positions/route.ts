@@ -29,6 +29,10 @@ import type { PolymarketBotState } from "@/types/api";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const BULLPEN_007_EXPECTED_ACCOUNT_IDENTITY =
+  process.env.BULLPEN_007_WALLET_ADDRESS?.trim() ||
+  "0xa70b18abdebf0704b41901c33e8477ea1085afdf";
+
 type BackendBullpenCredentialArtifact = {
   path?: string | null;
   inode?: number | null;
@@ -459,6 +463,7 @@ export async function GET(request: NextRequest) {
       force_fresh: forceFresh ? "true" : "false",
       max_age_seconds: String(maxAgeSeconds),
       caller_source: callerSource,
+      expected_account_identity: BULLPEN_007_EXPECTED_ACCOUNT_IDENTITY,
     });
     if (passive) {
       backendQuery.set("passive", "true");

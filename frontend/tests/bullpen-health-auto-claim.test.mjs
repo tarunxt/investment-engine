@@ -264,11 +264,11 @@ test("frontend positions polling calls only the backend positions runtime endpoi
   const payload = await response.json();
 
   assert.deepEqual(backendCalls, [
-    "/polymarket/runtime/positions?force_fresh=false&max_age_seconds=20&caller_source=frontend-passive&passive=true",
+    "/polymarket/runtime/positions/display?force_fresh=false&max_age_seconds=20&caller_source=frontend-passive&expected_account_identity=0xa70b18abdebf0704b41901c33e8477ea1085afdf&passive=true",
   ]);
   assert.equal(payload.liveAvailable, true);
   assert.equal(payload.positionsSource, "live-cli");
-  assert.equal(payload.health?.message, "Bullpen live wallet snapshot is ready.");
+  assert.equal(payload.health?.message, "Bullpen wallet display snapshot is available.");
   assert.deepEqual(payload.lineage, {
     accountIdentity: "0xa70-account",
     credentialArtifact: {
@@ -320,7 +320,7 @@ test("frontend distinguishes a fresh shared refresh from a display-only cached s
   };
 
   const freshPayload = await (await GET(request)).json();
-  assert.equal(freshPayload.liveAvailable, true);
+  assert.equal(freshPayload.liveAvailable, false);
   assert.equal(freshPayload.positionsSource, "redis-cache");
   assert.equal(freshPayload.lineage.freshnessState, "fresh");
 
@@ -329,10 +329,10 @@ test("frontend distinguishes a fresh shared refresh from a display-only cached s
   assert.equal(cachedPayload.liveAvailable, false);
   assert.equal(
     cachedPayload.positionsSource,
-    "last-successful-live-snapshot",
+    "redis-cache",
   );
   assert.equal(cachedPayload.lineage.freshnessState, "cached");
-  assert.match(cachedPayload.fallback.message, /display only/i);
+  assert.match(cachedPayload.fallback.message, /display snapshot/i);
 });
 
 test("frontend source tree contains no Bullpen child_process or execFile runtime usage", () => {

@@ -222,6 +222,80 @@ async def test_runtime_display_positions_allows_signed_in_user_and_strips_runtim
 
 
 @pytest.mark.anyio
+async def test_runtime_display_positions_replaces_a_different_cli_account(
+    monkeypatch,
+):
+    silver_snapshot = BullpenPositionsSnapshot(
+        payload={"positions": [], "summary": {"cash_balance": 133.67}},
+        fetched_at="2026-08-26T10:00:00+00:00",
+        account_identity="0x1111111111111111111111111111111111111111",
+        source="live-cli",
+        freshness_state="fresh",
+        diagnostics=BullpenCommandDiagnostics(
+            command_category="positions", pid=1, effective_home="/home/investor"
+        ),
+    )
+    intrepid_wallet = "0xa70b18abdebf0704b41901c33e8477ea1085afdf"
+    intrepid_snapshot = BullpenPositionsSnapshot(
+        payload={"positions": [], "summary": {"cash_balance": 9.21}},
+        fetched_at="2026-08-26T10:01:00+00:00",
+        account_identity=intrepid_wallet,
+        source="redis-cache",
+        freshness_state="cached",
+        diagnostics=BullpenCommandDiagnostics(
+            command_category="positions", pid=1, effective_home="/home/investor"
+        ),
+    )
+
+    class FakeBroker:
+        async def read_display_positions_snapshot(self):
+            return silver_snapshot
+
+        async def read_cached_positions_snapshot(self):
+            return silver_snapshot
+
+        async def get_positions_snapshot(self, **kwargs):
+            return silver_snapshot
+
+    async def fake_public_snapshot(broker, *, wallet, caller_source):
+        assert isinstance(broker, FakeBroker)
+        assert wallet == intrepid_wallet
+        assert caller_source == "ui-passive-refresh"
+        return intrepid_snapshot
+
+    app = FastAPI()
+    app.include_router(polymarket_router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+        id=8,
+        role=UserRole.USER,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket.router.get_bullpen_runtime_broker",
+        lambda: FakeBroker(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket.router.read_public_display_wallet_snapshot",
+        fake_public_snapshot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get(
+            "/polymarket/runtime/positions/display",
+            params={
+                "passive": "true",
+                "caller_source": "ui-passive-refresh",
+                "expected_account_identity": intrepid_wallet,
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["snapshot"]["account_identity"] == intrepid_wallet
+    assert payload["snapshot"]["payload"]["summary"]["cash_balance"] == 9.21
+
+
+@pytest.mark.anyio
 async def test_operational_runtime_positions_remain_admin_only(monkeypatch):
     app = FastAPI()
     app.include_router(polymarket_router)

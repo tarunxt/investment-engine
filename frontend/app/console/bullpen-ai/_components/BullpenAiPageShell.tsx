@@ -38,14 +38,6 @@ export function BullpenAiPageShell({
       ]);
       if (!active) return;
 
-      if (
-        dashboardResult.status === "fulfilled" &&
-        dashboardResult.value.bullpen
-      ) {
-        setLiveSummary(dashboardResult.value.bullpen);
-        return;
-      }
-
       if (positionsResult.status === "fulfilled") {
         const payload = positionsResult.value;
         const positionsSummary =
@@ -66,6 +58,14 @@ export function BullpenAiPageShell({
           });
           return;
         }
+      }
+
+      if (
+        dashboardResult.status === "fulfilled" &&
+        dashboardResult.value.bullpen
+      ) {
+        setLiveSummary(dashboardResult.value.bullpen);
+        return;
       }
 
       const failure =

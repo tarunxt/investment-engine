@@ -16,6 +16,9 @@ from app.domains.polymarket.runtime_broker import (
     BullpenRuntimeFailure,
     get_bullpen_runtime_broker,
 )
+from app.domains.polymarket.runtime_positions_refresh import (
+    read_public_display_wallet_snapshot,
+)
 from app.domains.polymarket.schemas import (
     PolymarketBotState,
     PolymarketDiscoveryDebugReport,
@@ -200,6 +203,7 @@ async def get_bullpen_runtime_display_positions(
     passive: bool = Query(default=False),
     caller_source: str | None = Query(default=None, max_length=80),
     max_age_seconds: int = Query(default=20, ge=0, le=300),
+    expected_account_identity: str | None = Query(default=None, max_length=42),
     current_user: User = Depends(get_current_user),
 ):
     """Read-only, sanitized Bullpen wallet evidence for the signed-in UI.
@@ -219,6 +223,20 @@ async def get_bullpen_runtime_display_positions(
     stale_snapshot = await broker.read_display_positions_snapshot()
     if stale_snapshot is None:
         stale_snapshot = await broker.read_cached_positions_snapshot()
+    normalized_expected_identity = (
+        expected_account_identity.strip().lower()
+        if expected_account_identity
+        else None
+    )
+    if (
+        normalized_expected_identity
+        and (
+            stale_snapshot is None
+            or (stale_snapshot.account_identity or "").strip().lower()
+            != normalized_expected_identity
+        )
+    ):
+        stale_snapshot = None
     try:
         snapshot = await broker.get_positions_snapshot(
             force_fresh=force_fresh,
@@ -226,11 +244,34 @@ async def get_bullpen_runtime_display_positions(
             caller_source=caller_source,
             max_age_seconds=max_age_seconds,
         )
+        if (
+            normalized_expected_identity
+            and (snapshot.account_identity or "").strip().lower()
+            != normalized_expected_identity
+        ):
+            snapshot = await read_public_display_wallet_snapshot(
+                broker,
+                wallet=normalized_expected_identity,
+                caller_source=caller_source or "ui-account-isolated-display",
+            )
         return BullpenRuntimeDisplayPositionsResponse(
             ok=True,
             snapshot=_sanitize_bullpen_display_snapshot(snapshot),
         )
     except Exception as exc:
+        if normalized_expected_identity:
+            try:
+                snapshot = await read_public_display_wallet_snapshot(
+                    broker,
+                    wallet=normalized_expected_identity,
+                    caller_source=caller_source or "ui-account-isolated-display",
+                )
+                return BullpenRuntimeDisplayPositionsResponse(
+                    ok=True,
+                    snapshot=_sanitize_bullpen_display_snapshot(snapshot),
+                )
+            except Exception:
+                pass
         return BullpenRuntimeDisplayPositionsResponse(
             ok=False,
             stale_snapshot=_sanitize_bullpen_display_snapshot(stale_snapshot),

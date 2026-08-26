@@ -483,15 +483,25 @@ async def _refresh_public_wallet_snapshot(
     broker: runtime_broker_module.BullpenRuntimeBroker,
     *,
     caller_source: str,
+    wallet_override: str | None = None,
+    persist: bool = True,
 ) -> runtime_broker_module.BullpenPositionsSnapshot:
-    wallet = await _status_wallet_address(broker)
+    wallet = _normalize_wallet_address(wallet_override)
+    if wallet_override is not None and wallet is None:
+        raise runtime_broker_module.BullpenRuntimeCommandError(
+            "The requested Bullpen display wallet address is invalid.",
+            classification="public_wallet_identity_invalid",
+        )
+    if wallet is None:
+        wallet = await _status_wallet_address(broker)
     if wallet is None:
         raise runtime_broker_module.BullpenRuntimeCommandError(
             "Unable to resolve the Bullpen Polymarket wallet address for the display refresh.",
             classification="public_wallet_identity_missing",
         )
 
-    await _persist_display_wallet_identity(broker, wallet)
+    if persist:
+        await _persist_display_wallet_identity(broker, wallet)
     payload = await _read_public_positions_payload(wallet)
     config = runtime_broker_module._runtime_config()
     diagnostics = runtime_broker_module.BullpenCommandDiagnostics(
@@ -524,8 +534,30 @@ async def _refresh_public_wallet_snapshot(
         freshness_state="cached",
         diagnostics=diagnostics,
     )
-    await _write_display_snapshot(broker, snapshot)
+    if persist:
+        await _write_display_snapshot(broker, snapshot)
     return snapshot
+
+
+async def read_public_display_wallet_snapshot(
+    broker: runtime_broker_module.BullpenRuntimeBroker,
+    *,
+    wallet: str,
+    caller_source: str,
+) -> runtime_broker_module.BullpenPositionsSnapshot:
+    """Read one explicit public wallet without mutating the runtime account LKG.
+
+    This is the account-isolated UI path. It lets a page render its configured
+    wallet even when the singleton execution CLI is currently authenticated as
+    a different Bullpen account.
+    """
+
+    return await _refresh_public_wallet_snapshot(
+        broker,
+        caller_source=caller_source,
+        wallet_override=wallet,
+        persist=False,
+    )
 
 
 async def _refresh_ui_positions_snapshot(
