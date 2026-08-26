@@ -430,6 +430,20 @@ test("Bullpen auto-run badges use explicit finite failure and retry labels", asy
   assert.deepEqual(
     getBullpenAutoRunStatusBadges(
       createStatus({
+        state: { running: false, paused: false, status: "stopped" },
+      }),
+      "ready",
+    ),
+    {
+      statusLabel: "Stopped",
+      modeLabel: "Live trading",
+      isStale: false,
+      isUpdating: false,
+    },
+  );
+  assert.deepEqual(
+    getBullpenAutoRunStatusBadges(
+      createStatus({
         state: { running: false, paused: true, mode: "analysis-only" },
       }),
       "ready",

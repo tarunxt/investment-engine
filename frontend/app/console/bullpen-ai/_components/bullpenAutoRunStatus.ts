@@ -58,7 +58,14 @@ export type BullpenAutoRunStatusLoadState =
   | "timeout";
 
 export type BullpenAutoRunStatusBadges = {
-  statusLabel: "Enabled" | "Disabled" | "Paused" | "Unavailable" | "Retrying" | null;
+  statusLabel:
+    | "Enabled"
+    | "Stopped"
+    | "Disabled"
+    | "Paused"
+    | "Unavailable"
+    | "Retrying"
+    | null;
   modeLabel:
     | "Dry run"
     | "Analysis only"
@@ -706,7 +713,9 @@ export function getBullpenAutoRunStatusBadges(
         ? "Paused"
         : schedulerReportedError && !schedulerRunning
           ? "Unavailable"
-          : "Enabled";
+          : schedulerRunning
+            ? "Enabled"
+            : "Stopped";
 
     return {
       statusLabel,
@@ -794,6 +803,8 @@ export function getBullpenAutoRunBadgeRationale(
     reason = "The saved scheduler state is paused, so it will not start the next automatic run.";
   } else if (data.state.status === "error" && !data.state.running) {
     reason = "The scheduler reported an error and is not currently running, so its status is Unavailable.";
+  } else if (!data.state.running) {
+    reason = "Auto-Live remains configured, but the scheduler has been stopped and no automatic run is scheduled.";
   } else {
     reason = "Auto-Live is enabled and the scheduler is running without a pause or emergency stop.";
   }
