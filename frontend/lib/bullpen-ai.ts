@@ -1096,7 +1096,8 @@ export function getBullpenReturnsPerDayBreakdown({
   }
 
   // Returns/day uses the unpriced upside for the current odds on the side matching the strongest LLM odds:
-  // (100 - current odds on strongest(LLM Yes odds, LLM No odds) side) / days left.
+  // Default persisted Excel-style formula:
+  // (100 - current odds on strongest(LLM Yes odds, LLM No odds) side) / (days left + 4).
   const currentSide = llmYesOdds >= llmNoOdds ? "Yes" : "No";
   const currentOdds = currentSide === "Yes" ? yesOdds : noOdds;
 
@@ -1106,7 +1107,7 @@ export function getBullpenReturnsPerDayBreakdown({
     daysUntilClose,
     llmYesOdds,
     llmNoOdds,
-    result: Number(((100 - currentOdds) / daysUntilClose).toFixed(2)),
+    result: Number(((100 - currentOdds) / (daysUntilClose + 4)).toFixed(2)),
   };
 }
 

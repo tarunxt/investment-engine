@@ -63,7 +63,7 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "candidate_returns_per_day",
         "stage": "stage-1",
-        "algorithm_version": "v3",
+        "algorithm_version": "v4",
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "candidate_returns_per_day",
         "label": "Candidate returns per day",
@@ -119,7 +119,7 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "llm_returns_per_day",
         "stage": "stage-2",
-        "algorithm_version": "v3",
+        "algorithm_version": "v4",
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "llm_returns_per_day",
         "label": "Stage 2 current-odds returns per day",
@@ -127,7 +127,7 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "position_returns_per_day",
         "stage": "stage-3",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "position_returns_per_day",
         "label": "Active position returns per day",

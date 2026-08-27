@@ -6452,7 +6452,11 @@ class BullpenAutoLiveEngine:
                         position=position,
                         row=matched_row,
                         market=matched_market,
-                        returns_per_day=position_returns_per_day(position, now=now),
+                        returns_per_day=position_returns_per_day(
+                            position,
+                            now=now,
+                            formula=settings.returns_per_day_formula,
+                        ),
                     )
                 )
                 reusable_manual_active_position_keys.add(position_key)
@@ -6932,7 +6936,11 @@ class BullpenAutoLiveEngine:
             for market in scan_seed_markets:
                 if market.market_id in positioned_market_ids:
                     continue
-                returns_per_day = candidate_returns_per_day(market, now=now)
+                returns_per_day = candidate_returns_per_day(
+                    market,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                )
                 candidate_rows.append((market, returns_per_day))
             active_llm_rows: list[dict[str, object]] = [
                 {
@@ -6943,7 +6951,11 @@ class BullpenAutoLiveEngine:
                         market_by_slug=market_by_slug,
                         market_by_id=market_by_id,
                     ),
-                    "returns_per_day": position_returns_per_day(position, now=now),
+                    "returns_per_day": position_returns_per_day(
+                        position,
+                        now=now,
+                        formula=settings.returns_per_day_formula,
+                    ),
                 }
                 for position in active_bullpen_wallet_positions
             ]
@@ -7353,6 +7365,7 @@ class BullpenAutoLiveEngine:
                         now=now,
                         current_yes_odds=market.current_yes_odds,
                         current_no_odds=market.current_no_odds,
+                        formula=settings.returns_per_day_formula,
                     )
                     selected_side, strongest_llm_odds = _stronger_probability_side(
                         yes_probability=llm_consensus.fair_yes_probability_pct,
@@ -9181,7 +9194,11 @@ class BullpenAutoLiveEngine:
         evaluated_active_positions: list[dict[str, object]] = []
 
         for position in active_bullpen_wallet_positions:
-            returns_per_day = position_returns_per_day(position, now=now)
+            returns_per_day = position_returns_per_day(
+                position,
+                now=now,
+                formula=settings.returns_per_day_formula,
+            )
             key = f"{position.market_id}::{position.side}"
             if key in pending_historical_sell_keys:
                 market = _active_position_market(

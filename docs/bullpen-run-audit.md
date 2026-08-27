@@ -898,8 +898,12 @@ Current required keys:
 
 Materialized formula rows use the same provenance as the registry:
 `console_trade_amount_per_opportunity` is `v2`,
-`llm_returns_per_day` is `v3`, and both returns-per-day implementations point
-to their actual `console_profile` source module.
+`candidate_returns_per_day` and `llm_returns_per_day` are `v4`, while
+`position_returns_per_day` is `v2`. All three use the user's persisted,
+Excel-style Returns/day formula and point to their actual `console_profile`
+source module. The default is
+`=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)`; existing frozen
+outputs remain unchanged.
 
 `stage3_active_reservation_cash_filter` algorithm version `v2` counts an
 otherwise consumed BUY reservation when its consumption timestamp is newer

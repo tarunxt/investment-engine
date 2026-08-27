@@ -1174,7 +1174,7 @@ def test_candidate_returns_per_day_accepts_naive_close_time():
         now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
     )
 
-    assert returns == 5.0
+    assert returns == 2.5
 
 
 def test_llm_returns_per_day_uses_unpriced_upside_for_current_side_matching_strongest_llm_odds_with_naive_close_time():
@@ -1187,7 +1187,7 @@ def test_llm_returns_per_day_uses_unpriced_upside_for_current_side_matching_stro
         current_no_odds=24.5,
     )
 
-    assert returns == 18.88
+    assert returns == 9.44
 
 
 def test_position_returns_per_day_accepts_naive_close_time():
@@ -1201,7 +1201,7 @@ def test_position_returns_per_day_accepts_naive_close_time():
         now=datetime(2026, 6, 21, 0, 0, tzinfo=UTC),
     )
 
-    assert returns == 5.0
+    assert returns == 2.5
 
 
 @pytest.mark.anyio

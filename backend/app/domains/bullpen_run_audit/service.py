@@ -784,7 +784,7 @@ def _build_formula_records(
                         if is_active_position
                         else "Stage 2 current-odds returns per day"
                     ),
-                    algorithm_version="v1" if is_active_position else "v3",
+                    algorithm_version="v2" if is_active_position else "v4",
                     source_module="app.domains.polymarket_auto_live.console_profile",
                     source_function=(
                         "position_returns_per_day"

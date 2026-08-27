@@ -129,7 +129,7 @@ export function BullpenInvestmentMathDialog({
   const returnsCard = question ? (
     <CalculationCard
       title="Returns/day"
-      formula="(100 - current odds on strongest LLM side) / days left"
+      formula="(100 - current odds on strongest LLM side) / (days left + 4)"
       summary={formatPercent(returnsBreakdown!.result)}
       highlighted={focus === "returnsPerDay"}
     >
@@ -141,7 +141,7 @@ export function BullpenInvestmentMathDialog({
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`(100 - Current ${returnsBreakdown!.currentSide ?? "—"} odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"}) / ${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days = ${returnsBreakdown!.result.toFixed(2)}% per day`}
+            {`(100 - Current ${returnsBreakdown!.currentSide ?? "—"} odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"}) / (${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days + 4) = ${returnsBreakdown!.result.toFixed(2)}% per day`}
           </div>
           <div className="mt-4">
             <MetricRow
@@ -175,7 +175,7 @@ export function BullpenInvestmentMathDialog({
   ) : (
     <CalculationCard
       title="Returns/day"
-      formula="(100 - current position price) / days until close"
+      formula="(100 - current position price) / (days until close + 4)"
       summary={formatPercent(position?.returnsPerDay ?? null)}
       highlighted={focus === "returnsPerDay"}
     >
@@ -187,7 +187,7 @@ export function BullpenInvestmentMathDialog({
       ) : (
         <>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`(100 - ${positionPricePercent?.toFixed(2) || "—"}) / ${positionDaysUntilClose?.toFixed(1) || "—"} = ${position.returnsPerDay.toFixed(2)}% per day`}
+            {`(100 - ${positionPricePercent?.toFixed(2) || "—"}) / (${positionDaysUntilClose?.toFixed(1) || "—"} + 4) = ${position.returnsPerDay.toFixed(2)}% per day`}
           </div>
           <div className="mt-4">
             <MetricRow label="Held outcome" value={position.outcome || "—"} />

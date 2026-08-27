@@ -428,7 +428,7 @@ export function calculateBullpenPositionReturnsPerDay({
   const normalizedPrice =
     currentPrice > 1 && currentPrice <= 100 ? currentPrice / 100 : currentPrice;
 
-  return round(((100 - normalizedPrice * 100) / daysUntilClose), 2);
+  return round(((100 - normalizedPrice * 100) / (daysUntilClose + 4)), 2);
 }
 
 function toBullpenPositionCurrentPrice({
