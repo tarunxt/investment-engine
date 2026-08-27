@@ -242,7 +242,7 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     assert.equal(position.closeTime, "2026-06-27T03:59:59.999Z");
     assert.equal(position.yesOdds, 86.5);
     assert.equal(position.noOdds, 13.5);
-    assert.equal(position.returnsPerDay, 17.65);
+    assert.equal(position.returnsPerDay, 9.72);
 
     const refreshed = applyBullpenPositionMarketData(position, {
       noOdds: 11.5,
@@ -260,7 +260,7 @@ test("Bullpen positions refresh current odds and use end-of-day ET for returns/d
     assert.equal(refreshed.currentPrice, 0.115);
     assert.equal(refreshed.currentValue, 1.52);
     assert.equal(refreshed.unrealizedPnl, -6.27);
-    assert.equal(refreshed.returnsPerDay, 18.06);
+    assert.equal(refreshed.returnsPerDay, 9.94);
     assert.equal(
       refreshed.marketUrl,
       "https://polymarket.com/event/starmer-out-in-2025",

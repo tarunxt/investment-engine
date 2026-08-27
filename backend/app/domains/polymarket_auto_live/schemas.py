@@ -220,6 +220,9 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     max_order_usd: float = Field(default=25, gt=0)
     console_order_usd: float = Field(default=5, gt=0)
     console_min_market_odds: float = Field(default=5, ge=0, lt=50)
+    returns_per_day_formula: str = (
+        "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
+    )
     min_liquidity_usd: float = Field(default=1_000, ge=0)
 
     min_independent_active_markets: int = Field(default=10, ge=1)
@@ -323,6 +326,15 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     ) -> list[BullpenAutoLiveLlmTarget]:
         return _normalize_console_llm_targets(value)
 
+    @field_validator("returns_per_day_formula")
+    @classmethod
+    def validate_returns_per_day_formula_field(cls, value: str) -> str:
+        from app.domains.polymarket_auto_live.returns_formula import (
+            validate_returns_per_day_formula,
+        )
+
+        return validate_returns_per_day_formula(value)
+
     @model_validator(mode="after")
     def validate_cross_field_rules(self) -> "BullpenAutoLiveSettingsBase":
         if self.max_single_trade_pct_bankroll > self.max_single_market_pct_bankroll:
@@ -381,6 +393,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     max_order_usd: float | None = Field(default=None, gt=0)
     console_order_usd: float | None = Field(default=None, gt=0)
     console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
+    returns_per_day_formula: str | None = None
     min_liquidity_usd: float | None = Field(default=None, ge=0)
 
     min_independent_active_markets: int | None = Field(default=None, ge=1)

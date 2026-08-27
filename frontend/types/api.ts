@@ -2343,6 +2343,7 @@ export interface BullpenAutoLiveSettings {
   max_order_usd: number;
   console_order_usd: number;
   console_min_market_odds: number;
+  returns_per_day_formula: string;
   min_liquidity_usd: number;
   min_independent_active_markets: number;
   target_active_markets: number;

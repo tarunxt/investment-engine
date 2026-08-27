@@ -89,7 +89,7 @@ def test_event_trend_rebuilds_missing_returns_per_day_from_frozen_scan_inputs() 
         }
     )
 
-    assert _event_trend_returns_per_day(decision) == 10.5
+    assert _event_trend_returns_per_day(decision) == 2.1
 
 
 def test_event_trend_prefers_saved_returns_per_day() -> None:

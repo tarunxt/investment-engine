@@ -116,6 +116,39 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
 });
 
+test("Run History Returns/day header opens a persistent Excel-style formula editor", () => {
+  const historyContent = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const trendsTable = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const formulaDialog = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenReturnsPerDayInfo.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(trendsTable, /BullpenReturnsPerDayHeaderInfo/);
+  assert.match(historyContent, /BullpenReturnsPerDayFormulaDialog/);
+  assert.match(formulaDialog, /Excel-style formula/);
+  assert.match(formulaDialog, /returns_per_day_formula: formula/);
+  assert.match(
+    formulaDialog,
+    /=\(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS\)\/\(DAYS_UNTIL_CLOSE\+4\)/,
+  );
+});
+
 test("Bullpen event links use the direct market route instead of the trending search", () => {
   assert.match(
     bullpenAi,

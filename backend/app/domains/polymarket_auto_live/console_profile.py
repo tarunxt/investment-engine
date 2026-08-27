@@ -25,6 +25,10 @@ from app.domains.polymarket_auto_live.category import (
     format_polymarket_category,
     read_polymarket_theme,
 )
+from app.domains.polymarket_auto_live.returns_formula import (
+    DEFAULT_RETURNS_PER_DAY_FORMULA,
+    calculate_returns_per_day_formula,
+)
 from app.domains.polymarket_auto_live.scanner import (
     FILTER_TEXT_KEYS,
     MARKET_PREDICTION_KEYWORDS,
@@ -1020,6 +1024,7 @@ def position_returns_per_day(
     position: ConsoleWalletPosition,
     *,
     now: datetime,
+    formula: str = DEFAULT_RETURNS_PER_DAY_FORMULA,
 ) -> float | None:
     if (
         position.is_claimable
@@ -1033,7 +1038,11 @@ def position_returns_per_day(
     days_until_close = round((close_time - now).total_seconds() / 86_400, 1)
     if days_until_close <= 0:
         return None
-    return round((100 - position.current_price_cents) / days_until_close, 2)
+    return calculate_returns_per_day_formula(
+        current_chosen_side_bullpen_odds=position.current_price_cents,
+        days_until_close=days_until_close,
+        formula=formula,
+    )
 
 
 def llm_returns_per_day(
@@ -1044,6 +1053,7 @@ def llm_returns_per_day(
     now: datetime,
     current_yes_odds: float | None = None,
     current_no_odds: float | None = None,
+    formula: str = DEFAULT_RETURNS_PER_DAY_FORMULA,
 ) -> float | None:
     if current_yes_odds is None and current_no_odds is None:
         return None
@@ -1062,13 +1072,18 @@ def llm_returns_per_day(
     )
     if current_odds_for_strongest_llm_side is None:
         return None
-    return round((100 - current_odds_for_strongest_llm_side) / days_until_close, 2)
+    return calculate_returns_per_day_formula(
+        current_chosen_side_bullpen_odds=current_odds_for_strongest_llm_side,
+        days_until_close=days_until_close,
+        formula=formula,
+    )
 
 
 def candidate_returns_per_day(
     market: ScannedMarket,
     *,
     now: datetime,
+    formula: str = DEFAULT_RETURNS_PER_DAY_FORMULA,
 ) -> float | None:
     if market.current_yes_odds is None and market.current_no_odds is None:
         return None
@@ -1086,7 +1101,11 @@ def candidate_returns_per_day(
     )
     if strongest_current_odds == float("-inf"):
         return None
-    return round((100 - strongest_current_odds) / days_until_close, 2)
+    return calculate_returns_per_day_formula(
+        current_chosen_side_bullpen_odds=strongest_current_odds,
+        days_until_close=days_until_close,
+        formula=formula,
+    )
 
 
 def active_position_slug_set(positions: list[ConsoleWalletPosition]) -> set[str]:

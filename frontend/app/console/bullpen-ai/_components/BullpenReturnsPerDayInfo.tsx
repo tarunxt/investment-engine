@@ -1,10 +1,14 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { Info, X } from "lucide-react";
+import { Info, Loader2, Save, X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { apiService } from "@/services/api";
+
+export const DEFAULT_RETURNS_PER_DAY_FORMULA =
+  "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)";
 
 type BullpenReturnsPerDayFormulaDialogProps = {
   onClose: () => void;
@@ -87,17 +91,59 @@ export function BullpenReturnsPerDayValueButton({
 export function BullpenReturnsPerDayFormulaDialog({
   onClose,
 }: BullpenReturnsPerDayFormulaDialogProps) {
+  const [formula, setFormula] = useState(DEFAULT_RETURNS_PER_DAY_FORMULA);
+  const [savedFormula, setSavedFormula] = useState(DEFAULT_RETURNS_PER_DAY_FORMULA);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void apiService
+      .getBullpenAutoLiveSettings()
+      .then((settings) => {
+        if (!active) return;
+        const next = settings.returns_per_day_formula || DEFAULT_RETURNS_PER_DAY_FORMULA;
+        setFormula(next);
+        setSavedFormula(next);
+      })
+      .catch(() => {
+        if (active) setMessage("Could not load the saved formula. The default is shown.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const saveFormula = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        returns_per_day_formula: formula,
+      });
+      setFormula(settings.returns_per_day_formula);
+      setSavedFormula(settings.returns_per_day_formula);
+      setMessage("Formula saved. It will be used for all new event calculations.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Formula could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950">
+    <div className="fixed inset-0 z-[190] flex items-center justify-center bg-slate-950/60 p-4 text-slate-950" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div className="w-full max-w-xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.55)]">
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-sky-700">
               Returns/day formula
             </p>
-            <h2 className="mt-2 text-xl font-semibold text-slate-950">
-              How Returns/day is calculated
-            </h2>
+            <h2 className="mt-2 text-xl font-semibold text-slate-950">Returns/day formula</h2>
           </div>
           <button
             type="button"
@@ -109,25 +155,32 @@ export function BullpenReturnsPerDayFormulaDialog({
           </button>
         </div>
         <div className="space-y-4 px-6 py-5 text-sm leading-6 text-slate-600">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              New event rows
-            </div>
-            <p className="mt-3 font-semibold text-slate-950">
-              (100 - current odds on strongest LLM side) / days left
-            </p>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Excel-style formula</span>
+            <textarea
+              value={formula}
+              onChange={(event) => setFormula(event.target.value)}
+              disabled={loading || saving}
+              rows={3}
+              spellCheck={false}
+              className="mt-2 w-full resize-y rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 font-mono text-sm font-semibold text-slate-950 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-200 disabled:opacity-60"
+              aria-label="Returns/day Excel-style formula"
+            />
+          </label>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs">
+            <p className="font-semibold text-slate-700">Available fields</p>
+            <code className="mt-2 block break-all text-sky-800">CURRENT_CHOSEN_SIDE_BULLPEN_ODDS</code>
+            <code className="mt-1 block break-all text-sky-800">DAYS_UNTIL_CLOSE</code>
+            <p className="mt-3 text-slate-500">Start with = and use numbers, parentheses, +, -, *, / or ^.</p>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              Active position rows
-            </div>
-            <p className="mt-3 font-semibold text-slate-950">
-              (100 - current position price) / days until close
-            </p>
+          {message && <p role="status" className={`rounded-xl px-3 py-2 text-xs font-semibold ${message.startsWith("Formula saved") ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>{message}</p>}
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">The saved formula is remembered for future runs and all event types.</p>
+            <button type="button" onClick={saveFormula} disabled={loading || saving || formula.trim() === savedFormula} className="inline-flex shrink-0 items-center rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50">
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+              Save formula
+            </button>
           </div>
-          <p>
-            Click any Returns/day value to see the event-specific inputs and arithmetic used for that displayed percentage.
-          </p>
         </div>
       </div>
     </div>
