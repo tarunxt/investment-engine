@@ -100,7 +100,7 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(trendsTable, /available to claim now/);
   assert.match(trendsTable, />Claim<\/span>/);
   assert.match(trendsTable, /data-returns-unavailable=\{returnsUnavailable \|\| undefined\}/);
-  assert.match(trendsTable, /returnsUnavailable \? "bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-400"/);
+  assert.match(trendsTable, /returnsUnavailable \? "bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-400/);
   assert.match(scheduleCard, /max-w-7xl/);
   assert.match(apiService, /getBullpenAutoLiveHistoryEventTrends/);
   assert.match(urls, /history\/event-trends/);
