@@ -7237,13 +7237,18 @@ function buildFinalActionableHistoryItems(
   });
 }
 
-function getCurrentPersistableHistoryRows(
-  rows: HistoricalDashboardActionRow[],
+function buildCanonicalCurrentHistoryRows(
+  rows: DashboardActionRow[],
   runs: RunResponse[],
   market: SwingTradeMarket,
-) {
-  const latestRunIds = new Set(getLatestMatchingRuns(runs, market).map((run) => run.id));
-  return rows.filter((row) => latestRunIds.has(row.runId));
+): HistoricalDashboardActionRow[] {
+  const latestRun = getLatestMatchingRuns(runs, market)[0];
+  if (!latestRun) return [];
+  return rows.map((row) => ({
+    ...row,
+    coveredAt: latestRun.created_at,
+    runId: latestRun.id,
+  }));
 }
 
 async function persistFinalActionableHistoryRows(
@@ -7635,6 +7640,21 @@ export function DashboardFinalActionablesTables() {
     ),
   }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
 
+  const actionRowsByMarket = useMemo(() => ({
+    india: buildDashboardActionRows(
+      buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india),
+      "india",
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    us: buildDashboardActionRows(
+      buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us),
+      "us",
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
+
   useEffect(() => {
     let ignore = false;
 
@@ -7685,13 +7705,13 @@ export function DashboardFinalActionablesTables() {
     writeHistoricalActionRowsCache("india", historicalActionRowsByMarket.india);
     writeHistoricalActionRowsCache("us", historicalActionRowsByMarket.us);
     const allRows = [
-      ...getCurrentPersistableHistoryRows(
-        historicalActionRowsByMarket.india,
+      ...buildCanonicalCurrentHistoryRows(
+        actionRowsByMarket.india,
         runs,
         "india",
       ),
-      ...getCurrentPersistableHistoryRows(
-        historicalActionRowsByMarket.us,
+      ...buildCanonicalCurrentHistoryRows(
+        actionRowsByMarket.us,
         runs,
         "us",
       ),
@@ -7704,22 +7724,7 @@ export function DashboardFinalActionablesTables() {
     void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
       console.warn("Unable to queue legacy final actionables history backfill:", error);
     });
-  }, [historicalActionRowsByMarket, runs]);
-
-  const actionRowsByMarket = useMemo(() => ({
-    india: buildDashboardActionRows(
-      buildConsensusRows(getLatestMatchingRuns(runs, "india"), "india", portfolioSnapshots.india),
-      "india",
-      technicalScans,
-      scoreMatrixFormulaConfig,
-    ),
-    us: buildDashboardActionRows(
-      buildConsensusRows(getLatestMatchingRuns(runs, "us"), "us", portfolioSnapshots.us),
-      "us",
-      technicalScans,
-      scoreMatrixFormulaConfig,
-    ),
-  }), [portfolioSnapshots.india, portfolioSnapshots.us, runs, scoreMatrixFormulaConfig, technicalScans]);
+  }, [actionRowsByMarket, historicalActionRowsByMarket, runs]);
 
   const updateFinalActionableColumnWidth = useCallback((column: FinalActionableColumnKey, width: number) => {
     setFinalActionableLayout((current) => ({
@@ -8293,6 +8298,15 @@ export function FinalActionablesConsole({
     ),
     [detailsData.portfolioSnapshot, market, runs, scoreMatrixFormulaConfig, technicalScans],
   );
+  const currentActionRows = useMemo(
+    () => buildDashboardActionRows(
+      consensus,
+      market,
+      technicalScans,
+      scoreMatrixFormulaConfig,
+    ),
+    [consensus, market, scoreMatrixFormulaConfig, technicalScans],
+  );
   const setupStockGroups = useMemo(
     () => getSetupStockGroups(consensus, technicalScans, market),
     [consensus, market, technicalScans],
@@ -8313,8 +8327,8 @@ export function FinalActionablesConsole({
   useEffect(() => {
     if (!runs.length) return;
     writeHistoricalActionRowsCache(market, historicalActionRows);
-    const currentHistoryRows = getCurrentPersistableHistoryRows(
-      historicalActionRows,
+    const currentHistoryRows = buildCanonicalCurrentHistoryRows(
+      currentActionRows,
       runs,
       market,
     );
@@ -8326,7 +8340,7 @@ export function FinalActionablesConsole({
     void apiService.queueFinalActionableHistoryBackfill().catch((error) => {
       console.warn("Unable to queue legacy final actionables history backfill:", error);
     });
-  }, [historicalActionRows, market, runs]);
+  }, [currentActionRows, historicalActionRows, market, runs]);
 
   const technicalScanCostByTarget = useMemo(() => {
     const costs: Record<string, number> = {};
