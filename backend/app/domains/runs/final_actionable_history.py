@@ -249,7 +249,10 @@ async def persist_history_items(
         .all()
     )
     existing_by_key = {
-        (row.market, row.rebalance_run_id, row.stock_symbol): row.coverage_status
+        (row.market, row.rebalance_run_id, row.stock_symbol): (
+            row.coverage_status,
+            row.formula_version,
+        )
         for row in existing_rows
     }
 
@@ -378,8 +381,14 @@ async def persist_history_items(
         constraint="uq_final_actionable_history_run_stock",
         set_={column: getattr(excluded, column) for column in update_columns},
         where=and_(
-            FinalActionableHistory.coverage_status != "suggested",
             excluded.coverage_status == "suggested",
+            or_(
+                FinalActionableHistory.coverage_status != "suggested",
+                and_(
+                    FinalActionableHistory.formula_version == "legacy-backfill-v1",
+                    excluded.formula_version == "score-matrix-v1",
+                ),
+            ),
         ),
     )
     await db.execute(statement)
@@ -388,11 +397,18 @@ async def persist_history_items(
     new_rows = sum(key not in existing_by_key for key in payload_by_key)
     upgrades = sum(
         key in existing_by_key
-        and existing_by_key[key] != "suggested"
+        and existing_by_key[key][0] != "suggested"
         and payload_by_key[key].get("coverage_status") == "suggested"
         for key in payload_by_key
     )
-    persisted = new_rows + upgrades
+    score_upgrades = sum(
+        key in existing_by_key
+        and existing_by_key[key][0] == "suggested"
+        and existing_by_key[key][1] == "legacy-backfill-v1"
+        and payload_by_key[key].get("formula_version") == "score-matrix-v1"
+        for key in payload_by_key
+    )
+    persisted = new_rows + upgrades + score_upgrades
     skipped = len(payload_by_key) - persisted
     coverage_inserted = sum(
         key not in existing_by_key

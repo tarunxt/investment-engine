@@ -133,6 +133,8 @@ const apiDebugEnabled = process.env.NEXT_PUBLIC_API_DEBUG === "true";
 const DEFAULT_API_REQUEST_TIMEOUT_MS = 20_000;
 const DEFAULT_API_READ_TOTAL_TIMEOUT_MS = 5_000;
 const DEFAULT_API_READ_PRIMARY_ATTEMPT_TIMEOUT_MS = 1_500;
+const CAPTURED_DETAILS_READ_TIMEOUT_MS = 20_000;
+const FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS = 20_000;
 const SLOW_API_REQUEST_THRESHOLD_MS = 2_000;
 const BULLPEN_RUN_START_SECONDARY_DELAY_MS = 250;
 const BULLPEN_RUN_START_TERTIARY_DELAY_MS = 750;
@@ -997,6 +999,7 @@ class apiServiceClass implements IApiService {
     if (params.cursor) query.set("cursor", params.cursor);
     return this.get<FinalActionableHistoryListResponse>(
       `${URLs.runs.finalActionableHistory()}?${query.toString()}`,
+      { timeoutMs: FINAL_ACTIONABLE_HISTORY_READ_TIMEOUT_MS },
     );
   }
 
@@ -1246,7 +1249,9 @@ class apiServiceClass implements IApiService {
   }
 
   zerodhaEventsLatest(): Promise<ZerodhaEventsLatestResponse> {
-    return this.get<ZerodhaEventsLatestResponse>(URLs.zerodha.eventsLatest());
+    return this.get<ZerodhaEventsLatestResponse>(URLs.zerodha.eventsLatest(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   zerodhaEventsHistory(params?: { limit?: number }): Promise<ZerodhaEventsHistoryResponse> {
@@ -1298,6 +1303,7 @@ class apiServiceClass implements IApiService {
 
   zerodhaThreatsLatest(): Promise<ZerodhaThreatLatestResponse> {
     return this.get<ZerodhaThreatLatestResponse>(URLs.zerodha.threatsLatest(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
       validate: isThreatLatestResponse,
     });
   }
@@ -1370,7 +1376,9 @@ class apiServiceClass implements IApiService {
   }
 
   indmoneyUsEventsLatest(): Promise<IndMoneyUsEventsLatestResponse> {
-    return this.get<IndMoneyUsEventsLatestResponse>(URLs.indmoneyUs.eventsLatest());
+    return this.get<IndMoneyUsEventsLatestResponse>(URLs.indmoneyUs.eventsLatest(), {
+      timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+    });
   }
 
   indmoneyUsEventsHistory(params?: { limit?: number }): Promise<IndMoneyUsEventsHistoryResponse> {
@@ -1428,7 +1436,10 @@ class apiServiceClass implements IApiService {
   indmoneyUsThreatsLatest(): Promise<IndMoneyUsThreatLatestResponse> {
     return this.get<IndMoneyUsThreatLatestResponse>(
       URLs.indmoneyUs.threatsLatest(),
-      { validate: isThreatLatestResponse },
+      {
+        timeoutMs: CAPTURED_DETAILS_READ_TIMEOUT_MS,
+        validate: isThreatLatestResponse,
+      },
     );
   }
 
