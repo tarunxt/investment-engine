@@ -1094,6 +1094,14 @@ export function getBullpenReturnsPerDayBreakdown({
     };
   }
 
+  // Polymarket date-only markets close at end-of-day ET, but expired pending-settlement
+  // rows are measured from the event date itself. The technical close is therefore
+  // one day later than the formula deadline once the row has expired.
+  const formulaDaysUntilClose =
+    daysUntilClose < 0
+      ? Number((daysUntilClose - 1).toFixed(1))
+      : daysUntilClose;
+
   // Returns/day uses the unpriced upside for the current odds on the side matching the strongest LLM odds:
   // Default persisted Excel-style formula:
   // (100 - current odds on strongest(LLM Yes odds, LLM No odds) side) / (days left + 4).
@@ -1103,10 +1111,10 @@ export function getBullpenReturnsPerDayBreakdown({
   return {
     currentOdds,
     currentSide,
-    daysUntilClose,
+    daysUntilClose: formulaDaysUntilClose,
     llmYesOdds,
     llmNoOdds,
-    result: Number(((100 - currentOdds) / (daysUntilClose + 4)).toFixed(2)),
+    result: Number(((100 - currentOdds) / (formulaDaysUntilClose + 4)).toFixed(2)),
   };
 }
 
