@@ -1036,8 +1036,6 @@ def position_returns_per_day(
     if close_time is None:
         return None
     days_until_close = round((close_time - now).total_seconds() / 86_400, 1)
-    if days_until_close <= 0:
-        return None
     return calculate_returns_per_day_formula(
         current_chosen_side_bullpen_odds=position.current_price_cents,
         days_until_close=days_until_close,
@@ -1063,8 +1061,6 @@ def llm_returns_per_day(
     if parsed_close_time is None:
         return None
     days_until_close = round((parsed_close_time - now).total_seconds() / 86_400, 1)
-    if days_until_close <= 0:
-        return None
     if llm_yes_odds is None or llm_no_odds is None:
         return None
     current_odds_for_strongest_llm_side = (
