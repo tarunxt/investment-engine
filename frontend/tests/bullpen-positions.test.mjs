@@ -1012,7 +1012,7 @@ test("expired unclaimable Bullpen positions use negative days in returns/day", a
 
   assert.equal(
     calculateBullpenPositionReturnsPerDay({
-      closeTime: "2026-08-26T00:00:00.000Z",
+      closeTime: "2026-08-27T00:00:00.000Z",
       currentPrice: 0.9955,
       nowMs,
     }),
@@ -1020,7 +1020,7 @@ test("expired unclaimable Bullpen positions use negative days in returns/day", a
   );
   assert.equal(
     calculateBullpenPositionReturnsPerDay({
-      closeTime: "2026-08-26T00:00:00.000Z",
+      closeTime: "2026-08-27T00:00:00.000Z",
       currentPrice: 0.9955,
       isClaimable: true,
       nowMs,
