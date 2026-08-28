@@ -1251,6 +1251,10 @@ class AsyncPolymarketAutoLiveRepository:
         run = PolymarketAutoLiveRunRecord
         decision = PolymarketAutoLiveDecisionRecord
         normalized_scan_count = max(1, min(scan_count, 20))
+        trend_generated_at = utc_now()
+        returns_formula = record_to_settings(
+            await self.get_settings_record(user_id)
+        ).returns_per_day_formula
         run_rows = (await self.session.execute(
             select(
                 run.id,
@@ -1548,10 +1552,43 @@ class AsyncPolymarketAutoLiveRepository:
                 value = latest_stage2.get(key)
                 return decision_value if value is None else value
 
-            decision_returns = (
-                _event_trend_returns_per_day(latest_decision)
-                if latest_decision is not None
-                else None
+            current_yes_odds = first_number(stage2_or_decision(
+                "current_yes_odds",
+                latest_decision.current_yes_odds if latest_decision else None,
+            ))
+            current_no_odds = first_number(stage2_or_decision(
+                "current_no_odds",
+                latest_decision.current_no_odds if latest_decision else None,
+            ))
+            llm_yes_odds = first_number(stage2_or_decision(
+                "llm_yes_odds",
+                latest_decision.fair_yes_probability_pct
+                if latest_decision else None,
+            ))
+            llm_no_odds = first_number(stage2_or_decision(
+                "llm_no_odds",
+                latest_decision.fair_no_probability_pct
+                if latest_decision else None,
+            ))
+            close_time = first_text(stage2_or_decision(
+                "close_time",
+                latest_decision.close_time if latest_decision else None,
+            ))
+            is_claimable_position = bool(
+                latest_stage2.get("is_claimable_position")
+            )
+            current_returns_per_day = (
+                None
+                if is_claimable_position
+                else llm_returns_per_day(
+                    llm_yes_odds=llm_yes_odds,
+                    llm_no_odds=llm_no_odds,
+                    close_time=close_time,
+                    now=trend_generated_at,
+                    current_yes_odds=current_yes_odds,
+                    current_no_odds=current_no_odds,
+                    formula=returns_formula,
+                )
             )
             active_from_stage2 = bool(latest_stage2.get("is_active_position"))
             active_from_decision = bool(
@@ -1565,10 +1602,7 @@ class AsyncPolymarketAutoLiveRepository:
                     "market_url",
                     latest_decision.market_url if latest_decision else None,
                 ),
-                close_time=stage2_or_decision(
-                    "close_time",
-                    latest_decision.close_time if latest_decision else None,
-                ),
+                close_time=close_time,
                 score=round(sum(
                     (entry["scores"][index] or 0) * weight
                     for index, weight in enumerate((1, 0.5, 0.25))
@@ -1577,28 +1611,13 @@ class AsyncPolymarketAutoLiveRepository:
                 scan_sides=entry["sides"],
                 scan_timestamps=entry["timestamps"],
                 scan_llm_outputs=entry["llm_outputs"],
-                current_yes_odds=stage2_or_decision(
-                    "current_yes_odds",
-                    latest_decision.current_yes_odds if latest_decision else None,
-                ),
-                current_no_odds=stage2_or_decision(
-                    "current_no_odds",
-                    latest_decision.current_no_odds if latest_decision else None,
-                ),
-                llm_yes_odds=stage2_or_decision(
-                    "llm_yes_odds",
-                    latest_decision.fair_yes_probability_pct
-                    if latest_decision else None,
-                ),
-                llm_no_odds=stage2_or_decision(
-                    "llm_no_odds",
-                    latest_decision.fair_no_probability_pct
-                    if latest_decision else None,
-                ),
-                returns_per_day=stage2_or_decision(
-                    "returns_per_day", decision_returns
-                ),
+                current_yes_odds=current_yes_odds,
+                current_no_odds=current_no_odds,
+                llm_yes_odds=llm_yes_odds,
+                llm_no_odds=llm_no_odds,
+                returns_per_day=current_returns_per_day,
                 is_active_position=active_from_stage2 or active_from_decision,
+                is_claimable_position=is_claimable_position,
                 active_position_side=(
                     latest_stage2.get("active_position_side")
                     if active_from_stage2
@@ -1614,7 +1633,7 @@ class AsyncPolymarketAutoLiveRepository:
         return BullpenAutoLiveEventTrendsResponse(
             events=events,
             scan_count=20,
-            generated_at=utc_now().isoformat(),
+            generated_at=trend_generated_at.isoformat(),
         )
 
     async def list_projected_decisions_for_run(
