@@ -34,9 +34,16 @@ function llmItem(output: BullpenAutoLiveLlmOutput): BullpenQuestionLlmBreakdownI
   return { provider: output.provider, model: output.model, status: output.status, providerError: output.error, jobId: null, runId: null, timestamp: output.completed_at ?? null, llmYesOdds: output.llm_yes_odds ?? null, llmNoOdds: output.llm_no_odds ?? null, yesDefinition: null, deadlineEt: null, hoursRemaining: null, evidenceStatus: output.evidence_status ?? null, eventState: output.event_state ?? null, confidence: output.confidence ?? null, keyEvidence: output.key_evidence ?? [], redFlags: output.red_flags ?? [], rationale: output.rationale ?? null, webSearchUsed: null, webSearchQueries: [], webSources: [], internetVerified: null, evidenceBlockUsed: false, staleFactDetected: false, invalidReason: output.invalid_reason ?? null, invalidStaleFact: false, staleFactReason: null };
 }
 
+function currentDaysUntilClose(closeTime: string | null | undefined) {
+  if (!closeTime) return null;
+  const closeDate = new Date(closeTime);
+  if (Number.isNaN(closeDate.getTime())) return null;
+  return Math.round(((closeDate.getTime() - Date.now()) / 86_400_000) * 10) / 10;
+}
+
 function questionFor(event: BullpenAutoLiveEventTrend, scanIndex = 0): BullpenQuestionRow {
   const outputs = event.scan_llm_outputs?.[scanIndex] ?? [];
-  return createBullpenQuestionRow({ id: event.market_id, question: event.market_title, marketId: event.market_id, questionId: event.market_id, closeTime: event.close_time ?? null, category: "", yesOdds: event.current_yes_odds ?? null, noOdds: event.current_no_odds ?? null, volume: null, liquidity: null, sourceUrl: event.market_url ?? "", slug: null, marketUrl: event.market_url ?? null, outcomeLabels: ["Yes", "No"], outcomeCount: 2, isBinaryYesNo: true, daysUntilClose: null, rules: null, marketContext: null, resolutionSource: null, llmYesOdds: scanIndex === 0 ? event.llm_yes_odds ?? null : null, llmNoOdds: scanIndex === 0 ? event.llm_no_odds ?? null : null, returnsPerDay: event.returns_per_day ?? null, llmCompletedAt: event.scan_timestamps[scanIndex] ?? null, llmBreakdown: outputs.map(llmItem) });
+  return createBullpenQuestionRow({ id: event.market_id, question: event.market_title, marketId: event.market_id, questionId: event.market_id, closeTime: event.close_time ?? null, category: "", yesOdds: event.current_yes_odds ?? null, noOdds: event.current_no_odds ?? null, volume: null, liquidity: null, sourceUrl: event.market_url ?? "", slug: null, marketUrl: event.market_url ?? null, outcomeLabels: ["Yes", "No"], outcomeCount: 2, isBinaryYesNo: true, daysUntilClose: currentDaysUntilClose(event.close_time), rules: null, marketContext: null, resolutionSource: null, llmYesOdds: scanIndex === 0 ? event.llm_yes_odds ?? null : null, llmNoOdds: scanIndex === 0 ? event.llm_no_odds ?? null : null, returnsPerDay: event.returns_per_day ?? null, llmCompletedAt: event.scan_timestamps[scanIndex] ?? null, llmBreakdown: outputs.map(llmItem) });
 }
 
 export const hasStrongestLatestLlmOdds = (event: BullpenAutoLiveEventTrend) => (event.scan_scores[0] ?? -1) >= 80;
