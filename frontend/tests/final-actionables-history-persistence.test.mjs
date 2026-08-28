@@ -66,7 +66,7 @@ test("dashboard remains bounded while history persists separately", () => {
   assert.match(persistenceSource, /on_conflict_do_update\(/);
   assert.match(
     persistenceSource,
-    /FinalActionableHistory\.formula_version == "legacy-backfill-v1"[\s\S]*?excluded\.formula_version == "score-matrix-v1"/,
+    /excluded\.formula_version == "score-matrix-v1"[\s\S]*?FinalActionableHistory\.formula_version\.in_\([\s\S]*?"legacy-backfill-v1", "score-matrix-v1"/,
   );
   assert.match(persistenceSource, /payload_defaults = \{/);
   assert.match(persistenceSource, /source_ids = \{/);
