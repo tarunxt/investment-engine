@@ -385,8 +385,10 @@ async def persist_history_items(
             or_(
                 FinalActionableHistory.coverage_status != "suggested",
                 and_(
-                    FinalActionableHistory.formula_version == "legacy-backfill-v1",
                     excluded.formula_version == "score-matrix-v1",
+                    FinalActionableHistory.formula_version.in_(
+                        ("legacy-backfill-v1", "score-matrix-v1")
+                    ),
                 ),
             ),
         ),
@@ -401,14 +403,15 @@ async def persist_history_items(
         and payload_by_key[key].get("coverage_status") == "suggested"
         for key in payload_by_key
     )
-    score_upgrades = sum(
+    score_refreshes = sum(
         key in existing_by_key
         and existing_by_key[key][0] == "suggested"
-        and existing_by_key[key][1] == "legacy-backfill-v1"
+        and existing_by_key[key][1]
+        in {"legacy-backfill-v1", "score-matrix-v1"}
         and payload_by_key[key].get("formula_version") == "score-matrix-v1"
         for key in payload_by_key
     )
-    persisted = new_rows + upgrades + score_upgrades
+    persisted = new_rows + upgrades + score_refreshes
     skipped = len(payload_by_key) - persisted
     coverage_inserted = sum(
         key not in existing_by_key
