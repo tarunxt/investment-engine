@@ -588,7 +588,7 @@ function mergeHistoricalActionRows(
   rowGroups.flat().forEach((row) => {
     const key = getHistoricalActionRowCacheId(row);
     const existing = merged.get(key);
-    if (!existing || parseTimestampMs(row.coveredAt) >= parseTimestampMs(existing.coveredAt)) {
+    if (!existing || parseTimestampMs(row.coveredAt) > parseTimestampMs(existing.coveredAt)) {
       merged.set(key, row);
     }
   });
@@ -3976,9 +3976,29 @@ export function StockDetailsButton({
     () => mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)),
     [historicalRows, market],
   );
+  const displayedPersistedHistory = useMemo(
+    () => persistedHistory.map((item) => {
+      const currentRow = effectiveHistoricalRows.find(
+        (row) => row.runId === item.rebalance_run_id && stockConsensusMatches(row.stock, stock),
+      );
+      if (!currentRow) return item;
+      return {
+        ...item,
+        action: currentRow.formulaAction,
+        score: currentRow.formulaScore,
+        consensus_numerator: currentRow.stock.actionCounts[currentRow.formulaAction],
+        consensus_denominator: currentRow.stock.totalSuggestions,
+        historical_current_units: currentRow.formulaEstimate.currentUnits,
+        historical_current_value: currentRow.formulaEstimate.currentInvestmentAmount,
+        action_units: currentRow.formulaEstimate.units,
+        amount: currentRow.formulaEstimate.amount,
+      };
+    }),
+    [effectiveHistoricalRows, persistedHistory, stock],
+  );
   const persistedRunIds = useMemo(
-    () => new Set(persistedHistory.map((item) => item.rebalance_run_id)),
-    [persistedHistory],
+    () => new Set(displayedPersistedHistory.map((item) => item.rebalance_run_id)),
+    [displayedPersistedHistory],
   );
   const matchingHistoricalRows = useMemo(
     () => effectiveHistoricalRows.filter(
@@ -4232,7 +4252,7 @@ export function StockDetailsButton({
                     Loading complete historical suggestions…
                   </div>
                 ) : null}
-                {persistedHistory.length ? (
+                {displayedPersistedHistory.length ? (
                   <div className="mb-3 overflow-x-auto rounded-lg border border-slate-200 bg-white/90">
                     <table className="min-w-[72rem] text-xs">
                       <thead>
@@ -4249,7 +4269,7 @@ export function StockDetailsButton({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {persistedHistory.map((item) => (
+                        {displayedPersistedHistory.map((item) => (
                           <tr key={item.id} className={item.coverage_status === "suggested" ? "bg-white" : "bg-slate-50/70"}>
                             <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">{item.stock_symbol}</td>
                             <td className="whitespace-nowrap px-3 py-2 text-gray-700">
@@ -7790,7 +7810,10 @@ export function DashboardFinalActionablesTables() {
 
   const renderMarketPanel = (market: SwingTradeMarket, title: string, description: string) => {
     const actionRows = actionRowsByMarket[market];
-    const historicalActionRows = historicalActionRowsByMarket[market];
+    const historicalActionRows = mergeHistoricalActionRows(
+      buildCanonicalCurrentHistoryRows(actionRows, runs, market),
+      historicalActionRowsByMarket[market],
+    );
     const detailsData = detailsDataByMarket[market];
     const latestRebalanceAt = getLatestMatchingRuns(runs, market)[0]?.created_at ?? null;
     const latestTechnicalAt = Object.values(technicalScans)
@@ -8496,7 +8519,10 @@ export function FinalActionablesConsole({
               technicalScans={technicalScans}
               setupGroups={setupStockGroups}
               detailsData={detailsData}
-              historicalRows={historicalActionRows}
+              historicalRows={mergeHistoricalActionRows(
+                buildCanonicalCurrentHistoryRows(currentActionRows, runs, market),
+                historicalActionRows,
+              )}
               onSetupClick={setSelectedSetupGroup}
               onFocusCalculation={(target) => {
                 setCalculationFocusTarget(target);
