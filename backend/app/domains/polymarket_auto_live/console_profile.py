@@ -1020,6 +1020,11 @@ def _position_yes_no_odds(
     return None, None
 
 
+def _returns_formula_days_until_close(days_until_close: float) -> float:
+    """Use the stated event date for expired date-only settlement-pending rows."""
+    return round(days_until_close - 1, 1) if days_until_close < 0 else days_until_close
+
+
 def position_returns_per_day(
     position: ConsoleWalletPosition,
     *,
@@ -1038,7 +1043,7 @@ def position_returns_per_day(
     days_until_close = round((close_time - now).total_seconds() / 86_400, 1)
     return calculate_returns_per_day_formula(
         current_chosen_side_bullpen_odds=position.current_price_cents,
-        days_until_close=days_until_close,
+        days_until_close=_returns_formula_days_until_close(days_until_close),
         formula=formula,
     )
 
@@ -1070,7 +1075,7 @@ def llm_returns_per_day(
         return None
     return calculate_returns_per_day_formula(
         current_chosen_side_bullpen_odds=current_odds_for_strongest_llm_side,
-        days_until_close=days_until_close,
+        days_until_close=_returns_formula_days_until_close(days_until_close),
         formula=formula,
     )
 

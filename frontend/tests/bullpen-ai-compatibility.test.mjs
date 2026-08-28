@@ -1196,7 +1196,7 @@ test("Bullpen returns/day keeps expired unresolved rows with negative days", asy
     noOdds: 99.55,
     llmYesOdds: 0,
     llmNoOdds: 100,
-    daysUntilClose: -2.5,
+    daysUntilClose: -1.5,
   });
   const august25 = getBullpenReturnsPerDayBreakdown({
     ...createQuestionRow(),
@@ -1204,7 +1204,7 @@ test("Bullpen returns/day keeps expired unresolved rows with negative days", asy
     noOdds: 99.05,
     llmYesOdds: 0,
     llmNoOdds: 100,
-    daysUntilClose: -3.5,
+    daysUntilClose: -2.5,
   });
 
   assert.equal(august26.result, 0.3);

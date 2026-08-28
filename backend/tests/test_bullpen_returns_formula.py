@@ -81,7 +81,7 @@ def test_expired_unclaimable_position_keeps_negative_days_in_formula() -> None:
         current_value_usd=5.24,
         current_yes_odds=0.45,
         current_no_odds=99.55,
-        close_time="2026-08-26T00:00:00+00:00",
+        close_time="2026-08-27T00:00:00+00:00",
         theme="Politics",
         is_claimable=False,
     )
@@ -95,7 +95,7 @@ def test_expired_llm_row_keeps_negative_days_in_formula() -> None:
     assert llm_returns_per_day(
         llm_yes_odds=0,
         llm_no_odds=100,
-        close_time="2026-08-25T00:00:00+00:00",
+        close_time="2026-08-26T00:00:00+00:00",
         now=datetime(2026, 8, 28, 12, 0, tzinfo=UTC),
         current_yes_odds=0.95,
         current_no_odds=99.05,
