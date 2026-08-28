@@ -56,6 +56,13 @@ test("historical cache merges rather than replacing older rows", () => {
   assert.match(source, /HISTORICAL_ACTION_ROWS_CACHE_VERSION = 2/);
   assert.match(source, /mergeHistoricalActionRows\(\s*rows,\s*readHistoricalActionRowsCache\(market\)/);
   assert.match(source, /mergeHistoricalActionRows\(historicalRows, readHistoricalActionRowsCache\(market\)\)/);
+  assert.match(source, /const displayedPersistedHistory = useMemo\(/);
+  assert.match(source, /action: currentRow\.formulaAction/);
+  assert.match(source, /score: currentRow\.formulaScore/);
+  assert.match(
+    source,
+    /buildCanonicalCurrentHistoryRows\(actionRows, runs, market\),\s*historicalActionRowsByMarket\[market\]/,
+  );
 });
 
 test("dashboard remains bounded while history persists separately", () => {
