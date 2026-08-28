@@ -14,6 +14,7 @@ import {
 import { EventScanRunControls } from "@/components/shared/EventScanRunControls";
 import { ScanHistoryButton } from "@/components/shared/ScanHistoryButton";
 import { PortfolioAnalysisNav } from "@/components/shared/PortfolioAnalysisNav";
+import { OperationalErrorNotice, normalizeOperationalErrorMessage } from "@/components/shared/OperationalErrorNotice";
 import { TradingViewSymbolLink } from "@/components/shared/TradingViewSymbolLink";
 import { TradingViewUrlListButton } from "@/components/shared/TradingViewUrlListButton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -3920,6 +3921,17 @@ export function ConsensusBreakupButton({
   );
 }
 
+function getRejectedResultMessage(result: PromiseSettledResult<unknown>, label: string) {
+  if (result.status === "fulfilled") return null;
+  const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
+  return `${label}: ${normalizeOperationalErrorMessage(message)}`;
+}
+
+function combineOperationalErrors(messages: Array<string | null>) {
+  const present = messages.filter((message): message is string => Boolean(message));
+  return present.length ? Array.from(new Set(present)).join("; ") : null;
+}
+
 export function StockDetailsButton({
   stock,
   market,
@@ -3947,17 +3959,19 @@ export function StockDetailsButton({
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [resolvedDetailsData, setResolvedDetailsData] = useState<StockDetailsData | null>(null);
+  const effectiveDetailsData = resolvedDetailsData ?? detailsData;
   const { dragHandleProps, draggableStyle } = useDraggablePopup();
-  const zerodhaHolding = market === "india" ? getZerodhaHoldingForStock(detailsData.portfolioSnapshot, stock) : null;
+  const zerodhaHolding = market === "india" ? getZerodhaHoldingForStock(effectiveDetailsData.portfolioSnapshot, stock) : null;
   const zerodhaBuyTransactions = useMemo(
     () => (zerodhaHolding ? getZerodhaBuyTransactionsForStock(zerodhaOrders, stock) : []),
     [stock, zerodhaHolding, zerodhaOrders],
   );
   const eventRows = getAnalysisTableRowsForStock(
-    detailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...detailsData.eventsAnalysis.table }] : [],
+    effectiveDetailsData.eventsAnalysis?.table ? [{ title: "Events Calendar", ...effectiveDetailsData.eventsAnalysis.table }] : [],
     stock,
   );
-  const threatRows = getAnalysisTableRowsForStock(detailsData.threatsAnalysis?.report?.tables, stock);
+  const threatRows = getAnalysisTableRowsForStock(effectiveDetailsData.threatsAnalysis?.report?.tables, stock);
   const effectiveHistoricalRows = useMemo(
     () => mergeHistoricalActionRows(historicalRows, readHistoricalActionRowsCache(market)),
     [historicalRows, market],
@@ -3986,11 +4000,31 @@ export function StockDetailsButton({
       setHistoryCursor(response.next_cursor);
       setHistoryHasMore(response.has_more);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : "Unable to load complete stock history.");
+      setHistoryError(normalizeOperationalErrorMessage(error instanceof Error ? error.message : "Unable to load complete stock history."));
     } finally {
       setHistoryLoading(false);
     }
   }, [market, stock.symbol]);
+
+  const retryCapturedDetails = useCallback(async () => {
+    const [portfolioResult, eventsResult, threatsResult] = await Promise.allSettled([
+      market === "india" ? apiService.zerodhaPortfolioOverview() : apiService.indmoneyUsPortfolioOverview(),
+      market === "india" ? apiService.zerodhaEventsLatest() : apiService.indmoneyUsEventsLatest(),
+      market === "india" ? apiService.zerodhaThreatsLatest() : apiService.indmoneyUsThreatsLatest(),
+    ]);
+    const nextError = combineOperationalErrors([
+      getRejectedResultMessage(portfolioResult, "Portfolio"),
+      getRejectedResultMessage(eventsResult, "Events"),
+      getRejectedResultMessage(threatsResult, "Threats"),
+    ]);
+    setResolvedDetailsData((current) => ({
+      portfolioSnapshot: portfolioResult.status === "fulfilled" ? portfolioResult.value.latest : (current ?? detailsData).portfolioSnapshot,
+      eventsAnalysis: eventsResult.status === "fulfilled" ? eventsResult.value.analysis : (current ?? detailsData).eventsAnalysis,
+      threatsAnalysis: threatsResult.status === "fulfilled" ? threatsResult.value.analysis : (current ?? detailsData).threatsAnalysis,
+      error: nextError,
+    }));
+    if (nextError) throw new Error(nextError);
+  }, [detailsData, market]);
 
   const directHistoricalEvidenceRows = useMemo(() => {
     const seen = new Set<string>();
@@ -4042,14 +4076,6 @@ export function StockDetailsButton({
   }, [stock]);
 
   useEffect(() => {
-    if (!open) return;
-    setPersistedHistory([]);
-    setHistoryCursor(null);
-    setHistoryHasMore(false);
-    void loadPersistedHistory(null, false);
-  }, [loadPersistedHistory, open]);
-
-  useEffect(() => {
     if (!open || market !== "india" || !zerodhaHolding) return;
     let cancelled = false;
     apiService
@@ -4078,7 +4104,12 @@ export function StockDetailsButton({
         type="button"
         onClick={(event) => {
           event.stopPropagation();
+          setResolvedDetailsData(null);
+          setPersistedHistory([]);
+          setHistoryCursor(null);
+          setHistoryHasMore(false);
           setOpen(true);
+          void loadPersistedHistory(null, false);
         }}
         className="mr-2 inline-flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-gray-300 bg-white text-gray-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
         aria-label={`Open ${stock.symbol} captured details`}
@@ -4144,10 +4175,13 @@ export function StockDetailsButton({
             </div>
 
             <div className="max-h-[75vh] space-y-5 overflow-y-auto px-5 py-5 text-sm">
-              {detailsData.error ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
-                  Some latest captured details could not be loaded: {detailsData.error}
-                </div>
+              {effectiveDetailsData.error ? (
+                <OperationalErrorNotice
+                  title="Some latest captured details could not be loaded:"
+                  error={effectiveDetailsData.error}
+                  context="captured-details"
+                  onRetry={retryCapturedDetails}
+                />
               ) : null}
 
               <section className="rounded-xl border border-blue-100 bg-blue-50/70 p-4">
@@ -4184,8 +4218,13 @@ export function StockDetailsButton({
               <section className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
                 <h3 className="mb-3 font-semibold text-slate-950">Historical LLM suggestions</h3>
                 {historyError ? (
-                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">
-                    Complete server history could not be loaded: {historyError}. Recent locally reconstructed rows remain below.
+                  <div className="mb-3">
+                    <OperationalErrorNotice
+                      title="Complete server history could not be loaded:"
+                      error={`${historyError}. Recent locally reconstructed rows remain below.`}
+                      context="server-history"
+                      onRetry={() => loadPersistedHistory(null, false)}
+                    />
                   </div>
                 ) : null}
                 {historyLoading && persistedHistory.length === 0 ? (
@@ -7600,38 +7639,34 @@ export function DashboardFinalActionablesTables() {
     let ignore = false;
 
     async function loadCapturedDetails() {
-      try {
-        const [zerodhaEvents, zerodhaThreats, indmoneyEvents, indmoneyThreats] = await Promise.all([
+      const [zerodhaEvents, zerodhaThreats, indmoneyEvents, indmoneyThreats] = await Promise.allSettled([
           apiService.zerodhaEventsLatest(),
           apiService.zerodhaThreatsLatest(),
           apiService.indmoneyUsEventsLatest(),
           apiService.indmoneyUsThreatsLatest(),
-        ]);
+      ]);
 
-        if (!ignore) {
-          setDetailsDataByMarket((current) => ({
-            india: {
-              ...current.india,
-              eventsAnalysis: zerodhaEvents.analysis,
-              threatsAnalysis: zerodhaThreats.analysis,
-              error: null,
-            },
-            us: {
-              ...current.us,
-              eventsAnalysis: indmoneyEvents.analysis,
-              threatsAnalysis: indmoneyThreats.analysis,
-              error: null,
-            },
-          }));
-        }
-      } catch (err) {
-        if (!ignore) {
-          const message = err instanceof Error ? err.message : "Failed to load captured stock details.";
-          setDetailsDataByMarket((current) => ({
-            india: { ...current.india, error: message },
-            us: { ...current.us, error: message },
-          }));
-        }
+      if (!ignore) {
+        setDetailsDataByMarket((current) => ({
+          india: {
+            ...current.india,
+            eventsAnalysis: zerodhaEvents.status === "fulfilled" ? zerodhaEvents.value.analysis : current.india.eventsAnalysis,
+            threatsAnalysis: zerodhaThreats.status === "fulfilled" ? zerodhaThreats.value.analysis : current.india.threatsAnalysis,
+            error: combineOperationalErrors([
+              getRejectedResultMessage(zerodhaEvents, "Events"),
+              getRejectedResultMessage(zerodhaThreats, "Threats"),
+            ]),
+          },
+          us: {
+            ...current.us,
+            eventsAnalysis: indmoneyEvents.status === "fulfilled" ? indmoneyEvents.value.analysis : current.us.eventsAnalysis,
+            threatsAnalysis: indmoneyThreats.status === "fulfilled" ? indmoneyThreats.value.analysis : current.us.threatsAnalysis,
+            error: combineOperationalErrors([
+              getRejectedResultMessage(indmoneyEvents, "Events"),
+              getRejectedResultMessage(indmoneyThreats, "Threats"),
+            ]),
+          },
+        }));
       }
     }
 
@@ -8187,8 +8222,7 @@ export function FinalActionablesConsole({
     let ignore = false;
 
     async function loadCapturedDetails() {
-      try {
-        const [portfolioResponse, eventsResponse, threatsResponse] = await Promise.all([
+      const [portfolioResponse, eventsResponse, threatsResponse] = await Promise.allSettled([
           portfolio === "zerodha"
             ? apiService.zerodhaPortfolioOverview()
             : apiService.indmoneyUsPortfolioOverview(),
@@ -8198,23 +8232,19 @@ export function FinalActionablesConsole({
           portfolio === "zerodha"
             ? apiService.zerodhaThreatsLatest()
             : apiService.indmoneyUsThreatsLatest(),
-        ]);
+      ]);
 
-        if (!ignore) {
-          setDetailsData({
-            portfolioSnapshot: portfolioResponse.latest,
-            eventsAnalysis: eventsResponse.analysis,
-            threatsAnalysis: threatsResponse.analysis,
-            error: null,
-          });
-        }
-      } catch (err) {
-        if (!ignore) {
-          setDetailsData((current) => ({
-            ...current,
-            error: err instanceof Error ? err.message : "Failed to load captured stock details.",
-          }));
-        }
+      if (!ignore) {
+        setDetailsData((current) => ({
+          portfolioSnapshot: portfolioResponse.status === "fulfilled" ? portfolioResponse.value.latest : current.portfolioSnapshot,
+          eventsAnalysis: eventsResponse.status === "fulfilled" ? eventsResponse.value.analysis : current.eventsAnalysis,
+          threatsAnalysis: threatsResponse.status === "fulfilled" ? threatsResponse.value.analysis : current.threatsAnalysis,
+          error: combineOperationalErrors([
+            getRejectedResultMessage(portfolioResponse, "Portfolio"),
+            getRejectedResultMessage(eventsResponse, "Events"),
+            getRejectedResultMessage(threatsResponse, "Threats"),
+          ]),
+        }));
       }
     }
 
