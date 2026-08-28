@@ -49,7 +49,7 @@ function questionFor(event: BullpenAutoLiveEventTrend, scanIndex = 0): BullpenQu
 export const hasStrongestLatestLlmOdds = (event: BullpenAutoLiveEventTrend) => (event.scan_scores[0] ?? -1) >= 80;
 export const hasUnavailableReturnsForCurrentPosition = (event: BullpenAutoLiveEventTrend) => event.returns_per_day == null && Boolean(event.is_active_position || event.is_claimable_position);
 export const isExpiredNotYetClaimablePosition = (event: BullpenAutoLiveEventTrend) => {
-  if (!event.is_active_position || event.is_claimable_position || !event.close_time) return false;
+  if (event.is_claimable_position || !event.close_time) return false;
   const closeTime = new Date(event.close_time).getTime();
   return Number.isFinite(closeTime) && closeTime < Date.now();
 };
