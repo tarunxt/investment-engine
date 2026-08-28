@@ -1187,6 +1187,30 @@ test("Bullpen returns/day uses unpriced upside divided by days left plus four", 
   assert.equal(result.result, 13.48);
 });
 
+test("Bullpen returns/day keeps expired unresolved rows with negative days", async () => {
+  const { getBullpenReturnsPerDayBreakdown } = await loadBullpenAiModule();
+
+  const august26 = getBullpenReturnsPerDayBreakdown({
+    ...createQuestionRow(),
+    yesOdds: 0.45,
+    noOdds: 99.55,
+    llmYesOdds: 0,
+    llmNoOdds: 100,
+    daysUntilClose: -2.5,
+  });
+  const august25 = getBullpenReturnsPerDayBreakdown({
+    ...createQuestionRow(),
+    yesOdds: 0.95,
+    noOdds: 99.05,
+    llmYesOdds: 0,
+    llmNoOdds: 100,
+    daysUntilClose: -3.5,
+  });
+
+  assert.equal(august26.result, 0.3);
+  assert.equal(august25.result, 1.9);
+});
+
 test("Events Summary can filter strongest LLM odds and rank its top 10 by returns per day", () => {
   const questionsTableSource = readFileSync(
     new URL(

@@ -1071,8 +1071,7 @@ export function getBullpenReturnsPerDayBreakdown({
   if (
     yesOdds === null ||
     noOdds === null ||
-    daysUntilClose === null ||
-    daysUntilClose <= 0
+    daysUntilClose === null
   ) {
     return {
       currentOdds: null,
