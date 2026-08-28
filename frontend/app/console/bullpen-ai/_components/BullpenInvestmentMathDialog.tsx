@@ -135,13 +135,19 @@ export function BullpenInvestmentMathDialog({
     >
       {returnsBreakdown!.result === null ? (
         <p className="text-sm leading-6 text-slate-600">
-          This value is only available when the row has current Yes and No odds
-          and a positive number of days until close.
+          This value is available when the row has current Yes and No odds, LLM
+          odds, and a valid deadline. Passed deadlines use negative days; a
+          formula error such as division by zero remains blank.
         </p>
       ) : (
         <>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`(100 - Current ${returnsBreakdown!.currentSide ?? "—"} odds ${returnsBreakdown!.currentOdds?.toFixed(2) || "—"}) / (${returnsBreakdown!.daysUntilClose?.toFixed(1) || "—"} days + 4) = ${returnsBreakdown!.result.toFixed(2)}% per day`}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Actual calculation
+            </p>
+            <code className="mt-2 block whitespace-normal break-words text-sm font-semibold text-slate-900">
+              {`(100 - ${returnsBreakdown!.currentOdds?.toFixed(2) ?? "—"}) / (${returnsBreakdown!.daysUntilClose?.toFixed(1) ?? "—"} + 4) = ${returnsBreakdown!.result.toFixed(2)}%`}
+            </code>
           </div>
           <div className="mt-4">
             <MetricRow
@@ -181,13 +187,19 @@ export function BullpenInvestmentMathDialog({
     >
       {position?.returnsPerDay === null || position?.returnsPerDay === undefined ? (
         <p className="text-sm leading-6 text-slate-600">
-          This value is only available when the active position has a current
-          price and a positive number of days until close.
+          This value is available when the unclaimable position has a current
+          price and a valid deadline. Passed deadlines use negative days; a
+          formula error such as division by zero remains blank.
         </p>
       ) : (
         <>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-            {`(100 - ${positionPricePercent?.toFixed(2) || "—"}) / (${positionDaysUntilClose?.toFixed(1) || "—"} + 4) = ${position.returnsPerDay.toFixed(2)}% per day`}
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-700">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+              Actual calculation
+            </p>
+            <code className="mt-2 block whitespace-normal break-words text-sm font-semibold text-slate-900">
+              {`(100 - ${positionPricePercent?.toFixed(2) ?? "—"}) / (${positionDaysUntilClose?.toFixed(1) ?? "—"} + 4) = ${position.returnsPerDay.toFixed(2)}%`}
+            </code>
           </div>
           <div className="mt-4">
             <MetricRow label="Held outcome" value={position.outcome || "—"} />
