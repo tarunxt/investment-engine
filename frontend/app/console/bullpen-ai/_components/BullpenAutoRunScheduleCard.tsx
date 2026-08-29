@@ -1470,8 +1470,30 @@ function getStageOneStats(stage: WorkflowStageView) {
 function getStageOneIncludedActiveCount(
   stage: WorkflowStageView,
   stats: ReturnType<typeof getStageOneStats>,
+  llmStage?: WorkflowStageView,
+  decisions: BullpenAutoLiveDecision[] = [],
+  run: BullpenAutoLiveRun | null = null,
 ) {
   if (stats.activePositions === 0 || stats.passedFilters === 0) return 0;
+
+  if (llmStage) {
+    const llmStats = getStageTwoStats(llmStage, decisions, run);
+    const aggregatesDescribeSameStageOneInput =
+      llmStats.llmRanOn > 0 &&
+      llmStats.activePositions === stats.activePositions &&
+      llmStats.newOpportunities === stats.passedFilters;
+
+    if (aggregatesDescribeSameStageOneInput) {
+      return Math.min(
+        stats.activePositions,
+        stats.passedFilters,
+        Math.max(
+          0,
+          stats.activePositions + stats.passedFilters - llmStats.llmRanOn,
+        ),
+      );
+    }
+  }
 
   const activeRows = stage.activePositionsFound.filter(
     (position) => !position.isClaimable,
@@ -2049,12 +2071,18 @@ function Stage2TopTenEventsSummaryTable({
 }
 function StageOneRunStats({
   stage,
+  llmStage,
+  decisions = [],
+  run = null,
   hideNumbers = false,
   renderInteractiveRows = false,
   onOpenScanCandidateDialog,
   onOpenScanFilters,
 }: {
   stage: WorkflowStageView;
+  llmStage?: WorkflowStageView;
+  decisions?: BullpenAutoLiveDecision[];
+  run?: BullpenAutoLiveRun | null;
   hideNumbers?: boolean;
   renderInteractiveRows?: boolean;
   onOpenScanCandidateDialog?: (
@@ -2064,7 +2092,13 @@ function StageOneRunStats({
   onOpenScanFilters?: () => void;
 }) {
   const stats = getStageOneStats(stage);
-  const includedActiveCount = getStageOneIncludedActiveCount(stage, stats);
+  const includedActiveCount = getStageOneIncludedActiveCount(
+    stage,
+    stats,
+    llmStage,
+    decisions,
+    run,
+  );
   const includedActiveLabel =
     !hideNumbers && includedActiveCount !== null
       ? ` (Includes ${includedActiveCount} active event${includedActiveCount === 1 ? "" : "s"})`
@@ -5065,6 +5099,11 @@ function RunDetailWorkerStages({
                 {stage.key === "scan" ? (
                   <StageOneRunStats
                     stage={stage}
+                    llmStage={workflowView.stages.find(
+                      (item) => item.key === "llm",
+                    )}
+                    decisions={decisions}
+                    run={run}
                     renderInteractiveRows
                     onOpenScanCandidateDialog={onOpenScanCandidateDialog}
                     onOpenScanFilters={onOpenScanFilters}
@@ -14329,6 +14368,15 @@ export function BullpenAutoRunScheduleCard({
                       {stage.key === "scan" ? (
                         <StageOneRunStats
                           stage={stage}
+                          llmStage={
+                            stage === workflowStage
+                              ? workflowView.stages.find(
+                                  (item) => item.key === "llm",
+                                )
+                              : undefined
+                          }
+                          decisions={investRunDecisions}
+                          run={workflowRunForMonitor}
                           hideNumbers={!showStageNumbers}
                           renderInteractiveRows
                           onOpenScanCandidateDialog={openScanCandidateDialog}
