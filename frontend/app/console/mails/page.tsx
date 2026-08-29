@@ -42,6 +42,8 @@ type MailHistoryItem = {
     question?: string;
     position_side?: string;
     held_side_llm_odds?: number;
+    held_side_bullpen_odds?: number;
+    breach_sources?: string[];
     recommended_action?: string;
   }>;
   provider_code?: string | null;
@@ -723,7 +725,12 @@ export default function MailsPage() {
                       <div key={warning.market_id || index} className="rounded-xl border border-red-200 bg-red-50/70 p-3 text-sm text-red-950">
                         <p className="font-bold">{warning.question || warning.market_id}</p>
                         <p className="mt-1">
-                          Held {warning.position_side}: {warning.held_side_llm_odds}% — {warning.recommended_action || 'EXIT'}
+                          Held {warning.position_side} · LLM: {warning.held_side_llm_odds ?? 'unavailable'}
+                          {typeof warning.held_side_llm_odds === 'number' ? '%' : ''} · Actual Bullpen: {warning.held_side_bullpen_odds ?? 'unavailable'}
+                          {typeof warning.held_side_bullpen_odds === 'number' ? '%' : ''}
+                        </p>
+                        <p className="mt-1 font-semibold">
+                          Trigger: {warning.breach_sources?.join(' and ') || 'Held-side odds below threshold'} — {warning.recommended_action || 'EXIT'}
                         </p>
                       </div>
                     ))}
