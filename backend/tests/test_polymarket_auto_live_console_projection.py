@@ -59,7 +59,20 @@ def _large_run() -> BullpenAutoLiveRun:
             "console_trade_max_positions": 10,
             "raw_response": "secret-provider-output" * 20_000,
             "llm_reviewed_candidates": [
-                {"market_id": f"market-{index}", "rationale": "r" * 5_000}
+                {
+                    "market_id": f"market-{index}",
+                    "rationale": "r" * 5_000,
+                    "llm_outputs": [
+                        {
+                            "provider": "test-provider",
+                            "model": f"model-{model_index}",
+                            "llm_yes_odds": 80 - model_index,
+                            "llm_no_odds": 20 + model_index,
+                            "final_conclusion": "Saved model conclusion.",
+                        }
+                        for model_index in range(12)
+                    ],
+                }
                 for index in range(100)
             ],
         },
@@ -86,10 +99,15 @@ def test_console_projection_is_bounded_and_does_not_mutate_frozen_run() -> None:
     projection = build_run_console_projection(run)
     encoded = json.dumps(projection, separators=(",", ":")).encode()
 
-    assert len(encoded) < 150_000
+    assert len(encoded) < 500_000
     assert "secret-provider-output" not in encoded.decode()
     assert len(
         projection["stage_results"][0]["outputs"]["llm_reviewed_candidates"]
+    ) == 100
+    assert len(
+        projection["stage_results"][0]["outputs"]["llm_reviewed_candidates"][0][
+            "llm_outputs"
+        ]
     ) == 10
     assert len(
         projection["stage_results"][0]["outputs"]["accepted_candidates"]

@@ -1497,6 +1497,7 @@ class AsyncPolymarketAutoLiveRepository:
             decision.risk_status, decision.edge_pp, decision.score,
             decision.console_projection,
             decision.console_projection["llm_outputs"].label("trend_llm_outputs"),
+            decision.payload["llm_outputs"].label("trend_frozen_llm_outputs"),
             decision.created_at, decision.updated_at,
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
           .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
@@ -1527,13 +1528,23 @@ class AsyncPolymarketAutoLiveRepository:
             strongest_side = "YES" if yes_score >= no_score else "NO"
             entry = ensure_entry(projected.market_id, projected.market_title)
             scores = entry["scores"]
+            frozen_llm_outputs = _event_trend_llm_outputs(
+                getattr(row, "trend_frozen_llm_outputs", None)
+            )
+            projected_llm_outputs = _event_trend_llm_outputs(
+                row.trend_llm_outputs
+            )
+            decision_llm_outputs = frozen_llm_outputs or projected_llm_outputs
             if isinstance(scores, list) and scores[index] is None:
                 scores[index] = round(strongest, 2)
                 entry["sides"][index] = strongest_side
                 entry["timestamps"][index] = projected.updated_at or projected.created_at
-                entry["llm_outputs"][index] = _event_trend_llm_outputs(
-                    row.trend_llm_outputs
-                )
+            # A Stage-2 projection created before per-model trend retention can
+            # already contain the score while its output array is empty. Enrich
+            # that scan from the immutable decision payload without replacing a
+            # newer authoritative Stage-2 breakdown.
+            if not entry["llm_outputs"][index] and decision_llm_outputs:
+                entry["llm_outputs"][index] = decision_llm_outputs
             if index == 0:
                 entry["latest_decision"] = projected
 
@@ -1570,6 +1581,21 @@ class AsyncPolymarketAutoLiveRepository:
                 latest_decision.fair_no_probability_pct
                 if latest_decision else None,
             ))
+            # Older compact projections retained the heatmap's strongest score
+            # and side but truncated the corresponding Stage-2 candidate row.
+            # Reconstruct the complementary consensus pair from those frozen
+            # values so latest-scan coverage and Returns/day stay truthful.
+            latest_score = first_number(entry["scores"][0])
+            latest_side = first_text(entry["sides"][0])
+            if latest_score is not None and 0 <= latest_score <= 100:
+                if llm_yes_odds is None:
+                    llm_yes_odds = (
+                        latest_score if latest_side == "YES" else 100 - latest_score
+                    )
+                if llm_no_odds is None:
+                    llm_no_odds = (
+                        latest_score if latest_side == "NO" else 100 - latest_score
+                    )
             close_time = first_text(stage2_or_decision(
                 "close_time",
                 latest_decision.close_time if latest_decision else None,

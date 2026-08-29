@@ -1496,6 +1496,16 @@ Older or compact projections remain compatible: a scan without retained model
 outputs is represented by an empty array and its historical facts are not
 rewritten.
 
+Current console projections retain up to 100 normalized Stage 2 reviewed-event
+rows and up to 10 normalized model outputs per event. This keeps the full normal
+Stage 2 universe, per-model Yes/No estimates, and commentary available to the
+20-scan heatmap even when Stage 3 later fails. For older compact projections, the
+trend adapter reconstructs a missing latest consensus pair from the frozen
+strongest-side score and side, and enriches per-model detail from the immutable
+decision payload when it exists. Returns/day is then evaluated from that same
+latest-scan consensus, current odds, close time, and saved user formula. These are
+additive compatibility projections; immutable historical run facts are unchanged.
+
 
 ## Candidate-only Stage 2 after wallet-read failure
 

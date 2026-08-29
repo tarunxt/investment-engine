@@ -20,7 +20,7 @@ export const calculateTrendDaysUntilClose = (event: BullpenAutoLiveEventTrend) =
   const scanTime = latestScan ? new Date(latestScan).getTime() : Number.NaN;
   if (!Number.isFinite(closeTime) || !Number.isFinite(scanTime)) return null;
   const days = Number(((closeTime - scanTime) / 86_400_000).toFixed(1));
-  return days > 0 ? days : null;
+  return days;
 };
 
 export const trendQuestion = (event: BullpenAutoLiveEventTrend): BullpenQuestionRow => createBullpenQuestionRow({

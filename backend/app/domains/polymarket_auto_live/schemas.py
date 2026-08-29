@@ -1252,6 +1252,7 @@ class BullpenAutoLiveEventTrend(BaseModel):
     llm_no_odds: float | None = Field(default=None, ge=0, le=100)
     returns_per_day: float | None = None
     is_active_position: bool = False
+    is_claimable_position: bool = False
     active_position_side: AutoLiveOutcomeSide | None = None
 
 

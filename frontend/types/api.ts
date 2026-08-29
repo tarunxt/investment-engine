@@ -2420,11 +2420,18 @@ export interface BullpenAutoLiveLlmOutput {
   status?: string | null;
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
+  direction?: string | null;
+  rationale_odds_mismatch?: boolean;
+  rationale_odds_mismatch_reason?: string | null;
+  effective_weight?: number | null;
   confidence?: BullpenAutoLiveConfidence | string | null;
   evidence_status?: BullpenAutoLiveEvidenceStatus | string | null;
   event_state?: string | null;
   key_evidence: string[];
   red_flags: string[];
+  preflight_commentary?: string | null;
+  internet_search_commentary?: string | null;
+  final_conclusion?: string | null;
   rationale?: string | null;
   error?: string | null;
   invalid_reason?: string | null;

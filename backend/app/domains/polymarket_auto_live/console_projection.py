@@ -34,8 +34,11 @@ _LIST_LIMITS = {
     "event_exit_rows": 10,
     "execution_steps": 10,
     "guardrails_checked": 10,
-    "llm_outputs": 0,
-    "llm_reviewed_candidates": 10,
+    # Event-trend history is rendered from this bounded projection. Preserve the
+    # complete normal Stage-2 universe and its normalized per-model results so a
+    # later Stage-3 failure cannot make completed LLM work appear uncovered.
+    "llm_outputs": 10,
+    "llm_reviewed_candidates": 100,
     "llm_target_runs": 0,
 }
 _DROPPED_KEYS = {
