@@ -43,3 +43,14 @@ test("scanned events dialog searches and paginates large exhaustive scans", () =
   assert.match(source, /visibleCandidates\.map/);
   assert.match(source, /Page \{boundedEventPage\} of \{eventPageCount\}/);
 });
+
+test("Stage 1 passed-filter count shows the exact included active-event overlap", () => {
+  assert.match(source, /function getStageOneIncludedActiveCount/);
+  assert.match(source, /activeRows\.length !== stats\.activePositions/);
+  assert.match(source, /stage\.scanCandidates\.length !== stats\.passedFilters/);
+  assert.match(
+    source,
+    /Includes \$\{includedActiveCount\} active event\$\{includedActiveCount === 1 \? "" : "s"\}/,
+  );
+  assert.match(source, /\{includedActiveLabel\}/);
+});

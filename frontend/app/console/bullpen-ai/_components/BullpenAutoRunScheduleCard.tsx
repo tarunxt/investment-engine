@@ -1467,6 +1467,51 @@ function getStageOneStats(stage: WorkflowStageView) {
   return { activePositions, claimablePositions, totalScanned, passedFilters };
 }
 
+function getStageOneIncludedActiveCount(
+  stage: WorkflowStageView,
+  stats: ReturnType<typeof getStageOneStats>,
+) {
+  if (stats.activePositions === 0 || stats.passedFilters === 0) return 0;
+
+  const activeRows = stage.activePositionsFound.filter(
+    (position) => !position.isClaimable,
+  );
+  // Compact historical projections may retain aggregate counts without the
+  // corresponding event rows. In that case the exact overlap is unknowable,
+  // so omit the suffix instead of presenting the full active count as though
+  // every active position passed the fresh-event filters.
+  if (
+    activeRows.length !== stats.activePositions ||
+    stage.scanCandidates.length !== stats.passedFilters
+  ) {
+    return null;
+  }
+
+  const passedFilterKeys = new Set(
+    stage.scanCandidates
+      .flatMap((candidate) => [
+        candidate.marketId,
+        candidate.slug,
+        candidate.marketUrl,
+        candidate.question,
+      ])
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key)),
+  );
+
+  return activeRows.filter((position) =>
+    [
+      position.marketId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ].some((value) => {
+      const key = normalizeMatchKey(value);
+      return key ? passedFilterKeys.has(key) : false;
+    }),
+  ).length;
+}
+
 function getStageTwoStats(
   stage: WorkflowStageView,
   decisions: BullpenAutoLiveDecision[] = [],
@@ -2019,6 +2064,11 @@ function StageOneRunStats({
   onOpenScanFilters?: () => void;
 }) {
   const stats = getStageOneStats(stage);
+  const includedActiveCount = getStageOneIncludedActiveCount(stage, stats);
+  const includedActiveLabel =
+    !hideNumbers && includedActiveCount !== null
+      ? ` (Includes ${includedActiveCount} active event${includedActiveCount === 1 ? "" : "s"})`
+      : "";
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
   const rowClassName = renderInteractiveRows
     ? "block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
@@ -2087,6 +2137,7 @@ function StageOneRunStats({
             <span className="font-semibold tabular-nums">
               {displayStat(stats.passedFilters)}
             </span>
+            {includedActiveLabel}
           </button>
           {onOpenScanFilters ? (
             <button
@@ -2106,6 +2157,7 @@ function StageOneRunStats({
             <span className="font-semibold tabular-nums">
               {displayStat(stats.passedFilters)}
             </span>
+            {includedActiveLabel}
           </span>
           {onOpenScanFilters ? (
             <button
