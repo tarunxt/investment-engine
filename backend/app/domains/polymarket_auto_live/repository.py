@@ -1481,6 +1481,50 @@ class AsyncPolymarketAutoLiveRepository:
                 )
                 llm_outputs = _event_trend_llm_outputs(candidate.get("llm_outputs"))
                 entry = ensure_entry(market_id, title)
+                has_valid_llm_output = _event_trend_has_valid_llm_output(
+                    llm_outputs
+                )
+                if llm_outputs and not entry["llm_outputs"][index]:
+                    entry["llm_outputs"][index] = llm_outputs
+                if index == 0:
+                    exposure = first_number(
+                        candidate.get("current_exposure_usd"),
+                        candidate.get("exposure_usd"),
+                    )
+                    entry["latest_stage2"] = {
+                        "market_url": first_text(
+                            candidate.get("market_url"),
+                            candidate.get("source_url"),
+                            prepared.get("market_url"),
+                            prompt_market.get("market_url"),
+                        ),
+                        "close_time": first_text(
+                            candidate.get("close_time"),
+                            candidate.get("end_date"),
+                            prepared.get("close_time"),
+                            prompt_market.get("close_time"),
+                        ),
+                        "current_yes_odds": current_yes_odds,
+                        "current_no_odds": current_no_odds,
+                        # Consensus without a usable saved model output is not
+                        # coverage. Some failed runs serialize the empty
+                        # consensus default as 0/100; exposing that as a green
+                        # scan circle creates odds that no model actually gave.
+                        "llm_yes_odds": yes_score if has_valid_llm_output else None,
+                        "llm_no_odds": no_score if has_valid_llm_output else None,
+                        "returns_per_day": first_number(
+                            candidate.get("returns_per_day")
+                        ),
+                        "is_active_position": bool(
+                            exposure is not None and exposure > 0
+                        ),
+                        "active_position_side": first_text(
+                            candidate.get("position_side"),
+                            candidate.get("side"),
+                        ),
+                    }
+                if not has_valid_llm_output:
+                    continue
                 scores = entry["scores"]
                 if isinstance(scores, list) and (
                     scores[index] is None or strongest >= float(scores[index])
@@ -1489,39 +1533,6 @@ class AsyncPolymarketAutoLiveRepository:
                     entry["sides"][index] = strongest_side
                     entry["timestamps"][index] = timestamp
                     entry["llm_outputs"][index] = llm_outputs
-                    if index == 0:
-                        exposure = first_number(
-                            candidate.get("current_exposure_usd"),
-                            candidate.get("exposure_usd"),
-                        )
-                        entry["latest_stage2"] = {
-                            "market_url": first_text(
-                                candidate.get("market_url"),
-                                candidate.get("source_url"),
-                                prepared.get("market_url"),
-                                prompt_market.get("market_url"),
-                            ),
-                            "close_time": first_text(
-                                candidate.get("close_time"),
-                                candidate.get("end_date"),
-                                prepared.get("close_time"),
-                                prompt_market.get("close_time"),
-                            ),
-                            "current_yes_odds": current_yes_odds,
-                            "current_no_odds": current_no_odds,
-                            "llm_yes_odds": yes_score,
-                            "llm_no_odds": no_score,
-                            "returns_per_day": first_number(
-                                candidate.get("returns_per_day")
-                            ),
-                            "is_active_position": bool(
-                                exposure is not None and exposure > 0
-                            ),
-                            "active_position_side": first_text(
-                                candidate.get("position_side"),
-                                candidate.get("side"),
-                            ),
-                        }
 
         # Decision rows preserve legacy history and enrich the newest scan with
         # position metadata, but never overwrite a Stage 2 scan observation.
@@ -1569,7 +1580,11 @@ class AsyncPolymarketAutoLiveRepository:
                 row.trend_llm_outputs
             )
             decision_llm_outputs = frozen_llm_outputs or projected_llm_outputs
-            if isinstance(scores, list) and scores[index] is None:
+            if (
+                isinstance(scores, list)
+                and scores[index] is None
+                and _event_trend_has_valid_llm_output(decision_llm_outputs)
+            ):
                 scores[index] = round(strongest, 2)
                 entry["sides"][index] = strongest_side
                 entry["timestamps"][index] = projected.updated_at or projected.created_at
@@ -1621,24 +1636,23 @@ class AsyncPolymarketAutoLiveRepository:
             # values so latest-scan coverage and Returns/day stay truthful.
             latest_score = first_number(entry["scores"][0])
             latest_side = first_text(entry["sides"][0])
-            if latest_score is not None and 0 <= latest_score <= 100:
-                latest_outputs = entry["llm_outputs"][0]
-                latest_has_valid_output = _event_trend_has_valid_llm_output(
-                    latest_outputs
-                )
-                if latest_outputs and not latest_has_valid_output:
-                    # A failed/circuit-broken provider row explains why the event
-                    # was not covered; it must not turn a legacy fallback score
-                    # into a fabricated 0/100 consensus.
-                    llm_yes_odds = None
-                    llm_no_odds = None
-                elif llm_yes_odds is None:
+            latest_outputs = entry["llm_outputs"][0]
+            latest_has_valid_output = _event_trend_has_valid_llm_output(
+                latest_outputs
+            )
+            if not latest_has_valid_output:
+                # A scan is covered only when at least one saved provider output
+                # can explain its odds. This also prevents old, detail-less
+                # projections and empty 0/100 consensus defaults from rendering
+                # as green circles with an empty hover card.
+                llm_yes_odds = None
+                llm_no_odds = None
+            elif latest_score is not None and 0 <= latest_score <= 100:
+                if llm_yes_odds is None:
                     llm_yes_odds = (
                         latest_score if latest_side == "YES" else 100 - latest_score
                     )
-                if llm_no_odds is None and not (
-                    latest_outputs and not latest_has_valid_output
-                ):
+                if llm_no_odds is None:
                     llm_no_odds = (
                         latest_score if latest_side == "NO" else 100 - latest_score
                     )
