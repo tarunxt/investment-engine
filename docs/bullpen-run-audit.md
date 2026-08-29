@@ -1509,6 +1509,11 @@ An explicit failed or circuit-broken model output never qualifies as latest-scan
 coverage and never becomes a synthetic 0/100 consensus. Active-position
 Returns/day remains available in that case by using the held Bullpen side as the
 chosen side; non-position rows still require valid latest LLM odds.
+For the current latest run only, the trend read overlays the frozen Stage 2 stage
+slice when an older console projection had truncated reviewed rows or stripped
+their model outputs. The bounded projection remains authoritative for earlier
+scan slots, and the compatibility read never materializes twenty full run
+payloads.
 
 
 ## Candidate-only Stage 2 after wallet-read failure

@@ -1287,6 +1287,30 @@ class AsyncPolymarketAutoLiveRepository:
         run_index = {run_id: index for index, run_id in enumerate(run_ids)}
         event_scores: dict[str, dict[str, object]] = {}
 
+        # Projections created before per-model trend retention kept only the
+        # first ten Stage-2 rows and removed their llm_outputs. Read just the
+        # latest run's frozen stage slice as a compatibility overlay. This is
+        # deliberately limited to one run so the first-paint query never loads
+        # twenty complete historical payloads.
+        latest_frozen_stage_row = (await self.session.execute(
+            select(
+                run.payload["stage_results"].label("trend_stage_results")
+            )
+            .where(run.user_id == user_id)
+            .where(run.id == run_rows[0].id)
+        )).first()
+        trend_run_rows = list(run_rows)
+        if latest_frozen_stage_row is not None and isinstance(
+            latest_frozen_stage_row.trend_stage_results, list
+        ):
+            trend_run_rows.append(SimpleNamespace(
+                id=run_rows[0].id,
+                trend_stage_results=latest_frozen_stage_row.trend_stage_results,
+                started_at=run_rows[0].started_at,
+                completed_at=run_rows[0].completed_at,
+                updated_at=run_rows[0].updated_at,
+            ))
+
         def as_record(value: object) -> dict[str, object]:
             return value if isinstance(value, dict) else {}
 
@@ -1330,7 +1354,7 @@ class AsyncPolymarketAutoLiveRepository:
         # console projection rather than the immutable full run payload: the latter
         # can contain the complete market universe and provider evidence for every
         # scan, which makes this first-paint query exceed its browser budget.
-        for run_row in run_rows:
+        for run_row in trend_run_rows:
             index = run_index[str(run_row.id)]
             raw_stages = run_row.trend_stage_results
             if not isinstance(raw_stages, list):

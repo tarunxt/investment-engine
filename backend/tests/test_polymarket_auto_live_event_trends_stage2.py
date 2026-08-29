@@ -23,6 +23,9 @@ class _RowsResult:
     def all(self):
         return self._rows
 
+    def first(self):
+        return self._rows[0] if self._rows else None
+
 
 class _StageTwoOnlySession:
     def __init__(self):
@@ -95,7 +98,7 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
         7
     )
 
-    assert session.calls == 2
+    assert session.calls == 3
     assert len(response.events) == 1
     event = response.events[0]
     assert event.market_id == "market-1"
