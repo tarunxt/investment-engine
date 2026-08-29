@@ -61,6 +61,16 @@ def _event_trend_llm_outputs(value: object) -> list[BullpenAutoLiveLlmOutput]:
     return outputs
 
 
+def _event_trend_has_valid_llm_output(
+    outputs: Sequence[BullpenAutoLiveLlmOutput],
+) -> bool:
+    """Return whether at least one model supplied a usable probability pair."""
+    return any(
+        output.llm_yes_odds is not None and output.llm_no_odds is not None
+        for output in outputs
+    )
+
+
 if TYPE_CHECKING:
     from app.domains.polymarket_auto_live.engine import PositionSnapshot
 
@@ -1588,11 +1598,23 @@ class AsyncPolymarketAutoLiveRepository:
             latest_score = first_number(entry["scores"][0])
             latest_side = first_text(entry["sides"][0])
             if latest_score is not None and 0 <= latest_score <= 100:
-                if llm_yes_odds is None:
+                latest_outputs = entry["llm_outputs"][0]
+                latest_has_valid_output = _event_trend_has_valid_llm_output(
+                    latest_outputs
+                )
+                if latest_outputs and not latest_has_valid_output:
+                    # A failed/circuit-broken provider row explains why the event
+                    # was not covered; it must not turn a legacy fallback score
+                    # into a fabricated 0/100 consensus.
+                    llm_yes_odds = None
+                    llm_no_odds = None
+                elif llm_yes_odds is None:
                     llm_yes_odds = (
                         latest_score if latest_side == "YES" else 100 - latest_score
                     )
-                if llm_no_odds is None:
+                if llm_no_odds is None and not (
+                    latest_outputs and not latest_has_valid_output
+                ):
                     llm_no_odds = (
                         latest_score if latest_side == "NO" else 100 - latest_score
                     )
@@ -1603,23 +1625,38 @@ class AsyncPolymarketAutoLiveRepository:
             is_claimable_position = bool(
                 latest_stage2.get("is_claimable_position")
             )
+            active_from_stage2 = bool(latest_stage2.get("is_active_position"))
+            active_from_decision = bool(
+                latest_decision is not None
+                and latest_decision.current_exposure_usd > 0
+            )
+            active_position_side = (
+                latest_stage2.get("active_position_side")
+                if active_from_stage2
+                else (
+                    latest_decision.side
+                    if active_from_decision and latest_decision is not None
+                    else None
+                )
+            )
+            returns_llm_yes_odds = llm_yes_odds
+            returns_llm_no_odds = llm_no_odds
+            if active_position_side == "YES":
+                returns_llm_yes_odds, returns_llm_no_odds = 100.0, 0.0
+            elif active_position_side == "NO":
+                returns_llm_yes_odds, returns_llm_no_odds = 0.0, 100.0
             current_returns_per_day = (
                 None
                 if is_claimable_position
                 else llm_returns_per_day(
-                    llm_yes_odds=llm_yes_odds,
-                    llm_no_odds=llm_no_odds,
+                    llm_yes_odds=returns_llm_yes_odds,
+                    llm_no_odds=returns_llm_no_odds,
                     close_time=close_time,
                     now=trend_generated_at,
                     current_yes_odds=current_yes_odds,
                     current_no_odds=current_no_odds,
                     formula=returns_formula,
                 )
-            )
-            active_from_stage2 = bool(latest_stage2.get("is_active_position"))
-            active_from_decision = bool(
-                latest_decision is not None
-                and latest_decision.current_exposure_usd > 0
             )
             events.append(BullpenAutoLiveEventTrend(
                 market_id=market_id,
@@ -1644,15 +1681,7 @@ class AsyncPolymarketAutoLiveRepository:
                 returns_per_day=current_returns_per_day,
                 is_active_position=active_from_stage2 or active_from_decision,
                 is_claimable_position=is_claimable_position,
-                active_position_side=(
-                    latest_stage2.get("active_position_side")
-                    if active_from_stage2
-                    else (
-                        latest_decision.side
-                        if active_from_decision and latest_decision is not None
-                        else None
-                    )
-                ),
+                active_position_side=active_position_side,
             ))
 
         events.sort(key=lambda event: (-event.score, event.market_title.casefold()))

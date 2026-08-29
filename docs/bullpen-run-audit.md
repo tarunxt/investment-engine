@@ -1505,6 +1505,10 @@ strongest-side score and side, and enriches per-model detail from the immutable
 decision payload when it exists. Returns/day is then evaluated from that same
 latest-scan consensus, current odds, close time, and saved user formula. These are
 additive compatibility projections; immutable historical run facts are unchanged.
+An explicit failed or circuit-broken model output never qualifies as latest-scan
+coverage and never becomes a synthetic 0/100 consensus. Active-position
+Returns/day remains available in that case by using the held Bullpen side as the
+chosen side; non-position rows still require valid latest LLM odds.
 
 
 ## Candidate-only Stage 2 after wallet-read failure
