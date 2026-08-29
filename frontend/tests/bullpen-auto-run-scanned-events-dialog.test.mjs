@@ -48,6 +48,7 @@ test("Stage 1 passed-filter count shows the exact included active-event overlap"
   assert.match(source, /function getStageOneIncludedActiveCount/);
   assert.match(source, /activeRows\.length !== stats\.activePositions/);
   assert.match(source, /stage\.scanCandidates\.length !== stats\.passedFilters/);
+  assert.match(source, /return null/);
   assert.match(
     source,
     /Includes \$\{includedActiveCount\} active event\$\{includedActiveCount === 1 \? "" : "s"\}/,
