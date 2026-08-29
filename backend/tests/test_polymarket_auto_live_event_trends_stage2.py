@@ -71,7 +71,19 @@ class _StageTwoOnlySession:
                                                 "completed_at": "2026-08-10T02:45:00+00:00",
                                             }
                                         ],
-                                    }
+                                    },
+                                    {
+                                        "market_id": "market-empty-consensus",
+                                        "question": "Will an empty consensus stay uncovered?",
+                                        "close_time": "2026-08-12T12:00:00+00:00",
+                                        "current_yes_odds": 96.75,
+                                        "current_no_odds": 3.25,
+                                        "fair_yes_probability_pct": 0,
+                                        "fair_no_probability_pct": 100,
+                                        "current_exposure_usd": 25,
+                                        "position_side": "YES",
+                                        "llm_outputs": [],
+                                    },
                                 ],
                             },
                             "started_at": "2026-08-10T02:40:00+00:00",
@@ -99,8 +111,8 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
     )
 
     assert session.calls == 3
-    assert len(response.events) == 1
-    event = response.events[0]
+    assert len(response.events) == 2
+    event = next(event for event in response.events if event.market_id == "market-1")
     assert event.market_id == "market-1"
     assert event.market_title == "Will event one happen?"
     assert event.scan_scores[0] == 74
@@ -115,3 +127,15 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
     assert event.scan_llm_outputs[0][0].provider == "deepseek"
     assert event.score == 74
     assert len(event.scan_scores) == 20
+
+    empty_consensus = next(
+        event
+        for event in response.events
+        if event.market_id == "market-empty-consensus"
+    )
+    assert empty_consensus.scan_scores[0] is None
+    assert empty_consensus.llm_yes_odds is None
+    assert empty_consensus.llm_no_odds is None
+    assert empty_consensus.scan_llm_outputs[0] == []
+    assert empty_consensus.is_active_position is True
+    assert empty_consensus.returns_per_day is not None
