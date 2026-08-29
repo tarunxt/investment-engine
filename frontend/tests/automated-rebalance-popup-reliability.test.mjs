@@ -127,6 +127,15 @@ test("stage cards keep every shortcut as an independent native button", () => {
   );
 });
 
+test("stage error details escape card stacking contexts and stay inside the viewport", () => {
+  assert.match(workflowSource, /createPortal\(/);
+  assert.match(workflowSource, /document\.body/);
+  assert.match(workflowSource, /className="fixed z-\[200\] overflow-y-auto overscroll-contain/);
+  assert.match(workflowSource, /window\.innerWidth - viewportPadding - width/);
+  assert.match(workflowSource, /window\.innerHeight - viewportPadding - measuredHeight/);
+  assert.match(workflowSource, /window\.addEventListener\("scroll", updatePosition, true\)/);
+});
+
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {
   assert.match(workflowSource, /totalLlms: jobs\.length/);
   assert.match(workflowSource, /getRunJobDisplayModels\(jobs\)/);
