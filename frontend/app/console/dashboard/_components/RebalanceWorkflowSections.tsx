@@ -2,15 +2,18 @@
 
 import Link from "next/link";
 import {
+  type CSSProperties,
   Fragment,
   type ReactNode,
   type SVGProps,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { useUsdInrRate } from "@/hooks/useUsdInrRate";
 import {
   formatUsdAsVerifiedInr,
@@ -3130,6 +3133,10 @@ function WorkflowStageTile({
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);
   const [openErrorDetail, setOpenErrorDetail] = useState<string | null>(null);
+  const errorButtonRef = useRef<HTMLButtonElement>(null);
+  const errorPopoverRef = useRef<HTMLSpanElement>(null);
+  const [errorPopoverStyle, setErrorPopoverStyle] =
+    useState<CSSProperties | null>(null);
   const [durationDialogOpen, setDurationDialogOpen] = useState(false);
   const closeDurationDialog = useCallback(
     () => setDurationDialogOpen(false),
@@ -3143,6 +3150,70 @@ function WorkflowStageTile({
         : stage === "actionables"
           ? getActionablesStageTileRows(info)
           : getIdleStageRows(stage, info, now);
+
+  useLayoutEffect(() => {
+    if (!openErrorDetail) return;
+
+    const updatePosition = () => {
+      const anchor = errorButtonRef.current;
+      if (!anchor) return;
+
+      const viewportPadding = 16;
+      const gap = 8;
+      const anchorRect = anchor.getBoundingClientRect();
+      const width = Math.min(384, window.innerWidth - viewportPadding * 2);
+      const maxHeight = Math.max(160, window.innerHeight - viewportPadding * 2);
+      const measuredHeight = Math.min(
+        errorPopoverRef.current?.scrollHeight ?? 320,
+        maxHeight,
+      );
+      const spaceBelow =
+        window.innerHeight - anchorRect.bottom - gap - viewportPadding;
+      const spaceAbove = anchorRect.top - gap - viewportPadding;
+      const placeBelow =
+        spaceBelow >= Math.min(measuredHeight, 320) ||
+        spaceBelow >= spaceAbove;
+      const left = Math.min(
+        Math.max(anchorRect.left, viewportPadding),
+        window.innerWidth - viewportPadding - width,
+      );
+      const top = placeBelow
+        ? Math.min(
+            anchorRect.bottom + gap,
+            window.innerHeight - viewportPadding - measuredHeight,
+          )
+        : Math.max(viewportPadding, anchorRect.top - gap - measuredHeight);
+
+      setErrorPopoverStyle({ left, top, width, maxHeight });
+    };
+
+    updatePosition();
+    const animationFrame = window.requestAnimationFrame(updatePosition);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [openErrorDetail]);
+
+  useEffect(() => {
+    if (!openErrorDetail) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        errorButtonRef.current?.contains(target) ||
+        errorPopoverRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setOpenErrorDetail(null);
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    return () =>
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+  }, [openErrorDetail]);
 
   const renderStageRow = (row: StageTileRow) => {
     if (row.label === "Duration") {
@@ -3187,6 +3258,7 @@ function WorkflowStageTile({
         {row.label === "Error" && row.detail ? (
           <span className="relative inline-flex align-middle">
             <button
+              ref={errorButtonRef}
               type="button"
               onClick={(event) => {
                 event.preventDefault();
@@ -3201,8 +3273,18 @@ function WorkflowStageTile({
             >
               {row.value}
             </button>
-            {openErrorDetail === row.detail ? (
-              <span className="absolute left-0 top-6 z-30 w-96 max-w-[calc(100vw-4rem)] rounded-2xl border border-red-100 bg-white p-4 text-xs leading-5 text-slate-700 shadow-xl shadow-slate-900/10">
+            {openErrorDetail === row.detail &&
+            errorPopoverStyle &&
+            typeof document !== "undefined"
+              ? createPortal(
+                  <span
+                    ref={errorPopoverRef}
+                    role="dialog"
+                    aria-label="Detailed LLM error"
+                    style={errorPopoverStyle}
+                    className="fixed z-[200] overflow-y-auto overscroll-contain rounded-2xl border border-red-100 bg-white p-4 text-xs leading-5 text-slate-700 shadow-2xl shadow-slate-900/20 ring-1 ring-slate-900/5"
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
                 <span className="block font-bold text-red-700">
                   Detailed LLM error
                 </span>
@@ -3239,8 +3321,10 @@ function WorkflowStageTile({
                     {row.detail}
                   </span>
                 )}
-              </span>
-            ) : null}
+                  </span>,
+                  document.body,
+                )
+              : null}
           </span>
         ) : (
           <span>{row.value}</span>
