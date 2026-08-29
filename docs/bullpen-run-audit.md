@@ -52,16 +52,25 @@ recompute business decisions on page load.
 Immediately after the final Stage 2 result is persisted, and before Stage 3
 starts, the planner evaluates each serialized `active_position` review row
 against the position's held side. A held YES position breaches when consolidated
-YES odds are strictly below 80%; a held NO position breaches when consolidated
-NO odds are strictly below 80%. Candidate rows, missing odds, and values equal
-to 80% do not trigger the warning.
+YES odds or actual current YES Bullpen odds are strictly below 80%; a held NO
+position breaches when consolidated NO odds or actual current NO Bullpen odds
+are strictly below 80%. Candidate rows, missing odds, and values equal to 80%
+do not trigger the warning. A single consolidated mail is sent when either
+measure breaches, and identifies whether LLM odds, actual Bullpen odds, or both
+caused the warning.
+
+The checker reads `current_yes_odds` and `current_no_odds` from the Stage 2
+review row when present, then falls back to its nested prompt-market snapshot
+and the matching completed Stage 1 active-position snapshot. Historical rows
+without any actual-odds snapshot remain compatible and are evaluated on their
+available LLM odds only.
 
 All breached active positions for a run are consolidated into one actionable
 email. The delivery is reserved in the existing durable activity log before
 SMTP is called, using a deterministic run/threshold idempotency key, so Celery
 redelivery cannot send a duplicate. Sent, failed, and in-flight attempts remain
 visible through `GET /mails/history` and the Mails console, including the
-message, affected events, held-side odds, provider diagnostics, and operator
+message, affected events, both held-side odds, breach reason, provider diagnostics, and operator
 remarks. Delivery metadata is also attached additively to
 `run.audit_metadata.stage2_position_warning_mail`; historical run payloads
 without this field remain valid. Mail failure is recorded and logged but does

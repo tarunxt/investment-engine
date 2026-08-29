@@ -51,8 +51,8 @@ MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
     },
     {
         "key": "stage2_position_warning",
-        "label": "Stage 2 position-risk alerts",
-        "description": "Urgent warnings when held-side consolidated LLM odds fall below the configured safety threshold.",
+        "label": "Bullpen position-risk alerts",
+        "description": "Urgent warnings when either held-side consolidated LLM odds or actual current Bullpen odds fall below the configured safety threshold.",
         "category": MAIL_CATEGORY_ALERTS,
         "segments": ("Bullpen",),
     },
@@ -84,8 +84,11 @@ class Stage2PositionWarning:
     question: str
     market_url: str | None
     position_side: str
-    held_side_llm_odds: float
+    held_side_llm_odds: float | None
     opposite_side_llm_odds: float | None
+    held_side_bullpen_odds: float | None
+    opposite_side_bullpen_odds: float | None
+    breach_sources: tuple[str, ...]
     threshold: float
 
     def as_dict(self) -> dict[str, object]:
@@ -96,6 +99,9 @@ class Stage2PositionWarning:
             "position_side": self.position_side,
             "held_side_llm_odds": self.held_side_llm_odds,
             "opposite_side_llm_odds": self.opposite_side_llm_odds,
+            "held_side_bullpen_odds": self.held_side_bullpen_odds,
+            "opposite_side_bullpen_odds": self.opposite_side_bullpen_odds,
+            "breach_sources": list(self.breach_sources),
             "threshold": self.threshold,
             "recommended_action": "EXIT",
         }
@@ -199,6 +205,14 @@ def _as_probability(value: object) -> float | None:
     return round(probability, 2)
 
 
+def _first_probability(*values: object) -> float | None:
+    for value in values:
+        probability = _as_probability(value)
+        if probability is not None:
+            return probability
+    return None
+
+
 def _completed_stage_two(
     run: BullpenAutoLiveRun,
 ) -> BullpenAutoLiveStageResult | None:
@@ -216,7 +230,7 @@ def extract_stage2_position_warnings(
     *,
     threshold: float = STAGE2_WARNING_THRESHOLD,
 ) -> list[Stage2PositionWarning]:
-    """Return active positions whose consolidated held-side odds are below the threshold."""
+    """Return active positions whose held-side LLM or Bullpen odds breach the threshold."""
     stage = _completed_stage_two(run)
     if stage is None:
         return []
@@ -224,6 +238,30 @@ def extract_stage2_position_warnings(
     rows = stage.outputs.get("llm_reviewed_candidates")
     if not isinstance(rows, list):
         return []
+
+    stage1_positions: dict[str, dict[str, Any]] = {}
+    for candidate_stage in run.stage_results:
+        if not (
+            candidate_stage.stage_number == 1
+            or candidate_stage.outputs.get("workflow_stage_key") == "scan"
+        ):
+            continue
+        active_positions = candidate_stage.outputs.get("active_positions_found")
+        if not isinstance(active_positions, list):
+            continue
+        for position in active_positions:
+            if not isinstance(position, dict):
+                continue
+            position_market_id = str(position.get("market_id") or "").strip()
+            position_side = str(position.get("side") or "").strip().upper()
+            position_key = str(
+                position.get("position_key")
+                or f"{position_market_id}::{position_side}"
+            )
+            if position_market_id:
+                stage1_positions[position_market_id] = position
+            if position_key:
+                stage1_positions[position_key] = position
 
     warnings: list[Stage2PositionWarning] = []
     seen: set[str] = set()
@@ -233,15 +271,51 @@ def extract_stage2_position_warnings(
         side = str(row.get("position_side") or "").strip().upper()
         if side not in {"YES", "NO"}:
             continue
-        yes_odds = _as_probability(row.get("fair_yes_probability_pct"))
-        no_odds = _as_probability(row.get("fair_no_probability_pct"))
-        held_odds = yes_odds if side == "YES" else no_odds
-        opposite_odds = no_odds if side == "YES" else yes_odds
-        if held_odds is None or held_odds >= threshold:
-            continue
-
         market_id = str(row.get("market_id") or "").strip()
         position_key = str(row.get("position_key") or f"{market_id}::{side}")
+        stage1_position = (
+            stage1_positions.get(position_key)
+            or stage1_positions.get(market_id)
+            or {}
+        )
+        prompt_inputs = (
+            row.get("llm_prompt_inputs")
+            if isinstance(row.get("llm_prompt_inputs"), dict)
+            else {}
+        )
+        prompt_market = (
+            prompt_inputs.get("market")
+            if isinstance(prompt_inputs.get("market"), dict)
+            else {}
+        )
+        yes_odds = _as_probability(row.get("fair_yes_probability_pct"))
+        no_odds = _as_probability(row.get("fair_no_probability_pct"))
+        held_llm_odds = yes_odds if side == "YES" else no_odds
+        opposite_llm_odds = no_odds if side == "YES" else yes_odds
+        current_yes_odds = _first_probability(
+            row.get("current_yes_odds"),
+            prompt_market.get("current_yes_odds"),
+            stage1_position.get("current_yes_odds"),
+        )
+        current_no_odds = _first_probability(
+            row.get("current_no_odds"),
+            prompt_market.get("current_no_odds"),
+            stage1_position.get("current_no_odds"),
+        )
+        held_bullpen_odds = (
+            current_yes_odds if side == "YES" else current_no_odds
+        )
+        opposite_bullpen_odds = (
+            current_no_odds if side == "YES" else current_yes_odds
+        )
+        breach_sources: list[str] = []
+        if held_llm_odds is not None and held_llm_odds < threshold:
+            breach_sources.append("LLM odds")
+        if held_bullpen_odds is not None and held_bullpen_odds < threshold:
+            breach_sources.append("Actual Current Bullpen Odds")
+        if not breach_sources:
+            continue
+
         if not market_id or position_key in seen:
             continue
         seen.add(position_key)
@@ -255,8 +329,11 @@ def extract_stage2_position_warnings(
                     else None
                 ),
                 position_side=side,
-                held_side_llm_odds=held_odds,
-                opposite_side_llm_odds=opposite_odds,
+                held_side_llm_odds=held_llm_odds,
+                opposite_side_llm_odds=opposite_llm_odds,
+                held_side_bullpen_odds=held_bullpen_odds,
+                opposite_side_bullpen_odds=opposite_bullpen_odds,
+                breach_sources=tuple(breach_sources),
                 threshold=threshold,
             )
         )
@@ -271,11 +348,12 @@ def build_stage2_warning_email(
     noun = "position" if count == 1 else "positions"
     subject = (
         f"WARNING: Exit required — {count} active {noun} below "
-        f"{STAGE2_WARNING_THRESHOLD:g}% LLM odds"
+        f"{STAGE2_WARNING_THRESHOLD:g}% safety threshold"
     )
     intro = (
-        "Stage 2 has completed and the consolidated LLM odds are crystallised. "
-        f"The held-side probability is below {STAGE2_WARNING_THRESHOLD:g}% for "
+        "Stage 2 has completed and the position-risk check has run. "
+        "Either the consolidated held-side LLM odds, the actual current held-side "
+        f"Bullpen odds, or both are below {STAGE2_WARNING_THRESHOLD:g}% for "
         f"{count} active {noun}."
     )
     text_parts = [
@@ -286,22 +364,25 @@ def build_stage2_warning_email(
     ]
     html_rows: list[str] = []
     for index, warning in enumerate(warnings, start=1):
-        opposite_side = "NO" if warning.position_side == "YES" else "YES"
         url_line = f"\nMarket: {warning.market_url}" if warning.market_url else ""
+        llm_value = (
+            f"{warning.held_side_llm_odds:g}%"
+            if warning.held_side_llm_odds is not None
+            else "unavailable"
+        )
+        bullpen_value = (
+            f"{warning.held_side_bullpen_odds:g}%"
+            if warning.held_side_bullpen_odds is not None
+            else "unavailable"
+        )
+        trigger_reason = " and ".join(warning.breach_sources)
         text_parts.extend(
             [
                 f"{index}. {warning.question}",
                 f"Held side: {warning.position_side}",
-                (
-                    "Consolidated held-side LLM odds: "
-                    f"{warning.held_side_llm_odds:g}%"
-                ),
-                (
-                    f"Consolidated {opposite_side} LLM odds: "
-                    f"{warning.opposite_side_llm_odds:g}%"
-                    if warning.opposite_side_llm_odds is not None
-                    else f"Consolidated {opposite_side} LLM odds: unavailable"
-                ),
+                f"Consolidated held-side LLM odds: {llm_value}",
+                f"Actual current held-side Bullpen odds: {bullpen_value}",
+                f"Alert triggered by: {trigger_reason}",
                 "Action: EXIT this position as soon as practical." + url_line,
                 "",
             ]
@@ -315,7 +396,10 @@ def build_stage2_warning_email(
             f"<strong>{html.escape(warning.question)}</strong>"
             f"<p>Held side: {warning.position_side}</p>"
             f"<p>Consolidated held-side LLM odds: "
-            f"<strong>{warning.held_side_llm_odds:g}%</strong></p>"
+            f"<strong>{html.escape(llm_value)}</strong></p>"
+            f"<p>Actual current held-side Bullpen odds: "
+            f"<strong>{html.escape(bullpen_value)}</strong></p>"
+            f"<p>Alert triggered by: <strong>{html.escape(trigger_reason)}</strong></p>"
             f"<p>Action: <strong>EXIT this position as soon as practical.</strong></p>"
             f"{market_link}</li>"
         )
@@ -335,7 +419,8 @@ def build_stage2_warning_email(
         "Stage 3. It is an alert only and does not itself submit an exit order.</p>"
     )
     remarks = (
-        "Automatic Stage 2 risk warning. Consolidated held-side LLM odds fell "
+        "Automatic Stage 2 risk warning. Consolidated held-side LLM odds or "
+        "actual current held-side Bullpen odds fell "
         f"below {STAGE2_WARNING_THRESHOLD:g}%; immediate exit review is required. "
         "The notification was evaluated before Stage 3."
     )
@@ -547,7 +632,7 @@ def notify_stage2_position_warnings_sync(
             session,
             user_id=user_id,
             action=STAGE2_WARNING_ACTION,
-            trigger="Stage 2 active-position LLM odds",
+            trigger="Stage 2 active-position LLM / Bullpen odds",
             recipients=TEST_RECIPIENTS,
             subject=subject,
             html_content=html_content,
@@ -555,7 +640,7 @@ def notify_stage2_position_warnings_sync(
             remarks=remarks,
             idempotency_key=(
                 f"stage2-position-warning:{run.id}:"
-                f"{STAGE2_WARNING_THRESHOLD:g}:v1"
+                f"{STAGE2_WARNING_THRESHOLD:g}:v2"
             ),
             run_id=run.id,
             threshold=STAGE2_WARNING_THRESHOLD,
