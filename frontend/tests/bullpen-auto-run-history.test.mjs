@@ -93,7 +93,7 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(trendsTable, /aClaimable[\s\S]*?return aClaimable \? -1 : 1/);
   assert.match(trendsTable, /aReturnsUnavailable[\s\S]*?return aReturnsUnavailable \? -1 : 1/);
   assert.match(trendsTable, /isExpiredNotYetClaimablePosition/);
-  assert.match(trendsTable, /if \(event\.is_claimable_position \|\| !event\.close_time\) return false/);
+  assert.match(trendsTable, /if \(!event\.is_active_position \|\| event\.is_claimable_position \|\| !event\.close_time\) return false/);
   assert.match(trendsTable, /data-expired-not-yet-claimable=\{expiredNotYetClaimable \|\| undefined\}/);
   assert.match(trendsTable, /expiredNotYetClaimable \? "bg-emerald-100 text-emerald-950 ring-1 ring-inset ring-emerald-400/);
   assert.match(trendsTable, /data-claimable=\{claimable \|\| undefined\}/);
