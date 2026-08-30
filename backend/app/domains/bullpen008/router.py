@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from uuid import uuid4
 
@@ -206,20 +207,40 @@ async def run_bullpen008_once(
             triggered_by="manual",
             idempotency_key=request.idempotency_key if request else None,
         )
-        async_result = execute_bullpen008_run.apply_async(
-            args=[record.id],
-            queue=CELERY_QUEUE,
-            task_id=f"bullpen008:{record.id}",
-            headers={
-                "workflow_profile": "bullpen008",
-                "shadow_mode": record.shadow_mode,
-                "orders_permitted": record.execution_enabled,
-            },
+        publish = asyncio.create_task(
+            asyncio.to_thread(
+                execute_bullpen008_run.apply_async,
+                args=[record.id],
+                queue=CELERY_QUEUE,
+                task_id=f"bullpen008:{record.id}",
+                headers={
+                    "workflow_profile": "bullpen008",
+                    "shadow_mode": record.shadow_mode,
+                    "orders_permitted": record.execution_enabled,
+                },
+                retry=False,
+            )
         )
+        try:
+            async_result = await asyncio.wait_for(
+                asyncio.shield(publish), timeout=5
+            )
+            dispatch_status = "published"
+            celery_task_id = async_result.id
+        except TimeoutError:
+            # The broker result is ambiguous, but the stable task ID and the
+            # worker's isolated run lock make any later duplicate delivery a
+            # no-op. Return the persisted run promptly so the UI never invents
+            # a second run after a proxy timeout.
+            dispatch_status = "publish-timeout-ambiguous"
+            celery_task_id = f"bullpen008:{record.id}"
+            publish.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None
+            )
         record.task_metadata = {
             **dict(record.task_metadata),
-            "celery_task_id": async_result.id,
-            "dispatch_status": "published",
+            "celery_task_id": celery_task_id,
+            "dispatch_status": dispatch_status,
         }
         await session.commit()
         loaded = await get_run(session, user_id=current_user.id, run_id=record.id)

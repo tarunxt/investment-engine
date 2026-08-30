@@ -447,6 +447,14 @@ def test_phase2_migration_and_tables_are_additive_and_008_only() -> None:
     assert "polymarket_auto_live_order_intents" not in source
 
 
+def test_manual_dispatch_returns_a_persisted_run_on_ambiguous_publish_timeout() -> None:
+    source = Path("app/domains/bullpen008/router.py").read_text()
+    assert "asyncio.to_thread" in source
+    assert "asyncio.shield(publish), timeout=5" in source
+    assert 'dispatch_status = "publish-timeout-ambiguous"' in source
+    assert 'celery_task_id = f"bullpen008:{record.id}"' in source
+
+
 def test_008_alerts_distinguish_sources_deduplicate_and_recover_with_hysteresis() -> None:
     positions = [position("m", 5, current_yes_odds=79, current_no_odds=21)]
     stage2 = [{"market_id": "m", "llm_yes_probability": 78, "llm_no_probability": 22}]
