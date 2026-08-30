@@ -450,8 +450,11 @@ def test_phase2_migration_and_tables_are_additive_and_008_only() -> None:
 def test_manual_dispatch_returns_a_persisted_run_on_ambiguous_publish_timeout() -> None:
     source = Path("app/domains/bullpen008/router.py").read_text()
     assert "asyncio.to_thread" in source
-    assert "asyncio.shield(publish), timeout=5" in source
+    assert "asyncio.shield(publish), timeout=PUBLISH_ACK_TIMEOUT_SECONDS" in source
     assert 'dispatch_status = "publish-timeout-ambiguous"' in source
+    assert "timeout=PUBLISH_ACK_TIMEOUT_SECONDS" in source
+    assert "PUBLISH_ACK_TIMEOUT_SECONDS = 0.25" in source
+    assert "async def retry_bullpen008_run" in source
     assert 'celery_task_id = f"bullpen008:{record.id}"' in source
 
 
