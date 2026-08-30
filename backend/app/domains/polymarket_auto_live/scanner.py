@@ -746,6 +746,82 @@ async def _fetch_gamma_keyset_page(
         normalized_cursor = None
     return markets, normalized_cursor
 
+
+async def _fetch_gamma_deadline_cursor_page(
+    client: httpx.AsyncClient,
+    *,
+    offset: int,
+    end_date_min: str,
+) -> tuple[list[dict[str, Any]], int, str | None, int]:
+    """Fetch one ordered event page and expose a safe rolling deadline cursor.
+
+    Gamma rejects large offsets even though the active universe is larger than
+    that limit.  Ordering by deadline lets the 008 scanner advance the lower
+    bound after every page while retaining an offset only for events that share
+    the boundary deadline.  The caller verifies that every full page advances
+    either the deadline or that boundary offset before accepting completeness.
+    """
+
+    response = await client.get(
+        POLYMARKET_GAMMA_EVENTS_URL,
+        params={
+            "active": "true",
+            "archived": "false",
+            "closed": "false",
+            "end_date_min": end_date_min,
+            "limit": str(GAMMA_EVENT_PAGE_SIZE),
+            "offset": str(offset),
+            "order": "endDate",
+            "ascending": "true",
+        },
+    )
+    response.raise_for_status()
+    payload = response.json()
+    events = payload if isinstance(payload, list) else []
+    markets: list[dict[str, Any]] = []
+    deadlines: list[str] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        deadline = _normalize_close_time(event.get("endDate"))
+        if deadline is not None:
+            deadlines.append(deadline)
+        if (
+            event.get("closed") is True
+            or event.get("active") is False
+            or event.get("archived") is True
+        ):
+            continue
+        event_identity = {
+            key: event[key]
+            for key in ("id", "slug", "title")
+            if key in event
+        }
+        event_markets = event.get("markets")
+        if not isinstance(event_markets, list):
+            continue
+        for market in event_markets:
+            if not isinstance(market, dict):
+                continue
+            if (
+                market.get("closed") is True
+                or market.get("active") is False
+                or market.get("archived") is True
+            ):
+                continue
+            normalized_row = dict(market)
+            normalized_row.setdefault("events", [event_identity])
+            markets.append(normalized_row)
+
+    last_deadline = max(deadlines) if deadlines else None
+    boundary_count = (
+        sum(1 for deadline in deadlines if deadline == last_deadline)
+        if last_deadline is not None
+        else 0
+    )
+    return markets, len(events), last_deadline, boundary_count
+
+
 @asynccontextmanager
 async def shared_gamma_market_client(
     *,
@@ -984,6 +1060,7 @@ async def scan_candidate_markets(
     existing_position_slugs: set[str] | None = None,
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
+    use_deadline_cursor_pagination: bool = False,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
@@ -999,7 +1076,16 @@ async def scan_candidate_markets(
         after_cursor: str | None = None
         seen_cursors: set[str] = set()
         while True:
-            if use_keyset_pagination:
+            if use_deadline_cursor_pagination:
+                rows, event_count, last_deadline, boundary_count = (
+                    await _fetch_gamma_deadline_cursor_page(
+                        client,
+                        offset=offset,
+                        end_date_min=current_universe_start,
+                    )
+                )
+                next_cursor = None
+            elif use_keyset_pagination:
                 rows, next_cursor = await _fetch_gamma_keyset_page(
                     client,
                     after_cursor=after_cursor,
@@ -1052,7 +1138,28 @@ async def scan_candidate_markets(
                     )
                     continue
                 accepted.append(normalized)
-            if use_keyset_pagination:
+            if use_deadline_cursor_pagination:
+                if event_count < GAMMA_EVENT_PAGE_SIZE:
+                    break
+                if last_deadline is None or boundary_count <= 0:
+                    raise ValueError(
+                        "Gamma deadline cursor page did not expose a deadline boundary."
+                    )
+                previous_state = (current_universe_start, offset)
+                if last_deadline == current_universe_start:
+                    offset += boundary_count
+                elif last_deadline > current_universe_start:
+                    current_universe_start = last_deadline
+                    offset = boundary_count
+                else:
+                    raise ValueError(
+                        "Gamma deadline cursor moved backwards before completion."
+                    )
+                if (current_universe_start, offset) == previous_state:
+                    raise ValueError(
+                        "Gamma deadline cursor did not advance before completion."
+                    )
+            elif use_keyset_pagination:
                 if next_cursor is None:
                     break
                 if next_cursor in seen_cursors:
