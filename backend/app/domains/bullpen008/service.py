@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -14,6 +13,7 @@ from app.domains.bullpen008.constants import (
     CELERY_QUEUE,
     CELERY_TASK_NAME,
     REDIS_PREFIX,
+    RUN_LOCK_TTL_SECONDS,
     STAGE_VERSIONS,
     WORKFLOW_PROFILE,
 )
@@ -40,6 +40,7 @@ from app.domains.polymarket_auto_live.models import (
 from app.domains.polymarket_auto_live.console_profile import (
     next_custom_console_schedule_time,
 )
+from app.domains.bullpen_run_audit.provenance import resolve_backend_commit_sha
 
 
 def _canonical_json(value: object) -> str:
@@ -64,6 +65,21 @@ def _is_interrupted_previous_build(
         and run_build.strip()
         and current_build.strip()
         and run_build.strip() != current_build.strip()
+    )
+
+
+def _is_recoverable_interrupted_run(
+    *,
+    run_build: str | None,
+    current_build: str | None,
+    started_at: datetime,
+    now: datetime,
+) -> bool:
+    if _is_interrupted_previous_build(run_build, current_build):
+        return True
+    return bool(
+        not run_build
+        and (now - started_at).total_seconds() >= RUN_LOCK_TTL_SECONDS
     )
 
 
@@ -94,13 +110,15 @@ async def recover_interrupted_previous_build_run(
             .limit(1)
         )
     ).scalar_one_or_none()
-    if record is None or not _is_interrupted_previous_build(
-        record.code_build_version,
-        current_build,
+    completed_at = datetime.now(UTC)
+    if record is None or not _is_recoverable_interrupted_run(
+        run_build=record.code_build_version,
+        current_build=current_build,
+        started_at=record.started_at,
+        now=completed_at,
     ):
         return None
 
-    completed_at = datetime.now(UTC)
     settings_hash = _hash(record.settings_snapshot)
     wallet_hash = _hash(record.wallet_snapshot)
     existing_by_number = {stage.stage_number: stage for stage in record.stages}
@@ -478,7 +496,7 @@ async def create_run_record(
         execution_enabled=False,
         started_at=datetime.now(UTC),
         summary="Bullpen 008 shadow-mode run queued for Stages 1-4.",
-        code_build_version=os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA"),
+        code_build_version=resolve_backend_commit_sha(),
         settings_snapshot=dict(settings_record.payload),
         wallet_snapshot={},
         task_metadata={
