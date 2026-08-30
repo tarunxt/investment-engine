@@ -651,6 +651,7 @@ function getFilterCustomKeywordKey(detailId: BullpenScanFilterDetailId) {
   if (detailId === "excludeTweetCountQuestions") {
     return "customExcludeTweetCountQuestionsKeywords";
   }
+  if (detailId === "excludeOthers") return "customExcludeOtherPhrases";
   return null;
 }
 
@@ -687,6 +688,9 @@ function readStoredCustomExclusionKeywords() {
       customExcludeTweetCountQuestionsKeywords: normalizeCustomExclusionKeywords(
         parsed.customExcludeTweetCountQuestionsKeywords,
       ),
+      customExcludeOtherPhrases: normalizeCustomExclusionKeywords(
+        parsed.customExcludeOtherPhrases,
+      ),
     };
   } catch {
     return {};
@@ -711,6 +715,7 @@ function writeStoredCustomExclusionKeywords(filters: BullpenScanFilters) {
         filters.customExcludeMarketPredictionsKeywords,
       customExcludeTweetCountQuestionsKeywords:
         filters.customExcludeTweetCountQuestionsKeywords,
+      customExcludeOtherPhrases: filters.customExcludeOtherPhrases,
     }),
   );
 }
@@ -734,6 +739,8 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
       right.customExcludeMarketPredictionsKeywords.join(",") &&
     left.customExcludeTweetCountQuestionsKeywords.join(",") ===
       right.customExcludeTweetCountQuestionsKeywords.join(",") &&
+    left.customExcludeOtherPhrases.join(",") ===
+      right.customExcludeOtherPhrases.join(",") &&
     left.onlyBinaryYesNo === right.onlyBinaryYesNo &&
     left.minYesOdds === right.minYesOdds &&
     left.minNoOdds === right.minNoOdds
@@ -4388,6 +4395,8 @@ function BullpenAiPageContent() {
               ...activeFilters,
               minYesOdds: settings.console_min_market_odds,
               minNoOdds: settings.console_min_market_odds,
+              customExcludeOtherPhrases:
+                settings.console_custom_exclude_phrases ?? [],
             };
           } catch {
             // The scan route still has safe filter defaults when the settings

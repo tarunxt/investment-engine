@@ -5909,6 +5909,7 @@ class BullpenAutoLiveEngine:
             scanned = await scan_console_profile_markets(
                 now=now,
                 min_market_odds=settings.console_min_market_odds,
+                custom_exclude_phrases=settings.console_custom_exclude_phrases,
             )
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url

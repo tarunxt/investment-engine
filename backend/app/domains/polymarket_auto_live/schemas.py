@@ -220,6 +220,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     max_order_usd: float = Field(default=25, gt=0)
     console_order_usd: float = Field(default=5, gt=0)
     console_min_market_odds: float = Field(default=5, ge=0, lt=50)
+    console_custom_exclude_phrases: list[str] = Field(default_factory=list)
     returns_per_day_formula: str = (
         "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
     )
@@ -326,6 +327,23 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     ) -> list[BullpenAutoLiveLlmTarget]:
         return _normalize_console_llm_targets(value)
 
+    @field_validator("console_custom_exclude_phrases")
+    @classmethod
+    def normalize_console_custom_exclude_phrases(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for phrase in value:
+            candidate = phrase.strip().lower()
+            if not candidate or candidate in seen:
+                continue
+            if len(candidate) > 120:
+                raise ValueError("custom exclusion phrases must be at most 120 characters")
+            seen.add(candidate)
+            normalized.append(candidate)
+        if len(normalized) > 100:
+            raise ValueError("no more than 100 custom exclusion phrases are allowed")
+        return normalized
+
     @field_validator("returns_per_day_formula")
     @classmethod
     def validate_returns_per_day_formula_field(cls, value: str) -> str:
@@ -393,6 +411,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     max_order_usd: float | None = Field(default=None, gt=0)
     console_order_usd: float | None = Field(default=None, gt=0)
     console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
+    console_custom_exclude_phrases: list[str] | None = None
     returns_per_day_formula: str | None = None
     min_liquidity_usd: float | None = Field(default=None, ge=0)
 

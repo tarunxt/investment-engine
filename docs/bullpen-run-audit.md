@@ -1561,3 +1561,11 @@ Snapshot freshness checks normalize both legacy offset-naive database timestamps
 and offset-aware ORM timestamps to UTC before comparing them. This preserves
 existing frozen snapshots, avoids a data backfill, and allows older durable run
 records to materialize under the current timezone-aware runtime.
+
+## Custom Stage 1 exclusions
+
+The immutable settings snapshot now records `console_custom_exclude_phrases`.
+Each normalized, case-insensitive phrase is applied to the canonical market search
+text before a candidate can pass Stage 1. The resulting rejection evidence names
+the matched custom phrase. Existing frozen snapshots remain valid because runs
+created before this setting was introduced retain their original settings payload.

@@ -16,6 +16,7 @@ from app.domains.polymarket_auto_live.console_profile import (
     CONSOLE_POSITIONS_TIMEOUT_SECONDS,
     CONSOLE_POSITIONS_TIMEOUT_ENV_VAR,
     read_console_wallet_positions,
+    console_market_filter_reasons,
     scan_console_profile_markets,
 )
 from app.domains.polymarket_auto_live.execution import refresh_balance
@@ -33,6 +34,36 @@ from app.domains.polymarket_auto_live.tasks import (
     AutoLiveRunCancelled,
     persist_auto_live_progress_sync,
 )
+
+
+def test_console_profile_custom_phrases_exclude_matching_market_context():
+    market = ScannedMarket(
+        market_id="praise-market",
+        question="Will Trump publicly Praise someone in August?",
+        market_url=None,
+        slug="will-trump-praise-someone",
+        close_time="2026-09-01T00:00:00Z",
+        theme="Politics",
+        current_yes_odds=50,
+        current_no_odds=50,
+        volume_usd=None,
+        liquidity_usd=None,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug=None,
+        best_bid_cents=None,
+        best_ask_cents=None,
+        spread_cents=None,
+        raw={},
+    )
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 8, 30, tzinfo=UTC),
+        custom_exclude_phrases=["Praise", "Praises"],
+    )
+
+    assert 'Excluded by custom phrase "Praise".' in reasons
 
 
 @pytest.mark.anyio

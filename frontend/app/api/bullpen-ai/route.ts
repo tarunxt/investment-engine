@@ -52,6 +52,7 @@ type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
   _customExcludeWeatherKeywords: string[];
   _customExcludeMarketPredictionsKeywords: string[];
   _customExcludeTweetCountQuestionsKeywords: string[];
+  _customExcludeOtherPhrases: string[];
 };
 
 const CLI_SOURCE_LABEL = "Bullpen CLI";
@@ -971,6 +972,7 @@ function normalizeGammaMarket(
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],
     _customExcludeTweetCountQuestionsKeywords: [],
+    _customExcludeOtherPhrases: [],
   };
 }
 
@@ -1095,6 +1097,7 @@ function normalizeQuestion(
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],
     _customExcludeTweetCountQuestionsKeywords: [],
+    _customExcludeOtherPhrases: [],
   };
 }
 
@@ -1154,6 +1157,9 @@ function getFilterReasons(
   if (isInsultMarket(question)) {
     reasons.push("Excluded insult or name-calling market.");
   }
+  if (includesAnyCustomKeyword(question._searchText, question._customExcludeOtherPhrases)) {
+    reasons.push("Excluded by a custom phrase in Others.");
+  }
   if (filters.onlyBinaryYesNo && !question.isBinaryYesNo) {
     reasons.push("Excluded unclear non-binary market.");
   }
@@ -1199,6 +1205,7 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
     _customExcludeWeatherKeywords,
     _customExcludeMarketPredictionsKeywords,
     _customExcludeTweetCountQuestionsKeywords,
+    _customExcludeOtherPhrases,
     ...publicQuestion
   } = question;
   void _categorySearchText;
@@ -1207,6 +1214,7 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
   void _customExcludeWeatherKeywords;
   void _customExcludeMarketPredictionsKeywords;
   void _customExcludeTweetCountQuestionsKeywords;
+  void _customExcludeOtherPhrases;
   return {
     ...publicQuestion,
     category:
@@ -1378,6 +1386,7 @@ async function buildResponse({
       filters.customExcludeMarketPredictionsKeywords,
     _customExcludeTweetCountQuestionsKeywords:
       filters.customExcludeTweetCountQuestionsKeywords,
+    _customExcludeOtherPhrases: filters.customExcludeOtherPhrases,
   }));
   const evaluatedCandidates = candidatesWithFilters.map((question) => ({
     question,

@@ -118,6 +118,7 @@ export type BullpenScanFilters = {
   customExcludeWeatherKeywords: string[];
   customExcludeMarketPredictionsKeywords: string[];
   customExcludeTweetCountQuestionsKeywords: string[];
+  customExcludeOtherPhrases: string[];
   onlyBinaryYesNo: boolean;
   minYesOdds: number;
   minNoOdds: number;
@@ -436,6 +437,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     customExcludeWeatherKeywords: [],
     customExcludeMarketPredictionsKeywords: [],
     customExcludeTweetCountQuestionsKeywords: [],
+    customExcludeOtherPhrases: [],
     onlyBinaryYesNo: true,
     minYesOdds: 5,
     minNoOdds: 5,
@@ -452,6 +454,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     customExcludeWeatherKeywords: [],
     customExcludeMarketPredictionsKeywords: [],
     customExcludeTweetCountQuestionsKeywords: [],
+    customExcludeOtherPhrases: [],
     onlyBinaryYesNo: true,
     minYesOdds: 5,
     minNoOdds: 5,
@@ -561,6 +564,9 @@ export function normalizeBullpenScanFilters(
     customExcludeTweetCountQuestionsKeywords: parseKeywordListSearchParam(
       searchParams.get("customExcludeTweetCountQuestionsKeywords"),
     ),
+    customExcludeOtherPhrases: parseKeywordListSearchParam(
+      searchParams.get("customExcludeOtherPhrases"),
+    ),
     onlyBinaryYesNo: parseBooleanSearchParam(
       searchParams.get("onlyBinaryYesNo"),
       defaults.onlyBinaryYesNo,
@@ -613,6 +619,10 @@ export function buildBullpenScanQueryParams(
   params.set(
     "customExcludeTweetCountQuestionsKeywords",
     filters.customExcludeTweetCountQuestionsKeywords.join(","),
+  );
+  params.set(
+    "customExcludeOtherPhrases",
+    filters.customExcludeOtherPhrases.join(","),
   );
   params.set("onlyBinaryYesNo", String(filters.onlyBinaryYesNo));
   params.set("minYesOdds", String(filters.minYesOdds));

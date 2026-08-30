@@ -22,6 +22,7 @@ export function BullpenScanFiltersPopupBridge() {
   const [isFloorLoading, setIsFloorLoading] = useState(false);
   const [isFloorSaving, setIsFloorSaving] = useState(false);
   const [floorMessage, setFloorMessage] = useState<string | null>(null);
+  const [customExcludePhrases, setCustomExcludePhrases] = useState<string[]>([]);
 
   useEffect(() => {
     async function loadOddsFloor() {
@@ -32,6 +33,7 @@ export function BullpenScanFiltersPopupBridge() {
         const saved = settings.console_min_market_odds ?? 5;
         setOddsFloor(saved);
         setSavedOddsFloor(saved);
+        setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
       } catch {
         setFloorMessage("Could not load the saved odds floor. The default 5% is shown.");
       } finally {
@@ -88,6 +90,19 @@ export function BullpenScanFiltersPopupBridge() {
       setFloorMessage("The odds floor could not be saved. Please try again.");
     } finally {
       setIsFloorSaving(false);
+    }
+  }
+
+  async function saveCustomExcludePhrases(phrases: string[]) {
+    setFloorMessage(null);
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        console_custom_exclude_phrases: phrases,
+      });
+      setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
+      setFloorMessage("Saved. Future Stage 1 scans will filter out these words and phrases.");
+    } catch {
+      setFloorMessage("The custom exclusions could not be saved. Please try again.");
     }
   }
 
@@ -208,8 +223,10 @@ export function BullpenScanFiltersPopupBridge() {
       {detailId ? (
         <BullpenScanFilterDetailsDialog
           detailId={detailId}
-          customKeywords={[]}
-          onSaveCustomKeywords={() => undefined}
+          customKeywords={detailId === "excludeOthers" ? customExcludePhrases : []}
+          onSaveCustomKeywords={(keywords) => {
+            if (detailId === "excludeOthers") void saveCustomExcludePhrases(keywords);
+          }}
           onClose={() => setDetailId(null)}
         />
       ) : null}
