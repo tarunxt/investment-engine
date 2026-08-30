@@ -131,6 +131,7 @@ def test_stage1_accounts_for_every_market_and_keeps_all_rejection_reasons() -> N
         "accepted": 1,
         "rejected": 0,
         "active_positions": 0,
+        "data_errors": 1,
         "stale_data_errors": 1,
         "accounted": 2,
     }
@@ -185,6 +186,7 @@ def test_stage1_accounts_for_missing_and_duplicate_ids_and_fails_incomplete_sour
 
     assert result["metrics"]["scanned"] == 3
     assert result["metrics"]["accounted"] == 3
+    assert result["metrics"]["data_errors"] == 2
     assert result["metrics"]["stale_data_errors"] == 2
     assert result["pass_condition_met"] is False
     assert result["duplicates"] == ["duplicate"]

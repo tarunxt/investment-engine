@@ -403,6 +403,7 @@ def build_stage1_output(
             "accepted": accepted,
             "rejected": rejected,
             "active_positions": active_count,
+            "data_errors": data_error_accounted,
             "stale_data_errors": stale_data_errors,
             "accounted": accounted,
         },
