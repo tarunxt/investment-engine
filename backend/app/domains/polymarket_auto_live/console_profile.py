@@ -658,9 +658,15 @@ def console_market_filter_reasons(
     *,
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    custom_exclude_phrases: list[str] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     search_text = build_market_filter_search_text(market)
+    for phrase in custom_exclude_phrases or []:
+        normalized_phrase = _normalize_text(phrase)
+        if normalized_phrase and normalized_phrase in search_text:
+            reasons.append(f'Excluded by custom phrase "{phrase}".')
+            break
     if is_sports_market_text(search_text):
         reasons.append("Excluded sports market.")
     if _includes_any(search_text, WEATHER_KEYWORDS):
@@ -853,6 +859,7 @@ def _build_cli_console_scan_result(
     now: datetime,
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    custom_exclude_phrases: list[str] | None = None,
 ) -> ConsoleScanResult:
     normalized_by_market_id: dict[str, ScannedMarket] = {}
     for discovered in rows:
@@ -872,6 +879,7 @@ def _build_cli_console_scan_result(
             market,
             now=now,
             min_market_odds=min_market_odds,
+            custom_exclude_phrases=custom_exclude_phrases,
         )
         if reasons:
             rejected.append(
@@ -902,6 +910,7 @@ async def scan_console_profile_markets(
     *,
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    custom_exclude_phrases: list[str] | None = None,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -917,6 +926,7 @@ async def scan_console_profile_markets(
             now=now,
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
+            custom_exclude_phrases=custom_exclude_phrases,
         )
         # Bullpen CLI limits parent discovery rows, while one parent can contain
         # multiple markets. The normalized count can therefore exceed the CLI
@@ -975,6 +985,7 @@ async def scan_console_profile_markets(
             market,
             now=now,
             min_market_odds=min_market_odds,
+            custom_exclude_phrases=custom_exclude_phrases,
         )
         if reasons:
             rejected.append(
