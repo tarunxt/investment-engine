@@ -52,8 +52,9 @@ test("008 page preserves the 007 shell patterns and exposes a six-stage monitor"
   assert.match(page, /import \{ BullpenAutoRunStageOutputDialog \} from "\.\.\/\.\.\/bullpen-ai/);
   assert.match(page, /const STAGES = \[/);
   for (const number of [1, 2, 3, 4, 5, 6]) assert.match(page, new RegExp(`number: ${number}`));
-  assert.match(page, /Pending Phase 2/);
-  assert.match(page, /orders permitted: no/);
+  assert.match(page, /Exit & Rebalance Plan/);
+  assert.match(page, /Execute & Reconcile/);
+  assert.doesNotMatch(page, /Pending Phase 2/);
   assert.match(stageDialog, /role="dialog"/);
   assert.match(stageDialog, /aria-modal="true"/);
   assert.match(stageDialog, /event\.key === "Escape"/);

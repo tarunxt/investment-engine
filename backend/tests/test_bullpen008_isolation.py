@@ -203,15 +203,15 @@ def test_migration_creates_only_additive_008_tables_with_profile_constraints() -
     assert "polymarket_auto_live" not in source
 
 
-def test_phase1_task_never_imports_or_calls_order_submission() -> None:
+def test_phase2_task_uses_only_certified_008_execution_and_shadow_defaults() -> None:
     source = Path("app/domains/bullpen008/tasks.py").read_text()
-    assert '"orders_created": 0' in source
-    assert '"orders_submitted": 0' in source
-    assert '"stage5_status": "disabled_pending_phase2"' in source
-    assert '"stage6_status": "disabled_pending_phase2"' in source
-    assert "execute_order" not in source
-    assert "submit_order" not in source
-    assert "create_order_intent" not in source
+    assert "build_action_plan" in source
+    assert "execute_certified_action" in source
+    assert "Bullpen008ExecutionIntentRecord" in source
+    assert "BULLPEN008_LIVE_EXECUTION_ENABLED" in source
+    assert 'execution_mode="shadow"' not in source
+    assert "PolymarketAutoLiveOrderIntentRecord" in source  # read-only shared-wallet exposure
+    assert "session.add(PolymarketAutoLiveOrderIntentRecord" not in source
 
 
 def test_008_scan_bypasses_007_prefilters_without_changing_007_default() -> None:

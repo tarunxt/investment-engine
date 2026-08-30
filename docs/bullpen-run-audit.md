@@ -1,5 +1,17 @@
 # Bullpen Run Audit
 
+## Bullpen 008 six-stage additive audit namespace
+
+Bullpen 008 does not rewrite or reinterpret the frozen three-stage snapshots
+described below. Its six-stage facts are stored in the isolated
+`bullpen008_stage_outputs`, `bullpen008_portfolio_certificates`,
+`bullpen008_action_plans`, `bullpen008_execution_intents`,
+`bullpen008_execution_attempts` and `bullpen008_execution_events` tables. The
+008 run-detail API and UI project those immutable records directly, including
+hash lineage, formula/calculation ledgers, prompts, cluster adjudication, Stage
+4 target certificate, Stage 5 plan certificate, Stage 6 attempts/remote IDs and
+final wallet evidence. See [Bullpen 008 Phase 2](bullpen008-phase2.md).
+
 ## Bullpen 008 Phase 1 isolation
 
 Bullpen 008 does not reuse or rewrite the frozen Bullpen 007 audit schema. Its immutable Stage 1–4 facts are stored additively in `bullpen008_stage_outputs`, linked to `bullpen008_runs`, with a workflow profile, previous-output hash, settings and wallet hashes, prompt/parser versions, provenance, build version, timing, pass condition and block reason. Deterministic Stage 4 certificates are stored in `bullpen008_portfolio_certificates`.
