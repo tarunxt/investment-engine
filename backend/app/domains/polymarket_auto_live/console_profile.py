@@ -919,6 +919,7 @@ async def scan_console_profile_markets(
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
+    gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -952,7 +953,7 @@ async def scan_console_profile_markets(
                 apply_base_filters=apply_base_filters,
                 use_keyset_pagination=use_keyset_pagination,
             ),
-            timeout=CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+            timeout=gamma_scan_timeout_seconds,
         )
     except Exception as gamma_exc:
         if cli_result is not None:
