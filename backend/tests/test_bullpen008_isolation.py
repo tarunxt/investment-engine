@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.domains.bullpen008.constants import (
     CELERY_SCHEDULER_TASK_NAME,
@@ -15,7 +17,7 @@ from app.domains.bullpen008.models import (
     Bullpen008StageOutputRecord,
     Bullpen008StateRecord,
 )
-from app.domains.bullpen008.service import _seed_payload_from_007
+from app.domains.bullpen008.service import _seed_payload_from_007, stage_from_record
 from app.domains.bullpen008.tasks import (
     _merge_stage2_provider_rows,
     _stage2_input_rows,
@@ -108,6 +110,37 @@ def test_stage2_packet_contains_only_accepted_candidates_and_active_monitoring()
         "candidate",
         "holding",
     ]
+
+
+def test_lightweight_stage_projection_keeps_metrics_without_raw_payloads() -> None:
+    now = datetime.now(UTC)
+    record = SimpleNamespace(
+        stage_number=1,
+        stage_name="Discover & Hard Filters",
+        stage_version="bullpen008-stage1-v1",
+        status="finished",
+        pass_condition="accounted",
+        block_reason=None,
+        previous_stage_output_hash=None,
+        output_hash="output",
+        settings_snapshot_hash="settings",
+        wallet_snapshot_hash="wallet",
+        inputs_json={"market_universe": [{"market_id": "large"}]},
+        calculations_json={"formula": "large"},
+        outputs_json={"metrics": {"scanned": 1}, "rows": [{"market_id": "large"}]},
+        rejections_json=[{"market_id": "large"}],
+        warnings_json=["warning"],
+        provenance_json={"source": "large"},
+        prompt_version=None,
+        parser_version=None,
+        started_at=now,
+        completed_at=now,
+        duration_seconds=0,
+    )
+    projected = stage_from_record(record, include_payload=False)
+    assert projected.outputs == {"metrics": {"scanned": 1}}
+    assert projected.inputs == {}
+    assert projected.rejections == []
 
 
 def test_migration_creates_only_additive_008_tables_with_profile_constraints() -> None:

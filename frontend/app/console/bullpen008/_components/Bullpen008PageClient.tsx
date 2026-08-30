@@ -331,6 +331,23 @@ export function Bullpen008PageClient() {
     }
   };
 
+  const openStage = async (stageNumber: number) => {
+    if (!latestRun) return;
+    setBusyAction(`stage-${stageNumber}`);
+    setError(null);
+    try {
+      setSelectedStage(
+        await apiService.getBullpen008Stage(latestRun.id, stageNumber),
+      );
+    } catch (stageError) {
+      setError(
+        `The immutable Stage ${stageNumber} record could not be loaded. ${formatUnknownError(stageError)}`,
+      );
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="space-y-6" aria-label="Loading Bullpen 008 workspace">
@@ -410,7 +427,7 @@ export function Bullpen008PageClient() {
             {STAGES.map((definition) => (
               <StageCard key={definition.number} definition={definition} stage={stagesByNumber.get(definition.number)} onOpen={() => {
                 const stage = stagesByNumber.get(definition.number);
-                if (stage) setSelectedStage(stage);
+                if (stage) void openStage(definition.number);
               }} />
             ))}
           </div>

@@ -19,6 +19,7 @@ from app.domains.bullpen008.constants import (
 from app.domains.bullpen008.models import (
     Bullpen008RunRecord,
     Bullpen008SettingsRecord,
+    Bullpen008StageOutputRecord,
     Bullpen008StateRecord,
 )
 from app.domains.bullpen008.schemas import (
@@ -160,7 +161,14 @@ def state_from_record(record: Bullpen008StateRecord) -> Bullpen008State:
     )
 
 
-def stage_from_record(record) -> Bullpen008StageOutput:
+def stage_from_record(
+    record, *, include_payload: bool = True
+) -> Bullpen008StageOutput:
+    outputs = (
+        record.outputs_json
+        if include_payload
+        else {"metrics": record.outputs_json.get("metrics", {})}
+    )
     return Bullpen008StageOutput(
         stage_number=record.stage_number,
         stage_name=record.stage_name,
@@ -172,12 +180,12 @@ def stage_from_record(record) -> Bullpen008StageOutput:
         output_hash=record.output_hash,
         settings_snapshot_hash=record.settings_snapshot_hash,
         wallet_snapshot_hash=record.wallet_snapshot_hash,
-        inputs=record.inputs_json,
-        calculations=record.calculations_json,
-        outputs=record.outputs_json,
-        rejections=record.rejections_json,
-        warnings=record.warnings_json,
-        provenance=record.provenance_json,
+        inputs=record.inputs_json if include_payload else {},
+        calculations=record.calculations_json if include_payload else {},
+        outputs=outputs,
+        rejections=record.rejections_json if include_payload else [],
+        warnings=record.warnings_json if include_payload else [],
+        provenance=record.provenance_json if include_payload else {},
         prompt_version=record.prompt_version,
         parser_version=record.parser_version,
         started_at=record.started_at.isoformat(),
@@ -186,7 +194,9 @@ def stage_from_record(record) -> Bullpen008StageOutput:
     )
 
 
-def run_from_record(record: Bullpen008RunRecord) -> Bullpen008Run:
+def run_from_record(
+    record: Bullpen008RunRecord, *, include_stage_payloads: bool = True
+) -> Bullpen008Run:
     certificate = record.certificate.payload if record.certificate is not None else None
     return Bullpen008Run(
         id=record.id,
@@ -201,7 +211,10 @@ def run_from_record(record: Bullpen008RunRecord) -> Bullpen008Run:
         wallet_snapshot=record.wallet_snapshot,
         task_metadata=record.task_metadata,
         run_metadata=record.run_metadata,
-        stages=[stage_from_record(stage) for stage in record.stages],
+        stages=[
+            stage_from_record(stage, include_payload=include_stage_payloads)
+            for stage in record.stages
+        ],
         portfolio_certificate=certificate,
     )
 
@@ -352,6 +365,32 @@ async def get_run(
     ).scalar_one_or_none()
 
 
+async def get_stage(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    run_id: str,
+    stage_number: int,
+) -> Bullpen008StageOutput | None:
+    record = (
+        await session.execute(
+            select(Bullpen008StageOutputRecord)
+            .join(
+                Bullpen008RunRecord,
+                Bullpen008RunRecord.id == Bullpen008StageOutputRecord.run_id,
+            )
+            .where(
+                Bullpen008StageOutputRecord.run_id == run_id,
+                Bullpen008StageOutputRecord.stage_number == stage_number,
+                Bullpen008StageOutputRecord.workflow_profile == WORKFLOW_PROFILE,
+                Bullpen008RunRecord.user_id == user_id,
+                Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+            )
+        )
+    ).scalar_one_or_none()
+    return stage_from_record(record) if record is not None else None
+
+
 async def _inherited_runs(
     session: AsyncSession,
     *,
@@ -408,7 +447,9 @@ async def get_bootstrap(
     return Bullpen008Bootstrap(
         settings=settings_from_record(settings_record),
         state=state_from_record(state_record),
-        latest_run=run_from_record(latest) if latest is not None else None,
+        latest_run=run_from_record(latest, include_stage_payloads=False)
+        if latest is not None
+        else None,
         inherited_runs=inherited,
     )
 
@@ -456,7 +497,10 @@ async def get_history(
         await _inherited_runs(session, user_id=user_id, limit=10) if offset == 0 else []
     )
     return Bullpen008HistoryPage(
-        rows=[run_from_record(record) for record in records],
+        rows=[
+            run_from_record(record, include_stage_payloads=False)
+            for record in records
+        ],
         inherited_rows=inherited,
         total=total,
         limit=limit,
