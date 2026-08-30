@@ -1,0 +1,207 @@
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.domains.bullpen008.constants import WORKFLOW_PROFILE
+from app.domains.polymarket_auto_live.returns_formula import (
+    DEFAULT_RETURNS_PER_DAY_FORMULA,
+    validate_returns_per_day_formula,
+)
+
+
+class Bullpen008LlmTarget(BaseModel):
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+
+    @field_validator("provider", "model")
+    @classmethod
+    def normalize_text(cls, value: str) -> str:
+        return value.strip()
+
+
+class Bullpen008Settings(BaseModel):
+    workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
+    shadow_mode: Literal[True] = True
+    execution_enabled: Literal[False] = False
+    bankroll_usd: float = Field(default=200, gt=0)
+    max_contract_exposure_usd: float = Field(default=20, gt=0)
+    max_strict_cluster_exposure_usd: float = Field(default=20, gt=0)
+    max_common_catalyst_exposure_usd: float = Field(default=20, gt=0)
+    allocation_increment_usd: float = Field(default=5, gt=0)
+    binary_side_odds_floor_pct: float = Field(default=5, ge=0, lt=50)
+    entry_side_odds_floor_pct: float = Field(default=80, ge=50, le=100)
+    min_llm_probability_pct: float = Field(default=80, ge=50, le=100)
+    preferred_min_edge_pp: float = Field(default=0.25, ge=0)
+    minimum_edge_pp: float = Field(default=0, ge=0)
+    risk_reject_threshold: float = Field(default=7, ge=0, le=10)
+    risk_hard_reject_threshold: float = Field(default=8, ge=0, le=10)
+    risk_half_size_min: float = Field(default=6, ge=0, le=10)
+    risk_half_size_max: float = Field(default=6.9, ge=0, le=10)
+    probability_tolerance_pp: float = Field(default=0.25, gt=0, le=2)
+    stale_quote_seconds: int = Field(default=300, ge=30)
+    closing_window_days: int = Field(default=30, ge=1)
+    custom_exclude_phrases: list[str] = Field(default_factory=list)
+    returns_per_day_formula: str = DEFAULT_RETURNS_PER_DAY_FORMULA
+    llm_targets: list[Bullpen008LlmTarget] = Field(default_factory=list)
+    auto_start_at: str | None = None
+    auto_refresh_minutes: int = Field(default=360, ge=1)
+
+    @field_validator("custom_exclude_phrases")
+    @classmethod
+    def normalize_phrases(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for phrase in value:
+            candidate = phrase.strip().lower()
+            if not candidate or candidate in seen:
+                continue
+            if len(candidate) > 120:
+                raise ValueError(
+                    "custom exclusion phrases must be at most 120 characters"
+                )
+            seen.add(candidate)
+            normalized.append(candidate)
+        if len(normalized) > 100:
+            raise ValueError("no more than 100 custom exclusion phrases are allowed")
+        return normalized
+
+    @field_validator("returns_per_day_formula")
+    @classmethod
+    def validate_formula(cls, value: str) -> str:
+        return validate_returns_per_day_formula(value)
+
+    @model_validator(mode="after")
+    def validate_thresholds(self) -> Bullpen008Settings:
+        if self.risk_hard_reject_threshold < self.risk_reject_threshold:
+            raise ValueError("hard-reject threshold cannot be below reject threshold")
+        if self.risk_half_size_max < self.risk_half_size_min:
+            raise ValueError("half-size maximum cannot be below half-size minimum")
+        for cap in (
+            self.max_contract_exposure_usd,
+            self.max_strict_cluster_exposure_usd,
+            self.max_common_catalyst_exposure_usd,
+        ):
+            if cap > self.bankroll_usd:
+                raise ValueError("portfolio exposure caps cannot exceed bankroll")
+        return self
+
+
+class Bullpen008SettingsUpdate(BaseModel):
+    bankroll_usd: float | None = Field(default=None, gt=0)
+    max_contract_exposure_usd: float | None = Field(default=None, gt=0)
+    max_strict_cluster_exposure_usd: float | None = Field(default=None, gt=0)
+    max_common_catalyst_exposure_usd: float | None = Field(default=None, gt=0)
+    allocation_increment_usd: float | None = Field(default=None, gt=0)
+    binary_side_odds_floor_pct: float | None = Field(default=None, ge=0, lt=50)
+    entry_side_odds_floor_pct: float | None = Field(default=None, ge=50, le=100)
+    min_llm_probability_pct: float | None = Field(default=None, ge=50, le=100)
+    preferred_min_edge_pp: float | None = Field(default=None, ge=0)
+    minimum_edge_pp: float | None = Field(default=None, ge=0)
+    risk_reject_threshold: float | None = Field(default=None, ge=0, le=10)
+    risk_hard_reject_threshold: float | None = Field(default=None, ge=0, le=10)
+    risk_half_size_min: float | None = Field(default=None, ge=0, le=10)
+    risk_half_size_max: float | None = Field(default=None, ge=0, le=10)
+    probability_tolerance_pp: float | None = Field(default=None, gt=0, le=2)
+    stale_quote_seconds: int | None = Field(default=None, ge=30)
+    closing_window_days: int | None = Field(default=None, ge=1)
+    custom_exclude_phrases: list[str] | None = None
+    returns_per_day_formula: str | None = None
+    llm_targets: list[Bullpen008LlmTarget] | None = None
+    auto_start_at: str | None = None
+    auto_refresh_minutes: int | None = Field(default=None, ge=1)
+
+
+class Bullpen008State(BaseModel):
+    workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
+    shadow_mode: Literal[True] = True
+    execution_enabled: Literal[False] = False
+    running: bool = False
+    paused: bool = False
+    status: str = "shadow-ready"
+    next_run_at: str | None = None
+    last_run_at: str | None = None
+    last_run_id: str | None = None
+    redis_namespace: str = "bullpen008"
+    celery_task_name: str
+    celery_queue: str
+
+
+class Bullpen008StageOutput(BaseModel):
+    stage_number: int = Field(ge=1, le=6)
+    stage_name: str
+    stage_version: str
+    status: Literal["pending", "running", "finished", "failed", "blocked", "disabled"]
+    pass_condition: str
+    block_reason: str | None = None
+    previous_stage_output_hash: str | None = None
+    output_hash: str
+    settings_snapshot_hash: str
+    wallet_snapshot_hash: str
+    inputs: dict[str, object] = Field(default_factory=dict)
+    calculations: dict[str, object] = Field(default_factory=dict)
+    outputs: dict[str, object] = Field(default_factory=dict)
+    rejections: list[object] = Field(default_factory=list)
+    warnings: list[object] = Field(default_factory=list)
+    provenance: dict[str, object] = Field(default_factory=dict)
+    prompt_version: str | None = None
+    parser_version: str | None = None
+    started_at: str
+    completed_at: str
+    duration_seconds: float = Field(ge=0)
+
+
+class Bullpen008Run(BaseModel):
+    id: str
+    workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
+    status: str
+    triggered_by: str
+    shadow_mode: Literal[True] = True
+    execution_enabled: Literal[False] = False
+    started_at: str
+    completed_at: str | None = None
+    summary: str
+    error_message: str | None = None
+    code_build_version: str | None = None
+    settings_snapshot: dict[str, object] = Field(default_factory=dict)
+    wallet_snapshot: dict[str, object] = Field(default_factory=dict)
+    task_metadata: dict[str, object] = Field(default_factory=dict)
+    run_metadata: dict[str, object] = Field(default_factory=dict)
+    stages: list[Bullpen008StageOutput] = Field(default_factory=list)
+    portfolio_certificate: dict[str, object] | None = None
+
+
+class Bullpen008RunRequest(BaseModel):
+    idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class Bullpen008InheritedRun(BaseModel):
+    id: str
+    label: Literal["Inherited from Bullpen 007"] = "Inherited from Bullpen 007"
+    status: str
+    started_at: str
+    completed_at: str | None = None
+    summary: str
+    read_only: Literal[True] = True
+    source_route: Literal["/console/bullpen-ai"] = "/console/bullpen-ai"
+
+
+class Bullpen008Bootstrap(BaseModel):
+    workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
+    page_identity: Literal["Bullpen 008"] = "Bullpen 008"
+    shadow_mode: Literal[True] = True
+    execution_enabled: Literal[False] = False
+    settings: Bullpen008Settings
+    state: Bullpen008State
+    latest_run: Bullpen008Run | None = None
+    inherited_runs: list[Bullpen008InheritedRun] = Field(default_factory=list)
+    pending_phase2_stages: list[int] = Field(default_factory=lambda: [5, 6])
+
+
+class Bullpen008HistoryPage(BaseModel):
+    rows: list[Bullpen008Run]
+    inherited_rows: list[Bullpen008InheritedRun] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
