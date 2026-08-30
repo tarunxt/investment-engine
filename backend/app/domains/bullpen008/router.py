@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +34,7 @@ from app.domains.bullpen008.service import (
     update_settings,
 )
 from app.domains.bullpen008.tasks import execute_bullpen008_shadow_run
+from app.domains.bullpen_run_audit.provenance import resolve_backend_commit_sha
 from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(prefix="/polymarket/bullpen008", tags=["bullpen008"])
@@ -52,7 +51,7 @@ async def _recover_interrupted_008_build(
 ) -> str | None:
     import redis.asyncio as aioredis
 
-    current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
+    current_build = resolve_backend_commit_sha()
     interrupted_run_id = await recover_interrupted_previous_build_run(
         session,
         user_id=user_id,
