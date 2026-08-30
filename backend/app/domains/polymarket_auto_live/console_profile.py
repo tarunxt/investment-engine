@@ -960,7 +960,9 @@ async def scan_console_profile_markets(
                 f"Bullpen CLI returned only {cli_result.total_candidates} rows; "
                 "the complete-market supplement was unavailable."
             )
-            cli_result.details = redact_secrets(str(gamma_exc))
+            cli_result.details = redact_secrets(
+                str(gamma_exc) or type(gamma_exc).__name__
+            )
             cli_result.complete_universe = False
             return cli_result
         else:

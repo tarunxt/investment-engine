@@ -15,12 +15,12 @@ from app.domains.polymarket_auto_live.category import read_polymarket_theme
 
 POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets"
 POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events"
-POLYMARKET_GAMMA_EVENTS_KEYSET_URL = (
-    "https://gamma-api.polymarket.com/events/keyset"
+POLYMARKET_GAMMA_MARKETS_KEYSET_URL = (
+    "https://gamma-api.polymarket.com/markets/keyset"
 )
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_EVENT_PAGE_SIZE = 100
-GAMMA_KEYSET_EVENT_PAGE_SIZE = 500
+GAMMA_KEYSET_MARKET_PAGE_SIZE = 100
 DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
 
 _SHARED_GAMMA_CLIENT: ContextVar[httpx.AsyncClient | None] = ContextVar(
@@ -681,58 +681,37 @@ async def _fetch_gamma_keyset_page(
     after_cursor: str | None,
     end_date_min: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Fetch one stable keyset page for exhaustive Bullpen 008 discovery.
+    """Fetch one stable market-keyset page for Bullpen 008 discovery.
 
-    Gamma's legacy offset endpoint rejects offsets above the service cap. The
-    keyset endpoint is opt-in so Bullpen 007 keeps its current scan behavior.
+    The event-keyset representation repeats large nested event payloads and can
+    exceed the console completeness timeout. The market endpoint returns the
+    same normalized rows directly and retains their event relation.
     """
 
     params = {
         "closed": "false",
         "end_date_min": end_date_min,
-        "limit": str(GAMMA_KEYSET_EVENT_PAGE_SIZE),
+        "include_tag": "true",
+        "limit": str(GAMMA_KEYSET_MARKET_PAGE_SIZE),
     }
     if after_cursor:
         params["after_cursor"] = after_cursor
-    response = await client.get(POLYMARKET_GAMMA_EVENTS_KEYSET_URL, params=params)
+    response = await client.get(POLYMARKET_GAMMA_MARKETS_KEYSET_URL, params=params)
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
         raise ValueError("Gamma keyset response must be an object.")
-    events = payload.get("events")
-    if not isinstance(events, list):
-        raise ValueError("Gamma keyset response did not include an events list.")
-
-    markets: list[dict[str, Any]] = []
-    for event in events:
-        if not isinstance(event, dict):
-            continue
-        if (
-            event.get("closed") is True
-            or event.get("active") is False
-            or event.get("archived") is True
-        ):
-            continue
-        event_identity = {
-            key: event[key]
-            for key in ("id", "slug", "title")
-            if key in event
-        }
-        event_markets = event.get("markets")
-        if not isinstance(event_markets, list):
-            continue
-        for market in event_markets:
-            if not isinstance(market, dict):
-                continue
-            if (
-                market.get("closed") is True
-                or market.get("active") is False
-                or market.get("archived") is True
-            ):
-                continue
-            normalized_row = dict(market)
-            normalized_row.setdefault("events", [event_identity])
-            markets.append(normalized_row)
+    market_rows = payload.get("markets")
+    if not isinstance(market_rows, list):
+        raise ValueError("Gamma keyset response did not include a markets list.")
+    markets = [
+        dict(market)
+        for market in market_rows
+        if isinstance(market, dict)
+        and market.get("closed") is not True
+        and market.get("active") is not False
+        and market.get("archived") is not True
+    ]
 
     next_cursor = payload.get("next_cursor")
     normalized_cursor = (

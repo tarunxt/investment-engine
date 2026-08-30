@@ -190,7 +190,7 @@ def test_008_scan_bypasses_007_prefilters_without_changing_007_default() -> None
     assert "apply_base_filters=False" in task
     assert "use_keyset_pagination=True" in task
     assert '"pre_stage1_filters_applied": False' in task
-    assert '"pagination_mode": "gamma-keyset"' in task
+    assert '"pagination_mode": "gamma-markets-keyset"' in task
 
 
 def test_llm_parse_failures_retain_raw_provider_payloads_for_audit() -> None:
