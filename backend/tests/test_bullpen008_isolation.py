@@ -20,6 +20,7 @@ from app.domains.bullpen008.models import (
 from app.domains.bullpen008.schemas import Bullpen008Settings
 from app.domains.bullpen008.service import (
     _is_interrupted_previous_build,
+    _is_recoverable_interrupted_run,
     _next_run_at,
     _seed_payload_from_007,
     stage_from_record,
@@ -60,6 +61,19 @@ def test_only_a_different_deployed_build_is_recoverable() -> None:
     assert _is_interrupted_previous_build("same-sha", "same-sha") is False
     assert _is_interrupted_previous_build(None, "new-sha") is False
     assert _is_interrupted_previous_build("old-sha", None) is False
+    now = datetime.now(UTC)
+    assert _is_recoverable_interrupted_run(
+        run_build=None,
+        current_build="new-sha",
+        started_at=now,
+        now=now,
+    ) is False
+    assert _is_recoverable_interrupted_run(
+        run_build=None,
+        current_build="new-sha",
+        started_at=datetime.fromtimestamp(now.timestamp() - 3600, tz=UTC),
+        now=now,
+    ) is True
 
 
 def test_008_interrupted_build_recovery_never_names_007_resources() -> None:
@@ -74,6 +88,8 @@ def test_008_interrupted_build_recovery_never_names_007_resources() -> None:
     bootstrap = bootstrap[: bootstrap.index("@router.get", 1)]
     assert "await _recover_interrupted_008_build" in bootstrap
     assert "bullpen_console_top10" not in recovery
+    assert "resolve_backend_commit_sha" in service
+    assert "resolve_backend_commit_sha" in router
 
 
 def test_one_time_seed_copies_007_console_defaults_without_aliasing_or_execution() -> (

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -59,6 +58,7 @@ from app.domains.polymarket_auto_live.console_profile import (
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveOrderIntentRecord,
 )
+from app.domains.bullpen_run_audit.provenance import resolve_backend_commit_sha
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 
@@ -1127,8 +1127,7 @@ def _create_scheduled_run(user_id: int) -> str | None:
             execution_enabled=False,
             started_at=now,
             summary="Bullpen 008 scheduled shadow-mode run queued.",
-            code_build_version=os.getenv("APP_COMMIT_SHA")
-            or os.getenv("GIT_COMMIT_SHA"),
+            code_build_version=resolve_backend_commit_sha(),
             settings_snapshot=settings.model_dump(mode="json"),
             wallet_snapshot={},
             task_metadata={
