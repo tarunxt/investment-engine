@@ -192,7 +192,7 @@ def test_008_scan_bypasses_007_prefilters_without_changing_007_default() -> None
     assert "use_keyset_pagination=True" in task
     assert "gamma_scan_timeout_seconds=COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS" in task
     assert '"pre_stage1_filters_applied": False' in task
-    assert '"pagination_mode": "gamma-markets-keyset"' in task
+    assert '"pagination_mode": "gamma-events-keyset"' in task
     assert '"scan_timeout_seconds": COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS' in task
 
 
