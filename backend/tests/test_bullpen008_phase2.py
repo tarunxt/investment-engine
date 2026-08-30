@@ -8,6 +8,10 @@ import pytest
 from types import SimpleNamespace
 
 from app.domains.bullpen008.engine import stable_hash
+from app.domains.bullpen008.constants import (
+    is_active_pending_order_status,
+    normalize_order_status,
+)
 from app.domains.bullpen008.execution import execute_certified_action
 from app.domains.bullpen008.alerts import evaluate_held_position_alerts
 from app.domains.bullpen008.planning import (
@@ -222,6 +226,51 @@ def test_pending_buy_from_any_profile_consumes_gap_and_cluster_capacity() -> Non
     pending = [{"profile": "bullpen007", "market_id": "m", "side": "YES", "action": "BUY", "status": "submitted", "current_order_usd": 10}]
     plan = make_plan(rows, [position("m", 5)], pending=pending)
     assert plan["buys"][0]["estimated_usd"] == 5
+
+
+@pytest.mark.parametrize(
+    ("raw", "canonical"),
+    [
+        ("PARTIALLY_FILLED", "partially_filled"),
+        ("PartiallyFilled", "partially_filled"),
+        ("WAITING_FOR_EXIT", "waiting_for_exit"),
+        ("RiskCertified", "risk_certified"),
+    ],
+)
+def test_pending_order_statuses_normalize_across_007_and_008(
+    raw: str, canonical: str
+) -> None:
+    assert normalize_order_status(raw) == canonical
+    assert is_active_pending_order_status(raw) is True
+
+
+@pytest.mark.parametrize("status", ["FILLED", "FAILED_PERMANENT", "Reconciled", "Blocked"])
+def test_terminal_order_statuses_are_not_pending_inputs(status: str) -> None:
+    assert is_active_pending_order_status(status) is False
+
+
+def test_terminal_orders_do_not_consume_target_gap_or_cluster_capacity() -> None:
+    rows = [allocation("m", 20)]
+    terminal = [
+        {
+            "profile": "bullpen007",
+            "market_id": "m",
+            "side": "YES",
+            "action": "BUY",
+            "status": "FILLED",
+            "current_order_usd": 10,
+        },
+        {
+            "profile": "bullpen008",
+            "market_id": "m",
+            "side": "YES",
+            "action": "BUY",
+            "status": "Reconciled",
+            "current_order_usd": 10,
+        },
+    ]
+    plan = make_plan(rows, [position("m", 5)], pending=terminal)
+    assert plan["buys"][0]["estimated_usd"] == 15
 
 
 def test_pending_order_blocks_a_buy_that_would_exceed_cluster_capacity() -> None:

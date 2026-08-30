@@ -12,7 +12,13 @@ from datetime import UTC, datetime
 import math
 from typing import Iterable
 
-from app.domains.bullpen008.constants import ACTION_PLAN_VERSION, EXECUTION_VERSION, WORKFLOW_PROFILE
+from app.domains.bullpen008.constants import (
+    ACTION_PLAN_VERSION,
+    EXECUTION_VERSION,
+    PENDING_ORDER_STATUSES,
+    WORKFLOW_PROFILE,
+    normalize_order_status,
+)
 from app.domains.bullpen008.engine import stable_hash
 from app.domains.bullpen008.schemas import Bullpen008Settings
 
@@ -248,19 +254,18 @@ def build_action_plan(
     active_pending_buys: dict[str, float] = defaultdict(float)
     active_pending_sells: dict[str, float] = defaultdict(float)
     cancel_orders: list[dict[str, object]] = []
-    active_statuses = {"planned", "queued", "ready", "submitting", "submitted", "confirming", "partially_filled", "pending"}
     seen_pending: set[tuple[str, str, str]] = set()
     for pending in pending_orders:
         market_id = str(pending.get("market_id") or "")
         action = str(pending.get("action") or "").upper()
-        status = str(pending.get("status") or "").lower()
+        status = normalize_order_status(pending.get("status"))
         identity = (market_id, action, str(pending.get("side") or ""))
         stale_or_duplicate = bool(pending.get("stale") or pending.get("conflicting") or identity in seen_pending)
         seen_pending.add(identity)
         amount = _number(pending.get("remaining_usd"), _number(pending.get("current_order_usd"), _number(pending.get("requested_order_usd"))))
-        if stale_or_duplicate and status in active_statuses:
+        if stale_or_duplicate and status in PENDING_ORDER_STATUSES:
             cancel_orders.append(dict(pending))
-        elif status in active_statuses:
+        elif status in PENDING_ORDER_STATUSES:
             if action == "BUY":
                 active_pending_buys[market_id] += amount
             elif action in {"SELL", "EXIT", "TRIM"}:
@@ -614,7 +619,7 @@ def preflight_execution_plan(
     for pending in pending_orders:
         if str(pending.get("action") or "").upper() != "BUY":
             continue
-        if str(pending.get("status") or "").lower() not in {"planned", "queued", "ready", "submitting", "submitted", "confirming", "partially_filled", "pending"}:
+        if normalize_order_status(pending.get("status")) not in PENDING_ORDER_STATUSES:
             continue
         market_id = str(pending.get("market_id") or "")
         exposure_by_market[market_id] += _number(pending.get("remaining_usd"), _number(pending.get("current_order_usd"), _number(pending.get("requested_order_usd"))))
