@@ -492,6 +492,8 @@ export function Bullpen008PageClient() {
           stageDetail={`${selectedStage.status.toUpperCase()} · ${formatApiTimestamp(selectedStage.started_at)} to ${formatApiTimestamp(selectedStage.completed_at)} · ${selectedStage.duration_seconds.toFixed(2)} seconds. Pass condition: ${selectedStage.pass_condition}${selectedStage.block_reason ? ` Blocker: ${selectedStage.block_reason}` : ""}`}
           eyebrow={`Bullpen 008 · ${selectedStage.stage_version}`}
           outputLabel="Stage record"
+          recordPageSize={25}
+          deferRawJson
           outputs={{
             status: selectedStage.status,
             start_time: selectedStage.started_at,

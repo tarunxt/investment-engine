@@ -97,6 +97,40 @@ test("Bullpen auto-run stage dialog renders candidate inputs as readable tables 
   assert.match(markup, /Raw JSON/);
 });
 
+test("Bullpen 008 can paginate large stage records without changing the 007 default", () => {
+  const { BullpenAutoRunStageOutputDialog } = loadStageOutputDialog();
+  const records = Array.from({ length: 60 }, (_, index) => ({
+    market_id: `market-${index + 1}`,
+    question: `Market row ${index + 1}`,
+    status: "accounted",
+  }));
+  const commonProps = {
+    stageTitle: "Stage 1 · Discover",
+    stageDetail: "Complete immutable accounting.",
+    onClose: () => {},
+    outputs: { records },
+  };
+
+  const paginatedMarkup = renderToStaticMarkup(
+    React.createElement(BullpenAutoRunStageOutputDialog, {
+      ...commonProps,
+      recordPageSize: 25,
+      deferRawJson: true,
+    }),
+  );
+  assert.match(paginatedMarkup, /Rows 1–25 of 60/);
+  assert.match(paginatedMarkup, /Page 1 of 3/);
+  assert.match(paginatedMarkup, /Market row 25/);
+  assert.doesNotMatch(paginatedMarkup, /Market row 26/);
+  assert.match(paginatedMarkup, /Expand to render the complete immutable JSON payload/);
+
+  const defaultMarkup = renderToStaticMarkup(
+    React.createElement(BullpenAutoRunStageOutputDialog, commonProps),
+  );
+  assert.match(defaultMarkup, /Market row 60/);
+  assert.doesNotMatch(defaultMarkup, /Rows 1–25 of 60/);
+});
+
 test("Bullpen auto-run stage dialog keeps primitive overview fields in a key-value table", () => {
   const { BullpenAutoRunStageOutputDialog } = loadStageOutputDialog();
 
