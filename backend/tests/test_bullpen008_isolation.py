@@ -16,6 +16,10 @@ from app.domains.bullpen008.models import (
     Bullpen008StateRecord,
 )
 from app.domains.bullpen008.service import _seed_payload_from_007
+from app.domains.bullpen008.tasks import (
+    _merge_stage2_provider_rows,
+    _stage2_repair_market_ids,
+)
 
 
 def test_008_namespaces_do_not_alias_007_resources() -> None:
@@ -62,6 +66,34 @@ def test_one_time_seed_copies_007_console_defaults_without_aliasing_or_execution
     assert seeded.workflow_profile == "bullpen008"
     assert seeded.shadow_mode is True
     assert seeded.execution_enabled is False
+
+
+def test_stage2_targeted_repair_replaces_only_missing_or_invalid_rows() -> None:
+    stage2 = {
+        "missing_market_ids": ["missing"],
+        "validation_errors": [
+            {"market_id": "invalid", "errors": ["bad probability"]}
+        ],
+    }
+    repair_ids = _stage2_repair_market_ids(stage2)
+    assert repair_ids == ["invalid", "missing"]
+
+    merged = _merge_stage2_provider_rows(
+        [
+            {"market_id": "valid", "value": 1},
+            {"market_id": "invalid", "value": "old"},
+        ],
+        [
+            {"market_id": "invalid", "value": "fixed"},
+            {"market_id": "missing", "value": "supplied"},
+        ],
+        repair_market_ids=repair_ids,
+    )
+    assert merged == [
+        {"market_id": "valid", "value": 1},
+        {"market_id": "invalid", "value": "fixed"},
+        {"market_id": "missing", "value": "supplied"},
+    ]
 
 
 def test_migration_creates_only_additive_008_tables_with_profile_constraints() -> None:

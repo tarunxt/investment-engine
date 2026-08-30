@@ -34,6 +34,7 @@ from app.domains.bullpen008.engine import (
     build_portfolio_target,
     build_probability_risk_prompt,
     build_stage1_output,
+    canonical_json,
     normalize_cluster_rows,
     normalize_stage2_rows,
     parse_cluster_response,
@@ -322,6 +323,65 @@ def _provider_target(settings: Bullpen008Settings) -> tuple[str, str]:
     return target.provider, target.model
 
 
+def _stage2_repair_market_ids(stage2: dict[str, object]) -> list[str]:
+    market_ids = {
+        str(value)
+        for value in stage2.get("missing_market_ids", [])
+        if value
+    }
+    for error in stage2.get("validation_errors", []):
+        if isinstance(error, dict) and error.get("market_id"):
+            market_ids.add(str(error["market_id"]))
+    return sorted(market_ids)
+
+
+def _merge_stage2_provider_rows(
+    original: list[dict[str, object]],
+    repair: list[dict[str, object]],
+    *,
+    repair_market_ids: list[str],
+) -> list[dict[str, object]]:
+    repair_ids = set(repair_market_ids)
+    merged = [
+        row
+        for row in original
+        if str(row.get("market_id") or "") not in repair_ids
+    ]
+    merged.extend(repair)
+    return merged
+
+
+def _provider_usage(response: object) -> dict[str, object]:
+    return {
+        "tokens_in": getattr(response, "tokens_in", 0) or 0,
+        "tokens_out": getattr(response, "tokens_out", 0) or 0,
+        "cost": getattr(response, "cost", 0) or 0,
+        "provider": getattr(response, "provider", None),
+        "model": getattr(response, "model", None),
+    }
+
+
+def _aggregate_provider_usage(
+    attempts: list[dict[str, object]], *, provider: str, model: str
+) -> dict[str, object]:
+    totals = {"tokens_in": 0.0, "tokens_out": 0.0, "cost": 0.0}
+    for attempt in attempts:
+        usage = attempt.get("provider_usage")
+        if not isinstance(usage, dict):
+            continue
+        for key in totals:
+            value = usage.get(key)
+            if isinstance(value, (int, float)):
+                totals[key] += float(value)
+    return {
+        "tokens_in": int(totals["tokens_in"]),
+        "tokens_out": int(totals["tokens_out"]),
+        "cost": totals["cost"],
+        "provider": provider,
+        "model": model,
+    }
+
+
 def _pending_exposures(user_id: int) -> tuple[dict[str, float], dict[str, float]]:
     pending_buys: dict[str, float] = {}
     confirmed_exits: dict[str, float] = {}
@@ -524,13 +584,78 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
             prompt = build_probability_risk_prompt(list(stage1["rows"]))
             try:
                 provider_name, model_name = _provider_target(settings)
-                response = ProviderFactory.create(provider_name).generate(
+                provider = ProviderFactory.create(provider_name)
+                response = provider.generate(
                     prompt=prompt, model=model_name
                 )
                 parsed = parse_probability_risk_response(response.content)
                 stage2 = normalize_stage2_rows(
                     list(stage1["rows"]), parsed, settings=settings, now=stage2_started
                 )
+                provider_attempts: list[dict[str, object]] = [
+                    {
+                        "attempt": 1,
+                        "kind": "complete_universe",
+                        "prompt": prompt,
+                        "raw_provider_response": response.content,
+                        "provider_usage": _provider_usage(response),
+                        "missing_market_ids": stage2["missing_market_ids"],
+                        "validation_errors": stage2["validation_errors"],
+                    }
+                ]
+                for repair_number in range(1, 3):
+                    repair_market_ids = _stage2_repair_market_ids(stage2)
+                    if not repair_market_ids:
+                        break
+                    repair_rows = [
+                        row
+                        for row in list(stage1["rows"])
+                        if str(row.get("market_id") or "") in repair_market_ids
+                    ]
+                    repair_prompt = (
+                        build_probability_risk_prompt(repair_rows)
+                        + "\n\nCORRECTION ATTEMPT: The prior response omitted or invalidated "
+                        + "the market IDs below. Return strict JSON containing exactly one corrected "
+                        + "row for each listed market ID and no other rows. Do not relax any schema, "
+                        + "probability-complementarity, evidence or risk requirement.\n"
+                        + canonical_json(
+                            {
+                                "market_ids": repair_market_ids,
+                                "prior_validation_errors": stage2[
+                                    "validation_errors"
+                                ],
+                            }
+                        )
+                    )
+                    repair_response = provider.generate(
+                        prompt=repair_prompt, model=model_name
+                    )
+                    repair_parsed = parse_probability_risk_response(
+                        repair_response.content
+                    )
+                    parsed = _merge_stage2_provider_rows(
+                        parsed,
+                        repair_parsed,
+                        repair_market_ids=repair_market_ids,
+                    )
+                    stage2 = normalize_stage2_rows(
+                        list(stage1["rows"]),
+                        parsed,
+                        settings=settings,
+                        now=stage2_started,
+                    )
+                    provider_attempts.append(
+                        {
+                            "attempt": repair_number + 1,
+                            "kind": "targeted_strict_repair",
+                            "market_ids": repair_market_ids,
+                            "prompt": repair_prompt,
+                            "raw_provider_response": repair_response.content,
+                            "provider_usage": _provider_usage(repair_response),
+                            "missing_market_ids": stage2["missing_market_ids"],
+                            "validation_errors": stage2["validation_errors"],
+                        }
+                    )
                 stage2_status = "finished" if stage2["pass_condition_met"] else "failed"
                 with SyncSessionLocal() as session:
                     run = session.execute(
@@ -562,17 +687,27 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                                 "rows": stage2["rows"],
                                 "metrics": stage2["metrics"],
                                 "raw_provider_response": response.content,
-                                "provider_usage": {
-                                    "tokens_in": response.tokens_in,
-                                    "tokens_out": response.tokens_out,
-                                    "cost": response.cost,
-                                    "provider": response.provider,
-                                    "model": response.model,
-                                },
+                                "provider_attempts": provider_attempts,
+                                "missing_market_ids": stage2["missing_market_ids"],
+                                "unexpected_market_ids": stage2[
+                                    "unexpected_market_ids"
+                                ],
+                                "duplicate_market_ids": stage2[
+                                    "duplicate_market_ids"
+                                ],
+                                "provider_usage": _aggregate_provider_usage(
+                                    provider_attempts,
+                                    provider=response.provider,
+                                    model=response.model,
+                                ),
                                 "validation_errors": stage2["validation_errors"],
                             },
                             rejections=list(stage2["validation_errors"]),
-                            warnings=[],
+                            warnings=[
+                                f"Stage 2 required {len(provider_attempts) - 1} targeted strict provider repair attempt(s)."
+                            ]
+                            if len(provider_attempts) > 1
+                            else [],
                             block_reason=None
                             if stage2_status == "finished"
                             else "Stage 2 has missing, duplicate or invalid rows.",
