@@ -5,7 +5,7 @@ WORKFLOW_LABEL = "Bullpen 008"
 SHADOW_MODE = True
 
 STAGE_VERSIONS = {
-    1: "bullpen008-stage1-v3",
+    1: "bullpen008-stage1-v4",
     2: "bullpen008-stage2-v2",
     3: "bullpen008-stage3-v3",
     4: "bullpen008-stage4-v2",
