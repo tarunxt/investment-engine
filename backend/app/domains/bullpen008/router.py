@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +30,7 @@ from app.domains.bullpen008.service import (
     get_run,
     get_stage,
     get_settings,
+    recover_interrupted_previous_build_run,
     run_from_record,
     set_scheduler_running,
     update_settings,
@@ -107,11 +110,29 @@ async def run_bullpen008_once(
         ex=PENDING_MARKER_TTL_SECONDS,
     )
     if not acquired:
-        await redis_client.close()
-        raise HTTPException(
-            status_code=409,
-            detail="A Bullpen 008 shadow run is already queued or running.",
+        current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
+        interrupted_run_id = await recover_interrupted_previous_build_run(
+            session,
+            user_id=current_user.id,
+            current_build=current_build,
         )
+        if interrupted_run_id is not None:
+            await redis_client.delete(
+                f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock"
+            )
+            await redis_client.delete(pending_key)
+            acquired = await redis_client.set(
+                pending_key,
+                "manual",
+                nx=True,
+                ex=PENDING_MARKER_TTL_SECONDS,
+            )
+        if not acquired:
+            await redis_client.close()
+            raise HTTPException(
+                status_code=409,
+                detail="A Bullpen 008 shadow run is already queued or running.",
+            )
     try:
         record = await create_run_record(
             session,
