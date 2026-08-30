@@ -5,7 +5,7 @@ WORKFLOW_LABEL = "Bullpen 008"
 SHADOW_MODE = True
 
 STAGE_VERSIONS = {
-    1: "bullpen008-stage1-v5",
+    1: "bullpen008-stage1-v6",
     2: "bullpen008-stage2-v2",
     3: "bullpen008-stage3-v3",
     4: "bullpen008-stage4-v2",
@@ -21,7 +21,7 @@ CLUSTER_MAP_VERSION = "bullpen008-cluster-map-v3"
 REDIS_PREFIX = "bullpen008"
 RUN_LOCK_TTL_SECONDS = 60 * 60
 PENDING_MARKER_TTL_SECONDS = 60 * 60
-COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS = 5 * 60
+COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS = 10 * 60
 
 CELERY_TASK_NAME = "app.domains.bullpen008.tasks.execute_bullpen008_shadow_run"
 CELERY_SCHEDULER_TASK_NAME = "app.domains.bullpen008.tasks.enqueue_due_bullpen008_runs"

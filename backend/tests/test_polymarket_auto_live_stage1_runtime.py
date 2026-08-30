@@ -496,18 +496,21 @@ async def test_gamma_keyset_page_uses_cursor_and_returns_nested_markets():
 
         def json(self):
             return {
-                "markets": [
+                "events": [
                     {
-                        "id": "market-1",
-                        "question": "Will event one happen?",
+                        "id": "event-1",
+                        "slug": "event-one",
+                        "title": "Event one",
                         "active": True,
                         "closed": False,
                         "archived": False,
-                        "events": [
+                        "markets": [
                             {
-                                "id": "event-1",
-                                "slug": "event-one",
-                                "title": "Event one",
+                                "id": "market-1",
+                                "question": "Will event one happen?",
+                                "active": True,
+                                "closed": False,
+                                "archived": False,
                             }
                         ],
                     }
@@ -528,12 +531,11 @@ async def test_gamma_keyset_page_uses_cursor_and_returns_nested_markets():
     )
 
     assert captured == {
-        "url": "https://gamma-api.polymarket.com/markets/keyset",
+        "url": "https://gamma-api.polymarket.com/events/keyset",
         "params": {
             "closed": "false",
             "end_date_min": "2026-08-30T00:00:00+00:00",
-            "include_tag": "true",
-            "limit": "100",
+            "limit": "500",
             "after_cursor": "cursor-1",
         },
     }
