@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +30,7 @@ from app.domains.bullpen008.service import (
     get_run,
     get_stage,
     get_settings,
+    recover_interrupted_previous_build_run,
     run_from_record,
     set_scheduler_running,
     update_settings,
@@ -100,6 +103,15 @@ async def run_bullpen008_once(
 
     redis_client = aioredis.from_url(app_settings.redis_url, decode_responses=True)
     pending_key = _pending_key(current_user.id)
+    current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
+    interrupted_run_id = await recover_interrupted_previous_build_run(
+        session,
+        user_id=current_user.id,
+        current_build=current_build,
+    )
+    if interrupted_run_id is not None:
+        await redis_client.delete(f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock")
+        await redis_client.delete(pending_key)
     acquired = await redis_client.set(
         pending_key,
         "manual",
