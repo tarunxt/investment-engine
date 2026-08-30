@@ -1,5 +1,14 @@
 # Bullpen 008 Phase 2
 
+Shadow Stage 6 may use the same status-resolved, read-only wallet identity
+attestation as Stages 1 and 5 so pre-submit checks are auditable when the CLI
+positions payload omits its public account address. This attestation is never
+promoted to execution lineage. Live Stage 6 continues to require a fresh
+authenticated runtime identity. Wallet-version revalidation hashes account-owned
+state (identity, shares, average price, position status, cash and open orders),
+not quote-driven liquidation value, so ordinary price movement cannot masquerade
+as a wallet mutation while real position or cash changes still block execution.
+
 Bullpen 008 is a separate six-stage workflow under the `bullpen008` profile and
 `/polymarket/bullpen008` API namespace. Bullpen 007 remains on its existing
 three-stage routes, models, Redis keys, scheduler task and order-intent tables.

@@ -94,7 +94,13 @@ def test_stage1_keeps_nonempty_authenticated_execution_snapshot(monkeypatch) -> 
     assert public_called is False
 
 
-def test_008_planning_attests_positive_snapshot_that_omits_identity(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "caller_source",
+    ["bullpen008-stage5-plan", "bullpen008-stage6-shadow-pre-submit"],
+)
+def test_008_nonexecution_attests_positive_snapshot_that_omits_identity(
+    monkeypatch, caller_source: str,
+) -> None:
     canonical = _snapshot(
         positions=[_position(condition_suffix="a")],
         wallet="",
@@ -105,7 +111,10 @@ def test_008_planning_attests_positive_snapshot_that_omits_identity(monkeypatch)
         return canonical
 
     async def fake_public(_broker, *, caller_source: str):
-        assert caller_source == "bullpen008-stage5-plan"
+        assert caller_source in {
+            "bullpen008-stage5-plan",
+            "bullpen008-stage6-shadow-pre-submit",
+        }
         return public
 
     monkeypatch.setattr(
@@ -123,7 +132,7 @@ def test_008_planning_attests_positive_snapshot_that_omits_identity(monkeypatch)
         positions_refresh._get_positions_snapshot_with_ui_read_fallback(
             object(),
             force_fresh=True,
-            caller_source="bullpen008-stage5-plan",
+            caller_source=caller_source,
             max_age_seconds=0,
         )
     )
@@ -133,9 +142,54 @@ def test_008_planning_attests_positive_snapshot_that_omits_identity(monkeypatch)
     assert result.diagnostics.error_classification == "stage1_analysis_public_fallback"
 
 
+def test_008_live_stage6_never_uses_public_identity_attestation(monkeypatch) -> None:
+    canonical = _snapshot(
+        positions=[_position(condition_suffix="a")],
+        wallet="",
+    )
+    public_called = False
+
+    async def fake_original(_broker, **_kwargs):
+        return canonical
+
+    async def fake_public(_broker, *, caller_source: str):
+        nonlocal public_called
+        public_called = True
+        return _snapshot(positions=[_position(condition_suffix="a")])
+
+    monkeypatch.setattr(
+        positions_refresh,
+        "_ORIGINAL_GET_POSITIONS_SNAPSHOT",
+        fake_original,
+    )
+    monkeypatch.setattr(
+        positions_refresh,
+        "_refresh_public_wallet_snapshot",
+        fake_public,
+    )
+
+    result = asyncio.run(
+        positions_refresh._get_positions_snapshot_with_ui_read_fallback(
+            object(),
+            force_fresh=True,
+            caller_source="bullpen008-stage6-pre-submit",
+            max_age_seconds=0,
+        )
+    )
+
+    assert result is canonical
+    assert result.account_identity == ""
+    assert public_called is False
+
+
 @pytest.mark.parametrize(
     "caller_source",
-    ["auto-live-stage1", "bullpen008-stage1-shadow", "bullpen008-stage5-plan"],
+    [
+        "auto-live-stage1",
+        "bullpen008-stage1-shadow",
+        "bullpen008-stage5-plan",
+        "bullpen008-stage6-shadow-pre-submit",
+    ],
 )
 def test_analysis_and_planning_replace_false_empty_execution_snapshot_with_same_wallet_public_positions(
     monkeypatch, caller_source: str,
@@ -159,6 +213,7 @@ def test_analysis_and_planning_replace_false_empty_execution_snapshot_with_same_
             "auto-live-stage1",
             "bullpen008-stage1-shadow",
             "bullpen008-stage5-plan",
+            "bullpen008-stage6-shadow-pre-submit",
         }
         return public
 

@@ -61,13 +61,13 @@ def _rows(value: object) -> list[dict[str, object]]:
 
 
 def wallet_version(wallet_snapshot: dict[str, object]) -> str:
-    """Stable version proving the exact account, positions, orders and cash."""
+    """Stable version proving account-owned state, not volatile market value."""
     positions = [
         {
             key: row.get(key)
             for key in (
                 "market_id", "condition_id", "side", "shares", "average_price_cents",
-                "exposure_usd", "classification", "claimable",
+                "classification", "claimable",
             )
         }
         for row in _rows(wallet_snapshot.get("positions"))

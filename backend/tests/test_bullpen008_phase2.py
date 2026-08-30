@@ -302,6 +302,35 @@ def test_preflight_blocks_odds_slippage_spread_emergency_and_wallet_change() -> 
     assert {"EMERGENCY_STOP", "WALLET_VERSION", "BUY_ODDS_AT_LEAST_80", "SPREAD"} <= blockers
 
 
+def test_wallet_version_ignores_quote_value_changes_but_detects_position_changes() -> None:
+    row = allocation("m", 10)
+    planned_wallet = wallet([position("m", 10)], cash=40)
+    plan = build_action_plan(
+        run_id="b008-run", stage4_allocations=[row],
+        stage4_certificate=certificate(), stage3_rows=[cluster(row)],
+        wallet_snapshot=planned_wallet, pending_orders=[],
+        settings=Bullpen008Settings(), stage4_completed_at=NOW, now=NOW,
+    )
+    quote_only_change = wallet(
+        [position("m", 12, shares=planned_wallet["positions"][0]["shares"])],
+        cash=40,
+    )
+    stable = preflight_execution_plan(
+        plan=plan, stage4_certificate=certificate(),
+        live_wallet_snapshot=quote_only_change, quotes_by_market={},
+        pending_orders=[], settings=Bullpen008Settings(), execution_mode="shadow",
+    )
+    assert stable["wallet_version_changed"] is False
+
+    position_change = wallet([position("m", 12, shares=99)], cash=40)
+    changed = preflight_execution_plan(
+        plan=plan, stage4_certificate=certificate(),
+        live_wallet_snapshot=position_change, quotes_by_market={},
+        pending_orders=[], settings=Bullpen008Settings(), execution_mode="shadow",
+    )
+    assert changed["wallet_version_changed"] is True
+
+
 def test_account_identity_mismatch_blocks_action() -> None:
     row = allocation("m", 10)
     plan = make_plan([row], [])

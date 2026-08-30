@@ -28,15 +28,20 @@ _PASSIVE_UI_POSITION_REFRESH_CALLERS = frozenset(
         "ui-passive-refresh",
     }
 )
-# Analysis and immutable planning need the current economic portfolio even when
+# Analysis, immutable planning and shadow-only pre-submit validation need the
+# current economic portfolio even when
 # the service-account execution snapshot is temporarily empty while the
 # operator/public wallet still has live holdings. These callers may use the
 # status-resolved public wallet as evidence for analysis or planning only. The
 # returned snapshot remains display-only (no auth lineage and never promoted to
-# the execution cache), so Stage 6 still refreshes and fails closed until the
-# authenticated runtime agrees.
+# the execution cache). Live Stage 6 deliberately uses a different caller and
+# still fails closed until the authenticated runtime agrees.
 _BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS = frozenset(
-    {"bullpen008-stage1-shadow", "bullpen008-stage5-plan"}
+    {
+        "bullpen008-stage1-shadow",
+        "bullpen008-stage5-plan",
+        "bullpen008-stage6-shadow-pre-submit",
+    }
 )
 _STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS = frozenset(
     {"auto-live-stage1", "auto-live-stage1-recovery"}
