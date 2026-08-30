@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 WORKFLOW_PROFILE = "bullpen008"
 WORKFLOW_LABEL = "Bullpen 008"
 SHADOW_MODE = True
@@ -51,11 +53,32 @@ PENDING_ORDER_STATUSES = frozenset(
     {
         "planned",
         "queued",
+        "risk_certified",
+        "ready",
+        "retry_wait",
+        "waiting_for_collateral",
+        "waiting_for_exit",
+        "submitting",
         "submitted",
         "pending",
         "confirming",
         "partially_filled",
+        "settlement_pending",
         "retrying",
-        "blocked",
+        "recoverable",
     }
 )
+
+
+def normalize_order_status(value: object) -> str:
+    """Return one canonical status for legacy screaming-snake and 008 CamelCase states."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", text)
+    return re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
+
+
+def is_active_pending_order_status(value: object) -> bool:
+    return normalize_order_status(value) in PENDING_ORDER_STATUSES

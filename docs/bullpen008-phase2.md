@@ -30,6 +30,12 @@ three-stage routes, models, Redis keys, scheduler task and order-intent tables.
    provider call. Ambiguous submission is `Recoverable`; it is reconciled by
    remote ID and is never blindly resubmitted.
 
+Stage 5 and Stage 6 immutable inputs include only non-terminal orders from both
+profiles. Legacy screaming-snake statuses and Bullpen 008 CamelCase lifecycle
+states are normalized before exposure accounting; filled, failed, cancelled,
+blocked and reconciled history remains available on its owning audit page but
+is never mislabeled as pending or counted against current capacity.
+
 Deadline-passed wallet rows that are not yet claimable remain explicit locked
 resolution holds in the Stage 4 target. They are never treated as cash or free
 capacity. A Stage 5 no-buy plan may still certify when a pre-existing

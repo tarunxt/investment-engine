@@ -28,6 +28,8 @@ from app.domains.bullpen008.constants import (
     RUN_LOCK_TTL_SECONDS,
     STAGE_VERSIONS,
     WORKFLOW_PROFILE,
+    is_active_pending_order_status,
+    normalize_order_status,
 )
 from app.domains.bullpen008.planning import (
     build_action_plan,
@@ -468,7 +470,7 @@ def _pending_exposures(user_id: int) -> tuple[dict[str, float], dict[str, float]
     for intent in records:
         market_id = str(intent.market_id)
         action = str(intent.action).upper()
-        status = str(intent.status).lower()
+        status = normalize_order_status(intent.status)
         if action == "BUY" and status in PENDING_ORDER_STATUSES:
             pending_buys[market_id] = pending_buys.get(market_id, 0) + float(
                 intent.current_order_usd
@@ -483,7 +485,7 @@ def _pending_exposures(user_id: int) -> tuple[dict[str, float], dict[str, float]
     for intent in phase2_records:
         market_id = str(intent.market_id)
         action = str(intent.action_type).upper()
-        status = str(intent.status).lower()
+        status = normalize_order_status(intent.status)
         payload = dict(intent.payload or {})
         if action == "BUY" and status in PENDING_ORDER_STATUSES:
             remaining = max(
@@ -525,6 +527,8 @@ def _pending_order_packets(user_id: int) -> list[dict[str, object]]:
             .all()
         )
     for intent in legacy:
+        if not is_active_pending_order_status(intent.status):
+            continue
         packets.append(
             {
                 "profile": "bullpen007",
@@ -533,7 +537,7 @@ def _pending_order_packets(user_id: int) -> list[dict[str, object]]:
                 "condition_id": intent.condition_id,
                 "side": intent.side,
                 "action": intent.action,
-                "status": intent.status,
+                "status": normalize_order_status(intent.status),
                 "current_order_usd": intent.current_order_usd,
                 "requested_order_usd": intent.requested_order_usd,
                 "remote_order_id": intent.remote_order_id,
@@ -541,6 +545,8 @@ def _pending_order_packets(user_id: int) -> list[dict[str, object]]:
             }
         )
     for intent in phase2:
+        if not is_active_pending_order_status(intent.status):
+            continue
         packets.append(
             {
                 "profile": WORKFLOW_PROFILE,
@@ -549,7 +555,7 @@ def _pending_order_packets(user_id: int) -> list[dict[str, object]]:
                 "condition_id": intent.condition_id,
                 "side": intent.side,
                 "action": intent.action_type,
-                "status": intent.status,
+                "status": normalize_order_status(intent.status),
                 "current_order_usd": intent.payload.get("estimated_usd"),
                 "remote_order_id": intent.remote_order_id,
                 "filled_shares": intent.filled_shares,
