@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -51,6 +51,7 @@ from app.domains.bullpen008.models import (
 from app.domains.bullpen008.schemas import Bullpen008Settings
 from app.domains.polymarket.bullpen import BullpenBalanceReader
 from app.domains.polymarket_auto_live.console_profile import (
+    next_custom_console_schedule_time,
     read_console_wallet_positions_snapshot,
     scan_console_profile_markets,
 )
@@ -182,11 +183,19 @@ def _position_packet(position: object, *, quote_timestamp: str) -> dict[str, obj
 
 async def _capture_stage1_inputs(
     settings: Bullpen008Settings,
-) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    dict[str, object],
+    dict[str, object],
+]:
     now = datetime.now(UTC)
     scan, wallet, balance = await asyncio.gather(
         scan_console_profile_markets(
-            now=now, min_market_odds=0, custom_exclude_phrases=[]
+            now=now,
+            min_market_odds=0,
+            custom_exclude_phrases=[],
+            apply_base_filters=False,
         ),
         read_console_wallet_positions_snapshot(
             force_fresh=True,
@@ -240,7 +249,17 @@ async def _capture_stage1_inputs(
             "position_classifier_version": wallet.position_classifier_version,
         },
     }
-    return market_packets, active_positions, wallet_snapshot
+    scan_metadata = {
+        "source_label": scan.source_label,
+        "source_url": scan.source_url,
+        "scanned_at": scan.scanned_at,
+        "total_candidates": scan.total_candidates,
+        "complete_universe": scan.complete_universe,
+        "warning": scan.warning,
+        "details": scan.details,
+        "pre_stage1_filters_applied": False,
+    }
+    return market_packets, active_positions, wallet_snapshot, scan_metadata
 
 
 def _stage_record(
@@ -491,11 +510,20 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
         # Stage 1
         stage1_started = datetime.now(UTC)
         try:
-            markets, positions, wallet_snapshot = asyncio.run(
+            markets, positions, wallet_snapshot, scan_metadata = asyncio.run(
                 _capture_stage1_inputs(settings)
             )
             stage1 = build_stage1_output(
-                markets, positions, settings=settings, now=stage1_started
+                markets,
+                positions,
+                settings=settings,
+                now=stage1_started,
+                universe_complete=bool(scan_metadata["complete_universe"]),
+                universe_warnings=[
+                    str(value)
+                    for value in (scan_metadata.get("warning"),)
+                    if value
+                ],
             )
             stage1_status = "finished" if stage1["pass_condition_met"] else "failed"
             with SyncSessionLocal() as session:
@@ -517,6 +545,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                         "market_universe": markets,
                         "active_wallet_positions": positions,
                         "saved_filters": settings.model_dump(mode="json"),
+                        "source_scan": scan_metadata,
                     },
                     calculations={
                         "accounting_identity": "scanned = accepted + rejected + data_errors",
@@ -527,17 +556,24 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                         "rows": stage1["rows"],
                         "metrics": stage1["metrics"],
                         "duplicates": stage1["duplicates"],
+                        "universe_complete": stage1["universe_complete"],
                     },
                     rejections=list(stage1["rejections"]),
                     warnings=[
-                        value
-                        for value in [wallet_snapshot.get("balance", {}).get("message")]
-                        if value
-                        and wallet_snapshot.get("balance", {}).get("status") != "ready"
+                        *list(stage1["universe_warnings"]),
+                        *[
+                            value
+                            for value in [
+                                wallet_snapshot.get("balance", {}).get("message")
+                            ]
+                            if value
+                            and wallet_snapshot.get("balance", {}).get("status")
+                            != "ready"
+                        ],
                     ],
                     block_reason=None
                     if stage1_status == "finished"
-                    else "Stage 1 could not account for every market exactly once.",
+                    else "Stage 1 did not capture a complete source universe or could not account for every market exactly once.",
                 )
                 session.add(record)
                 session.commit()
@@ -555,7 +591,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                     stage_name="Discover & Hard Filters",
                     started_at=stage1_started,
                     status="failed",
-                    pass_condition="Every scanned market is exactly once in accepted, rejected or data-error accounting.",
+                    pass_condition="The complete source universe was captured and every scanned market is exactly once in accepted, rejected or data-error accounting.",
                     inputs={"scan_started_at": stage1_started.isoformat()},
                     calculations={},
                     outputs={},
@@ -591,12 +627,15 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
             stage2_started = datetime.now(UTC)
             stage2_input_rows = _stage2_input_rows(list(stage1["rows"]))
             prompt = build_probability_risk_prompt(stage2_input_rows)
+            raw_provider_response: str | None = None
+            provider_attempts: list[dict[str, object]] = []
             try:
                 provider_name, model_name = _provider_target(settings)
                 provider = ProviderFactory.create(provider_name)
                 response = provider.generate(
                     prompt=prompt, model=model_name
                 )
+                raw_provider_response = response.content
                 parsed = parse_probability_risk_response(response.content)
                 stage2 = normalize_stage2_rows(
                     stage2_input_rows,
@@ -604,7 +643,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                     settings=settings,
                     now=stage2_started,
                 )
-                provider_attempts: list[dict[str, object]] = [
+                provider_attempts = [
                     {
                         "attempt": 1,
                         "kind": "complete_universe",
@@ -642,6 +681,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                     repair_response = provider.generate(
                         prompt=repair_prompt, model=model_name
                     )
+                    raw_provider_response = repair_response.content
                     repair_parsed = parse_probability_risk_response(
                         repair_response.content
                     )
@@ -752,7 +792,8 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                             inputs={"prompt": prompt},
                             calculations={},
                             outputs={
-                                "raw_provider_response": None,
+                                "raw_provider_response": raw_provider_response,
+                                "provider_attempts": provider_attempts,
                                 "validation_errors": [{"error": str(exc)}],
                             },
                             rejections=[{"error": str(exc)}],
@@ -786,11 +827,13 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
         else:
             stage3_started = datetime.now(UTC)
             prompt = build_cluster_prompt(list(stage2["rows"]))
+            raw_cluster_response: str | None = None
             try:
                 provider_name, model_name = _provider_target(settings)
                 response = ProviderFactory.create(provider_name).generate(
                     prompt=prompt, model=model_name
                 )
+                raw_cluster_response = response.content
                 parsed = parse_cluster_response(response.content)
                 existing_exposure: dict[str, float] = {}
                 for position in wallet_snapshot.get("positions", []):
@@ -850,6 +893,9 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                                     "common_catalyst_exposure"
                                 ],
                                 "raw_provider_response": response.content,
+                                "validation_errors": stage3[
+                                    "validation_errors"
+                                ],
                             },
                             rejections=list(stage3["unresolved_adjudications"]),
                             warnings=[],
@@ -880,7 +926,10 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                             pass_condition="Every market is assigned exactly once and no semantic-cluster adjudication remains unresolved.",
                             inputs={"prompt": prompt},
                             calculations={"transitive_closure": True},
-                            outputs={"raw_provider_response": None},
+                            outputs={
+                                "raw_provider_response": raw_cluster_response,
+                                "validation_errors": [{"error": str(exc)}],
+                            },
                             rejections=[{"error": str(exc)}],
                             warnings=[],
                             block_reason=str(exc),
@@ -1085,7 +1134,11 @@ def _create_scheduled_run(user_id: int) -> str | None:
             run_metadata={"phase": 1, "orders_permitted": False},
         )
         session.add(run)
-        state.next_run_at = now + timedelta(minutes=settings.auto_refresh_minutes)
+        state.next_run_at = next_custom_console_schedule_time(
+            now,
+            start_at=settings.auto_start_at,
+            refresh_minutes=settings.auto_refresh_minutes,
+        )
         session.commit()
     execute_bullpen008_shadow_run.apply_async(
         args=[run_id], queue=CELERY_QUEUE, task_id=f"bullpen008:{run_id}"

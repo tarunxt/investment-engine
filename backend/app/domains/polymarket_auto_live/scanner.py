@@ -906,6 +906,7 @@ async def scan_candidate_markets(
     *,
     min_liquidity_usd: float,
     existing_position_slugs: set[str] | None = None,
+    apply_base_filters: bool = True,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
@@ -943,9 +944,13 @@ async def scan_candidate_markets(
                 if normalized is None or normalized.market_id in seen_market_ids:
                     continue
                 seen_market_ids.add(normalized.market_id)
-                reasons = _evaluate_filter_reasons(
-                    normalized,
-                    min_liquidity_usd=min_liquidity_usd,
+                reasons = (
+                    _evaluate_filter_reasons(
+                        normalized,
+                        min_liquidity_usd=min_liquidity_usd,
+                    )
+                    if apply_base_filters
+                    else []
                 )
                 if reasons and not normalized.force_include:
                     rejected.append(

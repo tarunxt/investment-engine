@@ -168,6 +168,35 @@ def test_stage1_active_positions_bypass_new_entry_filters_for_monitoring() -> No
     assert result["metrics"]["active_positions"] == 1
 
 
+def test_stage1_accounts_for_missing_and_duplicate_ids_and_fails_incomplete_source() -> None:
+    settings = Bullpen008Settings()
+    duplicate = market("duplicate")
+    missing_id = market("missing")
+    missing_id["market_id"] = ""
+    missing_id["slug"] = ""
+    result = build_stage1_output(
+        [duplicate, duplicate, missing_id],
+        [],
+        settings=settings,
+        now=NOW,
+        universe_complete=False,
+        universe_warnings=["Gamma supplement unavailable"],
+    )
+
+    assert result["metrics"]["scanned"] == 3
+    assert result["metrics"]["accounted"] == 3
+    assert result["metrics"]["stale_data_errors"] == 2
+    assert result["pass_condition_met"] is False
+    assert result["duplicates"] == ["duplicate"]
+    assert result["universe_warnings"] == ["Gamma supplement unavailable"]
+    codes = {
+        reason["code"]
+        for row in result["rows"]
+        for reason in row["rejection_reasons"]
+    }
+    assert {"DUPLICATE_MARKET_ID", "MISSING_MARKET_ID"} <= codes
+
+
 def test_stage2_strict_json_complementarity_and_complete_row_validation() -> None:
     settings = Bullpen008Settings(probability_tolerance_pp=0.25)
     accepted = build_stage1_output([market("m1")], [], settings=settings, now=NOW)[
@@ -305,6 +334,24 @@ def test_incomplete_or_unresolved_semantic_cluster_blocks_stage4() -> None:
         parse_cluster_response("not-json")
 
 
+def test_resolved_cluster_row_requires_driver_trigger_ids_and_reason() -> None:
+    settings = Bullpen008Settings()
+    rows = [clustered_candidate("a", "a")]
+    result = normalize_cluster_rows(
+        rows,
+        [{"market_id": "a", "adjudication_status": "resolved"}],
+        existing_exposure_by_market={},
+        pending_buy_exposure_by_market={},
+        confirmed_exit_exposure_by_market={},
+        settings=settings,
+    )
+
+    assert result["pass_condition_met"] is False
+    assert result["validation_errors"]
+    assert "Missing shared driver." in result["validation_errors"][0]["errors"]
+    assert result["metrics"]["unresolved_adjudications"] == 1
+
+
 def test_optimizer_enforces_caps_pending_exposure_increments_cash_and_half_size() -> (
     None
 ):
@@ -351,3 +398,54 @@ def test_optimizer_rejects_adverse_scenario_above_common_catalyst_cap() -> None:
     tampered = dict(result["certificate"])
     tampered["bankroll"] = 201
     assert verify_portfolio_certificate(tampered) is False
+
+
+def test_optimizer_never_allocates_to_skip_or_low_edge_new_entries() -> None:
+    settings = Bullpen008Settings()
+    rows = [
+        clustered_candidate("skip", "skip", chosen_side="SKIP"),
+        clustered_candidate("tiny", "tiny", llm_edge_pp=0.1),
+    ]
+    result = build_portfolio_target(
+        rows, settings=settings, available_cash_usd=40, inputs_hash="skip"
+    )
+    allocations = {row["market_id"]: row for row in result["allocations"]}
+
+    assert allocations["skip"]["proposed_buy_usd"] == 0
+    assert "SKIP_OR_INVALID_RECOMMENDATION" in allocations["skip"][
+        "explanation_codes"
+    ]
+    assert allocations["tiny"]["proposed_buy_usd"] == 0
+    assert "EDGE_BELOW_PREFERRED_NOT_STABILISER" in allocations["tiny"][
+        "explanation_codes"
+    ]
+
+
+def test_optimizer_outputs_every_row_and_weights_the_target_portfolio() -> None:
+    settings = Bullpen008Settings()
+    rows = [
+        clustered_candidate("best", "shared", current_exposure_usd=10),
+        clustered_candidate(
+            "other",
+            "shared",
+            current_exposure_usd=5,
+            chosen_side="SKIP",
+            selection_score=-1,
+        ),
+    ]
+    result = build_portfolio_target(
+        rows, settings=settings, available_cash_usd=0, inputs_hash="targets"
+    )
+
+    assert {row["market_id"] for row in result["allocations"]} == {
+        "best",
+        "other",
+    }
+    other = next(row for row in result["allocations"] if row["market_id"] == "other")
+    assert other["proposed_buy_usd"] == 0
+    assert "NOT_CLUSTER_REPRESENTATIVE" in other["explanation_codes"]
+    assert result["portfolio_metrics"]["weighted_current_odds"] == 82
+    assert result["portfolio_metrics"]["weighted_llm_odds"] == 86
+    assert result["portfolio_metrics"]["weighted_edge_pp"] == 4
+    assert result["metrics"]["selected_contracts"] == 2
+    assert result["metrics"]["independent_clusters"] == 1

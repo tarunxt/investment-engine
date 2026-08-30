@@ -20,8 +20,8 @@ from app.domains.polymarket_auto_live.returns_formula import (
     calculate_returns_per_day_formula,
 )
 
-STAGE2_PARSER_VERSION = "bullpen008-stage2-parser-v1"
-STAGE3_PARSER_VERSION = "bullpen008-stage3-parser-v1"
+STAGE2_PARSER_VERSION = "bullpen008-stage2-parser-v2"
+STAGE3_PARSER_VERSION = "bullpen008-stage3-parser-v2"
 
 _SPORTS_TERMS = (
     " vs ",
@@ -196,7 +196,7 @@ def stage1_rejection_reasons(
     outcomes = [
         str(value).strip().lower() for value in row.get("outcomes", []) if value
     ]
-    if outcomes and (len(set(outcomes)) != 2 or set(outcomes) != {"yes", "no"}):
+    if len(set(outcomes)) != 2 or set(outcomes) != {"yes", "no"}:
         reject("NON_BINARY", "Outcomes are not an unambiguous binary YES/NO pair.")
     if yes_odds is None or no_odds is None:
         reject("MISSING_ODDS", "Both YES and NO odds are required.")
@@ -252,56 +252,91 @@ def build_stage1_output(
     *,
     settings: Bullpen008Settings,
     now: datetime,
+    universe_complete: bool = True,
+    universe_warnings: list[str] | None = None,
 ) -> dict[str, object]:
     active_by_market: dict[str, list[dict[str, object]]] = defaultdict(list)
     for position in active_positions:
         active_by_market[_market_id(position)].append(position)
 
-    rows_by_id: dict[str, dict[str, object]] = {}
+    prepared_markets: list[
+        tuple[str, dict[str, object], list[dict[str, object]]]
+    ] = []
+    seen_market_ids: set[str] = set()
     duplicate_market_ids: list[str] = []
-    for market in markets:
-        market_id = _market_id(market)
+    for index, market in enumerate(markets):
+        source_market_id = _market_id(market)
+        market_id = source_market_id
+        forced_reasons: list[dict[str, object]] = []
         if not market_id:
-            continue
-        if market_id in rows_by_id:
+            market_id = f"data-error:missing-market-id:{index}"
+            forced_reasons.append(
+                {
+                    "code": "MISSING_MARKET_ID",
+                    "reason": "The scanned market has no stable market identifier.",
+                }
+            )
+        elif market_id in seen_market_ids:
             duplicate_market_ids.append(market_id)
-            continue
-        rows_by_id[market_id] = dict(market)
+            market_id = f"data-error:duplicate:{market_id}:{index}"
+            forced_reasons.append(
+                {
+                    "code": "DUPLICATE_MARKET_ID",
+                    "reason": "The market identifier appeared more than once in the scanned universe.",
+                    "duplicate_of_market_id": source_market_id,
+                }
+            )
+        else:
+            seen_market_ids.add(market_id)
+        prepared_markets.append((market_id, dict(market), forced_reasons))
     for market_id, positions in active_by_market.items():
-        if market_id in rows_by_id:
+        if market_id in seen_market_ids:
             continue
         exemplar = positions[0]
-        rows_by_id[market_id] = {
-            "market_id": market_id,
-            "condition_id": exemplar.get("condition_id"),
-            "question_id": exemplar.get("question_id"),
-            "parent_event_id": exemplar.get("parent_event_id"),
-            "slug": exemplar.get("slug"),
-            "question": exemplar.get("question") or exemplar.get("market_title"),
-            "category": exemplar.get("category") or exemplar.get("theme"),
-            "outcomes": ["YES", "NO"],
-            "resolution_rules": exemplar.get("resolution_rules"),
-            "resolution_source": exemplar.get("resolution_source"),
-            "deadline": exemplar.get("deadline") or exemplar.get("close_time"),
-            "timezone": exemplar.get("timezone") or "UTC",
-            "open": exemplar.get("classification") == "active",
-            "closed": exemplar.get("classification") == "closed",
-            "resolved": exemplar.get("classification") == "claimable",
-            "claimable": exemplar.get("claimable", False),
-            "accepting_orders": exemplar.get("classification") == "active",
-            "current_yes_odds": exemplar.get("current_yes_odds"),
-            "current_no_odds": exemplar.get("current_no_odds"),
-            "quote_timestamp": exemplar.get("quote_timestamp"),
-            "source": "active-wallet-position",
-        }
+        seen_market_ids.add(market_id)
+        prepared_markets.append(
+            (
+                market_id,
+                {
+                    "market_id": market_id,
+                    "condition_id": exemplar.get("condition_id"),
+                    "question_id": exemplar.get("question_id"),
+                    "parent_event_id": exemplar.get("parent_event_id"),
+                    "slug": exemplar.get("slug"),
+                    "question": exemplar.get("question")
+                    or exemplar.get("market_title"),
+                    "category": exemplar.get("category") or exemplar.get("theme"),
+                    "outcomes": ["YES", "NO"],
+                    "resolution_rules": exemplar.get("resolution_rules"),
+                    "resolution_source": exemplar.get("resolution_source"),
+                    "deadline": exemplar.get("deadline")
+                    or exemplar.get("close_time"),
+                    "timezone": exemplar.get("timezone") or "UTC",
+                    "open": exemplar.get("classification") == "active",
+                    "closed": exemplar.get("classification") == "closed",
+                    "resolved": exemplar.get("classification") == "claimable",
+                    "claimable": exemplar.get("claimable", False),
+                    "accepting_orders": exemplar.get("classification") == "active",
+                    "current_yes_odds": exemplar.get("current_yes_odds"),
+                    "current_no_odds": exemplar.get("current_no_odds"),
+                    "quote_timestamp": exemplar.get("quote_timestamp"),
+                    "source": "active-wallet-position",
+                },
+                [],
+            )
+        )
 
     rows: list[dict[str, object]] = []
     rejections: list[dict[str, object]] = []
-    accepted = rejected = data_errors = active_count = 0
-    for market_id, market in rows_by_id.items():
+    accepted = rejected = data_error_accounted = active_count = 0
+    stale_data_errors = 0
+    for market_id, market, forced_reasons in prepared_markets:
         positions = active_by_market.get(market_id, [])
         is_active_position = bool(positions)
-        reasons = stage1_rejection_reasons(market, settings=settings, now=now)
+        reasons = [
+            *stage1_rejection_reasons(market, settings=settings, now=now),
+            *forced_reasons,
+        ]
         narrow_band = bool(_NARROW_BAND_PATTERN.search(_search_text(market)))
         data_error_codes = {
             "MISSING_DEADLINE",
@@ -309,15 +344,19 @@ def build_stage1_output(
             "MISSING_ODDS",
             "MISSING_QUOTE_TIMESTAMP",
             "STALE_ODDS",
+            "MISSING_MARKET_ID",
+            "DUPLICATE_MARKET_ID",
         }
         has_data_error = any(reason["code"] in data_error_codes for reason in reasons)
+        if has_data_error:
+            stale_data_errors += 1
         if is_active_position:
             accounting_status = "accepted_monitoring"
             active_count += 1
             accepted += 1
         elif has_data_error:
             accounting_status = "data_error"
-            data_errors += 1
+            data_error_accounted += 1
         elif reasons:
             accounting_status = "rejected"
             rejected += 1
@@ -353,8 +392,8 @@ def build_stage1_output(
         rows.append(row)
 
     scanned = len(rows)
-    accounted = accepted + rejected + data_errors
-    pass_condition_met = scanned == accounted and not duplicate_market_ids
+    accounted = accepted + rejected + data_error_accounted
+    pass_condition_met = scanned == accounted and universe_complete
     return {
         "rows": rows,
         "rejections": rejections,
@@ -364,11 +403,13 @@ def build_stage1_output(
             "accepted": accepted,
             "rejected": rejected,
             "active_positions": active_count,
-            "stale_data_errors": data_errors,
+            "stale_data_errors": stale_data_errors,
             "accounted": accounted,
         },
+        "universe_complete": universe_complete,
+        "universe_warnings": list(universe_warnings or []),
         "pass_condition_met": pass_condition_met,
-        "pass_condition": "Every scanned market is exactly once in accepted, rejected or data-error accounting.",
+        "pass_condition": "The complete source universe was captured and every scanned market is exactly once in accepted, rejected or data-error accounting.",
     }
 
 
@@ -391,6 +432,15 @@ def build_probability_risk_prompt(rows: list[dict[str, object]]) -> str:
             "current_yes_odds": row.get("current_yes_odds"),
             "current_no_odds": row.get("current_no_odds"),
             "quote_timestamp": row.get("quote_timestamp"),
+            "open": row.get("open"),
+            "closed": row.get("closed"),
+            "resolved": row.get("resolved"),
+            "claimable": row.get("claimable"),
+            "accepting_orders": row.get("accepting_orders"),
+            "liquidity": row.get("liquidity"),
+            "volume": row.get("volume"),
+            "spread": row.get("spread"),
+            "context": row.get("context"),
             "active_position": row.get("active_position"),
             "held_sides": row.get("held_sides", []),
             "narrow_band_flag": row.get("narrow_band_flag"),
@@ -742,6 +792,7 @@ def normalize_cluster_rows(
 
     rows: list[dict[str, object]] = []
     unresolved: list[dict[str, object]] = []
+    validation_errors: list[dict[str, object]] = []
     for market_id, source in expected.items():
         provider = provider_by_id.get(market_id, {})
         strict_root = strict_dsu.find(market_id)
@@ -751,11 +802,28 @@ def normalize_cluster_rows(
             f"catalyst:{stable_hash(sorted(catalyst_members[catalyst_root]))[:16]}"
         )
         status = _text(provider.get("adjudication_status")).lower() or "unresolved"
-        if status != "resolved":
+        field_errors: list[str] = []
+        for field, label in (
+            ("strict_cluster_id", "strict cluster ID"),
+            ("common_catalyst_cluster_id", "common-catalyst cluster ID"),
+            ("driver", "shared driver"),
+            ("main_joint_loss_trigger", "main joint-loss trigger"),
+            ("adjudication_reason", "adjudication reason"),
+        ):
+            if not _text(provider.get(field)):
+                field_errors.append(f"Missing {label}.")
+        if status not in {"resolved", "unresolved"}:
+            field_errors.append("adjudication_status must be resolved or unresolved.")
+        if field_errors:
+            validation_errors.append(
+                {"market_id": market_id, "errors": field_errors}
+            )
+        if status != "resolved" or field_errors:
             unresolved.append(
                 {
                     "market_id": market_id,
-                    "reason": provider.get("adjudication_reason")
+                    "reason": "; ".join(field_errors)
+                    or provider.get("adjudication_reason")
                     or "Semantic cluster adjudication is unresolved.",
                 }
             )
@@ -803,7 +871,11 @@ def normalize_cluster_rows(
             2,
         )
     pass_condition_met = (
-        not missing and not unexpected and not duplicates and not unresolved
+        not missing
+        and not unexpected
+        and not duplicates
+        and not unresolved
+        and not validation_errors
     )
     return {
         "rows": rows,
@@ -826,6 +898,7 @@ def normalize_cluster_rows(
         "unexpected_market_ids": unexpected,
         "duplicate_market_ids": sorted(set(duplicates)),
         "unresolved_adjudications": unresolved,
+        "validation_errors": validation_errors,
         "pass_condition_met": pass_condition_met,
         "pass_condition": "Every market is assigned exactly once and no semantic-cluster adjudication remains unresolved.",
     }
@@ -887,12 +960,22 @@ def build_portfolio_target(
         edge = _float(row.get("llm_edge_pp"))
         risk = _float(row.get("risk_score"))
         eligible_reasons: list[str] = []
+        if _text(row.get("chosen_side")).upper() not in {"YES", "NO"}:
+            eligible_reasons.append("SKIP_OR_INVALID_RECOMMENDATION")
         if llm_odds is None or llm_odds < settings.min_llm_probability_pct:
             eligible_reasons.append("LLM_ODDS_BELOW_80")
         if market_odds is None or market_odds < settings.entry_side_odds_floor_pct:
             eligible_reasons.append("MARKET_ODDS_BELOW_80")
         if edge is None or edge < settings.minimum_edge_pp:
             eligible_reasons.append("NEGATIVE_EDGE")
+        elif (
+            edge < settings.preferred_min_edge_pp
+            and not (
+                row.get("active_position")
+                and float(row.get("current_exposure_usd") or 0) > 0
+            )
+        ):
+            eligible_reasons.append("EDGE_BELOW_PREFERRED_NOT_STABILISER")
         if (
             row.get("open") is not True
             or row.get("closed")
@@ -933,12 +1016,22 @@ def build_portfolio_target(
             }
         )
 
+    candidates_by_cluster: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for candidate in candidates:
+        candidates_by_cluster[
+            str(candidate.get("common_catalyst_cluster_id"))
+        ].append(candidate)
     representatives: dict[str, dict[str, object]] = {}
-    for candidate in sorted(
-        candidates, key=lambda row: float(row["selection_score"]), reverse=True
-    ):
-        cluster_id = str(candidate.get("common_catalyst_cluster_id"))
-        representatives.setdefault(cluster_id, candidate)
+    for cluster_id, cluster_candidates in candidates_by_cluster.items():
+        ranked = sorted(
+            cluster_candidates,
+            key=lambda row: float(row["selection_score"]),
+            reverse=True,
+        )
+        representatives[cluster_id] = next(
+            (candidate for candidate in ranked if candidate["eligible"]),
+            ranked[0],
+        )
 
     contract_exposure: dict[str, float] = defaultdict(float)
     strict_exposure: dict[str, float] = defaultdict(float)
@@ -1016,6 +1109,45 @@ def build_portfolio_target(
             }
         )
 
+    representative_market_ids = {
+        _market_id(candidate) for candidate in representatives.values()
+    }
+    for candidate in sorted(
+        candidates, key=lambda row: float(row["selection_score"]), reverse=True
+    ):
+        market_id = _market_id(candidate)
+        if market_id in representative_market_ids:
+            continue
+        current_exposure = round(
+            float(candidate.get("current_exposure_usd") or 0), 2
+        )
+        allocations.append(
+            {
+                "market_id": market_id,
+                "question": candidate.get("question"),
+                "chosen_side": candidate.get("chosen_side"),
+                "strict_cluster_id": str(candidate.get("strict_cluster_id")),
+                "common_catalyst_cluster_id": str(
+                    candidate.get("common_catalyst_cluster_id")
+                ),
+                "current_exposure_usd": current_exposure,
+                "proposed_buy_usd": 0.0,
+                "target_exposure_usd": current_exposure,
+                "current_odds": candidate.get(
+                    "current_chosen_side_bullpen_odds"
+                ),
+                "llm_odds": candidate.get("chosen_side_llm_probability"),
+                "edge_pp": candidate.get("llm_edge_pp"),
+                "returns_per_day": candidate.get("returns_per_day"),
+                "risk_score": candidate.get("risk_score"),
+                "selection_score": candidate.get("selection_score"),
+                "explanation_codes": [
+                    *list(candidate["eligibility_reasons"]),
+                    "NOT_CLUSTER_REPRESENTATIVE",
+                ],
+            }
+        )
+
     all_exposures = [*contract_exposure.values(), 0]
     all_strict = [*strict_exposure.values(), 0]
     all_catalyst = [*catalyst_exposure.values(), 0]
@@ -1049,45 +1181,59 @@ def build_portfolio_target(
     invested_amount = round(sum(contract_exposure.values()), 2)
     cash_retained = round(max(0, settings.bankroll_usd - invested_amount), 2)
     bankroll_result = invested_amount <= settings.bankroll_usd + 1e-9
-    selected = [row for row in allocations if float(row["proposed_buy_usd"]) > 0]
-    total_selected = sum(float(row["proposed_buy_usd"]) for row in selected)
+    selected_buys = [
+        row for row in allocations if float(row["proposed_buy_usd"]) > 0
+    ]
+    target_rows = [
+        row for row in allocations if float(row["target_exposure_usd"]) > 0
+    ]
+    target_exposure_total = sum(
+        float(row["target_exposure_usd"]) for row in target_rows
+    )
     weighted_current = (
         sum(
-            float(row["current_odds"] or 0) * float(row["proposed_buy_usd"])
-            for row in selected
+            float(row["current_odds"] or 0) * float(row["target_exposure_usd"])
+            for row in target_rows
         )
-        / total_selected
-        if total_selected
+        / target_exposure_total
+        if target_exposure_total
         else 0
     )
     weighted_llm = (
         sum(
-            float(row["llm_odds"] or 0) * float(row["proposed_buy_usd"])
-            for row in selected
+            float(row["llm_odds"] or 0) * float(row["target_exposure_usd"])
+            for row in target_rows
         )
-        / total_selected
-        if total_selected
+        / target_exposure_total
+        if target_exposure_total
         else 0
     )
-    weighted_edge = weighted_llm - weighted_current if total_selected else 0
+    weighted_edge = (
+        weighted_llm - weighted_current if target_exposure_total else 0
+    )
     dollar_return_per_day = sum(
-        float(row["proposed_buy_usd"]) * float(row["returns_per_day"] or 0) / 100
-        for row in selected
+        float(row["target_exposure_usd"])
+        * float(row["returns_per_day"] or 0)
+        / 100
+        for row in target_rows
     )
     maximum_payout = sum(
-        float(row["proposed_buy_usd"])
+        float(row["target_exposure_usd"])
         * 100
         / max(float(row["current_odds"] or 100), 0.01)
-        for row in selected
+        for row in target_rows
     )
     expected_profit = sum(
-        float(row["proposed_buy_usd"])
+        float(row["target_exposure_usd"])
         * (
             (float(row["llm_odds"] or 0) / max(float(row["current_odds"] or 100), 0.01))
             - 1
         )
-        for row in selected
+        for row in target_rows
     )
+    invested_cluster_ids = {
+        str(row["common_catalyst_cluster_id"]) for row in target_rows
+    }
     portfolio_certified = (
         bankroll_result
         and contract_cap_result
@@ -1118,10 +1264,11 @@ def build_portfolio_target(
         "stress_scenarios": stress_scenarios,
         "certificate": certificate,
         "metrics": {
-            "selected_contracts": len(selected),
+            "selected_contracts": len(target_rows),
+            "new_buy_contracts": len(selected_buys),
             "invested": invested_amount,
             "cash_retained": cash_retained,
-            "independent_clusters": len(catalyst_exposure),
+            "independent_clusters": len(invested_cluster_ids),
             "stress_test_result": "pass" if stress_test_result else "fail",
         },
         "portfolio_metrics": {
@@ -1133,7 +1280,7 @@ def build_portfolio_target(
             "llm_implied_expected_profit": round(expected_profit, 2),
             "invested_amount": invested_amount,
             "cash_retained": cash_retained,
-            "independent_clusters": len(catalyst_exposure),
+            "independent_clusters": len(invested_cluster_ids),
         },
         "pass_condition_met": portfolio_certified,
         "pass_condition": "The deterministic portfolio certificate is valid and every contract, cluster and adverse-scenario cap passes.",

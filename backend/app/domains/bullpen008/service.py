@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -35,6 +35,9 @@ from app.domains.bullpen008.schemas import (
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveRunRecord,
     PolymarketAutoLiveSettingsRecord,
+)
+from app.domains.polymarket_auto_live.console_profile import (
+    next_custom_console_schedule_time,
 )
 
 
@@ -258,7 +261,11 @@ async def update_settings(
 
 
 def _next_run_at(settings: Bullpen008Settings, *, now: datetime) -> datetime:
-    return now + timedelta(minutes=settings.auto_refresh_minutes)
+    return next_custom_console_schedule_time(
+        now,
+        start_at=settings.auto_start_at,
+        refresh_minutes=settings.auto_refresh_minutes,
+    )
 
 
 async def set_scheduler_running(

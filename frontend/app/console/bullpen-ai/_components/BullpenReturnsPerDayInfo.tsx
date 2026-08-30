@@ -12,6 +12,8 @@ export const DEFAULT_RETURNS_PER_DAY_FORMULA =
 
 type BullpenReturnsPerDayFormulaDialogProps = {
   onClose: () => void;
+  loadFormula?: () => Promise<string>;
+  saveFormula?: (formula: string) => Promise<string>;
 };
 
 type BullpenReturnsPerDayHeaderInfoProps = {
@@ -90,6 +92,8 @@ export function BullpenReturnsPerDayValueButton({
 
 export function BullpenReturnsPerDayFormulaDialog({
   onClose,
+  loadFormula,
+  saveFormula: saveFormulaOverride,
 }: BullpenReturnsPerDayFormulaDialogProps) {
   const [formula, setFormula] = useState(DEFAULT_RETURNS_PER_DAY_FORMULA);
   const [savedFormula, setSavedFormula] = useState(DEFAULT_RETURNS_PER_DAY_FORMULA);
@@ -99,11 +103,15 @@ export function BullpenReturnsPerDayFormulaDialog({
 
   useEffect(() => {
     let active = true;
-    void apiService
-      .getBullpenAutoLiveSettings()
-      .then((settings) => {
+    const request = loadFormula
+      ? loadFormula()
+      : apiService
+          .getBullpenAutoLiveSettings()
+          .then((settings) => settings.returns_per_day_formula);
+    void request
+      .then((saved) => {
         if (!active) return;
-        const next = settings.returns_per_day_formula || DEFAULT_RETURNS_PER_DAY_FORMULA;
+        const next = saved || DEFAULT_RETURNS_PER_DAY_FORMULA;
         setFormula(next);
         setSavedFormula(next);
       })
@@ -116,17 +124,21 @@ export function BullpenReturnsPerDayFormulaDialog({
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadFormula]);
 
   const saveFormula = async () => {
     setSaving(true);
     setMessage(null);
     try {
-      const settings = await apiService.updateBullpenAutoLiveSettings({
-        returns_per_day_formula: formula,
-      });
-      setFormula(settings.returns_per_day_formula);
-      setSavedFormula(settings.returns_per_day_formula);
+      const saved = saveFormulaOverride
+        ? await saveFormulaOverride(formula)
+        : (
+            await apiService.updateBullpenAutoLiveSettings({
+              returns_per_day_formula: formula,
+            })
+          ).returns_per_day_formula;
+      setFormula(saved);
+      setSavedFormula(saved);
       setMessage("Formula saved. It will be used for all new event calculations.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Formula could not be saved.");

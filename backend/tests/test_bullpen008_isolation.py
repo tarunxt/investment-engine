@@ -17,7 +17,12 @@ from app.domains.bullpen008.models import (
     Bullpen008StageOutputRecord,
     Bullpen008StateRecord,
 )
-from app.domains.bullpen008.service import _seed_payload_from_007, stage_from_record
+from app.domains.bullpen008.schemas import Bullpen008Settings
+from app.domains.bullpen008.service import (
+    _next_run_at,
+    _seed_payload_from_007,
+    stage_from_record,
+)
 from app.domains.bullpen008.tasks import (
     _merge_stage2_provider_rows,
     _stage2_input_rows,
@@ -169,3 +174,33 @@ def test_phase1_task_never_imports_or_calls_order_submission() -> None:
     assert "execute_order" not in source
     assert "submit_order" not in source
     assert "create_order_intent" not in source
+
+
+def test_008_scan_bypasses_007_prefilters_without_changing_007_default() -> None:
+    scanner = Path("app/domains/polymarket_auto_live/scanner.py").read_text()
+    console_profile = Path(
+        "app/domains/polymarket_auto_live/console_profile.py"
+    ).read_text()
+    task = Path("app/domains/bullpen008/tasks.py").read_text()
+
+    assert "apply_base_filters: bool = True" in scanner
+    assert "apply_base_filters: bool = True" in console_profile
+    assert "apply_base_filters=False" in task
+    assert '"pre_stage1_filters_applied": False' in task
+
+
+def test_llm_parse_failures_retain_raw_provider_payloads_for_audit() -> None:
+    source = Path("app/domains/bullpen008/tasks.py").read_text()
+    assert '"raw_provider_response": raw_provider_response' in source
+    assert '"raw_provider_response": raw_cluster_response' in source
+
+
+def test_008_scheduler_honours_the_seeded_007_start_time() -> None:
+    now = datetime(2026, 8, 30, 12, 0, tzinfo=UTC)
+    settings = Bullpen008Settings(
+        auto_start_at="18:00:00 30 August, 2026",
+        auto_refresh_minutes=360,
+    )
+    assert _next_run_at(settings, now=now) == datetime(
+        2026, 8, 30, 12, 30, tzinfo=UTC
+    )
