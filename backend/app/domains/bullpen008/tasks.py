@@ -19,6 +19,7 @@ from app.domains.bullpen008.constants import (
     CELERY_SCHEDULER_TASK_NAME,
     CELERY_TASK_NAME,
     CLUSTER_PROMPT_VERSION,
+    COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS,
     LLM_PROMPT_VERSION,
     PENDING_MARKER_TTL_SECONDS,
     PENDING_ORDER_STATUSES,
@@ -197,6 +198,7 @@ async def _capture_stage1_inputs(
             custom_exclude_phrases=[],
             apply_base_filters=False,
             use_keyset_pagination=True,
+            gamma_scan_timeout_seconds=COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS,
         ),
         read_console_wallet_positions_snapshot(
             force_fresh=True,
@@ -260,6 +262,7 @@ async def _capture_stage1_inputs(
         "details": scan.details,
         "pre_stage1_filters_applied": False,
         "pagination_mode": "gamma-markets-keyset",
+        "scan_timeout_seconds": COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS,
     }
     return market_packets, active_positions, wallet_snapshot, scan_metadata
 
