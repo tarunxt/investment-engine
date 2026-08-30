@@ -47,6 +47,13 @@ from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(prefix="/polymarket/bullpen008", tags=["bullpen008"])
 
+# The public same-origin proxy has a deliberately small mutation budget.  A
+# broker reconnect can consume several seconds even though the publish later
+# succeeds, so only wait briefly for the acknowledgement.  The run is already
+# durable and the stable Celery task id plus run lock make the ambiguous path
+# idempotent.
+PUBLISH_ACK_TIMEOUT_SECONDS = 0.25
+
 
 def _pending_key(user_id: int) -> str:
     return f"{REDIS_PREFIX}:pending:user:{user_id}"
@@ -223,7 +230,7 @@ async def run_bullpen008_once(
         )
         try:
             async_result = await asyncio.wait_for(
-                asyncio.shield(publish), timeout=5
+                asyncio.shield(publish), timeout=PUBLISH_ACK_TIMEOUT_SECONDS
             )
             dispatch_status = "published"
             celery_task_id = async_result.id
@@ -313,13 +320,33 @@ async def retry_bullpen008_run(
             "retry_version": int(frozen.run_metadata.get("retry_version", 0)) + 1,
             "frozen_source_run_unchanged": True,
         }
-        async_result = execute_bullpen008_run.apply_async(
-            args=[record.id],
-            queue=CELERY_QUEUE,
-            task_id=f"bullpen008:{record.id}",
-            headers={"workflow_profile": "bullpen008", "retry_of_run_id": run_id},
+        publish = asyncio.create_task(
+            asyncio.to_thread(
+                execute_bullpen008_run.apply_async,
+                args=[record.id],
+                queue=CELERY_QUEUE,
+                task_id=f"bullpen008:{record.id}",
+                headers={"workflow_profile": "bullpen008", "retry_of_run_id": run_id},
+                retry=False,
+            )
         )
-        record.task_metadata = {**dict(record.task_metadata), "celery_task_id": async_result.id, "dispatch_status": "published"}
+        try:
+            async_result = await asyncio.wait_for(
+                asyncio.shield(publish), timeout=PUBLISH_ACK_TIMEOUT_SECONDS
+            )
+            dispatch_status = "published"
+            celery_task_id = async_result.id
+        except TimeoutError:
+            dispatch_status = "publish-timeout-ambiguous"
+            celery_task_id = f"bullpen008:{record.id}"
+            publish.add_done_callback(
+                lambda task: task.exception() if not task.cancelled() else None
+            )
+        record.task_metadata = {
+            **dict(record.task_metadata),
+            "celery_task_id": celery_task_id,
+            "dispatch_status": dispatch_status,
+        }
         await session.commit()
         loaded = await get_run(session, user_id=current_user.id, run_id=record.id)
         assert loaded is not None
