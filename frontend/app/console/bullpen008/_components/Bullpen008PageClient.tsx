@@ -70,15 +70,15 @@ const STAGES = [
   },
   {
     number: 5,
-    name: "Execution Planning",
-    detail: "Pending Phase 2. No order intents can be created in Phase 1.",
-    metricKeys: [],
+    name: "Exit & Rebalance Plan",
+    detail: "Translates only the certified Stage 4 target into an immutable, dependency-ordered plan.",
+    metricKeys: ["claims", "cancellations", "sells", "trims", "buys", "holds", "blocked", "expected_post_plan_cash", "plan_certificate_result"],
   },
   {
     number: 6,
-    name: "Execution & Reconciliation",
-    detail: "Pending Phase 2. No trades can be submitted in Phase 1.",
-    metricKeys: [],
+    name: "Execute & Reconcile",
+    detail: "Revalidates every immutable action, then safely executes or shadow-validates and reconciles it.",
+    metricKeys: ["planned", "risk_certified", "ready", "durable_intents", "submitted", "confirmed", "partially_filled", "blocked", "failed", "recoverable", "reconciled"],
   },
 ] as const;
 
@@ -139,6 +139,10 @@ function statusStyle(status: Bullpen008StageStatus | string) {
       return "border-rose-200 bg-rose-50 text-rose-700";
     case "blocked":
       return "border-amber-200 bg-amber-50 text-amber-800";
+    case "partial":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "cancelled":
+      return "border-slate-300 bg-slate-100 text-slate-700";
     default:
       return "border-slate-200 bg-slate-100 text-slate-600";
   }
@@ -169,20 +173,16 @@ function StageCard({
   stage?: Bullpen008StageOutput;
   onOpen: () => void;
 }) {
-  const phase2 = definition.number > 4;
-  const status = phase2 ? "disabled" : stage?.status ?? "pending";
+  const status = stage?.status ?? "pending";
   const metrics = metricSource(stage);
-  const progressPercent = status === "finished" ? 100 : status === "running" ? 55 : 0;
+  const progressPercent = status === "finished" ? 100 : status === "partial" ? 75 : status === "running" ? 55 : 0;
   return (
     <button
       type="button"
-      disabled={phase2 || !stage}
+      disabled={!stage}
       onClick={onOpen}
       className={cn(
-        "group flex min-h-[28rem] flex-col rounded-2xl border bg-white p-4 text-left shadow-sm transition",
-        phase2
-          ? "cursor-not-allowed border-dashed border-slate-300 bg-slate-50/70"
-          : "border-slate-200 hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-lg disabled:translate-y-0 disabled:cursor-default disabled:hover:border-slate-200 disabled:hover:shadow-sm",
+        "group flex min-h-[30rem] flex-col rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-lg disabled:translate-y-0 disabled:cursor-default disabled:hover:border-slate-200 disabled:hover:shadow-sm",
       )}
       aria-label={`Stage ${definition.number}: ${definition.name}. ${status}`}
     >
@@ -195,7 +195,7 @@ function StageCard({
         </div>
         <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold capitalize", statusStyle(status))}>
           <StatusIcon status={status} />
-          {phase2 ? "Pending Phase 2" : status}
+          {status}
         </span>
       </div>
       <p className="mt-3 text-sm leading-6 text-slate-600">{definition.detail}</p>
@@ -215,11 +215,6 @@ function StageCard({
             <p className="mt-1 text-sm font-semibold text-slate-900">{formatMetric(key, metrics[key])}</p>
           </div>
         ))}
-        {phase2 ? (
-          <div className="col-span-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs font-medium text-amber-900">
-            Disabled in Phase 1 · orders permitted: no
-          </div>
-        ) : null}
       </div>
       {stage ? (
         <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
@@ -364,6 +359,34 @@ export function Bullpen008PageClient() {
     }
   };
 
+  const togglePause = async () => {
+    setBusyAction("pause");
+    setError(null);
+    try {
+      if (bootstrap?.state.paused) await apiService.resumeBullpen008Scheduler();
+      else await apiService.pauseBullpen008Scheduler();
+      await load();
+    } catch (actionError) {
+      setError(`The 008 pause state could not be changed. ${formatUnknownError(actionError)}`);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const toggleEmergencyStop = async () => {
+    setBusyAction("emergency");
+    setError(null);
+    try {
+      if (bootstrap?.state.emergency_stop) await apiService.clearBullpen008EmergencyStop();
+      else await apiService.emergencyStopBullpen008();
+      await load();
+    } catch (actionError) {
+      setError(`The 008 emergency stop could not be changed. ${formatUnknownError(actionError)}`);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
   const loadReturnsFormula = useCallback(async () => {
     const settings = await apiService.getBullpen008Settings();
     return settings.returns_per_day_formula;
@@ -429,11 +452,11 @@ export function Bullpen008PageClient() {
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Copy Trading Bots</p>
               <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700">Bullpen 008</span>
-              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">Shadow mode · no orders</span>
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">{bootstrap?.settings.execution_mode === "shadow" ? "Shadow mode · no orders" : bootstrap?.settings.execution_mode}</span>
             </div>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight text-slate-950">Bullpen 008</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              Isolated six-stage evolution of Bullpen 007. Phase 1 executes Stages 1–4 and can never create an order intent or submit a trade.
+              Isolated six-stage evolution of Bullpen 007. Stage 4 owns the target, Stage 5 certifies an immutable action plan, and Stage 6 is production-locked in shadow mode until separately armed.
             </p>
             <div className="mt-4 flex flex-wrap gap-4 text-xs text-slate-500">
               <span>Profile: <strong className="text-slate-700">bullpen008</strong></span>
@@ -447,7 +470,7 @@ export function Bullpen008PageClient() {
             </Button>
             <Button onClick={() => void runOnce()} disabled={Boolean(busyAction) || Boolean(latestRun && !TERMINAL_RUN_STATUSES.has(latestRun.status))}>
               {busyAction === "run" || (latestRun && !TERMINAL_RUN_STATUSES.has(latestRun.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-              Run Stages 1–4
+              Run six stages
             </Button>
           </div>
         </div>
@@ -471,7 +494,7 @@ export function Bullpen008PageClient() {
         <CardHeader className="flex flex-col gap-4 border-b border-slate-100 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <CardTitle>Background worker monitor</CardTitle>
-            <CardDescription className="mt-2">A stage is Finished only after its recorded pass condition succeeds.</CardDescription>
+            <CardDescription className="mt-2">A stage is Finished only after its recorded pass condition succeeds. Current stage: {latestRun?.stages.find((stage) => stage.status === "running")?.stage_name ?? (latestRun?.status === "completed" ? "Reconciled outcome" : "Idle")}.</CardDescription>
           </div>
           {latestRun ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -562,8 +585,10 @@ export function Bullpen008PageClient() {
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void saveSettings()} disabled={Boolean(busyAction)}>{busyAction === "settings" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}Save 008 settings</Button>
               <Button variant="outline" onClick={() => void toggleScheduler()} disabled={Boolean(busyAction)}>{busyAction === "scheduler" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Clock3 className="mr-2 h-4 w-4" />}{bootstrap?.state.running ? "Stop schedule" : "Start schedule"}</Button>
+              <Button variant="outline" onClick={() => void togglePause()} disabled={Boolean(busyAction) || !bootstrap?.state.running}>{bootstrap?.state.paused ? "Resume" : "Pause"}</Button>
+              <Button variant="destructive" onClick={() => void toggleEmergencyStop()} disabled={Boolean(busyAction)}>{bootstrap?.state.emergency_stop ? "Clear emergency stop" : "Emergency stop"}</Button>
             </div>
-            <p className="text-xs text-slate-500">Next run: {formatApiTimestamp(bootstrap?.state.next_run_at, { emptyValue: "Not scheduled" })}</p>
+            <p className="text-xs text-slate-500">Next run: {formatApiTimestamp(bootstrap?.state.next_run_at, { emptyValue: "Not scheduled" })} · Mode: {bootstrap?.state.execution_mode} · Last run: {bootstrap?.state.last_run_id ?? "none"}</p>
           </CardContent>
         </Card>
       </div>
@@ -621,6 +646,24 @@ export function Bullpen008PageClient() {
                     </td>
                   </tr>
                 ) : null}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-3xl border-slate-200 shadow-sm">
+        <CardHeader>
+          <CardTitle>Held-position alerts</CardTitle>
+          <CardDescription>008-only LLM and actual-odds warning episodes. Refresh alerts never create orders.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="min-w-[760px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3">Market</th><th className="px-4 py-3">Side</th><th className="px-4 py-3">Breach</th><th className="px-4 py-3 text-right">LLM odds</th><th className="px-4 py-3 text-right">Actual odds</th><th className="px-4 py-3">Source</th><th className="px-4 py-3">State</th></tr></thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {(bootstrap?.alerts ?? []).map((alert) => <tr key={alert.id}><td className="px-4 py-3 font-medium text-slate-900">{String(alert.payload.question ?? alert.market_id)}</td><td className="px-4 py-3 font-semibold">{alert.side}</td><td className="px-4 py-3 capitalize">{alert.breach_type}</td><td className="px-4 py-3 text-right tabular-nums">{alert.llm_odds == null ? "—" : `${alert.llm_odds.toFixed(2)}%`}</td><td className="px-4 py-3 text-right tabular-nums">{alert.actual_odds == null ? "—" : `${alert.actual_odds.toFixed(2)}%`}</td><td className="px-4 py-3">{alert.source.replaceAll("_", " ")}</td><td className="px-4 py-3">{alert.recovered_at ? "Recovered" : "Active"}</td></tr>)}
+                {(bootstrap?.alerts.length ?? 0) === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No Bullpen 008 warning episodes.</td></tr> : null}
               </tbody>
             </table>
           </div>

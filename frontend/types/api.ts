@@ -3050,6 +3050,8 @@ export type Bullpen008StageStatus =
   | "finished"
   | "failed"
   | "blocked"
+  | "partial"
+  | "cancelled"
   | "disabled";
 
 export interface Bullpen008LlmTarget {
@@ -3059,8 +3061,11 @@ export interface Bullpen008LlmTarget {
 
 export interface Bullpen008Settings {
   workflow_profile: "bullpen008";
-  shadow_mode: true;
-  execution_enabled: false;
+  shadow_mode: boolean;
+  execution_enabled: boolean;
+  execution_mode: "shadow" | "confirmation_required" | "live";
+  live_control_armed: boolean;
+  emergency_stop: boolean;
   bankroll_usd: number;
   max_contract_exposure_usd: number;
   max_strict_cluster_exposure_usd: number;
@@ -3077,6 +3082,13 @@ export interface Bullpen008Settings {
   risk_half_size_max: number;
   probability_tolerance_pp: number;
   stale_quote_seconds: number;
+  wallet_freshness_seconds: number;
+  plan_max_age_seconds: number;
+  exit_edge_threshold_pp: number;
+  max_slippage_cents: number;
+  max_spread_cents: number;
+  dust_threshold_usd: number;
+  exposure_rounding_tolerance_usd: number;
   closing_window_days: number;
   custom_exclude_phrases: string[];
   returns_per_day_formula: string;
@@ -3088,14 +3100,16 @@ export interface Bullpen008Settings {
 export type Bullpen008SettingsUpdate = Partial<
   Omit<
     Bullpen008Settings,
-    "workflow_profile" | "shadow_mode" | "execution_enabled"
+    "workflow_profile" | "shadow_mode" | "execution_enabled" | "execution_mode" | "live_control_armed" | "emergency_stop"
   >
 >;
 
 export interface Bullpen008State {
   workflow_profile: "bullpen008";
-  shadow_mode: true;
-  execution_enabled: false;
+  shadow_mode: boolean;
+  execution_enabled: boolean;
+  execution_mode: "shadow" | "confirmation_required" | "live";
+  emergency_stop: boolean;
   running: boolean;
   paused: boolean;
   status: string;
@@ -3136,8 +3150,8 @@ export interface Bullpen008Run {
   workflow_profile: "bullpen008";
   status: string;
   triggered_by: string;
-  shadow_mode: true;
-  execution_enabled: false;
+  shadow_mode: boolean;
+  execution_enabled: boolean;
   started_at: string;
   completed_at: string | null;
   summary: string;
@@ -3149,6 +3163,8 @@ export interface Bullpen008Run {
   run_metadata: Record<string, unknown>;
   stages: Bullpen008StageOutput[];
   portfolio_certificate: Record<string, unknown> | null;
+  action_plan: Record<string, unknown> | null;
+  execution_intents: Record<string, unknown>[];
 }
 
 export interface Bullpen008InheritedRun {
@@ -3165,13 +3181,27 @@ export interface Bullpen008InheritedRun {
 export interface Bullpen008Bootstrap {
   workflow_profile: "bullpen008";
   page_identity: "Bullpen 008";
-  shadow_mode: true;
-  execution_enabled: false;
+  shadow_mode: boolean;
+  execution_enabled: boolean;
   settings: Bullpen008Settings;
   state: Bullpen008State;
   latest_run: Bullpen008Run | null;
   inherited_runs: Bullpen008InheritedRun[];
+  alerts: Bullpen008Alert[];
   pending_phase2_stages: number[];
+}
+
+export interface Bullpen008Alert {
+  id: number;
+  market_id: string;
+  side: string;
+  source: string;
+  breach_type: string;
+  llm_odds: number | null;
+  actual_odds: number | null;
+  created_at: string;
+  recovered_at: string | null;
+  payload: Record<string, unknown>;
 }
 
 export interface Bullpen008HistoryPage {

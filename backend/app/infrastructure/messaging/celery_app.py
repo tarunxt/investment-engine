@@ -57,8 +57,10 @@ celery.conf.task_routes = {
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
-    "app.domains.bullpen008.tasks.execute_bullpen008_shadow_run": {"queue": AUTO_LIVE_QUEUE},
+    "app.domains.bullpen008.tasks.execute_bullpen008_run": {"queue": AUTO_LIVE_QUEUE},
     "app.domains.bullpen008.tasks.enqueue_due_bullpen008_runs": {"queue": "beat"},
+    "app.domains.bullpen008.tasks.refresh_bullpen008_position_alerts": {"queue": "beat"},
+    "app.domains.bullpen008.tasks.recover_bullpen008_executions": {"queue": "ai"},
     "app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history": {"queue": "ai"},
     "app.domains.fx_rates.tasks.refresh_usd_inr_rate": {"queue": "beat"},
     "app.domains.dashboard.tasks.capture_daily_dashboard_portfolios": {"queue": "beat"},
@@ -100,6 +102,14 @@ celery.conf.beat_schedule = {
     },
     "bullpen008-shadow-due-run-scan": {
         "task": "app.domains.bullpen008.tasks.enqueue_due_bullpen008_runs",
+        "schedule": crontab(minute="*"),
+    },
+    "bullpen008-held-position-alert-refresh": {
+        "task": "app.domains.bullpen008.tasks.refresh_bullpen008_position_alerts",
+        "schedule": crontab(minute="*"),
+    },
+    "bullpen008-execution-recovery": {
+        "task": "app.domains.bullpen008.tasks.recover_bullpen008_executions",
         "schedule": crontab(minute="*"),
     },
     "polymarket-auto-live-order-intent-dispatch": {

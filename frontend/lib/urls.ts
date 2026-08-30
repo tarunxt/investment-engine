@@ -277,10 +277,20 @@ const bullpen008ApiUrls = {
     `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/start`,
   schedulerStop: () =>
     `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/stop`,
+  schedulerPause: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/pause`,
+  schedulerResume: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/scheduler/resume`,
+  emergencyStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop`,
+  clearEmergencyStop: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop/clear`,
   runOnce: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/run-once`,
   runs: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/runs`,
   run: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}`,
+  retryRun: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/retry`,
   stage: (runId: string, stageNumber: number) =>
     `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/stages/${stageNumber}`,
 };

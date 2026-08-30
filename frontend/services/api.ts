@@ -1662,6 +1662,22 @@ class apiServiceClass implements IApiService {
     return this.post<Bullpen008State>(URLs.bullpen008.schedulerStop());
   }
 
+  pauseBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerPause());
+  }
+
+  resumeBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerResume());
+  }
+
+  emergencyStopBullpen008(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.emergencyStop());
+  }
+
+  clearBullpen008EmergencyStop(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.clearEmergencyStop());
+  }
+
   runBullpen008Once(idempotencyKey?: string): Promise<Bullpen008Run> {
     return this.post<Bullpen008Run>(
       URLs.bullpen008.runOnce(),
@@ -1691,6 +1707,13 @@ class apiServiceClass implements IApiService {
       cache: "no-store",
       ...options,
     });
+  }
+
+  retryBullpen008Run(runId: string, idempotencyKey?: string): Promise<Bullpen008Run> {
+    return this.post<Bullpen008Run>(
+      URLs.bullpen008.retryRun(runId),
+      idempotencyKey ? { idempotency_key: idempotencyKey } : undefined,
+    );
   }
 
   getBullpen008Stage(

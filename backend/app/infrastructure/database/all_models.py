@@ -21,6 +21,11 @@ from app.domains.bullpen_run_audit.models import (  # noqa: F401
     BullpenRunAuditStageRecord,
 )
 from app.domains.bullpen008.models import (  # noqa: F401
+    Bullpen008ActionPlanRecord,
+    Bullpen008AlertRecord,
+    Bullpen008ExecutionAttemptRecord,
+    Bullpen008ExecutionEventRecord,
+    Bullpen008ExecutionIntentRecord,
     Bullpen008PortfolioCertificateRecord,
     Bullpen008RunRecord,
     Bullpen008SettingsRecord,

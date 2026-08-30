@@ -384,7 +384,7 @@ def test_optimizer_enforces_caps_pending_exposure_increments_cash_and_half_size(
     )
 
 
-def test_optimizer_rejects_adverse_scenario_above_common_catalyst_cap() -> None:
+def test_optimizer_authoritatively_trims_adverse_scenario_to_cluster_cap() -> None:
     settings = Bullpen008Settings()
     rows = [
         clustered_candidate("a", "shared", current_exposure_usd=12),
@@ -393,9 +393,11 @@ def test_optimizer_rejects_adverse_scenario_above_common_catalyst_cap() -> None:
     result = build_portfolio_target(
         rows, settings=settings, available_cash_usd=100, inputs_hash="stress"
     )
-    assert result["certificate"]["stress_test_result"] is False
-    assert result["certificate"]["portfolio_certified"] is False
-    assert result["pass_condition_met"] is False
+    assert result["certificate"]["stress_test_result"] is True
+    assert result["certificate"]["portfolio_certified"] is True
+    assert result["pass_condition_met"] is True
+    assert sum(float(row["target_exposure_usd"]) for row in result["allocations"]) <= 20
+    assert sum(float(row["proposed_sell_usd"]) for row in result["allocations"]) >= 2
 
     tampered = dict(result["certificate"])
     tampered["bankroll"] = 201
@@ -449,5 +451,5 @@ def test_optimizer_outputs_every_row_and_weights_the_target_portfolio() -> None:
     assert result["portfolio_metrics"]["weighted_current_odds"] == 82
     assert result["portfolio_metrics"]["weighted_llm_odds"] == 86
     assert result["portfolio_metrics"]["weighted_edge_pp"] == 4
-    assert result["metrics"]["selected_contracts"] == 2
+    assert result["metrics"]["selected_contracts"] == 1
     assert result["metrics"]["independent_clusters"] == 1

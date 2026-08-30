@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, Loader2 } from "lucide-react";
 
@@ -14,9 +15,11 @@ import type { Bullpen008Run, Bullpen008StageOutput } from "@/types/api";
 import { BullpenAutoRunStageOutputDialog } from "../../../bullpen-ai/_components/BullpenAutoRunStageOutputDialog";
 
 export function Bullpen008RunDetailClient({ runId }: { runId: string }) {
+  const router = useRouter();
   const [run, setRun] = useState<Bullpen008Run | null>(null);
   const [selectedStage, setSelectedStage] = useState<Bullpen008StageOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -37,17 +40,27 @@ export function Bullpen008RunDetailClient({ runId }: { runId: string }) {
       );
     }
   };
+  const retryRun = async () => {
+    setRetrying(true);
+    try {
+      const nextRun = await apiService.retryBullpen008Run(runId, `bullpen008-retry-ui-${runId}-${Date.now()}`);
+      router.push(URLs.routes.console.bullpen008RunDetail(nextRun.id));
+    } catch (reason) {
+      setError(`The immutable retry could not be queued. ${formatUnknownError(reason)}`);
+      setRetrying(false);
+    }
+  };
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 p-6">
-      <Button variant="outline" asChild><Link href={URLs.routes.console.bullpen008()}><ArrowLeft className="mr-2 h-4 w-4" />Bullpen 008</Link></Button>
+      <div className="flex flex-wrap gap-2"><Button variant="outline" asChild><Link href={URLs.routes.console.bullpen008()}><ArrowLeft className="mr-2 h-4 w-4" />Bullpen 008</Link></Button><Button variant="outline" onClick={() => void retryRun()} disabled={retrying}>{retrying ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}Retry as new run</Button></div>
       <Card className="rounded-3xl border-slate-200 shadow-sm">
         <CardHeader><p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Bullpen 008 · immutable run</p><CardTitle>{run.id}</CardTitle><CardDescription>{run.summary}</CardDescription></CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Status</p><p className="mt-1 font-semibold capitalize">{run.status}</p></div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Started</p><p className="mt-1 font-semibold">{formatApiTimestamp(run.started_at)}</p></div>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3"><p className="text-xs text-slate-500">Profile</p><p className="mt-1 font-semibold">{run.workflow_profile}</p></div>
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs text-amber-700">Execution</p><p className="mt-1 font-semibold text-amber-900">Shadow · no orders</p></div>
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs text-amber-700">Execution</p><p className="mt-1 font-semibold text-amber-900">{run.execution_enabled ? "Explicitly armed" : "Shadow · no remote writes"}</p></div>
         </CardContent>
       </Card>
       <div className="grid gap-4 lg:grid-cols-2">

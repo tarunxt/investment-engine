@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+import html
+import os
 from typing import Any
 from uuid import uuid4
 
@@ -27,6 +29,14 @@ from app.domains.bullpen008.constants import (
     STAGE_VERSIONS,
     WORKFLOW_PROFILE,
 )
+from app.domains.bullpen008.planning import (
+    build_action_plan,
+    preflight_execution_plan,
+)
+from app.domains.bullpen008.execution import (
+    ProductionBullpen008Adapter,
+    execute_certified_action,
+)
 from app.domains.bullpen008.engine import (
     STAGE2_PARSER_VERSION,
     STAGE3_PARSER_VERSION,
@@ -42,6 +52,11 @@ from app.domains.bullpen008.engine import (
     stable_hash,
 )
 from app.domains.bullpen008.models import (
+    Bullpen008ActionPlanRecord,
+    Bullpen008AlertRecord,
+    Bullpen008ExecutionAttemptRecord,
+    Bullpen008ExecutionEventRecord,
+    Bullpen008ExecutionIntentRecord,
     Bullpen008PortfolioCertificateRecord,
     Bullpen008RunRecord,
     Bullpen008SettingsRecord,
@@ -57,6 +72,10 @@ from app.domains.polymarket_auto_live.console_profile import (
 )
 from app.domains.polymarket_auto_live.models import (
     PolymarketAutoLiveOrderIntentRecord,
+)
+from app.domains.polymarket_auto_live.execution import refresh_execution_quote
+from app.domains.polymarket_auto_live.advisory_lock import (
+    acquire_bullpen_account_execution_advisory_lock_sync,
 )
 from app.domains.bullpen_run_audit.provenance import resolve_backend_commit_sha
 from app.infrastructure.database.sync_session import SyncSessionLocal
@@ -427,6 +446,23 @@ def _pending_exposures(user_id: int) -> tuple[dict[str, float], dict[str, float]
             .scalars()
             .all()
         )
+        phase2_records = (
+            session.execute(
+                select(Bullpen008ExecutionIntentRecord)
+                .join(
+                    Bullpen008RunRecord,
+                    Bullpen008RunRecord.id
+                    == Bullpen008ExecutionIntentRecord.run_id,
+                )
+                .where(
+                    Bullpen008RunRecord.user_id == user_id,
+                    Bullpen008ExecutionIntentRecord.workflow_profile
+                    == WORKFLOW_PROFILE,
+                )
+            )
+            .scalars()
+            .all()
+        )
     for intent in records:
         market_id = str(intent.market_id)
         action = str(intent.action).upper()
@@ -442,7 +478,522 @@ def _pending_exposures(user_id: int) -> tuple[dict[str, float], dict[str, float]
             confirmed_exits[market_id] = confirmed_exits.get(market_id, 0) + float(
                 intent.confirmed_release_usd or 0
             )
+    for intent in phase2_records:
+        market_id = str(intent.market_id)
+        action = str(intent.action_type).upper()
+        status = str(intent.status).lower()
+        payload = dict(intent.payload or {})
+        if action == "BUY" and status in PENDING_ORDER_STATUSES:
+            remaining = max(
+                0.0,
+                float(payload.get("estimated_usd") or 0)
+                - float(intent.filled_value_usd or 0),
+            )
+            pending_buys[market_id] = pending_buys.get(market_id, 0) + remaining
+        if action in {"SELL", "FULL_EXIT", "TRIM"} and status == "reconciled":
+            confirmed_exits[market_id] = confirmed_exits.get(market_id, 0) + float(
+                intent.filled_value_usd or payload.get("estimated_usd") or 0
+            )
     return pending_buys, confirmed_exits
+
+
+def _pending_order_packets(user_id: int) -> list[dict[str, object]]:
+    """Read both 007 and 008 durable orders without mutating either profile."""
+    packets: list[dict[str, object]] = []
+    with SyncSessionLocal() as session:
+        legacy = (
+            session.execute(
+                select(PolymarketAutoLiveOrderIntentRecord).where(
+                    PolymarketAutoLiveOrderIntentRecord.user_id == user_id
+                )
+            )
+            .scalars()
+            .all()
+        )
+        phase2 = (
+            session.execute(
+                select(Bullpen008ExecutionIntentRecord)
+                .join(Bullpen008RunRecord, Bullpen008RunRecord.id == Bullpen008ExecutionIntentRecord.run_id)
+                .where(
+                    Bullpen008RunRecord.user_id == user_id,
+                    Bullpen008ExecutionIntentRecord.workflow_profile == WORKFLOW_PROFILE,
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for intent in legacy:
+        packets.append(
+            {
+                "profile": "bullpen007",
+                "intent_id": intent.id,
+                "market_id": intent.market_id,
+                "condition_id": intent.condition_id,
+                "side": intent.side,
+                "action": intent.action,
+                "status": intent.status,
+                "current_order_usd": intent.current_order_usd,
+                "requested_order_usd": intent.requested_order_usd,
+                "remote_order_id": intent.remote_order_id,
+                "remaining_shares": intent.remaining_shares,
+            }
+        )
+    for intent in phase2:
+        packets.append(
+            {
+                "profile": WORKFLOW_PROFILE,
+                "intent_id": intent.id,
+                "market_id": intent.market_id,
+                "condition_id": intent.condition_id,
+                "side": intent.side,
+                "action": intent.action_type,
+                "status": intent.status,
+                "current_order_usd": intent.payload.get("estimated_usd"),
+                "remote_order_id": intent.remote_order_id,
+                "filled_shares": intent.filled_shares,
+            }
+        )
+    return packets
+
+
+async def _refresh_wallet_snapshot(
+    settings: Bullpen008Settings, *, caller_source: str
+) -> dict[str, object]:
+    wallet, balance = await asyncio.gather(
+        read_console_wallet_positions_snapshot(
+            force_fresh=True,
+            caller_source=caller_source,
+            max_age_seconds=settings.wallet_freshness_seconds,
+        ),
+        BullpenBalanceReader().refresh(wait_for_login=False),
+    )
+    return {
+        "source": wallet.source,
+        "fetched_at": wallet.fetched_at,
+        "freshness_state": wallet.freshness_state,
+        "account_identity": wallet.account_identity,
+        "credential_artifact": wallet.credential_artifact,
+        "raw_position_count": wallet.raw_position_count,
+        "positions": [
+            _position_packet(position, quote_timestamp=wallet.fetched_at)
+            for position in wallet.positions
+        ],
+        "balance": balance.model_dump(mode="json"),
+        "freshness_proof": {
+            "auth_checked_at": wallet.auth_checked_at,
+            "cli_version": wallet.cli_version,
+            "position_classifier_version": wallet.position_classifier_version,
+            "caller_source": caller_source,
+        },
+    }
+
+
+async def _refresh_stage6_quotes(plan: dict[str, object]) -> dict[str, dict[str, object]]:
+    actions = [
+        row
+        for key in ("full_exits", "trims", "buys")
+        for row in plan.get(key, [])
+        if isinstance(row, dict)
+    ]
+
+    async def one(action: dict[str, object]) -> tuple[str, dict[str, object]]:
+        market_id = str(action.get("market_id") or "")
+        refreshed = await refresh_execution_quote(
+            slug=str(action.get("slug") or "") or None,
+            side=str(action.get("side") or "YES"),
+        )
+        market = refreshed.market
+        raw = dict(getattr(market, "raw", None) or {}) if market else {}
+        return market_id, {
+            "current_odds": refreshed.current_price_cents,
+            "spread_cents": refreshed.spread_cents,
+            "open": bool(
+                market is not None
+                and raw.get("closed") is not True
+                and raw.get("active", True) is not False
+                and raw.get("acceptingOrders", raw.get("accepting_orders", True)) is not False
+            ),
+            "liquidity_usd": getattr(market, "liquidity_usd", None) if market else None,
+            "quote_timestamp": datetime.now(UTC).isoformat(),
+            "source": "fresh Stage 6 Bullpen quote",
+        }
+
+    if not actions:
+        return {}
+    return dict(await asyncio.gather(*(one(action) for action in actions)))
+
+
+async def _execute_live_plan(
+    *,
+    run_id: str,
+    user_id: int,
+    plan: dict[str, object],
+    stage4_certificate: dict[str, object],
+    settings: Bullpen008Settings,
+) -> dict[str, object]:
+    """Execute certified actions in dependency order with durable evidence."""
+    if not (
+        settings.execution_enabled
+        and settings.live_control_armed
+        and settings.execution_mode == "live"
+        and os.getenv("BULLPEN008_LIVE_EXECUTION_ENABLED", "").strip().lower()
+        in {"1", "true", "yes"}
+    ):
+        raise RuntimeError("BULLPEN008_LIVE_CONTROL_NOT_ARMED")
+    account_identity = str(plan.get("account_identity") or "")
+    if not account_identity:
+        raise RuntimeError("BULLPEN008_ACCOUNT_IDENTITY_MISSING")
+
+    adapter = ProductionBullpen008Adapter()
+    statuses: dict[str, str] = {}
+    results: list[dict[str, object]] = []
+    action_rows = [
+        action
+        for key in ("claims", "order_cancellations", "full_exits", "trims", "buys")
+        for action in plan.get(key, [])
+        if isinstance(action, dict)
+    ]
+
+    async def persist_intent(payload: dict[str, object]) -> None:
+        with SyncSessionLocal() as session:
+            intent_id = str(payload["intent_id"])
+            record = session.get(Bullpen008ExecutionIntentRecord, intent_id)
+            if record is None:
+                record = Bullpen008ExecutionIntentRecord(
+                    id=intent_id,
+                    run_id=run_id,
+                    workflow_profile=WORKFLOW_PROFILE,
+                    plan_id=str(payload["plan_id"]),
+                    action_id=str(payload["action_id"]),
+                    action_type=str(payload["action_type"]),
+                    market_id=str(payload["market_id"]),
+                    condition_id=str(payload.get("condition_id") or "") or None,
+                    side=str(payload.get("side") or "") or None,
+                    status="Submitting",
+                    idempotency_key=str(payload["idempotency_key"]),
+                    request_hash=str(payload["request_hash"]),
+                    stage4_certificate_hash=str(payload["stage4_certificate_hash"]),
+                    stage5_plan_hash=str(payload["stage5_plan_hash"]),
+                    attempt_count=int(payload.get("attempt_number") or 1),
+                    payload=dict(payload),
+                )
+                session.add(record)
+            else:
+                record.status = "Submitting"
+                record.attempt_count = max(record.attempt_count, int(payload.get("attempt_number") or 1))
+                record.payload = {**dict(record.payload), **payload}
+            session.flush()
+            attempt_number = record.attempt_count
+            existing_attempt = session.execute(
+                select(Bullpen008ExecutionAttemptRecord).where(
+                    Bullpen008ExecutionAttemptRecord.intent_id == intent_id,
+                    Bullpen008ExecutionAttemptRecord.attempt_number == attempt_number,
+                )
+            ).scalar_one_or_none()
+            if existing_attempt is None:
+                session.add(
+                    Bullpen008ExecutionAttemptRecord(
+                        intent_id=intent_id,
+                        attempt_number=attempt_number,
+                        request_hash=record.request_hash,
+                        started_at=datetime.now(UTC),
+                        result_status="Submitting",
+                        sanitized_request=dict(payload.get("sanitized_request") or {}),
+                        sanitized_response={},
+                        reconciliation={},
+                    )
+                )
+            session.commit()
+
+    async def persist_transition(
+        payload: dict[str, object], status: str, evidence: dict[str, object]
+    ) -> None:
+        with SyncSessionLocal() as session:
+            record = session.get(Bullpen008ExecutionIntentRecord, str(payload["intent_id"]))
+            if record is None:
+                raise RuntimeError("DURABLE_INTENT_MISSING_BEFORE_TRANSITION")
+            previous = record.status
+            record.status = status
+            remote_id = evidence.get("remote_id")
+            if remote_id:
+                record.remote_order_id = str(remote_id)
+                if record.first_submitted_at is None:
+                    record.first_submitted_at = datetime.now(UTC)
+            record.blocker_code = str(evidence.get("error_code") or "") or None
+            record.failure_message = str(evidence.get("message") or "") or None
+            record.retryable = status == "Recoverable"
+            record.payload = {**dict(record.payload), "last_evidence": evidence}
+            if status in {"Reconciled", "Filled"}:
+                record.reconciled_at = datetime.now(UTC)
+                record.terminal_at = record.reconciled_at
+            elif status in {"Failed", "Blocked", "Cancelled"}:
+                record.terminal_at = datetime.now(UTC)
+            attempt = session.execute(
+                select(Bullpen008ExecutionAttemptRecord).where(
+                    Bullpen008ExecutionAttemptRecord.intent_id == record.id,
+                    Bullpen008ExecutionAttemptRecord.attempt_number == record.attempt_count,
+                )
+            ).scalar_one_or_none()
+            if attempt is not None:
+                attempt.result_status = status
+                if isinstance(evidence.get("response"), dict):
+                    attempt.sanitized_response = dict(evidence["response"])
+                if isinstance(evidence.get("reconciliation"), dict):
+                    attempt.reconciliation = dict(evidence["reconciliation"])
+                if status in {"Reconciled", "Filled", "PartiallyFilled", "Failed", "Recoverable", "Blocked", "Cancelled"}:
+                    attempt.completed_at = datetime.now(UTC)
+                attempt.error_code = str(evidence.get("error_code") or "") or None
+                attempt.error_message = str(evidence.get("message") or "") or None
+                attempt.remote_order_id = str(evidence.get("remote_id") or "") or attempt.remote_order_id
+            session.add(
+                Bullpen008ExecutionEventRecord(
+                    intent_id=record.id,
+                    workflow_profile=WORKFLOW_PROFILE,
+                    from_status=previous,
+                    to_status=status,
+                    reason_code=str(evidence.get("error_code") or evidence.get("reason") or "") or None,
+                    evidence=evidence,
+                    occurred_at=datetime.now(UTC),
+                )
+            )
+            session.commit()
+
+    for action in sorted(action_rows, key=lambda row: int(row.get("priority") or 999)):
+        live_wallet = await _refresh_wallet_snapshot(
+            settings, caller_source=f"bullpen008-stage6-action-{action.get('action_id')}"
+        )
+        quotes = await _refresh_stage6_quotes(
+            {**plan, "claims": [], "order_cancellations": [], "full_exits": [action] if action.get("action_type") == "full_exit" else [], "trims": [action] if action.get("action_type") == "trim" else [], "buys": [action] if action.get("action_type") == "buy" else []}
+        )
+        preflight = preflight_execution_plan(
+            plan=plan,
+            stage4_certificate=stage4_certificate,
+            live_wallet_snapshot=live_wallet,
+            quotes_by_market=quotes,
+            pending_orders=_pending_order_packets(user_id),
+            settings=settings,
+            execution_mode="live",
+            emergency_stop=False,
+            prerequisite_statuses=statuses,
+        )
+        action_preflight = next(
+            (row for row in preflight["actions"] if row.get("action_id") == action.get("action_id")),
+            {"status": "Blocked", "blocker_codes": ["ACTION_MISSING_FROM_PREFLIGHT"]},
+        )
+        if action_preflight.get("status") == "Blocked":
+            result = {
+                "action_id": action.get("action_id"),
+                "status": "Blocked",
+                "blocker_code": "+".join(action_preflight.get("blocker_codes", [])),
+                "pre_submit_checks": action_preflight.get("pre_submit_checks", {}),
+            }
+            results.append(result)
+            statuses[str(action.get("action_id"))] = "Blocked"
+            continue
+        existing = None
+        with SyncSessionLocal() as session:
+            record = session.execute(
+                select(Bullpen008ExecutionIntentRecord).where(
+                    Bullpen008ExecutionIntentRecord.workflow_profile == WORKFLOW_PROFILE,
+                    Bullpen008ExecutionIntentRecord.action_id == action.get("action_id"),
+                )
+            ).scalar_one_or_none()
+            if record is not None:
+                existing = dict(record.payload)
+                existing.update(
+                    {
+                        "intent_id": record.id,
+                        "status": record.status,
+                        "remote_order_id": record.remote_order_id,
+                        "remote_transaction_id": record.remote_transaction_id,
+                        "idempotency_key": record.idempotency_key,
+                    }
+                )
+        fence = acquire_bullpen_account_execution_advisory_lock_sync(account_identity)
+        if fence is None:
+            result = {"action_id": action.get("action_id"), "status": "Blocked", "blocker_code": "ACCOUNT_EXECUTION_LOCK_BUSY"}
+        else:
+            try:
+                if not fence.is_healthy():
+                    raise RuntimeError("ACCOUNT_EXECUTION_LOCK_LOST")
+                # The account-wide fence closes the last race with Bullpen 007
+                # or another 008 worker. Refresh and re-run every guard while
+                # the fence is held, immediately before the irreversible call.
+                locked_wallet = await _refresh_wallet_snapshot(
+                    settings,
+                    caller_source=(
+                        "bullpen008-stage6-locked-"
+                        f"{action.get('action_id')}"
+                    ),
+                )
+                locked_quotes = await _refresh_stage6_quotes(
+                    {
+                        **plan,
+                        "claims": [],
+                        "order_cancellations": [],
+                        "full_exits": [action]
+                        if action.get("action_type") == "full_exit"
+                        else [],
+                        "trims": [action]
+                        if action.get("action_type") == "trim"
+                        else [],
+                        "buys": [action]
+                        if action.get("action_type") == "buy"
+                        else [],
+                    }
+                )
+                with SyncSessionLocal() as session:
+                    state = session.execute(
+                        select(Bullpen008StateRecord).where(
+                            Bullpen008StateRecord.user_id == user_id,
+                            Bullpen008StateRecord.workflow_profile
+                            == WORKFLOW_PROFILE,
+                        )
+                    ).scalar_one()
+                    emergency_stop = bool(
+                        dict(state.payload or {}).get("emergency_stop", False)
+                    )
+                locked_preflight = preflight_execution_plan(
+                    plan=plan,
+                    stage4_certificate=stage4_certificate,
+                    live_wallet_snapshot=locked_wallet,
+                    quotes_by_market=locked_quotes,
+                    pending_orders=_pending_order_packets(user_id),
+                    settings=settings,
+                    execution_mode="live",
+                    emergency_stop=emergency_stop,
+                    prerequisite_statuses=statuses,
+                )
+                locked_action_preflight = next(
+                    (
+                        row
+                        for row in locked_preflight["actions"]
+                        if row.get("action_id") == action.get("action_id")
+                    ),
+                    {
+                        "status": "Blocked",
+                        "blocker_codes": ["ACTION_MISSING_FROM_LOCKED_PREFLIGHT"],
+                    },
+                )
+                if locked_action_preflight.get("status") == "Blocked":
+                    result = {
+                        "action_id": action.get("action_id"),
+                        "status": "Blocked",
+                        "blocker_code": "+".join(
+                            locked_action_preflight.get("blocker_codes", [])
+                        ),
+                        "pre_submit_checks": locked_action_preflight.get(
+                            "pre_submit_checks", {}
+                        ),
+                    }
+                else:
+                    result = await execute_certified_action(
+                        action=action,
+                        plan=plan,
+                        stage4_certificate=stage4_certificate,
+                        preflight=locked_action_preflight,
+                        adapter=adapter,
+                        persist_intent=persist_intent,
+                        persist_transition=persist_transition,
+                        existing_intent=existing,
+                    )
+            finally:
+                fence.release()
+        results.append(result)
+        statuses[str(action.get("action_id"))] = str(result.get("status") or "Failed")
+
+    counters = {
+        "planned": len(action_rows),
+        "risk_certified": sum(1 for row in results if row.get("status") not in {"Blocked"}),
+        "ready": 0,
+        "durable_intents": sum(1 for row in results if row.get("intent_id")),
+        "submitted": sum(1 for row in results if row.get("remote_order_id")),
+        "confirmed": sum(1 for row in results if row.get("status") in {"Filled", "Reconciled"}),
+        "partially_filled": sum(1 for row in results if row.get("status") == "PartiallyFilled"),
+        "blocked": sum(1 for row in results if row.get("status") == "Blocked"),
+        "failed": sum(1 for row in results if row.get("status") == "Failed"),
+        "recoverable": sum(1 for row in results if row.get("status") == "Recoverable"),
+        "reconciled": sum(1 for row in results if row.get("status") == "Reconciled"),
+    }
+    from app.domains.bullpen008.planning import derive_execution_status
+
+    terminal_status, terminal_reason = derive_execution_status(
+        counters=counters, execution_mode="live"
+    )
+    return {
+        "execution_mode": "live",
+        "actions": results,
+        "counters": counters,
+        "terminal_status": terminal_status,
+        "terminal_reason": terminal_reason,
+        "orders_submitted": counters["submitted"],
+        "remote_writes_permitted": True,
+    }
+
+
+def _execution_audit_packets(run_id: str) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
+    with SyncSessionLocal() as session:
+        intents = session.execute(
+            select(Bullpen008ExecutionIntentRecord).where(
+                Bullpen008ExecutionIntentRecord.run_id == run_id,
+                Bullpen008ExecutionIntentRecord.workflow_profile == WORKFLOW_PROFILE,
+            )
+        ).scalars().all()
+        intent_ids = [intent.id for intent in intents]
+        attempts = (
+            session.execute(
+                select(Bullpen008ExecutionAttemptRecord).where(
+                    Bullpen008ExecutionAttemptRecord.intent_id.in_(intent_ids)
+                )
+            ).scalars().all()
+            if intent_ids else []
+        )
+        events = (
+            session.execute(
+                select(Bullpen008ExecutionEventRecord).where(
+                    Bullpen008ExecutionEventRecord.intent_id.in_(intent_ids),
+                    Bullpen008ExecutionEventRecord.workflow_profile == WORKFLOW_PROFILE,
+                )
+            ).scalars().all()
+            if intent_ids else []
+        )
+    return (
+        [
+            {
+                "intent_id": row.id, "action_id": row.action_id, "action_type": row.action_type,
+                "market_id": row.market_id, "side": row.side, "status": row.status,
+                "attempt_count": row.attempt_count, "idempotency_key": row.idempotency_key,
+                "request_hash": row.request_hash, "remote_order_id": row.remote_order_id,
+                "remote_transaction_id": row.remote_transaction_id, "filled_shares": row.filled_shares,
+                "filled_value_usd": row.filled_value_usd, "average_price_cents": row.average_price_cents,
+                "fees_usd": row.fees_usd, "blocker_code": row.blocker_code,
+                "failure_message": row.failure_message, "retryable": row.retryable,
+                "first_submitted_at": row.first_submitted_at.isoformat() if row.first_submitted_at else None,
+                "reconciled_at": row.reconciled_at.isoformat() if row.reconciled_at else None,
+            }
+            for row in intents
+        ],
+        [
+            {
+                "intent_id": row.intent_id, "attempt_number": row.attempt_number,
+                "request_hash": row.request_hash, "started_at": row.started_at.isoformat(),
+                "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                "result_status": row.result_status, "remote_order_id": row.remote_order_id,
+                "remote_transaction_id": row.remote_transaction_id, "error_code": row.error_code,
+                "error_message": row.error_message, "sanitized_request": row.sanitized_request,
+                "sanitized_response": row.sanitized_response, "reconciliation": row.reconciliation,
+            }
+            for row in attempts
+        ],
+        [
+            {
+                "intent_id": row.intent_id, "from_status": row.from_status,
+                "to_status": row.to_status, "reason_code": row.reason_code,
+                "evidence": row.evidence, "occurred_at": row.occurred_at.isoformat(),
+            }
+            for row in events
+        ],
+    )
 
 
 def _blocked_stage(
@@ -476,7 +1027,7 @@ def _blocked_stage(
     soft_time_limit=3300,
     time_limit=3600,
 )
-def execute_bullpen008_shadow_run(self, run_id: str) -> str:
+def execute_bullpen008_run(self, run_id: str) -> str:
     redis_client = _redis()
     lock_token = str(uuid4())
     lock_key = _run_lock_key(run_id)
@@ -502,7 +1053,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
             settings = Bullpen008Settings.model_validate(run.settings_snapshot)
             user_id = run.user_id
             run.status = "running"
-            run.summary = "Bullpen 008 shadow run is executing Stages 1-4."
+            run.summary = "Bullpen 008 shadow run is executing the six-stage pipeline."
             run.task_metadata = {
                 **dict(run.task_metadata),
                 "celery_task_id": self.request.id,
@@ -880,7 +1431,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                                 "provider": provider_name,
                                 "model": model_name,
                                 "current_wallet_exposure": existing_exposure,
-                                "all_active_007_pending_buys": pending_buys,
+                                "all_active_007_and_008_pending_buys": pending_buys,
                                 "confirmed_exits": confirmed_exits,
                             },
                             calculations={
@@ -946,6 +1497,8 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
 
         # Stage 4
         stage4_status = "blocked"
+        stage4_completed_at = datetime.now(UTC)
+        portfolio: dict[str, object] | None = None
         if stage3_status != "finished":
             with SyncSessionLocal() as session:
                 run = session.execute(
@@ -981,6 +1534,8 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                         "wallet": wallet_snapshot,
                     }
                 ),
+                account_identity=str(wallet_snapshot.get("account_identity") or "")
+                or None,
             )
             stage4_status = "finished" if portfolio["pass_condition_met"] else "failed"
             with SyncSessionLocal() as session:
@@ -1030,6 +1585,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                     else "Portfolio certificate failed one or more deterministic cap or stress checks.",
                 )
                 session.add(stage_record)
+                stage4_completed_at = stage_record.completed_at
                 certificate = dict(portfolio["certificate"])
                 session.add(
                     Bullpen008PortfolioCertificateRecord(
@@ -1042,29 +1598,351 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                 )
                 session.commit()
 
+        # Stage 5 — translate only the frozen Stage 4 target.
+        stage5_status = "blocked"
+        plan: dict[str, object] | None = None
+        pending_orders: list[dict[str, object]] = []
+        if portfolio is None:
+            with SyncSessionLocal() as session:
+                run = session.execute(
+                    select(Bullpen008RunRecord)
+                    .options(selectinload(Bullpen008RunRecord.stages))
+                    .where(Bullpen008RunRecord.id == run_id)
+                ).scalar_one()
+                session.add(
+                    _blocked_stage(
+                        run,
+                        stage_number=5,
+                        stage_name="Exit & Rebalance Plan",
+                        reason="Stage 4 did not produce a target portfolio.",
+                    )
+                )
+                session.commit()
+        else:
+            stage5_started = datetime.now(UTC)
+            try:
+                stage5_wallet = asyncio.run(
+                    _refresh_wallet_snapshot(
+                        settings, caller_source="bullpen008-stage5-plan"
+                    )
+                )
+                pending_orders = _pending_order_packets(user_id)
+                plan = build_action_plan(
+                    run_id=run_id,
+                    stage4_allocations=list(portfolio["allocations"]),
+                    stage4_certificate=dict(portfolio["certificate"]),
+                    stage3_rows=list(stage3["rows"]),
+                    wallet_snapshot=stage5_wallet,
+                    pending_orders=pending_orders,
+                    settings=settings,
+                    stage4_completed_at=stage4_completed_at,
+                    now=stage5_started,
+                )
+                plan_certificate = dict(plan["plan_certificate"])
+                stage5_status = (
+                    "finished" if plan_certificate.get("plan_certified") is True else "failed"
+                )
+                with SyncSessionLocal() as session:
+                    run = session.execute(
+                        select(Bullpen008RunRecord)
+                        .options(selectinload(Bullpen008RunRecord.stages))
+                        .where(Bullpen008RunRecord.id == run_id)
+                    ).scalar_one()
+                    run.wallet_snapshot = stage5_wallet
+                    session.add(
+                        Bullpen008ActionPlanRecord(
+                            id=str(plan["plan_id"]),
+                            run_id=run.id,
+                            workflow_profile=WORKFLOW_PROFILE,
+                            version=1,
+                            stage4_certificate_hash=str(plan["stage4_certificate_hash"]),
+                            plan_hash=str(plan["plan_hash"]),
+                            plan_certified=bool(plan_certificate["plan_certified"]),
+                            status=stage5_status,
+                            account_identity=str(plan.get("account_identity") or "") or None,
+                            wallet_version=str(plan["wallet_version"]),
+                            payload=plan,
+                            certified_at=datetime.now(UTC)
+                            if plan_certificate["plan_certified"]
+                            else None,
+                        )
+                    )
+                    session.add(
+                        _stage_record(
+                            run=run,
+                            stage_number=5,
+                            stage_name="Exit & Rebalance Plan",
+                            started_at=stage5_started,
+                            status=stage5_status,
+                            pass_condition="A complete immutable plan reproduces the Stage 4 target, keeps cash non-negative, preserves every cap and classifies every wallet position.",
+                            inputs={
+                                "certified_stage4_target": portfolio["allocations"],
+                                "stage4_certificate": portfolio["certificate"],
+                                "fresh_wallet_snapshot": stage5_wallet,
+                                "open_pending_durable_orders_from_007_and_008": pending_orders,
+                                "stage3_cluster_map": stage3["rows"],
+                                "settings_and_exit_thresholds": settings.model_dump(mode="json"),
+                            },
+                            calculations={
+                                "Position gap": "target exposure - confirmed current exposure - active pending buys + active pending sells",
+                                "action_order": ["claim", "cancel", "sell", "trim", "refresh", "capacity", "buy", "hold"],
+                                "stage4_is_sole_portfolio_authority": True,
+                                "cash_ledger": plan["cash_ledger"],
+                            },
+                            outputs={
+                                "certified_target": portfolio["allocations"],
+                                "claims": plan["claims"],
+                                "order_cancellations": plan["order_cancellations"],
+                                "full_exits": plan["full_exits"],
+                                "trims": plan["trims"],
+                                "buys": plan["buys"],
+                                "holds": plan["holds"],
+                                "blocked_untradeable": plan["blocked_untradeable"],
+                                "simulated_final_wallet": plan["simulated_final_wallet"],
+                                "cash_ledger": plan["cash_ledger"],
+                                "cluster_exposure_before_after": plan["cluster_exposure_before_after"],
+                                "plan_certificate": plan_certificate,
+                                "plan_hash": plan["plan_hash"],
+                                "metrics": plan["metrics"],
+                            },
+                            rejections=list(plan["blocked_untradeable"]),
+                            warnings=[]
+                            if stage5_status == "finished"
+                            else ["The immutable plan is visible, but its deterministic certificate failed."],
+                            block_reason=None
+                            if stage5_status == "finished"
+                            else "Stage 5 plan certificate failed; Stage 6 is blocked.",
+                        )
+                    )
+                    session.commit()
+            except Exception as exc:
+                logger.exception("Bullpen 008 Stage 5 failed for %s", run_id)
+                stage5_status = "failed"
+                with SyncSessionLocal() as session:
+                    run = session.execute(
+                        select(Bullpen008RunRecord)
+                        .options(selectinload(Bullpen008RunRecord.stages))
+                        .where(Bullpen008RunRecord.id == run_id)
+                    ).scalar_one()
+                    session.add(
+                        _stage_record(
+                            run=run,
+                            stage_number=5,
+                            stage_name="Exit & Rebalance Plan",
+                            started_at=stage5_started,
+                            status="failed",
+                            pass_condition="A complete immutable and certified action plan is persisted.",
+                            inputs={"stage4_certificate": portfolio.get("certificate", {})},
+                            calculations={"stage4_is_sole_portfolio_authority": True},
+                            outputs={"metrics": {}},
+                            rejections=[{"error": str(exc)}],
+                            warnings=[],
+                            block_reason=str(exc),
+                        )
+                    )
+                    session.commit()
+
+        # Stage 6 — shadow mode performs every fresh pre-submit check and never writes remotely.
+        stage6_status = "blocked"
+        execution: dict[str, object] = {
+            "counters": {},
+            "terminal_status": "blocked",
+            "terminal_reason": "Stage 5 did not pass.",
+            "orders_submitted": 0,
+        }
+        if stage5_status != "finished" or plan is None or portfolio is None:
+            with SyncSessionLocal() as session:
+                run = session.execute(
+                    select(Bullpen008RunRecord)
+                    .options(selectinload(Bullpen008RunRecord.stages))
+                    .where(Bullpen008RunRecord.id == run_id)
+                ).scalar_one()
+                session.add(
+                    _blocked_stage(
+                        run,
+                        stage_number=6,
+                        stage_name="Execute & Reconcile",
+                        reason="Stage 5 did not persist a valid certified plan.",
+                    )
+                )
+                session.commit()
+        else:
+            stage6_started = datetime.now(UTC)
+            try:
+                live_wallet = asyncio.run(
+                    _refresh_wallet_snapshot(
+                        settings, caller_source="bullpen008-stage6-pre-submit"
+                    )
+                )
+                quotes = asyncio.run(_refresh_stage6_quotes(plan))
+                stage6_pending_orders = _pending_order_packets(user_id)
+                with SyncSessionLocal() as guard_session:
+                    phase2_state = guard_session.execute(
+                        select(Bullpen008StateRecord).where(
+                            Bullpen008StateRecord.user_id == user_id,
+                            Bullpen008StateRecord.workflow_profile == WORKFLOW_PROFILE,
+                        )
+                    ).scalar_one_or_none()
+                    emergency_stop = bool(
+                        phase2_state
+                        and phase2_state.payload.get("emergency_stop", False)
+                    )
+                execution = preflight_execution_plan(
+                    plan=plan,
+                    stage4_certificate=dict(portfolio["certificate"]),
+                    live_wallet_snapshot=live_wallet,
+                    quotes_by_market=quotes,
+                    pending_orders=stage6_pending_orders,
+                    settings=settings,
+                    execution_mode=settings.execution_mode,
+                    emergency_stop=emergency_stop,
+                )
+                if settings.execution_mode == "live" and not emergency_stop:
+                    execution = asyncio.run(
+                        _execute_live_plan(
+                            run_id=run_id,
+                            user_id=user_id,
+                            plan=plan,
+                            stage4_certificate=dict(portfolio["certificate"]),
+                            settings=settings,
+                        )
+                    )
+                    live_wallet = asyncio.run(
+                        _refresh_wallet_snapshot(
+                            settings, caller_source="bullpen008-stage6-final-reconciliation"
+                        )
+                    )
+                terminal_status = str(execution["terminal_status"])
+                stage6_status = {
+                    "completed": "finished",
+                    "partial": "partial",
+                    "failed": "failed",
+                    "blocked": "blocked",
+                    "cancelled": "cancelled",
+                }.get(terminal_status, "failed")
+                intent_packets, attempt_packets, event_packets = _execution_audit_packets(run_id)
+                with SyncSessionLocal() as session:
+                    run = session.execute(
+                        select(Bullpen008RunRecord)
+                        .options(selectinload(Bullpen008RunRecord.stages))
+                        .where(Bullpen008RunRecord.id == run_id)
+                    ).scalar_one()
+                    run.wallet_snapshot = live_wallet
+                    session.add(
+                        _stage_record(
+                            run=run,
+                            stage_number=6,
+                            stage_name="Execute & Reconcile",
+                            started_at=stage6_started,
+                            status=stage6_status,
+                            pass_condition="Every required action reaches its permitted reconciled terminal state; in shadow mode every pre-submit guard passes and no remote write is permitted.",
+                            inputs={
+                                "immutable_stage5_plan": plan,
+                                "fresh_wallet_snapshot": live_wallet,
+                                "fresh_quotes": quotes,
+                                "all_pending_007_and_008_orders": stage6_pending_orders,
+                                "execution_mode": settings.execution_mode,
+                            },
+                            calculations={
+                                "pre_submit_check_count": 14,
+                                "stage4_or_stage5_override_permitted": False,
+                                "wallet_version_revalidation": True,
+                                "account_wide_runtime_serialization": True,
+                            },
+                            outputs={
+                                **execution,
+                                "durable_intents": intent_packets,
+                                "attempts": attempt_packets,
+                                "order_lifecycle_timeline": event_packets,
+                                "remote_evidence": [
+                                    row for row in attempt_packets
+                                    if row.get("remote_order_id") or row.get("remote_transaction_id")
+                                ],
+                                "final_wallet": live_wallet,
+                                "final_cluster_exposure": plan.get("cluster_exposure_before_after", {}),
+                                "metrics": execution["counters"],
+                            },
+                            rejections=[
+                                row for row in execution.get("actions", [])
+                                if isinstance(row, dict) and row.get("status") == "Blocked"
+                            ],
+                            warnings=(
+                                ["Production shadow mode is active. Stage 6 performed no remote submission."]
+                                if settings.execution_mode == "shadow"
+                                else []
+                            ),
+                            block_reason=None
+                            if stage6_status == "finished"
+                            else str(execution.get("terminal_reason") or "Stage 6 guard failed."),
+                        )
+                    )
+                    session.commit()
+            except Exception as exc:
+                logger.exception("Bullpen 008 Stage 6 failed for %s", run_id)
+                stage6_status = "failed"
+                execution = {
+                    "counters": {"planned": sum(len(plan.get(key, [])) for key in ("claims", "order_cancellations", "full_exits", "trims", "buys")), "durable_intents": 0, "submitted": 0, "failed": 1},
+                    "terminal_status": "failed",
+                    "terminal_reason": "Failed before intent creation.",
+                    "error": str(exc),
+                }
+                with SyncSessionLocal() as session:
+                    run = session.execute(
+                        select(Bullpen008RunRecord)
+                        .options(selectinload(Bullpen008RunRecord.stages))
+                        .where(Bullpen008RunRecord.id == run_id)
+                    ).scalar_one()
+                    session.add(
+                        _stage_record(
+                            run=run,
+                            stage_number=6,
+                            stage_name="Execute & Reconcile",
+                            started_at=stage6_started,
+                            status="failed",
+                            pass_condition="Every action reaches its permitted reconciled terminal state.",
+                            inputs={"immutable_stage5_plan_hash": plan.get("plan_hash")},
+                            calculations={"remote_submission_permitted": False},
+                            outputs={**execution, "metrics": execution["counters"]},
+                            rejections=[{"error": str(exc)}],
+                            warnings=[],
+                            block_reason="Failed before intent creation: " + str(exc),
+                        )
+                    )
+                    session.commit()
+
         with SyncSessionLocal() as session:
             run = session.get(Bullpen008RunRecord, run_id)
             if run is None:
                 return "missing-run"
-            success = stage4_status == "finished"
-            run.status = "completed" if success else "failed"
+            success = stage6_status == "finished"
+            run.status = {
+                "finished": "completed",
+                "partial": "partial",
+                "cancelled": "cancelled",
+            }.get(stage6_status, "failed")
             run.completed_at = datetime.now(UTC)
             run.summary = (
-                "Bullpen 008 Phase 1 shadow run completed and the portfolio was certified."
+                "Bullpen 008 six-stage shadow run completed through certified planning and safe execution validation."
                 if success
-                else "Bullpen 008 Phase 1 shadow run stopped safely because a stage pass condition was not satisfied."
+                else (
+                    "Bullpen 008 six-stage run partially reconciled; remaining actions retain exact blockers."
+                    if stage6_status == "partial"
+                    else "Bullpen 008 six-stage run stopped safely because a stage pass condition or execution guard was not satisfied."
+                )
             )
             run.error_message = (
                 None
                 if success
-                else "One or more Stage 1-4 pass conditions failed; no orders were created."
+                else str(execution.get("terminal_reason") or "One or more six-stage pass conditions failed; no remote order was submitted.")
             )
             run.run_metadata = {
                 **dict(run.run_metadata),
-                "orders_created": 0,
-                "orders_submitted": 0,
-                "stage5_status": "disabled_pending_phase2",
-                "stage6_status": "disabled_pending_phase2",
+                "orders_created": int(execution.get("counters", {}).get("durable_intents", 0)) if isinstance(execution.get("counters"), dict) else 0,
+                "orders_submitted": int(execution.get("counters", {}).get("submitted", 0)) if isinstance(execution.get("counters"), dict) else 0,
+                "stage5_status": stage5_status,
+                "stage6_status": stage6_status,
+                "execution_mode": settings.execution_mode,
+                "final_reconciled_outcome": execution.get("terminal_status"),
             }
             state = session.execute(
                 select(Bullpen008StateRecord).where(
@@ -1079,7 +1957,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                     "shadow-ready" if not state.running else "shadow-scheduled"
                 )
             session.commit()
-        return "completed" if stage4_status == "finished" else "failed-safe"
+        return "completed" if stage6_status == "finished" else "failed-safe"
     finally:
         try:
             if redis_client.get(lock_key) == lock_token:
@@ -1123,10 +2001,10 @@ def _create_scheduled_run(user_id: int) -> str | None:
             idempotency_key=f"bullpen008:scheduler:{now.isoformat()}",
             status="queued",
             triggered_by="scheduler",
-            shadow_mode=True,
-            execution_enabled=False,
+            shadow_mode=settings.shadow_mode,
+            execution_enabled=settings.execution_enabled,
             started_at=now,
-            summary="Bullpen 008 scheduled shadow-mode run queued.",
+            summary="Bullpen 008 scheduled six-stage shadow-mode run queued.",
             code_build_version=resolve_backend_commit_sha(),
             settings_snapshot=settings.model_dump(mode="json"),
             wallet_snapshot={},
@@ -1135,7 +2013,12 @@ def _create_scheduled_run(user_id: int) -> str | None:
                 "queue": CELERY_QUEUE,
                 "workflow_profile": WORKFLOW_PROFILE,
             },
-            run_metadata={"phase": 1, "orders_permitted": False},
+            run_metadata={
+                "phase": 2,
+                "stages_enabled": [1, 2, 3, 4, 5, 6],
+                "execution_mode": settings.execution_mode,
+                "orders_permitted": settings.execution_enabled and settings.live_control_armed,
+            },
         )
         session.add(run)
         state.next_run_at = next_custom_console_schedule_time(
@@ -1144,7 +2027,7 @@ def _create_scheduled_run(user_id: int) -> str | None:
             refresh_minutes=settings.auto_refresh_minutes,
         )
         session.commit()
-    execute_bullpen008_shadow_run.apply_async(
+    execute_bullpen008_run.apply_async(
         args=[run_id], queue=CELERY_QUEUE, task_id=f"bullpen008:{run_id}"
     )
     return run_id
@@ -1185,3 +2068,204 @@ def enqueue_due_bullpen008_runs() -> int:
     finally:
         redis_client.close()
     return dispatched
+
+
+@celery.task(name="app.domains.bullpen008.tasks.refresh_bullpen008_position_alerts")
+def refresh_bullpen008_position_alerts() -> int:
+    """Refresh actual held-side odds independently of six-stage run completion."""
+    from app.domains.bullpen008.alerts import evaluate_held_position_alerts
+    from app.domains.mails.service import TEST_RECIPIENTS, send_logged_email_sync
+
+    with SyncSessionLocal() as session:
+        user_ids = session.execute(
+            select(Bullpen008SettingsRecord.user_id).where(
+                Bullpen008SettingsRecord.workflow_profile == WORKFLOW_PROFILE
+            )
+        ).scalars().all()
+    created = 0
+    for user_id in user_ids:
+        with SyncSessionLocal() as session:
+            settings_record = session.execute(
+                select(Bullpen008SettingsRecord).where(
+                    Bullpen008SettingsRecord.user_id == user_id,
+                    Bullpen008SettingsRecord.workflow_profile == WORKFLOW_PROFILE,
+                )
+            ).scalar_one()
+            phase2_settings = Bullpen008Settings.model_validate(settings_record.payload)
+            run = session.execute(
+                select(Bullpen008RunRecord)
+                .options(selectinload(Bullpen008RunRecord.stages))
+                .where(
+                    Bullpen008RunRecord.user_id == user_id,
+                    Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+                )
+                .order_by(Bullpen008RunRecord.started_at.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if run is None:
+                continue
+            stage2 = next((stage for stage in run.stages if stage.stage_number == 2), None)
+            stage2_rows = (
+                list(stage2.outputs_json.get("rows", []))
+                if stage2 is not None and isinstance(stage2.outputs_json.get("rows"), list)
+                else []
+            )
+            history = session.execute(
+                select(Bullpen008AlertRecord)
+                .where(
+                    Bullpen008AlertRecord.user_id == user_id,
+                    Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE,
+                )
+                .order_by(Bullpen008AlertRecord.created_at.asc())
+            ).scalars().all()
+            active = {
+                (record.market_id, record.side)
+                for record in history
+                if record.recovered_at is None
+            }
+            versions: dict[tuple[str, str], int] = defaultdict(int)
+            for record in history:
+                versions[(record.market_id, record.side)] += 1
+        try:
+            refreshed = asyncio.run(
+                _refresh_wallet_snapshot(
+                    phase2_settings,
+                    caller_source="bullpen008-continuous-alert-refresh",
+                )
+            )
+        except Exception:
+            logger.exception("Bullpen 008 continuous alert wallet refresh failed for user %s", user_id)
+            continue
+        evaluation = evaluate_held_position_alerts(
+            positions=list(refreshed.get("positions", [])),
+            stage2_rows=stage2_rows,
+            active_episodes=active,
+            episode_versions=versions,
+            threshold=phase2_settings.entry_side_odds_floor_pct,
+        )
+        with SyncSessionLocal() as session:
+            for recovery in evaluation["recoveries"]:
+                record = session.execute(
+                    select(Bullpen008AlertRecord)
+                    .where(
+                        Bullpen008AlertRecord.user_id == user_id,
+                        Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE,
+                        Bullpen008AlertRecord.market_id == recovery["market_id"],
+                        Bullpen008AlertRecord.side == recovery["side"],
+                        Bullpen008AlertRecord.recovered_at.is_(None),
+                    )
+                    .order_by(Bullpen008AlertRecord.created_at.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if record is not None:
+                    record.recovered_at = datetime.now(UTC)
+                    record.payload = {**dict(record.payload), "recovery": recovery}
+            for alert in evaluation["alerts"]:
+                record = Bullpen008AlertRecord(
+                    user_id=user_id,
+                    workflow_profile=WORKFLOW_PROFILE,
+                    market_id=str(alert["market_id"]),
+                    side=str(alert["side"]),
+                    source="continuous_wallet_refresh",
+                    breach_type=str(alert["breach_type"]),
+                    idempotency_key=str(alert["idempotency_key"]),
+                    llm_odds=alert.get("llm_odds"),
+                    actual_odds=alert.get("actual_odds"),
+                    payload={**alert, "run_id": run.id, "refresh_fetched_at": refreshed.get("fetched_at")},
+                )
+                session.add(record)
+                session.flush()
+                breach_label = {
+                    "llm": "LLM odds",
+                    "actual": "Actual Current Bullpen Odds",
+                    "both": "LLM odds and Actual Current Bullpen Odds",
+                }[str(alert["breach_type"])]
+                text_content = (
+                    f"WARNING — Bullpen 008 held position below {alert['threshold']}%\n\n"
+                    f"{alert['question']}\nHeld side: {alert['side']}\n"
+                    f"LLM odds: {alert.get('llm_odds')}\nActual Bullpen odds: {alert.get('actual_odds')}\n"
+                    f"Alert triggered by: {breach_label}\n\nThis alert does not submit an order."
+                )
+                delivery = send_logged_email_sync(
+                    session,
+                    user_id=user_id,
+                    action="mail.bullpen008_position_warning",
+                    trigger=f"Bullpen 008 {breach_label}",
+                    recipients=TEST_RECIPIENTS,
+                    subject=f"WARNING: Bullpen 008 held {alert['side']} odds below {alert['threshold']}%",
+                    html_content="<pre>" + html.escape(text_content) + "</pre>",
+                    text_content=text_content,
+                    remarks="Bullpen 008 alert only; no order was created.",
+                    idempotency_key=str(alert["idempotency_key"]),
+                    run_id=run.id,
+                    warnings=[alert],
+                )
+                record.payload = {**dict(record.payload), "mail_history_id": delivery.history_id, "mail_deduplicated": delivery.deduplicated}
+                created += 1
+            session.commit()
+    return created
+
+
+@celery.task(name="app.domains.bullpen008.tasks.recover_bullpen008_executions")
+def recover_bullpen008_executions() -> int:
+    """Reconcile remote-identified 008 intents; never resubmit an ambiguous one."""
+    with SyncSessionLocal() as session:
+        records = session.execute(
+            select(Bullpen008ExecutionIntentRecord).where(
+                Bullpen008ExecutionIntentRecord.workflow_profile == WORKFLOW_PROFILE,
+                Bullpen008ExecutionIntentRecord.status.in_(
+                    ("Submitted", "Confirming", "PartiallyFilled", "Recoverable")
+                ),
+                Bullpen008ExecutionIntentRecord.remote_order_id.is_not(None),
+            )
+        ).scalars().all()
+        intent_ids = [record.id for record in records]
+    adapter = ProductionBullpen008Adapter()
+    reconciled_count = 0
+    for intent_id in intent_ids:
+        with SyncSessionLocal() as session:
+            record = session.get(Bullpen008ExecutionIntentRecord, intent_id)
+            if record is None or not record.remote_order_id:
+                continue
+            request = record.payload.get("sanitized_request")
+            action = request.get("action") if isinstance(request, dict) else None
+            if not isinstance(action, dict):
+                record.blocker_code = "RECOVERY_ACTION_PAYLOAD_MISSING"
+                record.status = "Recoverable"
+                session.commit()
+                continue
+            remote_id = record.remote_order_id
+        try:
+            evidence = asyncio.run(adapter.reconcile(remote_id=remote_id, action=action))
+        except Exception as exc:
+            logger.warning("Bullpen 008 recovery could not reconcile intent %s: %s", intent_id, exc)
+            continue
+        with SyncSessionLocal() as session:
+            record = session.get(Bullpen008ExecutionIntentRecord, intent_id)
+            if record is None:
+                continue
+            previous = record.status
+            status = str(evidence.get("status") or "Recoverable")
+            record.status = status
+            record.filled_shares = float(evidence.get("filled_shares") or record.filled_shares)
+            record.filled_value_usd = float(evidence.get("filled_value_usd") or record.filled_value_usd)
+            record.average_price_cents = evidence.get("average_price_cents") or record.average_price_cents
+            record.fees_usd = evidence.get("fees_usd") or record.fees_usd
+            record.payload = {**dict(record.payload), "recovery_evidence": evidence}
+            if status == "Reconciled":
+                record.reconciled_at = datetime.now(UTC)
+                record.terminal_at = record.reconciled_at
+            session.add(
+                Bullpen008ExecutionEventRecord(
+                    intent_id=record.id,
+                    workflow_profile=WORKFLOW_PROFILE,
+                    from_status=previous,
+                    to_status=status,
+                    reason_code="RECOVERY_BY_REMOTE_ID",
+                    evidence=evidence,
+                    occurred_at=datetime.now(UTC),
+                )
+            )
+            session.commit()
+            reconciled_count += 1
+    return reconciled_count

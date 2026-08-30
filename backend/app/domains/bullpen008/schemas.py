@@ -23,8 +23,11 @@ class Bullpen008LlmTarget(BaseModel):
 
 class Bullpen008Settings(BaseModel):
     workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
-    shadow_mode: Literal[True] = True
-    execution_enabled: Literal[False] = False
+    shadow_mode: bool = True
+    execution_enabled: bool = False
+    execution_mode: Literal["shadow", "confirmation_required", "live"] = "shadow"
+    live_control_armed: bool = False
+    emergency_stop: bool = False
     bankroll_usd: float = Field(default=200, gt=0)
     max_contract_exposure_usd: float = Field(default=20, gt=0)
     max_strict_cluster_exposure_usd: float = Field(default=20, gt=0)
@@ -41,6 +44,13 @@ class Bullpen008Settings(BaseModel):
     risk_half_size_max: float = Field(default=6.9, ge=0, le=10)
     probability_tolerance_pp: float = Field(default=0.25, gt=0, le=2)
     stale_quote_seconds: int = Field(default=300, ge=30)
+    wallet_freshness_seconds: int = Field(default=300, ge=30, le=1800)
+    plan_max_age_seconds: int = Field(default=900, ge=60, le=86400)
+    exit_edge_threshold_pp: float = Field(default=0, ge=-100, le=100)
+    max_slippage_cents: float = Field(default=1, ge=0, le=20)
+    max_spread_cents: float = Field(default=3, ge=0, le=50)
+    dust_threshold_usd: float = Field(default=1, ge=0, le=20)
+    exposure_rounding_tolerance_usd: float = Field(default=0.05, ge=0.001, le=1)
     closing_window_days: int = Field(default=30, ge=1)
     custom_exclude_phrases: list[str] = Field(default_factory=list)
     returns_per_day_formula: str = DEFAULT_RETURNS_PER_DAY_FORMULA
@@ -85,6 +95,11 @@ class Bullpen008Settings(BaseModel):
         ):
             if cap > self.bankroll_usd:
                 raise ValueError("portfolio exposure caps cannot exceed bankroll")
+        if self.execution_mode == "live":
+            if self.shadow_mode or not self.execution_enabled or not self.live_control_armed:
+                raise ValueError("live execution requires the explicit armed live-control state")
+        elif self.execution_enabled or self.live_control_armed or not self.shadow_mode:
+            raise ValueError("non-live Bullpen 008 modes must remain shadowed and unarmed")
         return self
 
 
@@ -105,6 +120,12 @@ class Bullpen008SettingsUpdate(BaseModel):
     risk_half_size_max: float | None = Field(default=None, ge=0, le=10)
     probability_tolerance_pp: float | None = Field(default=None, gt=0, le=2)
     stale_quote_seconds: int | None = Field(default=None, ge=30)
+    wallet_freshness_seconds: int | None = Field(default=None, ge=30, le=1800)
+    plan_max_age_seconds: int | None = Field(default=None, ge=60, le=86400)
+    exit_edge_threshold_pp: float | None = Field(default=None, ge=-100, le=100)
+    max_slippage_cents: float | None = Field(default=None, ge=0, le=20)
+    max_spread_cents: float | None = Field(default=None, ge=0, le=50)
+    dust_threshold_usd: float | None = Field(default=None, ge=0, le=20)
     closing_window_days: int | None = Field(default=None, ge=1)
     custom_exclude_phrases: list[str] | None = None
     returns_per_day_formula: str | None = None
@@ -115,8 +136,10 @@ class Bullpen008SettingsUpdate(BaseModel):
 
 class Bullpen008State(BaseModel):
     workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
-    shadow_mode: Literal[True] = True
-    execution_enabled: Literal[False] = False
+    shadow_mode: bool = True
+    execution_enabled: bool = False
+    execution_mode: Literal["shadow", "confirmation_required", "live"] = "shadow"
+    emergency_stop: bool = False
     running: bool = False
     paused: bool = False
     status: str = "shadow-ready"
@@ -132,7 +155,7 @@ class Bullpen008StageOutput(BaseModel):
     stage_number: int = Field(ge=1, le=6)
     stage_name: str
     stage_version: str
-    status: Literal["pending", "running", "finished", "failed", "blocked", "disabled"]
+    status: Literal["pending", "running", "finished", "failed", "blocked", "partial", "cancelled", "disabled"]
     pass_condition: str
     block_reason: str | None = None
     previous_stage_output_hash: str | None = None
@@ -157,8 +180,8 @@ class Bullpen008Run(BaseModel):
     workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
     status: str
     triggered_by: str
-    shadow_mode: Literal[True] = True
-    execution_enabled: Literal[False] = False
+    shadow_mode: bool = True
+    execution_enabled: bool = False
     started_at: str
     completed_at: str | None = None
     summary: str
@@ -170,10 +193,17 @@ class Bullpen008Run(BaseModel):
     run_metadata: dict[str, object] = Field(default_factory=dict)
     stages: list[Bullpen008StageOutput] = Field(default_factory=list)
     portfolio_certificate: dict[str, object] | None = None
+    action_plan: dict[str, object] | None = None
+    execution_intents: list[dict[str, object]] = Field(default_factory=list)
 
 
 class Bullpen008RunRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=8, max_length=128)
+
+
+class Bullpen008ExecutionControlRequest(BaseModel):
+    mode: Literal["shadow", "live"]
+    confirmation: str = Field(min_length=1, max_length=80)
 
 
 class Bullpen008InheritedRun(BaseModel):
@@ -187,16 +217,30 @@ class Bullpen008InheritedRun(BaseModel):
     source_route: Literal["/console/bullpen-ai"] = "/console/bullpen-ai"
 
 
+class Bullpen008Alert(BaseModel):
+    id: int
+    market_id: str
+    side: str
+    source: str
+    breach_type: str
+    llm_odds: float | None = None
+    actual_odds: float | None = None
+    created_at: str
+    recovered_at: str | None = None
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
 class Bullpen008Bootstrap(BaseModel):
     workflow_profile: Literal["bullpen008"] = WORKFLOW_PROFILE
     page_identity: Literal["Bullpen 008"] = "Bullpen 008"
-    shadow_mode: Literal[True] = True
-    execution_enabled: Literal[False] = False
+    shadow_mode: bool = True
+    execution_enabled: bool = False
     settings: Bullpen008Settings
     state: Bullpen008State
     latest_run: Bullpen008Run | None = None
     inherited_runs: list[Bullpen008InheritedRun] = Field(default_factory=list)
-    pending_phase2_stages: list[int] = Field(default_factory=lambda: [5, 6])
+    alerts: list[Bullpen008Alert] = Field(default_factory=list)
+    pending_phase2_stages: list[int] = Field(default_factory=list)
 
 
 class Bullpen008HistoryPage(BaseModel):

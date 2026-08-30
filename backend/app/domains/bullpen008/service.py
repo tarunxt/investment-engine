@@ -18,6 +18,9 @@ from app.domains.bullpen008.constants import (
     WORKFLOW_PROFILE,
 )
 from app.domains.bullpen008.models import (
+    Bullpen008ActionPlanRecord,
+    Bullpen008AlertRecord,
+    Bullpen008ExecutionIntentRecord,
     Bullpen008RunRecord,
     Bullpen008SettingsRecord,
     Bullpen008StageOutputRecord,
@@ -25,6 +28,7 @@ from app.domains.bullpen008.models import (
 )
 from app.domains.bullpen008.schemas import (
     Bullpen008Bootstrap,
+    Bullpen008Alert,
     Bullpen008HistoryPage,
     Bullpen008InheritedRun,
     Bullpen008Run,
@@ -128,12 +132,14 @@ async def recover_interrupted_previous_build_run(
         2: "Probability & Structural Risk",
         3: "Cluster & Dependency Map",
         4: "Portfolio Optimizer & Stress Test",
+        5: "Exit & Rebalance Plan",
+        6: "Execute & Reconcile",
     }
     first_missing = next(
-        (number for number in range(1, 5) if number not in existing_by_number),
+        (number for number in range(1, 7) if number not in existing_by_number),
         None,
     )
-    for stage_number in range(1, 5):
+    for stage_number in range(1, 7):
         existing = existing_by_number.get(stage_number)
         if existing is not None:
             previous_hash = existing.output_hash
@@ -213,8 +219,8 @@ async def recover_interrupted_previous_build_run(
         "replacement_build": current_build,
         "orders_created": 0,
         "orders_submitted": 0,
-        "stage5_status": "disabled_pending_phase2",
-        "stage6_status": "disabled_pending_phase2",
+        "stage5_status": "failed" if first_missing == 5 else "blocked",
+        "stage6_status": "failed" if first_missing == 6 else "blocked",
     }
     await session.commit()
     return record.id
@@ -300,6 +306,9 @@ async def ensure_seeded(
             payload={
                 "shadow_mode": True,
                 "execution_enabled": False,
+                "execution_mode": "shadow",
+                "live_control_armed": False,
+                "emergency_stop": False,
                 "seeded_scheduler_values": {
                     "auto_start_at": settings_record.payload.get("auto_start_at"),
                     "auto_refresh_minutes": settings_record.payload.get(
@@ -319,8 +328,12 @@ def settings_from_record(record: Bullpen008SettingsRecord) -> Bullpen008Settings
 
 def state_from_record(record: Bullpen008StateRecord) -> Bullpen008State:
     return Bullpen008State(
+        shadow_mode=bool(record.payload.get("shadow_mode", True)),
+        execution_enabled=bool(record.payload.get("execution_enabled", False)),
+        execution_mode=str(record.payload.get("execution_mode", "shadow")),
         running=record.running,
         paused=record.paused,
+        emergency_stop=bool(record.payload.get("emergency_stop", False)),
         status=record.status,
         next_run_at=_iso(record.next_run_at),
         last_run_at=_iso(record.last_run_at),
@@ -368,10 +381,35 @@ def run_from_record(
     record: Bullpen008RunRecord, *, include_stage_payloads: bool = True
 ) -> Bullpen008Run:
     certificate = record.certificate.payload if record.certificate is not None else None
+    action_plan = record.action_plan.payload if record.action_plan is not None else None
+    execution_intents = [
+        {
+            "intent_id": intent.id,
+            "action_id": intent.action_id,
+            "action_type": intent.action_type,
+            "market_id": intent.market_id,
+            "side": intent.side,
+            "status": intent.status,
+            "attempt_count": intent.attempt_count,
+            "remote_order_id": intent.remote_order_id,
+            "remote_transaction_id": intent.remote_transaction_id,
+            "filled_shares": intent.filled_shares,
+            "filled_value_usd": intent.filled_value_usd,
+            "average_price_cents": intent.average_price_cents,
+            "fees_usd": intent.fees_usd,
+            "blocker_code": intent.blocker_code,
+            "failure_message": intent.failure_message,
+            "retryable": intent.retryable,
+            "payload": intent.payload if include_stage_payloads else {},
+        }
+        for intent in record.execution_intents
+    ]
     return Bullpen008Run(
         id=record.id,
         status=record.status,
         triggered_by=record.triggered_by,
+        shadow_mode=record.shadow_mode,
+        execution_enabled=record.execution_enabled,
         started_at=record.started_at.isoformat(),
         completed_at=_iso(record.completed_at),
         summary=record.summary,
@@ -386,6 +424,8 @@ def run_from_record(
             for stage in record.stages
         ],
         portfolio_certificate=certificate,
+        action_plan=action_plan,
+        execution_intents=execution_intents,
     )
 
 
@@ -408,16 +448,20 @@ async def update_settings(
     merged.update(
         {
             "workflow_profile": WORKFLOW_PROFILE,
-            "shadow_mode": True,
-            "execution_enabled": False,
+            "shadow_mode": current.shadow_mode,
+            "execution_enabled": current.execution_enabled,
+            "execution_mode": current.execution_mode,
+            "live_control_armed": current.live_control_armed,
         }
     )
     validated = Bullpen008Settings.model_validate(merged)
     record.payload = validated.model_dump(mode="json")
     state.payload = {
         **dict(state.payload),
-        "shadow_mode": True,
-        "execution_enabled": False,
+        "shadow_mode": validated.shadow_mode,
+        "execution_enabled": validated.execution_enabled,
+        "execution_mode": validated.execution_mode,
+        "live_control_armed": validated.live_control_armed,
         "saved_schedule": {
             "auto_start_at": validated.auto_start_at,
             "auto_refresh_minutes": validated.auto_refresh_minutes,
@@ -459,6 +503,75 @@ async def set_scheduler_running(
     return state_from_record(state)
 
 
+async def set_scheduler_paused(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    paused: bool,
+) -> Bullpen008State:
+    _, state = await ensure_seeded(session, user_id=user_id)
+    now = datetime.now(UTC)
+    state.paused = paused
+    state.status = "shadow-paused" if paused else ("shadow-scheduled" if state.running else "shadow-ready")
+    state.payload = {
+        **dict(state.payload),
+        "last_action": "Bullpen 008 scheduler paused." if paused else "Bullpen 008 scheduler resumed.",
+        "last_action_at": now.isoformat(),
+    }
+    await session.commit()
+    return state_from_record(state)
+
+
+async def set_emergency_stop(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    active: bool,
+) -> Bullpen008State:
+    _, state = await ensure_seeded(session, user_id=user_id)
+    now = datetime.now(UTC)
+    state.paused = True if active else state.paused
+    state.status = "emergency-stopped" if active else ("shadow-paused" if state.paused else "shadow-ready")
+    state.payload = {
+        **dict(state.payload),
+        "emergency_stop": active,
+        "last_action": "Bullpen 008 emergency stop activated." if active else "Bullpen 008 emergency stop cleared.",
+        "last_action_at": now.isoformat(),
+    }
+    await session.commit()
+    return state_from_record(state)
+
+
+async def set_execution_control(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    live: bool,
+) -> Bullpen008Settings:
+    settings_record, state = await ensure_seeded(session, user_id=user_id)
+    current = settings_from_record(settings_record)
+    updated = Bullpen008Settings.model_validate(
+        {
+            **current.model_dump(mode="json"),
+            "shadow_mode": not live,
+            "execution_enabled": live,
+            "execution_mode": "live" if live else "shadow",
+            "live_control_armed": live,
+        }
+    )
+    settings_record.payload = updated.model_dump(mode="json")
+    state.payload = {
+        **dict(state.payload),
+        "shadow_mode": not live,
+        "execution_enabled": live,
+        "execution_mode": "live" if live else "shadow",
+        "live_control_armed": live,
+        "execution_control_changed_at": datetime.now(UTC).isoformat(),
+    }
+    await session.commit()
+    return updated
+
+
 async def create_run_record(
     session: AsyncSession,
     *,
@@ -467,6 +580,7 @@ async def create_run_record(
     idempotency_key: str | None,
 ) -> Bullpen008RunRecord:
     settings_record, _ = await ensure_seeded(session, user_id=user_id)
+    execution_settings = settings_from_record(settings_record)
     key = idempotency_key or f"bullpen008:{triggered_by}:{uuid4()}"
     existing = (
         await session.execute(
@@ -474,6 +588,8 @@ async def create_run_record(
             .options(
                 selectinload(Bullpen008RunRecord.stages),
                 selectinload(Bullpen008RunRecord.certificate),
+                selectinload(Bullpen008RunRecord.action_plan),
+                selectinload(Bullpen008RunRecord.execution_intents),
             )
             .where(
                 Bullpen008RunRecord.user_id == user_id,
@@ -492,10 +608,10 @@ async def create_run_record(
         idempotency_key=key,
         status="queued",
         triggered_by=triggered_by,
-        shadow_mode=True,
-        execution_enabled=False,
+        shadow_mode=execution_settings.shadow_mode,
+        execution_enabled=execution_settings.execution_enabled,
         started_at=datetime.now(UTC),
-        summary="Bullpen 008 shadow-mode run queued for Stages 1-4.",
+        summary="Bullpen 008 shadow-mode run queued for the six-stage pipeline.",
         code_build_version=resolve_backend_commit_sha(),
         settings_snapshot=dict(settings_record.payload),
         wallet_snapshot={},
@@ -506,9 +622,9 @@ async def create_run_record(
             "orders_permitted": False,
         },
         run_metadata={
-            "phase": 1,
-            "stages_enabled": [1, 2, 3, 4],
-            "stages_disabled": [5, 6],
+            "phase": 2,
+            "stages_enabled": [1, 2, 3, 4, 5, 6],
+            "stages_disabled": [],
         },
     )
     session.add(record)
@@ -529,6 +645,8 @@ async def get_run(
             .options(
                 selectinload(Bullpen008RunRecord.stages),
                 selectinload(Bullpen008RunRecord.certificate),
+                selectinload(Bullpen008RunRecord.action_plan),
+                selectinload(Bullpen008RunRecord.execution_intents),
             )
             .where(
                 Bullpen008RunRecord.id == run_id,
@@ -607,6 +725,8 @@ async def get_bootstrap(
             .options(
                 selectinload(Bullpen008RunRecord.stages),
                 selectinload(Bullpen008RunRecord.certificate),
+                selectinload(Bullpen008RunRecord.action_plan),
+                selectinload(Bullpen008RunRecord.execution_intents),
             )
             .where(
                 Bullpen008RunRecord.user_id == user_id,
@@ -617,6 +737,21 @@ async def get_bootstrap(
         )
     ).scalar_one_or_none()
     inherited = await _inherited_runs(session, user_id=user_id)
+    alert_records = (
+        (
+            await session.execute(
+                select(Bullpen008AlertRecord)
+                .where(
+                    Bullpen008AlertRecord.user_id == user_id,
+                    Bullpen008AlertRecord.workflow_profile == WORKFLOW_PROFILE,
+                )
+                .order_by(Bullpen008AlertRecord.created_at.desc())
+                .limit(20)
+            )
+        )
+        .scalars()
+        .all()
+    )
     await session.commit()
     return Bullpen008Bootstrap(
         settings=settings_from_record(settings_record),
@@ -625,6 +760,21 @@ async def get_bootstrap(
         if latest is not None
         else None,
         inherited_runs=inherited,
+        alerts=[
+            Bullpen008Alert(
+                id=record.id,
+                market_id=record.market_id,
+                side=record.side,
+                source=record.source,
+                breach_type=record.breach_type,
+                llm_odds=record.llm_odds,
+                actual_odds=record.actual_odds,
+                created_at=record.created_at.isoformat(),
+                recovered_at=_iso(record.recovered_at),
+                payload=record.payload,
+            )
+            for record in alert_records
+        ],
     )
 
 
@@ -642,6 +792,8 @@ async def get_history(
                 .options(
                     selectinload(Bullpen008RunRecord.stages),
                     selectinload(Bullpen008RunRecord.certificate),
+                    selectinload(Bullpen008RunRecord.action_plan),
+                    selectinload(Bullpen008RunRecord.execution_intents),
                 )
                 .where(
                     Bullpen008RunRecord.user_id == user_id,

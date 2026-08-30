@@ -926,6 +926,7 @@ def build_portfolio_target(
     settings: Bullpen008Settings,
     available_cash_usd: float,
     inputs_hash: str,
+    account_identity: str | None = None,
 ) -> dict[str, object]:
     edge_norm = _normalize_metric([_float(row.get("llm_edge_pp")) for row in rows])
     returns_norm = _normalize_metric(
@@ -1034,16 +1035,38 @@ def build_portfolio_target(
             ranked[0],
         )
 
+    # Phase 2 makes Stage 4 authoritative over reductions as well as additions.
+    # Start from zero target exposure, retain only the highest-ranked eligible
+    # representative in each catalyst cluster, and trim every cap breach in the
+    # target. Stage 5 may translate these frozen reductions but cannot invent
+    # them or redirect the released cash.
     contract_exposure: dict[str, float] = defaultdict(float)
     strict_exposure: dict[str, float] = defaultdict(float)
     catalyst_exposure: dict[str, float] = defaultdict(float)
-    for row in candidates:
-        current = float(row.get("current_exposure_usd") or 0)
-        contract_exposure[_market_id(row)] += current
-        strict_exposure[str(row.get("strict_cluster_id"))] += current
-        catalyst_exposure[str(row.get("common_catalyst_cluster_id"))] += current
+    target_before_buys: dict[str, float] = defaultdict(float)
+    for cluster_id, representative in representatives.items():
+        if not representative["eligible"]:
+            continue
+        market_id = _market_id(representative)
+        strict_id = str(representative.get("strict_cluster_id"))
+        common_id = str(representative.get("common_catalyst_cluster_id"))
+        normal_cap = settings.max_contract_exposure_usd
+        risk = float(representative.get("risk_score") or 10)
+        if settings.risk_half_size_min <= risk <= settings.risk_half_size_max:
+            normal_cap = min(normal_cap, settings.max_contract_exposure_usd / 2)
+        retained = min(
+            float(representative.get("current_exposure_usd") or 0),
+            normal_cap,
+            settings.max_strict_cluster_exposure_usd,
+            settings.max_common_catalyst_exposure_usd,
+        )
+        retained = round(max(0.0, retained), 2)
+        target_before_buys[market_id] = retained
+        contract_exposure[market_id] = retained
+        strict_exposure[strict_id] += retained
+        catalyst_exposure[common_id] += retained
 
-    existing_total_exposure = sum(contract_exposure.values())
+    existing_total_exposure = sum(target_before_buys.values())
     cash_for_buys = min(
         max(0.0, available_cash_usd),
         max(0.0, settings.bankroll_usd - existing_total_exposure),
@@ -1059,6 +1082,11 @@ def build_portfolio_target(
         common_id = str(candidate.get("common_catalyst_cluster_id"))
         allocation = 0.0
         explanation = list(candidate["eligibility_reasons"])
+        current_exposure = float(candidate.get("current_exposure_usd") or 0)
+        retained_exposure = target_before_buys.get(market_id, 0.0)
+        proposed_sell = max(0.0, current_exposure - retained_exposure)
+        if proposed_sell > 0:
+            explanation.append("STAGE4_TARGET_REDUCTION")
         if candidate["eligible"]:
             normal_cap = settings.max_contract_exposure_usd
             risk = float(candidate.get("risk_score") or 10)
@@ -1094,12 +1122,15 @@ def build_portfolio_target(
                 "strict_cluster_id": strict_id,
                 "common_catalyst_cluster_id": common_id,
                 "current_exposure_usd": round(
-                    float(candidate.get("current_exposure_usd") or 0), 2
+                    current_exposure, 2
                 ),
+                "proposed_sell_usd": round(proposed_sell, 2),
                 "proposed_buy_usd": round(allocation, 2),
-                "target_exposure_usd": round(
-                    float(candidate.get("current_exposure_usd") or 0) + allocation, 2
-                ),
+                "target_exposure_usd": round(retained_exposure + allocation, 2),
+                "condition_id": candidate.get("condition_id"),
+                "slug": candidate.get("slug"),
+                "deadline": candidate.get("deadline"),
+                "quote_timestamp": candidate.get("quote_timestamp"),
                 "current_odds": candidate.get("current_chosen_side_bullpen_odds"),
                 "llm_odds": candidate.get("chosen_side_llm_probability"),
                 "edge_pp": candidate.get("llm_edge_pp"),
@@ -1119,9 +1150,8 @@ def build_portfolio_target(
         market_id = _market_id(candidate)
         if market_id in representative_market_ids:
             continue
-        current_exposure = round(
-            float(candidate.get("current_exposure_usd") or 0), 2
-        )
+        current_exposure = round(float(candidate.get("current_exposure_usd") or 0), 2)
+        target_exposure = target_before_buys.get(market_id, 0.0)
         allocations.append(
             {
                 "market_id": market_id,
@@ -1132,8 +1162,13 @@ def build_portfolio_target(
                     candidate.get("common_catalyst_cluster_id")
                 ),
                 "current_exposure_usd": current_exposure,
+                "proposed_sell_usd": round(max(0.0, current_exposure - target_exposure), 2),
                 "proposed_buy_usd": 0.0,
-                "target_exposure_usd": current_exposure,
+                "target_exposure_usd": round(target_exposure, 2),
+                "condition_id": candidate.get("condition_id"),
+                "slug": candidate.get("slug"),
+                "deadline": candidate.get("deadline"),
+                "quote_timestamp": candidate.get("quote_timestamp"),
                 "current_odds": candidate.get(
                     "current_chosen_side_bullpen_odds"
                 ),
@@ -1145,6 +1180,7 @@ def build_portfolio_target(
                 "explanation_codes": [
                     *list(candidate["eligibility_reasons"]),
                     "NOT_CLUSTER_REPRESENTATIVE",
+                    *(["STAGE4_TARGET_REDUCTION"] if current_exposure > target_exposure else []),
                 ],
             }
         )
@@ -1255,6 +1291,8 @@ def build_portfolio_target(
         "cluster_cap_result": cluster_cap_result,
         "stress_test_result": stress_test_result,
         "inputs_hash": inputs_hash,
+        "account_identity": account_identity,
+        "target_portfolio_hash": stable_hash(allocations),
         "cluster_map_version": CLUSTER_MAP_VERSION,
         "optimizer_version": OPTIMIZER_VERSION,
         "portfolio_certified": portfolio_certified,
