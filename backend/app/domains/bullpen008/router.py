@@ -103,6 +103,15 @@ async def run_bullpen008_once(
 
     redis_client = aioredis.from_url(app_settings.redis_url, decode_responses=True)
     pending_key = _pending_key(current_user.id)
+    current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
+    interrupted_run_id = await recover_interrupted_previous_build_run(
+        session,
+        user_id=current_user.id,
+        current_build=current_build,
+    )
+    if interrupted_run_id is not None:
+        await redis_client.delete(f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock")
+        await redis_client.delete(pending_key)
     acquired = await redis_client.set(
         pending_key,
         "manual",
@@ -110,29 +119,11 @@ async def run_bullpen008_once(
         ex=PENDING_MARKER_TTL_SECONDS,
     )
     if not acquired:
-        current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
-        interrupted_run_id = await recover_interrupted_previous_build_run(
-            session,
-            user_id=current_user.id,
-            current_build=current_build,
+        await redis_client.close()
+        raise HTTPException(
+            status_code=409,
+            detail="A Bullpen 008 shadow run is already queued or running.",
         )
-        if interrupted_run_id is not None:
-            await redis_client.delete(
-                f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock"
-            )
-            await redis_client.delete(pending_key)
-            acquired = await redis_client.set(
-                pending_key,
-                "manual",
-                nx=True,
-                ex=PENDING_MARKER_TTL_SECONDS,
-            )
-        if not acquired:
-            await redis_client.close()
-            raise HTTPException(
-                status_code=409,
-                detail="A Bullpen 008 shadow run is already queued or running.",
-            )
     try:
         record = await create_run_record(
             session,
