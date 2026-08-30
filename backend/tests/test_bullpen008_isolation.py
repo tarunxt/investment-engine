@@ -18,6 +18,7 @@ from app.domains.bullpen008.models import (
 from app.domains.bullpen008.service import _seed_payload_from_007
 from app.domains.bullpen008.tasks import (
     _merge_stage2_provider_rows,
+    _stage2_input_rows,
     _stage2_repair_market_ids,
 )
 
@@ -93,6 +94,19 @@ def test_stage2_targeted_repair_replaces_only_missing_or_invalid_rows() -> None:
         {"market_id": "valid", "value": 1},
         {"market_id": "invalid", "value": "fixed"},
         {"market_id": "missing", "value": "supplied"},
+    ]
+
+
+def test_stage2_packet_contains_only_accepted_candidates_and_active_monitoring() -> None:
+    rows = [
+        {"market_id": "candidate", "accounting_status": "accepted"},
+        {"market_id": "holding", "accounting_status": "accepted_monitoring"},
+        {"market_id": "hard-filtered", "accounting_status": "rejected"},
+        {"market_id": "stale", "accounting_status": "data_error"},
+    ]
+    assert [row["market_id"] for row in _stage2_input_rows(rows)] == [
+        "candidate",
+        "holding",
     ]
 
 
