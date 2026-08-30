@@ -37,6 +37,11 @@ import type {
   Bullpen008StageStatus,
 } from "@/types/api";
 import { BullpenAutoRunStageOutputDialog } from "../../bullpen-ai/_components/BullpenAutoRunStageOutputDialog";
+import { BullpenScanFilterDetailsDialog } from "../../bullpen-ai/_components/BullpenScanFilterDetailsDialog";
+import {
+  BullpenReturnsPerDayFormulaDialog,
+  BullpenReturnsPerDayHeaderInfo,
+} from "../../bullpen-ai/_components/BullpenReturnsPerDayInfo";
 
 const STAGES = [
   {
@@ -167,13 +172,14 @@ function StageCard({
   const phase2 = definition.number > 4;
   const status = phase2 ? "disabled" : stage?.status ?? "pending";
   const metrics = metricSource(stage);
+  const progressPercent = status === "finished" ? 100 : status === "running" ? 55 : 0;
   return (
     <button
       type="button"
       disabled={phase2 || !stage}
       onClick={onOpen}
       className={cn(
-        "group min-h-64 rounded-3xl border bg-white p-5 text-left shadow-sm transition",
+        "group flex min-h-[28rem] flex-col rounded-2xl border bg-white p-4 text-left shadow-sm transition",
         phase2
           ? "cursor-not-allowed border-dashed border-slate-300 bg-slate-50/70"
           : "border-slate-200 hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-lg disabled:translate-y-0 disabled:cursor-default disabled:hover:border-slate-200 disabled:hover:shadow-sm",
@@ -193,6 +199,15 @@ function StageCard({
         </span>
       </div>
       <p className="mt-3 text-sm leading-6 text-slate-600">{definition.detail}</p>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200" aria-label={`Stage ${definition.number} progress ${progressPercent}%`}>
+        <div
+          className={cn(
+            "h-full rounded-full transition-all",
+            status === "finished" ? "bg-emerald-500" : status === "failed" ? "bg-rose-500" : status === "blocked" ? "bg-amber-500" : "bg-sky-500",
+          )}
+          style={{ width: `${progressPercent}%` }}
+        />
+      </div>
       <div className="mt-5 grid grid-cols-2 gap-2">
         {definition.metricKeys.map((key) => (
           <div key={key} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -207,7 +222,7 @@ function StageCard({
         ) : null}
       </div>
       {stage ? (
-        <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
+        <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
           <span>{stage.duration_seconds.toFixed(2)}s · v{stage.stage_version}</span>
           <span className="font-semibold text-sky-700 group-hover:text-sky-900">Open details</span>
         </div>
@@ -229,6 +244,9 @@ function SummaryMetric({ label, value, note }: { label: string; value: string; n
 export function Bullpen008PageClient() {
   const [bootstrap, setBootstrap] = useState<Bullpen008Bootstrap | null>(null);
   const [selectedStage, setSelectedStage] = useState<Bullpen008StageOutput | null>(null);
+  const [portfolioStage, setPortfolioStage] = useState<Bullpen008StageOutput | null>(null);
+  const [isFormulaDialogOpen, setIsFormulaDialogOpen] = useState(false);
+  const [isOthersFilterOpen, setIsOthersFilterOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -243,6 +261,20 @@ export function Bullpen008PageClient() {
       setCustomPhrases(data.settings.custom_exclude_phrases.join(", "));
       setClosingWindowDays(String(data.settings.closing_window_days));
       setAutoRefreshMinutes(String(data.settings.auto_refresh_minutes));
+      const hasStage4 = data.latest_run?.stages.some(
+        (stage) => stage.stage_number === 4,
+      );
+      if (data.latest_run && hasStage4) {
+        try {
+          setPortfolioStage(
+            await apiService.getBullpen008Stage(data.latest_run.id, 4),
+          );
+        } catch {
+          setPortfolioStage(null);
+        }
+      } else {
+        setPortfolioStage(null);
+      }
       setError(null);
     } catch (loadError) {
       if (signal?.aborted) return;
@@ -277,6 +309,7 @@ export function Bullpen008PageClient() {
   const walletSnapshot = asRecord(latestRun?.wallet_snapshot);
   const balance = asRecord(walletSnapshot.balance);
   const positions = asRows(walletSnapshot.positions);
+  const portfolioAllocations = asRows(portfolioStage?.outputs.allocations);
   const invested = positions.reduce(
     (total, row) => total + Number(row.current_value_usd ?? row.exposure_usd ?? 0),
     0,
@@ -330,6 +363,35 @@ export function Bullpen008PageClient() {
       setBusyAction(null);
     }
   };
+
+  const loadReturnsFormula = useCallback(async () => {
+    const settings = await apiService.getBullpen008Settings();
+    return settings.returns_per_day_formula;
+  }, []);
+
+  const saveReturnsFormula = useCallback(async (formula: string) => {
+    const settings = await apiService.updateBullpen008Settings({
+      returns_per_day_formula: formula,
+    });
+    await load();
+    return settings.returns_per_day_formula;
+  }, [load]);
+
+  const saveOtherPhrases = useCallback(async (phrases: string[]) => {
+    setCustomPhrases(phrases.join(", "));
+    setBusyAction("settings");
+    setError(null);
+    try {
+      await apiService.updateBullpen008Settings({
+        custom_exclude_phrases: phrases,
+      });
+      await load();
+    } catch (actionError) {
+      setError(`Bullpen 008 custom phrases were not saved. ${formatUnknownError(actionError)}`);
+    } finally {
+      setBusyAction(null);
+    }
+  }, [load]);
 
   const openStage = async (stageNumber: number) => {
     if (!latestRun) return;
@@ -472,6 +534,28 @@ export function Bullpen008PageClient() {
             <div className="space-y-2"><Label htmlFor="bullpen008-window">Closing window (days)</Label><Input id="bullpen008-window" inputMode="numeric" value={closingWindowDays} onChange={(event) => setClosingWindowDays(event.target.value)} /></div>
             <div className="space-y-2"><Label htmlFor="bullpen008-refresh">Refresh interval (minutes)</Label><Input id="bullpen008-refresh" inputMode="numeric" value={autoRefreshMinutes} onChange={(event) => setAutoRefreshMinutes(event.target.value)} /></div>
             <div className="space-y-2"><Label htmlFor="bullpen008-phrases">Custom exclusion phrases</Label><Input id="bullpen008-phrases" value={customPhrases} onChange={(event) => setCustomPhrases(event.target.value)} placeholder="comma-separated phrases" /></div>
+            <button
+              type="button"
+              onClick={() => setIsOthersFilterOpen(true)}
+              className="w-full rounded-2xl border border-indigo-200 bg-indigo-50/60 p-4 text-left transition hover:border-indigo-300 hover:bg-indigo-50"
+            >
+              <span className="text-sm font-semibold text-slate-950">Others</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-600">
+                Open the same Bullpen 007 filter-details popup to add, remove, and inspect custom exclusion phrases.
+              </span>
+            </button>
+            <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+              <div>
+                <p className="font-semibold text-slate-950">Returns/day formula</p>
+                <p className="mt-1 break-all font-mono text-xs text-slate-500">
+                  {bootstrap?.settings.returns_per_day_formula}
+                </p>
+              </div>
+              <BullpenReturnsPerDayHeaderInfo
+                onOpen={() => setIsFormulaDialogOpen(true)}
+                className="h-6 w-6 shrink-0"
+              />
+            </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
               Entry floor {bootstrap?.settings.entry_side_odds_floor_pct}% · LLM floor {bootstrap?.settings.min_llm_probability_pct}% · $5 increments · $20 contract and cluster caps.
             </div>
@@ -483,6 +567,65 @@ export function Bullpen008PageClient() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="rounded-3xl border-slate-200 shadow-sm">
+        <CardHeader>
+          <CardTitle>Event Summary</CardTitle>
+          <CardDescription>
+            Read-only Stage 4 target rows using the familiar Bullpen event-table density. Every analysed row remains visible, including zero-allocation rejections.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="min-w-[1120px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-4 py-3">Event</th>
+                  <th className="px-4 py-3">Side</th>
+                  <th className="px-4 py-3 text-right">Current odds</th>
+                  <th className="px-4 py-3 text-right">LLM odds</th>
+                  <th className="px-4 py-3 text-right">Edge</th>
+                  <th className="px-4 py-3 text-right">
+                    <span className="inline-flex items-center justify-end gap-1">
+                      Returns/day
+                      <BullpenReturnsPerDayHeaderInfo onOpen={() => setIsFormulaDialogOpen(true)} />
+                    </span>
+                  </th>
+                  <th className="px-4 py-3 text-right">Risk</th>
+                  <th className="px-4 py-3 text-right">Current</th>
+                  <th className="px-4 py-3 text-right">Proposed</th>
+                  <th className="px-4 py-3 text-right">Target</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {portfolioAllocations.map((row, index) => (
+                  <tr key={String(row.market_id ?? index)}>
+                    <td className="max-w-md px-4 py-3 font-medium text-slate-900">
+                      <span className="line-clamp-2">{String(row.question ?? row.market_id ?? "Unknown market")}</span>
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-slate-700">{String(row.chosen_side ?? "—")}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.current_odds == null ? "—" : `${Number(row.current_odds).toFixed(2)}%`}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.llm_odds == null ? "—" : `${Number(row.llm_odds).toFixed(2)}%`}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.edge_pp == null ? "—" : `${Number(row.edge_pp).toFixed(2)} pp`}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.returns_per_day == null ? "—" : `${Number(row.returns_per_day).toFixed(2)}%`}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{row.risk_score == null ? "—" : Number(row.risk_score).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums">{formatMoney(row.current_exposure_usd)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-sky-700">{formatMoney(row.proposed_buy_usd)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-950">{formatMoney(row.target_exposure_usd)}</td>
+                  </tr>
+                ))}
+                {portfolioAllocations.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-4 py-10 text-center text-slate-500">
+                      Run Stages 1–4 to create the first immutable target portfolio.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="rounded-3xl border-slate-200 shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between gap-4">
@@ -531,6 +674,21 @@ export function Bullpen008PageClient() {
             output_hash: selectedStage.output_hash,
           }}
           onClose={() => setSelectedStage(null)}
+        />
+      ) : null}
+      {isOthersFilterOpen ? (
+        <BullpenScanFilterDetailsDialog
+          detailId="excludeOthers"
+          customKeywords={customPhrases.split(",").map((phrase) => phrase.trim()).filter(Boolean)}
+          onSaveCustomKeywords={(phrases) => void saveOtherPhrases(phrases)}
+          onClose={() => setIsOthersFilterOpen(false)}
+        />
+      ) : null}
+      {isFormulaDialogOpen ? (
+        <BullpenReturnsPerDayFormulaDialog
+          loadFormula={loadReturnsFormula}
+          saveFormula={saveReturnsFormula}
+          onClose={() => setIsFormulaDialogOpen(false)}
         />
       ) : null}
     </div>

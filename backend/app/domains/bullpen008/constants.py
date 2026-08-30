@@ -5,18 +5,18 @@ WORKFLOW_LABEL = "Bullpen 008"
 SHADOW_MODE = True
 
 STAGE_VERSIONS = {
-    1: "bullpen008-stage1-v1",
-    2: "bullpen008-stage2-v1",
-    3: "bullpen008-stage3-v2",
-    4: "bullpen008-stage4-v1",
+    1: "bullpen008-stage1-v2",
+    2: "bullpen008-stage2-v2",
+    3: "bullpen008-stage3-v3",
+    4: "bullpen008-stage4-v2",
     5: "pending-phase2",
     6: "pending-phase2",
 }
 
-LLM_PROMPT_VERSION = "bullpen008-probability-risk-v1"
-CLUSTER_PROMPT_VERSION = "bullpen008-cluster-map-v2"
-OPTIMIZER_VERSION = "bullpen008-optimizer-v1"
-CLUSTER_MAP_VERSION = "bullpen008-cluster-map-v2"
+LLM_PROMPT_VERSION = "bullpen008-probability-risk-v2"
+CLUSTER_PROMPT_VERSION = "bullpen008-cluster-map-v3"
+OPTIMIZER_VERSION = "bullpen008-optimizer-v2"
+CLUSTER_MAP_VERSION = "bullpen008-cluster-map-v3"
 
 REDIS_PREFIX = "bullpen008"
 RUN_LOCK_TTL_SECONDS = 60 * 60

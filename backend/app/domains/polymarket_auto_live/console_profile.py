@@ -246,6 +246,7 @@ class ConsoleScanResult:
     total_candidates: int
     warning: str | None = None
     details: str | None = None
+    complete_universe: bool = True
 
 
 @dataclass(frozen=True)
@@ -860,6 +861,7 @@ def _build_cli_console_scan_result(
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     custom_exclude_phrases: list[str] | None = None,
+    apply_base_filters: bool = True,
 ) -> ConsoleScanResult:
     normalized_by_market_id: dict[str, ScannedMarket] = {}
     for discovered in rows:
@@ -875,11 +877,15 @@ def _build_cli_console_scan_result(
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     for market in normalized_by_market_id.values():
-        reasons = console_market_filter_reasons(
-            market,
-            now=now,
-            min_market_odds=min_market_odds,
-            custom_exclude_phrases=custom_exclude_phrases,
+        reasons = (
+            console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+                custom_exclude_phrases=custom_exclude_phrases,
+            )
+            if apply_base_filters
+            else []
         )
         if reasons:
             rejected.append(
@@ -911,6 +917,7 @@ async def scan_console_profile_markets(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     custom_exclude_phrases: list[str] | None = None,
+    apply_base_filters: bool = True,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -927,6 +934,7 @@ async def scan_console_profile_markets(
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
             custom_exclude_phrases=custom_exclude_phrases,
+            apply_base_filters=apply_base_filters,
         )
         # Bullpen CLI limits parent discovery rows, while one parent can contain
         # multiple markets. The normalized count can therefore exceed the CLI
@@ -940,6 +948,7 @@ async def scan_console_profile_markets(
             scan_candidate_markets(
                 min_liquidity_usd=0,
                 existing_position_slugs=set(),
+                apply_base_filters=apply_base_filters,
             ),
             timeout=CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
         )
@@ -950,6 +959,7 @@ async def scan_console_profile_markets(
                 "the complete-market supplement was unavailable."
             )
             cli_result.details = redact_secrets(str(gamma_exc))
+            cli_result.complete_universe = False
             return cli_result
         else:
             # A scan failure is safe to degrade to an empty candidate set: no
@@ -976,16 +986,21 @@ async def scan_console_profile_markets(
                 details=redact_secrets(
                     f"CLI error: {cli_exc}; Gamma error: {gamma_exc}"
                 ),
+                complete_universe=False,
             )
 
     accepted: list[ScannedMarket] = []
     rejected = list(gamma_scan.rejected)
     for market in gamma_scan.accepted:
-        reasons = console_market_filter_reasons(
-            market,
-            now=now,
-            min_market_odds=min_market_odds,
-            custom_exclude_phrases=custom_exclude_phrases,
+        reasons = (
+            console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+                custom_exclude_phrases=custom_exclude_phrases,
+            )
+            if apply_base_filters
+            else []
         )
         if reasons:
             rejected.append(

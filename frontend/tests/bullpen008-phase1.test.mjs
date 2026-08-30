@@ -44,6 +44,9 @@ test("008 page preserves the 007 shell patterns and exposes a six-stage monitor"
     "Wallet positions",
     "Scan & schedule settings",
     "Run history",
+    "Event Summary",
+    "Returns/day formula",
+    "Others",
   ]) assert.match(page, new RegExp(label));
 
   assert.match(page, /import \{ BullpenAutoRunStageOutputDialog \} from "\.\.\/\.\.\/bullpen-ai/);
@@ -55,6 +58,10 @@ test("008 page preserves the 007 shell patterns and exposes a six-stage monitor"
   assert.match(stageDialog, /aria-modal="true"/);
   assert.match(stageDialog, /event\.key === "Escape"/);
   assert.match(stageDialog, /document\.body\.style\.overflow = "hidden"/);
+  assert.match(page, /BullpenScanFilterDetailsDialog/);
+  assert.match(page, /BullpenReturnsPerDayFormulaDialog/);
+  assert.match(page, /getBullpen008Stage\(data\.latest_run\.id, 4\)/);
+  assert.match(page, /portfolioAllocations\.map/);
 });
 
 test("all Bullpen 008 internal destinations stay in the 008 route namespace", () => {
@@ -80,4 +87,18 @@ test("008 cards use a responsive three-column desktop grid with narrow fallbacks
   assert.match(page, /overflow-x-auto/);
   assert.match(dialog, /max-h-\[90vh\]/);
   assert.match(dialog, /z-\[130\]/);
+});
+
+test("shared Returns/day dialog keeps 007 defaults and accepts explicit 008 callbacks", () => {
+  const dialog = readSource("../app/console/bullpen-ai/_components/BullpenReturnsPerDayInfo.tsx");
+  const page = readSource("../app/console/bullpen008/_components/Bullpen008PageClient.tsx");
+
+  assert.match(dialog, /loadFormula\?: \(\) => Promise<string>/);
+  assert.match(dialog, /saveFormula\?: \(formula: string\) => Promise<string>/);
+  assert.match(dialog, /apiService\s*\.getBullpenAutoLiveSettings\(\)/);
+  assert.match(dialog, /apiService\.updateBullpenAutoLiveSettings/);
+  assert.match(page, /apiService\.getBullpen008Settings/);
+  assert.match(page, /apiService\.updateBullpen008Settings/);
+  assert.match(page, /loadFormula=\{loadReturnsFormula\}/);
+  assert.match(page, /saveFormula=\{saveReturnsFormula\}/);
 });
