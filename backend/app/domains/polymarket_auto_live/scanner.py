@@ -20,6 +20,7 @@ POLYMARKET_GAMMA_EVENTS_KEYSET_URL = (
 )
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_EVENT_PAGE_SIZE = 100
+GAMMA_DEADLINE_CURSOR_PAGE_SIZE = 500
 GAMMA_DEADLINE_CURSOR_MAX_OFFSET = 1_900
 GAMMA_KEYSET_EVENT_PAGE_SIZE = 500
 DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
@@ -770,7 +771,7 @@ async def _fetch_gamma_deadline_cursor_page(
             "archived": "false",
             "closed": "false",
             "end_date_min": end_date_min,
-            "limit": str(GAMMA_EVENT_PAGE_SIZE),
+            "limit": str(GAMMA_DEADLINE_CURSOR_PAGE_SIZE),
             "offset": str(offset),
             "order": "endDate",
             "ascending": "true",
@@ -1142,7 +1143,7 @@ async def scan_candidate_markets(
                     continue
                 accepted.append(normalized)
             if use_deadline_cursor_pagination:
-                if event_count < GAMMA_EVENT_PAGE_SIZE:
+                if event_count < GAMMA_DEADLINE_CURSOR_PAGE_SIZE:
                     break
                 if last_deadline is None or boundary_count <= 0:
                     raise ValueError(
