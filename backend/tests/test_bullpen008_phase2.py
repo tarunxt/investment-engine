@@ -186,6 +186,21 @@ def test_gap_ordering_cash_ledger_and_dependent_buy() -> None:
     assert verify_action_plan(plan)
 
 
+def test_live_wallet_rounding_can_reduce_a_certified_five_dollar_gap() -> None:
+    row = allocation("rounding", 15)
+    plan = make_plan([row], [position("rounding", 10.01)], cash=20)
+
+    assert plan["blocked_untradeable"] == []
+    assert plan["buys"][0]["estimated_usd"] == 4.99
+    assert plan["buys"][0]["fill_rounding_adjustment_usd"] == -0.01
+    assert plan["buys"][0]["reason_code"] == (
+        "STAGE4_CERTIFIED_TARGET_GAP_FILL_ROUNDING"
+    )
+    assert plan["plan_certificate"]["buy_increments"] is True
+    assert plan["plan_certificate"]["targets_reproduced"] is True
+    assert plan["plan_certificate"]["plan_certified"] is True
+
+
 def test_claim_cancel_sell_trim_buy_hold_action_order() -> None:
     rows = [
         allocation("claim", 0), allocation("exit", 0), allocation("trim", 10),
