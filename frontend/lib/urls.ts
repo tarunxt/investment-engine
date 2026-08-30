@@ -281,6 +281,8 @@ const bullpen008ApiUrls = {
   runs: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/runs`,
   run: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}`,
+  stage: (runId: string, stageNumber: number) =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}/stages/${stageNumber}`,
 };
 
 const bullpenTradeAnalysisApiUrls = {

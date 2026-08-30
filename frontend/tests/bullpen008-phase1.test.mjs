@@ -15,10 +15,13 @@ test("Bullpen 007 and 008 routes and mutation namespaces remain separate", () =>
   assert.match(urls, /bullpen008: \(\) => "\/console\/bullpen008"/);
   assert.match(urls, /\/polymarket\/bullpen008\/bootstrap/);
   assert.match(urls, /\/polymarket\/bullpen008\/run-once/);
+  assert.match(urls, /\/polymarket\/bullpen008\/runs\/\$\{encodeURIComponent\(runId\)\}\/stages\/\$\{stageNumber\}/);
   assert.match(service, /runBullpen008Once[\s\S]*?URLs\.bullpen008\.runOnce\(\)/);
   assert.doesNotMatch(service.match(/runBullpen008Once[\s\S]*?\n  }/)?.[0] ?? "", /bullpenAutoLive/);
   assert.match(router, /prefix="\/polymarket\/bullpen008"/);
   assert.match(router, /status_code=403/);
+  assert.match(router, /bullpen008_stage_detail/);
+  assert.match(service, /getBullpen008Stage[\s\S]*?URLs\.bullpen008\.stage/);
 });
 
 test("Bullpen 008 is immediately below Bullpen 007 in the sidebar", () => {

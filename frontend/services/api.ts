@@ -50,6 +50,7 @@ import {
   Bullpen008Run,
   Bullpen008Settings,
   Bullpen008SettingsUpdate,
+  Bullpen008StageOutput,
   Bullpen008State,
   BullpenRunAuditDetailResponse,
   BullpenRunAuditFeedbackCreateRequest,
@@ -1690,6 +1691,17 @@ class apiServiceClass implements IApiService {
       cache: "no-store",
       ...options,
     });
+  }
+
+  getBullpen008Stage(
+    runId: string,
+    stageNumber: number,
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008StageOutput> {
+    return this.get<Bullpen008StageOutput>(
+      URLs.bullpen008.stage(runId, stageNumber),
+      { cache: "no-store", ...options },
+    );
   }
 
   getBullpenAutoLiveSummary(

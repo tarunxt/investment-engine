@@ -18,6 +18,7 @@ from app.domains.bullpen008.schemas import (
     Bullpen008RunRequest,
     Bullpen008Settings,
     Bullpen008SettingsUpdate,
+    Bullpen008StageOutput,
     Bullpen008State,
 )
 from app.domains.bullpen008.service import (
@@ -25,6 +26,7 @@ from app.domains.bullpen008.service import (
     get_bootstrap,
     get_history,
     get_run,
+    get_stage,
     get_settings,
     run_from_record,
     set_scheduler_running,
@@ -167,7 +169,30 @@ async def bullpen008_run_detail(
     record = await get_run(session, user_id=current_user.id, run_id=run_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Bullpen 008 run not found.")
-    return run_from_record(record)
+    return run_from_record(record, include_stage_payloads=False)
+
+
+@router.get(
+    "/runs/{run_id}/stages/{stage_number}",
+    response_model=Bullpen008StageOutput,
+)
+async def bullpen008_stage_detail(
+    run_id: str,
+    stage_number: int,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_db),
+) -> Bullpen008StageOutput:
+    if stage_number not in {1, 2, 3, 4}:
+        raise HTTPException(status_code=404, detail="Bullpen 008 stage not found.")
+    stage = await get_stage(
+        session,
+        user_id=current_user.id,
+        run_id=run_id,
+        stage_number=stage_number,
+    )
+    if stage is None:
+        raise HTTPException(status_code=404, detail="Bullpen 008 stage not found.")
+    return stage
 
 
 @router.post("/orders", status_code=403)
