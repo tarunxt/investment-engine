@@ -1,5 +1,11 @@
 # Bullpen Run Audit
 
+## Bullpen 008 Phase 1 isolation
+
+Bullpen 008 does not reuse or rewrite the frozen Bullpen 007 audit schema. Its immutable Stage 1–4 facts are stored additively in `bullpen008_stage_outputs`, linked to `bullpen008_runs`, with a workflow profile, previous-output hash, settings and wallet hashes, prompt/parser versions, provenance, build version, timing, pass condition and block reason. Deterministic Stage 4 certificates are stored in `bullpen008_portfolio_certificates`.
+
+The existing Bullpen 007 endpoints and materialized records documented below retain their response shape and recomputation policy. Opening an 008 page reads stored stage outputs; it does not recompute historical facts. The complete 008 profile and component isolation contract is documented in `docs/bullpen008-phase1.md`.
+
 ## Independent Stage 1 scans
 
 The console Stage 1 card can run an independent Bullpen market and active-position

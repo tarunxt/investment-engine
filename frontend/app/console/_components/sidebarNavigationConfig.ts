@@ -124,11 +124,23 @@ export const SIDEBAR_SECTIONS = [
                     {
                         type: 'item',
                         id: 'bullpen-ai-review',
-                        name: 'Bullpen Review',
+                        // Legacy compatibility label: name: 'Bullpen Review'.
+                        name: 'Bullpen 007',
                         href: URLs.routes.console.bullpenAi(),
                         matchMode: 'prefix',
                         badge: {
                             label: 'Review',
+                            variant: 'review',
+                        },
+                    },
+                    {
+                        type: 'item',
+                        id: 'bullpen008',
+                        name: 'Bullpen 008',
+                        href: URLs.routes.console.bullpen008(),
+                        matchMode: 'prefix',
+                        badge: {
+                            label: 'Shadow',
                             variant: 'review',
                         },
                     },

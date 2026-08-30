@@ -13,6 +13,13 @@ from app.domains.bullpen_run_audit.models import (
     BullpenRunAuditSnapshotRecord,
     BullpenRunAuditStageRecord,
 )
+from app.domains.bullpen008.models import (
+    Bullpen008PortfolioCertificateRecord,
+    Bullpen008RunRecord,
+    Bullpen008SettingsRecord,
+    Bullpen008StageOutputRecord,
+    Bullpen008StateRecord,
+)
 from app.domains.bullpen_trade_analysis.models import (
     BullpenTradeAnalysisEventLogRecord,
     BullpenTradeAnalysisLlmRecord,
@@ -70,6 +77,11 @@ __all__ = [
     "BullpenRunAuditRemarkRecord",
     "BullpenRunAuditSnapshotRecord",
     "BullpenRunAuditStageRecord",
+    "Bullpen008PortfolioCertificateRecord",
+    "Bullpen008RunRecord",
+    "Bullpen008SettingsRecord",
+    "Bullpen008StageOutputRecord",
+    "Bullpen008StateRecord",
     "BullpenTradeAnalysisEventLogRecord",
     "BullpenTradeAnalysisLlmRecord",
     "BullpenTradeAnalysisRecord",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { CheckCircle2, ExternalLink, X } from "lucide-react";
 
 type BullpenAutoRunStageOutputDialogProps = {
@@ -1874,6 +1874,7 @@ export function BullpenAutoRunStageOutputDialog({
   outputLabel = "Outputs",
   onClose,
 }: BullpenAutoRunStageOutputDialogProps) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const [breakdownDialogState, setBreakdownDialogState] =
     useState<{ Component: BreakdownDialogComponent } | null>(null);
   const [breakdownQuestion, setBreakdownQuestion] =
@@ -1917,6 +1918,47 @@ export function BullpenAutoRunStageOutputDialog({
   });
   const resolvedEyebrow = eyebrow ?? buildStageOutputEyebrow(stageTitle);
 
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const dialog = dialogRef.current;
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    focusable()[0]?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const candidates = focusable();
+      if (candidates.length === 0) {
+        event.preventDefault();
+        dialog?.focus();
+        return;
+      }
+      const first = candidates[0];
+      const last = candidates[candidates.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
   const handleOpenBreakdown = async (record: Record<string, unknown>) => {
     const seed = buildStageOutputBreakdownSeed(record);
     if (!seed) return;
@@ -1943,7 +1985,14 @@ export function BullpenAutoRunStageOutputDialog({
   return (
     <>
       <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
-        <div className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label={stageTitle}
+          tabIndex={-1}
+          className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]"
+        >
           <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
             <div className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">

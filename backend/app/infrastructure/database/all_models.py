@@ -20,6 +20,13 @@ from app.domains.bullpen_run_audit.models import (  # noqa: F401
     BullpenRunAuditSnapshotRecord,
     BullpenRunAuditStageRecord,
 )
+from app.domains.bullpen008.models import (  # noqa: F401
+    Bullpen008PortfolioCertificateRecord,
+    Bullpen008RunRecord,
+    Bullpen008SettingsRecord,
+    Bullpen008StageOutputRecord,
+    Bullpen008StateRecord,
+)
 from app.domains.google_sheets.models import GoogleSheetsAppConfig, GoogleSheetsCredential  # noqa: F401
 from app.domains.indmoney_us.models import IndMoneyUsPortfolioSnapshot  # noqa: F401
 from app.domains.jobs.models import Job  # noqa: F401

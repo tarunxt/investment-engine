@@ -57,6 +57,8 @@ celery.conf.task_routes = {
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
+    "app.domains.bullpen008.tasks.execute_bullpen008_shadow_run": {"queue": AUTO_LIVE_QUEUE},
+    "app.domains.bullpen008.tasks.enqueue_due_bullpen008_runs": {"queue": "beat"},
     "app.domains.bullpen_trade_analysis.tasks.refresh_bullpen_trade_analysis_history": {"queue": "ai"},
     "app.domains.fx_rates.tasks.refresh_usd_inr_rate": {"queue": "beat"},
     "app.domains.dashboard.tasks.capture_daily_dashboard_portfolios": {"queue": "beat"},
@@ -95,6 +97,10 @@ celery.conf.beat_schedule = {
         # when the user starts just after the tick, so scan due runs frequently
         # while the actual planning work stays isolated on ``auto_live``.
         "schedule": schedule(run_every=10.0),
+    },
+    "bullpen008-shadow-due-run-scan": {
+        "task": "app.domains.bullpen008.tasks.enqueue_due_bullpen008_runs",
+        "schedule": crontab(minute="*"),
     },
     "polymarket-auto-live-order-intent-dispatch": {
         "task": "app.domains.polymarket_auto_live.tasks.dispatch_due_auto_live_order_intents",
@@ -137,6 +143,7 @@ celery.autodiscover_tasks([
     "app.domains.runs",
     "app.domains.google_sheets",
     "app.domains.bullpen_run_audit",
+    "app.domains.bullpen008",
     "app.domains.bullpen_trade_analysis",
     "app.domains.dashboard",
     "app.domains.fx_rates",

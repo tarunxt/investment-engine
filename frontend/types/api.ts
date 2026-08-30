@@ -3044,6 +3044,144 @@ export interface BullpenAutoLiveEventTrendsResponse {
   generated_at: string;
 }
 
+export type Bullpen008StageStatus =
+  | "pending"
+  | "running"
+  | "finished"
+  | "failed"
+  | "blocked"
+  | "disabled";
+
+export interface Bullpen008LlmTarget {
+  provider: string;
+  model: string;
+}
+
+export interface Bullpen008Settings {
+  workflow_profile: "bullpen008";
+  shadow_mode: true;
+  execution_enabled: false;
+  bankroll_usd: number;
+  max_contract_exposure_usd: number;
+  max_strict_cluster_exposure_usd: number;
+  max_common_catalyst_exposure_usd: number;
+  allocation_increment_usd: number;
+  binary_side_odds_floor_pct: number;
+  entry_side_odds_floor_pct: number;
+  min_llm_probability_pct: number;
+  preferred_min_edge_pp: number;
+  minimum_edge_pp: number;
+  risk_reject_threshold: number;
+  risk_hard_reject_threshold: number;
+  risk_half_size_min: number;
+  risk_half_size_max: number;
+  probability_tolerance_pp: number;
+  stale_quote_seconds: number;
+  closing_window_days: number;
+  custom_exclude_phrases: string[];
+  returns_per_day_formula: string;
+  llm_targets: Bullpen008LlmTarget[];
+  auto_start_at: string | null;
+  auto_refresh_minutes: number;
+}
+
+export type Bullpen008SettingsUpdate = Partial<
+  Omit<
+    Bullpen008Settings,
+    "workflow_profile" | "shadow_mode" | "execution_enabled"
+  >
+>;
+
+export interface Bullpen008State {
+  workflow_profile: "bullpen008";
+  shadow_mode: true;
+  execution_enabled: false;
+  running: boolean;
+  paused: boolean;
+  status: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_run_id: string | null;
+  redis_namespace: "bullpen008";
+  celery_task_name: string;
+  celery_queue: string;
+}
+
+export interface Bullpen008StageOutput {
+  stage_number: number;
+  stage_name: string;
+  stage_version: string;
+  status: Bullpen008StageStatus;
+  pass_condition: string;
+  block_reason: string | null;
+  previous_stage_output_hash: string | null;
+  output_hash: string;
+  settings_snapshot_hash: string;
+  wallet_snapshot_hash: string;
+  inputs: Record<string, unknown>;
+  calculations: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  rejections: unknown[];
+  warnings: unknown[];
+  provenance: Record<string, unknown>;
+  prompt_version: string | null;
+  parser_version: string | null;
+  started_at: string;
+  completed_at: string;
+  duration_seconds: number;
+}
+
+export interface Bullpen008Run {
+  id: string;
+  workflow_profile: "bullpen008";
+  status: string;
+  triggered_by: string;
+  shadow_mode: true;
+  execution_enabled: false;
+  started_at: string;
+  completed_at: string | null;
+  summary: string;
+  error_message: string | null;
+  code_build_version: string | null;
+  settings_snapshot: Record<string, unknown>;
+  wallet_snapshot: Record<string, unknown>;
+  task_metadata: Record<string, unknown>;
+  run_metadata: Record<string, unknown>;
+  stages: Bullpen008StageOutput[];
+  portfolio_certificate: Record<string, unknown> | null;
+}
+
+export interface Bullpen008InheritedRun {
+  id: string;
+  label: "Inherited from Bullpen 007";
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+  summary: string;
+  read_only: true;
+  source_route: "/console/bullpen-ai";
+}
+
+export interface Bullpen008Bootstrap {
+  workflow_profile: "bullpen008";
+  page_identity: "Bullpen 008";
+  shadow_mode: true;
+  execution_enabled: false;
+  settings: Bullpen008Settings;
+  state: Bullpen008State;
+  latest_run: Bullpen008Run | null;
+  inherited_runs: Bullpen008InheritedRun[];
+  pending_phase2_stages: number[];
+}
+
+export interface Bullpen008HistoryPage {
+  rows: Bullpen008Run[];
+  inherited_rows: Bullpen008InheritedRun[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type TradingBotStatus =
   | "running"
   | "paused"

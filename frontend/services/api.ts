@@ -45,6 +45,12 @@ import {
   BullpenAutoLivePersistedStatus,
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
+  Bullpen008Bootstrap,
+  Bullpen008HistoryPage,
+  Bullpen008Run,
+  Bullpen008Settings,
+  Bullpen008SettingsUpdate,
+  Bullpen008State,
   BullpenRunAuditDetailResponse,
   BullpenRunAuditFeedbackCreateRequest,
   BullpenRunAuditFeedbackDetail,
@@ -1621,6 +1627,69 @@ class apiServiceClass implements IApiService {
       URLs.bullpenAutoLive.status(),
       { cache: "no-store", ...options },
     );
+  }
+
+  getBullpen008Bootstrap(
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008Bootstrap> {
+    return this.get<Bullpen008Bootstrap>(URLs.bullpen008.bootstrap(), {
+      cache: "no-store",
+      ...options,
+    });
+  }
+
+  getBullpen008Settings(
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008Settings> {
+    return this.get<Bullpen008Settings>(URLs.bullpen008.settings(), {
+      cache: "no-store",
+      ...options,
+    });
+  }
+
+  updateBullpen008Settings(
+    data: Bullpen008SettingsUpdate,
+  ): Promise<Bullpen008Settings> {
+    return this.put<Bullpen008Settings>(URLs.bullpen008.settings(), data);
+  }
+
+  startBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerStart());
+  }
+
+  stopBullpen008Scheduler(): Promise<Bullpen008State> {
+    return this.post<Bullpen008State>(URLs.bullpen008.schedulerStop());
+  }
+
+  runBullpen008Once(idempotencyKey?: string): Promise<Bullpen008Run> {
+    return this.post<Bullpen008Run>(
+      URLs.bullpen008.runOnce(),
+      idempotencyKey ? { idempotency_key: idempotencyKey } : undefined,
+    );
+  }
+
+  getBullpen008Runs(
+    params: { limit?: number; offset?: number } = {},
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008HistoryPage> {
+    const query = new URLSearchParams();
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    const suffix = query.size > 0 ? `?${query.toString()}` : "";
+    return this.get<Bullpen008HistoryPage>(
+      `${URLs.bullpen008.runs()}${suffix}`,
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpen008Run(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008Run> {
+    return this.get<Bullpen008Run>(URLs.bullpen008.run(runId), {
+      cache: "no-store",
+      ...options,
+    });
   }
 
   getBullpenAutoLiveSummary(
