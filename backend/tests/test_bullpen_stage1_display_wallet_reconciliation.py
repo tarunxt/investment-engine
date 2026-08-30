@@ -94,6 +94,45 @@ def test_stage1_keeps_nonempty_authenticated_execution_snapshot(monkeypatch) -> 
     assert public_called is False
 
 
+def test_008_planning_attests_positive_snapshot_that_omits_identity(monkeypatch) -> None:
+    canonical = _snapshot(
+        positions=[_position(condition_suffix="a")],
+        wallet="",
+    )
+    public = _snapshot(positions=[_position(condition_suffix="a")])
+
+    async def fake_original(_broker, **_kwargs):
+        return canonical
+
+    async def fake_public(_broker, *, caller_source: str):
+        assert caller_source == "bullpen008-stage5-plan"
+        return public
+
+    monkeypatch.setattr(
+        positions_refresh,
+        "_ORIGINAL_GET_POSITIONS_SNAPSHOT",
+        fake_original,
+    )
+    monkeypatch.setattr(
+        positions_refresh,
+        "_refresh_public_wallet_snapshot",
+        fake_public,
+    )
+
+    result = asyncio.run(
+        positions_refresh._get_positions_snapshot_with_ui_read_fallback(
+            object(),
+            force_fresh=True,
+            caller_source="bullpen008-stage5-plan",
+            max_age_seconds=0,
+        )
+    )
+
+    assert result.account_identity == WALLET
+    assert result.payload == public.payload
+    assert result.diagnostics.error_classification == "stage1_analysis_public_fallback"
+
+
 @pytest.mark.parametrize(
     "caller_source",
     ["auto-live-stage1", "bullpen008-stage1-shadow", "bullpen008-stage5-plan"],
