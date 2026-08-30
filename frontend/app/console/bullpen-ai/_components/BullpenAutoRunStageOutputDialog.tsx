@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { CheckCircle2, ExternalLink, X } from "lucide-react";
 
 type BullpenAutoRunStageOutputDialogProps = {
@@ -15,6 +23,8 @@ type BullpenAutoRunStageOutputDialogProps = {
     source?: string | null;
   }>;
   outputLabel?: string;
+  recordPageSize?: number;
+  deferRawJson?: boolean;
   onClose: () => void;
 };
 
@@ -42,6 +52,8 @@ type AlreadyInvestedRecord = {
   reason: string | null;
   source: string | null;
 };
+
+const RecordPageSizeContext = createContext<number | null>(null);
 
 const SUMMARY_COLUMN_PRIORITY = [
   "question",
@@ -439,6 +451,8 @@ function StructuredValue({
   fieldKey: string;
   depth?: number;
 }) {
+  const recordPageSize = useContext(RecordPageSizeContext);
+  const [recordPage, setRecordPage] = useState(0);
   if (value === null || value === undefined || value === "") {
     return <span className="text-slate-400">—</span>;
   }
@@ -527,16 +541,29 @@ function StructuredValue({
 
     if (value.every((item) => isRecord(item))) {
       const records = value as Record<string, unknown>[];
+      const pageSize = recordPageSize ?? records.length;
+      const totalPages = Math.max(1, Math.ceil(records.length / pageSize));
+      const safePage = Math.min(recordPage, totalPages - 1);
+      const pageStart = safePage * pageSize;
+      const visibleRecords = records.slice(pageStart, pageStart + pageSize);
       return (
         <div className="space-y-3">
-          {records.map((record, index) => (
+          {records.length > visibleRecords.length ? (
+            <RecordPaginationControls
+              page={safePage}
+              pageSize={pageSize}
+              total={records.length}
+              onPageChange={setRecordPage}
+            />
+          ) : null}
+          {visibleRecords.map((record, index) => (
             <div
-              key={`${fieldKey}-${index}`}
+              key={`${fieldKey}-${pageStart + index}`}
               className="rounded-2xl border border-slate-200 bg-white/80 p-3"
             >
               <div className="mb-2 flex items-center justify-between gap-3">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                  {formatLabel(fieldKey)} {index + 1}
+                  {formatLabel(fieldKey)} {pageStart + index + 1}
                 </p>
                 <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
                   {Object.keys(record).length} fields
@@ -545,6 +572,14 @@ function StructuredValue({
               <KeyValueTable entries={orderEntries(Object.entries(record))} nested />
             </div>
           ))}
+          {records.length > visibleRecords.length ? (
+            <RecordPaginationControls
+              page={safePage}
+              pageSize={pageSize}
+              total={records.length}
+              onPageChange={setRecordPage}
+            />
+          ) : null}
         </div>
       );
     }
@@ -572,6 +607,50 @@ function StructuredValue({
   }
 
   return <span className="text-slate-500">{String(value)}</span>;
+}
+
+function RecordPaginationControls({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const first = page * pageSize + 1;
+  const last = Math.min(total, first + pageSize - 1);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+      <span>
+        Rows {first.toLocaleString("en-IN")}–{last.toLocaleString("en-IN")} of {total.toLocaleString("en-IN")}
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(0, page - 1))}
+          disabled={page === 0}
+          className="rounded-lg border border-slate-200 px-2.5 py-1 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span aria-label={`Page ${page + 1} of ${totalPages}`} className="font-semibold text-slate-700">
+          {page + 1}/{totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+          disabled={page >= totalPages - 1}
+          className="rounded-lg border border-slate-200 px-2.5 py-1 font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function KeyValueTable({
@@ -1774,6 +1853,13 @@ function RecordArraySection({
   onOpenBreakdown: (record: Record<string, unknown>) => void;
   onOpenRationale: (record: Record<string, unknown>, fieldKey: string) => void;
 }) {
+  const recordPageSize = useContext(RecordPageSizeContext);
+  const [page, setPage] = useState(0);
+  const pageSize = recordPageSize ?? Math.max(1, rows.length);
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const safePage = Math.min(page, totalPages - 1);
+  const pageStart = safePage * pageSize;
+  const visibleRows = rows.slice(pageStart, pageStart + pageSize);
   return (
     <section className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1791,8 +1877,13 @@ function RecordArraySection({
       </div>
 
       <div className="mt-4">
+        {rows.length > visibleRows.length ? (
+          <div className="mb-3">
+            <RecordPaginationControls page={safePage} pageSize={pageSize} total={rows.length} onPageChange={setPage} />
+          </div>
+        ) : null}
         <SummaryTable
-          rows={rows}
+          rows={visibleRows}
           title="Summary Table"
           alreadyInvestedLookup={alreadyInvestedLookup}
           onOpenBreakdown={onOpenBreakdown}
@@ -1801,13 +1892,13 @@ function RecordArraySection({
       </div>
 
       <div className="mt-4 space-y-4">
-        {rows.map((row, index) => {
+        {visibleRows.map((row, index) => {
           const marketId = readSummaryString(row.market_id);
           return (
             <RecordDetailsCard
-              key={`${sectionKey}-${index}-${String(row.market_id ?? row.question ?? row.slug ?? index)}`}
+              key={`${sectionKey}-${pageStart + index}-${String(row.market_id ?? row.question ?? row.slug ?? pageStart + index)}`}
               record={row}
-              index={index}
+              index={pageStart + index}
               alreadyInvestedRecord={
                 marketId ? alreadyInvestedLookup?.get(marketId) ?? null : null
               }
@@ -1817,6 +1908,11 @@ function RecordArraySection({
           );
         })}
       </div>
+      {rows.length > visibleRows.length ? (
+        <div className="mt-4">
+          <RecordPaginationControls page={safePage} pageSize={pageSize} total={rows.length} onPageChange={setPage} />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1872,6 +1968,8 @@ export function BullpenAutoRunStageOutputDialog({
   outputs,
   alreadyInvestedRecords = [],
   outputLabel = "Outputs",
+  recordPageSize,
+  deferRawJson = false,
   onClose,
 }: BullpenAutoRunStageOutputDialogProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -1883,6 +1981,7 @@ export function BullpenAutoRunStageOutputDialog({
     useState<ValueRationaleDialogState | null>(null);
   const [candidateDetailsDialog, setCandidateDetailsDialog] =
     useState<CandidateDetailsDialogState | null>(null);
+  const [rawJsonExpanded, setRawJsonExpanded] = useState(false);
   const alreadyInvestedLookup = buildAlreadyInvestedLookup({
     explicitRecords: alreadyInvestedRecords,
     outputs,
@@ -1981,9 +2080,12 @@ export function BullpenAutoRunStageOutputDialog({
     });
   };
   const BreakdownDialog = breakdownDialogState?.Component ?? null;
+  const normalizedRecordPageSize = recordPageSize && recordPageSize > 0
+    ? Math.max(1, Math.floor(recordPageSize))
+    : null;
 
   return (
-    <>
+    <RecordPageSizeContext.Provider value={normalizedRecordPageSize}>
       <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
         <div
           ref={dialogRef}
@@ -2055,12 +2157,17 @@ export function BullpenAutoRunStageOutputDialog({
                 </div>
               ) : null}
 
-              <details className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4">
+              <details
+                className="rounded-3xl border border-slate-200 bg-slate-50/70 p-4"
+                onToggle={(event) => setRawJsonExpanded(event.currentTarget.open)}
+              >
                 <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   Raw JSON
                 </summary>
                 <pre className="mt-4 overflow-x-auto whitespace-pre-wrap break-words rounded-2xl border border-slate-200 bg-white p-4 text-xs leading-6 text-slate-700">
-                  {renderJson(visibleOutputs)}
+                  {!deferRawJson || rawJsonExpanded
+                    ? renderJson(visibleOutputs)
+                    : "Expand to render the complete immutable JSON payload."}
                 </pre>
               </details>
             </div>
@@ -2089,6 +2196,6 @@ export function BullpenAutoRunStageOutputDialog({
           }
         />
       ) : null}
-    </>
+    </RecordPageSizeContext.Provider>
   );
 }
