@@ -335,6 +335,14 @@ def _stage2_repair_market_ids(stage2: dict[str, object]) -> list[str]:
     return sorted(market_ids)
 
 
+def _stage2_input_rows(stage1_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        row
+        for row in stage1_rows
+        if row.get("accounting_status") in {"accepted", "accepted_monitoring"}
+    ]
+
+
 def _merge_stage2_provider_rows(
     original: list[dict[str, object]],
     repair: list[dict[str, object]],
@@ -581,7 +589,8 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                 session.commit()
         else:
             stage2_started = datetime.now(UTC)
-            prompt = build_probability_risk_prompt(list(stage1["rows"]))
+            stage2_input_rows = _stage2_input_rows(list(stage1["rows"]))
+            prompt = build_probability_risk_prompt(stage2_input_rows)
             try:
                 provider_name, model_name = _provider_target(settings)
                 provider = ProviderFactory.create(provider_name)
@@ -590,7 +599,10 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                 )
                 parsed = parse_probability_risk_response(response.content)
                 stage2 = normalize_stage2_rows(
-                    list(stage1["rows"]), parsed, settings=settings, now=stage2_started
+                    stage2_input_rows,
+                    parsed,
+                    settings=settings,
+                    now=stage2_started,
                 )
                 provider_attempts: list[dict[str, object]] = [
                     {
@@ -609,7 +621,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                         break
                     repair_rows = [
                         row
-                        for row in list(stage1["rows"])
+                        for row in stage2_input_rows
                         if str(row.get("market_id") or "") in repair_market_ids
                     ]
                     repair_prompt = (
@@ -639,7 +651,7 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                         repair_market_ids=repair_market_ids,
                     )
                     stage2 = normalize_stage2_rows(
-                        list(stage1["rows"]),
+                        stage2_input_rows,
                         parsed,
                         settings=settings,
                         now=stage2_started,
@@ -672,7 +684,11 @@ def execute_bullpen008_shadow_run(self, run_id: str) -> str:
                             status=stage2_status,
                             pass_condition=str(stage2["pass_condition"]),
                             inputs={
-                                "complete_input_packet": list(stage1["rows"]),
+                                "complete_input_packet": stage2_input_rows,
+                                "stage1_accounting_row_count": len(
+                                    list(stage1["rows"])
+                                ),
+                                "stage2_eligible_row_count": len(stage2_input_rows),
                                 "prompt": prompt,
                                 "provider": provider_name,
                                 "model": model_name,
