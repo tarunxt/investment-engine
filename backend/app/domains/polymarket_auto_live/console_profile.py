@@ -918,6 +918,7 @@ async def scan_console_profile_markets(
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
+    use_keyset_pagination: bool = False,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -949,6 +950,7 @@ async def scan_console_profile_markets(
                 min_liquidity_usd=0,
                 existing_position_slugs=set(),
                 apply_base_filters=apply_base_filters,
+                use_keyset_pagination=use_keyset_pagination,
             ),
             timeout=CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
         )

@@ -29,4 +29,5 @@ New 008-only UI exists only for the six-stage monitor and profile adapter becaus
 - Inherited 007 history is labelled `Inherited from Bullpen 007` and is not copied into 008 tables.
 - Settings are copied once from 007 into a dedicated row, then validated and saved independently.
 - The 008 source scan explicitly bypasses inherited 007 pre-filters so Stage 1 receives the normalized complete active universe and applies its own versioned rules. The shared scanner keeps its existing filtering behavior by default.
+- Bullpen 008 opts into Gamma's cursor-based `/events/keyset` pagination so the source universe is not truncated at the legacy offset cap. Bullpen 007 keeps the legacy scanner pagination default unchanged.
 - Stage 4 writes an allocation row for every analysed contract. `SKIP`, invalid, rejected, missing-data and non-representative rows receive `$0`, and weighted metrics use the entire target exposure rather than only new buys.

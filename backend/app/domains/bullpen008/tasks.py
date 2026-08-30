@@ -196,6 +196,7 @@ async def _capture_stage1_inputs(
             min_market_odds=0,
             custom_exclude_phrases=[],
             apply_base_filters=False,
+            use_keyset_pagination=True,
         ),
         read_console_wallet_positions_snapshot(
             force_fresh=True,
@@ -258,6 +259,7 @@ async def _capture_stage1_inputs(
         "warning": scan.warning,
         "details": scan.details,
         "pre_stage1_filters_applied": False,
+        "pagination_mode": "gamma-keyset",
     }
     return market_packets, active_positions, wallet_snapshot, scan_metadata
 
