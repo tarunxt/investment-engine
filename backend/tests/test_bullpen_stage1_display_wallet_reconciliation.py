@@ -94,8 +94,12 @@ def test_stage1_keeps_nonempty_authenticated_execution_snapshot(monkeypatch) -> 
     assert public_called is False
 
 
-def test_stage1_replaces_false_empty_execution_snapshot_with_same_wallet_public_positions(
-    monkeypatch,
+@pytest.mark.parametrize(
+    "caller_source",
+    ["auto-live-stage1", "bullpen008-stage1-shadow", "bullpen008-stage5-plan"],
+)
+def test_analysis_and_planning_replace_false_empty_execution_snapshot_with_same_wallet_public_positions(
+    monkeypatch, caller_source: str,
 ) -> None:
     canonical = _snapshot(positions=[])
     public = _snapshot(
@@ -112,7 +116,11 @@ def test_stage1_replaces_false_empty_execution_snapshot_with_same_wallet_public_
         return canonical
 
     async def fake_public(_broker, *, caller_source: str):
-        assert caller_source == "auto-live-stage1"
+        assert caller_source in {
+            "auto-live-stage1",
+            "bullpen008-stage1-shadow",
+            "bullpen008-stage5-plan",
+        }
         return public
 
     monkeypatch.setattr(
@@ -130,7 +138,7 @@ def test_stage1_replaces_false_empty_execution_snapshot_with_same_wallet_public_
         positions_refresh._get_positions_snapshot_with_ui_read_fallback(
             object(),
             force_fresh=True,
-            caller_source="auto-live-stage1",
+            caller_source=caller_source,
             max_age_seconds=0,
         )
     )
