@@ -49,6 +49,15 @@ const PUBLIC_BACKEND_PATHS = new Set([
   "health/ready",
 ]);
 const originCircuit = new ApiOriginCircuitBreaker(2, 30_000);
+// Read fallbacks share a circuit so a dead primary does not consume every
+// dashboard poll budget. Mutations are single-target and carry server-side
+// idempotency keys; they must still reach that target when a prior read opened
+// its circuit. A practically non-opening circuit retains the transport's
+// accounting contract without suppressing an explicitly requested mutation.
+const mutationOriginCircuit = new ApiOriginCircuitBreaker(
+  Number.MAX_SAFE_INTEGER,
+  0,
+);
 
 type BackendApiCandidate = {
   baseUrl: string;
@@ -332,7 +341,9 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
     const result = await executeBoundedApiRequest({
       method: request.method,
       candidates: resolvedCandidates,
-      circuit: originCircuit,
+      circuit: SAFE_FALLBACK_METHODS.has(request.method)
+        ? originCircuit
+        : mutationOriginCircuit,
       callerSignal: request.signal,
       totalBudgetMs: totalTimeoutMs,
       primaryAttemptBudgetMs: getProxyAttemptTimeoutMs(request.method, path),
