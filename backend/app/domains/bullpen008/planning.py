@@ -369,7 +369,9 @@ def build_action_plan(
             buy_blockers.append("STAGE4_ACCOUNT_IDENTITY_MISMATCH")
         if not target_is_fresh:
             buy_blockers.append("TARGET_EXPIRED")
-        if abs(gap / settings.allocation_increment_usd - round(gap / settings.allocation_increment_usd)) > 1e-6:
+        nearest_increment = round(gap / settings.allocation_increment_usd) * settings.allocation_increment_usd
+        fill_rounding_adjustment = round(gap - nearest_increment, 2)
+        if abs(fill_rounding_adjustment) > settings.exposure_rounding_tolerance_usd:
             buy_blockers.append("BUY_NOT_INCREMENTAL")
         action_type = "blocked" if buy_blockers else "buy"
         action = _make_action(
@@ -379,6 +381,13 @@ def build_action_plan(
             explanation=("Buy is frozen until every Stage 3/4/wallet guard passes." if buy_blockers else "Fill only the positive gap in the certified Stage 4 target."),
             ordinal=ordinal, settings=settings,
         )
+        action["fill_rounding_adjustment_usd"] = fill_rounding_adjustment
+        if not buy_blockers and abs(fill_rounding_adjustment) > 1e-9:
+            action["reason_code"] = "STAGE4_CERTIFIED_TARGET_GAP_FILL_ROUNDING"
+            action["explanation"] = (
+                "Fill only the certified Stage 4 target gap; the deviation from the "
+                "$5 increment is unavoidable wallet-value rounding within tolerance."
+            )
         arrays["blocked_untradeable" if buy_blockers else "buys"].append(action)
 
     for pending in cancel_orders:
@@ -476,7 +485,15 @@ def build_action_plan(
     # the complete simulated wallet to be within every cap.
     caps_pass = not arrays["buys"] or final_caps_within_limit
     increments_pass = all(
-        abs(_number(action["estimated_usd"]) / settings.allocation_increment_usd - round(_number(action["estimated_usd"]) / settings.allocation_increment_usd)) <= 1e-6
+        abs(
+            _number(action["estimated_usd"])
+            - round(
+                _number(action["estimated_usd"])
+                / settings.allocation_increment_usd
+            )
+            * settings.allocation_increment_usd
+        )
+        <= settings.exposure_rounding_tolerance_usd
         for action in arrays["buys"]
     )
     dependencies_pass = all(
