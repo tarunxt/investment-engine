@@ -70,6 +70,9 @@ def test_008_interrupted_build_recovery_never_names_007_resources() -> None:
     recovery = service[start:end]
     assert "PolymarketAutoLiveRunRecord" not in recovery
     assert 'f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock"' in router
+    bootstrap = router[router.index("async def bullpen008_bootstrap") :]
+    bootstrap = bootstrap[: bootstrap.index("@router.get", 1)]
+    assert "await _recover_interrupted_008_build" in bootstrap
     assert "bullpen_console_top10" not in recovery
 
 
