@@ -21,6 +21,13 @@ three-stage routes, models, Redis keys, scheduler task and order-intent tables.
    provider call. Ambiguous submission is `Recoverable`; it is reconciled by
    remote ID and is never blindly resubmitted.
 
+Deadline-passed wallet rows that are not yet claimable remain explicit locked
+resolution holds in the Stage 4 target. They are never treated as cash or free
+capacity. A Stage 5 no-buy plan may still certify when a pre-existing
+untradeable hold is over a cap, but its certificate exposes
+`final_wallet_within_caps=false` and `existing_untradeable_over_cap=true`; any
+new buy continues to require the complete simulated wallet to pass every cap.
+
 Production defaults to `execution_mode=shadow`. Live submission additionally
 requires the environment gate `BULLPEN008_LIVE_EXECUTION_ENABLED=true` and the
 exact authenticated confirmation `ARM BULLPEN 008 LIVE`. Phase 2 deployment and

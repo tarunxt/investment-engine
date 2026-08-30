@@ -352,7 +352,12 @@ def build_stage1_output(
             stale_data_errors += 1
         if is_active_position:
             accounting_status = "accepted_monitoring"
-            active_count += 1
+            if any(
+                (_text(position.get("classification")) or "active")
+                in {"active", "claimable", "settlement_pending"}
+                for position in positions
+            ):
+                active_count += 1
             accepted += 1
         elif has_data_error:
             accounting_status = "data_error"
@@ -380,6 +385,12 @@ def build_stage1_output(
                     _text(position.get("side")).upper()
                     for position in positions
                     if position.get("side")
+                }
+            ),
+            "wallet_position_classifications": sorted(
+                {
+                    _text(position.get("classification")) or "active"
+                    for position in positions
                 }
             ),
             "monitoring_override": is_active_position and bool(reasons),
@@ -1044,10 +1055,37 @@ def build_portfolio_target(
     strict_exposure: dict[str, float] = defaultdict(float)
     catalyst_exposure: dict[str, float] = defaultdict(float)
     target_before_buys: dict[str, float] = defaultdict(float)
+    locked_resolution_holds: set[str] = set()
+    # An expired, non-claimable holding cannot be treated as cash or a free
+    # portfolio slot. Freeze its conservative current exposure in Stage 4 so
+    # Stage 5 can classify it as a hold-for-resolution without changing the
+    # target or pretending that the exposure disappeared.
+    for candidate in candidates:
+        market_id = _market_id(candidate)
+        days_until_close = _float(candidate.get("days_until_close"))
+        if not (
+            candidate.get("active_position")
+            and not candidate.get("claimable")
+            and days_until_close is not None
+            and days_until_close <= 0
+        ):
+            continue
+        exposure = round(float(candidate.get("current_exposure_usd") or 0), 2)
+        if exposure <= 0:
+            continue
+        strict_id = str(candidate.get("strict_cluster_id"))
+        common_id = str(candidate.get("common_catalyst_cluster_id"))
+        locked_resolution_holds.add(market_id)
+        target_before_buys[market_id] = exposure
+        contract_exposure[market_id] = exposure
+        strict_exposure[strict_id] += exposure
+        catalyst_exposure[common_id] += exposure
     for cluster_id, representative in representatives.items():
         if not representative["eligible"]:
             continue
         market_id = _market_id(representative)
+        if market_id in locked_resolution_holds:
+            continue
         strict_id = str(representative.get("strict_cluster_id"))
         common_id = str(representative.get("common_catalyst_cluster_id"))
         normal_cap = settings.max_contract_exposure_usd
@@ -1138,6 +1176,8 @@ def build_portfolio_target(
                 "risk_score": candidate.get("risk_score"),
                 "selection_score": candidate.get("selection_score"),
                 "explanation_codes": explanation,
+                "locked_resolution_hold": market_id
+                in locked_resolution_holds,
             }
         )
 
@@ -1182,6 +1222,8 @@ def build_portfolio_target(
                     "NOT_CLUSTER_REPRESENTATIVE",
                     *(["STAGE4_TARGET_REDUCTION"] if current_exposure > target_exposure else []),
                 ],
+                "locked_resolution_hold": market_id
+                in locked_resolution_holds,
             }
         )
 
