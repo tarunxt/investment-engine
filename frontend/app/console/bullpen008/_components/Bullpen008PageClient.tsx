@@ -48,7 +48,7 @@ const STAGES = [
     number: 1,
     name: "Discover & Hard Filters",
     detail: "Builds a complete, clean market universe before any LLM request.",
-    metricKeys: ["scanned", "accepted", "rejected", "active_positions", "stale_data_errors"],
+    metricKeys: ["scanned", "accepted", "rejected", "active_positions", "data_errors"],
   },
   {
     number: 2,
