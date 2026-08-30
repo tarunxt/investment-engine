@@ -35,14 +35,12 @@ _PASSIVE_UI_POSITION_REFRESH_CALLERS = frozenset(
 # returned snapshot remains display-only (no auth lineage and never promoted to
 # the execution cache), so Stage 6 still refreshes and fails closed until the
 # authenticated runtime agrees.
-_STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS = frozenset(
-    {
-        "auto-live-stage1",
-        "auto-live-stage1-recovery",
-        "bullpen008-stage1-shadow",
-        "bullpen008-stage5-plan",
-    }
+_BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS = frozenset(
+    {"bullpen008-stage1-shadow", "bullpen008-stage5-plan"}
 )
+_STAGE1_ANALYSIS_POSITION_REFRESH_CALLERS = frozenset(
+    {"auto-live-stage1", "auto-live-stage1-recovery"}
+) | _BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS
 
 _ORIGINAL_GET_POSITIONS_SNAPSHOT = (
     runtime_broker_module.BullpenRuntimeBroker.get_positions_snapshot
@@ -691,15 +689,26 @@ async def _get_stage1_analysis_positions_snapshot(
     except Exception as exc:
         canonical_error = exc
 
+    normalized_caller_source = runtime_broker_module._normalize_caller_source(
+        caller_source
+    )
     if canonical_snapshot is not None and _snapshot_has_positive_wallet_rows(
         canonical_snapshot
     ):
-        return canonical_snapshot
+        canonical_identity = _normalize_wallet_address(
+            canonical_snapshot.account_identity
+        )
+        if (
+            canonical_identity is not None
+            or normalized_caller_source
+            not in _BULLPEN008_NON_EXECUTION_IDENTITY_CALLERS
+        ):
+            return canonical_snapshot
 
     try:
         public_snapshot = await _refresh_public_wallet_snapshot(
             broker,
-            caller_source=runtime_broker_module._normalize_caller_source(caller_source),
+            caller_source=normalized_caller_source,
         )
     except Exception:
         if canonical_snapshot is not None:
