@@ -250,11 +250,13 @@ async def _capture_stage1_inputs(
                 "source_filter_reasons": list(rejected.reasons),
             }
         )
+    # Preserve every economically present wallet row, including expired,
+    # stale/unknown and resolution-pending positions. Stage 4 must classify
+    # these rows before Stage 5 can translate a complete target. The upstream
+    # wallet reader has already discarded truly closed zero-share rows.
     active_positions = [
         _position_packet(position, quote_timestamp=wallet.fetched_at)
         for position in wallet.positions
-        if getattr(position, "classification", "active")
-        in {"active", "claimable", "settlement_pending"}
     ]
     wallet_snapshot = {
         "source": wallet.source,

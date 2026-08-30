@@ -465,11 +465,16 @@ def build_action_plan(
     cash_nonnegative = all(_number(row.get("cash_usd")) >= -1e-9 for row in cash_ledger)
     every_position_classified = set(positions) == classified_position_ids
     targets_reproduced = all(row["matches"] for row in target_match_rows)
-    caps_pass = bool(
+    final_caps_within_limit = bool(
         contract_max <= settings.max_contract_exposure_usd + settings.exposure_rounding_tolerance_usd
         and max([*strict_exposure.values(), 0]) <= settings.max_strict_cluster_exposure_usd + settings.exposure_rounding_tolerance_usd
         and max([*catalyst_exposure.values(), 0]) <= settings.max_common_catalyst_exposure_usd + settings.exposure_rounding_tolerance_usd
     )
+    # Pre-existing deadline-passed holdings may be untradeable and must not be
+    # represented as free capacity. They do not invalidate a no-buy plan merely
+    # because the wallet was already above a cap; any new buy still requires
+    # the complete simulated wallet to be within every cap.
+    caps_pass = not arrays["buys"] or final_caps_within_limit
     increments_pass = all(
         abs(_number(action["estimated_usd"]) / settings.allocation_increment_usd - round(_number(action["estimated_usd"]) / settings.allocation_increment_usd)) <= 1e-6
         for action in arrays["buys"]
@@ -519,6 +524,9 @@ def build_action_plan(
         "targets_reproduced": targets_reproduced,
         "cash_nonnegative": cash_nonnegative,
         "contract_and_cluster_caps": caps_pass,
+        "final_wallet_within_caps": final_caps_within_limit,
+        "existing_untradeable_over_cap": not final_caps_within_limit
+        and not arrays["buys"],
         "buy_increments": increments_pass,
         "dependency_ordering": dependencies_pass,
         "all_wallet_positions_classified": every_position_classified,

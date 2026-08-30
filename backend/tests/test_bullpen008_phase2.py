@@ -253,6 +253,22 @@ def test_missing_bid_dust_and_expired_not_claimable_are_distinct() -> None:
     assert "DUST_POSITION" in codes
 
 
+def test_expired_nonclaimable_hold_can_certify_a_no_buy_plan() -> None:
+    settings = Bullpen008Settings()
+    row = allocation(
+        "expired-hold",
+        10,
+        deadline=(NOW - timedelta(days=1)).isoformat(),
+        locked_resolution_hold=True,
+    )
+    plan = make_plan([row], [position("expired-hold", 10)], settings=settings)
+    assert plan["buys"] == []
+    assert plan["blocked_untradeable"][0]["reason_code"] == (
+        "EXPIRED_NOT_CLAIMABLE"
+    )
+    assert plan["plan_certificate"]["plan_certified"] is True
+
+
 def test_preflight_blocks_odds_slippage_spread_emergency_and_wallet_change() -> None:
     row = allocation("m", 10)
     planned_wallet = wallet([])
