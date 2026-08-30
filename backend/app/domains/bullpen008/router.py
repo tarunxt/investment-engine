@@ -45,11 +45,36 @@ def _pending_key(user_id: int) -> str:
     return f"{REDIS_PREFIX}:pending:user:{user_id}"
 
 
+async def _recover_interrupted_008_build(
+    session: AsyncSession,
+    *,
+    user_id: int,
+) -> str | None:
+    import redis.asyncio as aioredis
+
+    current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
+    interrupted_run_id = await recover_interrupted_previous_build_run(
+        session,
+        user_id=user_id,
+        current_build=current_build,
+    )
+    if interrupted_run_id is None:
+        return None
+    redis_client = aioredis.from_url(app_settings.redis_url, decode_responses=True)
+    try:
+        await redis_client.delete(f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock")
+        await redis_client.delete(_pending_key(user_id))
+    finally:
+        await redis_client.close()
+    return interrupted_run_id
+
+
 @router.get("/bootstrap", response_model=Bullpen008Bootstrap)
 async def bullpen008_bootstrap(
     current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_db),
 ) -> Bullpen008Bootstrap:
+    await _recover_interrupted_008_build(session, user_id=current_user.id)
     return await get_bootstrap(session, user_id=current_user.id)
 
 
@@ -103,15 +128,7 @@ async def run_bullpen008_once(
 
     redis_client = aioredis.from_url(app_settings.redis_url, decode_responses=True)
     pending_key = _pending_key(current_user.id)
-    current_build = os.getenv("APP_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA")
-    interrupted_run_id = await recover_interrupted_previous_build_run(
-        session,
-        user_id=current_user.id,
-        current_build=current_build,
-    )
-    if interrupted_run_id is not None:
-        await redis_client.delete(f"{REDIS_PREFIX}:run:{interrupted_run_id}:lock")
-        await redis_client.delete(pending_key)
+    await _recover_interrupted_008_build(session, user_id=current_user.id)
     acquired = await redis_client.set(
         pending_key,
         "manual",
