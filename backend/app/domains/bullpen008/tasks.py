@@ -1775,7 +1775,12 @@ def execute_bullpen008_run(self, run_id: str) -> str:
             try:
                 live_wallet = asyncio.run(
                     _refresh_wallet_snapshot(
-                        settings, caller_source="bullpen008-stage6-pre-submit"
+                        settings,
+                        caller_source=(
+                            "bullpen008-stage6-shadow-pre-submit"
+                            if settings.execution_mode == "shadow"
+                            else "bullpen008-stage6-pre-submit"
+                        ),
                     )
                 )
                 quotes = asyncio.run(_refresh_stage6_quotes(plan))
