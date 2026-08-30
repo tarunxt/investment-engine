@@ -187,12 +187,14 @@ def test_008_scan_bypasses_007_prefilters_without_changing_007_default() -> None
     assert "apply_base_filters: bool = True" in console_profile
     assert "use_keyset_pagination: bool = False" in scanner
     assert "use_keyset_pagination: bool = False" in console_profile
+    assert "use_deadline_cursor_pagination: bool = False" in scanner
+    assert "use_deadline_cursor_pagination: bool = False" in console_profile
     assert "gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS" in console_profile
     assert "apply_base_filters=False" in task
-    assert "use_keyset_pagination=True" in task
+    assert "use_deadline_cursor_pagination=True" in task
     assert "gamma_scan_timeout_seconds=COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS" in task
     assert '"pre_stage1_filters_applied": False' in task
-    assert '"pagination_mode": "gamma-events-keyset"' in task
+    assert '"pagination_mode": "gamma-events-deadline-cursor"' in task
     assert '"scan_timeout_seconds": COMPLETE_UNIVERSE_SCAN_TIMEOUT_SECONDS' in task
 
 

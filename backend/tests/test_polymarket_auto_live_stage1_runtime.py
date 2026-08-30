@@ -23,6 +23,7 @@ from app.domains.polymarket_auto_live.execution import refresh_balance
 from app.domains.polymarket_auto_live.scanner import (
     ScanResult,
     ScannedMarket,
+    _fetch_gamma_deadline_cursor_page,
     _fetch_gamma_keyset_page,
     _fetch_gamma_page,
     scan_candidate_markets,
@@ -591,6 +592,117 @@ async def test_008_keyset_scan_follows_every_cursor(monkeypatch):
         "market-1",
         "market-2",
     ]
+
+
+@pytest.mark.anyio
+async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
+    requested_pages: list[tuple[str, int]] = []
+
+    def row(index: int) -> dict[str, object]:
+        return {
+            "id": f"deadline-market-{index}",
+            "question": f"Will deadline candidate {index} happen?",
+            "slug": f"deadline-market-{index}",
+            "endDate": "2026-09-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+            "active": True,
+            "archived": False,
+            "closed": False,
+        }
+
+    async def fake_fetch_deadline_page(
+        _client,
+        *,
+        offset: int,
+        end_date_min: str,
+    ):
+        requested_pages.append((end_date_min, offset))
+        if len(requested_pages) == 1:
+            return [row(index) for index in range(100)], 100, "2026-09-30T20:59:59Z", 8
+        if len(requested_pages) == 2:
+            return [row(100 + index) for index in range(100)], 100, "2026-10-31T20:59:59Z", 5
+        return [row(200)], 1, "2026-11-30T20:59:59Z", 1
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_deadline_cursor_page",
+        fake_fetch_deadline_page,
+    )
+
+    result = await scan_candidate_markets(
+        min_liquidity_usd=0,
+        apply_base_filters=False,
+        use_deadline_cursor_pagination=True,
+    )
+
+    assert requested_pages[1:] == [
+        ("2026-09-30T20:59:59Z", 8),
+        ("2026-10-31T20:59:59Z", 5),
+    ]
+    assert len(result.accepted) == 201
+
+
+@pytest.mark.anyio
+async def test_gamma_deadline_cursor_page_orders_and_reports_boundary():
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return [
+                {
+                    "id": "event-1",
+                    "slug": "event-one",
+                    "title": "Event one",
+                    "endDate": "2026-09-30T20:59:59Z",
+                    "active": True,
+                    "closed": False,
+                    "archived": False,
+                    "markets": [{"id": "market-1", "question": "Question one?"}],
+                },
+                {
+                    "id": "event-2",
+                    "slug": "event-two",
+                    "title": "Event two",
+                    "endDate": "2026-10-31T20:59:59Z",
+                    "active": True,
+                    "closed": False,
+                    "archived": False,
+                    "markets": [{"id": "market-2", "question": "Question two?"}],
+                },
+            ]
+
+    class FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            captured["params"] = params
+            return FakeResponse()
+
+    rows, count, deadline, boundary_count = await _fetch_gamma_deadline_cursor_page(
+        FakeClient(),
+        offset=7,
+        end_date_min="2026-09-30T00:00:00+00:00",
+    )
+
+    assert captured["url"] == "https://gamma-api.polymarket.com/events"
+    assert captured["params"] == {
+        "active": "true",
+        "archived": "false",
+        "closed": "false",
+        "end_date_min": "2026-09-30T00:00:00+00:00",
+        "limit": "100",
+        "offset": "7",
+        "order": "endDate",
+        "ascending": "true",
+    }
+    assert [row["id"] for row in rows] == ["market-1", "market-2"]
+    assert (count, deadline, boundary_count) == (
+        2,
+        "2026-10-31T20:59:59+00:00",
+        1,
+    )
 
 
 @pytest.mark.anyio

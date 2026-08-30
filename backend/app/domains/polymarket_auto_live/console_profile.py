@@ -919,6 +919,7 @@ async def scan_console_profile_markets(
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
+    use_deadline_cursor_pagination: bool = False,
     gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
@@ -952,6 +953,7 @@ async def scan_console_profile_markets(
                 existing_position_slugs=set(),
                 apply_base_filters=apply_base_filters,
                 use_keyset_pagination=use_keyset_pagination,
+                use_deadline_cursor_pagination=use_deadline_cursor_pagination,
             ),
             timeout=gamma_scan_timeout_seconds,
         )
