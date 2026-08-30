@@ -14,6 +14,7 @@ from app.domains.bullpen008.constants import (
     CELERY_QUEUE,
     CELERY_TASK_NAME,
     REDIS_PREFIX,
+    STAGE_VERSIONS,
     WORKFLOW_PROFILE,
 )
 from app.domains.bullpen008.models import (
@@ -51,6 +52,154 @@ def _hash(value: object) -> str:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _is_interrupted_previous_build(
+    run_build: str | None,
+    current_build: str | None,
+) -> bool:
+    return bool(
+        run_build
+        and current_build
+        and run_build.strip()
+        and current_build.strip()
+        and run_build.strip() != current_build.strip()
+    )
+
+
+async def recover_interrupted_previous_build_run(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    current_build: str | None,
+) -> str | None:
+    """Fail only an unfinished 008 run that belonged to a replaced build.
+
+    A production container replacement cannot leave the prior build's Celery
+    process alive, but its Redis TTL may outlive that process.  Preserve any
+    immutable stage facts already written, append explicit failed/blocked facts
+    for missing stages, and never inspect or mutate a 007 record or key.
+    """
+
+    record = (
+        await session.execute(
+            select(Bullpen008RunRecord)
+            .options(selectinload(Bullpen008RunRecord.stages))
+            .where(
+                Bullpen008RunRecord.user_id == user_id,
+                Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+                Bullpen008RunRecord.status.in_(("queued", "running")),
+            )
+            .order_by(Bullpen008RunRecord.started_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if record is None or not _is_interrupted_previous_build(
+        record.code_build_version,
+        current_build,
+    ):
+        return None
+
+    completed_at = datetime.now(UTC)
+    settings_hash = _hash(record.settings_snapshot)
+    wallet_hash = _hash(record.wallet_snapshot)
+    existing_by_number = {stage.stage_number: stage for stage in record.stages}
+    previous_hash: str | None = None
+    stage_names = {
+        1: "Discover & Hard Filters",
+        2: "Probability & Structural Risk",
+        3: "Cluster & Dependency Map",
+        4: "Portfolio Optimizer & Stress Test",
+    }
+    first_missing = next(
+        (number for number in range(1, 5) if number not in existing_by_number),
+        None,
+    )
+    for stage_number in range(1, 5):
+        existing = existing_by_number.get(stage_number)
+        if existing is not None:
+            previous_hash = existing.output_hash
+            continue
+        status = "failed" if stage_number == first_missing else "blocked"
+        reason = (
+            "The worker was interrupted by a production build replacement before "
+            "this stage could satisfy its pass condition."
+            if status == "failed"
+            else "A previous stage was interrupted by a production build replacement."
+        )
+        outputs = {
+            "metrics": {},
+            "interrupted": True,
+            "orders_created": 0,
+            "orders_submitted": 0,
+        }
+        output_hash = _hash(
+            {
+                "run_id": record.id,
+                "stage_number": stage_number,
+                "status": status,
+                "reason": reason,
+                "previous_stage_output_hash": previous_hash,
+                "current_build": current_build,
+            }
+        )
+        session.add(
+            Bullpen008StageOutputRecord(
+                run_id=record.id,
+                workflow_profile=WORKFLOW_PROFILE,
+                stage_number=stage_number,
+                stage_name=stage_names[stage_number],
+                stage_version=STAGE_VERSIONS[stage_number],
+                status=status,
+                pass_condition="The defined stage pass condition must be satisfied.",
+                block_reason=reason,
+                previous_stage_output_hash=previous_hash,
+                output_hash=output_hash,
+                settings_snapshot_hash=settings_hash,
+                wallet_snapshot_hash=wallet_hash,
+                inputs_json={
+                    "interrupted_build": record.code_build_version,
+                    "replacement_build": current_build,
+                },
+                calculations_json={},
+                outputs_json=outputs,
+                rejections_json=[],
+                warnings_json=[reason],
+                provenance_json={
+                    "workflow_profile": WORKFLOW_PROFILE,
+                    "recovery": "build-aware-worker-interruption",
+                    "orders_permitted": False,
+                },
+                prompt_version=None,
+                parser_version=None,
+                started_at=record.started_at,
+                completed_at=completed_at,
+                duration_seconds=max(
+                    0.0,
+                    (completed_at - record.started_at).total_seconds(),
+                ),
+            )
+        )
+        previous_hash = output_hash
+
+    record.status = "failed"
+    record.completed_at = completed_at
+    record.summary = (
+        "Bullpen 008 shadow run was interrupted by a production build replacement; "
+        "no orders were created."
+    )
+    record.error_message = "worker_interrupted_by_build_replacement"
+    record.run_metadata = {
+        **dict(record.run_metadata),
+        "recovered_interrupted_build": True,
+        "replacement_build": current_build,
+        "orders_created": 0,
+        "orders_submitted": 0,
+        "stage5_status": "disabled_pending_phase2",
+        "stage6_status": "disabled_pending_phase2",
+    }
+    await session.commit()
+    return record.id
 
 
 def _seed_payload_from_007(payload: dict[str, object]) -> Bullpen008Settings:
