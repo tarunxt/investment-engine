@@ -20,6 +20,7 @@ POLYMARKET_GAMMA_EVENTS_KEYSET_URL = (
 )
 POLYMARKET_HTTP_HEADERS = {"User-Agent": "investment-engine-bullpen-auto-live/1.0"}
 GAMMA_EVENT_PAGE_SIZE = 100
+GAMMA_DEADLINE_CURSOR_MAX_OFFSET = 1_900
 GAMMA_KEYSET_EVENT_PAGE_SIZE = 500
 DEFAULT_GAMMA_HTTP_TIMEOUT_SECONDS = 20.0
 
@@ -1075,6 +1076,8 @@ async def scan_candidate_markets(
         offset = 0
         after_cursor: str | None = None
         seen_cursors: set[str] = set()
+        deadline_boundary: str | None = None
+        deadline_boundary_seen = 0
         while True:
             if use_deadline_cursor_pagination:
                 rows, event_count, last_deadline, boundary_count = (
@@ -1145,15 +1148,23 @@ async def scan_candidate_markets(
                     raise ValueError(
                         "Gamma deadline cursor page did not expose a deadline boundary."
                     )
+                if last_deadline == deadline_boundary:
+                    deadline_boundary_seen += boundary_count
+                else:
+                    deadline_boundary = last_deadline
+                    deadline_boundary_seen = boundary_count
                 previous_state = (current_universe_start, offset)
-                if last_deadline == current_universe_start:
-                    offset += boundary_count
+                next_offset = offset + event_count
+                if next_offset <= GAMMA_DEADLINE_CURSOR_MAX_OFFSET:
+                    offset = next_offset
                 elif last_deadline > current_universe_start:
                     current_universe_start = last_deadline
-                    offset = boundary_count
+                    offset = deadline_boundary_seen
+                elif deadline_boundary_seen <= GAMMA_DEADLINE_CURSOR_MAX_OFFSET:
+                    offset = deadline_boundary_seen
                 else:
                     raise ValueError(
-                        "Gamma deadline cursor moved backwards before completion."
+                        "Gamma deadline boundary exceeds the safe offset window."
                     )
                 if (current_universe_start, offset) == previous_state:
                     raise ValueError(

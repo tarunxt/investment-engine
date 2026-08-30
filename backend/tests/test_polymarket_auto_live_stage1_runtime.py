@@ -618,11 +618,21 @@ async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
         end_date_min: str,
     ):
         requested_pages.append((end_date_min, offset))
-        if len(requested_pages) == 1:
-            return [row(index) for index in range(100)], 100, "2026-09-30T20:59:59Z", 8
-        if len(requested_pages) == 2:
-            return [row(100 + index) for index in range(100)], 100, "2026-10-31T20:59:59Z", 5
-        return [row(200)], 1, "2026-11-30T20:59:59Z", 1
+        page = len(requested_pages) - 1
+        if page < 20:
+            deadline = (
+                "2026-09-30T20:59:59Z"
+                if page < 19
+                else "2026-10-31T20:59:59Z"
+            )
+            boundary = 100 if page < 19 else 5
+            return (
+                [row(page * 100 + index) for index in range(100)],
+                100,
+                deadline,
+                boundary,
+            )
+        return [row(2000)], 1, "2026-11-30T20:59:59Z", 1
 
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.scanner._fetch_gamma_deadline_cursor_page",
@@ -635,11 +645,14 @@ async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
         use_deadline_cursor_pagination=True,
     )
 
-    assert requested_pages[1:] == [
-        ("2026-09-30T20:59:59Z", 8),
-        ("2026-10-31T20:59:59Z", 5),
+    assert requested_pages[:3] == [
+        (requested_pages[0][0], 0),
+        (requested_pages[0][0], 100),
+        (requested_pages[0][0], 200),
     ]
-    assert len(result.accepted) == 201
+    assert requested_pages[19] == (requested_pages[0][0], 1900)
+    assert requested_pages[20] == ("2026-10-31T20:59:59Z", 5)
+    assert len(result.accepted) == 2001
 
 
 @pytest.mark.anyio
