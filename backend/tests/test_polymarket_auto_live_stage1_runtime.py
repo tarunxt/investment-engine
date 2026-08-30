@@ -619,16 +619,16 @@ async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
     ):
         requested_pages.append((end_date_min, offset))
         page = len(requested_pages) - 1
-        if page < 20:
+        if page < 4:
             deadline = (
                 "2026-09-30T20:59:59Z"
-                if page < 19
+                if page < 3
                 else "2026-10-31T20:59:59Z"
             )
-            boundary = 100 if page < 19 else 5
+            boundary = 500 if page < 3 else 5
             return (
-                [row(page * 100 + index) for index in range(100)],
-                100,
+                [row(page * 500 + index) for index in range(500)],
+                500,
                 deadline,
                 boundary,
             )
@@ -647,11 +647,11 @@ async def test_008_deadline_cursor_scan_advances_boundary_offset(monkeypatch):
 
     assert requested_pages[:3] == [
         (requested_pages[0][0], 0),
-        (requested_pages[0][0], 100),
-        (requested_pages[0][0], 200),
+        (requested_pages[0][0], 500),
+        (requested_pages[0][0], 1000),
     ]
-    assert requested_pages[19] == (requested_pages[0][0], 1900)
-    assert requested_pages[20] == ("2026-10-31T20:59:59Z", 5)
+    assert requested_pages[3] == (requested_pages[0][0], 1500)
+    assert requested_pages[4] == ("2026-10-31T20:59:59Z", 5)
     assert len(result.accepted) == 2001
 
 
@@ -705,7 +705,7 @@ async def test_gamma_deadline_cursor_page_orders_and_reports_boundary():
         "archived": "false",
         "closed": "false",
         "end_date_min": "2026-09-30T00:00:00+00:00",
-        "limit": "100",
+        "limit": "500",
         "offset": "7",
         "order": "endDate",
         "ascending": "true",
