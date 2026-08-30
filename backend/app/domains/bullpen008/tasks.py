@@ -1638,7 +1638,9 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                     pending_orders=pending_orders,
                     settings=settings,
                     stage4_completed_at=stage4_completed_at,
-                    now=stage5_started,
+                    # The forced wallet refresh completes after stage5_started;
+                    # certify freshness against the post-refresh clock.
+                    now=datetime.now(UTC),
                 )
                 plan_certificate = dict(plan["plan_certificate"])
                 stage5_status = (
