@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from app.domains.bullpen008.engine import (
+    build_cluster_prompt,
     build_portfolio_target,
     build_stage1_output,
     deterministic_cluster_seed,
@@ -18,6 +19,13 @@ from app.domains.bullpen008.engine import (
 from app.domains.bullpen008.schemas import Bullpen008Settings
 
 NOW = datetime(2026, 8, 30, 12, tzinfo=UTC)
+
+
+def test_cluster_prompt_distinguishes_assignment_from_event_resolution() -> None:
+    prompt = build_cluster_prompt([market("future")])
+    assert "CLUSTER ASSIGNMENT" in prompt
+    assert "future deadline, unsettled market or unknown outcome is not a reason" in prompt
+    assert 'adjudication_status="resolved"' in prompt
 
 
 def market(market_id: str, **updates: object) -> dict[str, object]:
