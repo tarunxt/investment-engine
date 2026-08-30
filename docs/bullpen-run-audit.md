@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 23651)
-Total output lines: 1579
-
 # Bullpen Run Audit
 
 ## Bullpen 008 Phase 1 isolation
@@ -665,7 +662,261 @@ Successful evidence is stored under
 lineage, authoritative enrichment, classification, identities, and the
 requested/verified/submitted share amounts.
 
-Live Stage 3 sells use …3651 tokens truncated…osition_returns_per_day` is `v2`. All three use the user's persisted,
+Live Stage 3 sells use one bounded immediate-exit strategy inside a single durable
+order-intent attempt. The strategy tries these paths in order:
+
+1. `primary` / `market_sell_explicit`
+2. `secondary` / `market_sell_max`
+3. `tertiary` / `limit_sell_fak`
+
+The next path is allowed only when the preceding path returns
+`result=fallback` with `safe_to_fallback=true`, proving that no ambiguous or
+accepted remote write exists. `accepted`, `ambiguous`, and
+`provider_retry_required` are terminal for the in-provider sequence. An ambiguous
+write moves to reconciliation; neither it nor a provider-level retry result may
+fall through to another sell path. Write-time RPC rate limiting is treated as
+ambiguous because acceptance might have preceded response loss, so it is never
+automatically resubmitted. This keeps all three paths under the same order-intent
+ID, idempotency key, worker operation lease, PostgreSQL advisory fence, and outer
+attempt budget.
+
+Fallback eligibility is deliberately fail-closed. It requires either a Bullpen CLI
+parse/argument rejection that could not issue an order, or a structured
+`unmatched`/`no_match` result with explicit zero-fill evidence and no order,
+transaction, or trade reference. Generic failure, rejection, cancellation,
+timeout, malformed output, any positive fill amount, or any remote reference stops
+the chain and reconciles instead of issuing another sell. A positive fill smaller
+than the requested shares remains `PARTIALLY_FILLED` until wallet/order
+reconciliation accounts for the residual exposure.
+
+Each telemetry-bearing sell stores
+`execution_metadata_json.immediate_sell_strategy` with `version=v1`,
+`selected_layer`, `execution_path`, `fallback_count`, and an ordered `attempts`
+list. Every layer records its sequence, layer, path, result, reason, validation,
+`safe_to_fallback`, provider alias, and start/completion timestamps. The exact
+strategy object is mirrored under the owning order attempt's sanitized response at
+`_stage3_immediate_sell`, so an audit can prove which fallback ran and why even if
+mutable intent metadata later changes. A later attempt that stops in preflight does
+not replace that owner. Missing immediate-sell telemetry is valid
+legacy evidence: snapshot schema version 2 is retained, frozen snapshots are not
+rewritten, and validators activate only when the versioned strategy key is
+present.
+`fallback_count` counts transitions that were actually taken and is therefore
+bounded to `0..2`; a verified no-write failure on the final tertiary layer may
+still record `result=fallback`, but it does not imply a fourth transition. That
+terminal case is valid only with null selected layer/path and a permanently failed
+intent.
+
+New Stage 3 intents use the `auto-live:v2` idempotency-key format: a SHA-256
+digest over the exact run, decision, and order-plan identity with a stable prefix.
+This preserves deterministic retry identity while keeping the stored value below
+the existing 128-character database limit. The execution metadata records the
+format, and the algorithm registry plus deterministic validator audit the key and
+block any oversized value. Existing frozen snapshots and already-persisted legacy
+keys remain valid and are not rewritten.
+
+An ambiguous BUY write persists `first_submitted_at`, `last_submitted_at`, and
+the mirrored `uncertain_remote_write_boundary` attempt evidence before entering
+reconciliation. Automatic resubmission remains disabled. BUY reconciliation
+polls a persisted order reference, then requires a forced-fresh same-account,
+same-credential, same-classifier wallet snapshot and alias/side/size/timestamp
+correlated history before inferring a fill. Its automatic ambiguity window is
+configured by `AUTO_LIVE_BUY_RECONCILIATION_MAX_AGE_SECONDS`, defaults to 900
+seconds, and is clamped to 30 seconds through 24 hours. When the window expires,
+the intent becomes non-retryable `TIMED_OUT`, records the v1
+`buy_reconciliation_operator_block`, retains its cash/write fence, and requires
+Bullpen support verification before manual recovery.
+
+Every current terminal BUY also persists
+`post_buy_terminal_wallet_refresh`. A direct or polled fill records a bounded
+publication result (`published` or `refresh_failed`) with its caller source;
+wallet/history reconciliation retains the forced-fresh source, fetch timestamp,
+direct lineage comparison, and expected Stage 1/preflight lineage checks. This
+is the authoritative bridge that makes newly bought active positions visible to
+the Bullpen Portfolio without issuing a second order.
+
+Bullpen CLI buy and sell writes use the persisted market slug as their execution
+reference because the CLI resolves slugs, while the numeric Gamma market ID
+remains the canonical audit and portfolio identity. Legacy intents without a slug
+fall back to their stored market reference. The algorithm registry records this
+selection rule so audit readers can distinguish provider execution identity from
+internal market identity.
+
+Decision rows expose the explicit execution states `EXIT_RPC_RETRYING`,
+`EXIT_NOT_SUBMITTED`, `EXIT_SUBMITTED`, `EXIT_OPEN_UNFILLED`,
+`EXIT_PARTIALLY_FILLED`, `EXIT_FAILED_PERMANENTLY`,
+`POST_EXIT_REFRESH_PENDING`, `REPLACEMENT_SLOT_RESERVED`,
+`GENUINE_CAPACITY_BLOCK`, `CAPACITY_OVERRIDE_USED`, `BUY_READY`,
+`BUY_SUBMITTED`, and `BUY_FAILED`. The operator action “Retry failed exits and
+continue buys” is tied to the same saved run, is idempotent, does not rerun Stage 1
+or Stage 2, and never resets an intent that already has a remote order or
+transaction reference. `stage3_capacity_override` defaults false and is audited
+as an explicit operator bypass of only the slot-capacity gate; live cash,
+duplicate-market, market-validity, order-size, exposure, slippage, pricing, and
+cooldown guardrails remain active.
+
+Stage 3 order sizing always uses the forced, lineage-fenced live economic-position
+snapshot plus accepted buys from the current run. Stage 1, Stage 3 sizing, and
+sell preflight share the same authoritative market enrichment so an open row with
+stale claim flags cannot be active on one screen and claimable on another.
+Fresh coalesced `redis-cache` snapshots are valid; cached/stale or pre-request
+snapshots are rejected.
+
+Stage 3 computes how many open slots can be funded at the normal minimum:
+`spendable cash = max(0, gross cash - execution balance buffer)` and
+`affordable slots = min(open slots, floor(spendable cash / minimum order))`.
+It plans only the highest-ranked eligible rows up to that count, and each
+lower-ranked row retains an explicit affordability blocker.
+Historical accepted rows that are absent from the live wallet remain
+duplicate-market denylist entries, but they cannot reduce available sizing slots
+or post-buy free-slot diagnostics to zero. An explicit capacity override still
+bypasses only the slot gate; it does not bypass cash or order-size limits. The
+snapshot records gross cash, the shared reservation buffer, spendable cash,
+capacity-gate, v2 sizing, eligible, cash-funded, affordable, concrete planned,
+and free-slot counts. Existing frozen v1 snapshots without these additive
+fields remain readable.
+
+The duplicate-market denylist also retains an unresolved BUY after its parent
+run becomes terminal. `TIMED_OUT`, unknown-fill `CANCELLED`/`REJECTED`, and any
+other terminal BUY with persisted remote-write evidence remain blocked until
+reconciliation records quantity-known definitive zero fill. A later exit does
+not clear an unresolved open-order risk. Immediately before reservation, Stage
+3 takes one host-global Bullpen-account row lock, matches the candidate against
+all durable BUYs by market ID, condition ID, or slug regardless of side, and
+persists a bounded `buy_market_exposure_preflight` proof on both the intent and
+attempt. This same lock serializes collateral across app users because the
+Bullpen CLI credential store is a singleton host runtime. Only a zero-conflict
+proof may proceed to the external write.
+
+A dependent replacement remains deferred and unsized until its paired exit is
+terminally successful and a post-exit wallet/cash refresh establishes the actual
+slot and spendable balance. A terminal or deferred buy that never acquired a
+remote order, transaction, or submission timestamp releases its capital
+reservation. Active-reservation sums join the durable buy intent and ignore
+leaked `active` rows from terminal no-write intents, while ambiguous or persisted
+submissions remain fenced. In particular, a `REJECTED`, `CANCELLED`, or
+`TIMED_OUT` BUY with a persisted write timestamp/reference and unknown fill
+quantity continues to count against reserved cash until reconciliation records
+an explicit zero fill or the reservation is otherwise safely released. These
+rules prevent a failed replacement from
+artificially consuming cash or a pre-exit diagnostic amount from becoming an
+executable order.
+
+Event Exit evaluation removes every planned exit from the investable ranking
+before Stage 3 freezes final ranks, candidate order, and Step 2 queue counters.
+Candidates promoted by a forced, LLM/odds, or rank-out exit therefore retain
+their returns-per-day order instead of falling back to market ID order. Stage 3
+first assigns the portfolio's cash-affordable, already-free economic slots to
+the highest-ranked candidates. Only candidates beyond that immediately
+affordable count receive one-for-one replacement reservations, paired with
+executable sell exits that actually release an initially occupied economic
+slot. Redeem/claim rows, duplicate exits, non-economic rows, and a sell of only
+one side of a multi-side market exposure cannot create a replacement
+reservation. This is
+`stage3_rank_and_selection` algorithm version `v2` and
+`stage3_deferred_replacement_sizing` algorithm version `v2`.
+
+The exit-to-replacement transition is serialized on the exit row. Reconciliation
+flushes the terminal exit before scanning and locking dependent BUY rows, so both
+paths use the same EXIT-then-BUY lock order. Every slot-releasing EXIT and its
+paired replacement BUY persist the same deterministic `dependency_group`;
+execution wake-up and watchdog recovery match that shared group rather than
+relying on in-memory pairing. Bounded compatibility repair fills a missing EXIT
+group only when the BUY group identifies that exact same-run exit market; it
+never overwrites a conflicting non-empty group. This is
+`stage3_dependency_exit_handoff` algorithm version `v3`. A bounded watchdog also
+recovers a
+historical lost-wake row only when its committed sibling exit is already
+`CONFIRMED` or `FILLED`; it then records `DEPENDENCY_WAKE_RECOVERED` and the
+durable `exit_confirmed_at` proof before returning the BUY to `READY`.
+
+The Stage 2 transfer queue remains a separate handoff diagnostic. Stage 3 Step 2
+`planned`, `processed`, and `submitted` execution tiles count concrete persisted
+buy intents only. The backend reconciles those tiles, the Stage 3 totals, and the
+order funnel from the same durable records; the UI must not combine stale queue
+counters with a different decision-row source.
+After an explicit same-run operator retry backfills durable intent IDs, state and
+summary polling treat those intent tasks as the execution authority. A terminal
+result from the original parent analysis task cannot reclassify the resumed run
+as interrupted, replace its decision rows, or cascade-delete the backfilled
+intents. The stored `stage3_recovery` and `stage3_resume_action` fields make that
+handoff deterministic and auditable.
+An exit that is merely submitted or still open never releases a slot. A partial
+exit releases one only when the remaining economic exposure is at or below the
+configured dust threshold. A ranked replacement is reserved for its specific
+slot-releasing Event Exit and is executable only after the exit is confirmed and
+the live snapshot shows the old exposure removed. When a ranked buy cannot be placed,
+the persisted Stage 3 reason should distinguish an open/unfilled exit, a
+meaningful partial remainder, stale cache, excluded dust/resolution, genuine
+capacity, or a successfully released replacement slot. Historical snapshots
+without these diagnostics remain valid and must not be rewritten.
+
+### Guardrails
+
+Run-level guardrails plus decision-specific guardrail payloads.
+
+### Formulas
+
+Immutable ledger rows for Stage 1 portfolio-slot sizing, Stage 2 consensus
+statistics, returns-per-day metrics, Stage 3 ranking data, and order funnel
+aggregates.
+
+### Raw
+
+Sanitized run payloads, stage results, decisions, orders response, and event summaries.
+Native audit decision capture uses the same reconciliation visibility predicate
+as run and order-intent reads. Durable rows marked
+`_console_reconciliation_state=superseded` remain in PostgreSQL for foreign-key
+history but are not reintroduced into current Stage 3 decisions or audit findings.
+
+## Formula and Algorithm Registry
+
+Defined in `AUDITED_ALGORITHM_REGISTRY`.
+The current registry version is
+`2026-07-27-stage3-submission-evidence-v29`. The
+`bullpen_position_claimability` entry is algorithm version `v4`; historical
+frozen bundles retain their earlier registry provenance and child findings.
+
+Current required keys:
+
+* `stage2_consensus_statistics`
+* `candidate_returns_per_day`
+* `bullpen_position_claimability`
+* `stage2_to_stage3_handoff_checkpoint`
+* `console_trade_amount_per_opportunity`
+* `llm_returns_per_day`
+* `position_returns_per_day`
+* `stage3_rank_and_selection`
+* `stage3_affordable_ranked_buy_allocation`
+* `order_funnel_aggregation`
+* `stage3_sell_live_exposure_preflight`
+* `stage3_buy_market_exposure_preflight`
+* `stage3_redeem_wallet_lineage_preflight`
+* `stage3_wallet_credential_rotation_attestation`
+* `stage3_post_exit_planner_credential_rotation`
+* `stage3_sell_alias_reconciliation`
+* `stage3_buy_reservation_terminal_release`
+* `stage3_active_reservation_cash_filter`
+* `stage3_buy_post_submit_reconciliation`
+* `stage3_ambiguous_write_boundary_fence`
+* `stage3_terminal_buy_portfolio_refresh`
+* `stage3_dependency_exit_handoff`
+* `stage3_waiting_exit_watchdog_recovery`
+* `stage3_deferred_replacement_sizing`
+* `stage3_immediate_sell_fallback`
+* `stage3_persisted_counter_reconciliation`
+* `stage3_restart_recovery`
+* `stage3_bullpen_response_normalization`
+* `stage3_verified_remote_absence_retry`
+* `stage3_reconciliation_generation_guard`
+* `stage3_terminal_resume_preservation`
+* `stage3_terminal_doctor_blocker`
+* `stage3_submission_evidence_terminality`
+
+Materialized formula rows use the same provenance as the registry:
+`console_trade_amount_per_opportunity` is `v2`,
+`candidate_returns_per_day` and `llm_returns_per_day` are `v4`, while
+`position_returns_per_day` is `v2`. All three use the user's persisted,
 Excel-style Returns/day formula and point to their actual `console_profile`
 source module. The default is
 `=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)`; existing frozen
