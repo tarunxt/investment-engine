@@ -23,6 +23,7 @@ from app.domains.polymarket_auto_live.execution import refresh_balance
 from app.domains.polymarket_auto_live.scanner import (
     ScanResult,
     ScannedMarket,
+    _fetch_gamma_keyset_page,
     _fetch_gamma_page,
     scan_candidate_markets,
 )
@@ -483,6 +484,113 @@ async def test_gamma_scan_continues_past_legacy_1500_market_cutoff(monkeypatch):
     ]
     assert len(result.accepted) == 2_001
     assert any(market.question == target_question for market in result.accepted)
+
+
+@pytest.mark.anyio
+async def test_gamma_keyset_page_uses_cursor_and_returns_nested_markets():
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "events": [
+                    {
+                        "id": "event-1",
+                        "slug": "event-one",
+                        "title": "Event one",
+                        "active": True,
+                        "closed": False,
+                        "archived": False,
+                        "markets": [
+                            {
+                                "id": "market-1",
+                                "question": "Will event one happen?",
+                                "active": True,
+                                "closed": False,
+                                "archived": False,
+                            }
+                        ],
+                    }
+                ],
+                "next_cursor": "cursor-2",
+            }
+
+    class FakeClient:
+        async def get(self, url, *, params):
+            captured["url"] = url
+            captured["params"] = params
+            return FakeResponse()
+
+    rows, next_cursor = await _fetch_gamma_keyset_page(
+        FakeClient(),
+        after_cursor="cursor-1",
+        end_date_min="2026-08-30T00:00:00+00:00",
+    )
+
+    assert captured == {
+        "url": "https://gamma-api.polymarket.com/events/keyset",
+        "params": {
+            "closed": "false",
+            "end_date_min": "2026-08-30T00:00:00+00:00",
+            "limit": "500",
+            "after_cursor": "cursor-1",
+        },
+    }
+    assert rows[0]["id"] == "market-1"
+    assert rows[0]["events"] == [
+        {"id": "event-1", "slug": "event-one", "title": "Event one"}
+    ]
+    assert next_cursor == "cursor-2"
+
+
+@pytest.mark.anyio
+async def test_008_keyset_scan_follows_every_cursor(monkeypatch):
+    requested_cursors: list[str | None] = []
+
+    def row(index: int) -> dict[str, object]:
+        return {
+            "id": f"market-{index}",
+            "question": f"Will candidate {index} happen?",
+            "slug": f"market-{index}",
+            "endDate": "2026-09-30T20:59:59Z",
+            "outcomes": '["Yes", "No"]',
+            "outcomePrices": "[0.10, 0.90]",
+            "active": True,
+            "archived": False,
+            "closed": False,
+        }
+
+    async def fake_fetch_keyset_page(
+        _client,
+        *,
+        after_cursor: str | None,
+        end_date_min: str,
+    ):
+        assert end_date_min
+        requested_cursors.append(after_cursor)
+        if after_cursor is None:
+            return [row(1)], "cursor-2"
+        return [row(2)], None
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_keyset_page",
+        fake_fetch_keyset_page,
+    )
+
+    result = await scan_candidate_markets(
+        min_liquidity_usd=0,
+        apply_base_filters=False,
+        use_keyset_pagination=True,
+    )
+
+    assert requested_cursors == [None, "cursor-2"]
+    assert [market.market_id for market in result.accepted] == [
+        "market-1",
+        "market-2",
+    ]
 
 
 @pytest.mark.anyio
