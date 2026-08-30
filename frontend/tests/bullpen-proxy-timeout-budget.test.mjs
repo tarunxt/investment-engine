@@ -41,6 +41,19 @@ test("ordinary API reads retain the strict fast-failure budget", () => {
   assert.match(proxySource, /DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000/);
 });
 
+test("read circuit failures cannot suppress idempotent mutations", () => {
+  const proxySource = read("../app/backend-api/[...path]/route.ts");
+
+  assert.match(
+    proxySource,
+    /const mutationOriginCircuit = new ApiOriginCircuitBreaker\(\s*Number\.MAX_SAFE_INTEGER,\s*0,\s*\)/,
+  );
+  assert.match(
+    proxySource,
+    /SAFE_FALLBACK_METHODS\.has\(request\.method\)\s*\? originCircuit\s*: mutationOriginCircuit/,
+  );
+});
+
 test("the updated backend proxy route parses as TypeScript", () => {
   const source = read("../app/backend-api/[...path]/route.ts");
   const result = ts.transpileModule(source, {
