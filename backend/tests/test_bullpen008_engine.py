@@ -453,6 +453,32 @@ def test_optimizer_freezes_expired_nonclaimable_holdings_until_resolution() -> N
     assert allocation["locked_resolution_hold"] is True
 
 
+def test_optimizer_uses_authoritative_deadline_when_expired_wallet_metadata_is_incomplete() -> None:
+    row = clustered_candidate(
+        "expired-deadline-only",
+        "expired-deadline-only",
+        active_position=False,
+        days_until_close=None,
+        current_exposure_usd=10.5,
+        open=False,
+        deadline=(NOW - timedelta(days=1)).isoformat(),
+        new_entry_eligible=False,
+        claimable=False,
+    )
+    result = build_portfolio_target(
+        [row],
+        settings=Bullpen008Settings(),
+        available_cash_usd=50,
+        inputs_hash="expired-deadline-only",
+        now=NOW,
+    )
+    allocation = result["allocations"][0]
+    assert allocation["target_exposure_usd"] == 10.5
+    assert allocation["proposed_sell_usd"] == 0
+    assert allocation["proposed_buy_usd"] == 0
+    assert allocation["locked_resolution_hold"] is True
+
+
 def test_optimizer_outputs_every_row_and_weights_the_target_portfolio() -> None:
     settings = Bullpen008Settings()
     rows = [
