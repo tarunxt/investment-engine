@@ -28,6 +28,7 @@ ACTION_ARRAYS = (
     "full_exits",
     "trims",
     "buys",
+    "dormant_contingent_exits",
     "holds",
     "blocked_untradeable",
 )
@@ -37,6 +38,7 @@ ACTION_PRIORITY = {
     "full_exit": 30,
     "trim": 40,
     "buy": 70,
+    "contingent_exit": 60,
     "hold": 80,
     "blocked": 90,
 }
@@ -160,6 +162,11 @@ def _make_action(
         "target_exposure_usd": round(target_exposure, 2),
         "strict_cluster_id": row.get("strict_cluster_id"),
         "common_catalyst_cluster_id": row.get("common_catalyst_cluster_id"),
+        "joint_loss_scenario_ids": row.get("joint_loss_scenario_ids", []),
+        "risk_tier": row.get("risk_tier"),
+        "effective_contract_cap_usd": row.get("effective_contract_cap_usd"),
+        "effective_cluster_cap_usd": row.get("effective_cluster_cap_usd"),
+        "effective_joint_scenario_cap_usd": row.get("effective_joint_scenario_cap_usd"),
         "reason_code": reason_code,
         "explanation": explanation,
         "priority": ACTION_PRIORITY[action_type],
@@ -408,6 +415,51 @@ def build_action_plan(
         action["remote_order_id"] = pending.get("remote_order_id") or pending.get("order_id")
         arrays["order_cancellations"].append(action)
 
+    certified_policies = _rows(stage4_certificate.get("contingent_exit_policies"))
+    translated_policy_hashes: list[str] = []
+    for policy in certified_policies:
+        market_id = str(policy.get("affected_market_id") or "")
+        allocation = allocations.get(market_id)
+        position = positions.get(market_id)
+        policy_hash = str(policy.get("policy_hash") or "")
+        policy_payload = {key: value for key, value in policy.items() if key != "policy_hash"}
+        if not market_id or allocation is None or position is None or policy_hash != stable_hash(policy_payload):
+            continue
+        ordinal += 1
+        row = {**clusters.get(market_id, {}), **allocation, "market_id": market_id}
+        current = _position_exposure(position)
+        action = _make_action(
+            run_id=run_id,
+            plan_inputs_hash=plan_inputs_hash,
+            action_type="contingent_exit",
+            row=row,
+            position=position,
+            current_exposure=current,
+            target_exposure=_number(allocation.get("target_exposure_usd")),
+            amount_usd=min(current, _number(allocation.get("current_exposure_usd"), current)),
+            reason_code="STAGE4_CERTIFIED_DORMANT_CONTINGENT_EXIT",
+            explanation="Dormant until Stage 6 proves one immutable Stage 4 trigger.",
+            ordinal=ordinal,
+            settings=settings,
+        )
+        action.update(
+            {
+                "contingent_policy": policy,
+                "contingent_policy_hash": policy_hash,
+                "activation_state": "DORMANT",
+                "quantity_shares": min(
+                    _number(action.get("quantity_shares")),
+                    _number(policy.get("maximum_sell_quantity")),
+                ),
+                "permitted_price_cents": policy.get("minimum_acceptable_price"),
+                "max_slippage_cents": policy.get("maximum_slippage"),
+                "max_spread_cents": policy.get("maximum_spread"),
+                "joint_loss_scenario_ids": policy.get("affected_scenario_ids", []),
+            }
+        )
+        arrays["dormant_contingent_exits"].append(action)
+        translated_policy_hashes.append(policy_hash)
+
     stage4_hash = str(stage4_certificate.get("certificate_hash") or "")
     cash = _number((wallet_snapshot.get("balance") if isinstance(wallet_snapshot.get("balance"), dict) else {}).get("available_balance_usd"))
     cash_available_without_unconfirmed_exits = cash
@@ -460,6 +512,8 @@ def build_action_plan(
         })
     strict_exposure: dict[str, float] = defaultdict(float)
     catalyst_exposure: dict[str, float] = defaultdict(float)
+    scenario_exposure: dict[str, float] = defaultdict(float)
+    per_market_cap_results: list[bool] = []
     contract_max = 0.0
     for market_id, exposure in simulated.items():
         if exposure <= settings.exposure_rounding_tolerance_usd:
@@ -468,21 +522,39 @@ def build_action_plan(
         contract_max = max(contract_max, exposure)
         strict_exposure[str(allocation.get("strict_cluster_id") or f"missing:{market_id}")] += exposure
         catalyst_exposure[str(allocation.get("common_catalyst_cluster_id") or f"missing:{market_id}")] += exposure
+        per_market_cap_results.append(
+            exposure <= _number(allocation.get("effective_contract_cap_usd"), settings.max_contract_exposure_usd) + settings.exposure_rounding_tolerance_usd
+        )
+        for scenario_id in allocation.get("joint_loss_scenario_ids", []):
+            scenario_exposure[str(scenario_id)] += exposure
 
     actions = _plan_actions(arrays)
     action_ids = [str(action.get("action_id")) for action in actions]
     contradictory = {
         market_id
         for market_id in all_market_ids
-        if len({str(action["action_type"]) for action in actions if action.get("market_id") == market_id and action.get("action_type") not in {"cancel", "hold", "blocked"}}) > 1
+        if len({str(action["action_type"]) for action in actions if action.get("market_id") == market_id and action.get("action_type") not in {"cancel", "hold", "blocked", "contingent_exit"}}) > 1
     }
     cash_nonnegative = all(_number(row.get("cash_usd")) >= -1e-9 for row in cash_ledger)
     every_position_classified = set(positions) == classified_position_ids
     targets_reproduced = all(row["matches"] for row in target_match_rows)
+    cluster_cap_results: list[bool] = []
+    scenario_cap_results: list[bool] = []
+    for allocation in allocations.values():
+        cluster_cap = _number(allocation.get("effective_cluster_cap_usd"), settings.max_common_catalyst_exposure_usd)
+        cluster_cap_results.extend([
+            strict_exposure[str(allocation.get("strict_cluster_id") or f"missing:{allocation.get('market_id')}")] <= cluster_cap + settings.exposure_rounding_tolerance_usd,
+            catalyst_exposure[str(allocation.get("common_catalyst_cluster_id") or f"missing:{allocation.get('market_id')}")] <= cluster_cap + settings.exposure_rounding_tolerance_usd,
+        ])
+        scenario_cap = _number(allocation.get("effective_joint_scenario_cap_usd"), settings.standard_cluster_cap_usd)
+        scenario_cap_results.extend(
+            scenario_exposure[str(value)] <= scenario_cap + settings.exposure_rounding_tolerance_usd
+            for value in allocation.get("joint_loss_scenario_ids", [])
+        )
     final_caps_within_limit = bool(
-        contract_max <= settings.max_contract_exposure_usd + settings.exposure_rounding_tolerance_usd
-        and max([*strict_exposure.values(), 0]) <= settings.max_strict_cluster_exposure_usd + settings.exposure_rounding_tolerance_usd
-        and max([*catalyst_exposure.values(), 0]) <= settings.max_common_catalyst_exposure_usd + settings.exposure_rounding_tolerance_usd
+        all(per_market_cap_results)
+        and all(cluster_cap_results)
+        and all(scenario_cap_results)
     )
     # Pre-existing deadline-passed holdings may be untradeable and must not be
     # represented as free capacity. They do not invalidate a no-buy plan merely
@@ -507,7 +579,9 @@ def build_action_plan(
         for action in arrays["buys"]
     )
     unique_actions = len(action_ids) == len(set(action_ids)) and not contradictory
-    plan_certified = all((targets_reproduced, cash_nonnegative, caps_pass, increments_pass, dependencies_pass, every_position_classified, unique_actions))
+    certified_policy_hashes = sorted(str(row.get("policy_hash") or "") for row in certified_policies)
+    policies_translated = sorted(translated_policy_hashes) == certified_policy_hashes
+    plan_certified = all((targets_reproduced, cash_nonnegative, caps_pass, increments_pass, dependencies_pass, every_position_classified, unique_actions, policies_translated))
 
     plan_without_hash: dict[str, object] = {
         "plan_id": "b008p-" + plan_inputs_hash[:32],
@@ -531,11 +605,16 @@ def build_action_plan(
         "cluster_exposure_before_after": {
             "strict_after": {key: round(value, 2) for key, value in strict_exposure.items()},
             "common_catalyst_after": {key: round(value, 2) for key, value in catalyst_exposure.items()},
+            "joint_scenario_after": {key: round(value, 2) for key, value in scenario_exposure.items()},
         },
         "metrics": {
             "claims": len(arrays["claims"]), "cancellations": len(arrays["order_cancellations"]),
             "sells": len(arrays["full_exits"]), "trims": len(arrays["trims"]), "buys": len(arrays["buys"]),
             "holds": len(arrays["holds"]), "blocked": len(arrays["blocked_untradeable"]),
+            "dormant_contingent_exits": len(arrays["dormant_contingent_exits"]),
+            "activated_reductions": len(arrays["full_exits"]) + len(arrays["trims"]),
+            "drawdown_mode": stage4_certificate.get("drawdown_state", "NORMAL"),
+            "exit_only_status": bool(stage4_certificate.get("exit_only")),
             "expected_post_plan_cash": round(cash, 2), "plan_certificate_result": "pass" if plan_certified else "fail",
         },
     }
@@ -554,9 +633,12 @@ def build_action_plan(
         "all_wallet_positions_classified": every_position_classified,
         "target_account_matches": target_account_matches,
         "no_duplicate_or_contradictory_action": unique_actions,
+        "all_contingent_policies_translated": policies_translated,
+        "certified_contingent_policy_hashes": certified_policy_hashes,
         "largest_contract_exposure": round(contract_max, 2),
         "largest_strict_cluster_exposure": round(max([*strict_exposure.values(), 0]), 2),
         "largest_common_catalyst_exposure": round(max([*catalyst_exposure.values(), 0]), 2),
+        "largest_joint_scenario_exposure": round(max([*scenario_exposure.values(), 0]), 2),
         "plan_certified": plan_certified,
     }
     plan_certificate["certificate_hash"] = stable_hash(plan_certificate)
@@ -595,18 +677,30 @@ def preflight_execution_plan(
     execution_mode: str = "shadow",
     emergency_stop: bool = False,
     prerequisite_statuses: dict[str, str] | None = None,
+    activated_contingent_action_ids: set[str] | None = None,
 ) -> dict[str, object]:
     prerequisite_statuses = prerequisite_statuses or {}
+    activated_contingent_action_ids = activated_contingent_action_ids or set()
     actions = [
         action for name in ("claims", "order_cancellations", "full_exits", "trims", "buys")
         for action in _rows(plan.get(name))
     ]
+    actions.extend(
+        action
+        for action in _rows(plan.get("dormant_contingent_exits"))
+        if str(action.get("action_id") or "") in activated_contingent_action_ids
+    )
     all_plan_rows = _plan_actions(plan)
     cluster_by_market = {
         str(row.get("market_id") or ""): (
             str(row.get("strict_cluster_id") or ""),
             str(row.get("common_catalyst_cluster_id") or ""),
         )
+        for row in all_plan_rows
+        if row.get("market_id")
+    }
+    scenarios_by_market = {
+        str(row.get("market_id") or ""): [str(value) for value in row.get("joint_loss_scenario_ids", [])]
         for row in all_plan_rows
         if row.get("market_id")
     }
@@ -641,7 +735,7 @@ def preflight_execution_plan(
     counters = {
         "planned": len(actions), "risk_certified": 0, "ready": 0, "durable_intents": 0,
         "submitted": 0, "confirmed": 0, "partially_filled": 0, "blocked": 0,
-        "failed": 0, "recoverable": 0, "reconciled": 0,
+        "failed": 0, "recoverable": 0, "reconciled": 0, "would_submit": 0,
     }
     for action in sorted(actions, key=lambda row: int(row.get("priority") or 999)):
         action_type = str(action.get("action_type") or "")
@@ -662,12 +756,13 @@ def preflight_execution_plan(
         checks["buy_odds_at_least_80"] = action_type != "buy" or current_odds >= settings.entry_side_odds_floor_pct
         permitted = _number(action.get("permitted_price_cents"), 100 if action_type == "buy" else 0)
         checks["slippage"] = (
-            action_type not in {"buy", "full_exit", "trim"}
+            action_type not in {"buy", "full_exit", "trim", "contingent_exit"}
             or (current_odds <= permitted if action_type == "buy" else current_odds >= permitted)
         )
         spread = _number(quote.get("spread_cents"))
-        checks["spread"] = action_type not in {"buy", "full_exit", "trim"} or spread <= settings.max_spread_cents
-        checks["liquidity"] = action_type not in {"buy", "full_exit", "trim"} or _number(quote.get("liquidity_usd"), 1) > 0
+        action_max_spread = _number(action.get("max_spread_cents"), settings.max_spread_cents)
+        checks["spread"] = action_type not in {"buy", "full_exit", "trim", "contingent_exit"} or spread <= action_max_spread
+        checks["liquidity"] = action_type not in {"buy", "full_exit", "trim", "contingent_exit"} or _number(quote.get("liquidity_usd"), 0) + 1e-9 >= _number(action.get("estimated_usd"))
         proposed_exposure = exposure_by_market.get(market_id, 0) + (_number(action.get("estimated_usd")) if action_type == "buy" else 0)
         strict_id = str(action.get("strict_cluster_id") or "")
         common_id = str(action.get("common_catalyst_cluster_id") or "")
@@ -681,26 +776,49 @@ def preflight_execution_plan(
             for candidate_market, exposure in exposure_by_market.items()
             if cluster_by_market.get(candidate_market, ("", ""))[1] == common_id
         ) + (_number(action.get("estimated_usd")) if action_type == "buy" else 0)
+        scenario_after = max(
+            [
+                sum(
+                    exposure
+                    for candidate_market, exposure in exposure_by_market.items()
+                    if scenario_id in scenarios_by_market.get(candidate_market, [])
+                )
+                + (_number(action.get("estimated_usd")) if action_type == "buy" else 0)
+                for scenario_id in scenarios_by_market.get(market_id, [])
+            ]
+            or [0.0]
+        )
+        contract_cap = _number(action.get("effective_contract_cap_usd"), settings.max_contract_exposure_usd)
+        cluster_cap = _number(action.get("effective_cluster_cap_usd"), settings.max_common_catalyst_exposure_usd)
+        scenario_cap = _number(action.get("effective_joint_scenario_cap_usd"), settings.standard_cluster_cap_usd)
         checks["capacity_revalidated"] = action_type != "buy" or (execution_mode == "shadow" and bool(dependencies)) or (
-            proposed_exposure <= settings.max_contract_exposure_usd + settings.exposure_rounding_tolerance_usd
-            and strict_after <= settings.max_strict_cluster_exposure_usd + settings.exposure_rounding_tolerance_usd
-            and common_after <= settings.max_common_catalyst_exposure_usd + settings.exposure_rounding_tolerance_usd
+            proposed_exposure <= contract_cap + settings.exposure_rounding_tolerance_usd
+            and strict_after <= cluster_cap + settings.exposure_rounding_tolerance_usd
+            and common_after <= cluster_cap + settings.exposure_rounding_tolerance_usd
+            and scenario_after <= scenario_cap + settings.exposure_rounding_tolerance_usd
         )
         checks["cash_or_shares_available"] = (
             (execution_mode == "shadow" and bool(dependencies))
             or available_cash + 1e-9 >= _number(action.get("estimated_usd"))
             if action_type == "buy"
             else shares_by_market_side[(market_id, str(action.get("side") or "").upper())] + 1e-9 >= _number(action.get("quantity_shares"))
-            if action_type in {"full_exit", "trim"}
+            if action_type in {"full_exit", "trim", "contingent_exit"}
             else True
         )
         blocker_codes = [key.upper() for key, passed in checks.items() if not passed]
         if blocker_codes:
-            counters["blocked"] += 1
-            state = "Blocked"
+            recoverable_exit_blockers = {"MARKET_OPEN", "SLIPPAGE", "SPREAD", "LIQUIDITY"}
+            if action_type in {"full_exit", "trim", "contingent_exit"} and set(blocker_codes) <= recoverable_exit_blockers:
+                counters["recoverable"] += 1
+                state = "Recoverable"
+            else:
+                counters["blocked"] += 1
+                state = "Blocked"
         else:
             counters["risk_certified"] += 1
             state = "RiskCertified" if execution_mode == "shadow" else "Ready"
+            if execution_mode == "shadow":
+                counters["would_submit"] += 1
             if execution_mode != "shadow":
                 counters["ready"] += 1
         results.append(

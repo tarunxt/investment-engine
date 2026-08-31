@@ -10,7 +10,7 @@ described below. Its six-stage facts are stored in the isolated
 008 run-detail API and UI project those immutable records directly, including
 hash lineage, formula/calculation ledgers, prompts, cluster adjudication, Stage
 4 target certificate, Stage 5 plan certificate, Stage 6 attempts/remote IDs and
-final wallet evidence. See [Bullpen 008 Phase 2](bullpen008-phase2.md).
+final wallet evidence. See [Bullpen 008 Phase 2](bullpen008-phase2.md) and [P0 loss prevention](bullpen008-p0-loss-prevention.md).
 
 ## Bullpen 008 Phase 1 isolation
 

@@ -33,6 +33,8 @@ import { cn } from "@/lib/utils";
 import { apiService } from "@/services/api";
 import type {
   Bullpen008Bootstrap,
+  Bullpen008Settings,
+  Bullpen008SettingsUpdate,
   Bullpen008StageOutput,
   Bullpen008StageStatus,
 } from "@/types/api";
@@ -48,39 +50,67 @@ const STAGES = [
     number: 1,
     name: "Discover & Hard Filters",
     detail: "Builds a complete, clean market universe before any LLM request.",
-    metricKeys: ["scanned", "accepted", "rejected", "active_positions", "data_errors"],
+    metricKeys: ["high_shock_rejected", "less_than_48_hour_rejected", "existing_high_shock_monitored", "timing_unresolved", "scanned", "accepted"],
   },
   {
     number: 2,
     name: "Probability & Structural Risk",
     detail: "Separates calibrated probability from structural contract risk.",
-    metricKeys: ["analysed", "chosen_side_llm_odds_gte_80", "positive_edge", "high_risk_rejects", "llm_failures"],
+    metricKeys: ["evidence_complete", "evidence_stale", "conservative_edge_rejected", "high_disagreement_rejected", "reward_skew_rejected", "analysed"],
   },
   {
     number: 3,
     name: "Cluster & Dependency Map",
     detail: "Finds mechanically related contracts and broader common catalysts.",
-    metricKeys: ["strict_clusters", "common_catalyst_clusters", "duplicates_date_ladders", "largest_current_exposure", "unresolved_adjudications"],
+    metricKeys: ["joint_loss_scenarios", "high_shock_scenarios", "unresolved_scenarios", "largest_current_scenario_loss", "strict_clusters", "common_catalyst_clusters"],
   },
   {
     number: 4,
     name: "Portfolio Optimizer & Stress Test",
     detail: "Deterministically selects targets, sizes them, and verifies every cap.",
-    metricKeys: ["selected_contracts", "invested", "cash_retained", "independent_clusters", "stress_test_result"],
+    metricKeys: ["maximum_scenario_loss", "binding_risk_tier", "contingent_exits_certified", "mandatory_time_exits", "scenario_cap_result", "invested"],
   },
   {
     number: 5,
     name: "Exit & Rebalance Plan",
     detail: "Translates only the certified Stage 4 target into an immutable, dependency-ordered plan.",
-    metricKeys: ["claims", "cancellations", "sells", "trims", "buys", "holds", "blocked", "expected_post_plan_cash", "plan_certificate_result"],
+    metricKeys: ["dormant_contingent_exits", "activated_reductions", "drawdown_mode", "exit_only_status", "plan_certificate_result", "claims", "cancellations", "sells", "trims", "buys", "holds", "blocked"],
   },
   {
     number: 6,
     name: "Execute & Reconcile",
     detail: "Revalidates every immutable action, then safely executes or shadow-validates and reconciles it.",
-    metricKeys: ["planned", "risk_certified", "ready", "durable_intents", "submitted", "confirmed", "partially_filled", "blocked", "failed", "recoverable", "reconciled"],
+    metricKeys: ["planned", "risk_certified", "would_submit", "ready", "durable_intents", "submitted", "confirmed", "partially_filled", "blocked", "failed", "recoverable", "reconciled"],
   },
 ] as const;
+
+type NumericRiskSetting = Exclude<keyof Bullpen008Settings, "workflow_profile">;
+
+const P0_RISK_SETTINGS: Array<{ key: NumericRiskSetting; label: string; step?: string }> = [
+  { key: "geopolitical_min_entry_hours", label: "Geopolitical minimum entry hours" },
+  { key: "single_day_high_shock_cap_usd", label: "Single-day high-shock cap ($)" },
+  { key: "high_shock_cluster_cap_usd", label: "High-shock cluster/scenario cap ($)" },
+  { key: "standard_cluster_cap_usd", label: "Standard cluster/scenario cap ($)" },
+  { key: "conservative_edge_min_pp", label: "Minimum conservative edge (pp)" },
+  { key: "high_shock_conservative_edge_min_pp", label: "High-shock minimum edge (pp)" },
+  { key: "entry_price_high_zone_pct", label: "High-price zone (%)" },
+  { key: "entry_price_hard_ceiling_pct", label: "Hard price ceiling (%)" },
+  { key: "high_zone_max_allocation_usd", label: "High-price maximum allocation ($)" },
+  { key: "min_reward_to_loss_ratio", label: "Minimum reward-to-loss ratio", step: "0.01" },
+  { key: "high_shock_evidence_max_age_minutes", label: "Evidence maximum age (minutes)" },
+  { key: "high_shock_min_source_count", label: "Minimum independent sources" },
+  { key: "single_day_time_exit_hours", label: "Single-day time exit (hours)" },
+  { key: "high_shock_time_exit_hours", label: "High-shock time exit (hours)" },
+  { key: "take_profit_odds_floor_pct", label: "Take-profit odds floor (%)" },
+  { key: "contingent_exit_odds_floor_pct", label: "Contingent-exit odds floor (%)" },
+  { key: "odds_drop_15m_pp", label: "15-minute drop threshold (pp)" },
+  { key: "odds_drop_24h_pp", label: "24-hour drop threshold (pp)" },
+  { key: "catastrophic_drop_15m_pp", label: "Catastrophic 15-minute drop (pp)" },
+  { key: "quote_confirmation_count", label: "Quote confirmation count" },
+  { key: "soft_drawdown_pct", label: "Soft drawdown (%)" },
+  { key: "hard_drawdown_pct", label: "Hard drawdown (%)" },
+  { key: "post_shock_cooldown_hours", label: "Post-shock cooldown (hours)" },
+];
 
 const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
@@ -157,7 +187,10 @@ function StatusIcon({ status }: { status: string }) {
 }
 
 function metricSource(stage: Bullpen008StageOutput | undefined) {
-  const metrics = asRecord(stage?.outputs.metrics);
+  const metrics = {
+    ...asRecord(stage?.outputs.metrics),
+    ...asRecord(stage?.outputs.risk_metrics),
+  };
   if (stage?.stage_number === 4 && Object.keys(metrics).length === 0) {
     return asRecord(stage.outputs.portfolio_metrics);
   }
@@ -248,6 +281,7 @@ export function Bullpen008PageClient() {
   const [customPhrases, setCustomPhrases] = useState("");
   const [closingWindowDays, setClosingWindowDays] = useState("30");
   const [autoRefreshMinutes, setAutoRefreshMinutes] = useState("360");
+  const [riskSettings, setRiskSettings] = useState<Record<string, string>>({});
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -256,6 +290,11 @@ export function Bullpen008PageClient() {
       setCustomPhrases(data.settings.custom_exclude_phrases.join(", "));
       setClosingWindowDays(String(data.settings.closing_window_days));
       setAutoRefreshMinutes(String(data.settings.auto_refresh_minutes));
+      setRiskSettings(
+        Object.fromEntries(
+          P0_RISK_SETTINGS.map(({ key }) => [key, String(data.settings[key])]),
+        ),
+      );
       const hasStage4 = data.latest_run?.stages.some(
         (stage) => stage.stage_number === 4,
       );
@@ -311,6 +350,18 @@ export function Bullpen008PageClient() {
   );
   const cash = Number(balance.available_balance_usd ?? 0);
   const portfolioValue = invested + cash;
+  const riskState = asRecord(bootstrap?.risk_state);
+  const jointLossScenarios = asRows(
+    riskState.joint_loss_scenarios ?? portfolioStage?.outputs.joint_scenario_stress,
+  );
+  const contingentPolicies = asRows(portfolioStage?.outputs.contingent_exit_policies);
+  const contingentActivations = asRows(riskState.contingent_activations);
+  const drawdown = asRecord(riskState.drawdown);
+  const pnlAttribution = asRows(riskState.pnl_attribution);
+  const lossPreventionAudit = asRows(
+    riskState.loss_prevention_audit ?? portfolioStage?.outputs.loss_prevention_audit,
+  );
+  const scenarioCooldowns = asRows(riskState.scenario_cooldowns);
 
   const runOnce = async () => {
     setBusyAction("run");
@@ -336,7 +387,10 @@ export function Bullpen008PageClient() {
           .filter(Boolean),
         closing_window_days: Number(closingWindowDays),
         auto_refresh_minutes: Number(autoRefreshMinutes),
-      });
+        ...Object.fromEntries(
+          P0_RISK_SETTINGS.map(({ key }) => [key, Number(riskSettings[key])]),
+        ),
+      } as Bullpen008SettingsUpdate);
       await load();
     } catch (actionError) {
       setError(`Bullpen 008 settings were not saved. ${formatUnknownError(actionError)}`);
@@ -537,7 +591,6 @@ export function Bullpen008PageClient() {
                       <td className="max-w-xs px-4 py-3 font-medium text-slate-900"><span className="line-clamp-2">{String(position.market_title ?? position.question ?? position.market_id ?? "Unknown market")}</span></td>
                       <td className="px-4 py-3 text-slate-600">{String(position.side ?? "—")}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-slate-600">{formatMoney(position.exposure_usd)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums font-semibold text-slate-900">{formatMoney(position.current_value_usd)}</td>
                       <td className="px-4 py-3 capitalize text-slate-600">{String(position.classification ?? "active")}</td>
                     </tr>
                   ))}
@@ -557,6 +610,25 @@ export function Bullpen008PageClient() {
             <div className="space-y-2"><Label htmlFor="bullpen008-window">Closing window (days)</Label><Input id="bullpen008-window" inputMode="numeric" value={closingWindowDays} onChange={(event) => setClosingWindowDays(event.target.value)} /></div>
             <div className="space-y-2"><Label htmlFor="bullpen008-refresh">Refresh interval (minutes)</Label><Input id="bullpen008-refresh" inputMode="numeric" value={autoRefreshMinutes} onChange={(event) => setAutoRefreshMinutes(event.target.value)} /></div>
             <div className="space-y-2"><Label htmlFor="bullpen008-phrases">Custom exclusion phrases</Label><Input id="bullpen008-phrases" value={customPhrases} onChange={(event) => setCustomPhrases(event.target.value)} placeholder="comma-separated phrases" /></div>
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-5 text-amber-900">
+              Deterministic single-day geopolitical rejection is enabled and cannot be downgraded by the LLM. This profile remains shadowed and unarmed.
+            </div>
+            <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+              {P0_RISK_SETTINGS.map(({ key, label, step }) => (
+                <div className="space-y-1.5" key={key}>
+                  <Label className="text-xs" htmlFor={`bullpen008-${key}`}>{label}</Label>
+                  <Input
+                    id={`bullpen008-${key}`}
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step={step ?? "1"}
+                    value={riskSettings[key] ?? ""}
+                    onChange={(event) => setRiskSettings((current) => ({ ...current, [key]: event.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
             <button
               type="button"
               onClick={() => setIsOthersFilterOpen(true)}
@@ -580,7 +652,7 @@ export function Bullpen008PageClient() {
               />
             </div>
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-600">
-              Entry floor {bootstrap?.settings.entry_side_odds_floor_pct}% · LLM floor {bootstrap?.settings.min_llm_probability_pct}% · $5 increments · $20 contract and cluster caps.
+              Tier caps: ${bootstrap?.settings.single_day_high_shock_cap_usd} single-day · ${bootstrap?.settings.high_shock_cluster_cap_usd} high-shock · ${bootstrap?.settings.standard_cluster_cap_usd} standard. High-shock evidence: {bootstrap?.settings.high_shock_min_source_count} independent sources, fresh within {bootstrap?.settings.high_shock_evidence_max_age_minutes} minutes.
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={() => void saveSettings()} disabled={Boolean(busyAction)}>{busyAction === "settings" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}Save 008 settings</Button>
@@ -589,6 +661,111 @@ export function Bullpen008PageClient() {
               <Button variant="destructive" onClick={() => void toggleEmergencyStop()} disabled={Boolean(busyAction)}>{bootstrap?.state.emergency_stop ? "Clear emergency stop" : "Emergency stop"}</Button>
             </div>
             <p className="text-xs text-slate-500">Next run: {formatApiTimestamp(bootstrap?.state.next_run_at, { emptyValue: "Not scheduled" })} · Mode: {bootstrap?.state.execution_mode} · Last run: {bootstrap?.state.last_run_id ?? "none"}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="rounded-3xl border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>Joint-loss scenarios & caps</CardTitle>
+            <CardDescription>Cross-worded positions are grouped by the real-world development that can make their held sides lose.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {jointLossScenarios.slice(0, 8).map((scenario, index) => (
+              <div className="rounded-2xl border border-slate-200 p-4" key={String(scenario.scenario_id ?? index)}>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold text-slate-950">{String(scenario.driver ?? scenario.scenario_id ?? "Scenario")}</p>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{formatLabel(String(scenario.risk_tier ?? "standard_objective"))}</span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-slate-600">{String(scenario.description ?? scenario.main_joint_loss_trigger ?? "No description recorded")}</p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div><span className="text-slate-500">Existing</span><p className="font-semibold">{formatMoney(scenario.existing_loss_at_risk_usd)}</p></div>
+                  <div><span className="text-slate-500">Target</span><p className="font-semibold">{formatMoney(scenario.target_loss_at_risk_usd)}</p></div>
+                  <div><span className="text-slate-500">Cap</span><p className="font-semibold">{formatMoney(scenario.effective_scenario_cap_usd)}</p></div>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">Markets: {asRows(scenario.affected_market_ids).length || (Array.isArray(scenario.affected_market_ids) ? scenario.affected_market_ids.length : 0)} · adjudication {String(scenario.adjudication_status ?? "unknown")}</p>
+              </div>
+            ))}
+            {jointLossScenarios.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">Run through Stage 3 to build the versioned joint-loss graph.</p> : null}
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>Drawdown, regimes & cooldowns</CardTitle>
+            <CardDescription>Daily UTC equity baseline with deposits and withdrawals neutralised; IST timestamps remain available in detailed records.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className={cn("rounded-2xl border p-4", drawdown.exit_only ? "border-rose-200 bg-rose-50" : drawdown.buy_freeze ? "border-amber-200 bg-amber-50" : "border-emerald-200 bg-emerald-50")}>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Current breaker</p>
+              <p className="mt-1 text-lg font-semibold text-slate-950">{formatLabel(String(drawdown.state ?? "NOT_YET_BASELINED"))}</p>
+              <p className="mt-2 text-sm text-slate-700">Drawdown {formatMoney(drawdown.drawdown_usd)} · soft {formatMoney(drawdown.soft_threshold_usd)} · hard {formatMoney(drawdown.hard_threshold_usd)}</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-950">Regime-triggered contingent actions</p>
+              <div className="mt-2 space-y-2">
+                {contingentActivations.slice(0, 6).map((activation, index) => (
+                  <div className="rounded-2xl border border-slate-200 px-3 py-2 text-xs" key={String(activation.policy_hash ?? index)}>
+                    <p className="font-semibold text-slate-900">{String(activation.activation_status ?? activation.status ?? "DORMANT")} · {String(activation.submission_status ?? "no submit")}</p>
+                    <p className="mt-1 text-slate-600">{Array.isArray(activation.trigger_types) ? activation.trigger_types.join(", ") : "No trigger"} · blockers {Array.isArray(activation.blocker_codes) ? activation.blocker_codes.join(", ") || "none" : "none"}</p>
+                  </div>
+                ))}
+                {contingentActivations.length === 0 ? <p className="text-xs text-slate-500">No active trigger episode.</p> : null}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">Active/recent scenario cooldowns: {scenarioCooldowns.length}. Opposite-side auto-buys remain prohibited after information shocks.</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>Conservative edge, reward skew & evidence</CardTitle>
+            <CardDescription>Raw probability is haircutted before comparison with market odds; missing or stale evidence fails closed.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="min-w-[760px] text-xs">
+                <thead className="bg-slate-50 text-left uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Market</th><th className="px-3 py-2">Tier</th><th className="px-3 py-2 text-right">Raw</th><th className="px-3 py-2 text-right">Haircut</th><th className="px-3 py-2 text-right">Conservative edge</th><th className="px-3 py-2 text-right">Reward/loss</th><th className="px-3 py-2">Evidence</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {portfolioAllocations.slice(0, 12).map((row, index) => <tr key={String(row.market_id ?? index)}><td className="max-w-xs px-3 py-2 font-medium"><span className="line-clamp-2">{String(row.question ?? row.market_id)}</span></td><td className="px-3 py-2">{formatLabel(String(row.risk_tier ?? "standard_objective"))}</td><td className="px-3 py-2 text-right">{row.raw_llm_probability == null ? "—" : `${Number(row.raw_llm_probability).toFixed(1)}%`}</td><td className="px-3 py-2 text-right">{row.uncertainty_haircut_pp == null ? "—" : `${Number(row.uncertainty_haircut_pp).toFixed(1)} pp`}</td><td className="px-3 py-2 text-right">{row.conservative_edge_pp == null ? "—" : `${Number(row.conservative_edge_pp).toFixed(1)} pp`}</td><td className="px-3 py-2 text-right">{row.reward_to_loss_ratio == null ? "—" : Number(row.reward_to_loss_ratio).toFixed(3)}</td><td className="px-3 py-2">{asRecord(row.evidence_validation).evidence_complete ? "Fresh / complete" : "Blocked"}</td></tr>)}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-slate-200 shadow-sm">
+          <CardHeader>
+            <CardTitle>Certified time & contingent exits</CardTitle>
+            <CardDescription>Stage 4 authors every policy, Stage 5 stores dormant actions, and the monitor can only activate exact matching hashes.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {contingentPolicies.slice(0, 10).map((policy, index) => (
+              <div className="rounded-2xl border border-slate-200 p-3 text-xs" key={String(policy.policy_hash ?? index)}>
+                <p className="font-semibold text-slate-900">{String(policy.affected_market_id ?? "Market")} · {String(policy.permitted_action ?? "exit")}</p>
+                <p className="mt-1 text-slate-600">Exit by {formatApiTimestamp(String(policy.must_exit_by ?? ""), { emptyValue: "not set" })} · max {Number(policy.maximum_sell_quantity ?? 0).toFixed(4)} shares · min {String(policy.minimum_acceptable_price ?? "—")}¢</p>
+                <p className="mt-1 break-all font-mono text-[10px] text-slate-500">{String(policy.policy_hash ?? "missing hash")}</p>
+              </div>
+            ))}
+            {contingentPolicies.length === 0 ? <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">No certified high-shock exit policy in the latest run.</p> : null}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="rounded-3xl border-slate-200 shadow-sm">
+          <CardHeader><CardTitle>P&amp;L attribution</CardTitle><CardDescription>Run, decision, contract, cluster, scenario, intent, trigger and calendar-day provenance.</CardDescription></CardHeader>
+          <CardContent className="space-y-2">
+            {pnlAttribution.slice(0, 10).map((row, index) => <div className="rounded-2xl border border-slate-200 p-3 text-xs" key={String(row.stage5_action_id ?? row.market_id ?? index)}><p className="font-semibold text-slate-900">{String(row.market_id ?? "Market")} · {String(row.final_reconciliation_status ?? "unreconciled")}</p><p className="mt-1 text-slate-600">Current {formatMoney(row.current_value)} · realised {formatMoney(row.realized_pnl)} · unrealised {formatMoney(row.unrealized_pnl)} · fees {formatMoney(row.fees)}</p><p className="mt-1 text-slate-500">Scenario(s): {Array.isArray(row.associated_scenario_ids) ? row.associated_scenario_ids.join(", ") : "none"}</p></div>)}
+            {pnlAttribution.length === 0 ? <p className="text-sm text-slate-500">P&amp;L projection appears after the next completed P0 run.</p> : null}
+          </CardContent>
+        </Card>
+        <Card className="rounded-3xl border-slate-200 shadow-sm">
+          <CardHeader><CardTitle>Loss-prevention audit</CardTitle><CardDescription>Counterfactual estimates only; they are never reported as realised or avoided P&amp;L.</CardDescription></CardHeader>
+          <CardContent className="space-y-2">
+            {lossPreventionAudit.slice(0, 10).map((row, index) => <div className="rounded-2xl border border-slate-200 p-3 text-xs" key={String(row.market_id ?? index)}><p className="font-semibold text-slate-900">{String(row.question ?? row.market_id ?? "Market")}</p><p className="mt-1 text-slate-600">Rejected {row.rejected_entry ? "yes" : "no"} · reduced {row.reduced_size ? "yes" : "no"} · top-up blocked {row.blocked_top_up ? "yes" : "no"} · early exit {row.required_early_exit ? "yes" : "no"}</p><p className="mt-1 font-medium text-amber-800">Counterfactual estimate — not an actual realised result.</p></div>)}
+            {lossPreventionAudit.length === 0 ? <p className="text-sm text-slate-500">No loss-prevention audit rows yet.</p> : null}
           </CardContent>
         </Card>
       </div>

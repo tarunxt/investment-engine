@@ -102,6 +102,12 @@ def clustered_candidate(
             "common_catalyst_cluster_id": f"catalyst-{cluster}",
             "strict_cluster_members": [market_id],
             "current_exposure_usd": 0,
+            "risk_tier": "standard_objective",
+            "joint_loss_scenario_ids": [f"scenario-{market_id}"],
+            "effective_joint_scenario_cap_usd": 20,
+            "contract_cap_usd": 20,
+            "strict_cluster_cap_usd": 20,
+            "common_catalyst_cap_usd": 20,
         }
     )
     row.update(updates)

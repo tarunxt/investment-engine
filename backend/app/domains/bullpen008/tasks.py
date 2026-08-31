@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import html
 import os
 from typing import Any
@@ -56,16 +56,39 @@ from app.domains.bullpen008.engine import (
 from app.domains.bullpen008.models import (
     Bullpen008ActionPlanRecord,
     Bullpen008AlertRecord,
+    Bullpen008ContingentExitActivationRecord,
+    Bullpen008ContingentExitPolicyRecord,
+    Bullpen008DailyEquityBaselineRecord,
+    Bullpen008DrawdownEpisodeRecord,
+    Bullpen008EvidencePacketRecord,
     Bullpen008ExecutionAttemptRecord,
     Bullpen008ExecutionEventRecord,
     Bullpen008ExecutionIntentRecord,
+    Bullpen008JointLossScenarioRecord,
+    Bullpen008LossPreventionAuditRecord,
+    Bullpen008PnlAttributionRecord,
     Bullpen008PortfolioCertificateRecord,
+    Bullpen008QuoteObservationRecord,
+    Bullpen008RegimeChangeEpisodeRecord,
+    Bullpen008RiskClassificationRecord,
     Bullpen008RunRecord,
+    Bullpen008ScenarioCooldownRecord,
+    Bullpen008ScenarioExposureSnapshotRecord,
+    Bullpen008ScenarioMembershipRecord,
     Bullpen008SettingsRecord,
     Bullpen008StageOutputRecord,
     Bullpen008StateRecord,
 )
+from app.domains.bullpen008.risk_controls import (
+    detect_regime_change,
+    evaluate_contingent_policy,
+    evaluate_drawdown,
+    validate_evidence_packet,
+)
 from app.domains.bullpen008.schemas import Bullpen008Settings
+from app.domains.polymarket_auto_live.evidence import build_evidence_packet
+from app.domains.polymarket_auto_live.rules import evaluate_market_rules
+from app.domains.polymarket_auto_live.scanner import ScannedMarket
 from app.domains.polymarket.bullpen import BullpenBalanceReader
 from app.domains.polymarket_auto_live.console_profile import (
     next_custom_console_schedule_time,
@@ -152,6 +175,9 @@ def _market_packet(market: object, *, quote_timestamp: str) -> dict[str, object]
             raw, "resolutionSource", "resolution_source", "source"
         ),
         "deadline": getattr(market, "close_time", None),
+        "start_time": _first(raw, "startDate", "start_time", "eventStart", "startTime"),
+        "end_time": _first(raw, "endDate", "end_time", "eventEnd", "endTime") or getattr(market, "close_time", None),
+        "resolution_window_hours": _first(raw, "resolutionWindowHours", "resolution_window_hours"),
         "timezone": _first(raw, "timezone", "resolutionTimezone") or "UTC",
         "open": raw.get("active", True) is not False and raw.get("closed") is not True,
         "closed": bool(raw.get("closed")),
@@ -168,8 +194,62 @@ def _market_packet(market: object, *, quote_timestamp: str) -> dict[str, object]
         "volume": getattr(market, "volume_usd", None),
         "spread": getattr(market, "spread_cents", None),
         "context": _first(raw, "context", "marketContext"),
+        "market_url": getattr(market, "market_url", None),
+        "best_bid_cents": getattr(market, "best_bid_cents", None),
+        "best_ask_cents": getattr(market, "best_ask_cents", None),
         "source": "Polymarket Gamma API / Bullpen discover",
     }
+
+
+def _attach_high_shock_evidence(
+    rows: list[dict[str, object]], *, now: datetime, force_refresh: bool = False
+) -> list[dict[str, object]]:
+    enriched: list[dict[str, object]] = []
+    for source in rows:
+        row = dict(source)
+        if row.get("risk_tier") == "standard_objective" or (
+            row.get("evidence_packet") and not force_refresh
+        ):
+            enriched.append(row)
+            continue
+        market = ScannedMarket(
+            market_id=str(row.get("market_id") or ""),
+            question=str(row.get("question") or ""),
+            market_url=str(row.get("market_url") or "") or None,
+            slug=str(row.get("slug") or "") or None,
+            close_time=str(row.get("deadline") or row.get("close_time") or "") or None,
+            theme=str(row.get("category") or ""),
+            current_yes_odds=float(row["current_yes_odds"]) if isinstance(row.get("current_yes_odds"), (int, float)) else None,
+            current_no_odds=float(row["current_no_odds"]) if isinstance(row.get("current_no_odds"), (int, float)) else None,
+            volume_usd=float(row["volume"]) if isinstance(row.get("volume"), (int, float)) else None,
+            liquidity_usd=float(row["liquidity"]) if isinstance(row.get("liquidity"), (int, float)) else None,
+            description=str(row.get("resolution_rules") or "") or None,
+            outcome_labels=[str(value) for value in row.get("outcomes", [])],
+            event_slug=str(row.get("event_slug") or "") or None,
+            best_bid_cents=float(row["best_bid_cents"]) if isinstance(row.get("best_bid_cents"), (int, float)) else None,
+            best_ask_cents=float(row["best_ask_cents"]) if isinstance(row.get("best_ask_cents"), (int, float)) else None,
+            spread_cents=float(row["spread"]) if isinstance(row.get("spread"), (int, float)) else None,
+            raw={},
+        )
+        try:
+            rules = evaluate_market_rules(
+                market,
+                now=now,
+                resolution_text=market.description,
+                exact_market_match_verified=True,
+            )
+            row["evidence_packet"] = build_evidence_packet(
+                market, rules, built_at=now.isoformat()
+            ).model_dump(mode="json")
+        except Exception as exc:
+            logger.warning("Bullpen 008 evidence retrieval failed for %s: %s", market.market_id, exc)
+            row["evidence_packet"] = {
+                "built_at_utc": now.isoformat(),
+                "sources": [],
+                "retrieval_error": str(exc),
+            }
+        enriched.append(row)
+    return enriched
 
 
 def _position_packet(position: object, *, quote_timestamp: str) -> dict[str, object]:
@@ -564,6 +644,28 @@ def _pending_order_packets(user_id: int) -> list[dict[str, object]]:
     return packets
 
 
+def _active_loss_prevention_gates(user_id: int, *, now: datetime) -> dict[str, object]:
+    with SyncSessionLocal() as session:
+        drawdown = session.execute(
+            select(Bullpen008DrawdownEpisodeRecord)
+            .where(Bullpen008DrawdownEpisodeRecord.user_id == user_id)
+            .order_by(Bullpen008DrawdownEpisodeRecord.activated_at.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        cooldowns = session.execute(
+            select(Bullpen008ScenarioCooldownRecord).where(
+                Bullpen008ScenarioCooldownRecord.user_id == user_id,
+                Bullpen008ScenarioCooldownRecord.status == "ACTIVE",
+                Bullpen008ScenarioCooldownRecord.ends_at > now,
+            )
+        ).scalars().all()
+    return {
+        "drawdown_state": drawdown.status if drawdown is not None else "NORMAL",
+        "drawdown_evidence": drawdown.payload if drawdown is not None else {},
+        "active_scenario_cooldown_ids": sorted({row.scenario_id for row in cooldowns}),
+    }
+
+
 async def _refresh_wallet_snapshot(
     settings: Bullpen008Settings, *, caller_source: str
 ) -> dict[str, object]:
@@ -596,13 +698,22 @@ async def _refresh_wallet_snapshot(
     }
 
 
-async def _refresh_stage6_quotes(plan: dict[str, object]) -> dict[str, dict[str, object]]:
+async def _refresh_stage6_quotes(
+    plan: dict[str, object], *, activated_contingent_action_ids: set[str] | None = None
+) -> dict[str, dict[str, object]]:
+    activated_contingent_action_ids = activated_contingent_action_ids or set()
     actions = [
         row
         for key in ("full_exits", "trims", "buys")
         for row in plan.get(key, [])
         if isinstance(row, dict)
     ]
+    actions.extend(
+        row
+        for row in plan.get("dormant_contingent_exits", [])
+        if isinstance(row, dict)
+        and str(row.get("action_id") or "") in activated_contingent_action_ids
+    )
 
     async def one(action: dict[str, object]) -> tuple[str, dict[str, object]]:
         market_id = str(action.get("market_id") or "")
@@ -638,6 +749,7 @@ async def _execute_live_plan(
     plan: dict[str, object],
     stage4_certificate: dict[str, object],
     settings: Bullpen008Settings,
+    activated_contingent_action_ids: set[str] | None = None,
 ) -> dict[str, object]:
     """Execute certified actions in dependency order with durable evidence."""
     if not (
@@ -655,12 +767,19 @@ async def _execute_live_plan(
     adapter = ProductionBullpen008Adapter()
     statuses: dict[str, str] = {}
     results: list[dict[str, object]] = []
+    activated_contingent_action_ids = activated_contingent_action_ids or set()
     action_rows = [
         action
         for key in ("claims", "order_cancellations", "full_exits", "trims", "buys")
         for action in plan.get(key, [])
         if isinstance(action, dict)
     ]
+    action_rows.extend(
+        action
+        for action in plan.get("dormant_contingent_exits", [])
+        if isinstance(action, dict)
+        and str(action.get("action_id") or "") in activated_contingent_action_ids
+    )
 
     async def persist_intent(payload: dict[str, object]) -> None:
         with SyncSessionLocal() as session:
@@ -771,7 +890,19 @@ async def _execute_live_plan(
             settings, caller_source=f"bullpen008-stage6-action-{action.get('action_id')}"
         )
         quotes = await _refresh_stage6_quotes(
-            {**plan, "claims": [], "order_cancellations": [], "full_exits": [action] if action.get("action_type") == "full_exit" else [], "trims": [action] if action.get("action_type") == "trim" else [], "buys": [action] if action.get("action_type") == "buy" else []}
+            {
+                **plan,
+                "claims": [],
+                "order_cancellations": [],
+                "full_exits": [action]
+                if action.get("action_type") == "full_exit"
+                else [],
+                "trims": [action] if action.get("action_type") == "trim" else [],
+                "buys": [action] if action.get("action_type") == "buy" else [],
+            },
+            activated_contingent_action_ids={str(action.get("action_id"))}
+            if action.get("action_type") == "contingent_exit"
+            else set(),
         )
         preflight = preflight_execution_plan(
             plan=plan,
@@ -783,15 +914,18 @@ async def _execute_live_plan(
             execution_mode="live",
             emergency_stop=False,
             prerequisite_statuses=statuses,
+            activated_contingent_action_ids={str(action.get("action_id"))}
+            if action.get("action_type") == "contingent_exit"
+            else set(),
         )
         action_preflight = next(
             (row for row in preflight["actions"] if row.get("action_id") == action.get("action_id")),
             {"status": "Blocked", "blocker_codes": ["ACTION_MISSING_FROM_PREFLIGHT"]},
         )
-        if action_preflight.get("status") == "Blocked":
+        if action_preflight.get("status") in {"Blocked", "Recoverable"}:
             result = {
                 "action_id": action.get("action_id"),
-                "status": "Blocked",
+                "status": action_preflight.get("status"),
                 "blocker_code": "+".join(action_preflight.get("blocker_codes", [])),
                 "pre_submit_checks": action_preflight.get("pre_submit_checks", {}),
             }
@@ -815,8 +949,33 @@ async def _execute_live_plan(
                         "remote_order_id": record.remote_order_id,
                         "remote_transaction_id": record.remote_transaction_id,
                         "idempotency_key": record.idempotency_key,
+                        "retryable": record.retryable,
                     }
                 )
+        if existing and not (
+            existing.get("remote_order_id") or existing.get("remote_transaction_id")
+        ):
+            existing_status = str(existing.get("status") or "")
+            if existing_status in {"Submitting", "Submitted", "Confirming", "Recoverable"} and not existing.get("retryable"):
+                result = {
+                    "action_id": action.get("action_id"),
+                    "status": "Recoverable",
+                    "blocker_code": "AMBIGUOUS_PRIOR_WRITE_NO_RESUBMIT",
+                    "resubmitted": False,
+                }
+                results.append(result)
+                statuses[str(action.get("action_id"))] = "Recoverable"
+                continue
+            if existing_status in {"Reconciled", "Filled", "Failed", "Blocked", "Cancelled"}:
+                result = {
+                    "action_id": action.get("action_id"),
+                    "status": existing_status,
+                    "blocker_code": "ACTION_ALREADY_TERMINAL",
+                    "resubmitted": False,
+                }
+                results.append(result)
+                statuses[str(action.get("action_id"))] = existing_status
+                continue
         fence = acquire_bullpen_account_execution_advisory_lock_sync(account_identity)
         if fence is None:
             result = {"action_id": action.get("action_id"), "status": "Blocked", "blocker_code": "ACCOUNT_EXECUTION_LOCK_BUSY"}
@@ -848,7 +1007,10 @@ async def _execute_live_plan(
                         "buys": [action]
                         if action.get("action_type") == "buy"
                         else [],
-                    }
+                    },
+                    activated_contingent_action_ids={str(action.get("action_id"))}
+                    if action.get("action_type") == "contingent_exit"
+                    else set(),
                 )
                 with SyncSessionLocal() as session:
                     state = session.execute(
@@ -871,6 +1033,9 @@ async def _execute_live_plan(
                     execution_mode="live",
                     emergency_stop=emergency_stop,
                     prerequisite_statuses=statuses,
+                    activated_contingent_action_ids={str(action.get("action_id"))}
+                    if action.get("action_type") == "contingent_exit"
+                    else set(),
                 )
                 locked_action_preflight = next(
                     (
@@ -883,10 +1048,10 @@ async def _execute_live_plan(
                         "blocker_codes": ["ACTION_MISSING_FROM_LOCKED_PREFLIGHT"],
                     },
                 )
-                if locked_action_preflight.get("status") == "Blocked":
+                if locked_action_preflight.get("status") in {"Blocked", "Recoverable"}:
                     result = {
                         "action_id": action.get("action_id"),
-                        "status": "Blocked",
+                        "status": locked_action_preflight.get("status"),
                         "blocker_code": "+".join(
                             locked_action_preflight.get("blocker_codes", [])
                         ),
@@ -1028,6 +1193,211 @@ def _blocked_stage(
     )
 
 
+def _persist_loss_prevention_artifacts(
+    session,
+    *,
+    run: Bullpen008RunRecord,
+    stage1: dict[str, object],
+    stage2: dict[str, object],
+    stage3: dict[str, object],
+    portfolio: dict[str, object] | None,
+    plan: dict[str, object] | None,
+) -> None:
+    """Persist the P0 audit projection without becoming a portfolio authority."""
+    if session.execute(
+        select(Bullpen008RiskClassificationRecord.id).where(
+            Bullpen008RiskClassificationRecord.run_id == run.id
+        ).limit(1)
+    ).scalar_one_or_none() is not None:
+        return
+    now = datetime.now(UTC)
+    for row in stage1.get("rows", []):
+        if not isinstance(row, dict) or not row.get("market_id"):
+            continue
+        session.add(
+            Bullpen008RiskClassificationRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                workflow_profile=WORKFLOW_PROFILE,
+                market_id=str(row["market_id"]),
+                classifier_version=str(row.get("classifier_version") or row.get("risk_classifier_version") or "unknown"),
+                risk_tier=str(row.get("risk_tier") or "standard_objective"),
+                payload={
+                    "matched_evidence": row.get("risk_classifier_evidence", []),
+                    "rejection_codes": row.get("risk_rejection_codes", []),
+                    "accepted_monitoring": row.get("accounting_status") == "accepted_monitoring",
+                    "new_entry_enabled": row.get("new_entry_enabled", False),
+                },
+            )
+        )
+    for row in stage2.get("rows", []):
+        if not isinstance(row, dict) or not row.get("market_id"):
+            continue
+        evidence = row.get("evidence_validation")
+        if not isinstance(evidence, dict):
+            evidence = {}
+        packet_hash = str(evidence.get("packet_hash") or stable_hash(evidence))
+        session.add(
+            Bullpen008EvidencePacketRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                market_id=str(row["market_id"]),
+                packet_hash=packet_hash,
+                status="complete" if evidence.get("evidence_complete") else "blocked",
+                fetched_at=now,
+                payload=evidence,
+            )
+        )
+    scenarios = [row for row in stage3.get("joint_loss_scenarios", []) if isinstance(row, dict)]
+    for scenario in scenarios:
+        scenario_id = str(scenario.get("scenario_id") or "")
+        if not scenario_id:
+            continue
+        session.add(
+            Bullpen008JointLossScenarioRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                workflow_profile=WORKFLOW_PROFILE,
+                scenario_id=scenario_id,
+                scenario_version=str(scenario.get("scenario_version") or "unknown"),
+                status=str(scenario.get("adjudication_status") or "unresolved"),
+                risk_tier=str(scenario.get("risk_tier") or "standard_objective"),
+                payload=scenario,
+            )
+        )
+        for market_id in scenario.get("affected_market_ids", []):
+            session.add(
+                Bullpen008ScenarioMembershipRecord(
+                    user_id=run.user_id,
+                    run_id=run.id,
+                    scenario_id=scenario_id,
+                    market_id=str(market_id),
+                    payload={
+                        "loss_direction": dict(scenario.get("loss_direction_by_market") or {}).get(str(market_id)),
+                        "deterministic_links": scenario.get("deterministic_links", []),
+                        "semantic_links": scenario.get("semantic_links", []),
+                    },
+                )
+            )
+        session.add(
+            Bullpen008ScenarioExposureSnapshotRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                scenario_id=scenario_id,
+                observed_at=now,
+                payload={
+                    key: scenario.get(key)
+                    for key in (
+                        "existing_loss_at_risk_usd",
+                        "pending_loss_at_risk_usd",
+                        "target_loss_at_risk_usd",
+                        "effective_scenario_cap_usd",
+                    )
+                },
+            )
+        )
+    if portfolio is None:
+        return
+    policies = [row for row in portfolio.get("contingent_exit_policies", []) if isinstance(row, dict)]
+    for policy in policies:
+        session.add(
+            Bullpen008ContingentExitPolicyRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                market_id=str(policy.get("affected_market_id") or ""),
+                policy_hash=str(policy.get("policy_hash") or ""),
+                status="DORMANT",
+                payload=policy,
+            )
+        )
+    action_by_market: dict[str, dict[str, object]] = {}
+    if plan:
+        for action_type in (
+            "claims", "order_cancellations", "full_exits", "trims", "buys",
+            "dormant_contingent_exits", "holds", "blocked_untradeable",
+        ):
+            for action in plan.get(action_type, []):
+                if isinstance(action, dict) and action.get("market_id"):
+                    action_by_market.setdefault(str(action["market_id"]), action)
+    intents = {
+        row.market_id: row
+        for row in session.execute(
+            select(Bullpen008ExecutionIntentRecord).where(Bullpen008ExecutionIntentRecord.run_id == run.id)
+        ).scalars()
+    }
+    day = now.date().isoformat()
+    audit_by_market = {
+        str(row.get("market_id")): row
+        for row in portfolio.get("loss_prevention_audit", [])
+        if isinstance(row, dict) and row.get("market_id")
+    }
+    for allocation in portfolio.get("allocations", []):
+        if not isinstance(allocation, dict) or not allocation.get("market_id"):
+            continue
+        market_id = str(allocation["market_id"])
+        current_exposure = float(allocation.get("current_exposure_usd") or 0)
+        odds = float(allocation.get("current_chosen_side_bullpen_odds") or 0)
+        current_value = current_exposure * odds / 100 if odds > 0 else current_exposure
+        scenarios_for_market = list(allocation.get("joint_loss_scenario_ids") or [])
+        action = action_by_market.get(market_id, {})
+        intent = intents.get(market_id)
+        pnl_payload = {
+            "entry_run_id": run.id,
+            "decision": "BUY" if float(allocation.get("proposed_buy_usd") or 0) > 0 else "REDUCE" if float(allocation.get("proposed_sell_usd") or 0) > 0 else "HOLD",
+            "contract": market_id,
+            "side": allocation.get("chosen_side"),
+            "stage4_certificate_id": portfolio.get("certificate", {}).get("certificate_hash"),
+            "stage5_action_id": action.get("action_id"),
+            "stage6_intent_id": intent.id if intent else None,
+            "entry_timestamp": run.started_at.isoformat(),
+            "entry_price": allocation.get("current_chosen_side_bullpen_odds"),
+            "entry_amount": current_exposure,
+            "current_or_exit_price": allocation.get("current_chosen_side_bullpen_odds"),
+            "current_value": round(current_value, 2),
+            "realized_pnl": 0.0,
+            "unrealized_pnl": round(current_value - current_exposure, 2),
+            "fees": float(intent.fees_usd or 0) if intent else 0.0,
+            "maximum_loss_at_entry": allocation.get("maximum_loss_usd"),
+            "maximum_remaining_profit_at_entry": allocation.get("maximum_profit_usd"),
+            "reward_to_loss_ratio_at_entry": allocation.get("reward_to_loss_ratio"),
+            "raw_edge_at_entry": allocation.get("raw_edge_pp"),
+            "conservative_edge_at_entry": allocation.get("conservative_edge_pp"),
+            "strict_cluster": allocation.get("strict_cluster_id"),
+            "common_catalyst_cluster": allocation.get("common_catalyst_cluster_id"),
+            "associated_scenario_ids": scenarios_for_market,
+            "scenario_loss_at_entry": allocation.get("target_loss_at_risk_usd"),
+            "applicable_cap": allocation.get("effective_scenario_cap_usd"),
+            "exit_policy": [p for p in policies if p.get("affected_market_id") == market_id],
+            "actual_exit_trigger": intent.payload.get("trigger") if intent else None,
+            "trigger_episode": intent.payload.get("trigger_episode") if intent else None,
+            "final_reconciliation_status": intent.status if intent else "NO_REMOTE_INTENT",
+        }
+        session.add(
+            Bullpen008PnlAttributionRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                market_id=market_id,
+                scenario_id=str(scenarios_for_market[0]) if scenarios_for_market else None,
+                calendar_day=day,
+                realized_pnl_usd=0.0,
+                unrealized_pnl_usd=float(pnl_payload["unrealized_pnl"]),
+                payload=pnl_payload,
+            )
+        )
+        session.add(
+            Bullpen008LossPreventionAuditRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                market_id=market_id,
+                payload=audit_by_market.get(market_id, {
+                    "market_id": market_id,
+                    "counterfactual_estimate": True,
+                    "estimate_notice": "Estimated safeguard effects are not realised profit or avoided-loss accounting.",
+                }),
+            )
+        )
+
+
 @celery.task(
     bind=True,
     name=CELERY_TASK_NAME,
@@ -1048,7 +1418,11 @@ def execute_bullpen008_run(self, run_id: str) -> str:
         with SyncSessionLocal() as session:
             run = session.execute(
                 select(Bullpen008RunRecord)
-                .options(selectinload(Bullpen008RunRecord.stages))
+                .options(
+                    selectinload(Bullpen008RunRecord.stages),
+                    selectinload(Bullpen008RunRecord.action_plan),
+                    selectinload(Bullpen008RunRecord.certificate),
+                )
                 .where(
                     Bullpen008RunRecord.id == run_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -1119,6 +1493,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                     outputs={
                         "rows": stage1["rows"],
                         "metrics": stage1["metrics"],
+                        "risk_metrics": stage1["risk_metrics"],
                         "duplicates": stage1["duplicates"],
                         "universe_complete": stage1["universe_complete"],
                     },
@@ -1189,7 +1564,9 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                 session.commit()
         else:
             stage2_started = datetime.now(UTC)
-            stage2_input_rows = _stage2_input_rows(list(stage1["rows"]))
+            stage2_input_rows = _attach_high_shock_evidence(
+                _stage2_input_rows(list(stage1["rows"])), now=stage2_started
+            )
             prompt = build_probability_risk_prompt(stage2_input_rows)
             raw_provider_response: str | None = None
             provider_attempts: list[dict[str, object]] = []
@@ -1456,6 +1833,8 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                                 "common_catalyst_exposure": stage3[
                                     "common_catalyst_exposure"
                                 ],
+                                "joint_loss_scenarios": stage3["joint_loss_scenarios"],
+                                "scenario_graph_version": stage3["scenario_graph_version"],
                                 "raw_provider_response": response.content,
                                 "validation_errors": stage3[
                                     "validation_errors"
@@ -1507,6 +1886,10 @@ def execute_bullpen008_run(self, run_id: str) -> str:
         stage4_status = "blocked"
         stage4_completed_at = datetime.now(UTC)
         portfolio: dict[str, object] | None = None
+        stage4_risk_gates: dict[str, object] = {
+            "drawdown_state": "NORMAL",
+            "active_scenario_cooldown_ids": [],
+        }
         if stage3_status != "finished":
             with SyncSessionLocal() as session:
                 run = session.execute(
@@ -1525,6 +1908,26 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                 session.commit()
         else:
             stage4_started = datetime.now(UTC)
+            stage4_risk_gates = _active_loss_prevention_gates(
+                user_id, now=stage4_started
+            )
+            active_cooldowns = set(
+                str(value)
+                for value in stage4_risk_gates.get(
+                    "active_scenario_cooldown_ids", []
+                )
+            )
+            stage4_rows = [
+                {
+                    **row,
+                    "drawdown_state": stage4_risk_gates["drawdown_state"],
+                    "scenario_cooldown_active": bool(
+                        active_cooldowns
+                        & set(str(value) for value in row.get("joint_loss_scenario_ids", []))
+                    ),
+                }
+                for row in stage3["rows"]
+            ]
             balance = wallet_snapshot.get("balance", {})
             available_cash = (
                 float(balance.get("available_balance_usd") or 0)
@@ -1532,7 +1935,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                 else 0
             )
             portfolio = build_portfolio_target(
-                list(stage3["rows"]),
+                stage4_rows,
                 settings=settings,
                 available_cash_usd=available_cash,
                 inputs_hash=stable_hash(
@@ -1544,6 +1947,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                 ),
                 account_identity=str(wallet_snapshot.get("account_identity") or "")
                 or None,
+                now=stage4_started,
             )
             stage4_status = "finished" if portfolio["pass_condition_met"] else "failed"
             with SyncSessionLocal() as session:
@@ -1563,6 +1967,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                         "stage3_cluster_map": list(stage3["rows"]),
                         "available_cash_usd": available_cash,
                         "portfolio_parameters": settings.model_dump(mode="json"),
+                        "active_loss_prevention_gates": stage4_risk_gates,
                     },
                     calculations={
                         "Selection score": "0.35(normalised edge) + 0.25(normalised Returns/day) + 0.15(evidence/confidence) + 0.15(resolution objectivity) + 0.10(breadth) - risk penalty",
@@ -1573,6 +1978,9 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                     outputs={
                         "allocations": portfolio["allocations"],
                         "stress_scenarios": portfolio["stress_scenarios"],
+                        "joint_scenario_stress": portfolio["joint_scenario_stress"],
+                        "contingent_exit_policies": portfolio["contingent_exit_policies"],
+                        "loss_prevention_audit": portfolio["loss_prevention_audit"],
                         "certificate": portfolio["certificate"],
                         "metrics": portfolio["metrics"],
                         "portfolio_metrics": portfolio["portfolio_metrics"],
@@ -1706,6 +2114,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                                 "full_exits": plan["full_exits"],
                                 "trims": plan["trims"],
                                 "buys": plan["buys"],
+                                "dormant_contingent_exits": plan["dormant_contingent_exits"],
                                 "holds": plan["holds"],
                                 "blocked_untradeable": plan["blocked_untradeable"],
                                 "simulated_final_wallet": plan["simulated_final_wallet"],
@@ -1929,6 +2338,15 @@ def execute_bullpen008_run(self, run_id: str) -> str:
             run = session.get(Bullpen008RunRecord, run_id)
             if run is None:
                 return "missing-run"
+            _persist_loss_prevention_artifacts(
+                session,
+                run=run,
+                stage1=stage1,
+                stage2=stage2,
+                stage3=stage3,
+                portfolio=portfolio,
+                plan=plan,
+            )
             success = stage6_status == "finished"
             run.status = {
                 "finished": "completed",
@@ -2048,6 +2466,375 @@ def _create_scheduled_run(user_id: int) -> str | None:
     return run_id
 
 
+def _continuous_risk_monitor(
+    session,
+    *,
+    user_id: int,
+    run: Bullpen008RunRecord,
+    settings: Bullpen008Settings,
+    refreshed: dict[str, object],
+    stage2_rows: list[dict[str, object]],
+) -> dict[str, dict[str, object]]:
+    """Observe and activate only immutable Stage 4 policies; never invent one."""
+    now = datetime.now(UTC)
+    wallet_version = stable_hash(
+        {
+            "account_identity": refreshed.get("account_identity"),
+            "fetched_at": refreshed.get("fetched_at"),
+            "positions": refreshed.get("positions", []),
+        }
+    )
+    positions = {
+        (str(row.get("market_id") or ""), str(row.get("side") or "").upper()): row
+        for row in refreshed.get("positions", [])
+        if isinstance(row, dict) and row.get("market_id")
+    }
+    for (market_id, side), position in positions.items():
+        odds = position.get("current_yes_odds") if side == "YES" else position.get("current_no_odds")
+        if not isinstance(odds, (int, float)):
+            continue
+        session.add(
+            Bullpen008QuoteObservationRecord(
+                user_id=user_id,
+                market_id=market_id,
+                side=side,
+                observed_at=now,
+                held_side_odds=float(odds),
+                wallet_version=wallet_version,
+                payload={
+                    "source": "continuous_wallet_refresh",
+                    "fetched_at": refreshed.get("fetched_at"),
+                    "account_identity": refreshed.get("account_identity"),
+                },
+            )
+        )
+    session.flush()
+
+    balance = refreshed.get("balance") if isinstance(refreshed.get("balance"), dict) else {}
+    cash = float(balance.get("available_balance_usd") or 0)
+    liquidation = sum(
+        float(row.get("current_value_usd") or row.get("exposure_usd") or 0)
+        for row in refreshed.get("positions", [])
+        if isinstance(row, dict)
+    )
+    pending = _pending_order_packets(user_id)
+    pending_buy_usd = sum(
+        float(row.get("remaining_value_usd") or row.get("amount_usd") or 0)
+        for row in pending
+        if str(row.get("action_type") or row.get("side") or "").lower() in {"buy", "yes", "no"}
+    )
+    equity = cash + liquidation + pending_buy_usd
+    baseline = session.execute(
+        select(Bullpen008DailyEquityBaselineRecord).where(
+            Bullpen008DailyEquityBaselineRecord.user_id == user_id,
+            Bullpen008DailyEquityBaselineRecord.baseline_date == now.date().isoformat(),
+        )
+    ).scalar_one_or_none()
+    if baseline is None:
+        baseline = Bullpen008DailyEquityBaselineRecord(
+            user_id=user_id,
+            baseline_date=now.date().isoformat(),
+            baseline_at=now,
+            wallet_version=wallet_version,
+            equity_usd=equity,
+            payload={
+                "cash_usd": cash,
+                "marked_liquidation_value_usd": liquidation,
+                "pending_and_unreconciled_usd": pending_buy_usd,
+                "external_flows_usd": 0.0,
+                "storage_timezone": "UTC",
+                "display_timezone": "Asia/Kolkata",
+            },
+        )
+        session.add(baseline)
+        session.flush()
+    external_flows = float(balance.get("net_external_flows_usd") or 0)
+    drawdown = evaluate_drawdown(
+        baseline_equity_usd=baseline.equity_usd,
+        current_equity_usd=equity,
+        external_flows_usd=external_flows,
+        settings=settings,
+    )
+    latest_drawdown = session.execute(
+        select(Bullpen008DrawdownEpisodeRecord)
+        .where(Bullpen008DrawdownEpisodeRecord.user_id == user_id)
+        .order_by(Bullpen008DrawdownEpisodeRecord.activated_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    if latest_drawdown is None or latest_drawdown.status != drawdown["state"]:
+        if latest_drawdown is not None and latest_drawdown.recovered_at is None:
+            latest_drawdown.recovered_at = now
+        session.add(
+            Bullpen008DrawdownEpisodeRecord(
+                user_id=user_id,
+                baseline_id=baseline.id,
+                status=str(drawdown["state"]),
+                activated_at=now,
+                payload={
+                    **drawdown,
+                    "pending_buys_would_cancel": [row for row in pending if drawdown["exit_only"]],
+                    "permitted_actions": ["claim", "cancel", "sell", "trim"],
+                    "prohibited_actions": ["buy", "top_up", "average_down"] if drawdown["buy_freeze"] else [],
+                },
+            )
+        )
+
+    stage3 = next((stage for stage in run.stages if stage.stage_number == 3), None)
+    stage3_rows = (
+        list(stage3.outputs_json.get("rows", []))
+        if stage3 is not None and isinstance(stage3.outputs_json.get("rows"), list)
+        else []
+    )
+    stage3_by_market = {str(row.get("market_id") or ""): row for row in stage3_rows if isinstance(row, dict)}
+    stage2_by_market = {str(row.get("market_id") or ""): row for row in stage2_rows if isinstance(row, dict)}
+    regimes: dict[str, dict[str, object]] = {}
+    new_regime_episode = False
+    for market_id, row in stage2_by_market.items():
+        evidence = validate_evidence_packet(
+            row.get("evidence_packet"),
+            risk_tier=str(row.get("risk_tier") or "standard_objective"),
+            settings=settings,
+            now=now,
+        )
+        packet_hash = str(evidence.get("packet_hash") or stable_hash(evidence))
+        packet_exists = session.execute(
+            select(Bullpen008EvidencePacketRecord.id).where(
+                Bullpen008EvidencePacketRecord.run_id == run.id,
+                Bullpen008EvidencePacketRecord.market_id == market_id,
+                Bullpen008EvidencePacketRecord.packet_hash == packet_hash,
+            )
+        ).scalar_one_or_none()
+        if packet_exists is None:
+            session.add(
+                Bullpen008EvidencePacketRecord(
+                    user_id=user_id,
+                    run_id=run.id,
+                    market_id=market_id,
+                    packet_hash=packet_hash,
+                    status="complete" if evidence.get("evidence_complete") else "blocked",
+                    fetched_at=now,
+                    payload=evidence,
+                )
+            )
+        regime = detect_regime_change(row)
+        if not regime["regime_change_active"]:
+            continue
+        scenarios = list(stage3_by_market.get(market_id, {}).get("joint_loss_scenario_ids") or [])
+        for scenario_id in scenarios or [f"market:{market_id}"]:
+            episode_hash = str(regime["episode_hash"])
+            exists = session.execute(
+                select(Bullpen008RegimeChangeEpisodeRecord.id).where(
+                    Bullpen008RegimeChangeEpisodeRecord.user_id == user_id,
+                    Bullpen008RegimeChangeEpisodeRecord.scenario_id == str(scenario_id),
+                    Bullpen008RegimeChangeEpisodeRecord.episode_hash == episode_hash,
+                )
+            ).scalar_one_or_none()
+            if exists is None:
+                new_regime_episode = True
+                session.add(
+                    Bullpen008RegimeChangeEpisodeRecord(
+                        user_id=user_id,
+                        run_id=run.id,
+                        scenario_id=str(scenario_id),
+                        episode_hash=episode_hash,
+                        status="ACTIVE_BUY_FREEZE",
+                        activated_at=now,
+                        payload={**regime, "market_id": market_id, "fresh_stage_1_to_4_required": True},
+                    )
+                )
+                session.add(
+                    Bullpen008ScenarioCooldownRecord(
+                        user_id=user_id,
+                        scenario_id=str(scenario_id),
+                        status="ACTIVE",
+                        starts_at=now,
+                        ends_at=now + timedelta(hours=settings.post_shock_cooldown_hours),
+                        payload={
+                            "reason": "INFORMATION_SHOCK",
+                            "opposite_side_auto_buy_prohibited": True,
+                            "fresh_stage_1_to_4_after_recovery_required": True,
+                        },
+                    )
+                )
+            regimes[market_id] = regime
+
+    policies = session.execute(
+        select(Bullpen008ContingentExitPolicyRecord).where(
+            Bullpen008ContingentExitPolicyRecord.user_id == user_id,
+            Bullpen008ContingentExitPolicyRecord.run_id == run.id,
+            Bullpen008ContingentExitPolicyRecord.status == "DORMANT",
+        )
+    ).scalars().all()
+    monitor_by_market: dict[str, dict[str, object]] = {}
+    live_activation_action_ids: list[str] = []
+    for policy_record in policies:
+        policy = dict(policy_record.payload)
+        market_id = policy_record.market_id
+        position_candidates = [(key, row) for key, row in positions.items() if key[0] == market_id]
+        observations = [
+            {
+                "observed_at": record.observed_at.isoformat(),
+                "held_side_odds": record.held_side_odds,
+                "wallet_version": record.wallet_version,
+            }
+            for record in session.execute(
+                select(Bullpen008QuoteObservationRecord)
+                .where(
+                    Bullpen008QuoteObservationRecord.user_id == user_id,
+                    Bullpen008QuoteObservationRecord.market_id == market_id,
+                    Bullpen008QuoteObservationRecord.observed_at >= now - timedelta(hours=24),
+                )
+                .order_by(Bullpen008QuoteObservationRecord.observed_at.asc())
+            ).scalars()
+        ]
+        evaluation = evaluate_contingent_policy(
+            policy,
+            observations,
+            now=now,
+            regime_change_active=market_id in regimes,
+            hard_drawdown_active=bool(drawdown["exit_only"]),
+        )
+        blockers = list(evaluation["blocker_codes"])
+        if not position_candidates:
+            blockers.append("HOLDING_NO_LONGER_EXISTS")
+        else:
+            (_, position) = position_candidates[0]
+            live_shares = float(position.get("shares") or 0)
+            if float(policy.get("maximum_sell_quantity") or 0) > live_shares + 1e-6:
+                blockers.append("CERTIFIED_QUANTITY_EXCEEDS_LIVE_SHARES")
+        plan = run.action_plan.payload if run.action_plan is not None else {}
+        if str(plan.get("account_identity") or "") != str(refreshed.get("account_identity") or ""):
+            blockers.append("ACCOUNT_IDENTITY_MISMATCH")
+        action = next(
+            (
+                row for row in plan.get("dormant_contingent_exits", [])
+                if isinstance(row, dict) and row.get("contingent_policy_hash") == policy_record.policy_hash
+            ),
+            None,
+        )
+        if action is None:
+            blockers.append("IMMUTABLE_STAGE5_ACTION_MISSING")
+        fence = None
+        if evaluation["trigger_proven"] and not blockers:
+            fence = acquire_bullpen_account_execution_advisory_lock_sync(str(refreshed.get("account_identity") or ""))
+            if fence is None:
+                blockers.append("ACCOUNT_EXECUTION_LOCK_BUSY")
+        if fence is not None:
+            try:
+                if not fence.is_healthy():
+                    blockers.append("ACCOUNT_EXECUTION_LOCK_LOST")
+            finally:
+                fence.release()
+        status = "BLOCKED" if blockers else str(evaluation["activation_status"])
+        submission = None if blockers else evaluation.get("submission_status")
+        episode_hash = stable_hash(
+            {
+                "policy_hash": policy_record.policy_hash,
+                "triggers": evaluation["trigger_types"],
+                "first_quote": evaluation["first_quote"],
+                "confirming_quote": evaluation["confirming_quote"],
+            }
+        )
+        packet = {
+            **evaluation,
+            "activation_status": status,
+            "submission_status": submission,
+            "blocker_codes": list(dict.fromkeys(blockers)),
+            "shadow_live_status": settings.execution_mode.upper(),
+            "remote_action": {
+                "action_type": policy.get("permitted_action"),
+                "maximum_sell_quantity": policy.get("maximum_sell_quantity"),
+                "minimum_acceptable_price": policy.get("minimum_acceptable_price"),
+                "never_market_order": True,
+                "affected_scenario_ids": policy.get("affected_scenario_ids", []),
+            },
+            "drawdown": drawdown,
+            "regime_change": regimes.get(market_id),
+            "stage5_action_id": action.get("action_id") if action else None,
+        }
+        if (
+            evaluation["trigger_proven"]
+            and not blockers
+            and action is not None
+            and settings.execution_mode == "live"
+        ):
+            live_activation_action_ids.append(str(action["action_id"]))
+        if evaluation["trigger_types"]:
+            existing = session.execute(
+                select(Bullpen008ContingentExitActivationRecord.id).where(
+                    Bullpen008ContingentExitActivationRecord.user_id == user_id,
+                    Bullpen008ContingentExitActivationRecord.policy_hash == policy_record.policy_hash,
+                    Bullpen008ContingentExitActivationRecord.episode_hash == episode_hash,
+                )
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(
+                    Bullpen008ContingentExitActivationRecord(
+                        user_id=user_id,
+                        run_id=run.id,
+                        market_id=market_id,
+                        policy_hash=policy_record.policy_hash,
+                        episode_hash=episode_hash,
+                        status=status,
+                        activated_at=now,
+                        payload=packet,
+                    )
+                )
+        monitor_by_market[market_id] = packet
+    reassessment_run_id: str | None = None
+    if new_regime_episode:
+        active_run = session.execute(
+            select(Bullpen008RunRecord.id).where(
+                Bullpen008RunRecord.user_id == user_id,
+                Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+                Bullpen008RunRecord.status.in_(["queued", "running"]),
+            ).limit(1)
+        ).scalar_one_or_none()
+        if active_run is None:
+            safe_settings = settings.model_copy(
+                update={
+                    "shadow_mode": True,
+                    "execution_enabled": False,
+                    "execution_mode": "shadow",
+                    "live_control_armed": False,
+                }
+            )
+            reassessment_run_id = f"b008-{uuid4().hex}"
+            session.add(
+                Bullpen008RunRecord(
+                    id=reassessment_run_id,
+                    user_id=user_id,
+                    workflow_profile=WORKFLOW_PROFILE,
+                    idempotency_key=f"bullpen008:risk-monitor:{stable_hash(regimes)}",
+                    status="queued",
+                    triggered_by="risk-monitor",
+                    shadow_mode=True,
+                    execution_enabled=False,
+                    started_at=now,
+                    summary="Bullpen 008 regime-change shadow reassessment queued.",
+                    code_build_version=resolve_backend_commit_sha(),
+                    settings_snapshot=safe_settings.model_dump(mode="json"),
+                    wallet_snapshot=refreshed,
+                    task_metadata={
+                        "task_name": CELERY_TASK_NAME,
+                        "queue": CELERY_QUEUE,
+                        "workflow_profile": WORKFLOW_PROFILE,
+                    },
+                    run_metadata={
+                        "phase": "p0-loss-prevention",
+                        "trigger": "VERIFIED_REGIME_CHANGE",
+                        "orders_permitted": False,
+                    },
+                )
+            )
+    monitor_by_market["__meta__"] = {
+        "reassessment_run_id": reassessment_run_id,
+        "new_regime_episode": new_regime_episode,
+        "live_activation_action_ids": live_activation_action_ids,
+    }
+    return monitor_by_market
+
+
 @celery.task(name=CELERY_SCHEDULER_TASK_NAME)
 def enqueue_due_bullpen008_runs() -> int:
     now = datetime.now(UTC)
@@ -2109,7 +2896,11 @@ def refresh_bullpen008_position_alerts() -> int:
             phase2_settings = Bullpen008Settings.model_validate(settings_record.payload)
             run = session.execute(
                 select(Bullpen008RunRecord)
-                .options(selectinload(Bullpen008RunRecord.stages))
+                .options(
+                    selectinload(Bullpen008RunRecord.stages),
+                    selectinload(Bullpen008RunRecord.action_plan),
+                    selectinload(Bullpen008RunRecord.certificate),
+                )
                 .where(
                     Bullpen008RunRecord.user_id == user_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -2151,6 +2942,9 @@ def refresh_bullpen008_position_alerts() -> int:
         except Exception:
             logger.exception("Bullpen 008 continuous alert wallet refresh failed for user %s", user_id)
             continue
+        stage2_rows = _attach_high_shock_evidence(
+            stage2_rows, now=datetime.now(UTC), force_refresh=True
+        )
         evaluation = evaluate_held_position_alerts(
             positions=list(refreshed.get("positions", [])),
             stage2_rows=stage2_rows,
@@ -2158,7 +2952,24 @@ def refresh_bullpen008_position_alerts() -> int:
             episode_versions=versions,
             threshold=phase2_settings.entry_side_odds_floor_pct,
         )
+        reassessment_run_id: str | None = None
+        live_activation_action_ids: set[str] = set()
         with SyncSessionLocal() as session:
+            monitor_by_market = _continuous_risk_monitor(
+                session,
+                user_id=user_id,
+                run=run,
+                settings=phase2_settings,
+                refreshed=refreshed,
+                stage2_rows=stage2_rows,
+            )
+            monitor_meta = monitor_by_market.get("__meta__", {})
+            reassessment_run_id = str(monitor_meta.get("reassessment_run_id") or "") or None
+            live_activation_action_ids = {
+                str(value)
+                for value in monitor_meta.get("live_activation_action_ids", [])
+                if value
+            }
             for recovery in evaluation["recoveries"]:
                 record = session.execute(
                     select(Bullpen008AlertRecord)
@@ -2176,6 +2987,7 @@ def refresh_bullpen008_position_alerts() -> int:
                     record.recovered_at = datetime.now(UTC)
                     record.payload = {**dict(record.payload), "recovery": recovery}
             for alert in evaluation["alerts"]:
+                monitor = monitor_by_market.get(str(alert["market_id"]), {})
                 record = Bullpen008AlertRecord(
                     user_id=user_id,
                     workflow_profile=WORKFLOW_PROFILE,
@@ -2186,7 +2998,12 @@ def refresh_bullpen008_position_alerts() -> int:
                     idempotency_key=str(alert["idempotency_key"]),
                     llm_odds=alert.get("llm_odds"),
                     actual_odds=alert.get("actual_odds"),
-                    payload={**alert, "run_id": run.id, "refresh_fetched_at": refreshed.get("fetched_at")},
+                    payload={
+                        **alert,
+                        "run_id": run.id,
+                        "refresh_fetched_at": refreshed.get("fetched_at"),
+                        "risk_monitor": monitor,
+                    },
                 )
                 session.add(record)
                 session.flush()
@@ -2199,7 +3016,16 @@ def refresh_bullpen008_position_alerts() -> int:
                     f"WARNING — Bullpen 008 held position below {alert['threshold']}%\n\n"
                     f"{alert['question']}\nHeld side: {alert['side']}\n"
                     f"LLM odds: {alert.get('llm_odds')}\nActual Bullpen odds: {alert.get('actual_odds')}\n"
-                    f"Alert triggered by: {breach_label}\n\nThis alert does not submit an order."
+                    f"Alert triggered by: {breach_label}\n"
+                    f"Contingent trigger: {', '.join(monitor.get('trigger_types', [])) or 'none'}\n"
+                    f"First quote: {monitor.get('first_quote')}\nConfirming quote: {monitor.get('confirming_quote')}\n"
+                    f"15-minute decline: {monitor.get('drop_15m_pp')} pp\n24-hour decline: {monitor.get('drop_24h_pp')} pp\n"
+                    f"Evidence/regime status: {monitor.get('regime_change') or 'no active verified episode'}\n"
+                    f"Scenario: {monitor.get('remote_action', {}).get('affected_scenario_ids', 'see certified policy')}\n"
+                    f"Shadow/live status: {monitor.get('shadow_live_status', phase2_settings.execution_mode.upper())}\n"
+                    f"Action status: {monitor.get('activation_status', 'DORMANT')} / {monitor.get('submission_status')}\n"
+                    f"Blocker or recovery state: {', '.join(monitor.get('blocker_codes', [])) or 'none'}\n\n"
+                    "Email delivery is not proof that an exit executed."
                 )
                 delivery = send_logged_email_sync(
                     session,
@@ -2218,6 +3044,59 @@ def refresh_bullpen008_position_alerts() -> int:
                 record.payload = {**dict(record.payload), "mail_history_id": delivery.history_id, "mail_deduplicated": delivery.deduplicated}
                 created += 1
             session.commit()
+        if reassessment_run_id is not None:
+            execute_bullpen008_run.apply_async(
+                args=[reassessment_run_id],
+                queue=CELERY_QUEUE,
+                task_id=f"bullpen008:{reassessment_run_id}",
+            )
+        if live_activation_action_ids:
+            try:
+                if run.action_plan is None or run.certificate is None:
+                    raise RuntimeError("IMMUTABLE_PLAN_OR_CERTIFICATE_MISSING")
+                live_result = asyncio.run(
+                    _execute_live_plan(
+                        run_id=run.id,
+                        user_id=user_id,
+                        plan=dict(run.action_plan.payload),
+                        stage4_certificate=dict(run.certificate.payload),
+                        settings=phase2_settings,
+                        activated_contingent_action_ids=live_activation_action_ids,
+                    )
+                )
+                result_by_action = {
+                    str(row.get("action_id") or ""): row
+                    for row in live_result.get("actions", [])
+                    if isinstance(row, dict)
+                }
+            except Exception as exc:
+                logger.exception("Bullpen 008 contingent live activation failed safely")
+                result_by_action = {
+                    action_id: {
+                        "action_id": action_id,
+                        "status": "Blocked",
+                        "blocker_code": str(exc),
+                    }
+                    for action_id in live_activation_action_ids
+                }
+            with SyncSessionLocal() as session:
+                activations = session.execute(
+                    select(Bullpen008ContingentExitActivationRecord).where(
+                        Bullpen008ContingentExitActivationRecord.user_id == user_id,
+                        Bullpen008ContingentExitActivationRecord.run_id == run.id,
+                    )
+                ).scalars().all()
+                for activation in activations:
+                    action_id = str(activation.payload.get("stage5_action_id") or "")
+                    live_row = result_by_action.get(action_id)
+                    if live_row is None:
+                        continue
+                    activation.status = str(live_row.get("status") or "Recoverable")
+                    activation.payload = {
+                        **dict(activation.payload),
+                        "live_execution_result": live_row,
+                    }
+                session.commit()
     return created
 
 

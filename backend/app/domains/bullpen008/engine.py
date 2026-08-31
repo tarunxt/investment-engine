@@ -16,6 +16,15 @@ from app.domains.bullpen008.constants import (
     SPEECH_WORDING_TERMS,
 )
 from app.domains.bullpen008.schemas import Bullpen008Settings
+from app.domains.bullpen008.risk_controls import (
+    build_joint_loss_scenarios,
+    build_loss_prevention_audit,
+    certify_exit_policies,
+    classify_tail_risk,
+    detect_regime_change,
+    reward_and_edge_protection,
+    tier_caps,
+)
 from app.domains.polymarket_auto_live.returns_formula import (
     calculate_returns_per_day_formula,
 )
@@ -243,6 +252,15 @@ def stage1_rejection_reasons(
                 "A saved custom exclusion phrase matched the contract packet.",
                 phrase,
             )
+    classification = classify_tail_risk(row, settings=settings, now=now)
+    risk_reason = {
+        "SINGLE_DAY_HIGH_SHOCK": "Single-day geopolitical or military tail-risk entries are prohibited.",
+        "HIGH_SHOCK_ENTRY_WINDOW_LT_48H": "High-shock geopolitical entries require at least 48 hours remaining.",
+        "HIGH_SHOCK_TIMING_UNRESOLVED": "Authoritative high-shock timing could not be resolved.",
+        "HIGH_SHOCK_RULES_INCOMPLETE": "Complete high-shock resolution rules are required.",
+    }
+    for code in classification["risk_rejection_codes"]:
+        reject(str(code), risk_reason[str(code)])
     return reasons
 
 
@@ -376,8 +394,10 @@ def build_stage1_output(
                     "reasons": reasons,
                 }
             )
+        risk_classification = classify_tail_risk(market, settings=settings, now=now)
         row = {
             **market,
+            **risk_classification,
             "market_id": market_id,
             "active_position": is_active_position,
             "held_sides": sorted(
@@ -395,6 +415,8 @@ def build_stage1_output(
             ),
             "monitoring_override": is_active_position and bool(reasons),
             "new_entry_eligible": not reasons,
+            "new_entry_enabled": not reasons and not is_active_position,
+            "exit_review_required": is_active_position and bool(reasons),
             "narrow_band_flag": narrow_band,
             "stage2_structural_review_required": narrow_band,
             "accounting_status": accounting_status,
@@ -417,6 +439,20 @@ def build_stage1_output(
             "data_errors": data_error_accounted,
             "stale_data_errors": stale_data_errors,
             "accounted": accounted,
+        },
+        "risk_metrics": {
+            "high_shock_rejected": sum(
+                1 for row in rows if "SINGLE_DAY_HIGH_SHOCK" in row.get("risk_rejection_codes", [])
+            ),
+            "less_than_48_hour_rejected": sum(
+                1 for row in rows if "HIGH_SHOCK_ENTRY_WINDOW_LT_48H" in row.get("risk_rejection_codes", [])
+            ),
+            "existing_high_shock_monitored": sum(
+                1 for row in rows if row.get("active_position") and row.get("risk_tier") != "standard_objective"
+            ),
+            "timing_unresolved": sum(
+                1 for row in rows if "HIGH_SHOCK_TIMING_UNRESOLVED" in row.get("risk_rejection_codes", [])
+            ),
         },
         "universe_complete": universe_complete,
         "universe_warnings": list(universe_warnings or []),
@@ -456,6 +492,9 @@ def build_probability_risk_prompt(rows: list[dict[str, object]]) -> str:
             "active_position": row.get("active_position"),
             "held_sides": row.get("held_sides", []),
             "narrow_band_flag": row.get("narrow_band_flag"),
+            "deterministic_risk_tier": row.get("risk_tier"),
+            "risk_classification_evidence": row.get("risk_classification_evidence"),
+            "risk_rejection_codes": row.get("risk_rejection_codes", []),
             "authoritative_evidence_packet": row.get("evidence_packet", {}),
         }
         for row in rows
@@ -464,7 +503,7 @@ def build_probability_risk_prompt(rows: list[dict[str, object]]) -> str:
 Analyse every supplied prediction-market contract independently. Use only the supplied rules, authoritative evidence packet, deadline, resolution source and market fields. For each contract: state exactly what YES requires; estimate calibrated YES and NO probabilities; recommend YES, NO or SKIP; do not copy market odds; score event unpredictability, resolution ambiguity, threshold sensitivity, data-quality risk and information-shock risk from 0-10; classify structural risk; reject inherently unpredictable speech/wording markets, single-game sports, single-day tail events and unresolved subjective superlative markets unless objective criteria remove the risk; return one row for every market; return strict JSON only.
 
 Required JSON shape:
-{{"markets":[{{"market_id":"...","yes_definition":"...","llm_yes_probability":50.0,"llm_no_probability":50.0,"recommended_side":"YES|NO|SKIP","confidence":"Low|Medium|High","evidence_quality":"Low|Moderate|Strong","U":0,"A":0,"T":0,"D":0,"I":0,"auto_reject":false,"watch":false,"sizing_modifier":1.0,"red_flags":[],"rationale":"..."}}]}}
+{{"markets":[{{"market_id":"...","yes_definition":"...","llm_yes_probability":50.0,"llm_no_probability":50.0,"recommended_side":"YES|NO|SKIP","confidence":"Low|Medium|High","evidence_quality":"Low|Moderate|Strong","risk_tier":"standard_objective|high_shock_geopolitical|single_day_high_shock","llm_disagreement_level":"low|medium|high","U":0,"A":0,"T":0,"D":0,"I":0,"auto_reject":false,"watch":false,"sizing_modifier":1.0,"red_flags":[],"rationale":"..."}}]}}
 
 CONTRACTS:
 {canonical_json(packet)}"""
@@ -571,7 +610,7 @@ def normalize_stage2_rows(
             if chosen_side == "YES"
             else source.get("current_no_odds")
         )
-        edge = round(p_llm - chosen_market, 2) if chosen_market is not None else None
+        edge = round(chosen_llm - chosen_market, 2) if chosen_market is not None else None
         deadline = _parse_datetime(source.get("deadline") or source.get("close_time"))
         days_until_close = (
             round((deadline - now).total_seconds() / 86_400, 4) if deadline else None
@@ -587,7 +626,7 @@ def normalize_stage2_rows(
             except (ValueError, ZeroDivisionError):
                 returns_per_day = None
         normalized.append(
-            {
+            risk_augmented := {
                 **source,
                 "yes_definition": raw.get("yes_definition"),
                 "llm_yes_probability": round(yes, 2),
@@ -600,6 +639,7 @@ def normalize_stage2_rows(
                 "llm_edge_pp": edge,
                 "confidence": confidence,
                 "evidence_quality": evidence,
+                "llm_disagreement_level": _text(raw.get("llm_disagreement_level")).lower() or "low",
                 "risk_components": components,
                 "risk_score": score,
                 "risk_class": risk_class(score),
@@ -617,6 +657,20 @@ def normalize_stage2_rows(
                 "days_until_close": days_until_close,
                 "returns_per_day": returns_per_day,
             }
+        )
+        # A provider may upgrade the tier, never downgrade the deterministic
+        # classifier.  Entry economics and evidence are then evaluated from the
+        # chosen-side probability, not from the maximum of YES/NO.
+        upgraded = classify_tail_risk(
+            risk_augmented,
+            settings=settings,
+            now=now,
+            llm_tier=_text(raw.get("risk_tier")) or None,
+        )
+        risk_augmented.update(upgraded)
+        risk_augmented.update(detect_regime_change(risk_augmented))
+        risk_augmented.update(
+            reward_and_edge_protection(risk_augmented, settings=settings, now=now)
         )
     analysed = len(normalized)
     pass_condition_met = (
@@ -644,6 +698,11 @@ def normalize_stage2_rows(
             "high_risk_rejects": sum(
                 1 for row in normalized if float(row["risk_score"]) >= 7
             ),
+            "evidence_complete": sum(1 for row in normalized if row.get("evidence_validation", {}).get("evidence_complete")),
+            "evidence_stale": sum(1 for row in normalized if "EVIDENCE_STALE" in row.get("entry_rejection_codes", [])),
+            "conservative_edge_rejected": sum(1 for row in normalized if "CONSERVATIVE_EDGE_BELOW_MINIMUM" in row.get("entry_rejection_codes", [])),
+            "high_disagreement_rejected": sum(1 for row in normalized if "MODEL_DISAGREEMENT_HIGH" in row.get("entry_rejection_codes", [])),
+            "reward_skew_rejected": sum(1 for row in normalized if "REWARD_TO_LOSS_BELOW_MINIMUM" in row.get("entry_rejection_codes", [])),
             "llm_failures": len(missing) + len(validation_errors),
         },
         "missing_market_ids": missing,
@@ -882,6 +941,10 @@ def normalize_cluster_rows(
             max(0, settings.max_common_catalyst_exposure_usd - catalyst_total),
             2,
         )
+    scenario_graph = build_joint_loss_scenarios(rows, settings=settings)
+    rows = list(scenario_graph["rows"])
+    if not scenario_graph["pass_condition_met"]:
+        unresolved.extend(list(scenario_graph["unresolved_scenarios"]))
     pass_condition_met = (
         not missing
         and not unexpected
@@ -899,6 +962,10 @@ def normalize_cluster_rows(
             ),
             "largest_current_exposure": round(max([*catalyst_exposure.values(), 0]), 2),
             "unresolved_adjudications": len(unresolved),
+            "joint_loss_scenarios": len(scenario_graph["scenarios"]),
+            "high_shock_scenarios": sum(1 for row in scenario_graph["scenarios"] if row.get("risk_tier") != "standard_objective"),
+            "unresolved_scenarios": len(scenario_graph["unresolved_scenarios"]),
+            "largest_current_scenario_loss": round(max([*(float(row.get("existing_loss_at_risk_usd") or 0) + float(row.get("pending_loss_at_risk_usd") or 0) for row in scenario_graph["scenarios"]), 0]), 2),
         },
         "strict_cluster_exposure": {
             key: round(value, 2) for key, value in strict_exposure.items()
@@ -906,6 +973,8 @@ def normalize_cluster_rows(
         "common_catalyst_exposure": {
             key: round(value, 2) for key, value in catalyst_exposure.items()
         },
+        "joint_loss_scenarios": scenario_graph["scenarios"],
+        "scenario_graph_version": scenario_graph["scenario_graph_version"],
         "missing_market_ids": missing,
         "unexpected_market_ids": unexpected,
         "duplicate_market_ids": sorted(set(duplicates)),
@@ -938,7 +1007,9 @@ def build_portfolio_target(
     available_cash_usd: float,
     inputs_hash: str,
     account_identity: str | None = None,
+    now: datetime | None = None,
 ) -> dict[str, object]:
+    now = now or datetime.now(UTC)
     edge_norm = _normalize_metric([_float(row.get("llm_edge_pp")) for row in rows])
     returns_norm = _normalize_metric(
         [_float(row.get("returns_per_day")) for row in rows]
@@ -1020,11 +1091,40 @@ def build_portfolio_target(
             or _text(row.get("llm_disagreement_level")).lower() == "high"
         ):
             eligible_reasons.append("LLM_DISAGREEMENT_UNACCEPTABLE")
+        eligible_reasons.extend(
+            str(code) for code in row.get("entry_rejection_codes", []) if code
+        )
+        eligible_reasons.extend(
+            str(code)
+            for code in row.get("risk_rejection_codes", [])
+            if code
+        )
+        if row.get("regime_change_active"):
+            eligible_reasons.extend(
+                ["REGIME_CHANGE_ACTIVE", "INFORMATION_SHOCK_ACTIVE"]
+            )
+        drawdown_state = _text(row.get("drawdown_state")) or "NORMAL"
+        if drawdown_state == "BUY_FREEZE_SOFT_DRAWDOWN":
+            eligible_reasons.extend(["BUY_FREEZE_SOFT_DRAWDOWN", "AVERAGING_DOWN_BLOCKED"])
+        elif drawdown_state == "EXIT_ONLY_HARD_DRAWDOWN":
+            eligible_reasons.extend(["EXIT_ONLY_HARD_DRAWDOWN", "AVERAGING_DOWN_BLOCKED"])
+        if row.get("scenario_cooldown_active"):
+            eligible_reasons.extend(["SCENARIO_COOLDOWN_ACTIVE", "AVERAGING_DOWN_AFTER_INFORMATION_SHOCK_BLOCKED"])
+        if not row.get("joint_loss_scenario_ids"):
+            eligible_reasons.append("JOINT_LOSS_SCENARIO_MISSING")
+        retention_only_blockers = {
+            "BUY_FREEZE_SOFT_DRAWDOWN",
+            "EXIT_ONLY_HARD_DRAWDOWN",
+            "AVERAGING_DOWN_BLOCKED",
+            "SCENARIO_COOLDOWN_ACTIVE",
+            "AVERAGING_DOWN_AFTER_INFORMATION_SHOCK_BLOCKED",
+        }
         candidates.append(
             {
                 **row,
                 "selection_score": round(score, 6),
                 "eligible": not eligible_reasons,
+                "retention_eligible": not [reason for reason in eligible_reasons if reason not in retention_only_blockers],
                 "eligibility_reasons": eligible_reasons,
             }
         )
@@ -1043,8 +1143,22 @@ def build_portfolio_target(
         )
         representatives[cluster_id] = next(
             (candidate for candidate in ranked if candidate["eligible"]),
-            ranked[0],
+            next((candidate for candidate in ranked if candidate["retention_eligible"]), ranked[0]),
         )
+
+    exit_bundle = certify_exit_policies(candidates, settings=settings, now=now)
+    policies_by_market = {
+        str(policy.get("affected_market_id") or ""): policy
+        for policy in exit_bundle["policies"]
+    }
+    mandatory_exit_markets = set(exit_bundle["mandatory_exit_market_ids"])
+
+    def effective_contract_cap(candidate: dict[str, object]) -> float:
+        cap = float(tier_caps(_text(candidate.get("risk_tier")), settings)["contract_cap_usd"])
+        odds = _float(candidate.get("current_chosen_side_bullpen_odds"))
+        if odds is not None and odds >= settings.entry_price_high_zone_pct:
+            cap = min(cap, settings.high_zone_max_allocation_usd)
+        return cap
 
     # Phase 2 makes Stage 4 authoritative over reductions as well as additions.
     # Start from zero target exposure, retain only the highest-ranked eligible
@@ -1054,6 +1168,7 @@ def build_portfolio_target(
     contract_exposure: dict[str, float] = defaultdict(float)
     strict_exposure: dict[str, float] = defaultdict(float)
     catalyst_exposure: dict[str, float] = defaultdict(float)
+    scenario_exposure: dict[str, float] = defaultdict(float)
     target_before_buys: dict[str, float] = defaultdict(float)
     locked_resolution_holds: set[str] = set()
     # An expired, non-claimable holding cannot be treated as cash or a free
@@ -1080,29 +1195,72 @@ def build_portfolio_target(
         contract_exposure[market_id] = exposure
         strict_exposure[strict_id] += exposure
         catalyst_exposure[common_id] += exposure
+        for scenario_id in candidate.get("joint_loss_scenario_ids", []):
+            scenario_exposure[str(scenario_id)] += exposure
     for cluster_id, representative in representatives.items():
-        if not representative["eligible"]:
+        if not representative["retention_eligible"]:
             continue
         market_id = _market_id(representative)
         if market_id in locked_resolution_holds:
             continue
         strict_id = str(representative.get("strict_cluster_id"))
         common_id = str(representative.get("common_catalyst_cluster_id"))
-        normal_cap = settings.max_contract_exposure_usd
+        caps = tier_caps(_text(representative.get("risk_tier")), settings)
+        normal_cap = effective_contract_cap(representative)
+        if market_id in mandatory_exit_markets:
+            normal_cap = 0
         risk = float(representative.get("risk_score") or 10)
         if settings.risk_half_size_min <= risk <= settings.risk_half_size_max:
             normal_cap = min(normal_cap, settings.max_contract_exposure_usd / 2)
         retained = min(
             float(representative.get("current_exposure_usd") or 0),
             normal_cap,
-            settings.max_strict_cluster_exposure_usd,
-            settings.max_common_catalyst_exposure_usd,
+            caps["cluster_cap_usd"],
+            float(representative.get("effective_joint_scenario_cap_usd") or caps["scenario_cap_usd"]),
         )
         retained = round(max(0.0, retained), 2)
         target_before_buys[market_id] = retained
         contract_exposure[market_id] = retained
         strict_exposure[strict_id] += retained
         catalyst_exposure[common_id] += retained
+        for scenario_id in representative.get("joint_loss_scenario_ids", []):
+            scenario_exposure[str(scenario_id)] += retained
+
+    current_contract_exposure = {
+        _market_id(row): float(row.get("current_exposure_usd") or 0)
+        for row in candidates
+    }
+    current_strict_exposure: dict[str, float] = defaultdict(float)
+    current_catalyst_exposure: dict[str, float] = defaultdict(float)
+    current_scenario_exposure: dict[str, float] = defaultdict(float)
+    for row in candidates:
+        exposure = float(row.get("current_exposure_usd") or 0)
+        current_strict_exposure[str(row.get("strict_cluster_id"))] += exposure
+        current_catalyst_exposure[str(row.get("common_catalyst_cluster_id"))] += exposure
+        for scenario_id in row.get("joint_loss_scenario_ids", []):
+            current_scenario_exposure[str(scenario_id)] += exposure
+    wallet_currently_over_cap = any(
+        exposure > effective_contract_cap(row) + 1e-9
+        for row in candidates
+        if (exposure := current_contract_exposure.get(_market_id(row), 0)) > 0
+    ) or any(
+        current_strict_exposure[str(row.get("strict_cluster_id"))]
+        > tier_caps(_text(row.get("risk_tier")), settings)["cluster_cap_usd"] + 1e-9
+        or current_catalyst_exposure[str(row.get("common_catalyst_cluster_id"))]
+        > tier_caps(_text(row.get("risk_tier")), settings)["cluster_cap_usd"] + 1e-9
+        or any(
+            current_scenario_exposure[str(scenario_id)]
+            > float(row.get("effective_joint_scenario_cap_usd") or settings.standard_cluster_cap_usd) + 1e-9
+            for scenario_id in row.get("joint_loss_scenario_ids", [])
+        )
+        for row in candidates
+    )
+    drawdown_state = next(
+        (_text(row.get("drawdown_state")) for row in candidates if _text(row.get("drawdown_state")) in {"BUY_FREEZE_SOFT_DRAWDOWN", "EXIT_ONLY_HARD_DRAWDOWN"}),
+        "NORMAL",
+    )
+    cooldown_buy_freeze = any(bool(row.get("scenario_cooldown_active")) for row in candidates)
+    risk_gate_buy_freeze = drawdown_state != "NORMAL" or cooldown_buy_freeze
 
     existing_total_exposure = sum(target_before_buys.values())
     cash_for_buys = min(
@@ -1126,18 +1284,39 @@ def build_portfolio_target(
         if proposed_sell > 0:
             explanation.append("STAGE4_TARGET_REDUCTION")
         if candidate["eligible"]:
-            normal_cap = settings.max_contract_exposure_usd
+            caps = tier_caps(_text(candidate.get("risk_tier")), settings)
+            normal_cap = effective_contract_cap(candidate)
+            if normal_cap < caps["contract_cap_usd"]:
+                explanation.append("HIGH_PRICE_MAXIMUM_EXPOSURE_5")
             risk = float(candidate.get("risk_score") or 10)
             if settings.risk_half_size_min <= risk <= settings.risk_half_size_max:
                 normal_cap = min(normal_cap, settings.max_contract_exposure_usd / 2)
                 explanation.append("RISK_HALF_SIZE")
+            scenario_capacity = min(
+                [
+                    float(candidate.get("effective_joint_scenario_cap_usd") or caps["scenario_cap_usd"])
+                    - scenario_exposure[str(scenario_id)]
+                    for scenario_id in candidate.get("joint_loss_scenario_ids", [])
+                ]
+                or [0.0]
+            )
             capacity = min(
                 normal_cap - contract_exposure[market_id],
-                settings.max_strict_cluster_exposure_usd - strict_exposure[strict_id],
-                settings.max_common_catalyst_exposure_usd
+                caps["cluster_cap_usd"] - strict_exposure[strict_id],
+                caps["cluster_cap_usd"]
                 - catalyst_exposure[common_id],
+                scenario_capacity,
                 cash_for_buys,
             )
+            if wallet_currently_over_cap or risk_gate_buy_freeze:
+                capacity = 0
+                explanation.append(
+                    "SCENARIO_OVER_CAP_BUY_FREEZE"
+                    if wallet_currently_over_cap
+                    else drawdown_state
+                    if drawdown_state != "NORMAL"
+                    else "SCENARIO_COOLDOWN_ACTIVE"
+                )
             allocation = (
                 math.floor(max(0.0, capacity) / settings.allocation_increment_usd)
                 * settings.allocation_increment_usd
@@ -1149,9 +1328,18 @@ def build_portfolio_target(
                 contract_exposure[market_id] += allocation
                 strict_exposure[strict_id] += allocation
                 catalyst_exposure[common_id] += allocation
+                for scenario_id in candidate.get("joint_loss_scenario_ids", []):
+                    scenario_exposure[str(scenario_id)] += allocation
                 cash_for_buys -= allocation
             elif not explanation:
                 explanation.append("NO_REMAINING_CAPACITY_OR_CASH")
+        reward_amount = allocation if allocation > 0 else current_exposure
+        chosen_price = _float(candidate.get("current_chosen_side_bullpen_odds"))
+        reward_profit = (
+            reward_amount * 100 / chosen_price - reward_amount
+            if chosen_price is not None and 0 < chosen_price < 100 and reward_amount > 0
+            else None
+        )
         allocations.append(
             {
                 "market_id": market_id,
@@ -1174,6 +1362,24 @@ def build_portfolio_target(
                 "edge_pp": candidate.get("llm_edge_pp"),
                 "returns_per_day": candidate.get("returns_per_day"),
                 "risk_score": candidate.get("risk_score"),
+                "risk_tier": candidate.get("risk_tier"),
+                "effective_contract_cap_usd": effective_contract_cap(candidate),
+                "effective_cluster_cap_usd": tier_caps(_text(candidate.get("risk_tier")), settings)["cluster_cap_usd"],
+                "joint_loss_scenario_ids": candidate.get("joint_loss_scenario_ids", []),
+                "effective_joint_scenario_cap_usd": candidate.get("effective_joint_scenario_cap_usd"),
+                "raw_llm_probability": candidate.get("raw_llm_probability"),
+                "uncertainty_haircut_pp": candidate.get("uncertainty_haircut_pp"),
+                "conservative_probability": candidate.get("conservative_probability"),
+                "conservative_edge_pp": candidate.get("conservative_edge_pp"),
+                "maximum_profit_usd": round(reward_profit, 2) if reward_profit is not None else None,
+                "maximum_loss_usd": round(reward_amount, 2) if reward_amount > 0 else None,
+                "reward_to_loss_ratio": round(reward_profit / reward_amount, 4) if reward_profit is not None and reward_amount > 0 else None,
+                "target_loss_at_risk_usd": round(retained_exposure + allocation, 2),
+                "evidence_validation": candidate.get("evidence_validation"),
+                "regime_change_active": candidate.get("regime_change_active"),
+                "entry_rejection_codes": candidate.get("entry_rejection_codes", []),
+                "contingent_exit_policy_hashes": [policies_by_market[market_id]["policy_hash"]] if market_id in policies_by_market else [],
+                "mandatory_exit_active": market_id in mandatory_exit_markets,
                 "selection_score": candidate.get("selection_score"),
                 "explanation_codes": explanation,
                 "locked_resolution_hold": market_id
@@ -1192,6 +1398,12 @@ def build_portfolio_target(
             continue
         current_exposure = round(float(candidate.get("current_exposure_usd") or 0), 2)
         target_exposure = target_before_buys.get(market_id, 0.0)
+        chosen_price = _float(candidate.get("current_chosen_side_bullpen_odds"))
+        reward_profit = (
+            current_exposure * 100 / chosen_price - current_exposure
+            if chosen_price is not None and 0 < chosen_price < 100 and current_exposure > 0
+            else None
+        )
         allocations.append(
             {
                 "market_id": market_id,
@@ -1216,6 +1428,24 @@ def build_portfolio_target(
                 "edge_pp": candidate.get("llm_edge_pp"),
                 "returns_per_day": candidate.get("returns_per_day"),
                 "risk_score": candidate.get("risk_score"),
+                "risk_tier": candidate.get("risk_tier"),
+                "effective_contract_cap_usd": effective_contract_cap(candidate),
+                "effective_cluster_cap_usd": tier_caps(_text(candidate.get("risk_tier")), settings)["cluster_cap_usd"],
+                "joint_loss_scenario_ids": candidate.get("joint_loss_scenario_ids", []),
+                "effective_joint_scenario_cap_usd": candidate.get("effective_joint_scenario_cap_usd"),
+                "raw_llm_probability": candidate.get("raw_llm_probability"),
+                "uncertainty_haircut_pp": candidate.get("uncertainty_haircut_pp"),
+                "conservative_probability": candidate.get("conservative_probability"),
+                "conservative_edge_pp": candidate.get("conservative_edge_pp"),
+                "maximum_profit_usd": round(reward_profit, 2) if reward_profit is not None else None,
+                "maximum_loss_usd": current_exposure if current_exposure > 0 else None,
+                "reward_to_loss_ratio": round(reward_profit / current_exposure, 4) if reward_profit is not None and current_exposure > 0 else None,
+                "target_loss_at_risk_usd": round(target_exposure, 2),
+                "evidence_validation": candidate.get("evidence_validation"),
+                "regime_change_active": candidate.get("regime_change_active"),
+                "entry_rejection_codes": candidate.get("entry_rejection_codes", []),
+                "contingent_exit_policy_hashes": [policies_by_market[market_id]["policy_hash"]] if market_id in policies_by_market else [],
+                "mandatory_exit_active": market_id in mandatory_exit_markets,
                 "selection_score": candidate.get("selection_score"),
                 "explanation_codes": [
                     *list(candidate["eligibility_reasons"]),
@@ -1233,11 +1463,23 @@ def build_portfolio_target(
     largest_contract = round(max(all_exposures), 2)
     largest_strict = round(max(all_strict), 2)
     largest_catalyst = round(max(all_catalyst), 2)
-    contract_cap_result = largest_contract <= settings.max_contract_exposure_usd + 1e-9
-    cluster_cap_result = (
-        largest_strict <= settings.max_strict_cluster_exposure_usd + 1e-9
-        and largest_catalyst <= settings.max_common_catalyst_exposure_usd + 1e-9
-    )
+    contract_cap_rows = [
+        {
+            "market_id": _market_id(row),
+            "loss_usd": round(contract_exposure.get(_market_id(row), 0), 2),
+            "cap_usd": effective_contract_cap(row),
+        }
+        for row in candidates
+    ]
+    contract_cap_result = all(row["loss_usd"] <= row["cap_usd"] + 1e-9 for row in contract_cap_rows)
+    cluster_cap_rows: list[dict[str, object]] = []
+    for row in candidates:
+        cap = tier_caps(_text(row.get("risk_tier")), settings)["cluster_cap_usd"]
+        cluster_cap_rows.extend([
+            {"cluster_type": "strict", "cluster_id": row.get("strict_cluster_id"), "loss_usd": round(strict_exposure[str(row.get("strict_cluster_id"))], 2), "cap_usd": cap},
+            {"cluster_type": "common_catalyst", "cluster_id": row.get("common_catalyst_cluster_id"), "loss_usd": round(catalyst_exposure[str(row.get("common_catalyst_cluster_id"))], 2), "cap_usd": cap},
+        ])
+    cluster_cap_result = all(row["loss_usd"] <= row["cap_usd"] + 1e-9 for row in cluster_cap_rows)
     stress_trigger_by_cluster = {
         str(row.get("common_catalyst_cluster_id")): row.get("main_joint_loss_trigger")
         for row in candidates
@@ -1256,6 +1498,31 @@ def build_portfolio_target(
     stress_test_result = all(
         scenario["result"] == "pass" for scenario in stress_scenarios
     )
+    scenario_cap_by_id: dict[str, float] = {}
+    scenario_tier_by_id: dict[str, str] = {}
+    scenario_members: dict[str, list[str]] = defaultdict(list)
+    for row in candidates:
+        for scenario_id in row.get("joint_loss_scenario_ids", []):
+            scenario_id = str(scenario_id)
+            cap = float(row.get("effective_joint_scenario_cap_usd") or settings.standard_cluster_cap_usd)
+            scenario_cap_by_id[scenario_id] = min(scenario_cap_by_id.get(scenario_id, cap), cap)
+            scenario_tier_by_id[scenario_id] = _text(row.get("risk_tier"))
+            scenario_members[scenario_id].append(_market_id(row))
+    scenario_stress_output = [
+        {
+            "scenario_id": scenario_id,
+            "affected_market_ids": sorted(set(scenario_members[scenario_id])),
+            "risk_tier": scenario_tier_by_id.get(scenario_id),
+            "maximum_joint_scenario_loss_usd": round(exposure, 2),
+            "effective_scenario_cap_usd": scenario_cap_by_id.get(scenario_id, settings.standard_cluster_cap_usd),
+            "offsets_counted_usd": 0.0,
+            "conservative_gross_loss": True,
+            "result": "pass" if exposure <= scenario_cap_by_id.get(scenario_id, settings.standard_cluster_cap_usd) + 1e-9 else "fail",
+        }
+        for scenario_id, exposure in sorted(scenario_exposure.items())
+    ]
+    scenario_cap_result = all(row["result"] == "pass" for row in scenario_stress_output)
+    maximum_joint_scenario_loss = round(max([*(float(row["maximum_joint_scenario_loss_usd"]) for row in scenario_stress_output), 0]), 2)
     proposed_buys = round(sum(float(row["proposed_buy_usd"]) for row in allocations), 2)
     invested_amount = round(sum(contract_exposure.values()), 2)
     cash_retained = round(max(0, settings.bankroll_usd - invested_amount), 2)
@@ -1313,12 +1580,25 @@ def build_portfolio_target(
     invested_cluster_ids = {
         str(row["common_catalyst_cluster_id"]) for row in target_rows
     }
+    rejected_allocations = [row for row in allocations if float(row["proposed_buy_usd"]) <= 0 and row.get("explanation_codes")]
+    proposed_reductions = [row for row in allocations if float(row["proposed_sell_usd"]) > 0]
+    existing_untradeable_over_cap = bool(locked_resolution_holds) and not (contract_cap_result and cluster_cap_result and scenario_cap_result)
+    no_buy_remediation_certificate = proposed_buys == 0 and existing_untradeable_over_cap
     portfolio_certified = (
         bankroll_result
-        and contract_cap_result
-        and cluster_cap_result
-        and stress_test_result
+        and (
+            (contract_cap_result and cluster_cap_result and stress_test_result and scenario_cap_result)
+            or no_buy_remediation_certificate
+        )
     )
+    binding_caps = [
+        (float(row["cap_usd"]), f"contract:{row['market_id']}") for row in contract_cap_rows
+    ] + [
+        (float(row["cap_usd"]), f"{row['cluster_type']}:{row['cluster_id']}") for row in cluster_cap_rows
+    ] + [
+        (float(row["effective_scenario_cap_usd"]), f"scenario:{row['scenario_id']}") for row in scenario_stress_output
+    ]
+    binding_cap = min(binding_caps, default=(settings.standard_cluster_cap_usd, "standard"))
     certificate = {
         "bankroll": settings.bankroll_usd,
         "invested_amount": invested_amount,
@@ -1332,7 +1612,33 @@ def build_portfolio_target(
         "contract_cap_result": contract_cap_result,
         "cluster_cap_result": cluster_cap_result,
         "stress_test_result": stress_test_result,
+        "scenario_cap_result": scenario_cap_result,
+        "maximum_contract_loss": largest_contract,
+        "maximum_strict_cluster_loss": largest_strict,
+        "maximum_common_catalyst_loss": largest_catalyst,
+        "maximum_joint_scenario_loss": maximum_joint_scenario_loss,
+        "contract_cap_results": contract_cap_rows,
+        "cluster_cap_results": cluster_cap_rows,
+        "scenario_stress_output": scenario_stress_output,
+        "most_restrictive_binding_cap": {"cap_usd": binding_cap[0], "binding_scope": binding_cap[1]},
+        "risk_tier_results": {
+            tier: sum(1 for row in allocations if row.get("risk_tier") == tier)
+            for tier in ("single_day_high_shock", "high_shock_geopolitical", "standard_objective")
+        },
+        "all_rejected_allocations": rejected_allocations,
+        "all_proposed_reductions": proposed_reductions,
+        "contingent_exit_policies": exit_bundle["policies"],
+        "exit_policy_version": exit_bundle["policy_version"],
+        "existing_untradeable_over_cap": existing_untradeable_over_cap,
+        "new_buys_frozen": wallet_currently_over_cap or existing_untradeable_over_cap or risk_gate_buy_freeze,
+        "drawdown_state": drawdown_state,
+        "exit_only": drawdown_state == "EXIT_ONLY_HARD_DRAWDOWN",
+        "scenario_cooldown_buy_freeze": cooldown_buy_freeze,
+        "remediation": "Exit/trim certified exposure when tradeable; hold expired non-claimable exposure for resolution without treating it as cash." if existing_untradeable_over_cap else None,
         "inputs_hash": inputs_hash,
+        "settings_snapshot_hash": stable_hash(settings.model_dump(mode="json")),
+        "scenario_stress_output_hash": stable_hash(scenario_stress_output),
+        "contingent_exit_policies_hash": stable_hash(exit_bundle["policies"]),
         "account_identity": account_identity,
         "target_portfolio_hash": stable_hash(allocations),
         "cluster_map_version": CLUSTER_MAP_VERSION,
@@ -1343,6 +1649,9 @@ def build_portfolio_target(
     return {
         "allocations": allocations,
         "stress_scenarios": stress_scenarios,
+        "joint_scenario_stress": scenario_stress_output,
+        "contingent_exit_policies": exit_bundle["policies"],
+        "loss_prevention_audit": build_loss_prevention_audit(allocations),
         "certificate": certificate,
         "metrics": {
             "selected_contracts": len(target_rows),
@@ -1351,6 +1660,11 @@ def build_portfolio_target(
             "cash_retained": cash_retained,
             "independent_clusters": len(invested_cluster_ids),
             "stress_test_result": "pass" if stress_test_result else "fail",
+            "maximum_scenario_loss": maximum_joint_scenario_loss,
+            "binding_risk_tier": next((row.get("risk_tier") for row in allocations if row.get("effective_joint_scenario_cap_usd") == binding_cap[0]), "standard_objective"),
+            "contingent_exits_certified": len(exit_bundle["policies"]),
+            "mandatory_time_exits": len(mandatory_exit_markets),
+            "scenario_cap_result": "pass" if scenario_cap_result else "fail",
         },
         "portfolio_metrics": {
             "weighted_current_odds": round(weighted_current, 2),
