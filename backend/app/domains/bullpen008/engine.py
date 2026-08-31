@@ -1177,16 +1177,24 @@ def build_portfolio_target(
     # target or pretending that the exposure disappeared.
     for candidate in candidates:
         market_id = _market_id(candidate)
-        days_until_close = _float(candidate.get("days_until_close"))
-        if not (
-            candidate.get("active_position")
-            and not candidate.get("claimable")
-            and days_until_close is not None
-            and days_until_close <= 0
-        ):
-            continue
         exposure = round(float(candidate.get("current_exposure_usd") or 0), 2)
-        if exposure <= 0:
+        days_until_close = _float(candidate.get("days_until_close"))
+        authoritative_deadline = _parse_datetime(
+            candidate.get("deadline")
+            or candidate.get("close_time")
+            or candidate.get("end_time")
+            or candidate.get("resolution_end")
+        )
+        deadline_passed = (
+            days_until_close is not None and days_until_close <= 0
+        ) or (
+            authoritative_deadline is not None and authoritative_deadline <= now
+        )
+        if not (
+            exposure > 0
+            and not candidate.get("claimable")
+            and deadline_passed
+        ):
             continue
         strict_id = str(candidate.get("strict_cluster_id"))
         common_id = str(candidate.get("common_catalyst_cluster_id"))
