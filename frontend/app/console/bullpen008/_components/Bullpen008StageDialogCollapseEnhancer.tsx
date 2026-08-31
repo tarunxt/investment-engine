@@ -71,12 +71,14 @@ function setExpanded(root: HTMLElement, expanded: boolean) {
         child.hidden = !expanded;
       }
     }
+    root.style.padding = expanded ? "" : "8px 12px";
   }
 
   root.setAttribute(COLLAPSED_ATTR, expanded ? "false" : "true");
   if (trigger) {
     const label = root.dataset.bullpen008CollapseLabel || "section";
-    trigger.textContent = expanded ? "▴" : "▾";
+    const triangle = expanded ? "▴" : "▾";
+    if (trigger.textContent !== triangle) trigger.textContent = triangle;
     trigger.setAttribute("aria-expanded", expanded ? "true" : "false");
     trigger.setAttribute("aria-label", `${expanded ? "Collapse" : "Expand"} ${label}`);
     trigger.setAttribute("title", `${expanded ? "Collapse" : "Expand"} ${label}`);
@@ -176,7 +178,8 @@ function updateCollapseAllButton(dialog: HTMLElement | null) {
   const items = collapsibles(dialog);
   const details = Array.from(dialog.querySelectorAll<HTMLDetailsElement>("details"));
   const anyExpanded = items.some((item) => item.getAttribute(COLLAPSED_ATTR) !== "true") || details.some((item) => item.open);
-  button.textContent = anyExpanded ? "Collapse All" : "Expand All";
+  const nextText = anyExpanded ? "Collapse All" : "Expand All";
+  if (button.textContent !== nextText) button.textContent = nextText;
   button.setAttribute("aria-label", anyExpanded ? "Collapse all popup sections" : "Expand all popup sections");
   button.title = anyExpanded ? "Collapse every section and subsection" : "Expand every section and subsection";
 }
@@ -200,6 +203,7 @@ function addCollapseAllButton(dialog: HTMLElement) {
   button.style.minHeight = "36px";
   button.style.padding = "0 12px";
   button.style.marginLeft = "auto";
+  button.style.marginRight = "8px";
   button.style.border = "1px solid rgb(186 230 253)";
   button.style.borderRadius = "9999px";
   button.style.background = "rgb(240 249 255)";
