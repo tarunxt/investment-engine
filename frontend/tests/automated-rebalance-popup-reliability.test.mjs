@@ -127,13 +127,18 @@ test("stage cards keep every shortcut as an independent native button", () => {
   );
 });
 
-test("stage error details escape card stacking contexts and stay inside the viewport", () => {
+test("stage failures automatically open a detailed modal and remain manually reopenable", () => {
   assert.match(workflowSource, /createPortal\(/);
   assert.match(workflowSource, /document\.body/);
-  assert.match(workflowSource, /className="fixed z-\[200\] overflow-y-auto overscroll-contain/);
-  assert.match(workflowSource, /window\.innerWidth - viewportPadding - width/);
-  assert.match(workflowSource, /window\.innerHeight - viewportPadding - measuredHeight/);
-  assert.match(workflowSource, /window\.addEventListener\("scroll", updatePosition, true\)/);
+  assert.match(workflowSource, /lastAutoOpenedErrorRef/);
+  assert.match(workflowSource, /setOpenErrorDetail\(stageErrorFingerprint\)/);
+  assert.match(workflowSource, /aria-modal="true"/);
+  assert.match(workflowSource, /className="pointer-events-auto fixed inset-0 z-\[200\]/);
+  assert.match(workflowSource, /Error message/);
+  assert.match(workflowSource, /Provider and job details/);
+  assert.match(workflowSource, /What to do next/);
+  assert.match(workflowSource, /The backend did not return an underlying provider exception or job identifier/);
+  assert.match(workflowSource, /aria-label="Show detailed LLM error"/);
 });
 
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {

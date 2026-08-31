@@ -2,13 +2,11 @@
 
 import Link from "next/link";
 import {
-  type CSSProperties,
   Fragment,
   type ReactNode,
   type SVGProps,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -3133,10 +3131,7 @@ function WorkflowStageTile({
     : "";
   const isFreshActionables = isActionablesFresh(info.completedAt, now);
   const [openErrorDetail, setOpenErrorDetail] = useState<string | null>(null);
-  const errorButtonRef = useRef<HTMLButtonElement>(null);
-  const errorPopoverRef = useRef<HTMLSpanElement>(null);
-  const [errorPopoverStyle, setErrorPopoverStyle] =
-    useState<CSSProperties | null>(null);
+  const lastAutoOpenedErrorRef = useRef<string | null>(null);
   const [durationDialogOpen, setDurationDialogOpen] = useState(false);
   const closeDurationDialog = useCallback(
     () => setDurationDialogOpen(false),
@@ -3150,70 +3145,25 @@ function WorkflowStageTile({
         : stage === "actionables"
           ? getActionablesStageTileRows(info)
           : getIdleStageRows(stage, info, now);
-
-  useLayoutEffect(() => {
-    if (!openErrorDetail) return;
-
-    const updatePosition = () => {
-      const anchor = errorButtonRef.current;
-      if (!anchor) return;
-
-      const viewportPadding = 16;
-      const gap = 8;
-      const anchorRect = anchor.getBoundingClientRect();
-      const width = Math.min(384, window.innerWidth - viewportPadding * 2);
-      const maxHeight = Math.max(160, window.innerHeight - viewportPadding * 2);
-      const measuredHeight = Math.min(
-        errorPopoverRef.current?.scrollHeight ?? 320,
-        maxHeight,
-      );
-      const spaceBelow =
-        window.innerHeight - anchorRect.bottom - gap - viewportPadding;
-      const spaceAbove = anchorRect.top - gap - viewportPadding;
-      const placeBelow =
-        spaceBelow >= Math.min(measuredHeight, 320) ||
-        spaceBelow >= spaceAbove;
-      const left = Math.min(
-        Math.max(anchorRect.left, viewportPadding),
-        window.innerWidth - viewportPadding - width,
-      );
-      const top = placeBelow
-        ? Math.min(
-            anchorRect.bottom + gap,
-            window.innerHeight - viewportPadding - measuredHeight,
-          )
-        : Math.max(viewportPadding, anchorRect.top - gap - measuredHeight);
-
-      setErrorPopoverStyle({ left, top, width, maxHeight });
-    };
-
-    updatePosition();
-    const animationFrame = window.requestAnimationFrame(updatePosition);
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [openErrorDetail]);
+  const stageErrorRow = stageRows.find(
+    (row) => row.label === "Error" && row.detail,
+  );
+  const stageErrorFingerprint = stageErrorRow
+    ? JSON.stringify({
+        stage,
+        detail: stageErrorRow.detail,
+        errorDetails: stageErrorRow.errorDetails,
+        runId: info.activeRunId ?? info.lastRunId ?? null,
+        status: info.runStatus ?? info.state,
+      })
+    : null;
 
   useEffect(() => {
-    if (!openErrorDetail) return;
-    const closeOnOutsidePointer = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (
-        errorButtonRef.current?.contains(target) ||
-        errorPopoverRef.current?.contains(target)
-      ) {
-        return;
-      }
-      setOpenErrorDetail(null);
-    };
-    document.addEventListener("pointerdown", closeOnOutsidePointer);
-    return () =>
-      document.removeEventListener("pointerdown", closeOnOutsidePointer);
-  }, [openErrorDetail]);
+    if (!stageErrorFingerprint) return;
+    if (lastAutoOpenedErrorRef.current === stageErrorFingerprint) return;
+    lastAutoOpenedErrorRef.current = stageErrorFingerprint;
+    setOpenErrorDetail(stageErrorFingerprint);
+  }, [stageErrorFingerprint]);
 
   const renderStageRow = (row: StageTileRow) => {
     if (row.label === "Duration") {
@@ -3258,13 +3208,14 @@ function WorkflowStageTile({
         {row.label === "Error" && row.detail ? (
           <span className="relative inline-flex align-middle">
             <button
-              ref={errorButtonRef}
               type="button"
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
                 setOpenErrorDetail((current) =>
-                  current === row.detail ? null : (row.detail ?? null),
+                  current === stageErrorFingerprint
+                    ? null
+                    : stageErrorFingerprint,
                 );
               }}
               className="pointer-events-auto cursor-pointer rounded text-left text-red-700 underline decoration-red-300 underline-offset-2 transition hover:text-red-800 hover:decoration-red-500 focus:outline-none focus:ring-2 focus:ring-red-200"
@@ -3273,55 +3224,87 @@ function WorkflowStageTile({
             >
               {row.value}
             </button>
-            {openErrorDetail === row.detail &&
-            errorPopoverStyle &&
+            {openErrorDetail === stageErrorFingerprint &&
             typeof document !== "undefined"
               ? createPortal(
-                  <span
-                    ref={errorPopoverRef}
+                  <div
                     role="dialog"
+                    aria-modal="true"
                     aria-label="Detailed LLM error"
-                    style={errorPopoverStyle}
-                    className="fixed z-[200] overflow-y-auto overscroll-contain rounded-2xl border border-red-100 bg-white p-4 text-xs leading-5 text-slate-700 shadow-2xl shadow-slate-900/20 ring-1 ring-slate-900/5"
-                    onPointerDown={(event) => event.stopPropagation()}
+                    className="pointer-events-auto fixed inset-0 z-[200] flex items-start justify-center overflow-y-auto bg-slate-950/60 px-4 py-10"
+                    onClick={() => setOpenErrorDetail(null)}
                   >
-                <span className="block font-bold text-red-700">
-                  Detailed LLM error
-                </span>
-                {row.errorDetails?.length ? (
-                  <span className="mt-2 block space-y-3">
-                    {row.errorDetails.map((detail, index) => (
-                      <span
-                        key={`${detail.provider ?? "unknown"}-${detail.model ?? "unknown"}-${detail.jobId ?? index}`}
-                        className="block rounded-xl border border-red-100 bg-red-50/50 p-3"
-                      >
-                        <span className="block font-semibold text-slate-900">
-                          LLM:{" "}
-                          {[
-                            detail.provider || "Unknown provider",
-                            detail.model || "Unknown model",
-                          ].join(" / ")}
-                        </span>
-                        {detail.jobId || detail.status ? (
-                          <span className="mt-0.5 block text-[11px] uppercase tracking-wide text-slate-500">
-                            {detail.jobId
-                              ? `Job #${detail.jobId}`
-                              : "Workflow error"}
-                            {detail.status ? ` · Status: ${detail.status}` : ""}
+                    <div
+                      className="w-full max-w-2xl overflow-hidden rounded-2xl border border-red-200 bg-white text-left text-sm text-slate-700 shadow-2xl"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="flex items-start justify-between gap-4 border-b border-red-100 bg-red-50 px-5 py-4">
+                        <div>
+                          <span className="block text-xs font-bold uppercase tracking-[0.16em] text-red-700">Stage failed</span>
+                          <span className="mt-1 block text-xl font-bold text-slate-950">{stageMeta.idle}</span>
+                          <span className="mt-1 block text-xs text-slate-600">
+                            Status: {info.runStatus || info.state}
+                            {info.activeRunId || info.lastRunId
+                              ? ` · Run #${info.activeRunId ?? info.lastRunId}`
+                              : ""}
                           </span>
-                        ) : null}
-                        <span className="mt-2 block whitespace-pre-wrap break-words">
-                          {detail.message}
-                        </span>
-                      </span>
-                    ))}
-                  </span>
-                ) : (
-                  <span className="mt-1 block whitespace-pre-wrap break-words">
-                    {row.detail}
-                  </span>
-                )}
-                  </span>,
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setOpenErrorDetail(null)}
+                          className="rounded-full p-2 text-slate-500 hover:bg-red-100 hover:text-slate-900"
+                          aria-label="Close detailed error"
+                        >
+                          <X className="size-5" />
+                        </button>
+                      </div>
+                      <div className="space-y-5 px-5 py-5">
+                        <section>
+                          <span className="block font-bold text-slate-950">Error message</span>
+                          <span className="mt-2 block whitespace-pre-wrap break-words rounded-xl border border-red-200 bg-red-50 p-3 font-medium text-red-800">
+                            {row.detail}
+                          </span>
+                        </section>
+                        <section>
+                          <span className="block font-bold text-slate-950">Provider and job details</span>
+                          {row.errorDetails?.length ? (
+                            <span className="mt-2 block space-y-3">
+                              {row.errorDetails.map((detail, index) => (
+                                <span
+                                  key={`${detail.provider ?? "unknown"}-${detail.model ?? "unknown"}-${detail.jobId ?? index}`}
+                                  className="block rounded-xl border border-slate-200 bg-slate-50 p-3"
+                                >
+                                  <span className="block font-semibold text-slate-900">
+                                    {detail.provider || "Unknown provider"} / {detail.model || "Unknown model"}
+                                  </span>
+                                  <span className="mt-0.5 block text-xs text-slate-500">
+                                    {detail.jobId ? `Job #${detail.jobId}` : "Job ID unavailable"}
+                                    {detail.status ? ` · Status: ${detail.status}` : ""}
+                                  </span>
+                                  <span className="mt-2 block whitespace-pre-wrap break-words">{detail.message}</span>
+                                </span>
+                              ))}
+                            </span>
+                          ) : (
+                            <span className="mt-2 block rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                              The backend did not return an underlying provider exception or job identifier. The message above is the complete diagnostic currently available; inspect the server logs for this run and preserve the original exception in the API response.
+                            </span>
+                          )}
+                        </section>
+                        <section>
+                          <span className="block font-bold text-slate-950">What to do next</span>
+                          <ol className="mt-2 list-decimal space-y-1.5 pl-5">
+                            <li>Check the provider/job detail above and correct the reported authentication, quota, timeout, parsing, or upstream-service issue.</li>
+                            <li>If no underlying cause was returned, inspect backend and worker logs using the run or job ID shown above.</li>
+                            <li>Retry this stage only after the cause is corrected; completed stages and their outputs remain unchanged.</li>
+                          </ol>
+                        </section>
+                        <div className="flex justify-end border-t pt-4">
+                          <Button type="button" onClick={() => setOpenErrorDetail(null)}>Close</Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>,
                   document.body,
                 )
               : null}
