@@ -206,6 +206,55 @@ def test_invalid_or_expired_stage4_certificate_blocks_buys(kind: str) -> None:
     assert plan["plan_certificate"]["plan_certified"] is False
 
 
+def test_invalid_stage4_authority_cannot_certify_a_noop_or_exit_only_plan() -> None:
+    cert = certificate()
+    cert["inputs_hash"] = "tampered-after-hash"
+    plan = make_plan([], [], cert=cert)
+    assert plan["plan_certificate"]["stage4_authority_valid"] is False
+    assert plan["plan_certificate"]["plan_certified"] is False
+
+
+def test_hard_drawdown_cancels_only_008_pending_buys_and_classifies_007_read_only() -> None:
+    cert = certificate()
+    cert.update({"exit_only": True, "drawdown_state": "EXIT_ONLY_HARD_DRAWDOWN"})
+    cert["certificate_hash"] = stable_hash(
+        {key: value for key, value in cert.items() if key != "certificate_hash"}
+    )
+    pending = [
+        {
+            "profile": "bullpen008",
+            "intent_id": "008-buy",
+            "market_id": "m008",
+            "action": "BUY",
+            "side": "YES",
+            "status": "Pending",
+            "current_order_usd": 5,
+            "remote_order_id": "remote-008",
+        },
+        {
+            "profile": "bullpen007",
+            "intent_id": "007-buy",
+            "market_id": "m007",
+            "action": "BUY",
+            "side": "YES",
+            "status": "Pending",
+            "current_order_usd": 5,
+            "remote_order_id": "remote-007",
+        },
+    ]
+    plan = make_plan([], [], cert=cert, pending=pending)
+    assert [row["remote_order_id"] for row in plan["order_cancellations"]] == ["remote-008"]
+    dispositions = {
+        row["intent_id"]: row["disposition"]
+        for row in plan["pending_order_classification"]
+    }
+    assert dispositions == {
+        "008-buy": "CANCEL_CERTIFIED",
+        "007-buy": "PROTECTED_007_OBSERVATION_ONLY",
+    }
+    assert plan["plan_certificate"]["all_pending_orders_classified"] is True
+
+
 def test_stage4_account_identity_mismatch_blocks_buys() -> None:
     cert = certificate()
     cert["account_identity"] = "0x007"

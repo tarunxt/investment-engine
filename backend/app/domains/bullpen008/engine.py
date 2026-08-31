@@ -23,6 +23,7 @@ from app.domains.bullpen008.risk_controls import (
     classify_tail_risk,
     detect_regime_change,
     reward_and_edge_protection,
+    stricter_tier,
     tier_caps,
 )
 from app.domains.polymarket_auto_live.returns_formula import (
@@ -1514,7 +1515,10 @@ def build_portfolio_target(
             scenario_id = str(scenario_id)
             cap = float(row.get("effective_joint_scenario_cap_usd") or settings.standard_cluster_cap_usd)
             scenario_cap_by_id[scenario_id] = min(scenario_cap_by_id.get(scenario_id, cap), cap)
-            scenario_tier_by_id[scenario_id] = _text(row.get("risk_tier"))
+            scenario_tier_by_id[scenario_id] = stricter_tier(
+                scenario_tier_by_id.get(scenario_id),
+                _text(row.get("risk_tier")),
+            )
             scenario_members[scenario_id].append(_market_id(row))
     scenario_stress_output = [
         {

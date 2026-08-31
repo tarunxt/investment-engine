@@ -356,8 +356,11 @@ def reward_and_edge_protection(
         loss_ratio = maximum_loss / maximum_profit if maximum_profit > 0 else None
         if price > settings.entry_price_hard_ceiling_pct:
             rejection_codes.append("ENTRY_PRICE_ABOVE_95")
-        elif price >= settings.entry_price_high_zone_pct and allocation > settings.high_zone_max_allocation_usd:
-            rejection_codes.append("HIGH_PRICE_ALLOCATION_ABOVE_5")
+        elif price >= settings.entry_price_high_zone_pct:
+            if allocation > settings.high_zone_max_allocation_usd:
+                rejection_codes.append("HIGH_PRICE_ALLOCATION_ABOVE_5")
+            if evidence_quality != "Strong":
+                rejection_codes.append("HIGH_PRICE_STRONG_EVIDENCE_REQUIRED")
         if reward_ratio is None or reward_ratio < settings.min_reward_to_loss_ratio:
             rejection_codes.append("REWARD_TO_LOSS_BELOW_MINIMUM")
     missing_uncertainty = (
@@ -666,13 +669,14 @@ def evaluate_contingent_policy(
     if not observations:
         blockers.append("FRESH_QUOTE_MISSING")
     latest_timestamp = _time(latest.get("observed_at"))
-    if latest_timestamp is not None and now - latest_timestamp > timedelta(minutes=2):
+    if latest_timestamp is None or now - latest_timestamp > timedelta(minutes=2):
         blockers.append("FRESH_QUOTE_MISSING")
     activation_expiry = _time(policy.get("activation_expiry"))
     if activation_expiry is None or now > activation_expiry:
         blockers.append("ACTIVATION_POLICY_EXPIRED")
     if triggers and not proven:
         blockers.append("QUOTE_CONFIRMATION_INCOMPLETE")
+    activation_allowed = proven and valid_hash and not blockers
     return {
         "policy_hash_valid": valid_hash,
         "trigger_types": list(dict.fromkeys(triggers)),
@@ -682,8 +686,8 @@ def evaluate_contingent_policy(
         "drop_24h_pp": round(drop_24, 2),
         "catastrophic_move": catastrophic,
         "trigger_proven": proven,
-        "activation_status": "WOULD_ACTIVATE" if proven and valid_hash else "BLOCKED" if blockers else "DORMANT",
-        "submission_status": "WOULD_SUBMIT" if proven and valid_hash else None,
+        "activation_status": "WOULD_ACTIVATE" if activation_allowed else "BLOCKED" if blockers else "DORMANT",
+        "submission_status": "WOULD_SUBMIT" if activation_allowed else None,
         "blocker_codes": blockers,
     }
 
