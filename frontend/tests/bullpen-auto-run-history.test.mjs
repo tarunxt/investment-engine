@@ -113,6 +113,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(trendsTable, /href=\{event\.market_url\}/);
   assert.match(trendsTable, /Not covered<br\/>in latest scan/);
   assert.match(trendsTable, /rounded-full bg-green-600 text-white/);
+  assert.match(trendsTable, /heldSideLlmOdds != null && heldSideLlmOdds < 80/);
+  assert.match(trendsTable, /activePositionSide === "YES" \? event\.llm_yes_odds : activePositionSide === "NO" \? event\.llm_no_odds/);
+  assert.match(trendsTable, /animate-pulse rounded bg-red-600 px-1 font-black text-white ring-2 ring-red-300/);
+  assert.match(trendsTable, /ALERT: held-side LLM odds are below 80%/);
   assert.match(trendsTable, /border-\[1\.5px\] border-black/);
   assert.match(historyContent, /<BullpenLlmBreakdownDialog question=\{llmQuestion\}/);
   assert.match(historyContent, /<BullpenInvestmentMathDialog focus="returnsPerDay"/);
