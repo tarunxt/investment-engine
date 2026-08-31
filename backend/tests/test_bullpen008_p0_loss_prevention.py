@@ -40,6 +40,14 @@ import app.infrastructure.database.all_models  # noqa: F401
 NOW = datetime(2026, 8, 30, 12, tzinfo=UTC)
 
 
+def test_minute_monitor_episode_version_counter_is_available() -> None:
+    from app.domains.bullpen008 import tasks
+
+    versions = tasks.defaultdict(int)
+    versions[("market", "YES")] += 1
+    assert versions[("market", "YES")] == 1
+
+
 def market(market_id: str, **updates: object) -> dict[str, object]:
     row: dict[str, object] = {
         "market_id": market_id,
