@@ -356,7 +356,14 @@ def stage_from_record(
     outputs = (
         record.outputs_json
         if include_payload
-        else {"metrics": record.outputs_json.get("metrics", {})}
+        else {
+            "metrics": record.outputs_json.get("metrics", {}),
+            # Stage 1 keeps the P0 counters separate so its legacy accounting
+            # metrics remain byte-for-byte compatible.  They are still compact
+            # headline data, not a large stage payload, and must survive the
+            # bootstrap projection used by the stage cards.
+            "risk_metrics": record.outputs_json.get("risk_metrics", {}),
+        }
     )
     return Bullpen008StageOutput(
         stage_number=record.stage_number,

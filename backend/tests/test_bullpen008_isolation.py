@@ -170,7 +170,11 @@ def test_lightweight_stage_projection_keeps_metrics_without_raw_payloads() -> No
         wallet_snapshot_hash="wallet",
         inputs_json={"market_universe": [{"market_id": "large"}]},
         calculations_json={"formula": "large"},
-        outputs_json={"metrics": {"scanned": 1}, "rows": [{"market_id": "large"}]},
+        outputs_json={
+            "metrics": {"scanned": 1},
+            "risk_metrics": {"high_shock_rejected": 3},
+            "rows": [{"market_id": "large"}],
+        },
         rejections_json=[{"market_id": "large"}],
         warnings_json=["warning"],
         provenance_json={"source": "large"},
@@ -181,7 +185,10 @@ def test_lightweight_stage_projection_keeps_metrics_without_raw_payloads() -> No
         duration_seconds=0,
     )
     projected = stage_from_record(record, include_payload=False)
-    assert projected.outputs == {"metrics": {"scanned": 1}}
+    assert projected.outputs == {
+        "metrics": {"scanned": 1},
+        "risk_metrics": {"high_shock_rejected": 3},
+    }
     assert projected.inputs == {}
     assert projected.rejections == []
 
