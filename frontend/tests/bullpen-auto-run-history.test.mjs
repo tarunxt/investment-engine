@@ -88,7 +88,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
   assert.match(trendsTable, /\(event\.scan_scores\[0\] \?\? -1\) >= 80/);
   assert.match(trendsTable, /hasStrongestLatestLlmOdds\(event\) \|\| event\.is_active_position \|\| event\.is_claimable_position/);
-  assert.match(trendsTable, /activeBelowThreshold[\s\S]*?bg-red-100 text-red-950/);
+  assert.match(trendsTable, /hasHeldSideOddsBelowThreshold\(event\)[\s\S]*?activeBelowOddsThreshold \? "bg-red-200 text-red-950 ring-2 ring-inset ring-red-600/);
+  assert.match(trendsTable, /data-active-below-odds-threshold=\{activeBelowOddsThreshold \|\| undefined\}/);
+  assert.match(trendsTable, /data-active-below-current-odds-threshold=\{heldSideCurrentBelowThreshold \|\| undefined\}/);
+  assert.match(trendsTable, /Active held-side odds alert:/);
   assert.match(trendsTable, /aExpiredNotYetClaimable[\s\S]*?return aExpiredNotYetClaimable \? -1 : 1/);
   assert.match(trendsTable, /aClaimable[\s\S]*?return aClaimable \? -1 : 1/);
   assert.match(trendsTable, /aReturnsUnavailable[\s\S]*?return aReturnsUnavailable \? -1 : 1/);
@@ -113,8 +116,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(trendsTable, /href=\{event\.market_url\}/);
   assert.match(trendsTable, /Not covered<br\/>in latest scan/);
   assert.match(trendsTable, /rounded-full bg-green-600 text-white/);
-  assert.match(trendsTable, /heldSideLlmOdds != null && heldSideLlmOdds < 80/);
+  assert.match(trendsTable, /heldSideLlmOdds != null && heldSideLlmOdds < HELD_SIDE_ODDS_ALERT_THRESHOLD/);
   assert.match(trendsTable, /activePositionSide === "YES" \? event\.llm_yes_odds : activePositionSide === "NO" \? event\.llm_no_odds/);
+  assert.match(trendsTable, /activePositionSide === "YES" \? event\.current_yes_odds : activePositionSide === "NO" \? event\.current_no_odds/);
+  assert.match(trendsTable, /hasHeldSideLlmOddsBelowThreshold\(event\) \|\| hasHeldSideCurrentOddsBelowThreshold\(event\)/);
   assert.match(trendsTable, /animate-pulse rounded bg-red-600 px-1 font-black text-white ring-2 ring-red-300/);
   assert.match(trendsTable, /ALERT: held-side LLM odds are below 80%/);
   assert.match(trendsTable, /border-\[1\.5px\] border-black/);
