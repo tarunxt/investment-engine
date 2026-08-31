@@ -7,20 +7,20 @@ WORKFLOW_LABEL = "Bullpen 008"
 SHADOW_MODE = True
 
 STAGE_VERSIONS = {
-    1: "bullpen008-stage1-v9",
-    2: "bullpen008-stage2-v2",
-    3: "bullpen008-stage3-v3",
-    4: "bullpen008-stage4-v3",
-    5: "bullpen008-stage5-v1",
-    6: "bullpen008-stage6-v1",
+    1: "bullpen008-stage1-v10-p0",
+    2: "bullpen008-stage2-v3-p0",
+    3: "bullpen008-stage3-v4-p0",
+    4: "bullpen008-stage4-v4-p0",
+    5: "bullpen008-stage5-v2-p0",
+    6: "bullpen008-stage6-v2-p0",
 }
 
 LLM_PROMPT_VERSION = "bullpen008-probability-risk-v2"
 CLUSTER_PROMPT_VERSION = "bullpen008-cluster-map-v3"
 OPTIMIZER_VERSION = "bullpen008-optimizer-v3"
 CLUSTER_MAP_VERSION = "bullpen008-cluster-map-v3"
-ACTION_PLAN_VERSION = "bullpen008-action-plan-v1"
-EXECUTION_VERSION = "bullpen008-execution-v1"
+ACTION_PLAN_VERSION = "bullpen008-action-plan-v2-p0"
+EXECUTION_VERSION = "bullpen008-execution-v2-p0"
 PLAN_MAX_AGE_SECONDS = 15 * 60
 WALLET_MAX_AGE_SECONDS = 5 * 60
 EXECUTION_ACCOUNT_LOCK_RESOURCE = "bullpen-shared-wallet"

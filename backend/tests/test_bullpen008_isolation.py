@@ -214,6 +214,22 @@ def test_phase2_task_uses_only_certified_008_execution_and_shadow_defaults() -> 
     assert "session.add(PolymarketAutoLiveOrderIntentRecord" not in source
 
 
+def test_p0_minute_monitor_observes_and_activates_only_stage4_policies() -> None:
+    source = Path("app/domains/bullpen008/tasks.py").read_text()
+    monitor = source.split("def _continuous_risk_monitor(", 1)[1].split(
+        "@celery.task(name=CELERY_SCHEDULER_TASK_NAME)", 1
+    )[0]
+    assert "Bullpen008QuoteObservationRecord" in monitor
+    assert "Bullpen008ContingentExitPolicyRecord" in monitor
+    assert "evaluate_contingent_policy(" in monitor
+    assert "acquire_bullpen_account_execution_advisory_lock_sync" in monitor
+    assert "ProductionBullpen008Adapter" not in monitor
+    assert "execute_certified_action(" not in monitor
+    assert "Bullpen008ExecutionIntentRecord(" not in monitor
+    assert "Bullpen008ContingentExitPolicyRecord(" not in monitor
+    assert "fresh_stage_1_to_4_required" in monitor
+
+
 def test_008_scan_bypasses_007_prefilters_without_changing_007_default() -> None:
     scanner = Path("app/domains/polymarket_auto_live/scanner.py").read_text()
     console_profile = Path(

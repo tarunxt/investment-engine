@@ -130,6 +130,66 @@ def test_stage5_cannot_add_market_or_override_side_or_target() -> None:
     assert {row["market_id"] for row in plan["buys"]} <= {"only"}
 
 
+def test_stage5_translates_stage4_contingent_policy_exactly_and_cannot_invent_one() -> None:
+    row = allocation(
+        "held",
+        10,
+        current_exposure_usd=10,
+        joint_loss_scenario_ids=["scenario:iran"],
+        effective_joint_scenario_cap_usd=10,
+    )
+    policy: dict[str, object] = {
+        "affected_market_id": "held",
+        "affected_scenario_ids": ["scenario:iran"],
+        "trigger_type": "MULTI_TRIGGER_CONTINGENT_EXIT",
+        "thresholds": {"held_side_odds_below_pct": 85},
+        "confirmation_requirements": 2,
+        "activation_expiry": (NOW + timedelta(days=1)).isoformat(),
+        "permitted_action": "full_exit",
+        "maximum_sell_quantity": 10,
+        "minimum_acceptable_price": 80,
+        "maximum_slippage": 2,
+        "maximum_spread": 4,
+        "retry_policy": {"mode": "recoverable_limit_only", "never_market_order": True},
+    }
+    policy["policy_hash"] = stable_hash(policy)
+    cert = certificate()
+    cert["contingent_exit_policies"] = [policy]
+    cert["certificate_hash"] = stable_hash({key: value for key, value in cert.items() if key != "certificate_hash"})
+    plan = make_plan([row], [position("held", 10)], cert=cert)
+    assert len(plan["dormant_contingent_exits"]) == 1
+    action = plan["dormant_contingent_exits"][0]
+    assert action["contingent_policy"] == policy
+    assert action["contingent_policy_hash"] == policy["policy_hash"]
+    assert action["activation_state"] == "DORMANT"
+    assert action["quantity_shares"] <= policy["maximum_sell_quantity"]
+    assert plan["plan_certificate"]["all_contingent_policies_translated"] is True
+
+    wide = preflight_execution_plan(
+        plan=plan,
+        stage4_certificate=cert,
+        live_wallet_snapshot=wallet([position("held", 10)]),
+        quotes_by_market={
+            "held": {
+                "current_odds": 85,
+                "spread_cents": 9,
+                "liquidity_usd": 100,
+                "open": True,
+            }
+        },
+        pending_orders=[],
+        settings=Bullpen008Settings(),
+        execution_mode="live",
+        activated_contingent_action_ids={str(action["action_id"])},
+    )
+    contingent = next(row for row in wide["actions"] if row["action_id"] == action["action_id"])
+    assert contingent["status"] == "Recoverable"
+    assert "SPREAD" in contingent["blocker_codes"]
+
+    without_policy = make_plan([row], [position("held", 10)], cert=certificate())
+    assert without_policy["dormant_contingent_exits"] == []
+
+
 @pytest.mark.parametrize("kind", ["invalid", "expired"])
 def test_invalid_or_expired_stage4_certificate_blocks_buys(kind: str) -> None:
     cert = certificate()

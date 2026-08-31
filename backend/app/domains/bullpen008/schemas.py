@@ -32,6 +32,30 @@ class Bullpen008Settings(BaseModel):
     max_contract_exposure_usd: float = Field(default=20, gt=0)
     max_strict_cluster_exposure_usd: float = Field(default=20, gt=0)
     max_common_catalyst_exposure_usd: float = Field(default=20, gt=0)
+    hard_reject_single_day_geopolitical: bool = True
+    geopolitical_min_entry_hours: int = Field(default=48, gt=0)
+    single_day_high_shock_cap_usd: float = Field(default=5, gt=0)
+    high_shock_cluster_cap_usd: float = Field(default=10, gt=0)
+    standard_cluster_cap_usd: float = Field(default=20, gt=0)
+    conservative_edge_min_pp: float = Field(default=5, ge=0, le=100)
+    high_shock_conservative_edge_min_pp: float = Field(default=10, ge=0, le=100)
+    entry_price_high_zone_pct: float = Field(default=90, gt=0, lt=100)
+    entry_price_hard_ceiling_pct: float = Field(default=95, gt=0, lt=100)
+    high_zone_max_allocation_usd: float = Field(default=5, gt=0)
+    min_reward_to_loss_ratio: float = Field(default=0.10, gt=0)
+    high_shock_evidence_max_age_minutes: int = Field(default=30, gt=0)
+    high_shock_min_source_count: int = Field(default=2, ge=2)
+    single_day_time_exit_hours: int = Field(default=24, gt=0)
+    high_shock_time_exit_hours: int = Field(default=12, gt=0)
+    take_profit_odds_floor_pct: float = Field(default=95, gt=0, lt=100)
+    contingent_exit_odds_floor_pct: float = Field(default=85, gt=0, lt=100)
+    odds_drop_15m_pp: float = Field(default=5, gt=0, le=100)
+    odds_drop_24h_pp: float = Field(default=10, gt=0, le=100)
+    catastrophic_drop_15m_pp: float = Field(default=20, gt=0, le=100)
+    quote_confirmation_count: int = Field(default=2, gt=0)
+    soft_drawdown_pct: float = Field(default=3, gt=0, le=100)
+    hard_drawdown_pct: float = Field(default=5, gt=0, le=100)
+    post_shock_cooldown_hours: int = Field(default=24, gt=0)
     allocation_increment_usd: float = Field(default=5, gt=0)
     binary_side_odds_floor_pct: float = Field(default=5, ge=0, lt=50)
     entry_side_odds_floor_pct: float = Field(default=80, ge=50, le=100)
@@ -92,9 +116,24 @@ class Bullpen008Settings(BaseModel):
             self.max_contract_exposure_usd,
             self.max_strict_cluster_exposure_usd,
             self.max_common_catalyst_exposure_usd,
+            self.single_day_high_shock_cap_usd,
+            self.high_shock_cluster_cap_usd,
+            self.standard_cluster_cap_usd,
         ):
             if cap > self.bankroll_usd:
                 raise ValueError("portfolio exposure caps cannot exceed bankroll")
+        if not (
+            self.single_day_high_shock_cap_usd
+            <= self.high_shock_cluster_cap_usd
+            <= self.standard_cluster_cap_usd
+        ):
+            raise ValueError("risk-tier caps must be ordered from most to least restrictive")
+        if self.entry_price_hard_ceiling_pct < self.entry_price_high_zone_pct:
+            raise ValueError("hard price ceiling must be at or above the high-price threshold")
+        if self.hard_drawdown_pct <= self.soft_drawdown_pct:
+            raise ValueError("hard drawdown must exceed soft drawdown")
+        if self.high_shock_conservative_edge_min_pp < self.conservative_edge_min_pp:
+            raise ValueError("high-shock conservative edge cannot be below the ordinary threshold")
         if self.execution_mode == "live":
             if self.shadow_mode or not self.execution_enabled or not self.live_control_armed:
                 raise ValueError("live execution requires the explicit armed live-control state")
@@ -108,6 +147,30 @@ class Bullpen008SettingsUpdate(BaseModel):
     max_contract_exposure_usd: float | None = Field(default=None, gt=0)
     max_strict_cluster_exposure_usd: float | None = Field(default=None, gt=0)
     max_common_catalyst_exposure_usd: float | None = Field(default=None, gt=0)
+    hard_reject_single_day_geopolitical: bool | None = None
+    geopolitical_min_entry_hours: int | None = Field(default=None, gt=0)
+    single_day_high_shock_cap_usd: float | None = Field(default=None, gt=0)
+    high_shock_cluster_cap_usd: float | None = Field(default=None, gt=0)
+    standard_cluster_cap_usd: float | None = Field(default=None, gt=0)
+    conservative_edge_min_pp: float | None = Field(default=None, ge=0, le=100)
+    high_shock_conservative_edge_min_pp: float | None = Field(default=None, ge=0, le=100)
+    entry_price_high_zone_pct: float | None = Field(default=None, gt=0, lt=100)
+    entry_price_hard_ceiling_pct: float | None = Field(default=None, gt=0, lt=100)
+    high_zone_max_allocation_usd: float | None = Field(default=None, gt=0)
+    min_reward_to_loss_ratio: float | None = Field(default=None, gt=0)
+    high_shock_evidence_max_age_minutes: int | None = Field(default=None, gt=0)
+    high_shock_min_source_count: int | None = Field(default=None, ge=2)
+    single_day_time_exit_hours: int | None = Field(default=None, gt=0)
+    high_shock_time_exit_hours: int | None = Field(default=None, gt=0)
+    take_profit_odds_floor_pct: float | None = Field(default=None, gt=0, lt=100)
+    contingent_exit_odds_floor_pct: float | None = Field(default=None, gt=0, lt=100)
+    odds_drop_15m_pp: float | None = Field(default=None, gt=0, le=100)
+    odds_drop_24h_pp: float | None = Field(default=None, gt=0, le=100)
+    catastrophic_drop_15m_pp: float | None = Field(default=None, gt=0, le=100)
+    quote_confirmation_count: int | None = Field(default=None, gt=0)
+    soft_drawdown_pct: float | None = Field(default=None, gt=0, le=100)
+    hard_drawdown_pct: float | None = Field(default=None, gt=0, le=100)
+    post_shock_cooldown_hours: int | None = Field(default=None, gt=0)
     allocation_increment_usd: float | None = Field(default=None, gt=0)
     binary_side_odds_floor_pct: float | None = Field(default=None, ge=0, lt=50)
     entry_side_odds_floor_pct: float | None = Field(default=None, ge=50, le=100)
@@ -240,6 +303,7 @@ class Bullpen008Bootstrap(BaseModel):
     latest_run: Bullpen008Run | None = None
     inherited_runs: list[Bullpen008InheritedRun] = Field(default_factory=list)
     alerts: list[Bullpen008Alert] = Field(default_factory=list)
+    risk_state: dict[str, object] = Field(default_factory=dict)
     pending_phase2_stages: list[int] = Field(default_factory=list)
 
 

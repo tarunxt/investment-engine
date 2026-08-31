@@ -20,8 +20,14 @@ from app.domains.bullpen008.constants import (
 from app.domains.bullpen008.models import (
     Bullpen008ActionPlanRecord,
     Bullpen008AlertRecord,
+    Bullpen008ContingentExitActivationRecord,
+    Bullpen008DrawdownEpisodeRecord,
     Bullpen008ExecutionIntentRecord,
+    Bullpen008JointLossScenarioRecord,
+    Bullpen008LossPreventionAuditRecord,
+    Bullpen008PnlAttributionRecord,
     Bullpen008RunRecord,
+    Bullpen008ScenarioCooldownRecord,
     Bullpen008SettingsRecord,
     Bullpen008StageOutputRecord,
     Bullpen008StateRecord,
@@ -752,6 +758,62 @@ async def get_bootstrap(
         .scalars()
         .all()
     )
+    latest_run_id = latest.id if latest is not None else None
+    scenario_records = [] if latest_run_id is None else (
+        (
+            await session.execute(
+                select(Bullpen008JointLossScenarioRecord)
+                .where(Bullpen008JointLossScenarioRecord.run_id == latest_run_id)
+                .order_by(Bullpen008JointLossScenarioRecord.id.asc())
+            )
+        ).scalars().all()
+    )
+    activation_records = (
+        (
+            await session.execute(
+                select(Bullpen008ContingentExitActivationRecord)
+                .where(Bullpen008ContingentExitActivationRecord.user_id == user_id)
+                .order_by(Bullpen008ContingentExitActivationRecord.activated_at.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+    )
+    drawdown_record = (
+        await session.execute(
+            select(Bullpen008DrawdownEpisodeRecord)
+            .where(Bullpen008DrawdownEpisodeRecord.user_id == user_id)
+            .order_by(Bullpen008DrawdownEpisodeRecord.activated_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    cooldown_records = (
+        (
+            await session.execute(
+                select(Bullpen008ScenarioCooldownRecord)
+                .where(Bullpen008ScenarioCooldownRecord.user_id == user_id)
+                .order_by(Bullpen008ScenarioCooldownRecord.starts_at.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+    )
+    pnl_records = [] if latest_run_id is None else (
+        (
+            await session.execute(
+                select(Bullpen008PnlAttributionRecord)
+                .where(Bullpen008PnlAttributionRecord.run_id == latest_run_id)
+                .order_by(Bullpen008PnlAttributionRecord.market_id.asc())
+            )
+        ).scalars().all()
+    )
+    audit_records = [] if latest_run_id is None else (
+        (
+            await session.execute(
+                select(Bullpen008LossPreventionAuditRecord)
+                .where(Bullpen008LossPreventionAuditRecord.run_id == latest_run_id)
+                .order_by(Bullpen008LossPreventionAuditRecord.market_id.asc())
+            )
+        ).scalars().all()
+    )
     await session.commit()
     return Bullpen008Bootstrap(
         settings=settings_from_record(settings_record),
@@ -775,6 +837,21 @@ async def get_bootstrap(
             )
             for record in alert_records
         ],
+        risk_state={
+            "joint_loss_scenarios": [record.payload for record in scenario_records],
+            "contingent_activations": [record.payload for record in activation_records],
+            "drawdown": drawdown_record.payload if drawdown_record is not None else {
+                "state": "NOT_YET_BASELINED",
+                "soft_threshold_usd": round(settings_from_record(settings_record).bankroll_usd * settings_from_record(settings_record).soft_drawdown_pct / 100, 2),
+                "hard_threshold_usd": round(settings_from_record(settings_record).bankroll_usd * settings_from_record(settings_record).hard_drawdown_pct / 100, 2),
+            },
+            "scenario_cooldowns": [
+                {**record.payload, "scenario_id": record.scenario_id, "status": record.status, "starts_at": _iso(record.starts_at), "ends_at": _iso(record.ends_at)}
+                for record in cooldown_records
+            ],
+            "pnl_attribution": [record.payload for record in pnl_records],
+            "loss_prevention_audit": [record.payload for record in audit_records],
+        },
     )
 
 

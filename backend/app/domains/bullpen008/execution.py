@@ -181,7 +181,7 @@ class ProductionBullpen008Adapter:
                 amount_usd=float(action.get("estimated_usd") or 0),
                 max_price=float(action.get("permitted_price_cents") or 0) / 100,
             )
-        elif action_type in {"full_exit", "trim"}:
+        elif action_type in {"full_exit", "trim", "contingent_exit"}:
             raw = await self._executor.sell_limit(
                 market_id=market_id,
                 outcome=side,

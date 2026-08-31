@@ -3076,6 +3076,30 @@ export interface Bullpen008Settings {
   min_llm_probability_pct: number;
   preferred_min_edge_pp: number;
   minimum_edge_pp: number;
+  hard_reject_single_day_geopolitical: boolean;
+  geopolitical_min_entry_hours: number;
+  single_day_high_shock_cap_usd: number;
+  high_shock_cluster_cap_usd: number;
+  standard_cluster_cap_usd: number;
+  conservative_edge_min_pp: number;
+  high_shock_conservative_edge_min_pp: number;
+  entry_price_high_zone_pct: number;
+  entry_price_hard_ceiling_pct: number;
+  high_zone_max_allocation_usd: number;
+  min_reward_to_loss_ratio: number;
+  high_shock_evidence_max_age_minutes: number;
+  high_shock_min_source_count: number;
+  single_day_time_exit_hours: number;
+  high_shock_time_exit_hours: number;
+  take_profit_odds_floor_pct: number;
+  contingent_exit_odds_floor_pct: number;
+  odds_drop_15m_pp: number;
+  odds_drop_24h_pp: number;
+  catastrophic_drop_15m_pp: number;
+  quote_confirmation_count: number;
+  soft_drawdown_pct: number;
+  hard_drawdown_pct: number;
+  post_shock_cooldown_hours: number;
   risk_reject_threshold: number;
   risk_hard_reject_threshold: number;
   risk_half_size_min: number;
@@ -3188,6 +3212,7 @@ export interface Bullpen008Bootstrap {
   latest_run: Bullpen008Run | null;
   inherited_runs: Bullpen008InheritedRun[];
   alerts: Bullpen008Alert[];
+  risk_state: Record<string, unknown>;
   pending_phase2_stages: number[];
 }
 

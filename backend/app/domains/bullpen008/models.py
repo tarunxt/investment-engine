@@ -399,3 +399,175 @@ class Bullpen008AlertRecord(Base, TimestampMixin):
     actual_odds: Mapped[float | None] = mapped_column(Float, nullable=True)
     recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008RiskClassificationRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_risk_classifications"
+    __table_args__ = (UniqueConstraint("run_id", "market_id", "classifier_version", name="uq_b008_risk_classification"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_profile: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="bullpen008")
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    classifier_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    risk_tier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008JointLossScenarioRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_joint_loss_scenarios"
+    __table_args__ = (UniqueConstraint("run_id", "scenario_id", name="uq_b008_joint_loss_scenario"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_profile: Mapped[str] = mapped_column(String(64), nullable=False, index=True, default="bullpen008")
+    scenario_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    scenario_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    risk_tier: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008ScenarioMembershipRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_scenario_memberships"
+    __table_args__ = (UniqueConstraint("run_id", "scenario_id", "market_id", name="uq_b008_scenario_membership"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    scenario_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008ScenarioExposureSnapshotRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_scenario_exposure_snapshots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=True, index=True)
+    scenario_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008EvidencePacketRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_evidence_packets"
+    __table_args__ = (UniqueConstraint("run_id", "market_id", "packet_hash", name="uq_b008_evidence_packet"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    packet_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008RegimeChangeEpisodeRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_regime_change_episodes"
+    __table_args__ = (UniqueConstraint("user_id", "scenario_id", "episode_hash", name="uq_b008_regime_episode"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    scenario_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    episode_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008QuoteObservationRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_quote_observations"
+    __table_args__ = (UniqueConstraint("user_id", "market_id", "side", "observed_at", name="uq_b008_quote_observation"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    held_side_odds: Mapped[float] = mapped_column(Float, nullable=False)
+    wallet_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008ContingentExitPolicyRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_contingent_exit_policies"
+    __table_args__ = (UniqueConstraint("run_id", "policy_hash", name="uq_b008_contingent_policy_hash"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    policy_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008ContingentExitActivationRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_contingent_exit_activations"
+    __table_args__ = (UniqueConstraint("user_id", "policy_hash", "episode_hash", name="uq_b008_contingent_activation"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    policy_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    episode_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008DailyEquityBaselineRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_daily_equity_baselines"
+    __table_args__ = (UniqueConstraint("user_id", "baseline_date", name="uq_b008_daily_equity_baseline"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    baseline_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    baseline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    wallet_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    equity_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008DrawdownEpisodeRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_drawdown_episodes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    baseline_id: Mapped[int] = mapped_column(ForeignKey("bullpen008_daily_equity_baselines.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    activated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    recovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008ScenarioCooldownRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_scenario_cooldowns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    scenario_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008PnlAttributionRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_pnl_attributions"
+    __table_args__ = (UniqueConstraint("run_id", "market_id", "calendar_day", name="uq_b008_pnl_attribution"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    scenario_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    calendar_day: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    realized_pnl_usd: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    unrealized_pnl_usd: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class Bullpen008LossPreventionAuditRecord(Base, TimestampMixin):
+    __tablename__ = "bullpen008_loss_prevention_audits"
+    __table_args__ = (UniqueConstraint("run_id", "market_id", name="uq_b008_loss_prevention_audit"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id: Mapped[str] = mapped_column(ForeignKey("bullpen008_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    market_id: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
+    payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
