@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 
+import { Bullpen008UniverseAccounting } from "./Bullpen008UniverseAccounting";
+
 const Bullpen008PageClient = dynamic(
   () => import("./Bullpen008PageClient").then((module) => module.Bullpen008PageClient),
   {
@@ -15,6 +17,7 @@ const Bullpen008PageClient = dynamic(
 export function Bullpen008PageShell() {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-6">
+      <Bullpen008UniverseAccounting />
       <Bullpen008PageClient />
     </div>
   );
