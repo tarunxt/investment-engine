@@ -110,9 +110,9 @@ function arrayContains(row: Row, key: string, expected: string) {
   return Array.isArray(row[key]) && (row[key] as unknown[]).some((value) => text(value) === expected);
 }
 
-function genericArrays(outputs: Row) {
+function genericArrays(outputs: Row): Row[] {
   return Object.entries(outputs).flatMap(([source, value]) =>
-    asRows(value).map((row) => ({ ...row, _breakdown_source: source })),
+    asRows(value).map((row): Row => ({ ...row, _breakdown_source: source })),
   );
 }
 
