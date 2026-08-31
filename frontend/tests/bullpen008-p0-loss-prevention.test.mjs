@@ -45,6 +45,7 @@ test("P0 scenario, evidence, exits, drawdown and attribution are visible", () =>
     "Conservative edge, reward skew & evidence",
     "Certified time & contingent exits",
     "Drawdown, regimes & cooldowns",
+    "Regime-change episodes",
     "P&amp;L attribution",
     "Loss-prevention audit",
     "Counterfactual estimate",
@@ -52,6 +53,7 @@ test("P0 scenario, evidence, exits, drawdown and attribution are visible", () =>
     assert.match(page, new RegExp(heading));
   }
   assert.match(types, /risk_state: Record<string, unknown>/);
+  assert.match(page, /regime_change_episodes/);
 });
 
 test("all six stage cards expose P0 headline metrics", () => {

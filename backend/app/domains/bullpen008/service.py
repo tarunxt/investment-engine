@@ -26,6 +26,7 @@ from app.domains.bullpen008.models import (
     Bullpen008JointLossScenarioRecord,
     Bullpen008LossPreventionAuditRecord,
     Bullpen008PnlAttributionRecord,
+    Bullpen008RegimeChangeEpisodeRecord,
     Bullpen008RunRecord,
     Bullpen008ScenarioCooldownRecord,
     Bullpen008SettingsRecord,
@@ -785,6 +786,16 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
+    regime_records = (
+        (
+            await session.execute(
+                select(Bullpen008RegimeChangeEpisodeRecord)
+                .where(Bullpen008RegimeChangeEpisodeRecord.user_id == user_id)
+                .order_by(Bullpen008RegimeChangeEpisodeRecord.activated_at.desc())
+                .limit(20)
+            )
+        ).scalars().all()
+    )
     drawdown_record = (
         await session.execute(
             select(Bullpen008DrawdownEpisodeRecord)
@@ -847,6 +858,16 @@ async def get_bootstrap(
         risk_state={
             "joint_loss_scenarios": [record.payload for record in scenario_records],
             "contingent_activations": [record.payload for record in activation_records],
+            "regime_change_episodes": [
+                {
+                    **record.payload,
+                    "scenario_id": record.scenario_id,
+                    "status": record.status,
+                    "activated_at": _iso(record.activated_at),
+                    "recovered_at": _iso(record.recovered_at),
+                }
+                for record in regime_records
+            ],
             "drawdown": drawdown_record.payload if drawdown_record is not None else {
                 "state": "NOT_YET_BASELINED",
                 "soft_threshold_usd": round(settings_from_record(settings_record).bankroll_usd * settings_from_record(settings_record).soft_drawdown_pct / 100, 2),

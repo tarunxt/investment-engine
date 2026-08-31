@@ -12,6 +12,8 @@ hash lineage, formula/calculation ledgers, prompts, cluster adjudication, Stage
 4 target certificate, Stage 5 plan certificate, Stage 6 attempts/remote IDs and
 final wallet evidence. See [Bullpen 008 Phase 2](bullpen008-phase2.md) and [P0 loss prevention](bullpen008-p0-loss-prevention.md).
 
+P0 audit persistence also includes deterministic classification evidence, Stage 4-certified scenario exposure snapshots, evidence and regime-change episodes, quote observations, contingent policies and activations, daily equity baselines, drawdown episodes, cooldowns, P&L attribution and explicitly estimated loss-prevention counterfactuals. Active regime episodes remain authoritative buy freezes across later runs until evidence-backed recovery; the monitor may evaluate only policies already certified by Stage 4.
+
 ## Bullpen 008 Phase 1 isolation
 
 Bullpen 008 does not reuse or rewrite the frozen Bullpen 007 audit schema. Its immutable Stage 1–4 facts are stored additively in `bullpen008_stage_outputs`, linked to `bullpen008_runs`, with a workflow profile, previous-output hash, settings and wallet hashes, prompt/parser versions, provenance, build version, timing, pass condition and block reason. Deterministic Stage 4 certificates are stored in `bullpen008_portfolio_certificates`.

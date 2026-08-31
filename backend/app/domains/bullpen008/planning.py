@@ -261,16 +261,44 @@ def build_action_plan(
     active_pending_buys: dict[str, float] = defaultdict(float)
     active_pending_sells: dict[str, float] = defaultdict(float)
     cancel_orders: list[dict[str, object]] = []
+    pending_order_classification: list[dict[str, object]] = []
     seen_pending: set[tuple[str, str, str]] = set()
     for pending in pending_orders:
         market_id = str(pending.get("market_id") or "")
         action = str(pending.get("action") or "").upper()
         status = normalize_order_status(pending.get("status"))
+        owned_by_008 = str(pending.get("profile") or WORKFLOW_PROFILE) == WORKFLOW_PROFILE
         identity = (market_id, action, str(pending.get("side") or ""))
         stale_or_duplicate = bool(pending.get("stale") or pending.get("conflicting") or identity in seen_pending)
         seen_pending.add(identity)
         amount = _number(pending.get("remaining_usd"), _number(pending.get("current_order_usd"), _number(pending.get("requested_order_usd"))))
-        if stale_or_duplicate and status in PENDING_ORDER_STATUSES:
+        drawdown_cancel = bool(
+            action == "BUY"
+            and stage4_certificate.get("exit_only") is True
+        )
+        disposition = (
+            "CANCEL_CERTIFIED"
+            if owned_by_008 and (stale_or_duplicate or drawdown_cancel) and status in PENDING_ORDER_STATUSES
+            else "PROTECTED_007_OBSERVATION_ONLY"
+            if not owned_by_008
+            else "CAPACITY_RESERVED"
+            if status in PENDING_ORDER_STATUSES
+            else "TERMINAL_OR_INACTIVE"
+        )
+        pending_order_classification.append(
+            {
+                "profile": pending.get("profile"),
+                "intent_id": pending.get("intent_id"),
+                "market_id": market_id,
+                "action": action,
+                "status": status,
+                "amount_usd": round(amount, 2),
+                "disposition": disposition,
+                "mutable_by_bullpen008": owned_by_008,
+                "included_in_capacity": status in PENDING_ORDER_STATUSES,
+            }
+        )
+        if owned_by_008 and (stale_or_duplicate or drawdown_cancel) and status in PENDING_ORDER_STATUSES:
             cancel_orders.append(dict(pending))
         elif status in PENDING_ORDER_STATUSES:
             if action == "BUY":
@@ -410,7 +438,12 @@ def build_action_plan(
             run_id=run_id, plan_inputs_hash=plan_inputs_hash, action_type="cancel", row=row,
             position=positions.get(market_id), current_exposure=_position_exposure(positions[market_id]) if market_id in positions else 0,
             target_exposure=_number(allocations.get(market_id, {}).get("target_exposure_usd")), amount_usd=_number(pending.get("remaining_usd"), _number(pending.get("current_order_usd"))),
-            reason_code="STALE_DUPLICATE_OR_CONFLICTING_ORDER", explanation="Cancel before any position-changing action.", ordinal=ordinal, settings=settings,
+            reason_code=(
+                "EXIT_ONLY_HARD_DRAWDOWN_CANCEL_PENDING_BUY"
+                if stage4_certificate.get("exit_only") is True
+                and str(pending.get("action") or "").upper() == "BUY"
+                else "STALE_DUPLICATE_OR_CONFLICTING_ORDER"
+            ), explanation="Cancel the Bullpen 008 order before any position-changing action.", ordinal=ordinal, settings=settings,
         )
         action["remote_order_id"] = pending.get("remote_order_id") or pending.get("order_id")
         arrays["order_cancellations"].append(action)
@@ -581,7 +614,17 @@ def build_action_plan(
     unique_actions = len(action_ids) == len(set(action_ids)) and not contradictory
     certified_policy_hashes = sorted(str(row.get("policy_hash") or "") for row in certified_policies)
     policies_translated = sorted(translated_policy_hashes) == certified_policy_hashes
-    plan_certified = all((targets_reproduced, cash_nonnegative, caps_pass, increments_pass, dependencies_pass, every_position_classified, unique_actions, policies_translated))
+    authority_valid = all(
+        (
+            stage4_hash_valid,
+            portfolio_certified,
+            clustering_complete,
+            wallet_is_fresh,
+            target_is_fresh,
+            target_account_matches,
+        )
+    )
+    plan_certified = all((authority_valid, targets_reproduced, cash_nonnegative, caps_pass, increments_pass, dependencies_pass, every_position_classified, unique_actions, policies_translated))
 
     plan_without_hash: dict[str, object] = {
         "plan_id": "b008p-" + plan_inputs_hash[:32],
@@ -599,6 +642,7 @@ def build_action_plan(
         "target_account_matches": target_account_matches,
         "wallet_version": wallet_version(wallet_snapshot),
         "plan_inputs_hash": plan_inputs_hash,
+        "pending_order_classification": pending_order_classification,
         **arrays,
         "cash_ledger": cash_ledger,
         "simulated_final_wallet": target_match_rows,
@@ -634,6 +678,9 @@ def build_action_plan(
         "target_account_matches": target_account_matches,
         "no_duplicate_or_contradictory_action": unique_actions,
         "all_contingent_policies_translated": policies_translated,
+        "all_pending_orders_classified": len(pending_order_classification)
+        == len(pending_orders),
+        "stage4_authority_valid": authority_valid,
         "certified_contingent_policy_hashes": certified_policy_hashes,
         "largest_contract_exposure": round(contract_max, 2),
         "largest_strict_cluster_exposure": round(max([*strict_exposure.values(), 0]), 2),

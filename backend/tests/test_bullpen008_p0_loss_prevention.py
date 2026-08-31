@@ -377,6 +377,25 @@ def test_reward_skew_protection(price: float, allocation: float, expected: str) 
     assert expected in result["entry_rejection_codes"]
 
 
+def test_high_price_zone_requires_strong_evidence_even_with_small_allocation() -> None:
+    result = reward_and_edge_protection(
+        {
+            "current_chosen_side_bullpen_odds": 90,
+            "proposed_allocation_usd": 5,
+            "chosen_side_llm_probability": 99,
+            "confidence": "High",
+            "evidence_quality": "Moderate",
+            "risk_components": {"U": 1, "A": 1, "T": 1, "D": 1, "I": 1},
+            "risk_score": 1,
+            "risk_tier": "standard_objective",
+            "llm_disagreement_level": "low",
+        },
+        settings=Bullpen008Settings(),
+        now=NOW,
+    )
+    assert "HIGH_PRICE_STRONG_EVIDENCE_REQUIRED" in result["entry_rejection_codes"]
+
+
 def test_conservative_haircut_rejects_96_against_95_and_missing_uncertainty() -> None:
     complete = {
         "current_chosen_side_bullpen_odds": 95,
@@ -461,6 +480,33 @@ def test_contingent_exit_five_point_15m_and_ten_point_24h_declines_activate() ->
     )
     assert "ODDS_DROP_24H" in slow["trigger_types"]
     assert slow["activation_status"] == "WOULD_ACTIVATE"
+
+
+def test_contingent_exit_never_would_submit_with_stale_quote_or_expired_policy() -> None:
+    stale = evaluate_contingent_policy(
+        policy(),
+        [
+            {"observed_at": (NOW - timedelta(minutes=4)).isoformat(), "held_side_odds": 84},
+            {"observed_at": (NOW - timedelta(minutes=3)).isoformat(), "held_side_odds": 83},
+        ],
+        now=NOW,
+    )
+    assert stale["activation_status"] == "BLOCKED"
+    assert stale["submission_status"] is None
+    assert "FRESH_QUOTE_MISSING" in stale["blocker_codes"]
+
+    expired_policy = policy(activation_expiry=(NOW - timedelta(seconds=1)).isoformat())
+    expired = evaluate_contingent_policy(
+        expired_policy,
+        [
+            {"observed_at": (NOW - timedelta(minutes=1)).isoformat(), "held_side_odds": 84},
+            {"observed_at": NOW.isoformat(), "held_side_odds": 83},
+        ],
+        now=NOW,
+    )
+    assert expired["activation_status"] == "BLOCKED"
+    assert expired["submission_status"] is None
+    assert "ACTIVATION_POLICY_EXPIRED" in expired["blocker_codes"]
 
 
 def test_drawdown_breakers_and_external_flow_neutralisation_for_200_bankroll() -> None:
@@ -585,7 +631,16 @@ def test_p0_run_artifacts_persist_with_run_contract_scenario_and_policy_attribut
             started_at=NOW,
             summary="P0 persistence test",
             settings_snapshot=Bullpen008Settings().model_dump(mode="json"),
-            wallet_snapshot={},
+            wallet_snapshot={
+                "positions": [
+                    {
+                        "market_id": "iran-arab-no",
+                        "shares": 10,
+                        "average_price_cents": 50,
+                        "current_value_usd": 8,
+                    }
+                ]
+            },
             task_metadata={},
             run_metadata={},
         )
@@ -635,7 +690,7 @@ def test_p0_run_artifacts_persist_with_run_contract_scenario_and_policy_attribut
                 "market_id": "iran-arab-no",
                 "classifier_version": "v1",
                 "risk_tier": "single_day_high_shock",
-                "risk_classifier_evidence": ["Iran", "target"],
+                "risk_classification_evidence": {"matches": ["Iran", "target"]},
                 "risk_rejection_codes": ["SINGLE_DAY_HIGH_SHOCK"],
                 "accounting_status": "accepted_monitoring",
             }]},
@@ -658,8 +713,14 @@ def test_p0_run_artifacts_persist_with_run_contract_scenario_and_policy_attribut
         assert session.scalar(select(Bullpen008JointLossScenarioRecord.id)) is not None
         assert session.scalar(select(Bullpen008ScenarioMembershipRecord.id)) is not None
         assert session.scalar(select(Bullpen008ContingentExitPolicyRecord.id)) is not None
+        risk = session.scalars(select(Bullpen008RiskClassificationRecord)).one()
+        assert risk.payload["matched_evidence"] == {"matches": ["Iran", "target"]}
         pnl = session.scalars(select(Bullpen008PnlAttributionRecord)).one()
         assert pnl.payload["entry_run_id"] == run.id
         assert pnl.payload["associated_scenario_ids"] == ["scenario:iran"]
+        assert pnl.payload["entry_amount"] == 5
+        assert pnl.payload["current_value"] == 8
+        assert pnl.payload["unrealized_pnl"] == 3
+        assert pnl.payload["applicable_cap"] == 5
         audit = session.scalars(select(Bullpen008LossPreventionAuditRecord)).one()
         assert audit.payload["counterfactual_estimate"] is True

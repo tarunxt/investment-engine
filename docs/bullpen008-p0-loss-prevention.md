@@ -8,6 +8,8 @@ Stage 4 is the only portfolio authority. It certifies buys, retained positions, 
 
 Production defaults remain `shadow_mode=true`, `execution_enabled=false`, `execution_mode=shadow` and `live_control_armed=false`. Shadow evaluation records `WOULD_ACTIVATE`, `WOULD_SUBMIT` and exact blockers, but does not perform a remote write.
 
+Stage 5 fails closed unless the Stage 4 hash, certification, clustering, wallet freshness, target freshness and account identity all validate. It classifies every pending order, but can mutate only orders owned by the `bullpen008` profile. In hard-drawdown exit-only mode it certifies cancellation of pending Bullpen 008 buys; Bullpen 007 orders remain read-only capacity evidence.
+
 ## Deterministic tail-risk classification
 
 Classifier `bullpen008-tail-risk-v1` combines the question, slug, category, tags, full rules, authoritative times, named entities and bounded military-action terms. It avoids classifying an unrelated contract from a generic word in incidental prose. An exact-calendar-date military or geopolitical contract, or one whose resolution window is at most 24 hours, is `single_day_high_shock`. Other military/geopolitical contracts are `high_shock_geopolitical`; remaining objective markets are `standard_objective`.
@@ -61,6 +63,8 @@ A high-shock packet requires at least two credible independent publishers, with 
 
 Deterministic regime flags include verified strikes, retaliation, ceasefire breach, official attack confirmation, authoritative imminent-retaliation warnings, emergency declarations, resolution-fact changes and evidence directly invalidating the held thesis. An active episode freezes buys/top-ups/averaging down, starts a 24-hour scenario cooldown, evaluates already certified exits and requires fresh Stage 1–4 analysis plus evidence-backed recovery. It never automatically buys the opposite side.
 
+The freeze is durable: every Stage 4 run reloads unrecovered active regime episodes and keeps their scenarios blocked until explicit recovery evidence closes the episode. The UI exposes the persisted episode, reason and activation/recovery evidence.
+
 ## Time exits and contingent exits
 
 Stage 4 schedules a `single_day_high_shock` exit before the event day and, when feasible, at least 24 hours before the deadline. Other high-shock holdings exit 12–24 hours before their deadline. It also reduces when held-side odds reach the certified 95–98% profit zone or reward-to-loss falls below 0.10. Expired non-claimable positions retain hold-for-resolution handling.
@@ -68,6 +72,8 @@ Stage 4 schedules a `single_day_high_shock` exit before the event day and, when 
 Default contingent triggers are held-side odds below 85%, a 5-point decline in 15 minutes, a 10-point decline in 24 hours, thesis-invalidating evidence, regime change, the mandatory timestamp, reward-to-loss below 0.10 and a hard drawdown. Normally two fresh observations are required and persisted. A deterministically verified regime change or a greater-than-20-point 15-minute catastrophic move can activate immediately after the move is evidenced.
 
 Every policy fixes the maximum shares, minimum sell price, slippage, spread, retry rules, expiry, scenarios, version and hash. A wide spread, insufficient liquidity or ambiguous remote outcome remains recoverable. A blocked limit exit is never converted into an unrestricted market sell. Duplicate delivery reconciles by stable idempotency key and remote ID rather than blindly submitting again.
+
+`WOULD_ACTIVATE` and `WOULD_SUBMIT` are emitted only when the immutable policy hash is valid, the trigger is proven and no safety blocker remains. A missing or older-than-two-minute quote, expired policy, or incomplete confirmation is `BLOCKED`, never a shadow submission candidate.
 
 ## Continuous monitoring and drawdown
 
@@ -78,6 +84,8 @@ The daily UTC baseline contains cash, marked liquidation value, pending/unreconc
 ## P&L and loss-prevention audit
 
 Bullpen 008 attribution records run, decision, contract, side, strict/common cluster, joint scenario, entry/exit intent, trigger episode and calendar day, including entry basis, current/exit value, realised and unrealised P&L, fees, original maximum loss/profit, reward skew, raw/conservative edge, scenario loss/cap, exit policy and reconciliation state.
+
+Current value comes from the wallet mark; cost basis uses live shares and average entry price when available. Inherited positions without a provable Bullpen 008 entry intent are labelled `CURRENT_008_RUN_SNAPSHOT` rather than being presented as a verified original entry. Stage 4 scenario exposure snapshots preserve the certified target loss and binding cap.
 
 The loss-prevention audit reports whether each new safeguard would have rejected entry, reduced size, blocked a top-up, required an early exit, activated a contingent exit, frozen buys or entered exit-only mode. These are explicitly labelled counterfactual estimates; avoided-loss estimates are never actual realised results.
 

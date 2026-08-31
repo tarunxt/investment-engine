@@ -356,6 +356,7 @@ export function Bullpen008PageClient() {
   );
   const contingentPolicies = asRows(portfolioStage?.outputs.contingent_exit_policies);
   const contingentActivations = asRows(riskState.contingent_activations);
+  const regimeEpisodes = asRows(riskState.regime_change_episodes);
   const drawdown = asRecord(riskState.drawdown);
   const pnlAttribution = asRows(riskState.pnl_attribution);
   const lossPreventionAudit = asRows(
@@ -701,6 +702,19 @@ export function Bullpen008PageClient() {
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Current breaker</p>
               <p className="mt-1 text-lg font-semibold text-slate-950">{formatLabel(String(drawdown.state ?? "NOT_YET_BASELINED"))}</p>
               <p className="mt-2 text-sm text-slate-700">Drawdown {formatMoney(drawdown.drawdown_usd)} · soft {formatMoney(drawdown.soft_threshold_usd)} · hard {formatMoney(drawdown.hard_threshold_usd)}</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-950">Regime-change episodes</p>
+              <div className="mt-2 space-y-2">
+                {regimeEpisodes.slice(0, 6).map((episode, index) => (
+                  <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs" key={String(episode.episode_hash ?? index)}>
+                    <p className="font-semibold text-rose-950">{String(episode.status ?? "ACTIVE_BUY_FREEZE")} · {String(episode.scenario_id ?? "scenario")}</p>
+                    <p className="mt-1 text-rose-800">{String(episode.regime_change_reason ?? "Verified thesis-invalidating development")}</p>
+                    <p className="mt-1 text-rose-700">Activated {formatApiTimestamp(String(episode.activated_at ?? ""), { emptyValue: "unknown" })} · recovery {episode.recovered_at ? formatApiTimestamp(String(episode.recovered_at)) : "not evidenced"}</p>
+                  </div>
+                ))}
+                {regimeEpisodes.length === 0 ? <p className="text-xs text-slate-500">No verified regime-change episode.</p> : null}
+              </div>
             </div>
             <div>
               <p className="text-sm font-semibold text-slate-950">Regime-triggered contingent actions</p>

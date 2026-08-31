@@ -659,10 +659,19 @@ def _active_loss_prevention_gates(user_id: int, *, now: datetime) -> dict[str, o
                 Bullpen008ScenarioCooldownRecord.ends_at > now,
             )
         ).scalars().all()
+        active_regimes = session.execute(
+            select(Bullpen008RegimeChangeEpisodeRecord).where(
+                Bullpen008RegimeChangeEpisodeRecord.user_id == user_id,
+                Bullpen008RegimeChangeEpisodeRecord.status == "ACTIVE_BUY_FREEZE",
+                Bullpen008RegimeChangeEpisodeRecord.recovered_at.is_(None),
+            )
+        ).scalars().all()
     return {
         "drawdown_state": drawdown.status if drawdown is not None else "NORMAL",
         "drawdown_evidence": drawdown.payload if drawdown is not None else {},
         "active_scenario_cooldown_ids": sorted({row.scenario_id for row in cooldowns}),
+        "active_regime_scenario_ids": sorted({row.scenario_id for row in active_regimes}),
+        "active_regime_evidence": [dict(row.payload or {}) for row in active_regimes],
     }
 
 
@@ -1223,7 +1232,7 @@ def _persist_loss_prevention_artifacts(
                 classifier_version=str(row.get("classifier_version") or row.get("risk_classifier_version") or "unknown"),
                 risk_tier=str(row.get("risk_tier") or "standard_objective"),
                 payload={
-                    "matched_evidence": row.get("risk_classifier_evidence", []),
+                    "matched_evidence": row.get("risk_classification_evidence", {}),
                     "rejection_codes": row.get("risk_rejection_codes", []),
                     "accepted_monitoring": row.get("accounting_status") == "accepted_monitoring",
                     "new_entry_enabled": row.get("new_entry_enabled", False),
@@ -1298,6 +1307,31 @@ def _persist_loss_prevention_artifacts(
         )
     if portfolio is None:
         return
+    for stress in portfolio.get("joint_scenario_stress", []):
+        if not isinstance(stress, dict) or not stress.get("scenario_id"):
+            continue
+        session.add(
+            Bullpen008ScenarioExposureSnapshotRecord(
+                user_id=run.user_id,
+                run_id=run.id,
+                scenario_id=str(stress["scenario_id"]),
+                observed_at=now,
+                payload={
+                    "snapshot_phase": "stage4-certified-target",
+                    "target_loss_at_risk_usd": stress.get(
+                        "maximum_joint_scenario_loss_usd"
+                    ),
+                    "effective_scenario_cap_usd": stress.get(
+                        "effective_scenario_cap_usd"
+                    ),
+                    "risk_tier": stress.get("risk_tier"),
+                    "result": stress.get("result"),
+                    "conservative_gross_loss": stress.get(
+                        "conservative_gross_loss", True
+                    ),
+                },
+            )
+        )
     policies = [row for row in portfolio.get("contingent_exit_policies", []) if isinstance(row, dict)]
     for policy in policies:
         session.add(
@@ -1326,6 +1360,11 @@ def _persist_loss_prevention_artifacts(
         ).scalars()
     }
     day = now.date().isoformat()
+    wallet_positions = {
+        str(row.get("market_id") or ""): row
+        for row in (run.wallet_snapshot or {}).get("positions", [])
+        if isinstance(row, dict) and row.get("market_id")
+    }
     audit_by_market = {
         str(row.get("market_id")): row
         for row in portfolio.get("loss_prevention_audit", [])
@@ -1335,14 +1374,24 @@ def _persist_loss_prevention_artifacts(
         if not isinstance(allocation, dict) or not allocation.get("market_id"):
             continue
         market_id = str(allocation["market_id"])
+        position = wallet_positions.get(market_id, {})
         current_exposure = float(allocation.get("current_exposure_usd") or 0)
-        odds = float(allocation.get("current_chosen_side_bullpen_odds") or 0)
-        current_value = current_exposure * odds / 100 if odds > 0 else current_exposure
+        current_value = float(
+            position.get("current_value_usd")
+            or position.get("exposure_usd")
+            or current_exposure
+        )
+        shares = float(position.get("shares") or 0)
+        average_price = float(position.get("average_price_cents") or 0)
+        cost_basis = shares * average_price / 100 if shares > 0 and average_price > 0 else current_exposure
+        unrealized_pnl = current_value - cost_basis
         scenarios_for_market = list(allocation.get("joint_loss_scenario_ids") or [])
         action = action_by_market.get(market_id, {})
         intent = intents.get(market_id)
         pnl_payload = {
             "entry_run_id": run.id,
+            "entry_provenance_status": "CURRENT_008_RUN_SNAPSHOT",
+            "decision_run_id": run.id,
             "decision": "BUY" if float(allocation.get("proposed_buy_usd") or 0) > 0 else "REDUCE" if float(allocation.get("proposed_sell_usd") or 0) > 0 else "HOLD",
             "contract": market_id,
             "side": allocation.get("chosen_side"),
@@ -1350,12 +1399,12 @@ def _persist_loss_prevention_artifacts(
             "stage5_action_id": action.get("action_id"),
             "stage6_intent_id": intent.id if intent else None,
             "entry_timestamp": run.started_at.isoformat(),
-            "entry_price": allocation.get("current_chosen_side_bullpen_odds"),
-            "entry_amount": current_exposure,
+            "entry_price": average_price or None,
+            "entry_amount": round(cost_basis, 2),
             "current_or_exit_price": allocation.get("current_chosen_side_bullpen_odds"),
             "current_value": round(current_value, 2),
             "realized_pnl": 0.0,
-            "unrealized_pnl": round(current_value - current_exposure, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
             "fees": float(intent.fees_usd or 0) if intent else 0.0,
             "maximum_loss_at_entry": allocation.get("maximum_loss_usd"),
             "maximum_remaining_profit_at_entry": allocation.get("maximum_profit_usd"),
@@ -1366,7 +1415,8 @@ def _persist_loss_prevention_artifacts(
             "common_catalyst_cluster": allocation.get("common_catalyst_cluster_id"),
             "associated_scenario_ids": scenarios_for_market,
             "scenario_loss_at_entry": allocation.get("target_loss_at_risk_usd"),
-            "applicable_cap": allocation.get("effective_scenario_cap_usd"),
+            "applicable_cap": allocation.get("effective_joint_scenario_cap_usd")
+            or allocation.get("effective_scenario_cap_usd"),
             "exit_policy": [p for p in policies if p.get("affected_market_id") == market_id],
             "actual_exit_trigger": intent.payload.get("trigger") if intent else None,
             "trigger_episode": intent.payload.get("trigger_episode") if intent else None,
@@ -1917,12 +1967,23 @@ def execute_bullpen008_run(self, run_id: str) -> str:
                     "active_scenario_cooldown_ids", []
                 )
             )
+            active_regimes = set(
+                str(value)
+                for value in stage4_risk_gates.get(
+                    "active_regime_scenario_ids", []
+                )
+            )
             stage4_rows = [
                 {
                     **row,
                     "drawdown_state": stage4_risk_gates["drawdown_state"],
                     "scenario_cooldown_active": bool(
                         active_cooldowns
+                        & set(str(value) for value in row.get("joint_loss_scenario_ids", []))
+                    ),
+                    "regime_change_active": bool(row.get("regime_change_active"))
+                    or bool(
+                        active_regimes
                         & set(str(value) for value in row.get("joint_loss_scenario_ids", []))
                     ),
                 }
@@ -2519,9 +2580,14 @@ def _continuous_risk_monitor(
     )
     pending = _pending_order_packets(user_id)
     pending_buy_usd = sum(
-        float(row.get("remaining_value_usd") or row.get("amount_usd") or 0)
+        float(
+            row.get("remaining_usd")
+            or row.get("current_order_usd")
+            or row.get("requested_order_usd")
+            or 0
+        )
         for row in pending
-        if str(row.get("action_type") or row.get("side") or "").lower() in {"buy", "yes", "no"}
+        if str(row.get("action") or row.get("action_type") or "").lower() == "buy"
     )
     equity = cash + liquidation + pending_buy_usd
     baseline = session.execute(
@@ -2541,14 +2607,20 @@ def _continuous_risk_monitor(
                 "cash_usd": cash,
                 "marked_liquidation_value_usd": liquidation,
                 "pending_and_unreconciled_usd": pending_buy_usd,
-                "external_flows_usd": 0.0,
+                "external_flows_usd": float(balance.get("net_external_flows_usd") or 0),
                 "storage_timezone": "UTC",
                 "display_timezone": "Asia/Kolkata",
             },
         )
         session.add(baseline)
         session.flush()
-    external_flows = float(balance.get("net_external_flows_usd") or 0)
+    baseline_external_flows = float(
+        dict(baseline.payload or {}).get("external_flows_usd") or 0
+    )
+    external_flows = (
+        float(balance.get("net_external_flows_usd") or 0)
+        - baseline_external_flows
+    )
     drawdown = evaluate_drawdown(
         baseline_equity_usd=baseline.equity_usd,
         current_equity_usd=equity,
