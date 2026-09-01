@@ -43,6 +43,7 @@ export type BullpenAutoRunStatusData = {
     auto_live_enabled: boolean;
     strategy_profile?: string | null;
     console_order_usd?: number | null;
+    console_scan_scope?: "trending" | "full_universe" | null;
     console_auto_start_at?: string | null;
     console_auto_refresh_minutes?: number | null;
   };
@@ -307,6 +308,7 @@ export function normalizeBullpenAutoRunStatusData(
       !isNullableActiveRunStatus(cachedState.active_run_status) ||
       !isNullableString(cachedSettings.strategy_profile) ||
       !isNullableFiniteNumber(cachedSettings.console_order_usd) ||
+      !isNullableString(cachedSettings.console_scan_scope) ||
       !isNullableString(cachedSettings.console_auto_start_at) ||
       !isNullableFiniteNumber(cachedSettings.console_auto_refresh_minutes) ||
       !isNullableString(root.fetched_at)
@@ -347,6 +349,14 @@ export function normalizeBullpenAutoRunStatusData(
         ...(cachedSettings.console_order_usd === undefined
           ? {}
           : { console_order_usd: cachedSettings.console_order_usd }),
+        ...(cachedSettings.console_scan_scope === undefined
+          ? {}
+          : {
+              console_scan_scope:
+                cachedSettings.console_scan_scope === "full_universe"
+                  ? "full_universe"
+                  : "trending",
+            }),
         ...(cachedSettings.console_auto_start_at === undefined
           ? {}
           : { console_auto_start_at: cachedSettings.console_auto_start_at }),
@@ -388,6 +398,7 @@ export function normalizeBullpenAutoRunStatusData(
     !isNullableActiveRunStatus(rawScheduler.active_run_status) ||
     !isNullableString(rawConfiguration.strategy_profile) ||
     !isNullableFiniteNumber(rawConfiguration.console_order_usd) ||
+    !isNullableString(rawConfiguration.console_scan_scope) ||
     !isNullableString(rawConfiguration.console_auto_start_at) ||
     !isNullableFiniteNumber(rawConfiguration.console_auto_refresh_minutes)
   ) {
@@ -427,6 +438,14 @@ export function normalizeBullpenAutoRunStatusData(
       ...(rawConfiguration.console_order_usd === undefined
         ? {}
         : { console_order_usd: rawConfiguration.console_order_usd }),
+      ...(rawConfiguration.console_scan_scope === undefined
+        ? {}
+        : {
+            console_scan_scope:
+              rawConfiguration.console_scan_scope === "full_universe"
+                ? "full_universe"
+                : "trending",
+          }),
       ...(rawConfiguration.console_auto_start_at === undefined
         ? {}
         : { console_auto_start_at: rawConfiguration.console_auto_start_at }),
@@ -475,6 +494,7 @@ export function normalizeBullpenAutoRunStatusFromSummary(
     !isNullableString(rawState.server_now) ||
     !isNullableString(rawSettings.strategy_profile) ||
     !isNullableFiniteNumber(rawSettings.console_order_usd) ||
+    !isNullableString(rawSettings.console_scan_scope) ||
     !isNullableString(rawSettings.console_auto_start_at) ||
     !isNullableFiniteNumber(rawSettings.console_auto_refresh_minutes)
   ) {
@@ -523,6 +543,14 @@ export function normalizeBullpenAutoRunStatusFromSummary(
         typeof rawSettings.console_order_usd === "number"
           ? rawSettings.console_order_usd
           : null,
+      ...(rawSettings.console_scan_scope === undefined
+        ? {}
+        : {
+            console_scan_scope:
+              rawSettings.console_scan_scope === "full_universe"
+                ? "full_universe"
+                : "trending",
+          }),
       console_auto_start_at:
         typeof rawSettings.console_auto_start_at === "string"
           ? rawSettings.console_auto_start_at

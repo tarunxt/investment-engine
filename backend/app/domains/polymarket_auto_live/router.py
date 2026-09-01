@@ -452,12 +452,21 @@ async def get_stage1_scan_preview(current_user: User = Depends(get_current_user)
         now=datetime.now(UTC),
         min_market_odds=settings.console_min_market_odds,
         custom_exclude_phrases=settings.console_custom_exclude_phrases,
+        scan_scope=settings.console_scan_scope,
     )
     return {
         "source_label": scan.source_label,
         "source_url": scan.source_url,
         "scanned_at": scan.scanned_at,
         "total_candidates": scan.total_candidates,
+        "scan_scope": settings.console_scan_scope,
+        "scan_completeness": (
+            "complete" if scan.complete_universe else "incomplete"
+            if settings.console_scan_scope == "full_universe"
+            else "trending"
+        ),
+        "bullpen_trending_rows": scan.trending_candidates,
+        "complete_catalogue_markets": scan.catalogue_candidates,
         "warning": scan.warning,
         "details": scan.details,
         "accepted": [

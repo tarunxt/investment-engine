@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -320,6 +321,9 @@ class ScanResult:
     scanned_at: str
     accepted: list[ScannedMarket]
     rejected: list[ScanRejectedMarket]
+    complete_universe: bool = True
+    warning: str | None = None
+    details: str | None = None
 
 
 def _now_iso() -> str:
@@ -700,7 +704,7 @@ async def _fetch_gamma_keyset_page(
     after_cursor: str | None,
     end_date_min: str,
 ) -> tuple[list[dict[str, Any]], str | None]:
-    """Fetch one high-throughput event-keyset page for 008 discovery.
+    """Fetch one high-throughput event-keyset page for exhaustive discovery.
 
     Parent events carry every child market and support pages five times larger
     than the market-keyset endpoint, reducing cursor round trips while still
@@ -1080,12 +1084,16 @@ async def scan_candidate_markets(
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
     use_deadline_cursor_pagination: bool = False,
+    preserve_partial_on_error: bool = False,
+    pagination_deadline_seconds: float | None = None,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     seen_market_ids: set[str] = set()
     current_universe_start = _now_iso()
+    pagination_error: Exception | None = None
+    pagination_started_at = time.monotonic()
 
     async with httpx.AsyncClient(
         timeout=20,
@@ -1097,29 +1105,43 @@ async def scan_candidate_markets(
         deadline_boundary: str | None = None
         deadline_boundary_seen = 0
         while True:
-            if use_deadline_cursor_pagination:
-                rows, event_count, last_deadline, boundary_count = (
-                    await _fetch_gamma_deadline_cursor_page(
+            try:
+                if (
+                    pagination_deadline_seconds is not None
+                    and time.monotonic() - pagination_started_at
+                    >= pagination_deadline_seconds
+                ):
+                    raise TimeoutError(
+                        "Gamma pagination exceeded its full-universe deadline."
+                    )
+                if use_deadline_cursor_pagination:
+                    rows, event_count, last_deadline, boundary_count = (
+                        await _fetch_gamma_deadline_cursor_page(
+                            client,
+                            offset=offset,
+                            end_date_min=current_universe_start,
+                        )
+                    )
+                    next_cursor = None
+                elif use_keyset_pagination:
+                    rows, next_cursor = await _fetch_gamma_keyset_page(
+                        client,
+                        after_cursor=after_cursor,
+                        end_date_min=current_universe_start,
+                    )
+                    event_count = 0
+                else:
+                    rows, event_count = await _fetch_gamma_page(
                         client,
                         offset=offset,
                         end_date_min=current_universe_start,
                     )
-                )
-                next_cursor = None
-            elif use_keyset_pagination:
-                rows, next_cursor = await _fetch_gamma_keyset_page(
-                    client,
-                    after_cursor=after_cursor,
-                    end_date_min=current_universe_start,
-                )
-                event_count = 0
-            else:
-                rows, event_count = await _fetch_gamma_page(
-                    client,
-                    offset=offset,
-                    end_date_min=current_universe_start,
-                )
-                next_cursor = None
+                    next_cursor = None
+            except Exception as exc:
+                if not preserve_partial_on_error or not seen_market_ids:
+                    raise
+                pagination_error = exc
+                break
             for row in rows:
                 if not isinstance(row, dict):
                     continue
@@ -1213,8 +1235,23 @@ async def scan_candidate_markets(
 
     return ScanResult(
         source_label="Polymarket Gamma API",
-        source_url=POLYMARKET_GAMMA_MARKETS_URL,
+        source_url=(
+            POLYMARKET_GAMMA_EVENTS_KEYSET_URL
+            if use_keyset_pagination
+            else POLYMARKET_GAMMA_EVENTS_URL
+        ),
         scanned_at=_now_iso(),
         accepted=accepted,
         rejected=rejected,
+        complete_universe=pagination_error is None,
+        warning=(
+            "Gamma pagination stopped after preserving the successfully fetched pages."
+            if pagination_error is not None
+            else None
+        ),
+        details=(
+            str(pagination_error) or type(pagination_error).__name__
+            if pagination_error is not None
+            else None
+        ),
     )

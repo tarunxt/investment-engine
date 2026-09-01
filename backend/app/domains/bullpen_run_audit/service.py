@@ -1171,6 +1171,28 @@ def _build_bundle(
             "scan_context": {
                 "scan_source_label": diagnostics.get("scan_source_label"),
                 "scan_source_url": diagnostics.get("scan_source_url"),
+                "scan_scope": stage1_outputs.get("scan_scope")
+                or diagnostics.get("scan_scope"),
+                "scan_completeness": stage1_outputs.get("scan_completeness")
+                or diagnostics.get("scan_completeness"),
+                "bullpen_trending_rows": stage1_outputs.get(
+                    "bullpen_trending_rows"
+                ),
+                "complete_catalogue_markets": stage1_outputs.get(
+                    "complete_catalogue_markets"
+                ),
+                "active_wallet_positions": stage1_outputs.get(
+                    "active_wallet_positions"
+                ),
+                "filter_eligible_markets": stage1_outputs.get(
+                    "accepted_candidates_count"
+                ),
+                "active_wallet_markets_added_to_union": stage1_outputs.get(
+                    "active_wallet_markets_added_to_union"
+                ),
+                "missing_active_market_count": stage1_outputs.get(
+                    "missing_active_market_count"
+                ),
                 "used_manual_console_rows": diagnostics.get("used_manual_console_rows"),
                 "selected_manual_candidate_ids": diagnostics.get("selected_manual_candidate_ids") or [],
                 "scanned_candidates": diagnostics.get("scanned_candidates"),

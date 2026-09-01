@@ -2086,12 +2086,49 @@ function StageOneRunStats({
       ? ` (Includes ${includedActiveCount} active event${includedActiveCount === 1 ? "" : "s"})`
       : "";
   const displayStat = (value: number) => (hideNumbers ? "—" : value);
+  const scanScope = readStageOutputString(stage.outputs.scan_scope);
+  const scanCompleteness = readStageOutputString(
+    stage.outputs.scan_completeness,
+  );
+  const fullUniverseMetrics = [
+    ["Bullpen trending rows", stage.outputs.bullpen_trending_rows],
+    ["Complete catalogue markets", stage.outputs.complete_catalogue_markets],
+    ["Active wallet positions", stage.outputs.active_wallet_positions],
+    ["Filter-eligible markets", stage.outputs.accepted_candidates_count],
+    [
+      "Wallet markets added to union",
+      stage.outputs.active_wallet_markets_added_to_union,
+    ],
+    ["Missing wallet markets", stage.outputs.missing_active_market_count],
+  ] as const;
   const rowClassName = renderInteractiveRows
     ? "block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
     : undefined;
 
   return (
     <div className="space-y-0.5">
+      {scanScope ? (
+        <div className="pb-1 text-xs font-semibold text-slate-700">
+          Scan: {scanScope === "full_universe" ? "Full Universe" : "Trending"}
+          {scanCompleteness
+            ? ` · ${scanCompleteness.charAt(0).toUpperCase()}${scanCompleteness.slice(1)}`
+            : ""}
+        </div>
+      ) : null}
+      {scanScope === "full_universe" ? (
+        <dl className="mb-2 grid grid-cols-2 gap-x-3 gap-y-0.5 rounded-lg border border-emerald-100 bg-white/70 p-2 text-[11px]">
+          {fullUniverseMetrics.map(([label, rawValue]) => (
+            <div key={label} className="contents">
+              <dt className="text-slate-500">{label}</dt>
+              <dd className="text-right font-semibold tabular-nums text-slate-800">
+                {hideNumbers
+                  ? "—"
+                  : (readStageOutputNumber(rawValue) ?? "—")}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <button
           type="button"
@@ -9466,6 +9503,7 @@ function Stage3PreviewDialog({
 
 function buildConsoleSettingsUpdate(
   consoleOrderUsd: number,
+  consoleScanScope: "trending" | "full_universe",
   startAt?: string | null,
   refreshMinutes?: number | null,
   consoleLlmTargets?: ProviderModelTarget[] | null,
@@ -9476,6 +9514,7 @@ function buildConsoleSettingsUpdate(
     // occupied. Settings require a positive baseline, while the worker will
     // recalculate the actual buy amount after claims and exits.
     console_order_usd: resolvePositiveConsoleOrderUsd(consoleOrderUsd),
+    console_scan_scope: consoleScanScope,
     console_auto_start_at: startAt ?? null,
     console_auto_refresh_minutes: refreshMinutes ?? null,
     ...(consoleLlmTargets ? { console_llm_targets: consoleLlmTargets } : {}),
@@ -10633,6 +10672,11 @@ export function BullpenAutoRunScheduleCard({
   const [isTradeAmountInfoDialogOpen, setIsTradeAmountInfoDialogOpen] =
     useState(false);
   const [scheduleStartInput, setScheduleStartInput] = useState("");
+  const [consoleScanScope, setConsoleScanScope] = useState<
+    "trending" | "full_universe"
+  >("trending");
+  const [consoleScanScopeSaveBusy, setConsoleScanScopeSaveBusy] =
+    useState(false);
   const [schedulePickerValue, setSchedulePickerValue] = useState("");
   const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
   const [scheduleSettingsDirty, setScheduleSettingsDirty] = useState(false);
@@ -11047,6 +11091,56 @@ export function BullpenAutoRunScheduleCard({
     visiblePersistedAutoRunStatus?.settings.console_auto_start_at,
     visiblePersistedAutoRunStatus?.settings.console_auto_refresh_minutes,
   ]);
+
+  useEffect(() => {
+    const persistedScope =
+      summary?.settings.console_scan_scope ??
+      visiblePersistedAutoRunStatus?.settings.console_scan_scope;
+    if (persistedScope !== "trending" && persistedScope !== "full_universe") {
+      return;
+    }
+    window.queueMicrotask(() => setConsoleScanScope(persistedScope));
+  }, [
+    summary?.settings.console_scan_scope,
+    visiblePersistedAutoRunStatus?.settings.console_scan_scope,
+  ]);
+
+  async function handleConsoleScanScopeChange(
+    nextScope: "trending" | "full_universe",
+  ) {
+    if (nextScope === consoleScanScope || consoleScanScopeSaveBusy) return;
+    const previousScope = consoleScanScope;
+    setConsoleScanScope(nextScope);
+    setConsoleScanScopeSaveBusy(true);
+    setError(null);
+    try {
+      await apiService.updateBullpenAutoLiveSettings({
+        console_scan_scope: nextScope,
+      });
+      setSummary((currentSummary) =>
+        currentSummary
+          ? {
+              ...currentSummary,
+              settings: {
+                ...currentSummary.settings,
+                console_scan_scope: nextScope,
+              },
+            }
+          : currentSummary,
+      );
+      void refreshPersistedAutoRunStatus();
+      setNotice(
+        nextScope === "full_universe"
+          ? "Full Universe saved. Future manual and scheduled runs will exhaustively scan the catalogue."
+          : "Trending saved. Future manual and scheduled runs will use the existing Bullpen feed.",
+      );
+    } catch (nextError) {
+      setConsoleScanScope(previousScope);
+      setError(normalizeError(nextError));
+    } finally {
+      setConsoleScanScopeSaveBusy(false);
+    }
+  }
 
   useEffect(() => {
     const nextTargets = summary?.settings.console_llm_targets ?? [];
@@ -12165,6 +12259,7 @@ export function BullpenAutoRunScheduleCard({
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           persistedConsoleOrderUsd,
+          consoleScanScope,
           normalizedStart || null,
           refreshMinutes,
           consoleLlmTargets,
@@ -12233,6 +12328,7 @@ export function BullpenAutoRunScheduleCard({
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           persistedConsoleOrderUsd,
+          consoleScanScope,
           normalizedStart || null,
           refreshMinutes,
           consoleLlmTargets,
@@ -12363,6 +12459,7 @@ export function BullpenAutoRunScheduleCard({
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           latestConsoleOrderUsd,
+          consoleScanScope,
           normalizedStart || null,
           refreshMinutes,
           consoleLlmTargets,
@@ -12475,6 +12572,7 @@ export function BullpenAutoRunScheduleCard({
       await apiService.updateBullpenAutoLiveSettings(
         buildConsoleSettingsUpdate(
           persistedConsoleOrderUsd,
+          consoleScanScope,
           scheduleStartInput.trim() || null,
           refreshMinutes,
           consoleLlmTargets,
@@ -13524,6 +13622,70 @@ export function BullpenAutoRunScheduleCard({
         </div>
 
         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
+          <fieldset className="mb-4">
+            <legend className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Stage 1 scan scope
+            </legend>
+            <div
+              className="mt-2 grid max-w-xl grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-inner"
+              aria-label="Bullpen scan scope"
+            >
+              {(
+                [
+                  {
+                    value: "trending",
+                    label: "Trending",
+                    description: "Current Bullpen feed",
+                  },
+                  {
+                    value: "full_universe",
+                    label: "Full Universe",
+                    description: "All Polymarket markets",
+                  },
+                ] as const
+              ).map((option) => {
+                const checked = consoleScanScope === option.value;
+                return (
+                  <label
+                    key={option.value}
+                    className={`relative cursor-pointer rounded-lg px-3 py-2 text-center transition ${
+                      checked
+                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
+                        : "text-slate-500 hover:text-slate-800"
+                    } ${
+                      action !== null || consoleScanScopeSaveBusy
+                        ? "cursor-wait opacity-60"
+                        : ""
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="bullpen-scan-scope"
+                      value={option.value}
+                      checked={checked}
+                      disabled={action !== null || consoleScanScopeSaveBusy}
+                      onChange={() =>
+                        void handleConsoleScanScopeChange(option.value)
+                      }
+                      className="sr-only"
+                    />
+                    <span className="block text-sm font-semibold">
+                      {option.label}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] font-medium">
+                      {option.description}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs leading-5 text-slate-500">
+              {consoleScanScope === "full_universe"
+                ? "Exhaustive keyset pagination is required. If enumeration is incomplete, active positions remain monitored but new purchases are blocked."
+                : "Uses the existing Trending workflow without changing its filters or downstream stages."}
+              {consoleScanScopeSaveBusy ? " Saving preference…" : ""}
+            </p>
+          </fieldset>
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">

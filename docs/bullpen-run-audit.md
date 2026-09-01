@@ -1591,3 +1591,21 @@ Each normalized, case-insensitive phrase is applied to the canonical market sear
 text before a candidate can pass Stage 1. The resulting rejection evidence names
 the matched custom phrase. Existing frozen snapshots remain valid because runs
 created before this setting was introduced retain their original settings payload.
+
+## Trending and Full Universe scan scopes
+
+Bullpen 007 persists `console_scan_scope` in the user settings snapshot. Legacy
+settings default to `trending`, which preserves the existing Bullpen CLI discovery
+feed and downstream workflow. Selecting `full_universe` changes only Stage 1
+discovery: the worker keyset-paginates Gamma events through the terminal cursor,
+enumerates every child market, unions the catalogue with Bullpen Trending and the
+active wallet, and deduplicates canonical market/condition identities.
+
+Successfully fetched catalogue pages are retained if a later page fails. Such a
+run is frozen as `scan_completeness=incomplete`; active positions can still be
+reviewed for safety, but the Stage 2 authoritative-universe contract is marked
+incomplete and Stage 3 cannot submit new purchases. The audit snapshot records
+Bullpen Trending rows, complete-catalogue markets, active wallet positions,
+filter-eligible markets, wallet markets added to the union, and the final missing
+wallet-market count. A complete Full Universe handoff requires
+`missing_active_market_count=0`.

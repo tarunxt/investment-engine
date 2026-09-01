@@ -533,6 +533,7 @@ class BullpenAutoLiveBot:
                 emergency_stop=settings.emergency_stop,
                 limit_orders_only=settings.limit_orders_only,
                 console_order_usd=settings.console_order_usd,
+                console_scan_scope=settings.console_scan_scope,
                 console_auto_start_at=settings.console_auto_start_at,
                 console_auto_refresh_minutes=settings.console_auto_refresh_minutes,
                 console_llm_target_count=len(settings.console_llm_targets),
