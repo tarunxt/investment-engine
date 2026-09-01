@@ -13,6 +13,23 @@ Bullpen 008 is a separate six-stage workflow under the `bullpen008` profile and
 `/polymarket/bullpen008` API namespace. Bullpen 007 remains on its existing
 three-stage routes, models, Redis keys, scheduler task and order-intent tables.
 
+## Run recovery and history
+
+An active 008 run owns an isolated pending marker and per-run Redis lease, so a
+second run request is rejected instead of being duplicated. The 008 console
+surfaces Pause and Kill controls whenever that non-terminal run is visible.
+Pause blocks new scheduled work; Kill terminalizes the 008 run, revokes its
+Celery task, and clears only the matching `bullpen008:*` leases. The worker also
+honours the durable `cancelled_by_user` terminal marker so a late delivery cannot
+reopen the killed run.
+
+The History button opens `/console/bullpen-ai/008history`. It reuses the Bullpen
+007 history presentation while reading only 008 run and Stage 2 records through
+`/polymarket/bullpen008/runs` and
+`/polymarket/bullpen008/history/event-trends`. The legacy
+`/console/bullpen008/history` route renders the same dedicated screen for
+backward-compatible links.
+
 ## Authority and handoff
 
 1. Stage 4 produces the only authoritative target portfolio and a certificate

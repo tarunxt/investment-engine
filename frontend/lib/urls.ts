@@ -285,8 +285,11 @@ const bullpen008ApiUrls = {
     `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop`,
   clearEmergencyStop: () =>
     `${resolveApiBaseUrl()}/polymarket/bullpen008/emergency-stop/clear`,
+  kill: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/kill`,
   runOnce: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/run-once`,
   runs: () => `${resolveApiBaseUrl()}/polymarket/bullpen008/runs`,
+  historyEventTrends: () =>
+    `${resolveApiBaseUrl()}/polymarket/bullpen008/history/event-trends`,
   run: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/bullpen008/runs/${encodeURIComponent(runId)}`,
   retryRun: (runId: string) =>
@@ -619,7 +622,7 @@ export const URLs = {
       polymarketDirectBot: () => "/console/polymarket-direct-bot",
       bullpenAi: () => "/console/bullpen-ai",
       bullpen008: () => "/console/bullpen008",
-      bullpen008History: () => "/console/bullpen008/history",
+      bullpen008History: () => "/console/bullpen-ai/008history",
       bullpen008AnalyseEvents: () => "/console/bullpen008/analyse-events",
       bullpen008AnalyseRuns: () => "/console/bullpen008/analyse-runs",
       bullpen008RunDetail: (runId: string) =>

@@ -68,12 +68,13 @@ test("008 page preserves the 007 shell patterns and exposes a six-stage monitor"
 test("all Bullpen 008 internal destinations stay in the 008 route namespace", () => {
   const urls = readSource("../lib/urls.ts");
   for (const path of [
-    "/console/bullpen008/history",
+    "/console/bullpen-ai/008history",
     "/console/bullpen008/analyse-events",
     "/console/bullpen008/analyse-runs",
     "/console/bullpen008/runs/",
   ]) assert.match(urls, new RegExp(path.replaceAll("/", "\\/")));
   for (const route of [
+    "../app/console/bullpen-ai/008history/page.tsx",
     "../app/console/bullpen008/history/page.tsx",
     "../app/console/bullpen008/analyse-events/page.tsx",
     "../app/console/bullpen008/analyse-runs/page.tsx",

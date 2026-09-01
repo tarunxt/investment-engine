@@ -3237,6 +3237,20 @@ export interface Bullpen008HistoryPage {
   offset: number;
 }
 
+export type Bullpen008EventTrend = BullpenAutoLiveEventTrend;
+
+export interface Bullpen008EventTrendsResponse {
+  events: Bullpen008EventTrend[];
+  scan_count: number;
+  generated_at: string;
+}
+
+export interface Bullpen008KillResponse {
+  state: Bullpen008State;
+  killed_run: Bullpen008Run | null;
+  message: string;
+}
+
 export type TradingBotStatus =
   | "running"
   | "paused"
