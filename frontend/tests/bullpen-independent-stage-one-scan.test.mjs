@@ -48,6 +48,19 @@ test("active independent Stage 1 scan is cancellable and resets its timer", () =
   assert.match(pageSource, /waitForBullpenPollDelay\([\s\S]{0,120}scanSignal/);
 });
 
+test("active independent Stage 1 shows live page progress instead of stale totals", () => {
+  assert.match(cardSource, /BullpenIndependentStageOneProgress/);
+  assert.match(cardSource, /markets scanned · Page/);
+  assert.match(cardSource, /Last update/);
+  assert.match(cardSource, /Retry attempts:/);
+  assert.match(cardSource, /isIndependentStageOneActive \? \(/);
+  assert.match(pageSource, /completedPages \+= 1/);
+  assert.match(pageSource, /options\?\.onProgress\?\./);
+  assert.match(pageSource, /status: isRetryingPage \? "retrying" : "scanning"/);
+  assert.match(routeSource, /retryReason/);
+  assert.match(routeSource, /rate-limited this page \(HTTP 429\)/);
+});
+
 test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
   assert.match(pageSource, /archivePrevious: false/);
   assert.match(pageSource, /onRunIndependentStageOne/);

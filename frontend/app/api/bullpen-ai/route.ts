@@ -1291,12 +1291,28 @@ async function fetchGammaMarketPage({
       name === "AbortError" ||
       name === "TimeoutError"
     ) {
-      return { candidates, nextCursor: cursor, retryableFailure: true };
+      return {
+        candidates,
+        nextCursor: cursor,
+        retryableFailure: true,
+        retryReason:
+          name === "TimeoutError" || name === "AbortError"
+            ? "Polymarket Gamma page request timed out."
+            : "Polymarket Gamma page request failed at the network layer.",
+      };
     }
     throw error;
   }
   if (response.status === 429 || response.status >= 500) {
-    return { candidates, nextCursor: cursor, retryableFailure: true };
+    return {
+      candidates,
+      nextCursor: cursor,
+      retryableFailure: true,
+      retryReason:
+        response.status === 429
+          ? "Polymarket Gamma rate-limited this page (HTTP 429)."
+          : `Polymarket Gamma returned a temporary server error (HTTP ${response.status}).`,
+    };
   }
   if (!response.ok) {
     throw new Error(`Polymarket Gamma returned HTTP ${response.status}`);
@@ -1348,7 +1364,12 @@ async function fetchGammaMarketPage({
     rawNextCursor === GAMMA_TERMINAL_CURSOR ||
     rawNextCursor === cursor;
   const nextCursor = reachedEnd ? null : rawNextCursor;
-  return { candidates, nextCursor, retryableFailure: false };
+  return {
+    candidates,
+    nextCursor,
+    retryableFailure: false,
+    retryReason: null,
+  };
 }
 
 function isVercelSecurityCheckpoint(html: string) {
@@ -1460,6 +1481,7 @@ export async function GET(request: NextRequest) {
       candidates,
       nextCursor,
       retryableFailure,
+      retryReason,
     } = await fetchGammaMarketPage({
       cursor,
       currentUniverseStart: new Date(scannedAt),
@@ -1473,6 +1495,7 @@ export async function GET(request: NextRequest) {
           resultChunk: true,
           scanStartedAt: scannedAt,
           nextCursor: cursor,
+          retryReason,
           totalCandidates: 0,
           questions: [],
           rejectedQuestions: [],
