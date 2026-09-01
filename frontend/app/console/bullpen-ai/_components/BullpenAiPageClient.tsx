@@ -246,6 +246,7 @@ const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
 const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 3_600_000;
+const PARTIAL_SCAN_MAX_REJECTED_ROWS = 2_000;
 const BULLPEN_SCAN_POLL_MS = 250;
 const BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000;
 
@@ -3037,20 +3038,18 @@ function BullpenAiPageContent() {
       positions: activePositions,
       error: `Failed to refresh Bullpen wallet positions during scan: ${normalizeError(error)}.`,
     }));
+    const scanRequestStartedAt = Date.now();
+    const chunkedQuestions: ScanResult["questions"] = [];
+    const chunkedRejectedQuestions: NonNullable<ScanResult["rejectedQuestions"]> = [];
+    let receivedResultChunk = false;
+    let chunkedTotalCandidates = 0;
+    let completedPages = 0;
+    let retryCount = 0;
+    let scanCursor: string | null = null;
+    let scanStartedAt: string | null = null;
+    let scanResponse: { response: Response; payload: ScanResult } | null = null;
 
     try {
-      const scanRequestStartedAt = Date.now();
-      const chunkedQuestions: ScanResult["questions"] = [];
-      const chunkedRejectedQuestions: NonNullable<
-        ScanResult["rejectedQuestions"]
-      > = [];
-      let receivedResultChunk = false;
-      let chunkedTotalCandidates = 0;
-      let completedPages = 0;
-      let retryCount = 0;
-      let scanCursor: string | null = null;
-      let scanStartedAt: string | null = null;
-      let scanResponse: { response: Response; payload: ScanResult };
       while (true) {
         const requestedCursor = scanCursor;
         const scanParams = new URLSearchParams(params);
@@ -3161,6 +3160,9 @@ function BullpenAiPageContent() {
           scanSignal,
         );
       }
+      if (!scanResponse) {
+        throw new Error("Bullpen scan ended without returning a result.");
+      }
       const { response } = scanResponse;
       const payload = receivedResultChunk
         ? {
@@ -3168,6 +3170,8 @@ function BullpenAiPageContent() {
             totalCandidates: chunkedTotalCandidates,
             questions: chunkedQuestions,
             rejectedQuestions: chunkedRejectedQuestions,
+            pagesScanned: completedPages,
+            totalRejectedQuestions: chunkedRejectedQuestions.length,
           }
         : scanResponse.payload;
       const isSuccessfulScan = response.ok && !payload.error;
@@ -3205,23 +3209,50 @@ function BullpenAiPageContent() {
       };
     } catch (scanError) {
       void positionsRefreshTask;
-      if (scanSignal.aborted || isBullpenRequestAbort(scanError)) {
-        return {
-          snapshot: null,
-          error: null,
-        };
-      }
+      const wasStopped = scanSignal.aborted || isBullpenRequestAbort(scanError);
       const message =
-        scanError instanceof Error
+        wasStopped
+          ? "Scan stopped by user."
+          : scanError instanceof Error
           ? scanError.message
           : "Bullpen scan failed.";
+      const partialSnapshot =
+        receivedResultChunk && scanResponse
+          ? createBullpenScanSnapshot({
+              ...scanResponse.payload,
+              scannedAt: scanStartedAt ?? scanResponse.payload.scannedAt,
+              totalCandidates: chunkedTotalCandidates,
+              questions: chunkedQuestions,
+              rejectedQuestions: chunkedRejectedQuestions.slice(0, PARTIAL_SCAN_MAX_REJECTED_ROWS),
+              error: undefined,
+              warning: `${message} Saved partial results from ${chunkedTotalCandidates.toLocaleString("en-IN")} scanned markets across ${completedPages} completed pages.`,
+              details:
+                chunkedRejectedQuestions.length > PARTIAL_SCAN_MAX_REJECTED_ROWS
+                  ? `The partial snapshot retains the first ${PARTIAL_SCAN_MAX_REJECTED_ROWS.toLocaleString("en-IN")} filtered rows for inspection; the complete filtered count was ${chunkedRejectedQuestions.length.toLocaleString("en-IN")}.`
+                  : scanResponse.payload.details,
+              isPartial: true,
+              interruptionReason: message,
+              pagesScanned: completedPages,
+              totalRejectedQuestions: chunkedRejectedQuestions.length,
+            })
+          : null;
+      if (partialSnapshot) {
+        syncBullpenScanSnapshot(partialSnapshot, {
+          resetSelections: options?.resetSelections,
+          archivePrevious: options?.archivePrevious,
+        });
+      }
       setMessagesByMode((current) => ({
         ...current,
-        [activeMode]: message,
+        [activeMode]: partialSnapshot
+          ? partialSnapshot.warning ?? message
+          : wasStopped
+            ? null
+            : message,
       }));
       return {
-        snapshot: null,
-        error: message,
+        snapshot: partialSnapshot,
+        error: wasStopped ? null : message,
       };
     } finally {
       pageSignal?.removeEventListener("abort", abortScan);

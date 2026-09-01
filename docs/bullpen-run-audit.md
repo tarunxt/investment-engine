@@ -34,13 +34,20 @@ do not rewrite historical run-audit facts or become an Auto Run audit record.
 While this independent scan is active, the console presents Stage 1 as a yellow
 working tile with a live elapsed timer. The **Scanning** control remains clickable
 and aborts the in-flight stateless pagination request, immediately restoring the
-blue **Scan** control without creating or mutating a frozen audit record.
+blue **Scan** control. A stopped, timed-out, or otherwise interrupted enumeration
+saves its accumulated counts and accepted rows as a clearly labelled partial
+independent snapshot; rejected rows are capped for browser storage while their
+authoritative total is retained. The dated snapshot button reopens this latest
+partial or completed Stage 1 evidence without creating or mutating a frozen audit
+record.
 The working tile replaces historical Stage 1 totals with the current stateless
 enumeration progress: normalized markets scanned, current keyset page, response
 age, and retry count. Gamma timeouts, rate limits, temporary server errors, and
 frontend polling failures surface an explicit retry reason while the same cursor
 is retried. Completed-run totals return only after the new scan finishes or is
-cancelled; they are never presented as progress for an in-flight scan.
+cancelled; they are never presented as progress for an in-flight scan. Gamma
+enumeration is bounded by the same saved maximum-closing-days filter shown in the
+console, preventing irrelevant far-future markets from exhausting the scan budget.
 The preview calls the canonical backend Stage 1 scanner. If Bullpen CLI returns a
 silently truncated discover set, the scanner supplements it from Polymarket Gamma
 before applying the saved filters; the same completeness safeguard applies to new

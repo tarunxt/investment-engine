@@ -1261,15 +1261,18 @@ async function runBullpenDiscover() {
 async function fetchGammaMarketPage({
   cursor,
   currentUniverseStart,
+  currentUniverseEnd,
 }: {
   cursor: string | null;
   currentUniverseStart: Date;
+  currentUniverseEnd: Date;
 }) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   const params = new URLSearchParams({
     archived: "false",
     closed: "false",
     end_date_min: currentUniverseStart.toISOString(),
+    end_date_max: currentUniverseEnd.toISOString(),
     limit: String(GAMMA_MARKET_PAGE_SIZE),
   });
   if (cursor) params.set("after_cursor", cursor);
@@ -1475,6 +1478,10 @@ export async function GET(request: NextRequest) {
       ? requestedScannedAtDate.toISOString()
       : new Date().toISOString();
   const cursor = searchParams.get("scanCursor");
+  const currentUniverseStart = new Date(scannedAt);
+  const currentUniverseEnd = new Date(
+    currentUniverseStart.getTime() + filters.maxClosingDays * MILLISECONDS_PER_DAY,
+  );
 
   try {
     const {
@@ -1484,7 +1491,8 @@ export async function GET(request: NextRequest) {
       retryReason,
     } = await fetchGammaMarketPage({
       cursor,
-      currentUniverseStart: new Date(scannedAt),
+      currentUniverseStart,
+      currentUniverseEnd,
     });
 
     if (retryableFailure) {
@@ -1515,7 +1523,7 @@ export async function GET(request: NextRequest) {
         ? {}
         : {
             details:
-              "Polymarket Gamma scanned the complete current universe of open markets before filters were applied.",
+              "Polymarket Gamma scanned every open market in the configured closing window before filters were applied.",
           }),
     });
     const chunk = {

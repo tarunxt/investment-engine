@@ -1390,20 +1390,29 @@ function buildIndependentStageOneView(
     (question) =>
       toCandidate(question, "filtered", question.filterReasons),
   );
+  const rejectedCandidateCount =
+    snapshot.totalRejectedQuestions ?? rejectedCandidates.length;
 
   return {
     key: "scan",
     title: "Stage 1 · Bullpen Scan",
     subtitle: "Independent Stage 1 scan",
-    tone: "green",
+    tone: snapshot.isPartial ? "yellow" : "green",
     state: "finished",
-    detail: "Independent Stage 1 scan completed without running Stage 2 or Stage 3.",
+    detail: snapshot.isPartial
+      ? snapshot.warning ?? "Independent Stage 1 scan stopped before completion; partial results were saved."
+      : "Independent Stage 1 scan completed without running Stage 2 or Stage 3.",
     progressCommentary: [
       `${snapshot.totalCandidates} Bullpen events scanned.`,
       `${acceptedCandidates.length} events passed the saved filters.`,
-      `${rejectedCandidates.length} events were filtered out.`,
+      `${rejectedCandidateCount} events were filtered out.`,
+      ...(snapshot.isPartial && snapshot.pagesScanned
+        ? [`Partial snapshot saved after ${snapshot.pagesScanned} completed pages.`]
+        : []),
     ],
-    progressLabel: `${snapshot.totalCandidates}/${snapshot.totalCandidates} events`,
+    progressLabel: snapshot.isPartial
+      ? `${snapshot.totalCandidates} events scanned before interruption`
+      : `${snapshot.totalCandidates}/${snapshot.totalCandidates} events`,
     progressPercent: 100,
     isCurrent: false,
     timerStartedAt: snapshot.scannedAt,
@@ -1419,6 +1428,10 @@ function buildIndependentStageOneView(
       total_items: snapshot.totalCandidates,
       accepted_candidates_count: acceptedCandidates.length,
       rejected_candidates_count: rejectedCandidates.length,
+      total_rejected_candidates_count: rejectedCandidateCount,
+      partial_scan: Boolean(snapshot.isPartial),
+      interruption_reason: snapshot.interruptionReason ?? null,
+      pages_scanned: snapshot.pagesScanned ?? null,
       accepted_candidates: acceptedCandidates,
       rejected_candidates: rejectedCandidates,
       scan_source_label: snapshot.sourceLabel,
@@ -14398,7 +14411,16 @@ export function BullpenAutoRunScheduleCard({
                                     : ""
                                 }`}
                               >
-                                Scan dated {formatIstDateTime(independentScanSnapshot.scannedAt)}
+                                {independentScanSnapshot.isPartial
+                                  ? "Partial scan dated "
+                                  : "Scan dated "}
+                                {formatIstDateTime(independentScanSnapshot.scannedAt)}
+                                <span className="mt-0.5 block text-[10px] font-medium opacity-90">
+                                  {independentScanSnapshot.totalCandidates.toLocaleString("en-IN")} markets
+                                  {independentScanSnapshot.pagesScanned
+                                    ? ` · ${independentScanSnapshot.pagesScanned} pages`
+                                    : ""}
+                                </span>
                               </button>
                             </>
                           ) : null}
