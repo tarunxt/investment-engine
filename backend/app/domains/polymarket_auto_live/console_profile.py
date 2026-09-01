@@ -571,6 +571,8 @@ def _read_outcome_labels(row: dict[str, object]) -> list[str]:
 def _read_yes_no_prices(
     row: dict[str, object], outcome_labels: list[str]
 ) -> tuple[float | None, float | None]:
+    """Read executable Buy Yes and Buy No prices, with legacy fallbacks."""
+
     normalized_labels = [_normalize_text(label) for label in outcome_labels]
     outcome_prices = [
         _read_number(value) for value in _iter_list_like(row.get("outcomePrices"))
@@ -587,16 +589,43 @@ def _read_yes_no_prices(
         if no_index < len(outcome_prices):
             no_price = outcome_prices[no_index]
 
-    nested_price_keys = (
-        "odds",
-        "decimalOdds",
-        "price",
-        "lastPrice",
-        "bestAsk",
-        "bestBid",
-        "probability",
-        "probabilityValue",
-    )
+    # Bullpen payloads may expose a separate ask for each outcome. Prefer those
+    # because they directly represent what a Buy order can fill at.
+    yes_ask = None
+    no_ask = None
+    ask_keys = ("bestAsk", "best_ask", "ask", "buyPrice", "buy_price")
+    for collection_name in ("outcomes", "options", "tokens", "markets"):
+        for item in _iter_list_like(row.get(collection_name)):
+            if not isinstance(item, dict):
+                continue
+            label = _read_string(item, _OUTCOME_LABEL_KEYS)
+            if not label:
+                continue
+            normalized_label = _normalize_text(label)
+            if normalized_label == "yes" and yes_ask is None:
+                yes_ask = _read_nested_number(item, ask_keys)
+            elif normalized_label == "no" and no_ask is None:
+                no_ask = _read_nested_number(item, ask_keys)
+
+    is_binary_yes_no = len(set(normalized_labels)) == 2 and set(normalized_labels) == {"yes", "no"}
+    if is_binary_yes_no:
+        # Gamma exposes the YES book at the market level: bestAsk buys YES;
+        # 1 - bestBid buys the complementary NO token.
+        top_level_yes_ask = _normalize_console_odds(row.get("bestAsk"))
+        top_level_yes_bid = _normalize_console_odds(row.get("bestBid"))
+        normalized_yes_ask = _normalize_console_odds(yes_ask)
+        normalized_no_ask = _normalize_console_odds(no_ask)
+        if normalized_yes_ask is not None:
+            yes_price = normalized_yes_ask
+        elif top_level_yes_ask is not None:
+            yes_price = top_level_yes_ask
+        if normalized_no_ask is not None:
+            no_price = normalized_no_ask
+        elif top_level_yes_bid is not None:
+            no_price = round(100.0 - top_level_yes_bid, 2)
+
+    # Compatibility fallbacks for non-Gamma/Bullpen payload variants.
+    nested_price_keys = ("odds", "decimalOdds", "price", "lastPrice", "probability", "probabilityValue")
     if yes_price is None or no_price is None:
         for collection_name in ("outcomes", "options", "tokens", "markets"):
             for item in _iter_list_like(row.get(collection_name)):
@@ -614,34 +643,15 @@ def _read_yes_no_prices(
     if yes_price is None:
         yes_price = _read_nested_number(
             row,
-            (
-                "yesOdds",
-                "yes_odd",
-                "yesDecimalOdds",
-                "yesPrice",
-                "yes",
-                "bestYesOdds",
-                "probabilityYes",
-                "yesProbability",
-            ),
+            ("yesOdds", "yes_odd", "yesDecimalOdds", "yesPrice", "yes", "bestYesOdds", "probabilityYes", "yesProbability"),
         )
     if no_price is None:
         no_price = _read_nested_number(
             row,
-            (
-                "noOdds",
-                "no_odd",
-                "noDecimalOdds",
-                "noPrice",
-                "no",
-                "bestNoOdds",
-                "probabilityNo",
-                "noProbability",
-            ),
+            ("noOdds", "no_odd", "noDecimalOdds", "noPrice", "no", "bestNoOdds", "probabilityNo", "noProbability"),
         )
 
     return _normalize_console_odds(yes_price), _normalize_console_odds(no_price)
-
 
 def _is_binary_yes_no(
     outcome_labels: list[str],
