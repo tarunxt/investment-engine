@@ -140,6 +140,10 @@ export type ScanResult = {
   error?: string;
   warning?: string;
   details?: string;
+  isPartial?: boolean;
+  interruptionReason?: string;
+  pagesScanned?: number;
+  totalRejectedQuestions?: number;
 };
 
 export type BullpenScanSnapshot = Omit<ScanResult, "questions"> & {
