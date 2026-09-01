@@ -549,9 +549,9 @@ function normalizeResolvedMarket(
   const bestBidPrice = normalizePrice(parseNumber(record.bestBid));
   const bestAskPrice = normalizePrice(parseNumber(record.bestAsk));
   const yesOdds =
-    bestAskPrice === null ? indicativeYesOdds : toPercent(bestAskPrice);
+    bestAskPrice === null ? indicativeYesOdds : normalizeOdds(bestAskPrice);
   const noOdds =
-    bestBidPrice === null ? indicativeNoOdds : toPercent(1 - bestBidPrice);
+    bestBidPrice === null ? indicativeNoOdds : normalizeOdds(1 - bestBidPrice);
   const category = formatPolymarketCategory(
     collectPolymarketCategoryLabels(record),
   );
