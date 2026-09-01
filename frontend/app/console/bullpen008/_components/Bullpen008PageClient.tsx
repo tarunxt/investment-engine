@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  CirclePause,
   Clock3,
   History,
   Loader2,
+  OctagonX,
   Play,
   RefreshCw,
   ShieldCheck,
@@ -328,6 +330,9 @@ export function Bullpen008PageClient() {
   }, [load]);
 
   const latestRun = bootstrap?.latest_run ?? null;
+  const hasActiveRun = Boolean(
+    latestRun && !TERMINAL_RUN_STATUSES.has(latestRun.status),
+  );
   useEffect(() => {
     if (!latestRun || TERMINAL_RUN_STATUSES.has(latestRun.status)) return;
     const interval = window.setInterval(() => void load(), 3000);
@@ -371,7 +376,13 @@ export function Bullpen008PageClient() {
       await apiService.runBullpen008Once(`bullpen008-ui-${Date.now()}`);
       await load();
     } catch (actionError) {
-      setError(`The shadow run could not be queued. ${formatUnknownError(actionError)}`);
+      const detail = formatUnknownError(actionError);
+      await load();
+      setError(
+        detail.includes("already queued or running")
+          ? "A Bullpen 008 run already owns the queue. Use Pause to stop new scheduling or Kill to terminate the active run, then start again."
+          : `The shadow run could not be queued. ${detail}`,
+      );
     } finally {
       setBusyAction(null);
     }
@@ -437,6 +448,19 @@ export function Bullpen008PageClient() {
       await load();
     } catch (actionError) {
       setError(`The 008 emergency stop could not be changed. ${formatUnknownError(actionError)}`);
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const killActiveRun = async () => {
+    setBusyAction("kill");
+    setError(null);
+    try {
+      await apiService.killBullpen008Run();
+      await load();
+    } catch (actionError) {
+      setError(`The active Bullpen 008 run could not be killed. ${formatUnknownError(actionError)}`);
     } finally {
       setBusyAction(null);
     }
@@ -523,8 +547,33 @@ export function Bullpen008PageClient() {
             <Button variant="outline" onClick={() => void load()} disabled={Boolean(busyAction)}>
               <RefreshCw className="mr-2 h-4 w-4" /> Refresh
             </Button>
-            <Button onClick={() => void runOnce()} disabled={Boolean(busyAction) || Boolean(latestRun && !TERMINAL_RUN_STATUSES.has(latestRun.status))}>
-              {busyAction === "run" || (latestRun && !TERMINAL_RUN_STATUSES.has(latestRun.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+            <Button variant="outline" asChild>
+              <Link href={URLs.routes.console.bullpen008History()}>
+                <History className="mr-2 h-4 w-4" /> History
+              </Link>
+            </Button>
+            {(hasActiveRun || bootstrap?.state.paused) ? (
+              <Button
+                onClick={() => void togglePause()}
+                disabled={Boolean(busyAction)}
+                className="border-orange-600 bg-orange-500 text-white hover:bg-orange-600"
+              >
+                {busyAction === "pause" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CirclePause className="mr-2 h-4 w-4" />}
+                {bootstrap?.state.paused ? "Resume" : "Pause"}
+              </Button>
+            ) : null}
+            {hasActiveRun ? (
+              <Button
+                onClick={() => void killActiveRun()}
+                disabled={Boolean(busyAction)}
+                className="border-rose-700 bg-rose-600 text-white hover:bg-rose-700"
+              >
+                {busyAction === "kill" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <OctagonX className="mr-2 h-4 w-4" />}
+                Kill
+              </Button>
+            ) : null}
+            <Button onClick={() => void runOnce()} disabled={Boolean(busyAction) || hasActiveRun}>
+              {busyAction === "run" || hasActiveRun ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
               Run six stages
             </Button>
           </div>

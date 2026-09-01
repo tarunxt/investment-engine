@@ -1481,7 +1481,7 @@ def execute_bullpen008_run(self, run_id: str) -> str:
             ).scalar_one_or_none()
             if run is None:
                 return "missing-run"
-            if run.status in {"completed", "failed"}:
+            if run.status in {"completed", "failed", "cancelled"}:
                 return run.status
             settings = Bullpen008Settings.model_validate(run.settings_snapshot)
             user_id = run.user_id
@@ -2400,6 +2400,10 @@ def execute_bullpen008_run(self, run_id: str) -> str:
             run = session.get(Bullpen008RunRecord, run_id)
             if run is None:
                 return "missing-run"
+            if run.status == "cancelled" or bool(
+                dict(run.run_metadata).get("cancelled_by_user")
+            ):
+                return "cancelled"
             _persist_loss_prevention_artifacts(
                 session,
                 run=run,

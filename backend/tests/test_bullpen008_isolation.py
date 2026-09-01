@@ -56,6 +56,28 @@ def test_008_namespaces_do_not_alias_007_resources() -> None:
     }
 
 
+def test_008_kill_and_history_recovery_remain_profile_isolated() -> None:
+    router = Path("app/domains/bullpen008/router.py").read_text()
+    service = Path("app/domains/bullpen008/service.py").read_text()
+    task = Path("app/domains/bullpen008/tasks.py").read_text()
+
+    kill = router.split('async def kill_bullpen008_run', 1)[1].split(
+        "@router.post", 1
+    )[0]
+    assert "cancel_active_run" in kill
+    assert "celery.control.revoke" in kill
+    assert "terminate=True" in kill
+    assert "REDIS_PREFIX" in kill
+    assert "PolymarketAutoLive" not in kill
+
+    trends = service.split("async def get_event_trends", 1)[1]
+    assert "Bullpen008RunRecord" in trends
+    assert "workflow_profile == WORKFLOW_PROFILE" in trends
+    assert "PolymarketAutoLiveRunRecord" not in trends
+    assert 'run.status in {"completed", "failed", "cancelled"}' in task
+    assert 'run.status == "cancelled"' in task
+
+
 def test_only_a_different_deployed_build_is_recoverable() -> None:
     assert _is_interrupted_previous_build("old-sha", "new-sha") is True
     assert _is_interrupted_previous_build("same-sha", "same-sha") is False

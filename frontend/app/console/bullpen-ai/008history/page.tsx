@@ -1,4 +1,4 @@
-import { Bullpen008RunHistoryScreen } from "../_components/Bullpen008RunHistoryScreen";
+import { Bullpen008RunHistoryScreen } from "../../bullpen008/_components/Bullpen008RunHistoryScreen";
 
 export const dynamic = "force-dynamic";
 

@@ -46,7 +46,9 @@ import {
   BullpenAutoLiveState,
   BullpenAutoLiveSummaryResponse,
   Bullpen008Bootstrap,
+  Bullpen008EventTrendsResponse,
   Bullpen008HistoryPage,
+  Bullpen008KillResponse,
   Bullpen008Run,
   Bullpen008Settings,
   Bullpen008SettingsUpdate,
@@ -1678,6 +1680,10 @@ class apiServiceClass implements IApiService {
     return this.post<Bullpen008State>(URLs.bullpen008.clearEmergencyStop());
   }
 
+  killBullpen008Run(): Promise<Bullpen008KillResponse> {
+    return this.post<Bullpen008KillResponse>(URLs.bullpen008.kill());
+  }
+
   runBullpen008Once(idempotencyKey?: string): Promise<Bullpen008Run> {
     return this.post<Bullpen008Run>(
       URLs.bullpen008.runOnce(),
@@ -1695,6 +1701,15 @@ class apiServiceClass implements IApiService {
     const suffix = query.size > 0 ? `?${query.toString()}` : "";
     return this.get<Bullpen008HistoryPage>(
       `${URLs.bullpen008.runs()}${suffix}`,
+      { cache: "no-store", ...options },
+    );
+  }
+
+  getBullpen008HistoryEventTrends(
+    options?: ApiRequestControl,
+  ): Promise<Bullpen008EventTrendsResponse> {
+    return this.get<Bullpen008EventTrendsResponse>(
+      URLs.bullpen008.historyEventTrends(),
       { cache: "no-store", ...options },
     );
   }
