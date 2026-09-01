@@ -543,10 +543,15 @@ function normalizeResolvedMarket(
   const conditionId = readString(record, ["conditionId", "condition_id"]);
   const slug = getCanonicalPolymarketMarketSlug(record, fallbackSlug);
   const eventSlug = getCanonicalPolymarketEventSlug(record, slug);
-  const { yesOdds, noOdds } = readOutcomeOdds(record);
+  const { yesOdds: indicativeYesOdds, noOdds: indicativeNoOdds } =
+    readOutcomeOdds(record);
   const rules = extractRulesText(record);
   const bestBidPrice = normalizePrice(parseNumber(record.bestBid));
   const bestAskPrice = normalizePrice(parseNumber(record.bestAsk));
+  const yesOdds =
+    bestAskPrice === null ? indicativeYesOdds : normalizeOdds(bestAskPrice);
+  const noOdds =
+    bestBidPrice === null ? indicativeNoOdds : normalizeOdds(1 - bestBidPrice);
   const category = formatPolymarketCategory(
     collectPolymarketCategoryLabels(record),
   );

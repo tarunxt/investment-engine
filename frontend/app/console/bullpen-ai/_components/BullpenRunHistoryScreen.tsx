@@ -64,6 +64,111 @@ async function fetchCurrentBullpenPositions() {
   return payload;
 }
 
+type CurrentOrderBookMarket = {
+  yesOdds?: number | null;
+  noOdds?: number | null;
+};
+
+type CurrentOrderBookOddsResponse = {
+  markets?: Record<string, CurrentOrderBookMarket>;
+};
+
+async function fetchCurrentOrderBookOdds(
+  trends: BullpenAutoLiveEventTrendsResponse,
+): Promise<CurrentOrderBookOddsResponse> {
+  const response = await fetch("/api/bullpen-ai/current-odds", {
+    method: "POST",
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      "Cache-Control": "no-cache",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      questions: trends.events.map((event) => ({
+        id: event.market_id,
+        slug: null,
+        marketUrl: event.market_url ?? null,
+        question: event.market_title,
+        category: null,
+      })),
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const payload = (await response.json()) as CurrentOrderBookOddsResponse & {
+    error?: string;
+  };
+  if (!response.ok) {
+    throw new Error(
+      payload.error || `Current order-book request failed (${response.status}).`,
+    );
+  }
+  return payload;
+}
+
+function currentReturnsPerDay(
+  event: BullpenAutoLiveEventTrend,
+  currentYesOdds: number | null,
+  currentNoOdds: number | null,
+) {
+  if (event.is_claimable_position || !event.close_time) {
+    return event.returns_per_day ?? null;
+  }
+  const latestScan = event.scan_timestamps.find(Boolean);
+  const closeTime = new Date(event.close_time).getTime();
+  const scanTime = latestScan ? new Date(latestScan).getTime() : Number.NaN;
+  if (!Number.isFinite(closeTime) || !Number.isFinite(scanTime)) {
+    return event.returns_per_day ?? null;
+  }
+  const daysUntilClose = Number(
+    ((closeTime - scanTime) / 86_400_000).toFixed(1),
+  );
+  const activeSide = event.active_position_side?.trim().toUpperCase();
+  const chosenSide =
+    activeSide === "YES" || activeSide === "NO"
+      ? activeSide
+      : (event.llm_yes_odds ?? -1) >= (event.llm_no_odds ?? -1)
+        ? "YES"
+        : "NO";
+  const currentOdds =
+    chosenSide === "YES" ? currentYesOdds : currentNoOdds;
+  const denominator = daysUntilClose + 4;
+  if (currentOdds === null || denominator === 0) {
+    return event.returns_per_day ?? null;
+  }
+  return Number(((100 - currentOdds) / denominator).toFixed(2));
+}
+
+export function applyCurrentOrderBookOddsToEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  response: CurrentOrderBookOddsResponse,
+): BullpenAutoLiveEventTrendsResponse {
+  return {
+    ...trends,
+    events: trends.events.map((event) => {
+      const market = response.markets?.[event.market_id];
+      const currentYesOdds =
+        typeof market?.yesOdds === "number"
+          ? market.yesOdds
+          : event.current_yes_odds ?? null;
+      const currentNoOdds =
+        typeof market?.noOdds === "number"
+          ? market.noOdds
+          : event.current_no_odds ?? null;
+      return {
+        ...event,
+        current_yes_odds: currentYesOdds,
+        current_no_odds: currentNoOdds,
+        returns_per_day: currentReturnsPerDay(
+          event,
+          currentYesOdds,
+          currentNoOdds,
+        ),
+      };
+    }),
+  };
+}
+
 function resolveActivePositionSide(
   position: BullpenActivePositionView,
 ): "YES" | "NO" | null {
@@ -209,13 +314,22 @@ export function BullpenRunHistoryScreen() {
         );
       }
       if (trendsResult.status === "fulfilled") {
+        const currentOrderBookOdds = await fetchCurrentOrderBookOdds(
+          trendsResult.value,
+        ).catch(() => null);
+        const orderBookTrends = currentOrderBookOdds
+          ? applyCurrentOrderBookOddsToEventTrends(
+              trendsResult.value,
+              currentOrderBookOdds,
+            )
+          : trendsResult.value;
         const nextTrends =
           hasUsableCurrentPositions && currentPositions
             ? applyCurrentBullpenPositionsToEventTrends(
-                trendsResult.value,
+                orderBookTrends,
                 currentPositions,
               )
-            : trendsResult.value;
+            : orderBookTrends;
         setTrends(nextTrends);
         cacheEventTrends(nextTrends);
       } else {
