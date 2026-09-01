@@ -86,7 +86,7 @@ export function Bullpen008RunHistoryScreen() {
     setLoading(true);
     setError(null);
     setTrendsError(null);
-    const options = { timeoutMs: 10_000 };
+    const options = { timeoutMs: 15_000 };
     const [historyResult, trendsResult] = await Promise.allSettled([
       apiService.getBullpen008Runs(
         { limit: PAGE_SIZE, offset: (pageNumber - 1) * PAGE_SIZE },
