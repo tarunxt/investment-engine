@@ -255,7 +255,7 @@ type BullpenAutoRunScheduleCardProps = {
   recentDecisions?: BullpenAutoLiveDecision[];
   onOpenScanFilters?: () => void;
   independentScanSnapshot?: BullpenScanSnapshot | null;
-  onRunIndependentStageOne?: () => Promise<{
+  onRunIndependentStageOne?: (signal?: AbortSignal) => Promise<{
     snapshot: BullpenScanSnapshot | null;
     error: string | null;
   }>;
@@ -10612,6 +10612,10 @@ export function BullpenAutoRunScheduleCard({
   >("original");
   const [isIndependentStageOneScanning, setIsIndependentStageOneScanning] =
     useState(false);
+  const [independentStageOneStartedAt, setIndependentStageOneStartedAt] =
+    useState<string | null>(null);
+  const independentStageOneAbortControllerRef =
+    useRef<AbortController | null>(null);
   const [independentStageOneError, setIndependentStageOneError] = useState<
     string | null
   >(null);
@@ -12935,11 +12939,25 @@ export function BullpenAutoRunScheduleCard({
     ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
     : null;
   const handleIndependentStageOneScan = async () => {
-    if (!onRunIndependentStageOne || isIndependentStageOneScanning) return;
+    if (!onRunIndependentStageOne) return;
+    if (isIndependentStageOneScanning) {
+      independentStageOneAbortControllerRef.current?.abort();
+      independentStageOneAbortControllerRef.current = null;
+      setIsIndependentStageOneScanning(false);
+      setIndependentStageOneStartedAt(null);
+      setIndependentStageOneError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    independentStageOneAbortControllerRef.current = controller;
     setIsIndependentStageOneScanning(true);
+    setIndependentStageOneStartedAt(new Date().toISOString());
+    setTimerNowMs(Date.now());
     setIndependentStageOneError(null);
     try {
-      const result = await onRunIndependentStageOne();
+      const result = await onRunIndependentStageOne(controller.signal);
+      if (controller.signal.aborted) return;
       if (result.snapshot) {
         setStageOneResultSource("independent");
       }
@@ -12947,9 +12965,15 @@ export function BullpenAutoRunScheduleCard({
         setIndependentStageOneError(result.error);
       }
     } catch (scanError) {
-      setIndependentStageOneError(formatUnknownError(scanError));
+      if (!controller.signal.aborted) {
+        setIndependentStageOneError(formatUnknownError(scanError));
+      }
     } finally {
-      setIsIndependentStageOneScanning(false);
+      if (independentStageOneAbortControllerRef.current === controller) {
+        independentStageOneAbortControllerRef.current = null;
+        setIsIndependentStageOneScanning(false);
+        setIndependentStageOneStartedAt(null);
+      }
     }
   };
   const openScanCandidateDialog = (
@@ -13071,7 +13095,8 @@ export function BullpenAutoRunScheduleCard({
   const workflowSettled = isBullpenAutoRunWorkflowSettled(workflowView);
   const showRunTimer =
     Boolean(runTimerStartedAt) && (runActionRequested || runIsActive);
-  const shouldTickTimers = showRunTimer || hasActiveWorkflowStage;
+  const shouldTickTimers =
+    showRunTimer || hasActiveWorkflowStage || isIndependentStageOneScanning;
   const showActiveRunControls = runIsActive;
   const elapsedRunTime = formatElapsedRunTime(runTimerStartedAt, timerNowMs);
   const openStage =
@@ -13337,6 +13362,8 @@ export function BullpenAutoRunScheduleCard({
       if (startNowProgressTimeoutRef.current !== null) {
         window.clearTimeout(startNowProgressTimeoutRef.current);
       }
+      independentStageOneAbortControllerRef.current?.abort();
+      independentStageOneAbortControllerRef.current = null;
     };
   }, []);
 
@@ -14214,8 +14241,12 @@ export function BullpenAutoRunScheduleCard({
                 displayedInvestSteps.every(
                   (step) => step.status === "completed",
                 );
+              const isIndependentStageOneActive =
+                stage.key === "scan" && isIndependentStageOneScanning;
               const toneClasses = getWorkflowToneClasses(
-                selectedRunSummaryTile === "next" && !runIsActive
+                isIndependentStageOneActive
+                  ? "yellow"
+                  : selectedRunSummaryTile === "next" && !runIsActive
                   ? "slate"
                   : immediateSuccess || investPreviewFinished || stage.state === "finished" || Boolean(stage.timerCompletedAt)
                     ? "green"
@@ -14223,7 +14254,9 @@ export function BullpenAutoRunScheduleCard({
               );
               const showStageRunDetails = true;
               const showStageNumbers = workflowRunForMonitor !== null;
-              const stageStatusLabel = immediateSuccess
+              const stageStatusLabel = isIndependentStageOneActive
+                ? "Working"
+                : immediateSuccess
                 ? "Finished"
                 : investPreviewFinished
                   ? "Finished"
@@ -14241,7 +14274,14 @@ export function BullpenAutoRunScheduleCard({
                   ? "Finished"
                   : stage.progressLabel;
               const showStageSpinner =
-                stage.isCurrent && !immediateSuccess && !investPreviewFinished;
+                isIndependentStageOneActive ||
+                (stage.isCurrent && !immediateSuccess && !investPreviewFinished);
+              const displayedStageTimerStartedAt = isIndependentStageOneActive
+                ? independentStageOneStartedAt
+                : stage.timerStartedAt;
+              const displayedStageTimerCompletedAt = isIndependentStageOneActive
+                ? null
+                : stage.timerCompletedAt;
               const stageTwoBypassed =
                 stage.key === "llm" &&
                 stage.state === "queued" &&
@@ -14328,13 +14368,22 @@ export function BullpenAutoRunScheduleCard({
                           <button
                             type="button"
                             onClick={() => void handleIndependentStageOneScan()}
-                            disabled={isIndependentStageOneScanning}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 disabled:cursor-wait ${
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 ${
                               isIndependentStageOneScanning
-                                ? "border-red-700 bg-red-600 focus:ring-red-300"
+                                ? "border-red-700 bg-red-600 hover:bg-red-700 focus:ring-red-300"
                                 : "border-blue-700 bg-blue-600 hover:bg-blue-700 focus:ring-blue-300"
                             }`}
                             aria-live="polite"
+                            aria-label={
+                              isIndependentStageOneScanning
+                                ? "Stop Stage 1 scan"
+                                : "Start Stage 1 scan"
+                            }
+                            title={
+                              isIndependentStageOneScanning
+                                ? "Click to stop scanning"
+                                : "Start a fresh Stage 1 scan"
+                            }
                           >
                             {isIndependentStageOneScanning ? "Scanning" : "Scan"}
                           </button>
@@ -14407,8 +14456,8 @@ export function BullpenAutoRunScheduleCard({
                       >
                         <Clock3 className="h-3 w-3" />
                         {formatStageElapsedTime(
-                          stage.timerStartedAt,
-                          stage.timerCompletedAt,
+                          displayedStageTimerStartedAt,
+                          displayedStageTimerCompletedAt,
                           timerNowMs,
                         )}
                       </span>
@@ -14423,7 +14472,8 @@ export function BullpenAutoRunScheduleCard({
                         Last stage run:{" "}
                         <span className="font-semibold tabular-nums">
                           {formatStageLastRunLabel(
-                            stage.timerCompletedAt ?? stage.timerStartedAt,
+                            displayedStageTimerCompletedAt ??
+                              displayedStageTimerStartedAt,
                           )}
                         </span>
                       </div>
@@ -14431,8 +14481,8 @@ export function BullpenAutoRunScheduleCard({
                         Time taken:{" "}
                         <span className="font-semibold tabular-nums">
                           {formatStageElapsedTime(
-                            stage.timerStartedAt,
-                            stage.timerCompletedAt,
+                            displayedStageTimerStartedAt,
+                            displayedStageTimerCompletedAt,
                             timerNowMs,
                           )}
                         </span>
