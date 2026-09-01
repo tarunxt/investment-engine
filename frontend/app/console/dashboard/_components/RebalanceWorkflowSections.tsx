@@ -276,6 +276,17 @@ const ZERODHA_SYNC_AUTH_RETRY_DELAY_MS = 1_000;
 const WORKFLOW_STORAGE_KEY = "investment-engine:rebalance-workflow-state:v1";
 const STAGE_LLM_SELECTION_STORAGE_KEY = "investment-engine:dashboard-stage-llms:v1";
 const WORKFLOW_COMPLETION_RESET_DELAY_MS = 10000;
+
+class RecordedWorkflowStageFailure extends Error {
+  readonly originalError: unknown;
+
+  constructor(message: string, originalError: unknown) {
+    super(message);
+    this.name = "RecordedWorkflowStageFailure";
+    this.originalError = originalError;
+  }
+}
+
 const STAGE_ORDER: WorkflowStageKey[] = [
   "sync",
   "threats",
@@ -650,6 +661,11 @@ function summarizeRun(run: RunResponse) {
       jobId: null,
     });
   }
+  const primaryError =
+    run.export_error?.trim() ||
+    failedJob?.error_message?.trim() ||
+    errorDetails[0]?.message ||
+    null;
   return {
     completedAt: run.updated_at ?? firstJob?.updated_at ?? run.created_at,
     provider: jobs.length > 1 ? `${jobs.length} LLMs` : firstJob?.provider,
@@ -657,7 +673,7 @@ function summarizeRun(run: RunResponse) {
     runStatus: run.status,
     exportStatus: run.export_status ?? firstJob?.export_status,
     costUsd: costUsd || null,
-    error: run.export_error ?? failedJob?.error_message ?? null,
+    error: primaryError,
     errorDetails,
   };
 }
@@ -3148,22 +3164,26 @@ function WorkflowStageTile({
   const stageErrorRow = stageRows.find(
     (row) => row.label === "Error" && row.detail,
   );
+  // Deliberately exclude status and errorDetails. Polling can hydrate those
+  // fields after the first failure render; they enrich the open dialog but do
+  // not represent a second failure and must not reopen a dialog the user
+  // already closed.
   const stageErrorFingerprint = stageErrorRow
     ? JSON.stringify({
         stage,
         detail: stageErrorRow.detail,
-        errorDetails: stageErrorRow.errorDetails,
         runId: info.activeRunId ?? info.lastRunId ?? null,
-        status: info.runStatus ?? info.state,
       })
     : null;
 
   useEffect(() => {
-    if (!stageErrorFingerprint) return;
+    // Historical idle-stage errors remain manually reopenable from the tile,
+    // but only a newly failed active stage should interrupt the user.
+    if (!stageErrorFingerprint || info.state !== "failed") return;
     if (lastAutoOpenedErrorRef.current === stageErrorFingerprint) return;
     lastAutoOpenedErrorRef.current = stageErrorFingerprint;
     setOpenErrorDetail(stageErrorFingerprint);
-  }, [stageErrorFingerprint]);
+  }, [info.state, stageErrorFingerprint]);
 
   const renderStageRow = (row: StageTileRow) => {
     if (row.label === "Duration") {
@@ -6904,7 +6924,20 @@ ${zerodhaExecutionMode === "direct_market"
       if (status === "completed" || status === "partial") return run;
 
       const progress = getRunProgress(run);
-      const error = summarizeRun(run).error;
+      const failureSummary = summarizeRun(run);
+      // The progress poll intentionally carries only counters. Before throwing
+      // a terminal failure, copy the full saved job/provider diagnostics into
+      // the stage so the modal never has to reconstruct them from a generic
+      // JavaScript Error.
+      updateStage(portfolio, stage, {
+        ...failureSummary,
+        ...progress,
+        state: "failed",
+        activeRunId: null,
+        lastRunId: run.id,
+        endedAt: getLatestRunTimestamp(run),
+      });
+      const error = failureSummary.error;
       throw new Error(
         `Run #${runId} ended with status "${run.status}". Completed so far: ${progress.completedLlms}/${progress.totalLlms} LLMs.${error ? ` Error: ${error}` : ""}`,
       );
@@ -7439,7 +7472,7 @@ ${zerodhaExecutionMode === "direct_market"
         // stage failure. Transient API failures are retried below/inside the
         // polling layer; a failure that reaches here is actionable and fully
         // recorded in the run history.
-        throw error;
+        throw new RecordedWorkflowStageFailure(message, error);
       };
       let generatedThreatMarkdown = "";
       let generatedSwingRun: RunResponse | null = null;
@@ -7971,22 +8004,26 @@ ${zerodhaExecutionMode === "direct_market"
           ? "Auto-rebalance flow was killed by user."
           : normalizeError(error);
         const failedAt = new Date().toISOString();
-        updateStage(portfolio, currentStage, {
-          state: "failed",
-          endedAt: failedAt,
-          error: message,
-          runStatus: wasCancelled ? "cancelled" : "failed",
-        });
-        void recordAutoRebalanceStage(
-          portfolio,
-          currentStage,
-          wasCancelled ? "cancelled" : "failed",
-          {
-          endedAt: failedAt,
-          error: message,
-          runStatus: wasCancelled ? "cancelled" : "failed",
-          },
-        );
+        // Stage-level catches already persist actionable failures. Do not
+        // write the same failure a second time from this workflow boundary.
+        if (!(error instanceof RecordedWorkflowStageFailure)) {
+          updateStage(portfolio, currentStage, {
+            state: "failed",
+            endedAt: failedAt,
+            error: message,
+            runStatus: wasCancelled ? "cancelled" : "failed",
+          });
+          void recordAutoRebalanceStage(
+            portfolio,
+            currentStage,
+            wasCancelled ? "cancelled" : "failed",
+            {
+              endedAt: failedAt,
+              error: message,
+              runStatus: wasCancelled ? "cancelled" : "failed",
+            },
+          );
+        }
         window.setTimeout(() => {
           setStates((current) => ({
             ...current,

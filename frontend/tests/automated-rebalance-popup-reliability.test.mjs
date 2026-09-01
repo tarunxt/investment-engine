@@ -132,6 +132,11 @@ test("stage failures automatically open a detailed modal and remain manually reo
   assert.match(workflowSource, /document\.body/);
   assert.match(workflowSource, /lastAutoOpenedErrorRef/);
   assert.match(workflowSource, /setOpenErrorDetail\(stageErrorFingerprint\)/);
+  assert.match(workflowSource, /info\.state !== "failed"/);
+  assert.doesNotMatch(
+    workflowSource,
+    /stageErrorFingerprint = stageErrorRow[\s\S]{0,300}errorDetails:/,
+  );
   assert.match(workflowSource, /aria-modal="true"/);
   assert.match(workflowSource, /className="pointer-events-auto fixed inset-0 z-\[200\]/);
   assert.match(workflowSource, /Error message/);
@@ -139,6 +144,23 @@ test("stage failures automatically open a detailed modal and remain manually reo
   assert.match(workflowSource, /What to do next/);
   assert.match(workflowSource, /The backend did not return an underlying provider exception or job identifier/);
   assert.match(workflowSource, /aria-label="Show detailed LLM error"/);
+});
+
+test("stage failures preserve provider diagnostics and are recorded only once", () => {
+  assert.match(workflowSource, /const primaryError =[\s\S]*?errorDetails\[0\]\?\.message/);
+  assert.match(
+    workflowSource,
+    /const failureSummary = summarizeRun\(run\);[\s\S]*?\.\.\.failureSummary,[\s\S]*?lastRunId: run\.id/,
+  );
+  assert.match(workflowSource, /class RecordedWorkflowStageFailure extends Error/);
+  assert.match(
+    workflowSource,
+    /throw new RecordedWorkflowStageFailure\(message, error\)/,
+  );
+  assert.match(
+    workflowSource,
+    /if \(!\(error instanceof RecordedWorkflowStageFailure\)\)/,
+  );
 });
 
 test("duplicate LLM runs retain the full denominator and receive ordinal summary labels", () => {

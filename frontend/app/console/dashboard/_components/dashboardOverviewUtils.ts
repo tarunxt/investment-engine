@@ -137,9 +137,9 @@ function extractStructuredErrorMessage(message: string) {
   }
 }
 
-function truncateErrorMessage(message: string) {
-  return message.length > 220
-    ? `${message.slice(0, 217).trimEnd()}...`
+function limitErrorMessage(message: string) {
+  return message.length > 10_000
+    ? `${message.slice(0, 9_997).trimEnd()}...`
     : message;
 }
 
@@ -168,7 +168,10 @@ export function normalizeError(error: unknown) {
     );
   }
   if (message.trim()) {
-    return truncateErrorMessage(message);
+    // Tile renderers already create a short preview. Keep the complete
+    // diagnostic here so the detailed failure dialog does not discard the
+    // provider response, request ID, retry history, or parsing context.
+    return limitErrorMessage(message);
   }
   return "Something went wrong";
 }
