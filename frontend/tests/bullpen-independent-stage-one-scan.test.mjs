@@ -28,6 +28,24 @@ test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () =>
   assert.match(cardSource, /border-red-700 bg-red-600/);
   assert.match(cardSource, /border-blue-700 bg-blue-600/);
   assert.match(cardSource, /border-emerald-700 bg-emerald-600/);
+  assert.match(cardSource, /isIndependentStageOneActive[\s\S]{0,200}\? "yellow"/);
+  assert.match(cardSource, /displayedStageTimerStartedAt/);
+});
+
+test("active independent Stage 1 scan is cancellable and resets its timer", () => {
+  assert.match(cardSource, /independentStageOneAbortControllerRef/);
+  assert.match(cardSource, /independentStageOneAbortControllerRef\.current\?\.abort\(\)/);
+  assert.match(cardSource, /aria-label=[\s\S]{0,200}"Stop Stage 1 scan"/);
+  assert.doesNotMatch(
+    cardSource,
+    /onClick=\{\(\) => void handleIndependentStageOneScan\(\)\}[\s\S]{0,120}disabled=\{isIndependentStageOneScanning\}/,
+  );
+  assert.match(cardSource, /setIndependentStageOneStartedAt\(new Date\(\)\.toISOString\(\)\)/);
+  assert.match(cardSource, /setIndependentStageOneStartedAt\(null\)/);
+  assert.match(pageSource, /signal\?: AbortSignal/);
+  assert.match(pageSource, /const scanAbortController = new AbortController\(\)/);
+  assert.match(pageSource, /signal: scanSignal/);
+  assert.match(pageSource, /waitForBullpenPollDelay\([\s\S]{0,120}scanSignal/);
 });
 
 test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
