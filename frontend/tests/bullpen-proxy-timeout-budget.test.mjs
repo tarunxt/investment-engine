@@ -41,6 +41,28 @@ test("ordinary API reads retain the strict fast-failure budget", () => {
   assert.match(proxySource, /DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000/);
 });
 
+test("Bullpen 008 summary reads have an explicit long-running budget", () => {
+  const proxySource = read("../app/backend-api/[...path]/route.ts");
+  const pageSource = read(
+    "../app/console/bullpen008/_components/Bullpen008PageClient.tsx",
+  );
+  const historySource = read(
+    "../app/console/bullpen008/_components/Bullpen008RunHistoryScreen.tsx",
+  );
+
+  assert.match(
+    proxySource,
+    /BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000/,
+  );
+  assert.match(
+    proxySource,
+    /BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000/,
+  );
+  assert.match(proxySource, /path\.startsWith\("polymarket\/bullpen008\/"\)/);
+  assert.match(pageSource, /timeoutMs: 15_000/);
+  assert.match(historySource, /timeoutMs: 15_000/);
+});
+
 test("read circuit failures cannot suppress idempotent mutations", () => {
   const proxySource = read("../app/backend-api/[...path]/route.ts");
 
