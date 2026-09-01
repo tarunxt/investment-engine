@@ -35,6 +35,12 @@ While this independent scan is active, the console presents Stage 1 as a yellow
 working tile with a live elapsed timer. The **Scanning** control remains clickable
 and aborts the in-flight stateless pagination request, immediately restoring the
 blue **Scan** control without creating or mutating a frozen audit record.
+The working tile replaces historical Stage 1 totals with the current stateless
+enumeration progress: normalized markets scanned, current keyset page, response
+age, and retry count. Gamma timeouts, rate limits, temporary server errors, and
+frontend polling failures surface an explicit retry reason while the same cursor
+is retried. Completed-run totals return only after the new scan finishes or is
+cancelled; they are never presented as progress for an in-flight scan.
 The preview calls the canonical backend Stage 1 scanner. If Bullpen CLI returns a
 silently truncated discover set, the scanner supplements it from Polymarket Gamma
 before applying the saved filters; the same completeness safeguard applies to new
