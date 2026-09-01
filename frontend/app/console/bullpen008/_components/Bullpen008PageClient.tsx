@@ -287,7 +287,10 @@ export function Bullpen008PageClient() {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const data = await apiService.getBullpen008Bootstrap({ signal });
+      const data = await apiService.getBullpen008Bootstrap({
+        signal,
+        timeoutMs: 15_000,
+      });
       setBootstrap(data);
       setCustomPhrases(data.settings.custom_exclude_phrases.join(", "));
       setClosingWindowDays(String(data.settings.closing_window_days));
