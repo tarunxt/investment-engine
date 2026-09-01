@@ -246,7 +246,8 @@ const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
 const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 3_600_000;
-const PARTIAL_SCAN_MAX_REJECTED_ROWS = 2_000;
+const SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS = 500;
+const SCAN_SNAPSHOT_MAX_REJECTED_ROWS = 500;
 const BULLPEN_SCAN_POLL_MS = 250;
 const BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000;
 
@@ -3179,7 +3180,16 @@ function BullpenAiPageContent() {
       void positionsRefreshTask;
 
       const nextSnapshot = isSuccessfulScan
-        ? createBullpenScanSnapshot(payload)
+        ? createBullpenScanSnapshot({
+            ...payload,
+            questions: payload.questions.slice(0, SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS),
+            rejectedQuestions: (payload.rejectedQuestions ?? []).slice(
+              0,
+              SCAN_SNAPSHOT_MAX_REJECTED_ROWS,
+            ),
+            totalAcceptedQuestions: payload.questions.length,
+            totalRejectedQuestions: payload.rejectedQuestions?.length ?? 0,
+          })
         : null;
       if (nextSnapshot) {
         syncBullpenScanSnapshot(nextSnapshot, {
@@ -3222,17 +3232,19 @@ function BullpenAiPageContent() {
               ...scanResponse.payload,
               scannedAt: scanStartedAt ?? scanResponse.payload.scannedAt,
               totalCandidates: chunkedTotalCandidates,
-              questions: chunkedQuestions,
-              rejectedQuestions: chunkedRejectedQuestions.slice(0, PARTIAL_SCAN_MAX_REJECTED_ROWS),
+              questions: chunkedQuestions.slice(0, SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS),
+              rejectedQuestions: chunkedRejectedQuestions.slice(0, SCAN_SNAPSHOT_MAX_REJECTED_ROWS),
               error: undefined,
               warning: `${message} Saved partial results from ${chunkedTotalCandidates.toLocaleString("en-IN")} scanned markets across ${completedPages} completed pages.`,
               details:
-                chunkedRejectedQuestions.length > PARTIAL_SCAN_MAX_REJECTED_ROWS
-                  ? `The partial snapshot retains the first ${PARTIAL_SCAN_MAX_REJECTED_ROWS.toLocaleString("en-IN")} filtered rows for inspection; the complete filtered count was ${chunkedRejectedQuestions.length.toLocaleString("en-IN")}.`
+                chunkedQuestions.length > SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS ||
+                chunkedRejectedQuestions.length > SCAN_SNAPSHOT_MAX_REJECTED_ROWS
+                  ? `The browser snapshot retains up to ${SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS.toLocaleString("en-IN")} passed and filtered rows for inspection; complete passed and filtered totals are retained.`
                   : scanResponse.payload.details,
               isPartial: true,
               interruptionReason: message,
               pagesScanned: completedPages,
+              totalAcceptedQuestions: chunkedQuestions.length,
               totalRejectedQuestions: chunkedRejectedQuestions.length,
             })
           : null;
