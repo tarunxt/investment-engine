@@ -143,6 +143,7 @@ export type ScanResult = {
   isPartial?: boolean;
   interruptionReason?: string;
   pagesScanned?: number;
+  totalAcceptedQuestions?: number;
   totalRejectedQuestions?: number;
 };
 
