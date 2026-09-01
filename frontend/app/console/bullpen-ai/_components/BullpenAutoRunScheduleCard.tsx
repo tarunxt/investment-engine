@@ -123,6 +123,10 @@ import {
   BullpenReturnsPerDayHeader,
   BullpenReturnsPerDayValueButton,
 } from "./BullpenReturnsPerDayInfo";
+import {
+  BullpenEventTrendsTable,
+  type BullpenEventTableSnapshot,
+} from "./BullpenEventTrendsTable";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import {
   buildBullpenStage3InvestPreviewSteps,
@@ -816,20 +820,6 @@ const DEFAULT_LLM_EVENTS_PER_PROMPT = 20;
 // this cadence keeps run progress visible without saturating the backend while
 // a long-running Auto-Live task is active.
 
-function buildScanCandidateReturnsPerDayQuestion(
-  candidate: ScanCandidateDialogCandidate,
-): BullpenQuestionRow {
-  return {
-    question: candidate.question,
-    yesOdds: candidate.currentYesOdds,
-    noOdds: candidate.currentNoOdds,
-    llmYesOdds: candidate.llmYesOdds,
-    llmNoOdds: candidate.llmNoOdds,
-    daysUntilClose: calculateDaysUntilClose(candidate.closeTime),
-    returnsPerDay: candidate.returnsPerDay,
-  } as BullpenQuestionRow;
-}
-
 const POLL_INTERVAL_MS = 2_000;
 // The run summary refreshes quickly while a run is active. Updating this very large
 // card every second only changes elapsed labels, so a five-second cadence
@@ -1093,14 +1083,6 @@ function formatUsdCost(value: number | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 4,
   })}`;
-}
-
-function formatInvestAmount(value: number | null) {
-  if (value === null) return "—";
-  return value.toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
 }
 
 type ConsoleTradeAmountView = {
@@ -4013,6 +3995,59 @@ function InvestExecutionStepsSummary({
   );
 }
 
+function buildStageOnePositionTableEvent(
+  position: ScanCandidateDialogState["activePositions"][number],
+  index: number,
+): BullpenEventTableSnapshot {
+  const marketId = position.marketId || position.conditionId || position.slug || `active-position-${index + 1}`;
+  const side = position.side?.trim().toUpperCase();
+  return {
+    market_id: marketId,
+    market_title: position.marketTitle,
+    market_url: position.marketUrl,
+    close_time: position.closeTime,
+    score: 0,
+    scan_scores: [],
+    scan_sides: [],
+    scan_timestamps: [],
+    current_yes_odds: position.currentYesOdds,
+    current_no_odds: position.currentNoOdds,
+    llm_yes_odds: null,
+    llm_no_odds: null,
+    returns_per_day: null,
+    is_active_position: true,
+    active_position_side: side === "YES" || side === "NO" ? side : null,
+    position_side: position.side,
+    position_shares: position.shares,
+    position_exposure_usd: position.exposureUsd,
+    position_average_price_cents: position.averagePriceCents,
+  };
+}
+
+function buildStageOneOpportunityTableEvent(
+  candidate: ScanCandidateDialogCandidate,
+  index: number,
+): BullpenEventTableSnapshot {
+  return {
+    market_id: candidate.marketId || candidate.questionId || candidate.slug || `fresh-opportunity-${index + 1}`,
+    market_title: candidate.question,
+    market_url: candidate.marketUrl,
+    close_time: candidate.closeTime,
+    score: Math.max(candidate.llmYesOdds ?? 0, candidate.llmNoOdds ?? 0),
+    scan_scores: [],
+    scan_sides: [],
+    scan_timestamps: [],
+    current_yes_odds: candidate.currentYesOdds,
+    current_no_odds: candidate.currentNoOdds,
+    llm_yes_odds: candidate.llmYesOdds,
+    llm_no_odds: candidate.llmNoOdds,
+    returns_per_day: candidate.returnsPerDay,
+    amount_to_be_invested: candidate.amountToBeInvested,
+    volume_usd: candidate.volumeUsd,
+    liquidity_usd: candidate.liquidityUsd,
+  };
+}
+
 function StageOneOutputDialog({
   state,
   onClose,
@@ -4036,6 +4071,8 @@ function StageOneOutputDialog({
     (position) => position.isClaimable,
   );
   const activePositions = state.activePositions.filter(isWorkflowActivePosition);
+  const activePositionEvents = activePositions.map(buildStageOnePositionTableEvent);
+  const freshOpportunityEvents = state.candidates.map(buildStageOneOpportunityTableEvent);
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -4201,63 +4238,13 @@ function StageOneOutputDialog({
 
               {activePositions.length > 0 ? (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                  <table className="min-w-[980px] table-fixed divide-y divide-slate-200 text-xs">
-                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      <tr>
-                        <th className="px-4 py-3">Position</th>
-                        <th className="px-4 py-3">Side & size</th>
-                        <th className="px-4 py-3">Odds</th>
-                        <th className="px-4 py-3">Close time</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {activePositions.map((position) => (
-                        <tr key={position.positionKey}>
-                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
-                            <div className="font-semibold text-slate-950">
-                              {position.marketUrl ? (
-                                <a
-                                  className="hover:text-sky-700 hover:underline"
-                                  href={position.marketUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {position.marketTitle}
-                                </a>
-                              ) : (
-                                position.marketTitle
-                              )}
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                              {position.theme ? (
-                                <span>{position.theme}</span>
-                              ) : null}
-                              {position.conditionId ? (
-                                <span>{position.conditionId}</span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
-                            {position.side ?? "—"}
-                            <br />
-                            Shares {formatShares(position.shares)}
-                            <br />
-                            Exposure {formatMoney(position.exposureUsd)}
-                            <br />
-                            Avg {formatPriceCents(position.averagePriceCents)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
-                            Yes {formatOddsPercent(position.currentYesOdds)}
-                            <br />
-                            No {formatOddsPercent(position.currentNoOdds)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
-                            {formatIstDateTime(position.closeTime)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <BullpenEventTrendsTable
+                    events={activePositionEvents}
+                    variant="active-positions"
+                    onReturnsFormula={() =>
+                      setIsReturnsPerDayFormulaDialogOpen(true)
+                    }
+                  />
                 </div>
               ) : state.activePositionCount > 0 ? (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
@@ -4294,91 +4281,14 @@ function StageOneOutputDialog({
 
               {state.candidates.length > 0 ? (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200">
-                  <table className="min-w-[980px] table-fixed divide-y divide-slate-200 text-xs">
-                    <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      <tr>
-                        <th className="w-[24rem] px-3 py-2">Outcomes</th>
-                        <th className="px-4 py-3">Current Yes odds %</th>
-                        <th className="px-4 py-3">Current No odds %</th>
-                        <th className="px-4 py-3">LLM Yes Odds</th>
-                        <th className="px-4 py-3">LLM No Odds</th>
-                        <th className="px-4 py-3">
-                          <BullpenReturnsPerDayHeader
-                            onOpen={() => setIsReturnsPerDayFormulaDialogOpen(true)}
-                          />
-                        </th>
-                        <th className="px-4 py-3">
-                          Trade amount formula Cash in Hand / (10 - Occupied Positions)
-                        </th>
-                        <th className="px-4 py-3">Volume</th>
-                        <th className="px-4 py-3">Liquidity</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 bg-white">
-                      {state.candidates.map((candidate, index) => (
-                        <tr
-                          key={`${candidate.slug || candidate.question}-${index}`}
-                        >
-                          <td className="w-[24rem] max-w-[24rem] px-3 py-2 align-middle">
-                            <div className="font-semibold text-slate-950">
-                              {candidate.marketUrl ? (
-                                <a
-                                  className="hover:text-sky-700 hover:underline"
-                                  href={candidate.marketUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {candidate.question}
-                                </a>
-                              ) : (
-                                candidate.question
-                              )}
-                            </div>
-                            <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                              {candidate.theme ? (
-                                <span>{candidate.theme}</span>
-                              ) : null}
-                              {candidate.forceInclude ? (
-                                <span>Force included</span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-emerald-700">
-                            {formatOddsPercent(candidate.currentYesOdds)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-rose-700">
-                            {formatOddsPercent(candidate.currentNoOdds)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-violet-700">
-                            {formatOddsPercent(candidate.llmYesOdds)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-fuchsia-700">
-                            {formatOddsPercent(candidate.llmNoOdds)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-slate-700">
-                            <BullpenReturnsPerDayValueButton
-                              disabled={candidate.returnsPerDay === null}
-                              onOpen={() => setReturnsPerDayQuestion(
-                                buildScanCandidateReturnsPerDayQuestion(candidate),
-                              )}
-                              ariaLabel={`Show Returns/day calculation for ${candidate.question}`}
-                            >
-                              {formatReturnsPerDay(candidate.returnsPerDay)}
-                            </BullpenReturnsPerDayValueButton>
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle font-semibold text-slate-700">
-                            {formatInvestAmount(candidate.amountToBeInvested)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
-                            {formatMoney(candidate.volumeUsd)}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-2 align-middle text-slate-700">
-                            {formatMoney(candidate.liquidityUsd)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <BullpenEventTrendsTable
+                    events={freshOpportunityEvents}
+                    variant="fresh-opportunities"
+                    onReturns={(question) => setReturnsPerDayQuestion(question)}
+                    onReturnsFormula={() =>
+                      setIsReturnsPerDayFormulaDialogOpen(true)
+                    }
+                  />
                 </div>
               ) : (
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600">
