@@ -38,6 +38,8 @@ export type ResolvedPolymarketMarket = {
   category: string | null;
   yesOdds: number | null;
   noOdds: number | null;
+  yesTokenId: string | null;
+  noTokenId: string | null;
   bestBidPrice: number | null;
   bestAskPrice: number | null;
   rules: string | null;
@@ -248,6 +250,30 @@ function readOutcomeOdds(record: Record<string, unknown>) {
   return {
     yesOdds,
     noOdds,
+  };
+}
+
+function readOutcomeTokenIds(record: Record<string, unknown>) {
+  const outcomes = parseJsonArray(record.outcomes)
+    .map((value) => {
+      if (typeof value === "string") return value.trim().toLowerCase();
+      if (!value || typeof value !== "object") return null;
+      return readString(value as Record<string, unknown>, [
+        "name",
+        "label",
+        "title",
+      ])?.toLowerCase() ?? null;
+    });
+  const tokenIds = parseJsonArray(
+    record.clobTokenIds ?? record.clob_token_ids,
+  ).map((value) =>
+    typeof value === "string" && value.trim() ? value.trim() : null,
+  );
+  const yesIndex = outcomes.findIndex((label) => label === "yes");
+  const noIndex = outcomes.findIndex((label) => label === "no");
+  return {
+    yesTokenId: yesIndex >= 0 ? tokenIds[yesIndex] ?? null : null,
+    noTokenId: noIndex >= 0 ? tokenIds[noIndex] ?? null : null,
   };
 }
 
@@ -552,6 +578,7 @@ function normalizeResolvedMarket(
     bestAskPrice === null ? indicativeYesOdds : normalizeOdds(bestAskPrice);
   const noOdds =
     bestBidPrice === null ? indicativeNoOdds : normalizeOdds(1 - bestBidPrice);
+  const { yesTokenId, noTokenId } = readOutcomeTokenIds(record);
   const category = formatPolymarketCategory(
     collectPolymarketCategoryLabels(record),
   );
@@ -570,6 +597,8 @@ function normalizeResolvedMarket(
     category,
     yesOdds,
     noOdds,
+    yesTokenId,
+    noTokenId,
     bestBidPrice,
     bestAskPrice,
     rules,
@@ -795,6 +824,8 @@ async function searchBullpenMarketByQuestion(
       category: null,
       yesOdds: toPercent(yesOutcome?.price ?? yesOutcome?.probability),
       noOdds: toPercent(noOutcome?.price ?? noOutcome?.probability),
+      yesTokenId: null,
+      noTokenId: null,
       bestBidPrice: null,
       bestAskPrice: null,
       rules: null,
