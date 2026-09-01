@@ -109,6 +109,7 @@ import type {
   BullpenTableSortKey,
   BullpenTableSortState,
 } from "./BullpenQuestionsTable";
+import type { BullpenIndependentStageOneProgress } from "./BullpenAutoRunScheduleCard";
 import {
   syncBullpenAutoRunActivePositionAnalyses,
   syncBullpenAutoRunSummarySnapshots,
@@ -3010,6 +3011,7 @@ function BullpenAiPageContent() {
     archivePrevious?: boolean;
     filtersOverride?: BullpenScanFilters;
     signal?: AbortSignal;
+    onProgress?: (progress: BullpenIndependentStageOneProgress) => void;
   }) {
     const scanFilters = options?.filtersOverride ?? activeFilters;
     const params = buildBullpenScanQueryParams(activeMode, scanFilters);
@@ -3044,10 +3046,13 @@ function BullpenAiPageContent() {
       > = [];
       let receivedResultChunk = false;
       let chunkedTotalCandidates = 0;
+      let completedPages = 0;
+      let retryCount = 0;
       let scanCursor: string | null = null;
       let scanStartedAt: string | null = null;
       let scanResponse: { response: Response; payload: ScanResult };
       while (true) {
+        const requestedCursor = scanCursor;
         const scanParams = new URLSearchParams(params);
         if (scanCursor) scanParams.set("scanCursor", scanCursor);
         if (scanStartedAt) scanParams.set("scanStartedAt", scanStartedAt);
@@ -3074,6 +3079,16 @@ function BullpenAiPageContent() {
             Date.now() - scanRequestStartedAt <
               BULLPEN_SCAN_REQUEST_TIMEOUT_MS
           ) {
+            retryCount += 1;
+            options?.onProgress?.({
+              scannedMarkets: chunkedTotalCandidates,
+              completedPages,
+              currentPage: completedPages + 1,
+              retryCount,
+              status: "retrying",
+              lastUpdatedAt: new Date().toISOString(),
+              message: `Page ${completedPages + 1} request failed (${pollErrorMessage}). Retrying automatically...`,
+            });
             await waitForBullpenPollDelay(
               BULLPEN_SCAN_TRANSIENT_RETRY_MS,
               scanSignal,
@@ -3088,6 +3103,7 @@ function BullpenAiPageContent() {
           resultChunk?: boolean;
           nextCursor?: string | null;
           scanStartedAt?: string | null;
+          retryReason?: string | null;
         };
         if (pendingPayload.resultChunk) {
           receivedResultChunk = true;
@@ -3096,9 +3112,34 @@ function BullpenAiPageContent() {
           chunkedRejectedQuestions.push(
             ...(pendingPayload.rejectedQuestions || []),
           );
+          if (!pendingPayload.retryReason) {
+            completedPages += 1;
+          }
         }
         scanCursor = pendingPayload.nextCursor ?? null;
         scanStartedAt = pendingPayload.scanStartedAt ?? scanStartedAt;
+        const isRetryingPage = Boolean(
+          pendingPayload.retryReason ||
+            (scanResponse.response.status === 202 &&
+              pendingPayload.status === "scanning" &&
+              pendingPayload.nextCursor === requestedCursor &&
+              (pendingPayload.totalCandidates || 0) === 0),
+        );
+        if (isRetryingPage) retryCount += 1;
+        options?.onProgress?.({
+          scannedMarkets: chunkedTotalCandidates,
+          completedPages,
+          currentPage:
+            scanResponse.response.status === 202 ? completedPages + 1 : completedPages,
+          retryCount,
+          status: isRetryingPage ? "retrying" : "scanning",
+          lastUpdatedAt: new Date().toISOString(),
+          message: isRetryingPage
+            ? `${pendingPayload.retryReason || `Polymarket Gamma did not complete page ${completedPages + 1}.`} Retrying automatically...`
+            : scanResponse.response.status === 202
+              ? `Page ${completedPages} completed. Scanning page ${completedPages + 1}...`
+              : `Full Universe scan completed across ${completedPages} pages.`,
+        });
         if (
           scanResponse.response.status !== 202 ||
           pendingPayload.status !== "scanning"
@@ -4403,7 +4444,7 @@ function BullpenAiPageContent() {
 
       <BullpenAutoRunScheduleCard
         independentScanSnapshot={activeCurrentSnapshot}
-        onRunIndependentStageOne={async (signal) => {
+        onRunIndependentStageOne={async (signal, onProgress) => {
           let independentFilters = activeFilters;
           try {
             const settings = await apiService.getBullpenAutoLiveSettings({
@@ -4425,6 +4466,7 @@ function BullpenAiPageContent() {
             archivePrevious: false,
             filtersOverride: independentFilters,
             signal,
+            onProgress,
           });
           return result;
         }}
