@@ -161,6 +161,9 @@ const GAMMA_MARKET_NORMALIZATION_KEYS = Array.from(
     "options",
     "tokens",
     "outcomePrices",
+    "bestBid",
+    "bestAsk",
+    "spread",
     "volume",
     "volume24hr",
     "volume24h",
@@ -894,8 +897,22 @@ function normalizeGammaMarket(
   );
   const yesPrice = yesIndex >= 0 ? outcomePrices[yesIndex] : null;
   const noPrice = noIndex >= 0 ? outcomePrices[noIndex] : null;
-  const yesOdds = normalizeOdds(yesPrice);
-  const noOdds = normalizeOdds(noPrice);
+  const indicativeYesOdds = normalizeOdds(yesPrice);
+  const indicativeNoOdds = normalizeOdds(noPrice);
+  const bestAskOdds = normalizeOdds(parseNumber(record.bestAsk));
+  const bestBidOdds = normalizeOdds(parseNumber(record.bestBid));
+  const isBinaryYesNo =
+    new Set(normalizedOutcomeLabels).size === 2 &&
+    normalizedOutcomeLabels.includes("yes") &&
+    normalizedOutcomeLabels.includes("no");
+  // Use executable order-book asks. Gamma's market-level book is the YES
+  // token, so Buy No is the complement of the best YES bid.
+  const yesOdds =
+    isBinaryYesNo && bestAskOdds !== null ? bestAskOdds : indicativeYesOdds;
+  const noOdds =
+    isBinaryYesNo && bestBidOdds !== null
+      ? Number((100 - bestBidOdds).toFixed(2))
+      : indicativeNoOdds;
   const slug = readString(record, MARKET_SLUG_KEYS);
   const closeTime = chooseCloseTime(
     readString(record, CLOSE_TIME_KEYS),
