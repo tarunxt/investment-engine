@@ -3009,9 +3009,21 @@ function BullpenAiPageContent() {
     resetSelections?: boolean;
     archivePrevious?: boolean;
     filtersOverride?: BullpenScanFilters;
+    signal?: AbortSignal;
   }) {
     const scanFilters = options?.filtersOverride ?? activeFilters;
     const params = buildBullpenScanQueryParams(activeMode, scanFilters);
+    const scanAbortController = new AbortController();
+    const pageSignal = pageRequestAbortControllerRef.current?.signal;
+    const callerSignal = options?.signal;
+    const abortScan = () => scanAbortController.abort();
+    if (pageSignal?.aborted || callerSignal?.aborted) {
+      abortScan();
+    } else {
+      pageSignal?.addEventListener("abort", abortScan, { once: true });
+      callerSignal?.addEventListener("abort", abortScan, { once: true });
+    }
+    const scanSignal = scanAbortController.signal;
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
@@ -3044,14 +3056,12 @@ function BullpenAiPageContent() {
             `/api/bullpen-ai?${scanParams.toString()}`,
             {
               cache: "no-store",
-              signal: pageRequestAbortControllerRef.current?.signal,
+              signal: scanSignal,
             },
             BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
           );
         } catch (scanPollError) {
-          const requestSignal =
-            pageRequestAbortControllerRef.current?.signal;
-          if (requestSignal?.aborted || isBullpenRequestAbort(scanPollError)) {
+          if (scanSignal.aborted || isBullpenRequestAbort(scanPollError)) {
             throw scanPollError;
           }
           const pollErrorMessage = normalizeError(scanPollError);
@@ -3066,7 +3076,7 @@ function BullpenAiPageContent() {
           ) {
             await waitForBullpenPollDelay(
               BULLPEN_SCAN_TRANSIENT_RETRY_MS,
-              requestSignal,
+              scanSignal,
             );
             continue;
           }
@@ -3105,11 +3115,9 @@ function BullpenAiPageContent() {
             BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
           );
         }
-        await new Promise((resolve) =>
-          window.setTimeout(
-            resolve,
-            pendingPayload.retryAfterMs ?? BULLPEN_SCAN_POLL_MS,
-          ),
+        await waitForBullpenPollDelay(
+          pendingPayload.retryAfterMs ?? BULLPEN_SCAN_POLL_MS,
+          scanSignal,
         );
       }
       const { response } = scanResponse;
@@ -3156,6 +3164,12 @@ function BullpenAiPageContent() {
       };
     } catch (scanError) {
       void positionsRefreshTask;
+      if (scanSignal.aborted || isBullpenRequestAbort(scanError)) {
+        return {
+          snapshot: null,
+          error: null,
+        };
+      }
       const message =
         scanError instanceof Error
           ? scanError.message
@@ -3169,6 +3183,8 @@ function BullpenAiPageContent() {
         error: message,
       };
     } finally {
+      pageSignal?.removeEventListener("abort", abortScan);
+      callerSignal?.removeEventListener("abort", abortScan);
       setScanningMode(null);
     }
   }
@@ -4387,10 +4403,12 @@ function BullpenAiPageContent() {
 
       <BullpenAutoRunScheduleCard
         independentScanSnapshot={activeCurrentSnapshot}
-        onRunIndependentStageOne={async () => {
+        onRunIndependentStageOne={async (signal) => {
           let independentFilters = activeFilters;
           try {
-            const settings = await apiService.getBullpenAutoLiveSettings();
+            const settings = await apiService.getBullpenAutoLiveSettings({
+              signal,
+            });
             independentFilters = {
               ...activeFilters,
               minYesOdds: settings.console_min_market_odds,
@@ -4406,6 +4424,7 @@ function BullpenAiPageContent() {
             resetSelections: true,
             archivePrevious: false,
             filtersOverride: independentFilters,
+            signal,
           });
           return result;
         }}
