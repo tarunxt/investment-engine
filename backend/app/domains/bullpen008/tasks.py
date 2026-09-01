@@ -3100,6 +3100,61 @@ def refresh_bullpen008_position_alerts() -> int:
                     f"Blocker or recovery state: {', '.join(monitor.get('blocker_codes', [])) or 'none'}\n\n"
                     "Email delivery is not proof that an exit executed."
                 )
+                scenario = monitor.get("remote_action", {}).get(
+                    "affected_scenario_ids", "see certified policy"
+                )
+                trigger_types = (
+                    ", ".join(monitor.get("trigger_types", [])) or "none"
+                )
+                blocker_state = (
+                    ", ".join(monitor.get("blocker_codes", [])) or "none"
+                )
+                regime_status = (
+                    monitor.get("regime_change") or "no active verified episode"
+                )
+                shadow_status = monitor.get(
+                    "shadow_live_status", phase2_settings.execution_mode.upper()
+                )
+                action_status = (
+                    f"{monitor.get('activation_status', 'DORMANT')} / "
+                    f"{monitor.get('submission_status')}"
+                )
+                safe = lambda value: html.escape(str(value))
+                html_content = (
+                    '<div style="font-family:Arial,Helvetica,sans-serif;'
+                    'font-size:16px;line-height:1.55;color:#f5f5f5;'
+                    'background:#111;padding:24px">'
+                    '<h2 style="margin:0 0 24px;color:#ff8f7a;'
+                    'font-size:28px;line-height:1.2">'
+                    "WARNING — Active position exit required</h2>"
+                    "<p>Continuous Bullpen 008 monitoring found that the held-side "
+                    "LLM odds, actual current held-side Bullpen odds, or both are "
+                    f"below {safe(alert['threshold'])}%.</p>"
+                    '<ol style="padding-left:28px"><li style="margin-bottom:20px">'
+                    f'<p><strong>{safe(alert["question"])}</strong></p>'
+                    f'<p>Held side: <strong>{safe(alert["side"])}</strong></p>'
+                    "<p>Consolidated held-side LLM odds: "
+                    f'<strong>{safe(alert.get("llm_odds"))}%</strong></p>'
+                    "<p>Actual current held-side Bullpen odds: "
+                    f'<strong>{safe(alert.get("actual_odds"))}%</strong></p>'
+                    f"<p>Alert triggered by: <strong>{safe(breach_label)}</strong></p>"
+                    "<p>Action: <strong>EXIT this position as soon as practical.</strong></p>"
+                    "</li></ol>"
+                    '<hr style="border:0;border-top:1px solid #444;margin:24px 0">'
+                    f"<p><strong>Contingent trigger:</strong> {safe(trigger_types)}<br>"
+                    f"<strong>First quote:</strong> {safe(monitor.get('first_quote'))}<br>"
+                    f"<strong>Confirming quote:</strong> {safe(monitor.get('confirming_quote'))}<br>"
+                    f"<strong>15-minute decline:</strong> {safe(monitor.get('drop_15m_pp'))} pp<br>"
+                    f"<strong>24-hour decline:</strong> {safe(monitor.get('drop_24h_pp'))} pp<br>"
+                    f"<strong>Evidence/regime status:</strong> {safe(regime_status)}<br>"
+                    f"<strong>Scenario:</strong> {safe(scenario)}<br>"
+                    f"<strong>Shadow/live status:</strong> {safe(shadow_status)}<br>"
+                    f"<strong>Action status:</strong> {safe(action_status)}<br>"
+                    f"<strong>Blocker or recovery state:</strong> {safe(blocker_state)}</p>"
+                    '<p style="margin-top:24px;color:#ffb4a8"><strong>'
+                    "Email delivery is not proof that an exit executed."
+                    "</strong></p></div>"
+                )
                 delivery = send_logged_email_sync(
                     session,
                     user_id=user_id,
@@ -3107,7 +3162,7 @@ def refresh_bullpen008_position_alerts() -> int:
                     trigger=f"Bullpen 008 {breach_label}",
                     recipients=TEST_RECIPIENTS,
                     subject=f"WARNING: Bullpen 008 held {alert['side']} odds below {alert['threshold']}%",
-                    html_content="<pre>" + html.escape(text_content) + "</pre>",
+                    html_content=html_content,
                     text_content=text_content,
                     remarks="Bullpen 008 alert only; no order was created.",
                     idempotency_key=str(alert["idempotency_key"]),
