@@ -1392,6 +1392,8 @@ function buildIndependentStageOneView(
   );
   const rejectedCandidateCount =
     snapshot.totalRejectedQuestions ?? rejectedCandidates.length;
+  const acceptedCandidateCount =
+    snapshot.totalAcceptedQuestions ?? acceptedCandidates.length;
 
   return {
     key: "scan",
@@ -1404,7 +1406,7 @@ function buildIndependentStageOneView(
       : "Independent Stage 1 scan completed without running Stage 2 or Stage 3.",
     progressCommentary: [
       `${snapshot.totalCandidates} Bullpen events scanned.`,
-      `${acceptedCandidates.length} events passed the saved filters.`,
+      `${acceptedCandidateCount} events passed the saved filters.`,
       `${rejectedCandidateCount} events were filtered out.`,
       ...(snapshot.isPartial && snapshot.pagesScanned
         ? [`Partial snapshot saved after ${snapshot.pagesScanned} completed pages.`]
@@ -1426,8 +1428,10 @@ function buildIndependentStageOneView(
       scanned_at: snapshot.scannedAt,
       scanned_candidates: snapshot.totalCandidates,
       total_items: snapshot.totalCandidates,
-      accepted_candidates_count: acceptedCandidates.length,
-      rejected_candidates_count: rejectedCandidates.length,
+      accepted_candidates_count: acceptedCandidateCount,
+      rejected_candidates_count: rejectedCandidateCount,
+      retained_accepted_candidates_count: acceptedCandidates.length,
+      retained_rejected_candidates_count: rejectedCandidates.length,
       total_rejected_candidates_count: rejectedCandidateCount,
       partial_scan: Boolean(snapshot.isPartial),
       interruption_reason: snapshot.interruptionReason ?? null,

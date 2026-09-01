@@ -103,10 +103,12 @@ test("Stage 1 scans the complete open Gamma universe before applying filters", (
 });
 
 test("interrupted independent Stage 1 preserves its latest partial snapshot", () => {
-  assert.match(pageSource, /PARTIAL_SCAN_MAX_REJECTED_ROWS = 2_000/);
+  assert.match(pageSource, /SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS = 500/);
+  assert.match(pageSource, /SCAN_SNAPSHOT_MAX_REJECTED_ROWS = 500/);
   assert.match(pageSource, /receivedResultChunk && scanResponse/);
   assert.match(pageSource, /isPartial: true/);
   assert.match(pageSource, /pagesScanned: completedPages/);
+  assert.match(pageSource, /totalAcceptedQuestions: chunkedQuestions\.length/);
   assert.match(pageSource, /totalRejectedQuestions: chunkedRejectedQuestions\.length/);
   assert.match(pageSource, /syncBullpenScanSnapshot\(partialSnapshot/);
   assert.match(cardSource, /snapshot\.totalRejectedQuestions/);
