@@ -31,6 +31,10 @@ only the previous independent snapshot. The Stage 1 output widget retains accept
 and rejected event rows plus their filter reasons. Selecting **Original** always
 returns to the latest persisted full Auto Run Stage 1 evidence, so independent scans
 do not rewrite historical run-audit facts or become an Auto Run audit record.
+While this independent scan is active, the console presents Stage 1 as a yellow
+working tile with a live elapsed timer. The **Scanning** control remains clickable
+and aborts the in-flight stateless pagination request, immediately restoring the
+blue **Scan** control without creating or mutating a frozen audit record.
 The preview calls the canonical backend Stage 1 scanner. If Bullpen CLI returns a
 silently truncated discover set, the scanner supplements it from Polymarket Gamma
 before applying the saved filters; the same completeness safeguard applies to new
