@@ -23,7 +23,8 @@ const routeSource = fs.readFileSync(
 
 test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () => {
   assert.match(cardSource, />\s*Original\s*</);
-  assert.match(cardSource, /Scan dated \{formatIstDateTime/);
+  assert.match(cardSource, /Partial scan dated/);
+  assert.match(cardSource, /independentScanSnapshot\.totalCandidates\.toLocaleString/);
   assert.match(cardSource, /isIndependentStageOneScanning \? "Scanning" : "Scan"/);
   assert.match(cardSource, /border-red-700 bg-red-600/);
   assert.match(cardSource, /border-blue-700 bg-blue-600/);
@@ -75,7 +76,7 @@ test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
 test("independent scan retains filtered rows and reasons for Stage 1 output dialogs", () => {
   assert.match(routeSource, /rejectedQuestions/);
   assert.match(routeSource, /getFilterReasons/);
-  assert.match(routeSource, /Gamma supplemented the scan/);
+  assert.match(routeSource, /configured closing window/);
   assert.match(cardSource, /scannedCandidates: \[\.\.\.acceptedCandidates, \.\.\.rejectedCandidates\]/);
   assert.match(cardSource, /independent_stage1_scan: true/);
 });
@@ -87,6 +88,8 @@ test("Stage 1 scans the complete open Gamma universe before applying filters", (
   assert.match(routeSource, /after_cursor/);
   assert.match(routeSource, /next_cursor/);
   assert.match(routeSource, /end_date_min: currentUniverseStart\.toISOString\(\)/);
+  assert.match(routeSource, /end_date_max: currentUniverseEnd\.toISOString\(\)/);
+  assert.match(routeSource, /filters\.maxClosingDays \* MILLISECONDS_PER_DAY/);
   assert.match(routeSource, /toArray\(market\.events\)\.find/);
   assert.match(routeSource, /eventIdentity \? \[eventIdentity\] : \[\]/);
   assert.doesNotMatch(routeSource, /active: "true"/);
@@ -96,7 +99,18 @@ test("Stage 1 scans the complete open Gamma universe before applying filters", (
   assert.match(routeSource, /market\.archived === true/);
   assert.match(routeSource, /GAMMA_MARKET_NORMALIZATION_KEYS/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
-  assert.match(routeSource, /scanned the complete current universe/);
+  assert.match(routeSource, /configured closing window/);
+});
+
+test("interrupted independent Stage 1 preserves its latest partial snapshot", () => {
+  assert.match(pageSource, /PARTIAL_SCAN_MAX_REJECTED_ROWS = 2_000/);
+  assert.match(pageSource, /receivedResultChunk && scanResponse/);
+  assert.match(pageSource, /isPartial: true/);
+  assert.match(pageSource, /pagesScanned: completedPages/);
+  assert.match(pageSource, /totalRejectedQuestions: chunkedRejectedQuestions\.length/);
+  assert.match(pageSource, /syncBullpenScanSnapshot\(partialSnapshot/);
+  assert.match(cardSource, /snapshot\.totalRejectedQuestions/);
+  assert.match(cardSource, /partial_scan: Boolean\(snapshot\.isPartial\)/);
 });
 
 test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
@@ -113,7 +127,7 @@ test("independent Stage 1 carries stateless keyset progress in each poll", () =>
   assert.doesNotMatch(routeSource, /GammaScanJob/);
   assert.match(routeSource, /searchParams\.get\("scanCursor"\)/);
   assert.match(routeSource, /searchParams\.get\("scanStartedAt"\)/);
-  assert.match(routeSource, /status: "scanning", retryAfterMs: 250/);
+  assert.match(routeSource, /status: "scanning",\s+retryAfterMs: 250/);
   assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
   assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 20_000/);
   assert.match(routeSource, /GAMMA_TERMINAL_CURSOR = "LTE="/);
@@ -138,5 +152,5 @@ test("independent Stage 1 carries stateless keyset progress in each poll", () =>
   assert.match(pageSource, /retryablePollFailure/);
   assert.match(pageSource, /unexpected token\|not valid json\|http/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
-  assert.match(routeSource, /complete current universe/);
+  assert.match(routeSource, /configured closing window/);
 });
