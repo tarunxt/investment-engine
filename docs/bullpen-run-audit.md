@@ -35,9 +35,9 @@ While this independent scan is active, the console presents Stage 1 as a yellow
 working tile with a live elapsed timer. The **Scanning** control remains clickable
 and aborts the in-flight stateless pagination request, immediately restoring the
 blue **Scan** control. A stopped, timed-out, or otherwise interrupted enumeration
-saves its accumulated counts and accepted rows as a clearly labelled partial
-independent snapshot; rejected rows are capped for browser storage while their
-authoritative total is retained. The dated snapshot button reopens this latest
+saves its accumulated counts and rows as a clearly labelled partial independent
+snapshot. Passed and filtered rows are capped for browser storage while their
+authoritative totals are retained. The dated snapshot button reopens this latest
 partial or completed Stage 1 evidence without creating or mutating a frozen audit
 record.
 The working tile replaces historical Stage 1 totals with the current stateless
