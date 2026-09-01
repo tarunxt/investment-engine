@@ -607,7 +607,10 @@ def _read_yes_no_prices(
             elif normalized_label == "no" and no_ask is None:
                 no_ask = _read_nested_number(item, ask_keys)
 
-    is_binary_yes_no = len(set(normalized_labels)) == 2 and set(normalized_labels) == {"yes", "no"}
+    is_binary_yes_no = (
+        len(set(normalized_labels)) == 2
+        and set(normalized_labels) == {"yes", "no"}
+    )
     if is_binary_yes_no:
         # Gamma exposes the YES book at the market level: bestAsk buys YES;
         # 1 - bestBid buys the complementary NO token.
@@ -625,7 +628,14 @@ def _read_yes_no_prices(
             no_price = round(100.0 - top_level_yes_bid, 2)
 
     # Compatibility fallbacks for non-Gamma/Bullpen payload variants.
-    nested_price_keys = ("odds", "decimalOdds", "price", "lastPrice", "probability", "probabilityValue")
+    nested_price_keys = (
+        "odds",
+        "decimalOdds",
+        "price",
+        "lastPrice",
+        "probability",
+        "probabilityValue",
+    )
     if yes_price is None or no_price is None:
         for collection_name in ("outcomes", "options", "tokens", "markets"):
             for item in _iter_list_like(row.get(collection_name)):
@@ -643,12 +653,30 @@ def _read_yes_no_prices(
     if yes_price is None:
         yes_price = _read_nested_number(
             row,
-            ("yesOdds", "yes_odd", "yesDecimalOdds", "yesPrice", "yes", "bestYesOdds", "probabilityYes", "yesProbability"),
+            (
+                "yesOdds",
+                "yes_odd",
+                "yesDecimalOdds",
+                "yesPrice",
+                "yes",
+                "bestYesOdds",
+                "probabilityYes",
+                "yesProbability",
+            ),
         )
     if no_price is None:
         no_price = _read_nested_number(
             row,
-            ("noOdds", "no_odd", "noDecimalOdds", "noPrice", "no", "bestNoOdds", "probabilityNo", "noProbability"),
+            (
+                "noOdds",
+                "no_odd",
+                "noDecimalOdds",
+                "noPrice",
+                "no",
+                "bestNoOdds",
+                "probabilityNo",
+                "noProbability",
+            ),
         )
 
     return _normalize_console_odds(yes_price), _normalize_console_odds(no_price)
