@@ -1506,6 +1506,16 @@ class AsyncPolymarketAutoLiveRepository:
                         ),
                         "current_yes_odds": current_yes_odds,
                         "current_no_odds": current_no_odds,
+                        "best_bid_cents": first_number(
+                            candidate.get("best_bid_cents"),
+                            prompt_market.get("best_bid_cents"),
+                            prepared.get("best_bid_cents"),
+                        ),
+                        "best_ask_cents": first_number(
+                            candidate.get("best_ask_cents"),
+                            prompt_market.get("best_ask_cents"),
+                            prepared.get("best_ask_cents"),
+                        ),
                         # Consensus without a usable saved model output is not
                         # coverage. Some failed runs serialize the empty
                         # consensus default as 0/100; exposing that as a green
@@ -1620,6 +1630,18 @@ class AsyncPolymarketAutoLiveRepository:
                 "current_no_odds",
                 latest_decision.current_no_odds if latest_decision else None,
             ))
+            best_bid_cents = first_number(stage2_or_decision(
+                "best_bid_cents",
+                getattr(latest_decision, "best_bid_cents", None),
+            ))
+            best_ask_cents = first_number(stage2_or_decision(
+                "best_ask_cents",
+                getattr(latest_decision, "best_ask_cents", None),
+            ))
+            if best_ask_cents is not None and 0 <= best_ask_cents <= 100:
+                current_yes_odds = best_ask_cents
+            if best_bid_cents is not None and 0 <= best_bid_cents <= 100:
+                current_no_odds = round(100.0 - best_bid_cents, 2)
             llm_yes_odds = first_number(stage2_or_decision(
                 "llm_yes_odds",
                 latest_decision.fair_yes_probability_pct
