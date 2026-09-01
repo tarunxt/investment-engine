@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 
 from app.domains.bullpen008.constants import (
     CELERY_QUEUE,
@@ -69,6 +69,68 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+def _compact_run_options():
+    """Load run-card facts without hydrating the large immutable JSON payloads."""
+    return (
+        selectinload(Bullpen008RunRecord.stages).load_only(
+            Bullpen008StageOutputRecord.stage_number,
+            Bullpen008StageOutputRecord.stage_name,
+            Bullpen008StageOutputRecord.stage_version,
+            Bullpen008StageOutputRecord.status,
+            Bullpen008StageOutputRecord.pass_condition,
+            Bullpen008StageOutputRecord.block_reason,
+            Bullpen008StageOutputRecord.previous_stage_output_hash,
+            Bullpen008StageOutputRecord.output_hash,
+            Bullpen008StageOutputRecord.settings_snapshot_hash,
+            Bullpen008StageOutputRecord.wallet_snapshot_hash,
+            Bullpen008StageOutputRecord.prompt_version,
+            Bullpen008StageOutputRecord.parser_version,
+            Bullpen008StageOutputRecord.started_at,
+            Bullpen008StageOutputRecord.completed_at,
+            Bullpen008StageOutputRecord.duration_seconds,
+        ),
+        noload(Bullpen008RunRecord.certificate),
+        noload(Bullpen008RunRecord.action_plan),
+        noload(Bullpen008RunRecord.execution_intents),
+    )
+
+
+async def _attach_compact_stage_metrics(
+    session: AsyncSession,
+    records: list[Bullpen008RunRecord],
+) -> None:
+    """Attach only the two small JSON subobjects used by run-summary cards."""
+    stages = [stage for record in records for stage in record.stages]
+    stage_ids = [stage.id for stage in stages]
+    if not stage_ids:
+        return
+    rows = (
+        await session.execute(
+            select(
+                Bullpen008StageOutputRecord.id,
+                Bullpen008StageOutputRecord.outputs_json["metrics"].label("metrics"),
+                Bullpen008StageOutputRecord.outputs_json["risk_metrics"].label(
+                    "risk_metrics"
+                ),
+            ).where(Bullpen008StageOutputRecord.id.in_(stage_ids))
+        )
+    ).all()
+    compact_by_id = {
+        row.id: {
+            "metrics": row.metrics if isinstance(row.metrics, dict) else {},
+            "risk_metrics": (
+                row.risk_metrics if isinstance(row.risk_metrics, dict) else {}
+            ),
+        }
+        for row in rows
+    }
+    for stage in stages:
+        stage._compact_outputs_json = compact_by_id.get(  # type: ignore[attr-defined]
+            stage.id,
+            {"metrics": {}, "risk_metrics": {}},
+        )
+
+
 def _is_interrupted_previous_build(
     run_build: str | None,
     current_build: str | None,
@@ -114,7 +176,7 @@ async def recover_interrupted_previous_build_run(
     record = (
         await session.execute(
             select(Bullpen008RunRecord)
-            .options(selectinload(Bullpen008RunRecord.stages))
+            .options(*_compact_run_options())
             .where(
                 Bullpen008RunRecord.user_id == user_id,
                 Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -357,18 +419,17 @@ def state_from_record(record: Bullpen008StateRecord) -> Bullpen008State:
 def stage_from_record(
     record, *, include_payload: bool = True
 ) -> Bullpen008StageOutput:
-    outputs = (
-        record.outputs_json
-        if include_payload
-        else {
-            "metrics": record.outputs_json.get("metrics", {}),
-            # Stage 1 keeps the P0 counters separate so its legacy accounting
-            # metrics remain byte-for-byte compatible.  They are still compact
-            # headline data, not a large stage payload, and must survive the
-            # bootstrap projection used by the stage cards.
-            "risk_metrics": record.outputs_json.get("risk_metrics", {}),
+    if include_payload:
+        outputs = record.outputs_json
+    else:
+        source = record.__dict__.get(
+            "_compact_outputs_json",
+            record.__dict__.get("outputs_json", {}),
+        )
+        outputs = {
+            "metrics": source.get("metrics", {}),
+            "risk_metrics": source.get("risk_metrics", {}),
         }
-    )
     return Bullpen008StageOutput(
         stage_number=record.stage_number,
         stage_name=record.stage_name,
@@ -397,8 +458,16 @@ def stage_from_record(
 def run_from_record(
     record: Bullpen008RunRecord, *, include_stage_payloads: bool = True
 ) -> Bullpen008Run:
-    certificate = record.certificate.payload if record.certificate is not None else None
-    action_plan = record.action_plan.payload if record.action_plan is not None else None
+    certificate = (
+        record.certificate.payload
+        if include_stage_payloads and record.certificate is not None
+        else None
+    )
+    action_plan = (
+        record.action_plan.payload
+        if include_stage_payloads and record.action_plan is not None
+        else None
+    )
     execution_intents = [
         {
             "intent_id": intent.id,
@@ -419,7 +488,7 @@ def run_from_record(
             "retryable": intent.retryable,
             "payload": intent.payload if include_stage_payloads else {},
         }
-        for intent in record.execution_intents
+        for intent in (record.execution_intents if include_stage_payloads else [])
     ]
     return Bullpen008Run(
         id=record.id,
@@ -602,12 +671,7 @@ async def create_run_record(
     existing = (
         await session.execute(
             select(Bullpen008RunRecord)
-            .options(
-                selectinload(Bullpen008RunRecord.stages),
-                selectinload(Bullpen008RunRecord.certificate),
-                selectinload(Bullpen008RunRecord.action_plan),
-                selectinload(Bullpen008RunRecord.execution_intents),
-            )
+            .options(*_compact_run_options())
             .where(
                 Bullpen008RunRecord.user_id == user_id,
                 Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -739,12 +803,7 @@ async def get_bootstrap(
     latest = (
         await session.execute(
             select(Bullpen008RunRecord)
-            .options(
-                selectinload(Bullpen008RunRecord.stages),
-                selectinload(Bullpen008RunRecord.certificate),
-                selectinload(Bullpen008RunRecord.action_plan),
-                selectinload(Bullpen008RunRecord.execution_intents),
-            )
+            .options(*_compact_run_options())
             .where(
                 Bullpen008RunRecord.user_id == user_id,
                 Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -753,6 +812,8 @@ async def get_bootstrap(
             .limit(1)
         )
     ).scalar_one_or_none()
+    if latest is not None:
+        await _attach_compact_stage_metrics(session, [latest])
     inherited = await _inherited_runs(session, user_id=user_id)
     alert_records = (
         (
@@ -897,12 +958,7 @@ async def get_history(
         (
             await session.execute(
                 select(Bullpen008RunRecord)
-                .options(
-                    selectinload(Bullpen008RunRecord.stages),
-                    selectinload(Bullpen008RunRecord.certificate),
-                    selectinload(Bullpen008RunRecord.action_plan),
-                    selectinload(Bullpen008RunRecord.execution_intents),
-                )
+                .options(*_compact_run_options())
                 .where(
                     Bullpen008RunRecord.user_id == user_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -915,17 +971,16 @@ async def get_history(
         .scalars()
         .all()
     )
-    total = len(
+    await _attach_compact_stage_metrics(session, list(records))
+    total = int(
         (
             await session.execute(
-                select(Bullpen008RunRecord.id).where(
+                select(func.count(Bullpen008RunRecord.id)).where(
                     Bullpen008RunRecord.user_id == user_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
                 )
             )
-        )
-        .scalars()
-        .all()
+        ).scalar_one()
     )
     inherited = (
         await _inherited_runs(session, user_id=user_id, limit=10) if offset == 0 else []
@@ -952,12 +1007,7 @@ async def cancel_active_run(
         (
             await session.execute(
                 select(Bullpen008RunRecord)
-                .options(
-                    selectinload(Bullpen008RunRecord.stages),
-                    selectinload(Bullpen008RunRecord.certificate),
-                    selectinload(Bullpen008RunRecord.action_plan),
-                    selectinload(Bullpen008RunRecord.execution_intents),
-                )
+                .options(*_compact_run_options())
                 .where(
                     Bullpen008RunRecord.user_id == user_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -1039,29 +1089,37 @@ async def get_event_trends(
 ) -> Bullpen008EventTrendsResponse:
     """Build the Bullpen 007-style 20-scan widget from isolated 008 Stage 2 facts."""
     normalized_scan_count = max(1, min(scan_count, 20))
-    records = (
-        (
-            await session.execute(
-                select(Bullpen008RunRecord)
-                .options(selectinload(Bullpen008RunRecord.stages))
-                .where(
-                    Bullpen008RunRecord.user_id == user_id,
-                    Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
-                )
-                .order_by(Bullpen008RunRecord.started_at.desc())
-                .limit(normalized_scan_count)
+    run_rows = (
+        await session.execute(
+            select(Bullpen008RunRecord.id, Bullpen008RunRecord.started_at)
+            .where(
+                Bullpen008RunRecord.user_id == user_id,
+                Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
+            )
+            .order_by(Bullpen008RunRecord.started_at.desc())
+            .limit(normalized_scan_count)
+        )
+    ).all()
+    run_ids = [row.id for row in run_rows]
+    stage_rows = [] if not run_ids else (
+        await session.execute(
+            select(
+                Bullpen008StageOutputRecord.run_id,
+                Bullpen008StageOutputRecord.inputs_json,
+                Bullpen008StageOutputRecord.outputs_json,
+                Bullpen008StageOutputRecord.completed_at,
+            ).where(
+                Bullpen008StageOutputRecord.run_id.in_(run_ids),
+                Bullpen008StageOutputRecord.workflow_profile == WORKFLOW_PROFILE,
+                Bullpen008StageOutputRecord.stage_number == 2,
             )
         )
-        .scalars()
-        .all()
-    )
+    ).all()
+    stage_by_run = {row.run_id: row for row in stage_rows}
     event_rows: dict[str, dict[str, object]] = {}
 
-    for scan_index, record in enumerate(records):
-        stage = next(
-            (item for item in record.stages if item.stage_number == 2),
-            None,
-        )
+    for scan_index, run_row in enumerate(run_rows):
+        stage = stage_by_run.get(run_row.id)
         if stage is None:
             continue
         rows = stage.outputs_json.get("rows", [])
