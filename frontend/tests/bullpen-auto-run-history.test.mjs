@@ -177,7 +177,7 @@ test("Bullpen event links use the direct market route instead of the trending se
 
 test("event trends support deadlines, persistent table controls, and stable scan details", () => {
   assert.match(trendsTable, /label: "Deadline"/);
-  assert.match(trendsTable, /localStorage\.setItem\(STORAGE_KEY/);
+  assert.match(trendsTable, /localStorage\.setItem\(storageKey/);
   assert.match(trendsTable, /draggable/);
   assert.match(trendsTable, /cursor-col-resize/);
   assert.match(trendsTable, /rowIndex===9/);
@@ -185,6 +185,17 @@ test("event trends support deadlines, persistent table controls, and stable scan
   assert.match(trendsTable, /scan_llm_outputs/);
   assert.match(llmDialog, /Individual LLM odds and commentary/);
   assert.match(llmDialog, /output\.rationale/);
+});
+
+test("Stage 1 fresh opportunities and active positions reuse the recurring-events table widget", () => {
+  assert.match(scheduleCard, /variant="active-positions"/);
+  assert.match(scheduleCard, /variant="fresh-opportunities"/);
+  assert.match(scheduleCard, /events=\{activePositionEvents\}/);
+  assert.match(scheduleCard, /events=\{freshOpportunityEvents\}/);
+  assert.match(scheduleCard, /buildStageOnePositionTableEvent/);
+  assert.match(scheduleCard, /buildStageOneOpportunityTableEvent/);
+  assert.match(trendsTable, /"currentOdds", "llmOdds", "returns", "position"/);
+  assert.match(trendsTable, /"amount", "volume", "liquidity"/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {
