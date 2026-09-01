@@ -55,10 +55,12 @@ class _StageTwoOnlySession:
                                         "question": "Will event one happen?",
                                         "market_url": "https://example.com/market-1",
                                         "close_time": "2026-08-12T12:00:00+00:00",
-                                        "current_yes_odds": 55.5,
-                                        "current_no_odds": 44.5,
-                                        "fair_yes_probability_pct": 74,
-                                        "fair_no_probability_pct": 26,
+                                        "current_yes_odds": 12.5,
+                                        "current_no_odds": 87.5,
+                                        "best_bid_cents": 1,
+                                        "best_ask_cents": 44,
+                                        "fair_yes_probability_pct": 10,
+                                        "fair_no_probability_pct": 90,
                                         "returns_per_day": 13,
                                         "llm_completed_at": "2026-08-10T02:45:00+00:00",
                                         "llm_outputs": [
@@ -66,8 +68,8 @@ class _StageTwoOnlySession:
                                                 "provider": "deepseek",
                                                 "model": "deepseek-v4-flash",
                                                 "status": "completed",
-                                                "llm_yes_odds": 74,
-                                                "llm_no_odds": 26,
+                                                "llm_yes_odds": 10,
+                                                "llm_no_odds": 90,
                                                 "completed_at": "2026-08-10T02:45:00+00:00",
                                             }
                                         ],
@@ -115,17 +117,17 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
     event = next(event for event in response.events if event.market_id == "market-1")
     assert event.market_id == "market-1"
     assert event.market_title == "Will event one happen?"
-    assert event.scan_scores[0] == 74
-    assert event.scan_sides[0] == "YES"
+    assert event.scan_scores[0] == 90
+    assert event.scan_sides[0] == "NO"
     assert event.scan_timestamps[0] == "2026-08-10T02:45:00+00:00"
-    assert event.llm_yes_odds == 74
-    assert event.llm_no_odds == 26
-    assert event.current_yes_odds == 55.5
-    assert event.current_no_odds == 44.5
+    assert event.llm_yes_odds == 10
+    assert event.llm_no_odds == 90
+    assert event.current_yes_odds == 44
+    assert event.current_no_odds == 99
     assert event.market_url == "https://example.com/market-1"
-    assert event.returns_per_day == 6.95
+    assert event.returns_per_day == 0.16
     assert event.scan_llm_outputs[0][0].provider == "deepseek"
-    assert event.score == 74
+    assert event.score == 90
     assert len(event.scan_scores) == 20
 
     empty_consensus = next(
