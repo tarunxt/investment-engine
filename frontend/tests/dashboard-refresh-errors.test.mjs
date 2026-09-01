@@ -135,6 +135,13 @@ test("structured Bullpen errors become concise dashboard warnings", () => {
     normalizeError(new Error("Request timed out after 20000ms")),
     "Request timed out after 20000ms",
   );
+
+  const detailedProviderError = `Provider rejected the request. ${"diagnostic context ".repeat(30)}`;
+  assert.equal(
+    normalizeError(new Error(detailedProviderError)),
+    detailedProviderError.trim(),
+    "the detailed dialog must receive the complete provider diagnostic",
+  );
 });
 
 test("changed dashboard TypeScript and threat routers parse", () => {
