@@ -427,6 +427,15 @@ def _read_outcome_labels(row: dict[str, Any]) -> list[str]:
 def _read_yes_no_prices(
     outcome_labels: list[str], row: dict[str, Any]
 ) -> tuple[float | None, float | None]:
+    """Return executable buy prices for each side of a binary order book.
+
+    Gamma outcomePrices are indicative/last-traded probabilities, not
+    necessarily prices at which a new order can fill. For a binary YES token,
+    bestAsk is the executable Buy Yes price and the complement of bestBid is
+    the executable Buy No price. Keep outcome prices only as a compatibility
+    fallback when either side of the book is unavailable.
+    """
+
     normalized_labels = [_normalize_text(label) for label in outcome_labels]
     prices = [_parse_float(item) for item in _parse_json_list(row.get("outcomePrices"))]
     yes_price = None
@@ -439,8 +448,16 @@ def _read_yes_no_prices(
         no_index = normalized_labels.index("no")
         if no_index < len(prices):
             no_price = prices[no_index]
-    return _normalize_odds(yes_price), _normalize_odds(no_price)
 
+    if len(set(normalized_labels)) == 2 and set(normalized_labels) == {"yes", "no"}:
+        best_ask_cents = _normalize_odds(_parse_float(row.get("bestAsk")))
+        best_bid_cents = _normalize_odds(_parse_float(row.get("bestBid")))
+        if best_ask_cents is not None:
+            yes_price = best_ask_cents
+        if best_bid_cents is not None:
+            no_price = round(100.0 - best_bid_cents, 2)
+
+    return _normalize_odds(yes_price), _normalize_odds(no_price)
 
 def _is_binary_yes_no(
     outcome_labels: list[str], yes_odds: float | None, no_odds: float | None
