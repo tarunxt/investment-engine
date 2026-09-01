@@ -8,7 +8,7 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import noload, selectinload
+from sqlalchemy.orm import load_only, noload, selectinload
 
 from app.domains.bullpen008.constants import (
     CELERY_QUEUE,
@@ -456,7 +456,10 @@ def stage_from_record(
 
 
 def run_from_record(
-    record: Bullpen008RunRecord, *, include_stage_payloads: bool = True
+    record: Bullpen008RunRecord,
+    *,
+    include_stage_payloads: bool = True,
+    include_run_snapshots: bool = True,
 ) -> Bullpen008Run:
     certificate = (
         record.certificate.payload
@@ -501,10 +504,10 @@ def run_from_record(
         summary=record.summary,
         error_message=record.error_message,
         code_build_version=record.code_build_version,
-        settings_snapshot=record.settings_snapshot,
-        wallet_snapshot=record.wallet_snapshot,
-        task_metadata=record.task_metadata,
-        run_metadata=record.run_metadata,
+        settings_snapshot=record.settings_snapshot if include_run_snapshots else {},
+        wallet_snapshot=record.wallet_snapshot if include_run_snapshots else {},
+        task_metadata=record.task_metadata if include_run_snapshots else {},
+        run_metadata=record.run_metadata if include_run_snapshots else {},
         stages=[
             stage_from_record(stage, include_payload=include_stage_payloads)
             for stage in record.stages
@@ -814,8 +817,9 @@ async def get_bootstrap(
     ).scalar_one_or_none()
     if latest is not None:
         await _attach_compact_stage_metrics(session, [latest])
+    has_active_run = bool(latest and latest.status in {"queued", "running"})
     inherited = await _inherited_runs(session, user_id=user_id)
-    alert_records = (
+    alert_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008AlertRecord)
@@ -831,7 +835,7 @@ async def get_bootstrap(
         .all()
     )
     latest_run_id = latest.id if latest is not None else None
-    scenario_records = [] if latest_run_id is None else (
+    scenario_records = [] if latest_run_id is None or has_active_run else (
         (
             await session.execute(
                 select(Bullpen008JointLossScenarioRecord)
@@ -840,7 +844,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    activation_records = (
+    activation_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008ContingentExitActivationRecord)
@@ -850,7 +854,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    regime_records = (
+    regime_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008RegimeChangeEpisodeRecord)
@@ -860,7 +864,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    drawdown_record = (
+    drawdown_record = None if has_active_run else (
         await session.execute(
             select(Bullpen008DrawdownEpisodeRecord)
             .where(Bullpen008DrawdownEpisodeRecord.user_id == user_id)
@@ -868,7 +872,7 @@ async def get_bootstrap(
             .limit(1)
         )
     ).scalar_one_or_none()
-    cooldown_records = (
+    cooldown_records = [] if has_active_run else (
         (
             await session.execute(
                 select(Bullpen008ScenarioCooldownRecord)
@@ -878,7 +882,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    pnl_records = [] if latest_run_id is None else (
+    pnl_records = [] if latest_run_id is None or has_active_run else (
         (
             await session.execute(
                 select(Bullpen008PnlAttributionRecord)
@@ -887,7 +891,7 @@ async def get_bootstrap(
             )
         ).scalars().all()
     )
-    audit_records = [] if latest_run_id is None else (
+    audit_records = [] if latest_run_id is None or has_active_run else (
         (
             await session.execute(
                 select(Bullpen008LossPreventionAuditRecord)
@@ -958,7 +962,21 @@ async def get_history(
         (
             await session.execute(
                 select(Bullpen008RunRecord)
-                .options(*_compact_run_options())
+                .options(
+                    load_only(
+                        Bullpen008RunRecord.id,
+                        Bullpen008RunRecord.status,
+                        Bullpen008RunRecord.triggered_by,
+                        Bullpen008RunRecord.shadow_mode,
+                        Bullpen008RunRecord.execution_enabled,
+                        Bullpen008RunRecord.started_at,
+                        Bullpen008RunRecord.completed_at,
+                        Bullpen008RunRecord.summary,
+                        Bullpen008RunRecord.error_message,
+                        Bullpen008RunRecord.code_build_version,
+                    ),
+                    *_compact_run_options(),
+                )
                 .where(
                     Bullpen008RunRecord.user_id == user_id,
                     Bullpen008RunRecord.workflow_profile == WORKFLOW_PROFILE,
@@ -971,7 +989,6 @@ async def get_history(
         .scalars()
         .all()
     )
-    await _attach_compact_stage_metrics(session, list(records))
     total = int(
         (
             await session.execute(
@@ -987,7 +1004,11 @@ async def get_history(
     )
     return Bullpen008HistoryPage(
         rows=[
-            run_from_record(record, include_stage_payloads=False)
+            run_from_record(
+                record,
+                include_stage_payloads=False,
+                include_run_snapshots=False,
+            )
             for record in records
         ],
         inherited_rows=inherited,
