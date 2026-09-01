@@ -126,6 +126,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   llm_execution_mode: "chunked_parallel",
   llm_events_per_prompt: 20,
   console_llm_prompt_template: null,
+  console_scan_scope: "trending",
   auto_live_enabled: false,
   dry_run: true,
   require_manual_confirmation: true,

@@ -460,6 +460,30 @@ test("Bullpen auto-run cannot enable a future schedule without Stage 2 LLM targe
   );
 });
 
+test("Bullpen auto-run persists Trending and Full Universe scan scope", () => {
+  const autoRunCardSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(autoRunCardSource, /name="bullpen-scan-scope"/);
+  assert.match(autoRunCardSource, /label: "Trending"/);
+  assert.match(autoRunCardSource, /label: "Full Universe"/);
+  assert.match(
+    autoRunCardSource,
+    /updateBullpenAutoLiveSettings\(\{\s*console_scan_scope:\s*nextScope,/,
+  );
+  assert.match(
+    autoRunCardSource,
+    /buildConsoleSettingsUpdate\(\s*latestConsoleOrderUsd,\s*consoleScanScope,/,
+  );
+  assert.match(autoRunCardSource, /FULL Universe|Full Universe/i);
+  assert.match(autoRunCardSource, /new purchases are blocked/);
+});
+
 test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM runs", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),

@@ -6,6 +6,7 @@ import os
 import re
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, time, timedelta
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.core.logging import get_logger
@@ -60,6 +61,7 @@ CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
 CONSOLE_MIN_MARKET_ODDS = 5.0
 CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
 CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS = 90
+CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS = 300
 CONSOLE_POSITIONS_TIMEOUT_SECONDS = 20
 CONSOLE_POSITIONS_TIMEOUT_ENV_VAR = "BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS"
 # The broker may wait for a shared authenticated CLI refresh before it runs the
@@ -122,6 +124,7 @@ CONSOLE_CLI_SOURCE_URL = (
     "https://app.bullpen.fi/predictions/trending?ref=intrepid-crane-3"
 )
 CONSOLE_GAMMA_SOURCE_LABEL = "Polymarket Gamma API"
+ConsoleScanScope = Literal["trending", "full_universe"]
 _EASTERN_TIMEZONE = ZoneInfo("America/New_York")
 logger = get_logger("app.domains.polymarket_auto_live.console_profile")
 _OUTCOME_LABEL_KEYS = ("name", "label", "outcome", "title", "side")
@@ -247,6 +250,24 @@ class ConsoleScanResult:
     warning: str | None = None
     details: str | None = None
     complete_universe: bool = True
+    trending_candidates: int | None = None
+    catalogue_candidates: int | None = None
+
+
+def _market_identity_keys(market: ScannedMarket) -> set[str]:
+    raw = market.raw if isinstance(market.raw, dict) else {}
+    keys = {
+        str(value).strip().lower()
+        for value in (
+            market.market_id,
+            raw.get("conditionId"),
+            raw.get("condition_id"),
+            raw.get("marketId"),
+            raw.get("market_id"),
+        )
+        if value is not None and str(value).strip()
+    }
+    return keys
 
 
 @dataclass(frozen=True)
@@ -947,6 +968,7 @@ def _build_cli_console_scan_result(
         accepted=accepted,
         rejected=rejected,
         total_candidates=len(normalized_by_market_id),
+        trending_candidates=len(normalized_by_market_id),
     )
 
 
@@ -959,6 +981,7 @@ async def scan_console_profile_markets(
     use_keyset_pagination: bool = False,
     use_deadline_cursor_pagination: bool = False,
     gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
+    scan_scope: ConsoleScanScope = "trending",
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -977,23 +1000,56 @@ async def scan_console_profile_markets(
             custom_exclude_phrases=custom_exclude_phrases,
             apply_base_filters=apply_base_filters,
         )
-        # Bullpen CLI limits parent discovery rows, while one parent can contain
-        # multiple markets. The normalized count can therefore exceed the CLI
-        # limit without representing the complete active market universe. Always
-        # complete the scan through Gamma before treating Stage 1 as exhaustive.
+        # Bullpen CLI is the complete legacy Trending contract. Full Universe
+        # supplements it through Gamma below without changing this fast path.
     except Exception as exc:
         cli_exc = exc
 
+    explicit_complete_scan = bool(
+        scan_scope == "full_universe"
+        or use_keyset_pagination
+        or use_deadline_cursor_pagination
+    )
+    if cli_result is not None and not explicit_complete_scan:
+        # Trending is the legacy Bullpen 007 behaviour. Keep this path
+        # byte-for-byte independent from the exhaustive Gamma catalogue so a
+        # Full Universe outage can never alter the default scheduled workflow.
+        cli_result.complete_universe = False
+        return cli_result
+
+    effective_keyset_pagination = bool(
+        use_keyset_pagination or scan_scope == "full_universe"
+    )
+    effective_gamma_timeout_seconds = (
+        max(
+            gamma_scan_timeout_seconds,
+            CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS,
+        )
+        if scan_scope == "full_universe"
+        else gamma_scan_timeout_seconds
+    )
+
     try:
-        gamma_scan = await asyncio.wait_for(
-            scan_candidate_markets(
-                min_liquidity_usd=0,
-                existing_position_slugs=set(),
-                apply_base_filters=apply_base_filters,
-                use_keyset_pagination=use_keyset_pagination,
-                use_deadline_cursor_pagination=use_deadline_cursor_pagination,
+        gamma_scan_coro = scan_candidate_markets(
+            min_liquidity_usd=0,
+            existing_position_slugs=set(),
+            apply_base_filters=apply_base_filters,
+            use_keyset_pagination=effective_keyset_pagination,
+            use_deadline_cursor_pagination=use_deadline_cursor_pagination,
+            preserve_partial_on_error=scan_scope == "full_universe",
+            pagination_deadline_seconds=(
+                effective_gamma_timeout_seconds
+                if scan_scope == "full_universe"
+                else None
             ),
-            timeout=gamma_scan_timeout_seconds,
+        )
+        gamma_scan = (
+            await gamma_scan_coro
+            if scan_scope == "full_universe"
+            else await asyncio.wait_for(
+                gamma_scan_coro,
+                timeout=effective_gamma_timeout_seconds,
+            )
         )
     except Exception as gamma_exc:
         if cli_result is not None:
@@ -1060,19 +1116,71 @@ async def scan_console_profile_markets(
             continue
         accepted.append(market)
     accepted.sort(key=lambda market: (market.close_time or "", market.question))
+    if scan_scope == "full_universe" and cli_result is not None:
+        # The exhaustive catalogue is authoritative, but Bullpen can expose a
+        # newly listed row before Gamma pagination observes it. Preserve that
+        # row in the union and deduplicate on the canonical market identifier.
+        accepted_by_id = {market.market_id: market for market in accepted}
+        rejected_by_id = {market.market_id: market for market in rejected}
+        seen_identity_keys = {
+            identity
+            for market in accepted
+            for identity in _market_identity_keys(market)
+        } | {market.market_id.strip().lower() for market in rejected}
+        for market in cli_result.accepted:
+            market_identity_keys = _market_identity_keys(market)
+            if market_identity_keys & seen_identity_keys:
+                continue
+            accepted_by_id[market.market_id] = market
+            seen_identity_keys.update(market_identity_keys)
+        for market in cli_result.rejected:
+            identity = market.market_id.strip().lower()
+            if identity in seen_identity_keys:
+                continue
+            rejected_by_id[market.market_id] = market
+            seen_identity_keys.add(identity)
+        accepted = list(accepted_by_id.values())
+        rejected = list(rejected_by_id.values())
+        accepted.sort(key=lambda market: (market.close_time or "", market.question))
+        rejected.sort(key=lambda market: (market.question, market.market_id))
+
+    gamma_complete = bool(getattr(gamma_scan, "complete_universe", True))
+    gamma_warning = getattr(gamma_scan, "warning", None)
+    gamma_details = getattr(gamma_scan, "details", None)
+    result_warning = gamma_warning
+    if result_warning is None and scan_scope != "full_universe":
+        result_warning = (
+            f"Bullpen CLI returned only {cli_result.total_candidates} rows; "
+            "Polymarket Gamma completed the market universe."
+            if cli_result is not None
+            else "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
+        )
     gamma_result = ConsoleScanResult(
-        source_label=CONSOLE_GAMMA_SOURCE_LABEL,
+        source_label=(
+            "Bullpen + Polymarket Full Universe"
+            if scan_scope == "full_universe"
+            else CONSOLE_GAMMA_SOURCE_LABEL
+        ),
         source_url=gamma_scan.source_url,
         scanned_at=gamma_scan.scanned_at,
         accepted=accepted,
         rejected=rejected,
-        total_candidates=len(gamma_scan.accepted) + len(gamma_scan.rejected),
-        warning=(
-            f"Bullpen CLI returned only {cli_result.total_candidates} rows; Polymarket Gamma completed the market universe."
-            if cli_result is not None
-            else "Using Polymarket Gamma API fallback because the Bullpen CLI scan failed."
+        total_candidates=len(accepted) + len(rejected),
+        trending_candidates=(
+            cli_result.total_candidates if cli_result is not None else None
         ),
-        details=redact_secrets(str(cli_exc)) if cli_exc else None,
+        catalogue_candidates=(
+            len(gamma_scan.accepted) + len(gamma_scan.rejected)
+        ),
+        warning=result_warning,
+        details=(
+            redact_secrets(gamma_details)
+            if gamma_details
+            else redact_secrets(str(cli_exc))
+            if cli_exc
+            else None
+        ),
+        complete_universe=gamma_complete,
     )
     return gamma_result
 

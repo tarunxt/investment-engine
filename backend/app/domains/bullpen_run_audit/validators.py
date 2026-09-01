@@ -1632,6 +1632,60 @@ def build_deterministic_findings(bundle: dict[str, Any]) -> list[dict[str, objec
     stage3_wallet_blocked = bool(
         stage_3.get("blocked_by_stage1_wallet_refresh")
     )
+    if scan_context.get("scan_scope") == "full_universe":
+        missing_active_market_count = scan_context.get(
+            "missing_active_market_count"
+        )
+        if (
+            isinstance(missing_active_market_count, (int, float))
+            and missing_active_market_count > 0
+        ):
+            findings.append(
+                _finding(
+                    code="FULL_UNIVERSE_MISSING_ACTIVE_MARKETS",
+                    severity="critical",
+                    stage="stage-1",
+                    category="scan-completeness",
+                    title="Full Universe omitted active wallet markets",
+                    explanation=(
+                        "Every active wallet market must be reconciled into the "
+                        "Stage 1/2 review universe before execution can continue."
+                    ),
+                    observed_value=str(missing_active_market_count),
+                    expected_value="0",
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/scan_context/missing_active_market_count"
+                    ],
+                )
+            )
+        universe_status = (
+            stage_2.get("universe_status")
+            if isinstance(stage_2.get("universe_status"), dict)
+            else {}
+        )
+        if (
+            scan_context.get("scan_completeness") == "incomplete"
+            and universe_status.get("is_complete") is not False
+        ):
+            findings.append(
+                _finding(
+                    code="FULL_UNIVERSE_INCOMPLETE_SCAN_NOT_BLOCKED",
+                    severity="critical",
+                    stage="stage-2",
+                    category="scan-completeness",
+                    title="Incomplete Full Universe scan retained buy authority",
+                    explanation=(
+                        "A Full Universe scan that did not reach its terminal "
+                        "cursor must make the Stage 2 universe non-authoritative."
+                    ),
+                    blocking=True,
+                    evidence_pointers=[
+                        "/stage_1/scan_context/scan_completeness",
+                        "/stage_2/universe_status/is_complete",
+                    ],
+                )
+            )
 
     if stage2_candidate_only:
         if not stage3_wallet_blocked:

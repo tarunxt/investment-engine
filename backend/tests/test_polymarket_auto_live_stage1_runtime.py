@@ -73,6 +73,7 @@ async def test_console_profile_scan_uses_fast_timeout_without_login_wait(
     monkeypatch,
 ):
     captured: dict[str, object] = {}
+    gamma_called = False
 
     async def fake_run_first_bullpen_json(
         _command_variants,
@@ -101,6 +102,16 @@ async def test_console_profile_scan_uses_fast_timeout_without_login_wait(
         fake_run_first_bullpen_json,
     )
 
+    async def forbidden_gamma(*_args, **_kwargs):
+        nonlocal gamma_called
+        gamma_called = True
+        raise AssertionError("Trending must not invoke the catalogue scan")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        forbidden_gamma,
+    )
+
     result = await scan_console_profile_markets(
         now=datetime(2026, 7, 18, 12, 0, tzinfo=UTC),
     )
@@ -112,6 +123,8 @@ async def test_console_profile_scan_uses_fast_timeout_without_login_wait(
     assert result.source_label == "Bullpen CLI"
     assert result.total_candidates == 1
     assert len(result.accepted) == 1
+    assert gamma_called is False
+    assert result.complete_universe is False
 
 
 @pytest.mark.anyio
@@ -139,6 +152,7 @@ async def test_console_profile_scan_falls_back_to_empty_set_after_bounded_scan_f
 
     result = await scan_console_profile_markets(
         now=datetime(2026, 7, 18, 12, 0, tzinfo=UTC),
+        gamma_scan_timeout_seconds=0.01,
     )
 
     assert result.accepted == []
@@ -147,6 +161,71 @@ async def test_console_profile_scan_falls_back_to_empty_set_after_bounded_scan_f
     assert result.warning == (
         "Bullpen CLI and Gamma scan failed; continuing with no Stage 1 candidates."
     )
+
+
+@pytest.mark.anyio
+async def test_keyset_scan_preserves_successful_pages_after_later_page_failure(
+    monkeypatch,
+):
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    market = ScannedMarket(
+        market_id="preserved-market",
+        question="Will the first page be preserved?",
+        market_url=None,
+        slug="preserved-market",
+        close_time="2026-09-30T00:00:00Z",
+        theme="Other",
+        current_yes_odds=50,
+        current_no_odds=50,
+        volume_usd=None,
+        liquidity_usd=None,
+        description=None,
+        outcome_labels=["Yes", "No"],
+        event_slug=None,
+        best_bid_cents=None,
+        best_ask_cents=None,
+        spread_cents=None,
+        raw={"id": "preserved-market"},
+    )
+    calls = 0
+
+    async def fake_keyset_page(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [{"id": "preserved-market"}], "page-2"
+        raise RuntimeError("page 2 unavailable")
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner.httpx.AsyncClient",
+        lambda **_kwargs: FakeClient(),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._fetch_gamma_keyset_page",
+        fake_keyset_page,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.scanner._normalize_market",
+        lambda *_args, **_kwargs: market,
+    )
+
+    result = await scan_candidate_markets(
+        min_liquidity_usd=0,
+        apply_base_filters=False,
+        use_keyset_pagination=True,
+        preserve_partial_on_error=True,
+    )
+
+    assert [row.market_id for row in result.accepted] == ["preserved-market"]
+    assert result.complete_universe is False
+    assert result.warning is not None
+    assert result.details == "page 2 unavailable"
 
 
 @pytest.mark.anyio
@@ -755,7 +834,10 @@ async def test_console_scan_does_not_treat_large_cli_payload_as_complete(monkeyp
         spread_cents=2.0,
     )
 
-    async def fake_scan_candidate_markets(**_kwargs):
+    gamma_call: dict[str, object] = {}
+
+    async def fake_scan_candidate_markets(**kwargs):
+        gamma_call.update(kwargs)
         return ScanResult(
             source_label="Polymarket Gamma API",
             source_url="https://gamma-api.polymarket.com/markets",
@@ -775,11 +857,44 @@ async def test_console_scan_does_not_treat_large_cli_payload_as_complete(monkeyp
 
     result = await scan_console_profile_markets(
         now=datetime(2026, 8, 24, 0, 0, tzinfo=UTC),
+        scan_scope="full_universe",
     )
 
-    assert result.source_label == "Polymarket Gamma API"
-    assert result.total_candidates == 1
-    assert [market.question for market in result.accepted] == [target_question]
+    assert result.source_label == "Bullpen + Polymarket Full Universe"
+    assert result.total_candidates == 1_001
+    assert target_question in [market.question for market in result.accepted]
+    assert gamma_call["use_keyset_pagination"] is True
+    assert gamma_call["preserve_partial_on_error"] is True
+    assert result.complete_universe is True
+    assert result.trending_candidates == 1_000
+    assert result.catalogue_candidates == 1
+
+
+def test_full_universe_scan_incompleteness_blocks_stage2_buy_authority():
+    from app.domains.polymarket_auto_live.engine import (
+        apply_full_universe_scan_completeness,
+        build_console_stage2_universe_status,
+    )
+
+    status = build_console_stage2_universe_status(
+        eligible_rows_total=16,
+        reviewed_rows=16,
+        max_llm_candidates_per_run=16,
+        active_rows_reviewed=16,
+        fresh_candidate_rows_total=0,
+        reviewed_fresh_candidate_rows=0,
+    )
+
+    blocked = apply_full_universe_scan_completeness(
+        status,
+        scan_scope="full_universe",
+        scan_complete_universe=False,
+        scan_warning="Cursor page 4 failed.",
+    )
+
+    assert blocked["stage2_universe_complete"] is False
+    assert blocked["stage2_universe_blocker_code"] == "FULL_UNIVERSE_SCAN_INCOMPLETE"
+    assert blocked["stage2_universe_status"]["is_complete"] is False
 
 
 def test_console_gamma_scan_budget_allows_full_event_catalog():

@@ -580,6 +580,51 @@ def build_console_stage2_universe_status(
     return universe_status
 
 
+def apply_full_universe_scan_completeness(
+    stage2_universe_status: dict[str, object],
+    *,
+    scan_scope: str,
+    scan_complete_universe: bool,
+    scan_warning: str | None,
+) -> dict[str, object]:
+    if scan_scope != "full_universe" or scan_complete_universe:
+        return stage2_universe_status
+
+    blocker_summary = (
+        "The Full Universe catalogue scan did not reach its terminal cursor; "
+        "successfully fetched pages and wallet positions were preserved."
+    )
+    if scan_warning:
+        blocker_summary = f"{blocker_summary} {scan_warning}"
+    blocker_fix = (
+        "Rerun Full Universe until scan completeness is Complete and the "
+        "missing-wallet-market count is zero. New purchases remain blocked meanwhile."
+    )
+    updated = dict(stage2_universe_status)
+    updated.update(
+        {
+            "stage2_universe_complete": False,
+            "stage2_universe_blocker_code": "FULL_UNIVERSE_SCAN_INCOMPLETE",
+            "stage2_universe_blocker_summary": blocker_summary,
+            "stage2_universe_blocker_fix": blocker_fix,
+            "stage2_universe_blocker_rows": [],
+        }
+    )
+    nested = updated.get("stage2_universe_status")
+    nested_status = dict(nested) if isinstance(nested, dict) else {}
+    nested_status.update(
+        {
+            "is_complete": False,
+            "blocker_code": "FULL_UNIVERSE_SCAN_INCOMPLETE",
+            "blocker_summary": blocker_summary,
+            "blocker_fix": blocker_fix,
+            "blocker_rows": [],
+        }
+    )
+    updated["stage2_universe_status"] = nested_status
+    return updated
+
+
 def _read_stage2_universe_blocker_detail(
     stage2_universe_status: dict[str, object],
     key: str,
@@ -3219,6 +3264,11 @@ def _serialize_scan_candidate(
             else market.market_id
         ),
         "market_id": market.market_id,
+        "condition_id": (
+            str(raw.get("conditionId") or raw.get("condition_id")).strip()
+            if raw.get("conditionId") or raw.get("condition_id")
+            else None
+        ),
         "question": market.question,
         "market_title": market.question,
         "market_url": market.market_url,
@@ -5547,6 +5597,10 @@ class BullpenAutoLiveEngine:
         )
         scan_warning: str | None = None
         scan_details: str | None = None
+        scan_scope = settings.console_scan_scope
+        scan_complete_universe = scan_scope != "full_universe"
+        bullpen_trending_rows: int | None = None
+        complete_catalogue_markets: int | None = None
         stage1_accepted_candidates: list[dict[str, object]] = []
         stage1_rejected_candidates: list[dict[str, object]] = []
         accepted_manual_rows: list[BullpenAutoLiveConsoleCandidateInput] = []
@@ -5910,11 +5964,21 @@ class BullpenAutoLiveEngine:
                 now=now,
                 min_market_odds=settings.console_min_market_odds,
                 custom_exclude_phrases=settings.console_custom_exclude_phrases,
+                scan_scope=scan_scope,
             )
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
             scan_warning = getattr(scanned, "warning", None)
             scan_details = getattr(scanned, "details", None)
+            scan_complete_universe = bool(
+                getattr(scanned, "complete_universe", False)
+            )
+            bullpen_trending_rows = getattr(scanned, "trending_candidates", None)
+            complete_catalogue_markets = getattr(
+                scanned,
+                "catalogue_candidates",
+                None,
+            )
             scanned_total_candidates = scanned.total_candidates
             stage1_accepted_candidates = [
                 _serialize_scan_candidate(market) for market in scanned.accepted
@@ -6051,6 +6115,14 @@ class BullpenAutoLiveEngine:
                 "wallet_snapshot_status": "refreshing",
                 "scan_warning": scan_warning,
                 "scan_details": scan_details,
+                "scan_scope": scan_scope,
+                "scan_completeness": (
+                    "complete" if scan_complete_universe else "incomplete"
+                    if scan_scope == "full_universe"
+                    else "trending"
+                ),
+                "bullpen_trending_rows": bullpen_trending_rows,
+                "complete_catalogue_markets": complete_catalogue_markets,
             },
         )
 
@@ -6340,6 +6412,45 @@ class BullpenAutoLiveEngine:
             _serialize_active_wallet_position(position)
             for position in excluded_position_diagnostics
         ]
+        scanned_identity_keys = {
+            str(value).strip().lower()
+            for row in [
+                *stage1_accepted_candidates,
+                *stage1_rejected_candidates,
+            ]
+            for value in (
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("slug"),
+            )
+            if value is not None and str(value).strip()
+        }
+        active_wallet_markets_missing_from_catalogue = [
+            row
+            for row in serialized_active_positions_found
+            if not (
+                {
+                    str(value).strip().lower()
+                    for value in (
+                        row.get("market_id"),
+                        row.get("condition_id"),
+                        row.get("slug"),
+                    )
+                    if value is not None and str(value).strip()
+                }
+                & scanned_identity_keys
+            )
+        ]
+        active_wallet_markets_added_to_union = len(
+            {
+                str(row.get("condition_id") or row.get("market_id") or row.get("slug"))
+                .strip()
+                .lower()
+                for row in active_wallet_markets_missing_from_catalogue
+                if row.get("condition_id") or row.get("market_id") or row.get("slug")
+            }
+        )
+        missing_active_market_count = 0
 
         position_snapshots: list[PositionSnapshot] = []
         for position in active_bullpen_wallet_positions:
@@ -6624,6 +6735,13 @@ class BullpenAutoLiveEngine:
                 conservatively_occupied_market_ids
             ),
             "active_wallet_positions": active_position_rows_before_llm,
+            "active_wallet_markets_missing_from_catalogue": (
+                active_wallet_markets_missing_from_catalogue
+            ),
+            "active_wallet_markets_added_to_union": (
+                active_wallet_markets_added_to_union
+            ),
+            "missing_active_market_count": missing_active_market_count,
             "active_positions_found": serialized_active_positions_found,
             "available_for_claim": serialized_claimable_positions,
             "claimable_wallet_positions": len(claimable_wallet_positions),
@@ -6697,6 +6815,14 @@ class BullpenAutoLiveEngine:
                     "scan_source_url": scan_source_url,
                     "scan_warning": scan_warning,
                     "scan_details": scan_details,
+                    "scan_scope": scan_scope,
+                    "scan_completeness": (
+                        "complete" if scan_complete_universe else "incomplete"
+                        if scan_scope == "full_universe"
+                        else "trending"
+                    ),
+                    "bullpen_trending_rows": bullpen_trending_rows,
+                    "complete_catalogue_markets": complete_catalogue_markets,
                     **stage2_universe_status,
                     **stage2_strategy_metadata,
                     "used_manual_console_rows": manual_console_rows_used,
@@ -7003,6 +7129,12 @@ class BullpenAutoLiveEngine:
                 fresh_llm_candidate_cap=len(fresh_llm_rows),
                 configured_max_llm_candidates_per_run=configured_max_llm_candidates,
             )
+            stage2_universe_status = apply_full_universe_scan_completeness(
+                stage2_universe_status,
+                scan_scope=scan_scope,
+                scan_complete_universe=scan_complete_universe,
+                scan_warning=scan_warning,
+            )
             stage2_strategy_metadata = build_console_strategy_metadata(
                 stage2_universe_complete=bool(
                     stage2_universe_status["stage2_universe_complete"]
@@ -7085,6 +7217,14 @@ class BullpenAutoLiveEngine:
                         "scan_source_url": scan_source_url,
                         "scan_warning": scan_warning,
                         "scan_details": scan_details,
+                        "scan_scope": scan_scope,
+                        "scan_completeness": (
+                            "complete" if scan_complete_universe else "incomplete"
+                            if scan_scope == "full_universe"
+                            else "trending"
+                        ),
+                        "bullpen_trending_rows": bullpen_trending_rows,
+                        "complete_catalogue_markets": complete_catalogue_markets,
                         "used_manual_console_rows": manual_console_rows_used,
                         "selected_manual_candidate_ids": selected_manual_candidate_ids,
                         "selected_manual_candidate_count": len(selected_manual_candidate_ids),
@@ -8404,6 +8544,15 @@ class BullpenAutoLiveEngine:
         run.diagnostics.rejected_candidates = list(rejected_candidate_map.values())
         run.diagnostics.scan_source_label = scan_source_label
         run.diagnostics.scan_source_url = scan_source_url
+        run.diagnostics.scan_scope = scan_scope
+        run.diagnostics.scan_completeness = (
+            "complete" if scan_complete_universe else "incomplete"
+            if scan_scope == "full_universe"
+            else "trending"
+        )
+        run.diagnostics.bullpen_trending_rows = bullpen_trending_rows
+        run.diagnostics.complete_catalogue_markets = complete_catalogue_markets
+        run.diagnostics.missing_active_market_count = missing_active_market_count
         run.diagnostics.used_manual_console_rows = manual_console_rows_used
         run.diagnostics.selected_manual_candidate_ids = selected_manual_candidate_ids
 

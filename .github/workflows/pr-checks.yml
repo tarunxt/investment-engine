@@ -41,10 +41,13 @@ jobs:
           python -m pip install --disable-pip-version-check -r backend/requirements.txt
           python -m pip install --disable-pip-version-check pytest
 
-      - name: Run compact dashboard response and degradation tests
+      - name: Run dashboard and Bullpen scan contract tests
         env:
           PYTHONPATH: backend
-        run: pytest -q backend/tests/test_dashboard_summary.py
+        run: >-
+          pytest -q
+          backend/tests/test_dashboard_summary.py
+          backend/tests/test_polymarket_auto_live_stage1_runtime.py
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests

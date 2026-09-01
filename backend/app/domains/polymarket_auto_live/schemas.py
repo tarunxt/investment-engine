@@ -114,6 +114,7 @@ TradingBotStatus = Literal["running", "paused", "stopped", "error", "not-configu
 TradingBotMode = Literal["paper", "live-read", "live-trading", "dry-run", "analysis-only"]
 TradingBotGuardrailTone = Literal["neutral", "positive", "warning", "critical"]
 BullpenLlmExecutionMode = Literal["chunked_parallel", "single_combined"]
+BullpenConsoleScanScope = Literal["trending", "full_universe"]
 AutoLiveOrderIntentStatus = Literal[
     "PLANNED",
     "READY",
@@ -286,6 +287,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     llm_execution_mode: BullpenLlmExecutionMode = "chunked_parallel"
     llm_events_per_prompt: int = Field(default=20, ge=1, le=100)
     console_llm_prompt_template: str | None = None
+    console_scan_scope: BullpenConsoleScanScope = "trending"
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -470,6 +472,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     llm_execution_mode: BullpenLlmExecutionMode | None = None
     llm_events_per_prompt: int | None = Field(default=None, ge=1, le=100)
     console_llm_prompt_template: str | None = None
+    console_scan_scope: BullpenConsoleScanScope | None = None
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = Field(default=None, ge=1)
 
@@ -635,6 +638,11 @@ class BullpenAutoLiveRunDiagnostics(BaseModel):
     )
     scan_source_label: str | None = None
     scan_source_url: str | None = None
+    scan_scope: BullpenConsoleScanScope = "trending"
+    scan_completeness: Literal["trending", "complete", "incomplete"] = "trending"
+    bullpen_trending_rows: int | None = Field(default=None, ge=0)
+    complete_catalogue_markets: int | None = Field(default=None, ge=0)
+    missing_active_market_count: int = Field(default=0, ge=0)
     used_manual_console_rows: bool = False
     selected_manual_candidate_ids: list[str] = Field(default_factory=list)
     stage2_has_usable_reviews: bool = True
@@ -1147,6 +1155,7 @@ class BullpenAutoLiveStatusConfiguration(BaseModel):
     emergency_stop: bool
     limit_orders_only: bool
     console_order_usd: float
+    console_scan_scope: BullpenConsoleScanScope = "trending"
     console_auto_start_at: str | None = None
     console_auto_refresh_minutes: int | None = None
     console_llm_target_count: int = Field(default=0, ge=0)

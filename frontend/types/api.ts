@@ -2395,6 +2395,7 @@ export interface BullpenAutoLiveSettings {
   llm_execution_mode: BullpenLlmExecutionMode;
   llm_events_per_prompt: number;
   console_llm_prompt_template?: string | null;
+  console_scan_scope: "trending" | "full_universe";
   console_auto_start_at?: string | null;
   console_auto_refresh_minutes?: number | null;
   auto_live_enabled: boolean;
