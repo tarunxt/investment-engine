@@ -1447,6 +1447,7 @@ export interface IndMoneyUsThreatAnalysis {
   tokens_out?: number | null;
   estimated_cost?: number | null;
   error_message?: string | null;
+  runtime_metadata_json?: Record<string, unknown> | null;
   report?: IndMoneyUsThreatReport | null;
 }
 
@@ -1643,6 +1644,7 @@ export interface ZerodhaThreatAnalysis {
   tokens_out?: number | null;
   estimated_cost?: number | null;
   error_message?: string | null;
+  runtime_metadata_json?: Record<string, unknown> | null;
   report?: ZerodhaThreatReport | null;
 }
 
