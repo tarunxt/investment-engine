@@ -200,6 +200,7 @@ async def _get_threat_jobs(db: AsyncSession, user_id: int, limit: int) -> list[J
                 Job.status,
                 Job.response,
                 Job.error_message,
+                Job.runtime_metadata_json,
                 Job.tokens_in,
                 Job.tokens_out,
                 Job.estimated_cost,
@@ -276,6 +277,7 @@ async def _serialize_threat_job(
         tokens_out=job.tokens_out,
         estimated_cost=job.estimated_cost,
         error_message=job.error_message,
+        runtime_metadata_json=job.runtime_metadata_json,
         report=parsed,
     )
 
