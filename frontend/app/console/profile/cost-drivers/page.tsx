@@ -8,6 +8,8 @@ import { Separator } from "@/components/ui/separator";
 import { URLs } from "@/lib/urls";
 import { apiService } from "@/services/api";
 
+const COST_DRIVERS_SYNC_EVENT = "credx-cost-drivers:sync";
+
 type CostDriver = {
   rank: number;
   driver: string;
@@ -401,6 +403,13 @@ export default function PlatformCostDriversPage() {
               URLs.costDrivers.summary(selectedMonth),
             );
         setData(response);
+        if (refresh) {
+          window.dispatchEvent(
+            new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
+              detail: { source: "details", month: selectedMonth, data: response },
+            }),
+          );
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Unable to load cost drivers",
@@ -421,6 +430,25 @@ export default function PlatformCostDriversPage() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    const handleSync = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        source?: string;
+        month?: string;
+        data?: Dashboard;
+      }>).detail;
+      if (!detail || detail.source === "details") return;
+      if (detail.month && detail.month !== selectedMonth) {
+        setSelectedMonth(detail.month);
+      }
+      if (detail.data && detail.month === selectedMonth) {
+        setData(detail.data);
+      }
+    };
+    window.addEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
+    return () => window.removeEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
+  }, [selectedMonth]);
 
   const selectedMonthLabel = monthLabel(selectedMonth);
 
@@ -528,7 +556,15 @@ export default function PlatformCostDriversPage() {
           <select
             id="cost-driver-month"
             value={selectedMonth}
-            onChange={(event) => setSelectedMonth(event.target.value)}
+            onChange={(event) => {
+              const month = event.target.value;
+              setSelectedMonth(month);
+              window.dispatchEvent(
+                new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
+                  detail: { source: "details", month },
+                }),
+              );
+            }}
             className="h-9 rounded-md border border-input bg-background px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {months.map((month) => (

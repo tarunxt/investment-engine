@@ -26,6 +26,7 @@ import {
 
 type ActionStatus = "open" | "in-progress" | "done" | "deferred";
 type ActionStatusMap = Record<string, ActionStatus>;
+const COST_DRIVERS_SYNC_EVENT = "credx-cost-drivers:sync";
 
 const money = (value: number) => `$${Number(value || 0).toFixed(2)}`;
 const monthValue = (date: Date) =>
@@ -192,6 +193,13 @@ export function OptimizationActionCenter() {
         setSelectedData(selected);
         setPreviousData(previous);
         setLastLoadedAt(new Date());
+        if (refresh) {
+          window.dispatchEvent(
+            new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
+              detail: { source: "action-centre", month: selectedMonth, data: selected },
+            }),
+          );
+        }
       } catch (loadError) {
         setError(
           loadError instanceof Error
@@ -210,6 +218,26 @@ export function OptimizationActionCenter() {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    const handleSync = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        source?: string;
+        month?: string;
+        data?: CostDashboard;
+      }>).detail;
+      if (!detail || detail.source === "action-centre") return;
+      if (detail.month && detail.month !== selectedMonth) {
+        setSelectedMonth(detail.month);
+      }
+      if (detail.data && detail.month === selectedMonth) {
+        setSelectedData(detail.data);
+        setLastLoadedAt(new Date());
+      }
+    };
+    window.addEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
+    return () => window.removeEventListener(COST_DRIVERS_SYNC_EVENT, handleSync);
+  }, [selectedMonth]);
 
   useEffect(() => {
     try {
@@ -303,7 +331,15 @@ export function OptimizationActionCenter() {
                 Review month
                 <select
                   value={selectedMonth}
-                  onChange={(event) => setSelectedMonth(event.target.value)}
+                  onChange={(event) => {
+                    const month = event.target.value;
+                    setSelectedMonth(month);
+                    window.dispatchEvent(
+                      new CustomEvent(COST_DRIVERS_SYNC_EVENT, {
+                        detail: { source: "action-centre", month },
+                      }),
+                    );
+                  }}
                   className="mt-1 block h-9 min-w-36 rounded-md border bg-background px-2 text-sm text-foreground"
                 >
                   {months.map((month) => (
