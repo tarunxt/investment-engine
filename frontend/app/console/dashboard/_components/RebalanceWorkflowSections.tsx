@@ -641,13 +641,17 @@ function getLlmSelectorTitle(
 }
 
 function readFailureDiagnostics(
-  metadata: Record<string, unknown> | null | undefined,
+  metadata: unknown,
 ): Partial<StageErrorDetail> {
+  const metadataRecord =
+    metadata && typeof metadata === "object" && !Array.isArray(metadata)
+      ? (metadata as Record<string, unknown>)
+      : null;
   const raw =
-    metadata?.failure_diagnostics &&
-    typeof metadata.failure_diagnostics === "object" &&
-    !Array.isArray(metadata.failure_diagnostics)
-      ? (metadata.failure_diagnostics as Record<string, unknown>)
+    metadataRecord?.failure_diagnostics &&
+    typeof metadataRecord.failure_diagnostics === "object" &&
+    !Array.isArray(metadataRecord.failure_diagnostics)
+      ? (metadataRecord.failure_diagnostics as Record<string, unknown>)
       : null;
   if (!raw) return {};
   const stringValue = (key: string) =>
