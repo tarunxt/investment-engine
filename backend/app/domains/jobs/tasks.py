@@ -15,6 +15,10 @@ from app.domains.ai_providers.availability import is_provider_capacity_error
 from app.domains.ai_providers.web_metadata import merge_web_metadata
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
+from app.domains.jobs.failure_diagnostics import (
+    build_failure_diagnostics,
+    merge_failure_diagnostics,
+)
 from app.domains.polymarket.bullpen_llm_execution import execute_bullpen_llm_target
 from app.domains.polymarket.event_preflight import prepare_polymarket_event_context
 from app.domains.runs.schemas import PolymarketEventRunContext
@@ -1144,6 +1148,22 @@ def execute_ai_job(self, job_id: int) -> None:
     web_search_queries: list[str] | None = None
     web_sources: list[str] | None = None
     runtime_metadata_json: dict | None = None
+    job: Job | None = None
+
+    def failure_metadata(exc: Exception, *, retry_safe: bool) -> dict[str, object]:
+        return merge_failure_diagnostics(
+            runtime_metadata_json,
+            build_failure_diagnostics(
+                exc,
+                provider=job.provider if job else None,
+                model=job.model if job else None,
+                job_id=job_id,
+                run_id=None,
+                task_id=self.request.id,
+                attempt=self.request.retries,
+                retry_safe=retry_safe,
+            ),
+        )
 
     try:
         if self.request.id:
@@ -1495,7 +1515,7 @@ def execute_ai_job(self, job_id: int) -> None:
             "execute_ai_job", "n/a", (monotonic() - started_at) * 1000, job_id
         )
 
-    except MaxRetriesExceededError:
+    except MaxRetriesExceededError as exc:
         _mark_failed(
             db,
             repo,
@@ -1508,9 +1528,9 @@ def execute_ai_job(self, job_id: int) -> None:
             web_search_used=web_search_used,
             web_search_queries=web_search_queries,
             web_sources=web_sources,
-            runtime_metadata_json=runtime_metadata_json,
+            runtime_metadata_json=failure_metadata(exc, retry_safe=False),
         )
-        logger.error("Job %s exhausted all retries", job_id)
+        logger.exception("Job %s exhausted all retries", job_id)
 
     except Exception as exc:
         error_summary = str(exc).split('\n')[0][:200]
@@ -1531,7 +1551,7 @@ def execute_ai_job(self, job_id: int) -> None:
                 web_search_used=web_search_used,
                 web_search_queries=web_search_queries,
                 web_sources=web_sources,
-                runtime_metadata_json=runtime_metadata_json,
+                runtime_metadata_json=failure_metadata(exc, retry_safe=False),
             )
             return
 
@@ -1550,9 +1570,9 @@ def execute_ai_job(self, job_id: int) -> None:
                 web_search_used=web_search_used,
                 web_search_queries=web_search_queries,
                 web_sources=web_sources,
-                runtime_metadata_json=runtime_metadata_json,
+                runtime_metadata_json=failure_metadata(exc, retry_safe=retryable),
             )
-            logger.error("Job %s exhausted all retries after: %s", job_id, exc)
+            logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
         db.close()
