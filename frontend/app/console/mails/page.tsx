@@ -59,13 +59,23 @@ type SellActionStatus =
   | 'submitting'
   | 'filled'
   | 'pending'
-  | 'failed';
+  | 'failed'
+  | 'cleared';
 
 type SellAction = {
   status: SellActionStatus;
   updated_at: string;
   inferred?: boolean;
   market_ids?: string[];
+  evaluated_market_id?: string | null;
+  market_question?: string | null;
+  position_side?: 'YES' | 'NO' | null;
+  live_held_side_bullpen_odds?: number | null;
+  sell_threshold?: number | null;
+  average_sell_price?: number | null;
+  evaluated_at?: string | null;
+  batch_id?: string | null;
+  eligibility_decision?: 'eligible' | 'recovered' | 'unverified';
   shares?: number | null;
   expected_proceeds?: number | null;
   proceeds?: number | null;
@@ -155,18 +165,20 @@ function normalizeFailure(payload: unknown): MailFailure {
 }
 
 const SELL_ACTION_NEXT: Record<SellActionStatus, SellActionStatus[]> = {
-  detected: ['awaiting_confirmation'],
-  awaiting_confirmation: ['confirmed'],
-  confirmed: ['submitting'],
+  detected: ['awaiting_confirmation', 'cleared'],
+  awaiting_confirmation: ['confirmed', 'cleared'],
+  confirmed: ['submitting', 'cleared'],
   submitting: ['filled', 'pending', 'failed'],
   pending: ['filled', 'failed'],
   filled: [],
   failed: [],
+  cleared: [],
 };
 
 function sellActionTone(status: SellActionStatus) {
   if (status === 'filled') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
   if (status === 'failed') return 'border-red-200 bg-red-50 text-red-800';
+  if (status === 'cleared') return 'border-slate-200 bg-slate-50 text-slate-700';
   if (status === 'pending' || status === 'submitting') {
     return 'border-amber-200 bg-amber-50 text-amber-800';
   }
@@ -195,6 +207,22 @@ function SellActionAudit({
   const [proceeds, setProceeds] = useState(action?.proceeds?.toString() || '');
   const [transactionUrl, setTransactionUrl] = useState(action?.transaction_url || '');
   const [executionError, setExecutionError] = useState(action?.error || '');
+  const [marketId, setMarketId] = useState(
+    action?.evaluated_market_id || action?.market_ids?.[0] || '',
+  );
+  const [marketQuestion, setMarketQuestion] = useState(
+    action?.market_question || item.warnings[0]?.question || '',
+  );
+  const [positionSide, setPositionSide] = useState(
+    action?.position_side || item.warnings[0]?.position_side || '',
+  );
+  const [liveBullpenOdds, setLiveBullpenOdds] = useState(
+    action?.live_held_side_bullpen_odds?.toString() || '',
+  );
+  const [averageSellPrice, setAverageSellPrice] = useState(
+    action?.average_sell_price?.toString() || '',
+  );
+  const [batchId, setBatchId] = useState(action?.batch_id || '');
 
   if (!action) return null;
 
@@ -208,6 +236,14 @@ function SellActionAudit({
         body: JSON.stringify({
           status,
           note: note || null,
+          market_id: marketId || null,
+          market_question: marketQuestion || null,
+          position_side: positionSide || null,
+          live_held_side_bullpen_odds: liveBullpenOdds ? Number(liveBullpenOdds) : null,
+          sell_threshold: 80,
+          average_sell_price: averageSellPrice ? Number(averageSellPrice) : null,
+          evaluated_at: liveBullpenOdds ? new Date().toISOString() : null,
+          batch_id: batchId || null,
           shares: shares ? Number(shares) : null,
           expected_proceeds: expectedProceeds ? Number(expectedProceeds) : null,
           proceeds: proceeds ? Number(proceeds) : null,
@@ -243,7 +279,39 @@ function SellActionAudit({
         </span>
       </div>
 
+      <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-950">
+        Sell eligibility uses only the fresh live held-side Bullpen odds: strictly below 80.0%. LLM odds are ignored.
+      </div>
+
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <label className="text-xs font-semibold text-foreground">
+          Event
+          <input aria-label={`Sell event for mail ${item.id}`} value={marketQuestion} onChange={(event) => setMarketQuestion(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Market ID
+          <input aria-label={`Sell market ID for mail ${item.id}`} value={marketId} onChange={(event) => setMarketId(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Held side
+          <select aria-label={`Sell held side for mail ${item.id}`} value={positionSide} onChange={(event) => setPositionSide(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal">
+            <option value="">Select side</option>
+            <option value="YES">YES</option>
+            <option value="NO">NO</option>
+          </select>
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Live held-side Bullpen odds (%)
+          <input aria-label={`Live held-side Bullpen odds for mail ${item.id}`} value={liveBullpenOdds} onChange={(event) => setLiveBullpenOdds(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Average Sell price (¢)
+          <input aria-label={`Average Sell price for mail ${item.id}`} value={averageSellPrice} onChange={(event) => setAverageSellPrice(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Batch ID
+          <input aria-label={`Sell batch ID for mail ${item.id}`} value={batchId} onChange={(event) => setBatchId(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
         <label className="text-xs font-semibold text-foreground">
           Shares
           <input aria-label={`Sell shares for mail ${item.id}`} value={shares} onChange={(event) => setShares(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
@@ -290,6 +358,163 @@ function SellActionAudit({
           Open Bullpen transaction <ExternalLink className="h-3.5 w-3.5" />
         </a>
       ) : null}
+    </section>
+  );
+}
+
+
+function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
+  type BatchRow = {
+    key: string;
+    event: string;
+    marketId: string;
+    side: string;
+    emailOdds?: number;
+    emailAt: string;
+    liveOdds?: number;
+    evaluatedAt?: string | null;
+    threshold: number;
+    decision: 'included' | 'recovered' | 'unverified';
+    shares?: number | null;
+    averageSellPrice?: number | null;
+    expectedProceeds?: number | null;
+    batchId?: string | null;
+    status: SellActionStatus;
+    auditIds: number[];
+  };
+
+  const rowsByMarket = new Map<string, BatchRow>();
+  for (const item of history) {
+    const action = item.sell_action;
+    if (!action || (action.status === 'detected' && !action.evaluated_at)) continue;
+    const warning =
+      item.warnings.find(
+        (candidate) => candidate.market_id === action.evaluated_market_id,
+      ) || item.warnings[0];
+    const marketId =
+      action.evaluated_market_id || action.market_ids?.[0] || warning?.market_id || '';
+    const event = action.market_question || warning?.question || item.subject;
+    const key = marketId || event;
+    const threshold = action.sell_threshold ?? 80;
+    const liveOdds = action.live_held_side_bullpen_odds ?? undefined;
+    const decision =
+      typeof liveOdds !== 'number'
+        ? 'unverified'
+        : liveOdds < threshold && action.status !== 'cleared'
+          ? 'included'
+          : 'recovered';
+    const candidate: BatchRow = {
+      key,
+      event,
+      marketId,
+      side: action.position_side || warning?.position_side || '—',
+      emailOdds: warning?.held_side_bullpen_odds,
+      emailAt: item.created_at,
+      liveOdds,
+      evaluatedAt: action.evaluated_at,
+      threshold,
+      decision,
+      shares: action.shares,
+      averageSellPrice: action.average_sell_price,
+      expectedProceeds: action.expected_proceeds,
+      batchId: action.batch_id,
+      status: action.status,
+      auditIds: [item.id],
+    };
+    const existing = rowsByMarket.get(key);
+    if (!existing) {
+      rowsByMarket.set(key, candidate);
+      continue;
+    }
+    const candidateTime = new Date(candidate.evaluatedAt || candidate.emailAt).getTime();
+    const existingTime = new Date(existing.evaluatedAt || existing.emailAt).getTime();
+    const latest = candidateTime >= existingTime ? candidate : existing;
+    latest.auditIds = Array.from(new Set([...existing.auditIds, item.id])).sort(
+      (left, right) => left - right,
+    );
+    rowsByMarket.set(key, latest);
+  }
+
+  const rows = Array.from(rowsByMarket.values()).sort((left, right) => {
+    const order = { included: 0, recovered: 1, unverified: 2 };
+    return order[left.decision] - order[right.decision];
+  });
+  const included = rows.filter((row) => row.decision === 'included');
+  const recovered = rows.filter((row) => row.decision === 'recovered');
+  const unverified = rows.filter((row) => row.decision === 'unverified');
+  const expectedTotal = included.reduce(
+    (total, row) => total + (row.expectedProceeds || 0),
+    0,
+  );
+
+  return (
+    <section
+      className="mt-8 overflow-hidden rounded-3xl border border-blue-200 bg-card shadow-sm"
+      aria-label="Sell batch preparation"
+    >
+      <div className="border-b border-blue-200 bg-blue-50/70 px-6 py-5">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-blue-700">
+          Bullpen exit control
+        </p>
+        <h2 className="mt-1 text-xl font-bold text-foreground">
+          Sell Batch Preparation
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Include a position only when its fresh live held-side Bullpen odds are strictly below 80.0%. LLM odds are ignored.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+          <div className="rounded-xl border border-red-200 bg-white p-3"><p className="text-xs text-muted-foreground">Included</p><p className="mt-1 text-2xl font-bold text-red-700">{included.length}</p></div>
+          <div className="rounded-xl border border-emerald-200 bg-white p-3"><p className="text-xs text-muted-foreground">Recovered / excluded</p><p className="mt-1 text-2xl font-bold text-emerald-700">{recovered.length}</p></div>
+          <div className="rounded-xl border border-amber-200 bg-white p-3"><p className="text-xs text-muted-foreground">Awaiting live validation</p><p className="mt-1 text-2xl font-bold text-amber-700">{unverified.length}</p></div>
+          <div className="rounded-xl border border-blue-200 bg-white p-3"><p className="text-xs text-muted-foreground">Expected proceeds</p><p className="mt-1 text-2xl font-bold text-blue-700">${expectedTotal.toFixed(2)}</p></div>
+        </div>
+      </div>
+      {rows.length ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-[1380px] w-full text-left text-xs">
+            <thead className="border-b border-border bg-muted/50 uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3">Event</th>
+                <th className="px-4 py-3">Market ID</th>
+                <th className="px-4 py-3">Held side</th>
+                <th className="px-4 py-3">Email Bullpen odds</th>
+                <th className="px-4 py-3">Fresh live odds</th>
+                <th className="px-4 py-3">Live read at</th>
+                <th className="px-4 py-3">80% test</th>
+                <th className="px-4 py-3">Full shares</th>
+                <th className="px-4 py-3">Avg. Sell</th>
+                <th className="px-4 py-3">Expected proceeds</th>
+                <th className="px-4 py-3">Batch</th>
+                <th className="px-4 py-3">Audit IDs</th>
+                <th className="px-4 py-3">Lifecycle</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((row) => (
+                <tr key={row.key} className={row.decision === 'included' ? 'bg-red-50/50' : row.decision === 'recovered' ? 'bg-emerald-50/40' : 'bg-amber-50/40'}>
+                  <td className="max-w-sm px-4 py-3 font-semibold text-foreground">{row.event}</td>
+                  <td className="px-4 py-3 font-mono">{row.marketId || '—'}</td>
+                  <td className="px-4 py-3 font-bold">{row.side}</td>
+                  <td className="px-4 py-3">{typeof row.emailOdds === 'number' ? `${row.emailOdds.toFixed(1)}%` : 'Unavailable'}<span className="mt-1 block text-[10px] text-muted-foreground">{new Date(row.emailAt).toLocaleString('en-IN')}</span></td>
+                  <td className="px-4 py-3 font-bold">{typeof row.liveOdds === 'number' ? `${row.liveOdds.toFixed(1)}%` : 'Not read'}</td>
+                  <td className="px-4 py-3">{row.evaluatedAt ? new Date(row.evaluatedAt).toLocaleString('en-IN') : '—'}</td>
+                  <td className="px-4 py-3"><span className={`rounded-full border px-2 py-1 font-bold ${row.decision === 'included' ? 'border-red-200 bg-red-100 text-red-800' : row.decision === 'recovered' ? 'border-emerald-200 bg-emerald-100 text-emerald-800' : 'border-amber-200 bg-amber-100 text-amber-800'}`}>{row.decision === 'included' ? `INCLUDE · < ${row.threshold.toFixed(1)}%` : row.decision === 'recovered' ? `EXCLUDE · ≥ ${row.threshold.toFixed(1)}%` : 'UNVERIFIED'}</span></td>
+                  <td className="px-4 py-3">{row.shares ?? '—'}</td>
+                  <td className="px-4 py-3">{typeof row.averageSellPrice === 'number' ? `${row.averageSellPrice.toFixed(1)}¢` : '—'}</td>
+                  <td className="px-4 py-3">{typeof row.expectedProceeds === 'number' ? `${row.expectedProceeds.toFixed(2)}` : '—'}</td>
+                  <td className="px-4 py-3 font-mono">{row.batchId || '—'}</td>
+                  <td className="px-4 py-3">{row.auditIds.map((id) => `#${id}`).join(', ')}</td>
+                  <td className="px-4 py-3 capitalize">{formatActionStatus(row.status)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="p-6 text-sm text-muted-foreground">
+          No Sell alerts have been evaluated against live Bullpen odds yet.
+        </div>
+      )}
     </section>
   );
 }
@@ -752,6 +977,8 @@ export default function MailsPage() {
           </button>
         </div>
       </section>
+
+      <SellBatchPreparation history={history} />
 
       <section className="mt-8 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
         <div className="flex flex-col gap-3 border-b border-border px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
