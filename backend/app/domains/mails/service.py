@@ -42,15 +42,17 @@ SELL_ACTION_STATUSES = (
     "filled",
     "pending",
     "failed",
+    "cleared",
 )
 SELL_ACTION_TRANSITIONS: dict[str, frozenset[str]] = {
-    "detected": frozenset({"awaiting_confirmation"}),
-    "awaiting_confirmation": frozenset({"confirmed"}),
-    "confirmed": frozenset({"submitting"}),
+    "detected": frozenset({"awaiting_confirmation", "cleared"}),
+    "awaiting_confirmation": frozenset({"confirmed", "cleared"}),
+    "confirmed": frozenset({"submitting", "cleared"}),
     "submitting": frozenset({"filled", "pending", "failed"}),
     "pending": frozenset({"filled", "pending", "failed"}),
     "filled": frozenset(),
     "failed": frozenset(),
+    "cleared": frozenset(),
 }
 MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
     {
@@ -172,6 +174,15 @@ def _initial_sell_action(
         "source": "gpt_work_cloud_browser",
         "inferred": inferred,
         "market_ids": market_ids,
+        "evaluated_market_id": None,
+        "market_question": None,
+        "position_side": None,
+        "live_held_side_bullpen_odds": None,
+        "sell_threshold": STAGE2_WARNING_THRESHOLD,
+        "average_sell_price": None,
+        "evaluated_at": None,
+        "batch_id": None,
+        "eligibility_decision": "unverified",
         "shares": None,
         "expected_proceeds": None,
         "proceeds": None,
@@ -789,6 +800,13 @@ def update_mail_sell_action_sync(
     proceeds: float | None = None,
     transaction_url: str | None = None,
     error: str | None = None,
+    market_question: str | None = None,
+    position_side: str | None = None,
+    live_held_side_bullpen_odds: float | None = None,
+    sell_threshold: float | None = None,
+    average_sell_price: float | None = None,
+    evaluated_at: str | None = None,
+    batch_id: str | None = None,
 ) -> dict[str, object]:
     if action_status not in SELL_ACTION_STATUSES:
         raise ValueError("Unsupported Sell action status.")
@@ -831,7 +849,51 @@ def update_mail_sell_action_sync(
             if market_id not in market_ids:
                 market_ids.append(market_id)
             sell_action["market_ids"] = market_ids
+            sell_action["evaluated_market_id"] = market_id
+
+        effective_threshold = float(
+            sell_threshold
+            if sell_threshold is not None
+            else sell_action.get("sell_threshold") or STAGE2_WARNING_THRESHOLD
+        )
+        effective_live_odds = (
+            live_held_side_bullpen_odds
+            if live_held_side_bullpen_odds is not None
+            else sell_action.get("live_held_side_bullpen_odds")
+        )
+        if action_status in {"awaiting_confirmation", "confirmed", "submitting"}:
+            if effective_live_odds is None:
+                raise ValueError(
+                    "Fresh live held-side Bullpen odds are required before this Sell action can advance."
+                )
+            if float(effective_live_odds) >= effective_threshold:
+                raise ValueError(
+                    "Sell blocked: live held-side Bullpen odds must be strictly below "
+                    f"{effective_threshold:g}%."
+                )
+        if action_status == "cleared":
+            if effective_live_odds is None or float(effective_live_odds) < effective_threshold:
+                raise ValueError(
+                    "A Sell alert can be cleared only when fresh live held-side Bullpen odds "
+                    f"are {effective_threshold:g}% or above."
+                )
+
+        eligibility_decision = "unverified"
+        if effective_live_odds is not None:
+            eligibility_decision = (
+                "eligible"
+                if float(effective_live_odds) < effective_threshold
+                else "recovered"
+            )
         for key, value in {
+            "market_question": market_question,
+            "position_side": position_side,
+            "live_held_side_bullpen_odds": live_held_side_bullpen_odds,
+            "sell_threshold": effective_threshold,
+            "average_sell_price": average_sell_price,
+            "evaluated_at": evaluated_at or (updated_at if effective_live_odds is not None else None),
+            "batch_id": batch_id,
+            "eligibility_decision": eligibility_decision,
             "shares": shares,
             "expected_proceeds": expected_proceeds,
             "proceeds": proceeds,
@@ -853,6 +915,15 @@ def update_mail_sell_action_sync(
                     "status": action_status,
                     "at": updated_at,
                     "note": note,
+                    "market_id": market_id,
+                    "market_question": market_question,
+                    "position_side": position_side,
+                    "live_held_side_bullpen_odds": live_held_side_bullpen_odds,
+                    "sell_threshold": effective_threshold,
+                    "average_sell_price": average_sell_price,
+                    "evaluated_at": evaluated_at,
+                    "batch_id": batch_id,
+                    "eligibility_decision": eligibility_decision,
                     "shares": shares,
                     "expected_proceeds": expected_proceeds,
                     "proceeds": proceeds,
