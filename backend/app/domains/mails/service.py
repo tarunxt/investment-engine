@@ -34,6 +34,24 @@ TEST_MESSAGE = "Hi, this a message from Tarun's Cred-X"
 
 MAIL_PREFERENCES_RESOURCE_TYPE = "cred_x_mail_preferences"
 MAIL_PREFERENCES_ACTION = "mail.preferences_updated"
+SELL_ACTION_STATUSES = (
+    "detected",
+    "awaiting_confirmation",
+    "confirmed",
+    "submitting",
+    "filled",
+    "pending",
+    "failed",
+)
+SELL_ACTION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "detected": frozenset({"awaiting_confirmation"}),
+    "awaiting_confirmation": frozenset({"confirmed"}),
+    "confirmed": frozenset({"submitting"}),
+    "submitting": frozenset({"filled", "pending", "failed"}),
+    "pending": frozenset({"filled", "pending", "failed"}),
+    "filled": frozenset(),
+    "failed": frozenset(),
+}
 MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
     {
         "key": "run_completion",
@@ -117,6 +135,84 @@ class LoggedMailDelivery:
 
 def _utc_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _sell_warnings(warnings: object) -> list[dict[str, object]]:
+    if not isinstance(warnings, list):
+        return []
+    return [
+        warning
+        for warning in warnings
+        if isinstance(warning, dict)
+        and (
+            str(warning.get("recommended_action") or "").upper() == "EXIT"
+            or str(warning.get("breach_type") or "").lower()
+            in {"llm", "actual", "both"}
+        )
+    ]
+
+
+def _initial_sell_action(
+    warnings: object,
+    *,
+    at: str,
+    inferred: bool = False,
+) -> dict[str, object] | None:
+    sell_warnings = _sell_warnings(warnings)
+    if not sell_warnings:
+        return None
+    market_ids = [
+        str(warning.get("market_id"))
+        for warning in sell_warnings
+        if warning.get("market_id")
+    ]
+    return {
+        "status": "detected",
+        "updated_at": at,
+        "source": "gpt_work_cloud_browser",
+        "inferred": inferred,
+        "market_ids": market_ids,
+        "shares": None,
+        "expected_proceeds": None,
+        "proceeds": None,
+        "transaction_url": None,
+        "note": "Sell requirement detected from the delivered Cred-X risk alert.",
+        "error": None,
+        "history": [
+            {
+                "status": "detected",
+                "at": at,
+                "note": "Sell requirement detected from the delivered Cred-X risk alert.",
+            }
+        ],
+    }
+
+
+def _sell_handoff_email_footer(history_id: int, action: dict[str, object]) -> tuple[str, str]:
+    market_ids = ", ".join(str(value) for value in action.get("market_ids", [])) or "unavailable"
+    audit_url = f"https://cred-x.in/console/mails?deliveryId={history_id}"
+    text = (
+        "\n\nGPT WORK SELL HANDOFF\n"
+        f"Delivery audit ID: {history_id}\n"
+        "Action: SELL FULL POSITION\n"
+        f"Market IDs: {market_ids}\n"
+        "Action status: detected\n"
+        f"Delivery audit: {audit_url}\n"
+        "Live Bullpen validation and one grouped confirmation are required before execution."
+    )
+    html_footer = (
+        '<div style="margin-top:24px;padding:16px;border:1px solid #ef4444;'
+        'border-radius:10px;background:#fff7f7;color:#7f1d1d">'
+        '<p style="margin:0 0 10px;font-weight:800">GPT Work Sell handoff</p>'
+        f'<p style="margin:4px 0"><strong>Delivery audit ID:</strong> {history_id}</p>'
+        '<p style="margin:4px 0"><strong>Action:</strong> SELL FULL POSITION</p>'
+        f'<p style="margin:4px 0"><strong>Market IDs:</strong> {html.escape(market_ids)}</p>'
+        '<p style="margin:4px 0"><strong>Action status:</strong> detected</p>'
+        f'<p style="margin:10px 0 0"><a href="{audit_url}">Open Delivery audit</a></p>'
+        '<p style="margin:10px 0 0">Live Bullpen validation and one grouped confirmation are required before execution.</p>'
+        '</div>'
+    )
+    return html_footer, text
 
 
 def get_mail_preferences_from_session(
@@ -518,7 +614,7 @@ def send_logged_email_sync(
 
     attempted_at = _utc_iso()
     details: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "idempotency_key": idempotency_key,
         "status": "sending",
         "category": category,
@@ -537,6 +633,9 @@ def send_logged_email_sync(
         "provider_message": None,
         "how_to_fix": [],
     }
+    sell_action = _initial_sell_action(warnings or [], at=attempted_at)
+    if sell_action is not None:
+        details["sell_action"] = sell_action
     row = ActivityLog(
         user_id=user_id,
         action=action,
@@ -547,6 +646,11 @@ def send_logged_email_sync(
     session.add(row)
     session.commit()
     session.refresh(row)
+
+    if sell_action is not None:
+        html_footer, text_footer = _sell_handoff_email_footer(int(row.id), sell_action)
+        html_content = f"{html_content}{html_footer}"
+        text_content = f"{text_content}{text_footer}"
 
     results = [
         EmailService.send_email_detailed(
@@ -673,6 +777,98 @@ def _mail_category(action: str, details: dict[str, Any]) -> str:
     return MAIL_CATEGORY_ALERTS
 
 
+def update_mail_sell_action_sync(
+    user_id: int,
+    history_id: int,
+    *,
+    action_status: str,
+    note: str | None = None,
+    market_id: str | None = None,
+    shares: float | None = None,
+    expected_proceeds: float | None = None,
+    proceeds: float | None = None,
+    transaction_url: str | None = None,
+    error: str | None = None,
+) -> dict[str, object]:
+    if action_status not in SELL_ACTION_STATUSES:
+        raise ValueError("Unsupported Sell action status.")
+    with SyncSessionLocal() as session:
+        row = session.execute(
+            select(ActivityLog)
+            .where(ActivityLog.id == history_id)
+            .where(ActivityLog.user_id == user_id)
+            .where(ActivityLog.resource_type == MAIL_RESOURCE_TYPE)
+            .where(ActivityLog.action.like(f"{MAIL_ACTION_PREFIX}%"))
+            .with_for_update()
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            raise LookupError("Mail delivery was not found.")
+
+        details = _details_from_row(row)
+        sell_action = details.get("sell_action")
+        if not isinstance(sell_action, dict):
+            sell_action = _initial_sell_action(
+                details.get("warnings") or [],
+                at=row.created_at.isoformat(),
+                inferred=True,
+            )
+        if sell_action is None:
+            raise ValueError("This mail delivery does not contain a Sell action.")
+
+        current_status = str(sell_action.get("status") or "detected")
+        if action_status != current_status and action_status not in SELL_ACTION_TRANSITIONS.get(
+            current_status,
+            frozenset(),
+        ):
+            raise ValueError(
+                f"Invalid Sell action transition: {current_status} -> {action_status}."
+            )
+
+        updated_at = _utc_iso()
+        if market_id:
+            market_ids = [str(value) for value in sell_action.get("market_ids", [])]
+            if market_id not in market_ids:
+                market_ids.append(market_id)
+            sell_action["market_ids"] = market_ids
+        for key, value in {
+            "shares": shares,
+            "expected_proceeds": expected_proceeds,
+            "proceeds": proceeds,
+            "transaction_url": transaction_url,
+            "note": note,
+            "error": error,
+        }.items():
+            if value is not None:
+                sell_action[key] = value
+        sell_action["status"] = action_status
+        sell_action["updated_at"] = updated_at
+        sell_action["inferred"] = False
+        history = sell_action.get("history")
+        if not isinstance(history, list):
+            history = []
+        if action_status != current_status:
+            history.append(
+                {
+                    "status": action_status,
+                    "at": updated_at,
+                    "note": note,
+                    "shares": shares,
+                    "expected_proceeds": expected_proceeds,
+                    "proceeds": proceeds,
+                    "transaction_url": transaction_url,
+                    "error": error,
+                }
+            )
+        sell_action["history"] = history
+        details["schema_version"] = max(int(details.get("schema_version") or 1), 2)
+        details["sell_action"] = sell_action
+        row.details = json.dumps(details, ensure_ascii=False)
+        session.add(row)
+        session.commit()
+        return dict(sell_action)
+
+
 def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, object]]:
     bounded_limit = max(1, min(limit, 200))
     with SyncSessionLocal() as session:
@@ -691,6 +887,13 @@ def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, 
         items: list[dict[str, object]] = []
         for row in rows:
             details = _details_from_row(row)
+            sell_action = details.get("sell_action")
+            if not isinstance(sell_action, dict):
+                sell_action = _initial_sell_action(
+                    details.get("warnings") or [],
+                    at=row.created_at.isoformat(),
+                    inferred=True,
+                )
             items.append(
                 {
                     "id": int(row.id),
@@ -711,6 +914,7 @@ def list_mail_history_sync(user_id: int, *, limit: int = 100) -> list[dict[str, 
                     "provider_summary": details.get("provider_summary"),
                     "provider_message": details.get("provider_message"),
                     "how_to_fix": details.get("how_to_fix") or [],
+                    "sell_action": sell_action,
                 }
             )
         return items
