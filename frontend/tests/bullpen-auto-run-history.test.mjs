@@ -85,7 +85,7 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Latest saved run:/);
   assert.match(historyContent, /Latest scored LLM scan:/);
   assert.match(historyContent, /Current Bullpen Odds fetched\/updated:/);
-  assert.match(historyContent, /trends\.current_odds_fetched_at/);
+  assert.match(historyContent, /currentOddsUpdatedAt = trends\?\.current_odds_fetched_at \?\? latestScoredScanAt \?\? trends\?\.generated_at/);
   assert.match(historyScreen, /current_odds_fetched_at: response\.fetchedAt/);
   assert.match(historyContent, /page\?\.page === 1 \? page\.items\[0\]\?\.started_at/);
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
