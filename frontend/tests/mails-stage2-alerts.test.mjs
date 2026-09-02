@@ -40,3 +40,15 @@ test('Sell batch preparation uses only fresh live Bullpen odds', () => {
   assert.match(source, /Expected proceeds/);
   assert.match(source, /Save live details/);
 });
+
+
+test('mails console documents both GPT-enabled Sell workflows', () => {
+  assert.match(source, /GPT-enabled Sell Workflows/);
+  assert.match(source, /Email-triggered Bullpen Sell/);
+  assert.match(source, /Hourly Bullpen Sell Check/);
+  assert.match(source, /Once every hour · Asia\/Kolkata/);
+  assert.match(source, /Both workflows merge and de-duplicate positions by canonical market ID/);
+  assert.match(source, /Approve the latest complete batch in its GPT Work chat on laptop or mobile/);
+  assert.match(source, /Cred-X Bullpen History/);
+  assert.match(source, /Live Bullpen Predictions wallet/);
+});
