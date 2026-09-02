@@ -1,6 +1,8 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, EmailStr
+from pydantic import AnyHttpUrl, BaseModel, EmailStr, Field
 
 from app.core.config import settings
 from app.domains.auth.dependencies import get_current_user
@@ -12,6 +14,7 @@ from app.domains.mails.service import (
     list_mail_preferences_sync,
     send_manual_test_mail_sync,
     update_mail_preferences_sync,
+    update_mail_sell_action_sync,
 )
 
 router = APIRouter(prefix="/mails", tags=["mails"])
@@ -43,10 +46,38 @@ class MailHistoryItem(BaseModel):
     provider_summary: str | None = None
     provider_message: str | None = None
     how_to_fix: list[str]
+    sell_action: dict[str, object] | None = None
 
 
 class MailHistoryResponse(BaseModel):
     items: list[MailHistoryItem]
+
+
+SellActionStatus = Literal[
+    "detected",
+    "awaiting_confirmation",
+    "confirmed",
+    "submitting",
+    "filled",
+    "pending",
+    "failed",
+]
+
+
+class UpdateMailSellActionRequest(BaseModel):
+    status: SellActionStatus
+    note: str | None = Field(default=None, max_length=2000)
+    market_id: str | None = Field(default=None, max_length=128)
+    shares: float | None = Field(default=None, ge=0)
+    expected_proceeds: float | None = Field(default=None, ge=0)
+    proceeds: float | None = Field(default=None, ge=0)
+    transaction_url: AnyHttpUrl | None = None
+    error: str | None = Field(default=None, max_length=4000)
+
+
+class MailSellActionResponse(BaseModel):
+    history_id: int
+    sell_action: dict[str, object]
 
 
 class MailPreferenceItem(BaseModel):
@@ -118,6 +149,38 @@ async def get_mail_history(
     return MailHistoryResponse(
         items=[MailHistoryItem.model_validate(item) for item in items]
     )
+
+
+@router.patch(
+    "/history/{history_id}/sell-action",
+    response_model=MailSellActionResponse,
+)
+async def update_mail_sell_action(
+    history_id: int,
+    request: UpdateMailSellActionRequest,
+    current_user: User = Depends(get_current_user),
+) -> MailSellActionResponse:
+    try:
+        sell_action = await run_in_threadpool(
+            update_mail_sell_action_sync,
+            int(current_user.id),
+            history_id,
+            action_status=request.status,
+            note=request.note,
+            market_id=request.market_id,
+            shares=request.shares,
+            expected_proceeds=request.expected_proceeds,
+            proceeds=request.proceeds,
+            transaction_url=(
+                str(request.transaction_url) if request.transaction_url else None
+            ),
+            error=request.error,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    return MailSellActionResponse(history_id=history_id, sell_action=sell_action)
 
 
 @router.post("/send-test", response_model=SendTestMailResponse)
