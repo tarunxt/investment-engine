@@ -172,6 +172,14 @@ async def test_update_mail_sell_action_returns_persisted_lifecycle(
         request=mails_router.UpdateMailSellActionRequest(
             status="awaiting_confirmation",
             note="Grouped preview prepared.",
+            market_id="1193094",
+            market_question="Will Magdalena Andersson be the next Prime Minister of Sweden?",
+            position_side="YES",
+            live_held_side_bullpen_odds=79.0,
+            sell_threshold=80.0,
+            average_sell_price=76.0,
+            evaluated_at="2026-09-02T07:00:00+00:00",
+            batch_id="sell-20260902-01",
             shares=12.5,
             expected_proceeds=9.75,
         ),
@@ -187,12 +195,19 @@ async def test_update_mail_sell_action_returns_persisted_lifecycle(
             {
                 "action_status": "awaiting_confirmation",
                 "note": "Grouped preview prepared.",
-                "market_id": None,
+                "market_id": "1193094",
                 "shares": 12.5,
                 "expected_proceeds": 9.75,
                 "proceeds": None,
                 "transaction_url": None,
                 "error": None,
+                "market_question": "Will Magdalena Andersson be the next Prime Minister of Sweden?",
+                "position_side": "YES",
+                "live_held_side_bullpen_odds": 79.0,
+                "sell_threshold": 80.0,
+                "average_sell_price": 76.0,
+                "evaluated_at": "2026-09-02T07:00:00+00:00",
+                "batch_id": "sell-20260902-01",
             },
         )
     ]
@@ -219,3 +234,16 @@ async def test_update_mail_sell_action_rejects_invalid_transition(
 
     assert exc_info.value.status_code == 409
     assert "detected -> filled" in str(exc_info.value.detail)
+
+
+def test_sell_action_request_accepts_recovered_clearance() -> None:
+    request = mails_router.UpdateMailSellActionRequest(
+        status="cleared",
+        market_id="1193094",
+        position_side="YES",
+        live_held_side_bullpen_odds=80.0,
+    )
+
+    assert request.status == "cleared"
+    assert request.live_held_side_bullpen_odds == 80.0
+    assert request.sell_threshold == 80.0
