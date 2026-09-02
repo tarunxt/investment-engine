@@ -355,6 +355,8 @@ export const URLs = {
   mails: {
     sendTest: () => `${resolveApiBaseUrl()}/mails/send-test`,
     history: () => `${resolveApiBaseUrl()}/mails/history`,
+    sellAction: (historyId: number) =>
+      `${resolveApiBaseUrl()}/mails/history/${historyId}/sell-action`,
     preferences: () => `${resolveApiBaseUrl()}/mails/preferences`,
   },
 

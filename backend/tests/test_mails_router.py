@@ -2,12 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fastapi import HTTPException
 import pytest
-
 from app.domains.mails import router as mails_router
 from app.domains.mails.service import LoggedMailDelivery
 from app.services.email import EmailSendResult
+from fastapi import HTTPException
 
 
 @pytest.mark.anyio
@@ -151,3 +150,72 @@ async def test_update_mail_preferences_saves_checkbox_values(
 
     assert observed == [(7, {"run_completion": False})]
     assert response.items[0].enabled is False
+
+
+@pytest.mark.anyio
+async def test_update_mail_sell_action_returns_persisted_lifecycle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[tuple[int, int, dict[str, object]]] = []
+
+    def update(user_id: int, history_id: int, **values: object):
+        observed.append((user_id, history_id, values))
+        return {
+            "status": values["action_status"],
+            "updated_at": "2026-09-02T07:00:00+00:00",
+            "history": [],
+        }
+
+    monkeypatch.setattr(mails_router, "update_mail_sell_action_sync", update)
+    response = await mails_router.update_mail_sell_action(
+        history_id=91,
+        request=mails_router.UpdateMailSellActionRequest(
+            status="awaiting_confirmation",
+            note="Grouped preview prepared.",
+            shares=12.5,
+            expected_proceeds=9.75,
+        ),
+        current_user=SimpleNamespace(id=7),
+    )
+
+    assert response.history_id == 91
+    assert response.sell_action["status"] == "awaiting_confirmation"
+    assert observed == [
+        (
+            7,
+            91,
+            {
+                "action_status": "awaiting_confirmation",
+                "note": "Grouped preview prepared.",
+                "market_id": None,
+                "shares": 12.5,
+                "expected_proceeds": 9.75,
+                "proceeds": None,
+                "transaction_url": None,
+                "error": None,
+            },
+        )
+    ]
+
+
+@pytest.mark.anyio
+async def test_update_mail_sell_action_rejects_invalid_transition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mails_router,
+        "update_mail_sell_action_sync",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("Invalid Sell action transition: detected -> filled.")
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await mails_router.update_mail_sell_action(
+            history_id=91,
+            request=mails_router.UpdateMailSellActionRequest(status="filled"),
+            current_user=SimpleNamespace(id=7),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert "detected -> filled" in str(exc_info.value.detail)

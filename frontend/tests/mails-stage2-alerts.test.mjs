@@ -14,3 +14,16 @@ test('mail history shows LLM and actual Bullpen odds with the breach source', ()
   assert.match(source, /Actual Bullpen:/);
   assert.match(source, /warning\.breach_sources\?\.join\(' and '\)/);
 });
+
+test('delivery audit renders the complete Sell action lifecycle and write-back controls', () => {
+  assert.match(source, /'detected'/);
+  assert.match(source, /'awaiting_confirmation'/);
+  assert.match(source, /'confirmed'/);
+  assert.match(source, /'submitting'/);
+  assert.match(source, /'filled'/);
+  assert.match(source, /'pending'/);
+  assert.match(source, /'failed'/);
+  assert.match(source, /Sell action taken/);
+  assert.match(source, /URLs\.mails\.sellAction\(item\.id\)/);
+  assert.match(source, /Bullpen transaction link/);
+});
