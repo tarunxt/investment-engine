@@ -49,6 +49,39 @@ type MailHistoryItem = {
   provider_code?: string | null;
   provider_summary?: string | null;
   provider_message?: string | null;
+  sell_action?: SellAction | null;
+};
+
+type SellActionStatus =
+  | 'detected'
+  | 'awaiting_confirmation'
+  | 'confirmed'
+  | 'submitting'
+  | 'filled'
+  | 'pending'
+  | 'failed';
+
+type SellAction = {
+  status: SellActionStatus;
+  updated_at: string;
+  inferred?: boolean;
+  market_ids?: string[];
+  shares?: number | null;
+  expected_proceeds?: number | null;
+  proceeds?: number | null;
+  transaction_url?: string | null;
+  note?: string | null;
+  error?: string | null;
+  history?: Array<{
+    status: SellActionStatus;
+    at: string;
+    note?: string | null;
+    shares?: number | null;
+    expected_proceeds?: number | null;
+    proceeds?: number | null;
+    transaction_url?: string | null;
+    error?: string | null;
+  }>;
 };
 
 type MailHistoryTab = 'all' | 'runs' | 'alerts' | 'account' | 'github';
@@ -121,6 +154,146 @@ function normalizeFailure(payload: unknown): MailFailure {
   };
 }
 
+const SELL_ACTION_NEXT: Record<SellActionStatus, SellActionStatus[]> = {
+  detected: ['awaiting_confirmation'],
+  awaiting_confirmation: ['confirmed'],
+  confirmed: ['submitting'],
+  submitting: ['filled', 'pending', 'failed'],
+  pending: ['filled', 'failed'],
+  filled: [],
+  failed: [],
+};
+
+function sellActionTone(status: SellActionStatus) {
+  if (status === 'filled') return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  if (status === 'failed') return 'border-red-200 bg-red-50 text-red-800';
+  if (status === 'pending' || status === 'submitting') {
+    return 'border-amber-200 bg-amber-50 text-amber-800';
+  }
+  return 'border-blue-200 bg-blue-50 text-blue-800';
+}
+
+function formatActionStatus(status: SellActionStatus) {
+  return status.replaceAll('_', ' ');
+}
+
+function SellActionAudit({
+  item,
+  onUpdated,
+}: {
+  item: MailHistoryItem;
+  onUpdated: (sellAction: SellAction) => void;
+}) {
+  const action = item.sell_action;
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const [note, setNote] = useState(action?.note || '');
+  const [shares, setShares] = useState(action?.shares?.toString() || '');
+  const [expectedProceeds, setExpectedProceeds] = useState(
+    action?.expected_proceeds?.toString() || '',
+  );
+  const [proceeds, setProceeds] = useState(action?.proceeds?.toString() || '');
+  const [transactionUrl, setTransactionUrl] = useState(action?.transaction_url || '');
+  const [executionError, setExecutionError] = useState(action?.error || '');
+
+  if (!action) return null;
+
+  async function updateStatus(status: SellActionStatus) {
+    setUpdating(true);
+    setUpdateError(null);
+    try {
+      const response = await fetch(URLs.mails.sellAction(item.id), {
+        method: 'PATCH',
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          note: note || null,
+          shares: shares ? Number(shares) : null,
+          expected_proceeds: expectedProceeds ? Number(expectedProceeds) : null,
+          proceeds: proceeds ? Number(proceeds) : null,
+          transaction_url: transactionUrl || null,
+          error: executionError || null,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { sell_action?: SellAction; detail?: string }
+        | null;
+      if (!response.ok || !payload?.sell_action) {
+        throw new Error(payload?.detail || 'Sell action status could not be updated.');
+      }
+      onUpdated(payload.sell_action);
+    } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : 'Sell action status could not be updated.');
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  return (
+    <section className="mt-4 rounded-2xl border border-red-200 bg-red-50/40 p-4" aria-label="Sell action audit">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-700">Sell action taken</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Delivery audit #{item.id}{action.inferred ? ' · inferred from historical EXIT email' : ''}
+          </p>
+        </div>
+        <span className={`rounded-full border px-2.5 py-1 text-xs font-bold uppercase ${sellActionTone(action.status)}`}>
+          {formatActionStatus(action.status)}
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <label className="text-xs font-semibold text-foreground">
+          Shares
+          <input aria-label={`Sell shares for mail ${item.id}`} value={shares} onChange={(event) => setShares(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Expected proceeds ($)
+          <input aria-label={`Expected Sell proceeds for mail ${item.id}`} value={expectedProceeds} onChange={(event) => setExpectedProceeds(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Filled proceeds ($)
+          <input aria-label={`Filled Sell proceeds for mail ${item.id}`} value={proceeds} onChange={(event) => setProceeds(event.target.value)} inputMode="decimal" className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground sm:col-span-2">
+          Bullpen transaction link
+          <input aria-label={`Sell transaction link for mail ${item.id}`} value={transactionUrl} onChange={(event) => setTransactionUrl(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+        <label className="text-xs font-semibold text-foreground">
+          Note or failure detail
+          <input aria-label={`Sell action note for mail ${item.id}`} value={executionError || note} onChange={(event) => action.status === 'submitting' ? setExecutionError(event.target.value) : setNote(event.target.value)} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 font-normal" />
+        </label>
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        {SELL_ACTION_NEXT[action.status].map((nextStatus) => (
+          <button key={nextStatus} type="button" disabled={updating} onClick={() => void updateStatus(nextStatus)} className="rounded-lg border border-red-200 bg-background px-3 py-2 text-xs font-bold capitalize text-red-800 transition hover:bg-red-100 disabled:opacity-50">
+            Mark {formatActionStatus(nextStatus)}
+          </button>
+        ))}
+      </div>
+      {updateError ? <p role="alert" className="mt-3 text-xs font-semibold text-red-700">{updateError}</p> : null}
+
+      {action.history?.length ? (
+        <ol className="mt-4 space-y-1 border-t border-red-200 pt-3 text-xs text-muted-foreground">
+          {action.history.map((entry, index) => (
+            <li key={`${entry.status}-${entry.at}-${index}`}>
+              <span className="font-semibold capitalize text-foreground">{formatActionStatus(entry.status)}</span>
+              {' · '}{new Date(entry.at).toLocaleString('en-IN')}{entry.note ? ` · ${entry.note}` : ''}
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {action.transaction_url ? (
+        <a href={action.transaction_url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs font-bold text-blue-700">
+          Open Bullpen transaction <ExternalLink className="h-3.5 w-3.5" />
+        </a>
+      ) : null}
+    </section>
+  );
+}
+
 export default function MailsPage() {
   const [selected, setSelected] = useState(true);
   const [sending, setSending] = useState(false);
@@ -168,6 +341,8 @@ export default function MailsPage() {
   }, []);
 
   useEffect(() => {
+    // Initial network synchronization is intentionally performed after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadPreferences();
   }, [loadPreferences]);
 
@@ -250,8 +425,20 @@ export default function MailsPage() {
   }, []);
 
   useEffect(() => {
+    // Initial network synchronization is intentionally performed after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadHistory();
   }, [loadHistory]);
+
+  useEffect(() => {
+    if (historyLoading || typeof window === 'undefined') return;
+    const deliveryId = new URLSearchParams(window.location.search).get('deliveryId');
+    if (!deliveryId) return;
+    document.getElementById(`mail-delivery-${deliveryId}`)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, [historyLoading, history]);
 
   const loadGitHubRuns = useCallback(async () => {
     setGithubLoading(true);
@@ -286,6 +473,8 @@ export default function MailsPage() {
   }, []);
 
   useEffect(() => {
+    // Initial network synchronization is intentionally performed after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadGitHubRuns();
   }, [loadGitHubRuns]);
 
@@ -699,7 +888,7 @@ export default function MailsPage() {
                   ? 'border-red-200 bg-red-50 text-red-800'
                   : 'border-amber-200 bg-amber-50 text-amber-800';
             return (
-              <article key={item.id} className="rounded-2xl border border-border bg-muted/20 p-5">
+              <article id={`mail-delivery-${item.id}`} key={item.id} className="rounded-2xl border border-border bg-muted/20 p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -736,6 +925,11 @@ export default function MailsPage() {
                     ))}
                   </div>
                 ) : null}
+
+                <SellActionAudit
+                  item={item}
+                  onUpdated={(sellAction) => setHistory((current) => current.map((entry) => entry.id === item.id ? { ...entry, sell_action: sellAction } : entry))}
+                />
 
                 <details className="mt-4 rounded-xl border border-border bg-background p-4">
                   <summary className="cursor-pointer text-sm font-semibold text-foreground">
