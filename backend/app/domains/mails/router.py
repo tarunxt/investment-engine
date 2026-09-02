@@ -61,6 +61,7 @@ SellActionStatus = Literal[
     "filled",
     "pending",
     "failed",
+    "cleared",
 ]
 
 
@@ -73,6 +74,13 @@ class UpdateMailSellActionRequest(BaseModel):
     proceeds: float | None = Field(default=None, ge=0)
     transaction_url: AnyHttpUrl | None = None
     error: str | None = Field(default=None, max_length=4000)
+    market_question: str | None = Field(default=None, max_length=500)
+    position_side: Literal["YES", "NO"] | None = None
+    live_held_side_bullpen_odds: float | None = Field(default=None, ge=0, le=100)
+    sell_threshold: float | None = Field(default=80.0, ge=0, le=100)
+    average_sell_price: float | None = Field(default=None, ge=0, le=100)
+    evaluated_at: str | None = Field(default=None, max_length=64)
+    batch_id: str | None = Field(default=None, max_length=128)
 
 
 class MailSellActionResponse(BaseModel):
@@ -175,6 +183,13 @@ async def update_mail_sell_action(
                 str(request.transaction_url) if request.transaction_url else None
             ),
             error=request.error,
+            market_question=request.market_question,
+            position_side=request.position_side,
+            live_held_side_bullpen_odds=request.live_held_side_bullpen_odds,
+            sell_threshold=request.sell_threshold,
+            average_sell_price=request.average_sell_price,
+            evaluated_at=request.evaluated_at,
+            batch_id=request.batch_id,
         )
     except LookupError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
