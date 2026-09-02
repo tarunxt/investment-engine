@@ -71,6 +71,7 @@ type CurrentOrderBookMarket = {
 
 type CurrentOrderBookOddsResponse = {
   markets?: Record<string, CurrentOrderBookMarket>;
+  fetchedAt?: string | null;
 };
 
 async function fetchCurrentOrderBookOdds(
@@ -145,6 +146,7 @@ export function applyCurrentOrderBookOddsToEventTrends(
 ): BullpenAutoLiveEventTrendsResponse {
   return {
     ...trends,
+    current_odds_fetched_at: response.fetchedAt ?? trends.current_odds_fetched_at,
     events: trends.events.map((event) => {
       const market = response.markets?.[event.market_id];
       const currentYesOdds =

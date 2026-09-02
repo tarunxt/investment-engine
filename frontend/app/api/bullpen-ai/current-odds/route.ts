@@ -145,6 +145,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         markets: {},
         unresolvedQuestionIds: [],
+        fetchedAt: new Date().toISOString(),
       });
     }
 
@@ -162,6 +163,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       markets: resolvedByQuestionId,
       unresolvedQuestionIds,
+      fetchedAt: new Date().toISOString(),
     });
   } catch (error) {
     return NextResponse.json(
