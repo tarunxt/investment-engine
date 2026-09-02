@@ -189,6 +189,14 @@ type StageErrorDetail = {
   message: string;
   status?: string | null;
   jobId?: number | null;
+  runId?: number | null;
+  httpStatus?: number | null;
+  providerResponseBody?: string | null;
+  correlationId?: string | null;
+  exceptionType?: string | null;
+  traceReference?: string | null;
+  retrySafe?: boolean | null;
+  attempt?: number | null;
 };
 
 type StageInfo = {
@@ -632,6 +640,37 @@ function getLlmSelectorTitle(
   return `Select LLMs- ${scanLabel}${costLabel !== "n/a" ? ` (Cost incurred: ${costLabel})` : ""}`;
 }
 
+function readFailureDiagnostics(
+  metadata: Record<string, unknown> | null | undefined,
+): Partial<StageErrorDetail> {
+  const raw =
+    metadata?.failure_diagnostics &&
+    typeof metadata.failure_diagnostics === "object" &&
+    !Array.isArray(metadata.failure_diagnostics)
+      ? (metadata.failure_diagnostics as Record<string, unknown>)
+      : null;
+  if (!raw) return {};
+  const stringValue = (key: string) =>
+    typeof raw[key] === "string" && raw[key] ? (raw[key] as string) : null;
+  const numberValue = (key: string) =>
+    typeof raw[key] === "number" && Number.isFinite(raw[key])
+      ? (raw[key] as number)
+      : null;
+  return {
+    provider: stringValue("provider"),
+    model: stringValue("model"),
+    jobId: numberValue("job_id"),
+    runId: numberValue("run_id"),
+    httpStatus: numberValue("http_status"),
+    providerResponseBody: stringValue("provider_response_body"),
+    correlationId: stringValue("correlation_id"),
+    exceptionType: stringValue("exception_type"),
+    traceReference: stringValue("trace_reference"),
+    retrySafe: typeof raw.retry_safe === "boolean" ? raw.retry_safe : null,
+    attempt: numberValue("attempt"),
+  };
+}
+
 function summarizeRun(run: RunResponse) {
   const jobs = run.run_jobs?.map((link) => link.job).filter((job): job is JobResponse => Boolean(job)) ?? [];
   const firstJob = jobs[0];
@@ -644,13 +683,18 @@ function summarizeRun(run: RunResponse) {
   );
   const failedJob = failedJobs[0];
   const errorDetails: StageErrorDetail[] = failedJobs
-    .map((job): StageErrorDetail => ({
-      provider: job.provider ?? null,
-      model: job.model ?? null,
-      message: job.error_message?.trim() || `LLM job #${job.id} ended with status "${job.status || "failed"}".`,
-      status: job.status ?? null,
-      jobId: job.id ?? null,
-    }))
+    .map((job): StageErrorDetail => {
+      const diagnostics = readFailureDiagnostics(job.runtime_metadata_json);
+      return {
+        ...diagnostics,
+        provider: diagnostics.provider ?? job.provider ?? null,
+        model: diagnostics.model ?? job.model ?? null,
+        message: job.error_message?.trim() || `LLM job #${job.id} ended with status "${job.status || "failed"}".`,
+        status: job.status ?? null,
+        jobId: diagnostics.jobId ?? job.id ?? null,
+        runId: diagnostics.runId ?? run.id,
+      };
+    })
     .filter((detail) => detail.message.trim());
   if (run.export_error?.trim()) {
     errorDetails.unshift({
@@ -682,6 +726,7 @@ function summarizeThreat(
   analysis: ZerodhaThreatAnalysis | IndMoneyUsThreatAnalysis,
 ) {
   const errorMessage = analysis.error_message?.trim() ?? null;
+  const diagnostics = readFailureDiagnostics(analysis.runtime_metadata_json);
   return {
     completedAt: analysis.updated_at ?? analysis.created_at,
     provider: analysis.provider,
@@ -693,11 +738,12 @@ function summarizeThreat(
     errorDetails: errorMessage
       ? [
           {
-            provider: analysis.provider ?? null,
-            model: analysis.model ?? null,
+            ...diagnostics,
+            provider: diagnostics.provider ?? analysis.provider ?? null,
+            model: diagnostics.model ?? analysis.model ?? null,
             message: errorMessage,
             status: analysis.status ?? null,
-            jobId: analysis.job_id ?? null,
+            jobId: diagnostics.jobId ?? analysis.job_id ?? null,
           },
         ]
       : [],
@@ -3299,9 +3345,24 @@ function WorkflowStageTile({
                                   </span>
                                   <span className="mt-0.5 block text-xs text-slate-500">
                                     {detail.jobId ? `Job #${detail.jobId}` : "Job ID unavailable"}
+                                    {detail.runId ? ` · Run #${detail.runId}` : " · Run ID unavailable"}
                                     {detail.status ? ` · Status: ${detail.status}` : ""}
                                   </span>
                                   <span className="mt-2 block whitespace-pre-wrap break-words">{detail.message}</span>
+                                  <span className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+                                    <span className="block"><b>HTTP status:</b> {detail.httpStatus ?? "Unavailable"}</span>
+                                    <span className="block"><b>Retry safe:</b> {detail.retrySafe === true ? "Yes" : detail.retrySafe === false ? "No" : "Unavailable"}</span>
+                                    <span className="block"><b>Correlation ID:</b> {detail.correlationId || "Unavailable"}</span>
+                                    <span className="block"><b>Attempt:</b> {detail.attempt ?? "Unavailable"}</span>
+                                    <span className="block sm:col-span-2"><b>Exception type:</b> {detail.exceptionType || "Unavailable"}</span>
+                                    <span className="block break-all sm:col-span-2"><b>Trace reference:</b> {detail.traceReference || "Unavailable"}</span>
+                                  </span>
+                                  <span className="mt-3 block">
+                                    <span className="block text-xs font-bold uppercase tracking-wide text-slate-500">Provider response body</span>
+                                    <code className="mt-1 block max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-slate-950 p-2 text-xs text-slate-100">
+                                      {detail.providerResponseBody || "Unavailable"}
+                                    </code>
+                                  </span>
                                 </span>
                               ))}
                             </span>
