@@ -260,7 +260,7 @@ export const buildOptimizationReview = (
       priority: computeSharePercent >= 50 ? "high" : "medium",
       confidence: "measure first",
       effort: "medium",
-      rationale: `EC2 compute is $${computeCostUsd.toFixed(2)} for the selected month, about ${computeSharePercent.toFixed(0)}% of total AWS cost. It is the largest controllable cost, but a safe saving estimate requires CPU, memory, network and disk utilisation data.`,
+      rationale: `EC2 compute is $${computeCostUsd.toFixed(2)} for the selected month, about ${computeSharePercent.toFixed(0)}% of pre-tax AWS service cost. It is the largest controllable cost, but a safe saving estimate requires CPU, memory, network and disk utilisation data.`,
       steps: [
         "Capture 14-day and 30-day P50/P95 CPU, memory, network and disk utilisation for the production instance.",
         "Test the next smaller instance size or a Graviton-compatible type in staging when P95 CPU and memory are both comfortably below the current capacity.",
@@ -331,18 +331,21 @@ export const buildOptimizationReview = (
           : "Prevent a repeat of the prior-month transfer overage",
       category: "Data transfer",
       priority: "high",
-      confidence: "confirmed",
+      confidence: selectedOverageGb > 0 ? "confirmed" : "historical evidence",
       effort: "medium",
-      rationale: `${observedOverageGb.toFixed(2)} GB was observed above the 100 GB allowance, representing up to $${observedOverageCostUsd.toFixed(2)} of directly avoidable monthly overage at the observed run rate.`,
+      rationale:
+        selectedOverageGb > 0
+          ? `${selectedOverageGb.toFixed(2)} GB is projected above the 100 GB allowance, representing up to $${selectedOverageUsd.toFixed(2)} of current-month overage at the observed run rate.`
+          : `${previousOverageGb.toFixed(2)} GB was above the 100 GB allowance in the prior month. Its $${previousOverageUsd.toFixed(2)} cost is historical avoided-cost context, not a saving in the selected month.`,
       steps: [
         "Identify the largest paths, response types and user agents before changing caching behaviour.",
         "Compress JSON, HTML, JavaScript and CSS responses and set long immutable cache headers for versioned assets.",
         "Move large static or media responses behind the existing CDN/object-storage path where this reduces origin egress.",
         "Rate-limit abusive bots and repeated downloads after validating that legitimate API and trading traffic is unaffected.",
       ],
-      estimatedMonthlySavingsUsd: observedOverageCostUsd || null,
+      estimatedMonthlySavingsUsd: selectedOverageUsd > 0 ? selectedOverageUsd : null,
       source: "AWS Cost Explorer transfer usage",
-      state: observedOverageCostUsd > 0 ? "ready" : "measure-first",
+      state: selectedOverageUsd > 0 ? "ready" : "measure-first",
     });
   }
 
