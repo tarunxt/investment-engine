@@ -335,6 +335,9 @@ function SellActionAudit({
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
+        <button type="button" disabled={updating} onClick={() => void updateStatus(action.status)} className="rounded-lg border border-blue-200 bg-background px-3 py-2 text-xs font-bold text-blue-800 transition hover:bg-blue-100 disabled:opacity-50">
+          Save live details
+        </button>
         {SELL_ACTION_NEXT[action.status].map((nextStatus) => (
           <button key={nextStatus} type="button" disabled={updating} onClick={() => void updateStatus(nextStatus)} className="rounded-lg border border-red-200 bg-background px-3 py-2 text-xs font-bold capitalize text-red-800 transition hover:bg-red-100 disabled:opacity-50">
             Mark {formatActionStatus(nextStatus)}
