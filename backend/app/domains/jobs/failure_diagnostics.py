@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 _MAX_PROVIDER_BODY_CHARS = 4_000
 _SENSITIVE_VALUE_PATTERN = re.compile(
-    r'(?i)(authorization|api[-_ ]?key|token|secret|password|cookie)\s*[:=]\s*([^,;\s]+)'
+    r'(?i)(authorization|api[-_ ]?key|token|secret|password|cookie)["\\\']?\s*[:=]\s*["\\\']?([^,"\\\';\s}]+)'
 )
 _CORRELATION_HEADERS = (
     "x-request-id",
