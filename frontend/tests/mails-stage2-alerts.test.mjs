@@ -23,7 +23,19 @@ test('delivery audit renders the complete Sell action lifecycle and write-back c
   assert.match(source, /'filled'/);
   assert.match(source, /'pending'/);
   assert.match(source, /'failed'/);
+  assert.match(source, /'cleared'/);
   assert.match(source, /Sell action taken/);
   assert.match(source, /URLs\.mails\.sellAction\(item\.id\)/);
   assert.match(source, /Bullpen transaction link/);
+});
+
+
+test('Sell batch preparation uses only fresh live Bullpen odds', () => {
+  assert.match(source, /Sell Batch Preparation/);
+  assert.match(source, /Live held-side Bullpen odds/);
+  assert.match(source, /LLM odds are ignored/);
+  assert.match(source, /liveOdds < threshold/);
+  assert.match(source, /Recovered \/ excluded/);
+  assert.match(source, /Average Sell price/);
+  assert.match(source, /Expected proceeds/);
 });
