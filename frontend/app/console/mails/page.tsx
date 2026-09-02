@@ -366,6 +366,98 @@ function SellActionAudit({
 }
 
 
+
+function SellWorkflowOverview() {
+  const workflows = [
+    {
+      name: 'Email-triggered Bullpen Sell',
+      badge: 'Event driven',
+      icon: Mail,
+      trigger: 'Matching Cred-X Bullpen 008 warning email',
+      timing: 'Starts when Gmail delivers a matching warning',
+      scope: 'Newest email plus every unresolved earlier Sell audit and live position',
+      source: 'Gmail → Cred-X Delivery Audit → live Bullpen market',
+      purpose: 'Fast path for new risk alerts',
+    },
+    {
+      name: 'Hourly Bullpen Sell Check',
+      badge: 'Every hour',
+      icon: Clock3,
+      trigger: 'GPT Work hourly schedule',
+      timing: 'Once every hour · Asia/Kolkata',
+      scope: 'Every non-zero active Bullpen position, unresolved audit, and pending Sell',
+      source: 'Cred-X Bullpen History → live Bullpen wallet → Delivery Audit',
+      purpose: 'Independent fallback when an email wake-up is delayed or missed',
+    },
+  ];
+
+  return (
+    <section
+      className="mt-8 overflow-hidden rounded-3xl border border-violet-200 bg-card shadow-sm"
+      aria-label="GPT-enabled Sell workflows"
+    >
+      <div className="border-b border-violet-200 bg-violet-50/70 px-6 py-5">
+        <p className="text-xs font-bold uppercase tracking-[0.18em] text-violet-700">
+          GPT Work automation
+        </p>
+        <h2 className="mt-1 text-xl font-bold text-foreground">
+          GPT-enabled Sell Workflows
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Two independent triggers feed one de-duplicated Sell batch and one confirmation.
+        </p>
+      </div>
+
+      <div className="grid gap-4 p-6 lg:grid-cols-2">
+        {workflows.map((workflow) => {
+          const Icon = workflow.icon;
+          return (
+            <article key={workflow.name} className="rounded-2xl border border-border bg-background p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="rounded-xl bg-violet-100 p-2 text-violet-700">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <div>
+                    <h3 className="font-bold text-foreground">{workflow.name}</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{workflow.purpose}</p>
+                  </div>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold uppercase text-emerald-700">
+                  Active · {workflow.badge}
+                </span>
+              </div>
+              <dl className="mt-4 grid gap-3 text-xs sm:grid-cols-2">
+                <div><dt className="font-bold uppercase tracking-wide text-muted-foreground">Trigger</dt><dd className="mt-1 font-semibold text-foreground">{workflow.trigger}</dd></div>
+                <div><dt className="font-bold uppercase tracking-wide text-muted-foreground">Timing</dt><dd className="mt-1 font-semibold text-foreground">{workflow.timing}</dd></div>
+                <div><dt className="font-bold uppercase tracking-wide text-muted-foreground">Scope</dt><dd className="mt-1 font-semibold text-foreground">{workflow.scope}</dd></div>
+                <div><dt className="font-bold uppercase tracking-wide text-muted-foreground">Sources</dt><dd className="mt-1 font-semibold text-foreground">{workflow.source}</dd></div>
+              </dl>
+            </article>
+          );
+        })}
+      </div>
+
+      <div className="border-t border-violet-200 bg-slate-50/70 px-6 py-5">
+        <h3 className="text-sm font-bold text-foreground">Shared execution controls</h3>
+        <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-red-200 bg-white p-3"><p className="font-bold text-red-800">Live odds only</p><p className="mt-1 text-muted-foreground">Held-side Bullpen quote must be strictly below 80.0%. LLM odds are ignored.</p></div>
+          <div className="rounded-xl border border-blue-200 bg-white p-3"><p className="font-bold text-blue-800">One cumulative batch</p><p className="mt-1 text-muted-foreground">Both workflows merge and de-duplicate positions by canonical market ID.</p></div>
+          <div className="rounded-xl border border-amber-200 bg-white p-3"><p className="font-bold text-amber-800">One confirmation</p><p className="mt-1 text-muted-foreground">Approve the latest complete batch in its GPT Work chat on laptop or mobile.</p></div>
+          <div className="rounded-xl border border-emerald-200 bg-white p-3"><p className="font-bold text-emerald-800">Duplicate protection</p><p className="mt-1 text-muted-foreground">Pending, sold, resolved, zero-share, and recovered positions are excluded.</p></div>
+        </div>
+        <p className="mt-4 text-xs text-muted-foreground">
+          Authoritative pages: <a className="font-bold text-violet-700 hover:underline" href="https://cred-x.in/console/bullpen-ai/history">Cred-X Bullpen History</a>
+          {' · '}
+          <a className="font-bold text-violet-700 hover:underline" href="https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3" target="_blank" rel="noreferrer">Live Bullpen Predictions wallet</a>
+          {' · '}
+          <a className="font-bold text-violet-700 hover:underline" href="https://cred-x.in/console/mails">Delivery Audit</a>
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function SellBatchPreparation({ history }: { history: MailHistoryItem[] }) {
   type BatchRow = {
     key: string;
@@ -980,6 +1072,8 @@ export default function MailsPage() {
           </button>
         </div>
       </section>
+
+      <SellWorkflowOverview />
 
       <SellBatchPreparation history={history} />
 
