@@ -38,4 +38,5 @@ test('Sell batch preparation uses only fresh live Bullpen odds', () => {
   assert.match(source, /Recovered \/ excluded/);
   assert.match(source, /Average Sell price/);
   assert.match(source, /Expected proceeds/);
+  assert.match(source, /Save live details/);
 });
