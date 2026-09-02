@@ -15,6 +15,7 @@ export type CostRecommendation = {
 export type CostDashboard = {
   summary: Record<string, unknown>;
   topServices?: Array<Record<string, unknown>>;
+  topUsageTypes?: Array<Record<string, unknown>>;
   costDrivers?: Array<Record<string, unknown>>;
   traffic?: Array<Record<string, unknown>>;
   recommendations?: CostRecommendation[];
@@ -52,11 +53,17 @@ export type OptimizationReview = {
   computeCostUsd: number;
   computeSharePercent: number;
   taxCostUsd: number;
+  preTaxCostUsd: number;
+  ec2OtherCostUsd: number;
+  lightsailCostUsd: number;
+  otherPreTaxCostUsd: number;
+  hasPriorMonthData: boolean;
   knownMonthlySavingsUsd: number;
   dataTransferUsedGb: number;
   observedOverageGb: number;
   observedOverageCostUsd: number;
   publicIpv4Count: number;
+  publicIpv4BilledCostUsd: number;
   routeAttributionAvailable: boolean;
   coverageReady: number;
   coverageTotal: number;
@@ -220,8 +227,23 @@ export const buildOptimizationReview = (
       (name.includes("ec2") && name.includes("compute")),
   );
   const taxCostUsd = findServiceCost(selected, (name) => name === "tax" || name.endsWith(" tax"));
+  const preTaxCostUsd = Math.max(actualCostUsd - taxCostUsd, 0);
+  const ec2OtherCostUsd = findServiceCost(
+    selected,
+    (name) => name === "ec2 - other" || name.includes("ec2 other"),
+  );
+  const lightsailCostUsd = findServiceCost(selected, (name) => name.includes("lightsail"));
+  const otherPreTaxCostUsd = Math.max(
+    preTaxCostUsd - computeCostUsd - ec2OtherCostUsd - lightsailCostUsd,
+    0,
+  );
   const computeSharePercent =
-    comparisonCostUsd > 0 ? (computeCostUsd / comparisonCostUsd) * 100 : 0;
+    preTaxCostUsd > 0 ? (computeCostUsd / preTaxCostUsd) * 100 : 0;
+  const hasPriorMonthData = Boolean(
+    previous &&
+      (summaryNumber(previous, "monthToDateAwsCost") > 0 ||
+        Boolean(previous.topServices?.length)),
+  );
 
   const actions: OptimizationAction[] = [];
   (selected.recommendations || []).forEach((recommendation, index) => {
@@ -251,24 +273,46 @@ export const buildOptimizationReview = (
     });
   }
 
+  if (ec2OtherCostUsd > 0 && !containsAction(actions, ["ebs", "snapshot"])) {
+    addUnique(actions, {
+      id: "ec2-other-storage-review",
+      title: "Separate active EBS storage from snapshots before deleting anything",
+      category: "Storage",
+      priority: "medium",
+      confidence: "billed cost confirmed",
+      effort: "low",
+      rationale: `EC2 Other is ${ec2OtherCostUsd.toFixed(2)} USD for the selected month. This bucket can include active EBS volumes, snapshots and small transfer charges; only an ownerless or excess item is a saving.`,
+      steps: [
+        "Open the EC2 usage-type breakdown and separate gp3 volume, EBS snapshot and transfer charges.",
+        "For every snapshot, record its source volume, age, owner, retention requirement and last restore test.",
+        "Delete only an obsolete snapshot or unattached volume after an owner-approved recovery check.",
+        "Right-size active gp3 capacity or provisioned performance only when utilisation proves it is excess.",
+      ],
+      estimatedMonthlySavingsUsd: null,
+      source: "AWS Cost Explorer usage types + EC2 inventory",
+      state: "measure-first",
+    });
+  }
+
   const publicIpv4Count = summaryNumber(selected, "activePublicIpv4Count");
+  const publicIpv4BilledCostUsd = summaryNumber(selected, "publicIpv4BilledCostUsd");
   if (publicIpv4Count > 0 && !containsAction(actions, ["ipv4"])) {
     addUnique(actions, {
       id: "public-ipv4-review",
-      title: "Confirm whether the public IPv4 address is still required",
+      title: "Verify the public IPv4 bill and production dependency",
       category: "Networking",
       priority: "medium",
-      confidence: "confirmed",
+      confidence: publicIpv4BilledCostUsd > 0 ? "billing matched" : "inventory only",
       effort: "low",
-      rationale: `${publicIpv4Count} public IPv4 address is billed continuously. Removing an unnecessary address saves about $${(publicIpv4Count * 3.72).toFixed(2)} per month.`,
+      rationale: `${publicIpv4Count} public IPv4 address exists in inventory, while ${publicIpv4BilledCostUsd.toFixed(2)} USD is currently matched to a Public IPv4 usage type. The list-price exposure is not a confirmed saving until the billed usage and production dependency are verified.`,
       steps: [
         "Map the address to its ENI and production dependency before changing it.",
         "Remove it only when the origin can use an existing private or already-paid ingress path.",
         "Do not add an ALB or NAT Gateway solely to avoid this charge; either service can cost more than the IPv4 saving.",
       ],
-      estimatedMonthlySavingsUsd: publicIpv4Count * 3.72,
-      source: "EC2 inventory",
-      state: "ready",
+      estimatedMonthlySavingsUsd: null,
+      source: "EC2 inventory + Cost Explorer usage types",
+      state: "measure-first",
     });
   }
 
@@ -357,7 +401,11 @@ export const buildOptimizationReview = (
   });
 
   const knownMonthlySavingsUsd = actions.reduce(
-    (total, action) => total + Math.max(action.estimatedMonthlySavingsUsd || 0, 0),
+    (total, action) =>
+      total +
+      (action.state === "ready"
+        ? Math.max(action.estimatedMonthlySavingsUsd || 0, 0)
+        : 0),
     0,
   );
 
@@ -388,11 +436,17 @@ export const buildOptimizationReview = (
     computeCostUsd,
     computeSharePercent,
     taxCostUsd,
+    preTaxCostUsd,
+    ec2OtherCostUsd,
+    lightsailCostUsd,
+    otherPreTaxCostUsd,
+    hasPriorMonthData,
     knownMonthlySavingsUsd,
     dataTransferUsedGb: summaryNumber(selected, "dataTransferUsedGb"),
     observedOverageGb,
     observedOverageCostUsd,
     publicIpv4Count,
+    publicIpv4BilledCostUsd,
     routeAttributionAvailable,
     coverageReady: coverageSignals.filter(Boolean).length,
     coverageTotal: coverageSignals.length,

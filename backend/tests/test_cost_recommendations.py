@@ -13,7 +13,7 @@ from app.domains.cost_drivers.recommendations import (
     generateUnattachedEbsRecommendation,
 )
 from app.domains.cost_drivers.cache import reset_local_cost_dashboard_cache_state
-from app.domains.cost_drivers.service import _mock_dashboard
+from app.domains.cost_drivers.service import _mock_dashboard, _public_ipv4_billed_cost
 
 
 def test_transfer_family_recommendation_is_null_when_list_servers_empty():
@@ -75,7 +75,12 @@ def test_evidence_based_recommendations_only_show_savings_when_supported():
         }
     )
     public_ipv4 = generatePublicIpv4Recommendation(
-        {"count": 2, "projectedMonthlyCostUsd": 7.2, "estimatedMonthlySavingsUsd": 7.2}
+        {
+            "count": 2,
+            "billedCostUsd": 0,
+            "projectedMonthlyCostUsd": 7.2,
+            "estimatedMonthlySavingsUsd": 7.2,
+        }
     )
     ec2 = generateOversizedEc2Recommendation(
         {
@@ -98,10 +103,33 @@ def test_evidence_based_recommendations_only_show_savings_when_supported():
     )
 
     assert cloudwatch is not None and cloudwatch["estimatedMonthlySavingsUsd"] == 0.1
-    assert public_ipv4 is not None and public_ipv4["estimatedMonthlySavingsUsd"] == 7.2
+    assert public_ipv4 is not None and public_ipv4["estimatedMonthlySavingsUsd"] is None
+    assert public_ipv4["confidence"] == "estimated"
     assert ec2 is not None and ec2["estimatedMonthlySavingsUsd"] is None
     assert lightsail is not None and lightsail["estimatedMonthlySavingsUsd"] is None
     assert cost_explorer is not None and cost_explorer["estimatedMonthlySavingsUsd"] is None
+
+
+def test_public_ipv4_cost_uses_only_matching_billing_usage_types():
+    rows = [
+        {"name": "APS3-PublicIPv4:InUseAddress", "cost": 3.72},
+        {"name": "APS3-EBS:VolumeUsage.gp3", "cost": 5.44},
+        {"name": "APS3-DataTransfer-Out-Bytes", "cost": 0.02},
+    ]
+    assert _public_ipv4_billed_cost(rows) == 3.72
+
+
+def test_public_ipv4_inventory_without_billing_is_not_claimed_as_saving():
+    rec = generatePublicIpv4Recommendation(
+        {"count": 1, "billedCostUsd": 0, "projectedMonthlyCostUsd": 3.72}
+    )
+    assert rec is not None
+    assert rec["estimatedMonthlySavingsUsd"] is None
+    assert any(
+        item["label"] == "Public IPv4 cost found in Cost Explorer"
+        and item["value"] == 0
+        for item in rec["evidence"]
+    )
 
 
 def test_mock_recommendations_use_demo_confidence_badge_data():

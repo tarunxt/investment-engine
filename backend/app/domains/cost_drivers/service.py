@@ -138,6 +138,30 @@ def _public_ipv4_monthly_cost(count: int, days_in_month: int) -> float:
     )
 
 
+def _public_ipv4_billed_cost(usage_rows: list[dict[str, Any]]) -> float:
+    """Return only Public IPv4 cost that Cost Explorer actually itemised.
+
+    An attached public address is inventory evidence, not billing evidence.  Keep
+    the two separate so a theoretical list-price exposure is never presented as
+    an already-paid or immediately removable charge.
+    """
+    markers = (
+        "publicipv4",
+        "public-ipv4",
+        "inuseaddress",
+        "idleaddress",
+        "ipaddress",
+    )
+    return round(
+        sum(
+            float(row.get("cost") or 0)
+            for row in usage_rows
+            if any(marker in str(row.get("name") or "").lower() for marker in markers)
+        ),
+        2,
+    )
+
+
 def _cloudwatch_storage_monthly_cost(stored_gb: float) -> float:
     return round(
         max(stored_gb, 0.0)
@@ -301,14 +325,20 @@ def _collect_cost_explorer(
             Granularity="DAILY",
             Metrics=["UnblendedCost"],
         )
+        daily_results = daily_resp.get("ResultsByTime", [])
         daily_cost = [
             {
                 "date": r["TimePeriod"]["Start"],
                 "cost": round(float(r["Total"]["UnblendedCost"]["Amount"]), 2),
             }
-            for r in daily_resp.get("ResultsByTime", [])
+            for r in daily_results
         ]
-        mtd_cost = round(sum(float(r["cost"]) for r in daily_cost), 2)
+        # Do not sum the display-rounded daily figures: the rounding loss made a
+        # closed August bill appear as $87.65 instead of AWS's $87.72 total.
+        mtd_cost = round(
+            sum(float(r["Total"]["UnblendedCost"]["Amount"]) for r in daily_results),
+            2,
+        )
         services_resp = ce.get_cost_and_usage(
             TimePeriod={"Start": start, "End": end},
             Granularity="MONTHLY",
@@ -318,7 +348,7 @@ def _collect_cost_explorer(
         services = []
         for g in (services_resp.get("ResultsByTime") or [{}])[0].get("Groups", []):
             cost = float(g["Metrics"]["UnblendedCost"]["Amount"])
-            if cost > 0:
+            if cost != 0:
                 services.append(
                     {
                         "name": g["Keys"][0],
@@ -361,8 +391,8 @@ def _collect_cost_explorer(
         return {
             "loaded": True,
             "mtd_cost": mtd_cost,
-            "top_services": services[:8],
-            "top_usage_types": usage[:10],
+            "top_services": services[:12],
+            "top_usage_types": usage[:25],
             "daily_cost": daily_cost,
             "transfer_summary": summarize_transfer_usage_types(
                 usage,
@@ -385,8 +415,17 @@ def _collect_cost_explorer(
 
 def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
     region = os.getenv("AWS_REGION", "ap-south-1")
+    configured_regions = [
+        value.strip()
+        for value in os.getenv(
+            "COST_DASHBOARD_AWS_REGIONS", f"{region},eu-west-1"
+        ).split(",")
+        if value.strip()
+    ]
+    audit_regions = list(dict.fromkeys([region, *configured_regions]))
     inventory: dict[str, Any] = {
         "region": region,
+        "regions": audit_regions,
         "instances": [],
         "volumes": [],
         "logGroups": [],
@@ -546,27 +585,50 @@ def _collect_inventory(diagnostics: list[dict[str, str]]) -> dict[str, Any]:
             {"service": "CloudWatch Logs", "status": "error", "message": str(exc)[:300]}
         )
         inventory["missingPermissions"].append("logs:DescribeLogGroups")
-    try:
-        lightsail = _aws_client("lightsail", region)
-        inventory["lightsail"]["instances"] = lightsail.get_instances().get("instances", [])
-        inventory["lightsail"]["staticIps"] = lightsail.get_static_ips().get("staticIps", [])
-        inventory["lightsail"]["disks"] = lightsail.get_disks().get("disks", [])
-        inventory["lightsail"]["snapshots"] = (
-            lightsail.get_instance_snapshots().get("instanceSnapshots", [])
-            + lightsail.get_disk_snapshots().get("diskSnapshots", [])
-        )
+    lightsail_regions_loaded: list[str] = []
+    for lightsail_region in audit_regions:
+        try:
+            lightsail = _aws_client("lightsail", lightsail_region)
+
+            def tagged(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+                return [{**row, "auditRegion": lightsail_region} for row in rows]
+
+            inventory["lightsail"]["instances"].extend(
+                tagged(lightsail.get_instances().get("instances", []))
+            )
+            inventory["lightsail"]["staticIps"].extend(
+                tagged(lightsail.get_static_ips().get("staticIps", []))
+            )
+            inventory["lightsail"]["disks"].extend(
+                tagged(lightsail.get_disks().get("disks", []))
+            )
+            inventory["lightsail"]["snapshots"].extend(
+                tagged(
+                    lightsail.get_instance_snapshots().get("instanceSnapshots", [])
+                    + lightsail.get_disk_snapshots().get("diskSnapshots", [])
+                )
+            )
+            lightsail_regions_loaded.append(lightsail_region)
+        except Exception as exc:
+            logger.exception("Lightsail inventory collection failed in %s", lightsail_region)
+            diagnostics.append(
+                {
+                    "service": f"Lightsail ({lightsail_region})",
+                    "status": "error",
+                    "message": str(exc)[:300],
+                }
+            )
+    if lightsail_regions_loaded:
         diagnostics.append(
             {
                 "service": "Lightsail",
                 "status": "ok",
-                "message": "Loaded read-only Lightsail inventory.",
+                "message": "Loaded read-only Lightsail inventory in "
+                + ", ".join(lightsail_regions_loaded)
+                + ".",
             }
         )
-    except Exception as exc:
-        logger.exception("Lightsail inventory collection failed")
-        diagnostics.append(
-            {"service": "Lightsail", "status": "error", "message": str(exc)[:300]}
-        )
+    else:
         inventory["missingPermissions"].append(
             "lightsail:GetInstances/GetStaticIps/GetDisks/GetInstanceSnapshots/GetDiskSnapshots"
         )
@@ -1270,10 +1332,12 @@ def _live_dashboard(month: str | None = None) -> dict:
     mtd_cost = float(ce.get("mtd_cost") or 0)
     projected = estimate_projected_month_end(mtd_cost, elapsed, days)
     top_services = list(ce.get("top_services") or [])
+    top_usage_types = list(ce.get("top_usage_types") or [])
     public_ipv4_count = max(
         len(inventory.get("publicIpv4Addresses") or []),
         sum(1 for instance in inventory.get("instances", []) if instance.get("publicIpv4")),
     )
+    public_ipv4_billed_cost = _public_ipv4_billed_cost(top_usage_types)
     unattached_volumes = list(inventory.get("volumes") or [])
     unattached_gb = sum(float(volume.get("sizeGb") or 0) for volume in unattached_volumes)
     lightsail_inventory = dict(inventory.get("lightsail") or {})
@@ -1333,9 +1397,11 @@ def _live_dashboard(month: str | None = None) -> dict:
                 {
                     "count": public_ipv4_count,
                     "projectedMonthlyCostUsd": _public_ipv4_monthly_cost(public_ipv4_count, days),
-                    "estimatedMonthlySavingsUsd": _public_ipv4_monthly_cost(public_ipv4_count, days)
-                    if public_ipv4_count > 0
-                    else None,
+                    "billedCostUsd": public_ipv4_billed_cost,
+                    # Inventory proves that an address exists, but not that it is
+                    # unnecessary. Savings remain unclaimed until both billing
+                    # and the production dependency are verified.
+                    "estimatedMonthlySavingsUsd": None,
                     "lastCheckedAt": now_iso,
                 }
             ),
@@ -1386,6 +1452,7 @@ def _live_dashboard(month: str | None = None) -> dict:
             "ec2RunningInstances": len(inventory.get("instances", [])),
             "unattachedEbsGb": unattached_gb,
             "activePublicIpv4Count": public_ipv4_count,
+            "publicIpv4BilledCostUsd": public_ipv4_billed_cost,
             "activeHighRiskResources": {
                 "transferFamily": 0,
                 "natGateways": int(
@@ -1405,7 +1472,7 @@ def _live_dashboard(month: str | None = None) -> dict:
             else []
         ),
         "topServices": top_services,
-        "topUsageTypes": ce.get("top_usage_types") or [],
+        "topUsageTypes": top_usage_types,
         "costDrivers": drivers,
         "traffic": traffic,
         "recommendations": recommendations,

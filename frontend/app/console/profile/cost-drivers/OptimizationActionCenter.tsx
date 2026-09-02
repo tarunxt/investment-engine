@@ -137,11 +137,11 @@ function ActionCard({
         </div>
         <div className="rounded-md border bg-background/70 p-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Evidenced saving
+            Savings status
           </p>
           <p className="mt-1 text-lg font-semibold">
             {action.estimatedMonthlySavingsUsd == null
-              ? "Measure first"
+              ? "Not yet evidenced"
               : `${money(action.estimatedMonthlySavingsUsd)}/month`}
           </p>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -267,8 +267,7 @@ export function OptimizationActionCenter() {
   }
 
   const isLower = review.changeUsd < 0;
-  const isFinalActual =
-    Math.abs(review.projectedCostUsd - review.actualCostUsd) < 0.01;
+  const isClosedMonth = selectedMonth < monthValue(new Date());
   const trackableActions = review.actions.filter(
     (action) => action.id !== "routine-finops-cadence",
   );
@@ -287,12 +286,11 @@ export function OptimizationActionCenter() {
             <div>
               <div className="flex items-center gap-2">
                 <Wrench className="h-5 w-5 text-primary" />
-                <CardTitle>Cost optimisation action centre</CardTitle>
+                <CardTitle>AWS cost truth &amp; savings centre</CardTitle>
               </div>
               <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                Converts AWS billing, inventory and traffic evidence into a
-                ranked action plan for Cred-X. Tax remains visible in billing
-                totals but is excluded from cost-cutting recommendations.
+                Reconciles the AWS total with its service components, then ranks
+                only savings that are supported by billing and inventory evidence.
               </p>
               {lastLoadedAt && (
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -342,13 +340,13 @@ export function OptimizationActionCenter() {
             <div className="rounded-lg border bg-background p-4">
               <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                 <CircleDollarSign className="h-4 w-4" />
-                {isFinalActual ? "Selected-month actual" : "Projected month end"}
+                {isClosedMonth ? "Closed-month AWS total" : "Projected month end"}
               </div>
               <p className="mt-2 text-2xl font-semibold">
                 {money(review.comparisonCostUsd)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                AWS actual posted: {money(review.actualCostUsd)}
+                Cost Explorer actual: {money(review.actualCostUsd)}
               </p>
             </div>
 
@@ -373,7 +371,9 @@ export function OptimizationActionCenter() {
                     }`}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Prior month: {money(review.priorMonthCostUsd)}
+                {review.hasPriorMonthData
+                  ? `Prior month: ${money(review.priorMonthCostUsd)}`
+                  : "No prior-month billing data loaded"}
               </p>
             </div>
 
@@ -386,20 +386,20 @@ export function OptimizationActionCenter() {
                 {money(review.computeCostUsd)}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                EC2 compute: {review.computeSharePercent.toFixed(0)}% of total
+                EC2 compute: {review.computeSharePercent.toFixed(0)}% of pre-tax services
               </p>
             </div>
 
             <div className="rounded-lg border bg-background p-4">
               <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                 <CheckCircle2 className="h-4 w-4" />
-                Evidenced opportunity
+                Confirmed removable cost
               </div>
               <p className="mt-2 text-2xl font-semibold text-emerald-700">
                 {money(review.knownMonthlySavingsUsd)}/mo
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Excludes EC2 savings until utilisation is measured
+                Unverified IP, Lightsail and EC2 ideas are excluded
               </p>
             </div>
 
@@ -415,6 +415,38 @@ export function OptimizationActionCenter() {
                 Evidence coverage: {review.coverageReady}/{review.coverageTotal}
               </p>
             </div>
+          </div>
+
+          <div className="rounded-lg border bg-background p-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold">AWS bill reconciliation</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Components below reconcile to the Cost Explorer total; rounded
+                  daily chart values are never re-summed into the bill.
+                </p>
+              </div>
+              <p className="text-sm font-semibold">Total {money(review.actualCostUsd)}</p>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
+              {[
+                ["Pre-tax services", review.preTaxCostUsd],
+                ["Tax", review.taxCostUsd],
+                ["EC2 compute", review.computeCostUsd],
+                ["EC2 other / EBS", review.ec2OtherCostUsd],
+                ["Lightsail", review.lightsailCostUsd],
+                ["Other pre-tax", review.otherPreTaxCostUsd],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-md border bg-muted/20 p-3">
+                  <p className="text-xs text-muted-foreground">{label}</p>
+                  <p className="mt-1 text-base font-semibold">{money(Number(value))}</p>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Public IPv4: {review.publicIpv4Count} in inventory; {money(review.publicIpv4BilledCostUsd)}
+              {" "}matched to a Public IPv4 usage type. Inventory existence is not counted as a saving.
+            </p>
           </div>
 
           <div className="grid gap-3 lg:grid-cols-2">
@@ -449,9 +481,8 @@ export function OptimizationActionCenter() {
               <p className="text-sm font-semibold">Billing context</p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Tax is {money(review.taxCostUsd)} for this review month and is
-                deliberately treated as non-actionable. The direct levers are
-                compute sizing, public IPv4, transfer, legacy resources and
-                measurement coverage.
+                shown in the total but not called a direct saving. Reduce the
+                underlying taxable service and the tax falls automatically.
               </p>
             </div>
           </div>

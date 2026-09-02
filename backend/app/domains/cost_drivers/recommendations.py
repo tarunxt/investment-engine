@@ -307,27 +307,34 @@ def generatePublicIpv4Recommendation(input: dict[str, Any]) -> dict[str, Any] | 
     if ipv4_count <= 0:
         return None
 
+    billed_cost = round(float(input.get("billedCostUsd") or 0), 2)
+    projected_cost = round(float(input.get("projectedMonthlyCostUsd") or 0), 2)
     return recommendation(
         "public-ipv4",
-        "Public IPv4 addresses should be reviewed as a direct monthly cost driver",
+        "Verify the public IPv4 dependency before treating it as a saving",
         "medium",
-        "confirmed",
+        "confirmed_billing_only" if billed_cost > 0 else "estimated",
         "ec2_api",
-        "AWS bills public IPv4 addresses directly, so every in-use or attached address should have an owner and a reason to exist.",
+        "The EC2 inventory confirms a public address, but inventory alone does not prove a billed or removable cost. The address may be required by the production endpoint.",
         [
             {"label": "Public IPv4 count", "value": ipv4_count},
             {
-                "label": "Projected monthly IPv4 cost",
-                "value": round(float(input.get("projectedMonthlyCostUsd") or 0), 2),
+                "label": "Public IPv4 cost found in Cost Explorer",
+                "value": billed_cost,
+                "unit": "USD",
+            },
+            {
+                "label": "List-price monthly exposure if chargeable for the full month",
+                "value": projected_cost,
                 "unit": "USD",
             },
         ],
         [
-            "Confirm that each public IPv4 address is still required for direct internet reachability.",
-            "Prefer a single public entry point such as a load balancer, proxy, or CDN where possible.",
-            "Use the runtime resource report to match public IPv4 use with running services before making any changes.",
+            "Match the Cost Explorer usage type to the address and confirm whether AWS is charging for it.",
+            "Map the address to its ENI, instance, DNS and production dependency before changing it.",
+            "Remove it only if the application already has a cheaper, working ingress path; do not add an ALB or NAT Gateway solely to avoid this charge.",
         ],
-        input.get("estimatedMonthlySavingsUsd"),
+        None,
         checked_at,
         "https://console.aws.amazon.com/ec2/home#Addresses:",
     )
@@ -413,13 +420,19 @@ def generateLightsailRecommendation(input: dict[str, Any]) -> dict[str, Any] | N
     if not instances and not static_ips and not disks and not snapshots and billing_cost <= 0:
         return None
 
+    inventory_count = len(instances) + len(static_ips) + len(disks) + len(snapshots)
+    billing_only = billing_cost > 0 and inventory_count == 0
     return recommendation(
         "lightsail-review",
-        "Lightsail resources should be reconciled against current production ownership",
+        (
+            "Lightsail spend is billed but the matching regional resource was not found"
+            if billing_only
+            else "Review billed Lightsail snapshots and resources for current ownership"
+        ),
         "medium",
-        "confirmed",
-        "lightsail_api",
-        "Lightsail resources can continue billing even after the primary app moved elsewhere, so inventory should be reviewed against the current Cred-X runtime.",
+        "confirmed_billing_only" if billing_only else "confirmed",
+        "cost_explorer" if billing_only else "lightsail_api",
+        "AWS billing confirms Lightsail spend. A resource is removable only after its region, owner, recovery purpose and production dependency are verified.",
         [
             {"label": "Lightsail instances", "value": len(instances)},
             {"label": "Lightsail static IPs", "value": len(static_ips)},
@@ -428,9 +441,9 @@ def generateLightsailRecommendation(input: dict[str, Any]) -> dict[str, Any] | N
             {"label": "Month-to-date Lightsail spend", "value": round(billing_cost, 2), "unit": "USD"},
         ],
         [
-            "Run deploy/no-docker/scripts/lightsail-inventory.sh to capture a read-only inventory before planning any cleanup.",
-            "Confirm whether each Lightsail resource still belongs to Cred-X or is leftover from an older deployment path.",
-            "Do not stop or delete Lightsail resources automatically from deployment scripts.",
+            "Review the multi-region read-only inventory, especially every region represented in the AWS bill.",
+            "For each snapshot, record its source, owner, last restore test and retention requirement.",
+            "Delete only an orphaned snapshot or resource after a restore/rollback check; do not remove it automatically from deployment scripts.",
         ],
         input.get("estimatedMonthlySavingsUsd"),
         checked_at,
