@@ -50,6 +50,7 @@ class ZerodhaThreatAnalysisResponse(BaseModel):
     tokens_out: int | None = None
     estimated_cost: float | None = None
     error_message: str | None = None
+    runtime_metadata_json: dict[str, object] | None = None
     report: ZerodhaThreatReportResponse | None = None
 
 
