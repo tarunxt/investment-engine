@@ -10,6 +10,7 @@ const scheduleCard = readFileSync(
   "utf8",
 );
 const historyContent = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx", import.meta.url), "utf8");
+const historyScreen = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenRunHistoryScreen.tsx", import.meta.url), "utf8");
 const trendsTable = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx", import.meta.url), "utf8");
 const llmDialog = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenLlmBreakdownDialog.tsx", import.meta.url), "utf8");
 const apiService = readFileSync(
@@ -83,6 +84,9 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Grey = not covered \/ no valid LLM score/);
   assert.match(historyContent, /Latest saved run:/);
   assert.match(historyContent, /Latest scored LLM scan:/);
+  assert.match(historyContent, /Current Bullpen Odds fetched\/updated:/);
+  assert.match(historyContent, /trends\.current_odds_fetched_at/);
+  assert.match(historyScreen, /current_odds_fetched_at: response\.fetchedAt/);
   assert.match(historyContent, /page\?\.page === 1 \? page\.items\[0\]\?\.started_at/);
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);

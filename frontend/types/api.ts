@@ -3045,6 +3045,7 @@ export interface BullpenAutoLiveEventTrendsResponse {
   events: BullpenAutoLiveEventTrend[];
   scan_count: number;
   generated_at: string;
+  current_odds_fetched_at?: string | null;
 }
 
 export type Bullpen008StageStatus =
