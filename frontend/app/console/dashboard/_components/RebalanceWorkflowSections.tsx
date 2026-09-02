@@ -4753,6 +4753,9 @@ function StageLlmSelectorDialog({
   onClose,
   lastRunCostInr,
   historicalEstimatedCostInrByTarget = {},
+  loading = false,
+  error = null,
+  onRetry,
 }: {
   open: boolean;
   stage: WorkflowStageKey | null;
@@ -4769,6 +4772,9 @@ function StageLlmSelectorDialog({
   onClose: () => void;
   lastRunCostInr?: number | null;
   historicalEstimatedCostInrByTarget?: HistoricalLlmCostMapInr;
+  loading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }) {
   const [savedMixes, setSavedMixes] = useState<SavedModelMix[]>(() =>
     readSavedModelMixes(),
@@ -5025,6 +5031,28 @@ function StageLlmSelectorDialog({
               )}
             </div>
           ) : null}
+          {error ? (
+            <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+              <p className="font-semibold">Provider models could not be loaded.</p>
+              <p className="mt-1">{error}</p>
+              {onRetry ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={onRetry}
+                  className="mt-3 rounded-full border-red-300 bg-white text-red-800 hover:bg-red-100"
+                >
+                  Retry
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+          {loading && providers.length === 0 ? (
+            <div className="mb-4 flex items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-800">
+              <Loader2 className="size-4 animate-spin" />
+              Loading provider models…
+            </div>
+          ) : null}
           <LlmModelSelectionPanel
             providers={providers}
             selectedKeys={selectedKeys}
@@ -5242,6 +5270,9 @@ export function RebalanceWorkflowSections({
   const [llmDialogMultipliers, setLlmDialogMultipliers] = useState<Record<string, number>>({});
   const [llmDialogHistoricalCosts, setLlmDialogHistoricalCosts] =
     useState<HistoricalLlmCostMapInr>({});
+  const [llmDialogLoading, setLlmDialogLoading] = useState(false);
+  const [llmDialogError, setLlmDialogError] = useState<string | null>(null);
+  const llmDialogRequestRef = useRef(0);
   const [costHistoryPortfolio, setCostHistoryPortfolio] = useState<WorkflowPortfolio | null>(null);
   const [stockFlowPortfolio, setStockFlowPortfolio] =
     useState<RebalanceStockFlowPortfolio | null>(null);
@@ -6947,34 +6978,67 @@ ${zerodhaExecutionMode === "direct_market"
 
   const showStageLlmInfo = useCallback(async (portfolio: WorkflowPortfolio, stage: WorkflowStageKey) => {
     if (stage === "sync" || stage === "actionables") return;
+    const requestId = ++llmDialogRequestRef.current;
+    const market = portfolio === "zerodha" ? "india" : "us";
+    const prompt = buildSwingTradePrompt(
+      market,
+      getSwingTradeDefaultInvestmentAmount(market),
+    );
+
     setLlmDialogStage(stage);
     setLlmDialogPortfolio(portfolio);
     setLlmDialogProviders([]);
     setLlmDialogSelectedKeys(new Set());
     setLlmDialogMultipliers({});
     setLlmDialogHistoricalCosts({});
+    setLlmDialogError(null);
+    setLlmDialogLoading(true);
+
+    // Cost history is optional display data. It must never prevent a user from
+    // choosing models, even when the history endpoint is temporarily unavailable.
+    const historicalCostsPromise = loadStageHistoricalCostMapInr(
+      stage,
+      portfolio,
+      usdInrRate,
+    );
+
+    let lastProviderError: unknown = null;
     try {
-      const [providers, historicalCosts] = await Promise.all([
-        apiService.getProviders({
-          prompt: buildSwingTradePrompt(
-            portfolio === "zerodha" ? "india" : "us",
-            getSwingTradeDefaultInvestmentAmount(
-              portfolio === "zerodha" ? "india" : "us",
-            ),
-          ),
-        }),
-        loadStageHistoricalCostMapInr(stage, portfolio, usdInrRate),
-      ]);
+      let providers: ProviderInfo[] | null = null;
+      for (let attempt = 0; attempt < 2 && !providers; attempt += 1) {
+        try {
+          providers = await apiService.getProviders({ prompt });
+        } catch (error) {
+          lastProviderError = error;
+          if (attempt === 0) await sleep(350);
+        }
+      }
+      if (!providers) throw lastProviderError ?? new Error("Provider models are unavailable.");
+
+      if (requestId !== llmDialogRequestRef.current) return;
       const targets = getSavedStageTargets(stage, providers);
       const targetKeys = targets.map(targetKey);
       setLlmDialogProviders(providers);
       setLlmDialogSelectedKeys(new Set(targetKeys));
       setLlmDialogMultipliers(getSelectionMultipliers(targetKeys));
-      setLlmDialogHistoricalCosts(historicalCosts);
+
+      void historicalCostsPromise
+        .then((historicalCosts) => {
+          if (requestId === llmDialogRequestRef.current) {
+            setLlmDialogHistoricalCosts(historicalCosts);
+          }
+        })
+        .catch(() => {
+          // Historical cost estimates are best-effort only.
+        });
     } catch (error) {
-      setLlmDialogStage(null);
-      setLlmDialogPortfolio(null);
-      window.alert(`Could not load LLM details: ${normalizeError(error)}`);
+      if (requestId === llmDialogRequestRef.current) {
+        setLlmDialogError(normalizeError(error));
+      }
+    } finally {
+      if (requestId === llmDialogRequestRef.current) {
+        setLlmDialogLoading(false);
+      }
     }
   }, [usdInrRate]);
 
@@ -8629,6 +8693,13 @@ ${zerodhaExecutionMode === "direct_market"
         providers={llmDialogProviders}
         selectedKeys={llmDialogSelectedKeys}
         historicalEstimatedCostInrByTarget={llmDialogHistoricalCosts}
+        loading={llmDialogLoading}
+        error={llmDialogError}
+        onRetry={() => {
+          if (llmDialogStage && llmDialogPortfolio) {
+            void showStageLlmInfo(llmDialogPortfolio, llmDialogStage);
+          }
+        }}
         onToggle={toggleLlmTarget}
         onSelectAll={selectAllLlmTargets}
         onClear={clearLlmTargets}
@@ -8645,8 +8716,11 @@ ${zerodhaExecutionMode === "direct_market"
             : null
         }
         onClose={() => {
+          llmDialogRequestRef.current += 1;
           setLlmDialogStage(null);
           setLlmDialogPortfolio(null);
+          setLlmDialogError(null);
+          setLlmDialogLoading(false);
         }}
       />
 
