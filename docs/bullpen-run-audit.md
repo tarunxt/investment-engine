@@ -1557,6 +1557,13 @@ An explicit failed or circuit-broken model output never qualifies as latest-scan
 coverage and never becomes a synthetic 0/100 consensus. Active-position
 Returns/day remains available in that case by using the held Bullpen side as the
 chosen side; non-position rows still require valid latest LLM odds.
+The live history screen reconciles current wallet-position metadata before it
+applies refreshed order-book odds. When a compact or failed LLM projection omits
+the deadline, the matched current position supplies its close time, and the same
+registered Returns/day formula uses the held position side without synthesizing
+LLM Yes/No odds. The LLM cell therefore remains truthfully “Not covered” while
+Deadline and Returns/day remain visible. If neither a held side nor a valid LLM
+pair identifies the chosen side, the presentation does not guess one.
 For the current latest run only, the trend read overlays the frozen Stage 2 stage
 slice when an older console projection had truncated reviewed rows or stripped
 their model outputs. The bounded projection remains authoritative for earlier
