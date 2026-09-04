@@ -96,6 +96,9 @@ test("History refreshes large current-odds sets in gateway-safe batches", () => 
   );
   assert.match(historyScreen, /Object\.assign\(mergedMarkets, payload\.markets/);
   assert.match(historyScreen, /return \{ markets: mergedMarkets, fetchedAt \}/);
+  assert.match(historyScreen, /historyCurrentOddsLookupId\(event, index\)/);
+  assert.match(scheduleCard, /stageOneActiveOddsLookupId\(position, index\)/);
+  assert.match(scheduleCard, /stageOneCandidateOddsLookupId\(candidate, index\)/);
 });
 
 test("History keeps deadlines and Returns/day when the latest LLM scan is uncovered", () => {

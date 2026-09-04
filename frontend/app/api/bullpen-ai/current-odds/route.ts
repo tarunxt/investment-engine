@@ -158,7 +158,10 @@ export async function POST(request: NextRequest) {
 
     const gammaMarkets = await resolvePolymarketMarketsWithQuestionFallback(
       questions,
-      { includeEventSupplements: false },
+      {
+        allowPartialGammaLookups: true,
+        includeEventSupplements: false,
+      },
     );
     const resolvedByQuestionId = await applyClobOrderBooks(gammaMarkets);
     questions.forEach((question) => {

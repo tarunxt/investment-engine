@@ -76,11 +76,20 @@ type CurrentOrderBookOddsResponse = {
 
 const MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE = 100;
 
+function historyCurrentOddsLookupId(
+  event: BullpenAutoLiveEventTrend,
+  index: number,
+) {
+  const exactIdentity =
+    event.condition_id ?? event.slug ?? event.market_id ?? event.market_title;
+  return `history-current-odds-${index}-${exactIdentity}`;
+}
+
 async function fetchCurrentOrderBookOdds(
   trends: BullpenAutoLiveEventTrendsResponse,
 ): Promise<CurrentOrderBookOddsResponse> {
-  const questions = trends.events.map((event) => ({
-    id: event.market_id,
+  const questions = trends.events.map((event, index) => ({
+    id: historyCurrentOddsLookupId(event, index),
     conditionId: event.condition_id ?? null,
     slug: event.slug ?? null,
     marketUrl: event.market_url ?? null,
@@ -187,8 +196,10 @@ export function applyCurrentOrderBookOddsToEventTrends(
   return {
     ...trends,
     current_odds_fetched_at: response.fetchedAt ?? trends.current_odds_fetched_at,
-    events: trends.events.map((event) => {
-      const market = response.markets?.[event.market_id];
+    events: trends.events.map((event, index) => {
+      const market = response.markets?.[
+        historyCurrentOddsLookupId(event, index)
+      ];
       const currentYesOdds =
         typeof market?.yesOdds === "number"
           ? market.yesOdds
