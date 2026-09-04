@@ -89,6 +89,8 @@ test("History active-event ticks are reconciled against current active positions
 });
 
 test("History keeps deadlines and Returns/day when the latest LLM scan is uncovered", () => {
+  assert.match(historyScreen, /conditionId: event\.condition_id \?\? null/);
+  assert.match(historyScreen, /slug: event\.slug \?\? null/);
   assert.match(
     historyScreen,
     /close_time: event\.close_time \?\? currentPosition\?\.closeTime \?\? null/,
