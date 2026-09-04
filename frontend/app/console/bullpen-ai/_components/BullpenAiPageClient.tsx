@@ -218,6 +218,9 @@ const SNAPSHOT_SOURCE_TABS: {
 const BULLPEN_SNAPSHOT_STORAGE_LEGACY_KEY =
   "investment-engine:bullpen-ai:snapshots:v1";
 const BULLPEN_SNAPSHOT_STORAGE_KEY = "investment-engine:bullpen-ai:snapshots:v2";
+const BULLPEN_SNAPSHOT_DATABASE_NAME = "investment-engine-bullpen-ai";
+const BULLPEN_SNAPSHOT_DATABASE_VERSION = 1;
+const BULLPEN_SNAPSHOT_OBJECT_STORE = "snapshot-cache";
 const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 const BULLPEN_ACTIVE_POSITION_LLM_STORAGE_KEY =
@@ -1180,26 +1183,40 @@ function readSnapshotHistoryByModeFromStorageValue(value: unknown) {
   return next;
 }
 
-function readBullpenSnapshotsFromStorage() {
+type StoredBullpenSnapshots = {
+  manual: Record<ScanMode, BullpenSnapshotHistory>;
+  auto: Record<ScanMode, BullpenSnapshotHistory>;
+};
+
+function parseStoredBullpenSnapshots(value: unknown): StoredBullpenSnapshots | null {
+  if (!value || typeof value !== "object") return null;
+
+  const record = value as Record<string, unknown>;
+  if (!record.manual && !record.auto) return null;
+
+  return {
+    manual: readSnapshotHistoryByModeFromStorageValue(record.manual),
+    auto: readSnapshotHistoryByModeFromStorageValue(record.auto),
+  };
+}
+
+function createEmptyStoredBullpenSnapshots(): StoredBullpenSnapshots {
+  return {
+    manual: createEmptySnapshotHistory(),
+    auto: createEmptySnapshotHistory(),
+  };
+}
+
+function readBullpenSnapshotsFromStorage(): StoredBullpenSnapshots {
   if (typeof window === "undefined") {
-    return {
-      manual: createEmptySnapshotHistory(),
-      auto: createEmptySnapshotHistory(),
-    };
+    return createEmptyStoredBullpenSnapshots();
   }
 
   try {
     const raw = window.localStorage.getItem(BULLPEN_SNAPSHOT_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed === "object") {
-      const record = parsed as Record<string, unknown>;
-      if (record.manual || record.auto) {
-        return {
-          manual: readSnapshotHistoryByModeFromStorageValue(record.manual),
-          auto: readSnapshotHistoryByModeFromStorageValue(record.auto),
-        };
-      }
-    }
+    const storedSnapshots = parseStoredBullpenSnapshots(parsed);
+    if (storedSnapshots) return storedSnapshots;
   } catch {
     // Fall back to the legacy manual-only snapshot cache.
   }
@@ -1212,14 +1229,90 @@ function readBullpenSnapshotsFromStorage() {
       auto: createEmptySnapshotHistory(),
     };
   } catch {
-    return {
-      manual: createEmptySnapshotHistory(),
-      auto: createEmptySnapshotHistory(),
-    };
+    return createEmptyStoredBullpenSnapshots();
   }
 }
 
-function writeBullpenSnapshotsToStorage({
+function openBullpenSnapshotDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(
+      BULLPEN_SNAPSHOT_DATABASE_NAME,
+      BULLPEN_SNAPSHOT_DATABASE_VERSION,
+    );
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(BULLPEN_SNAPSHOT_OBJECT_STORE)) {
+        database.createObjectStore(BULLPEN_SNAPSHOT_OBJECT_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function readBullpenSnapshotsFromIndexedDb(): Promise<StoredBullpenSnapshots | null> {
+  if (typeof window === "undefined" || !window.indexedDB) return null;
+
+  let database: IDBDatabase | null = null;
+  try {
+    database = await openBullpenSnapshotDatabase();
+    const serialized = await new Promise<unknown>((resolve, reject) => {
+      const transaction = database!.transaction(
+        BULLPEN_SNAPSHOT_OBJECT_STORE,
+        "readonly",
+      );
+      const request = transaction
+        .objectStore(BULLPEN_SNAPSHOT_OBJECT_STORE)
+        .get(BULLPEN_SNAPSHOT_STORAGE_KEY);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const parsed =
+      typeof serialized === "string" ? JSON.parse(serialized) : serialized;
+    return parseStoredBullpenSnapshots(parsed);
+  } catch {
+    return null;
+  } finally {
+    database?.close();
+  }
+}
+
+async function writeBullpenSnapshotsToIndexedDb({
+  manualSnapshotsByMode,
+  autoSnapshotsByMode,
+}: {
+  manualSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+  autoSnapshotsByMode: Record<ScanMode, BullpenSnapshotHistory>;
+}) {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+
+  let database: IDBDatabase | null = null;
+  try {
+    const serialized = JSON.stringify({
+      manual: manualSnapshotsByMode,
+      auto: autoSnapshotsByMode,
+    });
+    database = await openBullpenSnapshotDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database!.transaction(
+        BULLPEN_SNAPSHOT_OBJECT_STORE,
+        "readwrite",
+      );
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+      transaction
+        .objectStore(BULLPEN_SNAPSHOT_OBJECT_STORE)
+        .put(serialized, BULLPEN_SNAPSHOT_STORAGE_KEY);
+    });
+  } catch {
+    // Keep the current in-memory snapshot usable when durable storage fails.
+  } finally {
+    database?.close();
+  }
+}
+
+function writeBullpenSnapshotsToLocalStorage({
   manualSnapshotsByMode,
   autoSnapshotsByMode,
 }: {
@@ -1237,7 +1330,8 @@ function writeBullpenSnapshotsToStorage({
       }),
     );
   } catch {
-    // Keep the screen usable even when localStorage is unavailable.
+    // Large Full Universe snapshots exceed localStorage in some browsers.
+    // IndexedDB remains the authoritative durable cache in that case.
   }
 }
 
@@ -1792,27 +1886,41 @@ function BullpenAiPageContent() {
   }, []);
 
   useEffect(() => {
-    const storedSnapshots = readBullpenSnapshotsFromStorage();
-    setSnapshotsByMode(storedSnapshots.manual);
-    setAutoSnapshotsByMode(storedSnapshots.auto);
-    setLastLlmTargets(readLastLlmTargetsFromStorage());
-    setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
-    setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
-    setRequireFreshInternetEvidence(
-      readStoredBoolean(BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY, true),
-    );
-    setAllowEvidenceGroundedNonWebModels(
-      readStoredBoolean(BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY, false),
-    );
-    setHasLoadedStorage(true);
+    let cancelled = false;
+
+    void (async () => {
+      const indexedDbSnapshots = await readBullpenSnapshotsFromIndexedDb();
+      if (cancelled) return;
+
+      const storedSnapshots =
+        indexedDbSnapshots ?? readBullpenSnapshotsFromStorage();
+      setSnapshotsByMode(storedSnapshots.manual);
+      setAutoSnapshotsByMode(storedSnapshots.auto);
+      setLastLlmTargets(readLastLlmTargetsFromStorage());
+      setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
+      setActivePositionAnalysesByKey(readActivePositionAnalysesFromStorage());
+      setRequireFreshInternetEvidence(
+        readStoredBoolean(BULLPEN_REQUIRE_FRESH_EVIDENCE_STORAGE_KEY, true),
+      );
+      setAllowEvidenceGroundedNonWebModels(
+        readStoredBoolean(BULLPEN_ALLOW_NON_WEB_EVIDENCE_STORAGE_KEY, false),
+      );
+      setHasLoadedStorage(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!hasLoadedStorage) return;
-    writeBullpenSnapshotsToStorage({
+    const snapshots = {
       manualSnapshotsByMode: snapshotsByMode,
       autoSnapshotsByMode,
-    });
+    };
+    void writeBullpenSnapshotsToIndexedDb(snapshots);
+    writeBullpenSnapshotsToLocalStorage(snapshots);
   }, [autoSnapshotsByMode, hasLoadedStorage, snapshotsByMode]);
 
   useEffect(() => {
