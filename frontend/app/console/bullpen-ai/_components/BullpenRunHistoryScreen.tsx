@@ -300,13 +300,9 @@ export function applyCurrentBullpenPositionsToEventTrends(
     const currentPosition = activePosition ?? claimablePosition;
     const reconciledEvent: BullpenAutoLiveEventTrend = {
       ...event,
-      condition_id: currentPosition?.conditionId ?? event.condition_id ?? null,
-      slug: currentPosition?.slug ?? event.slug ?? null,
-      close_time: currentPosition?.closeTime ?? event.close_time ?? null,
-      current_yes_odds:
-        currentPosition?.yesOdds ?? event.current_yes_odds ?? null,
-      current_no_odds:
-        currentPosition?.noOdds ?? event.current_no_odds ?? null,
+      condition_id: event.condition_id ?? currentPosition?.conditionId ?? null,
+      slug: event.slug ?? currentPosition?.slug ?? null,
+      close_time: event.close_time ?? currentPosition?.closeTime ?? null,
       is_active_position: activePosition !== null,
       is_claimable_position: claimablePosition !== null,
       active_position_side: activePosition
