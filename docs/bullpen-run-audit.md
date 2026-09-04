@@ -1545,6 +1545,10 @@ The Stage 1 popup performs the same refresh and calculation, so matching rows on
 the dashboard and history screens use the same latest odds and formula. Frozen
 run payloads remain unchanged.
 
+The compact dashboard projection retains up to 200 accepted Stage 1 rows, which
+keeps the complete current filtered set visible for the console's normal scan
+scope (including the 116-row production scan observed during this fix).
+
 The trend response displays Returns/day from the latest decision's saved stage
 output when available. For backward compatibility with older decisions that did
 not persist that output, it deterministically rebuilds the value from the frozen
