@@ -215,27 +215,42 @@ async def _load_usage_rows(
     user_id: int,
     start_utc: datetime,
     end_utc: datetime,
+    include_run_details: bool = False,
 ) -> list[dict[str, Any]]:
-    job_rows = (
-        await db.execute(
-            select(
-                Job,
-                Run.id,
-                Run.auto_rebalance_sequence,
-                Run.auto_rebalance_label,
-                RunJob.stage,
+    if include_run_details:
+        job_rows = (
+            await db.execute(
+                select(
+                    Job,
+                    Run.id,
+                    Run.auto_rebalance_sequence,
+                    Run.auto_rebalance_label,
+                    RunJob.stage,
+                )
+                .select_from(Job)
+                .outerjoin(RunJob, RunJob.job_id == Job.id)
+                .outerjoin(Run, Run.id == RunJob.run_id)
+                .where(
+                    Job.user_id == user_id,
+                    Job.created_at >= start_utc,
+                    Job.created_at < end_utc,
+                )
+                .order_by(Job.created_at.asc(), Job.id.asc())
             )
-            .select_from(Job)
-            .outerjoin(RunJob, RunJob.job_id == Job.id)
-            .outerjoin(Run, Run.id == RunJob.run_id)
-            .where(
-                Job.user_id == user_id,
-                Job.created_at >= start_utc,
-                Job.created_at < end_utc,
+        ).all()
+    else:
+        jobs = (
+            await db.execute(
+                select(Job)
+                .where(
+                    Job.user_id == user_id,
+                    Job.created_at >= start_utc,
+                    Job.created_at < end_utc,
+                )
+                .order_by(Job.created_at.asc(), Job.id.asc())
             )
-            .order_by(Job.created_at.asc(), Job.id.asc())
-        )
-    ).all()
+        ).scalars().all()
+        job_rows = [(job, None, None, None, None) for job in jobs]
 
     rows: list[dict[str, Any]] = []
     for job, app_run_id, run_sequence, run_label, stage in job_rows:
@@ -310,28 +325,30 @@ async def _load_usage_rows(
             )
         )
 
-    target_runs_expression = PolymarketAutoLiveRunRecord.payload[
-        "stage_results"
-    ][1]["outputs"]["llm_target_runs"]
-    auto_live_rows = (
-        await db.execute(
-            select(
-                PolymarketAutoLiveRunRecord.id,
-                PolymarketAutoLiveRunRecord.status,
-                PolymarketAutoLiveRunRecord.started_at,
-                target_runs_expression.label("llm_target_runs"),
+    auto_live_rows: list[tuple[Any, ...]] = []
+    if include_run_details:
+        target_runs_expression = PolymarketAutoLiveRunRecord.payload[
+            "stage_results"
+        ][1]["outputs"]["llm_target_runs"]
+        auto_live_rows = (
+            await db.execute(
+                select(
+                    PolymarketAutoLiveRunRecord.id,
+                    PolymarketAutoLiveRunRecord.status,
+                    PolymarketAutoLiveRunRecord.started_at,
+                    target_runs_expression.label("llm_target_runs"),
+                )
+                .where(
+                    PolymarketAutoLiveRunRecord.user_id == user_id,
+                    PolymarketAutoLiveRunRecord.started_at >= start_utc,
+                    PolymarketAutoLiveRunRecord.started_at < end_utc,
+                )
+                .order_by(
+                    PolymarketAutoLiveRunRecord.started_at.asc(),
+                    PolymarketAutoLiveRunRecord.id.asc(),
+                )
             )
-            .where(
-                PolymarketAutoLiveRunRecord.user_id == user_id,
-                PolymarketAutoLiveRunRecord.started_at >= start_utc,
-                PolymarketAutoLiveRunRecord.started_at < end_utc,
-            )
-            .order_by(
-                PolymarketAutoLiveRunRecord.started_at.asc(),
-                PolymarketAutoLiveRunRecord.id.asc(),
-            )
-        )
-    ).all()
+        ).all()
 
     for run_id, run_status, run_started_at, target_runs in auto_live_rows:
         if not isinstance(target_runs, list):
@@ -565,13 +582,18 @@ async def _load_usage_sources(
     user_id: int,
     start_utc: datetime,
     end_utc: datetime,
+    include_run_details: bool = False,
 ) -> tuple[
     list[dict[str, Any]],
     list[dict[str, Any]],
     list[dict[str, Any]],
 ]:
     local_rows = await _load_usage_rows(
-        db, user_id=user_id, start_utc=start_utc, end_utc=end_utc
+        db,
+        user_id=user_id,
+        start_utc=start_utc,
+        end_utc=end_utc,
+        include_run_details=include_run_details,
     )
     call_rows = await _load_provider_call_rows(
         db, user_id=user_id, start_utc=start_utc, end_utc=end_utc
@@ -601,6 +623,7 @@ async def _load_effective_usage_rows(
         user_id=user_id,
         start_utc=start_utc,
         end_utc=end_utc,
+        include_run_details=False,
     )
     return _effective_usage_rows(local_rows, call_rows, snapshot_rows)
 
@@ -1071,6 +1094,7 @@ async def llm_usage_breakdown(
         user_id=current_user.id,
         start_utc=start_utc,
         end_utc=end_utc,
+        include_run_details=True,
     )
     rows = _run_breakdown_rows(local_rows, call_rows, snapshot_rows)
     display_fx_rate = (
