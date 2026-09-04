@@ -160,6 +160,7 @@ function calculateDaysUntilClose(closeTime: string | null) {
 
 function createBaseQuestionRow({
   marketId,
+  conditionId,
   questionKey,
   questionId,
   question,
@@ -175,6 +176,7 @@ function createBaseQuestionRow({
   rules,
 }: {
   marketId: string | null;
+  conditionId: string | null;
   questionKey: string | null;
   questionId: string;
   question: string;
@@ -193,7 +195,7 @@ function createBaseQuestionRow({
     id: questionId,
     question,
     positionKey: null,
-    conditionId: null,
+    conditionId,
     marketId,
     questionId: questionKey ?? questionId,
     closeTime,
@@ -245,6 +247,7 @@ function buildQuestionFromAcceptedCandidate({
     existingQuestion ??
     createBaseQuestionRow({
       marketId,
+      conditionId: readString(record.condition_id),
       questionKey,
       questionId,
       question: questionLabel,
@@ -264,6 +267,8 @@ function buildQuestionFromAcceptedCandidate({
     ...baseQuestion,
     id: questionId,
     question: questionLabel,
+    conditionId:
+      readString(record.condition_id) ?? baseQuestion.conditionId ?? null,
     marketId: marketId ?? baseQuestion.marketId ?? null,
     questionId: questionKey ?? baseQuestion.questionId ?? questionId,
     closeTime: readString(record.close_time) ?? baseQuestion.closeTime,
