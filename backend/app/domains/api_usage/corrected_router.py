@@ -310,9 +310,17 @@ async def _load_usage_rows(
             )
         )
 
-    auto_live_runs = (
+    target_runs_expression = PolymarketAutoLiveRunRecord.payload[
+        "stage_results"
+    ][1]["outputs"]["llm_target_runs"]
+    auto_live_rows = (
         await db.execute(
-            select(PolymarketAutoLiveRunRecord)
+            select(
+                PolymarketAutoLiveRunRecord.id,
+                PolymarketAutoLiveRunRecord.status,
+                PolymarketAutoLiveRunRecord.started_at,
+                target_runs_expression.label("llm_target_runs"),
+            )
             .where(
                 PolymarketAutoLiveRunRecord.user_id == user_id,
                 PolymarketAutoLiveRunRecord.started_at >= start_utc,
@@ -323,36 +331,13 @@ async def _load_usage_rows(
                 PolymarketAutoLiveRunRecord.id.asc(),
             )
         )
-    ).scalars().all()
+    ).all()
 
-    for auto_live_run in auto_live_runs:
-        payload = (
-            auto_live_run.payload
-            if isinstance(auto_live_run.payload, dict)
-            else {}
-        )
-        stage_results = payload.get("stage_results")
-        if not isinstance(stage_results, list):
-            continue
-        stage_two = next(
-            (
-                stage
-                for stage in stage_results
-                if isinstance(stage, dict)
-                and _safe_int(stage.get("stage_number")) == 2
-            ),
-            None,
-        )
-        if not isinstance(stage_two, dict):
-            continue
-        outputs = stage_two.get("outputs")
-        if not isinstance(outputs, dict):
-            continue
-        target_runs = outputs.get("llm_target_runs")
+    for run_id, run_status, run_started_at, target_runs in auto_live_rows:
         if not isinstance(target_runs, list):
             continue
 
-        run_label = f"Bullpen run {auto_live_run.id}"
+        run_label = f"Bullpen run {run_id}"
         for target_index, target in enumerate(target_runs, start=1):
             if not isinstance(target, dict):
                 continue
@@ -387,16 +372,16 @@ async def _load_usage_rows(
                     tokens_in=tokens_in,
                     tokens_out=tokens_out,
                     estimated_cost=estimated_cost,
-                    occurred_at=auto_live_run.started_at,
+                    occurred_at=run_started_at,
                     record_kind="bullpen_auto_live_target",
-                    record_id=f"{auto_live_run.id}:{target_index}",
+                    record_id=f"{run_id}:{target_index}",
                     run_metadata={
                         "job_id": None,
                         "app_run_id": None,
-                        "run_number": auto_live_run.id,
+                        "run_number": run_id,
                         "run_label": run_label,
                         "stage": 2,
-                        "status": str(target.get("status") or auto_live_run.status),
+                        "status": str(target.get("status") or run_status),
                     },
                 )
             )
