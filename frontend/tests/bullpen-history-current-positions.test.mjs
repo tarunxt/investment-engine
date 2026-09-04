@@ -112,6 +112,13 @@ test("History keeps deadlines and Returns/day when the latest LLM scan is uncove
     /event\.llm_yes_odds != null && event\.llm_no_odds != null/,
   );
   assert.match(historyScreen, /if \(chosenSide === null\)/);
+  assert.match(historyScreen, /daysUntilClose < 0/);
+  assert.match(historyScreen, /daysUntilClose - 1/);
+  assert.match(historyScreen, /formulaDaysUntilClose \+ 4/);
+  assert.match(
+    historyScreen,
+    /condition_id: event\.condition_id \?\? currentPosition\?\.conditionId \?\? null/,
+  );
 });
 
 test("History does not treat a shared parent market id as an active contract match", () => {
