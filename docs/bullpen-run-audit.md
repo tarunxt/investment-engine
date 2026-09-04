@@ -1538,6 +1538,9 @@ not hide that scan. Consequently every
 current filtered candidate retains its deadline and saved Stage 1 Returns/day
 even when no LLM output exists. The browser then refreshes current Bullpen odds
 for those same identities and recalculates Returns/day at that refresh timestamp.
+Both screens carry the exact condition ID and market slug into that refresh, so
+sibling contracts under one parent event cannot borrow each other's order book
+or held-position side.
 The Stage 1 popup performs the same refresh and calculation, so matching rows on
 the dashboard and history screens use the same latest odds and formula. Frozen
 run payloads remain unchanged.
