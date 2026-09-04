@@ -1453,6 +1453,11 @@ class AsyncPolymarketAutoLiveRepository:
                 ) or market_id
                 entry = ensure_entry(market_id, title)
                 entry["latest_stage1"] = {
+                    "condition_id": first_text(
+                        raw_candidate.get("condition_id"),
+                        raw_candidate.get("conditionId"),
+                    ),
+                    "slug": first_text(raw_candidate.get("slug")),
                     "market_url": first_text(
                         raw_candidate.get("market_url"),
                         raw_candidate.get("source_url"),
@@ -1623,6 +1628,19 @@ class AsyncPolymarketAutoLiveRepository:
                         candidate.get("exposure_usd"),
                     )
                     entry["latest_stage2"] = {
+                        "condition_id": first_text(
+                            candidate.get("condition_id"),
+                            candidate.get("conditionId"),
+                            prepared.get("condition_id"),
+                            prepared.get("conditionId"),
+                            prompt_market.get("condition_id"),
+                            prompt_market.get("conditionId"),
+                        ),
+                        "slug": first_text(
+                            candidate.get("slug"),
+                            prepared.get("slug"),
+                            prompt_market.get("slug"),
+                        ),
                         "market_url": first_text(
                             candidate.get("market_url"),
                             candidate.get("source_url"),
@@ -1864,6 +1882,14 @@ class AsyncPolymarketAutoLiveRepository:
                 )
             events.append(BullpenAutoLiveEventTrend(
                 market_id=market_id,
+                condition_id=first_text(stage2_or_decision(
+                    "condition_id",
+                    None,
+                )),
+                slug=first_text(stage2_or_decision(
+                    "slug",
+                    latest_decision.slug if latest_decision else None,
+                )),
                 market_title=str(entry["title"]),
                 market_url=stage2_or_decision(
                     "market_url",
