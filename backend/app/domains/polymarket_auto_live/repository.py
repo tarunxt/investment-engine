@@ -1342,6 +1342,7 @@ class AsyncPolymarketAutoLiveRepository:
                     "sides": [None] * 20,
                     "timestamps": [None] * 20,
                     "llm_outputs": [[] for _ in range(20)],
+                    "latest_stage1": None,
                     "latest_stage2": None,
                     "latest_decision": None,
                 },
@@ -1349,6 +1350,87 @@ class AsyncPolymarketAutoLiveRepository:
             if title:
                 entry["title"] = title
             return entry
+
+        # The latest Stage 1 accepted-candidate snapshot is the authoritative
+        # universe for the current dashboard (78 rows in the common console
+        # profile). Add every retained row before applying Stage 2 history so
+        # candidates still receive their deadline and current-market metrics
+        # when no model produced usable Yes/No odds.
+        for run_row in trend_run_rows:
+            if str(run_row.id) != run_ids[0]:
+                continue
+            raw_stages = run_row.trend_stage_results
+            if not isinstance(raw_stages, list):
+                continue
+            scan_stage: BullpenAutoLiveStageResult | None = None
+            for raw_stage in raw_stages:
+                try:
+                    stage = BullpenAutoLiveStageResult.model_validate(raw_stage)
+                except ValidationError:
+                    continue
+                if workflow_stage_key(stage) == "scan":
+                    scan_stage = stage
+                    break
+            if scan_stage is None:
+                continue
+            accepted_rows = scan_stage.outputs.get("accepted_candidates")
+            if not isinstance(accepted_rows, list):
+                continue
+            stage1_timestamp = first_text(
+                scan_stage.completed_at,
+                scan_stage.started_at,
+                _isoformat(run_row.completed_at),
+                _isoformat(run_row.updated_at),
+                _isoformat(run_row.started_at),
+            )
+            for raw_candidate in accepted_rows:
+                if not isinstance(raw_candidate, dict):
+                    continue
+                market_id = first_text(
+                    raw_candidate.get("market_id"),
+                    raw_candidate.get("marketId"),
+                    raw_candidate.get("question_id"),
+                    raw_candidate.get("questionId"),
+                    raw_candidate.get("condition_id"),
+                    raw_candidate.get("slug"),
+                )
+                if market_id is None:
+                    continue
+                title = first_text(
+                    raw_candidate.get("market_title"),
+                    raw_candidate.get("question"),
+                    raw_candidate.get("title"),
+                    market_id,
+                ) or market_id
+                entry = ensure_entry(market_id, title)
+                entry["latest_stage1"] = {
+                    "market_url": first_text(
+                        raw_candidate.get("market_url"),
+                        raw_candidate.get("source_url"),
+                    ),
+                    "close_time": first_text(
+                        raw_candidate.get("close_time"),
+                        raw_candidate.get("end_date"),
+                    ),
+                    "current_yes_odds": first_number(
+                        raw_candidate.get("current_yes_odds"),
+                        raw_candidate.get("current_yes_odds_pct"),
+                    ),
+                    "current_no_odds": first_number(
+                        raw_candidate.get("current_no_odds"),
+                        raw_candidate.get("current_no_odds_pct"),
+                    ),
+                    "best_bid_cents": first_number(
+                        raw_candidate.get("best_bid_cents")
+                    ),
+                    "best_ask_cents": first_number(
+                        raw_candidate.get("best_ask_cents")
+                    ),
+                    "returns_per_day": first_number(
+                        raw_candidate.get("returns_per_day")
+                    ),
+                    "scanned_at": stage1_timestamp,
+                }
 
         # Stage 2 is the source of truth for the scan circles. Read the bounded
         # console projection rather than the immutable full run payload: the latter
@@ -1609,6 +1691,11 @@ class AsyncPolymarketAutoLiveRepository:
 
         events: list[BullpenAutoLiveEventTrend] = []
         for market_id, entry in event_scores.items():
+            latest_stage1 = (
+                entry["latest_stage1"]
+                if isinstance(entry.get("latest_stage1"), dict)
+                else {}
+            )
             latest_stage2 = (
                 entry["latest_stage2"]
                 if isinstance(entry.get("latest_stage2"), dict)
@@ -1620,7 +1707,10 @@ class AsyncPolymarketAutoLiveRepository:
 
             def stage2_or_decision(key: str, decision_value: object) -> object:
                 value = latest_stage2.get(key)
-                return decision_value if value is None else value
+                if value is not None:
+                    return value
+                stage1_value = latest_stage1.get(key)
+                return decision_value if stage1_value is None else stage1_value
 
             current_yes_odds = first_number(stage2_or_decision(
                 "current_yes_odds",
@@ -1718,6 +1808,11 @@ class AsyncPolymarketAutoLiveRepository:
                     formula=returns_formula,
                 )
             )
+            if current_returns_per_day is None and not is_claimable_position:
+                current_returns_per_day = first_number(
+                    latest_stage2.get("returns_per_day"),
+                    latest_stage1.get("returns_per_day"),
+                )
             events.append(BullpenAutoLiveEventTrend(
                 market_id=market_id,
                 market_title=str(entry["title"]),
