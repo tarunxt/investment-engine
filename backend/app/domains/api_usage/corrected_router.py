@@ -589,9 +589,12 @@ async def llm_usage_breakdown(
         start_utc=start_utc,
         end_utc=end_utc,
     )
+    display_fx_rate = (
+        round(fx.valid_value, 4) if fx.valid_value is not None else None
+    )
     items, provider_totals = _aggregate_usage(
         rows,
-        usd_inr_rate=fx.valid_value,
+        usd_inr_rate=display_fx_rate,
     )
     from_day = start_utc.replace(tzinfo=UTC).astimezone(API_USAGE_TZ).date()
     to_day = (
@@ -606,9 +609,7 @@ async def llm_usage_breakdown(
         "period_label": period_label,
         "from_date": from_day.isoformat(),
         "to_date": to_day.isoformat(),
-        "usd_inr_rate": (
-            round(fx.valid_value, 4) if fx.valid_value is not None else None
-        ),
+        "usd_inr_rate": display_fx_rate,
         "fx_source": fx.source,
         "fx_as_of": fx.as_of,
         "fx_status": fx.status,
@@ -653,6 +654,9 @@ async def corrected_llm_cost_history(
         end_utc=end_utc,
     )
     fx = await load_persisted_usd_inr_rate()
+    display_fx_rate = (
+        round(fx.valid_value, 4) if fx.valid_value is not None else None
+    )
     daily_totals: dict[str, dict[str, float | int]] = {
         (today - timedelta(days=offset)).isoformat(): {
             "cost": 0.0,
@@ -679,7 +683,7 @@ async def corrected_llm_cost_history(
             "date": day_key,
             "estimated_cost": round(float(totals["cost"]), 6),
             "estimated_cost_inr": _convert_usd_to_inr(
-                float(totals["cost"]), fx.valid_value
+                float(totals["cost"]), display_fx_rate
             ),
             "requests": int(totals["requests"]),
             "tokens_in": int(totals["tokens_in"]),
