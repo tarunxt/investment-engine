@@ -20,6 +20,9 @@ const EXCEL_HEADERS = [
   "Theme",
   "Current Yes Odds (%)",
   "Current No Odds (%)",
+  "Best Bid (cents)",
+  "Best Ask (cents)",
+  "Spread (cents)",
   "LLM Yes Odds (%)",
   "LLM No Odds (%)",
   "Returns/day (%)",
@@ -27,8 +30,15 @@ const EXCEL_HEADERS = [
   "Volume (USD)",
   "Liquidity (USD)",
   "Force Included",
+  "Force-Included Position",
+  "Selected",
   "Scan Status",
   "Filter Reasons",
+  "Rules",
+  "Event Description",
+  "Market Context",
+  "Resolution Source",
+  "Preflight Evidence",
 ] as const;
 
 const formatIstTimestamp = (value: string | null) => {
@@ -58,6 +68,9 @@ export function buildStageOneFilteredEventsExcelRows(
     Theme: candidate.theme ?? "",
     "Current Yes Odds (%)": candidate.currentYesOdds,
     "Current No Odds (%)": candidate.currentNoOdds,
+    "Best Bid (cents)": candidate.bestBidCents,
+    "Best Ask (cents)": candidate.bestAskCents,
+    "Spread (cents)": candidate.spreadCents,
     "LLM Yes Odds (%)": candidate.llmYesOdds ?? null,
     "LLM No Odds (%)": candidate.llmNoOdds ?? null,
     "Returns/day (%)": candidate.returnsPerDay ?? null,
@@ -65,24 +78,41 @@ export function buildStageOneFilteredEventsExcelRows(
     "Volume (USD)": candidate.volumeUsd,
     "Liquidity (USD)": candidate.liquidityUsd,
     "Force Included": candidate.forceInclude ? "Yes" : "No",
+    "Force-Included Position": candidate.forceIncludedPosition ? "Yes" : "No",
+    Selected:
+      candidate.selected === null || candidate.selected === undefined
+        ? ""
+        : candidate.selected
+          ? "Yes"
+          : "No",
     "Scan Status": candidate.scanStatus,
     "Filter Reasons": candidate.filterReasons.join(" | "),
+    Rules: candidate.rules ?? "",
+    "Event Description": candidate.eventDescription ?? "",
+    "Market Context": candidate.marketContext ?? "",
+    "Resolution Source": candidate.resolutionSource ?? "",
+    "Preflight Evidence": candidate.preflightEvidenceBlock ?? "",
   }));
 }
 
-function buildExportFilename(scanCompletedAt: string | null) {
+function buildExportFilename(
+  scanCompletedAt: string | null,
+  exportScope: "filtered" | "all-scanned",
+) {
   const date = scanCompletedAt ? new Date(scanCompletedAt) : new Date();
   const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
   const stamp = safeDate.toISOString().replace(/[:.]/g, "-");
-  return `bullpen-stage-1-filtered-events-${stamp}.xlsx`;
+  return `bullpen-stage-1-${exportScope}-events-${stamp}.xlsx`;
 }
 
-export async function downloadStageOneFilteredEventsExcel({
+async function downloadStageOneEventsExcel({
   candidates,
   scanCompletedAt,
+  exportScope,
 }: {
   candidates: BullpenStageOneExcelCandidate[];
   scanCompletedAt: string | null;
+  exportScope: "filtered" | "all-scanned";
 }) {
   if (candidates.length === 0) return;
 
@@ -98,12 +128,19 @@ export async function downloadStageOneFilteredEventsExcel({
   const dataRows = rows.map((row) =>
     EXCEL_HEADERS.map((header) => ({
       value: row[header] ?? "",
-      wrap: header === "Event" || header === "Filter Reasons",
+      wrap:
+        header === "Event" ||
+        header === "Filter Reasons" ||
+        header === "Rules" ||
+        header === "Event Description" ||
+        header === "Market Context" ||
+        header === "Preflight Evidence",
       alignVertical: "top" as const,
     })),
   );
   const workbook = writeXlsxFile([headerRow, ...dataRows], {
-    sheet: "Filtered Events",
+    sheet:
+      exportScope === "all-scanned" ? "All Scanned Events" : "Filtered Events",
     stickyRowsCount: 1,
     columns: [
       { width: 8 },
@@ -116,11 +153,46 @@ export async function downloadStageOneFilteredEventsExcel({
       { width: 24 },
       { width: 26 },
       { width: 22 },
-      ...Array.from({ length: 8 }, () => ({ width: 22 })),
+      ...Array.from({ length: 11 }, () => ({ width: 22 })),
       { width: 16 },
+      { width: 16 },
+      { width: 22 },
       { width: 16 },
       { width: 60 },
+      { width: 72 },
+      { width: 72 },
+      { width: 60 },
+      { width: 48 },
+      { width: 72 },
     ],
   });
-  await workbook.toFile(buildExportFilename(scanCompletedAt));
+  await workbook.toFile(buildExportFilename(scanCompletedAt, exportScope));
+}
+
+export async function downloadStageOneFilteredEventsExcel({
+  candidates,
+  scanCompletedAt,
+}: {
+  candidates: BullpenStageOneExcelCandidate[];
+  scanCompletedAt: string | null;
+}) {
+  return downloadStageOneEventsExcel({
+    candidates,
+    scanCompletedAt,
+    exportScope: "filtered",
+  });
+}
+
+export async function downloadStageOneAllScannedEventsExcel({
+  candidates,
+  scanCompletedAt,
+}: {
+  candidates: BullpenStageOneExcelCandidate[];
+  scanCompletedAt: string | null;
+}) {
+  return downloadStageOneEventsExcel({
+    candidates,
+    scanCompletedAt,
+    exportScope: "all-scanned",
+  });
 }
