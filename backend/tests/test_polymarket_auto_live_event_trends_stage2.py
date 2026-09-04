@@ -42,6 +42,28 @@ class _StageTwoOnlySession:
                     id="run-stage2-only",
                     trend_stage_results=[
                         {
+                            "stage_number": 1,
+                            "stage_name": "Stage 1 - Scan",
+                            "status": "pass",
+                            "reason": "Scan complete",
+                            "outputs": {
+                                "workflow_stage_key": "scan",
+                                "accepted_candidates": [
+                                    {
+                                        "market_id": "market-stage1-only",
+                                        "question": "Will the Stage 1-only event happen?",
+                                        "market_url": "https://example.com/market-stage1-only",
+                                        "close_time": "2026-08-20T12:00:00+00:00",
+                                        "current_yes_odds": 82,
+                                        "current_no_odds": 18,
+                                        "returns_per_day": 1.5,
+                                    }
+                                ],
+                            },
+                            "started_at": "2026-08-10T02:35:00+00:00",
+                            "completed_at": "2026-08-10T02:40:00+00:00",
+                        },
+                        {
                             "stage_number": 2,
                             "stage_name": "Stage 2 - LLM",
                             "status": "pass",
@@ -113,7 +135,7 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
     )
 
     assert session.calls == 3
-    assert len(response.events) == 2
+    assert len(response.events) == 3
     event = next(event for event in response.events if event.market_id == "market-1")
     assert event.market_id == "market-1"
     assert event.market_title == "Will event one happen?"
@@ -141,3 +163,14 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
     assert empty_consensus.scan_llm_outputs[0] == []
     assert empty_consensus.is_active_position is True
     assert empty_consensus.returns_per_day is not None
+
+    stage1_only = next(
+        event for event in response.events if event.market_id == "market-stage1-only"
+    )
+    assert stage1_only.close_time == "2026-08-20T12:00:00+00:00"
+    assert stage1_only.current_yes_odds == 82
+    assert stage1_only.current_no_odds == 18
+    assert stage1_only.llm_yes_odds is None
+    assert stage1_only.llm_no_odds is None
+    assert stage1_only.returns_per_day == 1.5
+    assert stage1_only.scan_scores[0] is None

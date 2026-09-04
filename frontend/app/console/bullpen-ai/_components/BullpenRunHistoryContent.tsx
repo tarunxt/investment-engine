@@ -76,7 +76,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const [returnsQuestion, setReturnsQuestion] = useState<BullpenQuestionRow | null>(null);
   const [showReturnsFormula, setShowReturnsFormula] = useState(false);
   const [showStrongestOnly, setShowStrongestOnly] = useState(true);
-  const latestScoredScanAt = trends?.events.flatMap(event => event.scan_timestamps ?? []).find(Boolean) ?? null;
+  const latestScoredScanAt = trends?.events.flatMap(event => event.scan_timestamps.map((timestamp, index) => event.scan_scores[index] == null ? null : timestamp)).find(Boolean) ?? null;
   const latestSavedRunAt = page?.page === 1 ? page.items[0]?.started_at ?? null : null;
   const currentOddsUpdatedAt = trends?.current_odds_fetched_at ?? latestScoredScanAt ?? trends?.generated_at ?? null;
   return <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,.45)]">

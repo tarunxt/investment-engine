@@ -953,6 +953,14 @@ source module. The default is
 `=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)`; existing frozen
 outputs remain unchanged.
 
+Stage 1 candidate projections now retain `returns_per_day` beside each accepted
+row, and position projections retain the held-side value. On the console, a row
+without valid LLM Yes/No odds uses the strongest current Bullpen side, which is
+the same side selection used by `candidate_returns_per_day`. Once valid LLM odds
+exist, the existing `llm_returns_per_day` strongest-LLM-side selection continues
+to apply. This is presentation parity across the Stage 1 popup, Events Summary,
+and history; it does not make an uncovered candidate eligible for Stage 3.
+
 `stage3_active_reservation_cash_filter` algorithm version `v2` counts an
 otherwise consumed BUY reservation when its consumption timestamp is newer
 than the forced-fresh verified balance's `checked_at`. This prevents a balance
@@ -1522,6 +1530,15 @@ view records the strongest LLM-side probability in each scan (newest first),
 uses `null` when the event was absent, and sorts by `latest + 0.5 × previous +
 0.25 × third-latest`. This presentation-only score must not be interpreted as a
 Stage 2 or Stage 3 ranking input.
+
+The newest run's complete Stage 1 `accepted_candidates` slice is also projected
+into the trend response before Stage 2 history is overlaid. Consequently every
+current filtered candidate retains its deadline and saved Stage 1 Returns/day
+even when no LLM output exists. The browser then refreshes current Bullpen odds
+for those same identities and recalculates Returns/day at that refresh timestamp.
+The Stage 1 popup performs the same refresh and calculation, so matching rows on
+the dashboard and history screens use the same latest odds and formula. Frozen
+run payloads remain unchanged.
 
 The trend response displays Returns/day from the latest decision's saved stage
 output when available. For backward compatibility with older decisions that did

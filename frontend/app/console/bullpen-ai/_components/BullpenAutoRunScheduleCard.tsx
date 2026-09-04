@@ -1350,6 +1350,7 @@ function buildWorkflowPortfolioPositionFallback(
     conditionId: position.conditionId,
     isClaimable: position.isClaimable,
     classification: position.economicClassification,
+    returnsPerDay: position.returnsPerDay,
   }));
 }
 
@@ -1379,6 +1380,7 @@ function buildIndependentStageOneView(
     currentNoOdds: question.noOdds,
     volumeUsd: readIndependentScanNumber(question.volume),
     liquidityUsd: readIndependentScanNumber(question.liquidity),
+    returnsPerDay: null,
     forceInclude: false,
     scanStatus,
     filterReasons,
@@ -4065,6 +4067,7 @@ function InvestExecutionStepsSummary({
 function buildStageOnePositionTableEvent(
   position: ScanCandidateDialogState["activePositions"][number],
   index: number,
+  asOf: number,
 ): BullpenEventTableSnapshot {
   const marketId = position.marketId || position.conditionId || position.slug || `active-position-${index + 1}`;
   const side = position.side?.trim().toUpperCase();
@@ -4081,7 +4084,16 @@ function buildStageOnePositionTableEvent(
     current_no_odds: position.currentNoOdds,
     llm_yes_odds: null,
     llm_no_odds: null,
-    returns_per_day: null,
+    returns_per_day:
+      position.returnsPerDay ??
+      calculateStageOneReturnsPerDay({
+        currentYesOdds: position.currentYesOdds,
+        currentNoOdds: position.currentNoOdds,
+        llmYesOdds: side === "YES" ? 100 : side === "NO" ? 0 : null,
+        llmNoOdds: side === "NO" ? 100 : side === "YES" ? 0 : null,
+        closeTime: position.closeTime,
+        asOf,
+      }),
     is_active_position: true,
     active_position_side: side === "YES" || side === "NO" ? side : null,
     position_side: position.side,
@@ -4089,6 +4101,34 @@ function buildStageOnePositionTableEvent(
     position_exposure_usd: position.exposureUsd,
     position_average_price_cents: position.averagePriceCents,
   };
+}
+
+function calculateStageOneReturnsPerDay({
+  currentYesOdds,
+  currentNoOdds,
+  llmYesOdds,
+  llmNoOdds,
+  closeTime,
+  asOf,
+}: {
+  currentYesOdds: number | null;
+  currentNoOdds: number | null;
+  llmYesOdds: number | null;
+  llmNoOdds: number | null;
+  closeTime: string | null;
+  asOf: number;
+}) {
+  const closeTimeMs = closeTime ? Date.parse(closeTime) : Number.NaN;
+  const daysUntilClose = Number.isFinite(closeTimeMs)
+    ? Number(((closeTimeMs - asOf) / 86_400_000).toFixed(1))
+    : null;
+  return getBullpenReturnsPerDayBreakdown({
+    yesOdds: currentYesOdds,
+    noOdds: currentNoOdds,
+    llmYesOdds,
+    llmNoOdds,
+    daysUntilClose,
+  }).result;
 }
 
 function buildStageOneOpportunityTableEvent(
@@ -4126,6 +4166,73 @@ function StageOneOutputDialog({
     useState(false);
   const [returnsPerDayQuestion, setReturnsPerDayQuestion] =
     useState<BullpenQuestionRow | null>(null);
+  const [latestOdds, setLatestOdds] = useState<
+    Record<string, { yesOdds?: number | null; noOdds?: number | null }>
+  >({});
+  const [latestOddsFetchedAt, setLatestOddsFetchedAt] = useState<string | null>(
+    null,
+  );
+  const [dialogOpenedAt] = useState(() => Date.now());
+  useEffect(() => {
+    if (state.mode === "all-scanned") return;
+    const lookupRows = [
+      ...state.activePositions.map((position, index) => ({
+        id:
+          position.marketId ||
+          position.conditionId ||
+          position.slug ||
+          `active-position-${index + 1}`,
+        slug: position.slug,
+        marketUrl: position.marketUrl,
+        question: position.marketTitle,
+        category: position.theme,
+      })),
+      ...state.candidates.map((candidate, index) => ({
+        id:
+          candidate.marketId ||
+          candidate.questionId ||
+          candidate.slug ||
+          `fresh-opportunity-${index + 1}`,
+        slug: candidate.slug,
+        marketUrl: candidate.marketUrl,
+        question: candidate.question,
+        category: candidate.theme,
+      })),
+    ];
+    if (lookupRows.length === 0) return;
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
+    void fetch("/api/bullpen-ai/current-odds", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "Cache-Control": "no-cache",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ questions: lookupRows }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as {
+          markets?: Record<
+            string,
+            { yesOdds?: number | null; noOdds?: number | null }
+          >;
+          fetchedAt?: string | null;
+        };
+        if (!response.ok) return;
+        setLatestOdds(payload.markets ?? {});
+        setLatestOddsFetchedAt(payload.fetchedAt ?? new Date().toISOString());
+      })
+      .catch(() => undefined)
+      .finally(() => window.clearTimeout(timeoutId));
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [state]);
   if (state.mode === "all-scanned") {
     return <AllScannedEventsDialog state={state} onClose={onClose} />;
   }
@@ -4138,8 +4245,85 @@ function StageOneOutputDialog({
     (position) => position.isClaimable,
   );
   const activePositions = state.activePositions.filter(isWorkflowActivePosition);
-  const activePositionEvents = activePositions.map(buildStageOnePositionTableEvent);
-  const freshOpportunityEvents = state.candidates.map(buildStageOneOpportunityTableEvent);
+  const latestAsOf = latestOddsFetchedAt
+    ? Date.parse(latestOddsFetchedAt)
+    : dialogOpenedAt;
+  const enrichLatestOdds = (
+    event: BullpenEventTableSnapshot,
+    chosenSide?: string | null,
+  ): BullpenEventTableSnapshot => {
+    const market = latestOdds[event.market_id];
+    const currentYesOdds =
+      typeof market?.yesOdds === "number"
+        ? market.yesOdds
+        : event.current_yes_odds ?? null;
+    const currentNoOdds =
+      typeof market?.noOdds === "number"
+        ? market.noOdds
+        : event.current_no_odds ?? null;
+    const normalizedSide = chosenSide?.trim().toUpperCase();
+    return {
+      ...event,
+      current_yes_odds: currentYesOdds,
+      current_no_odds: currentNoOdds,
+      returns_per_day: event.is_claimable_position
+        ? null
+        : calculateStageOneReturnsPerDay({
+            currentYesOdds,
+            currentNoOdds,
+            llmYesOdds:
+              normalizedSide === "YES"
+                ? 100
+                : normalizedSide === "NO"
+                  ? 0
+                  : event.llm_yes_odds ?? null,
+            llmNoOdds:
+              normalizedSide === "NO"
+                ? 100
+                : normalizedSide === "YES"
+                  ? 0
+                  : event.llm_no_odds ?? null,
+            closeTime: event.close_time ?? null,
+            asOf: latestAsOf,
+          }) ?? event.returns_per_day ?? null,
+    };
+  };
+  const activeSideByKey = new Map<string, string>();
+  for (const position of activePositions) {
+    if (!position.side) continue;
+    [
+      position.marketId,
+      position.conditionId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => activeSideByKey.set(key, position.side as string));
+  }
+  const activePositionEvents = activePositions.map((position, index) =>
+    enrichLatestOdds(
+      buildStageOnePositionTableEvent(position, index, dialogOpenedAt),
+      position.side,
+    ),
+  );
+  const freshOpportunityEvents = state.candidates.map((candidate, index) => {
+    const activeSide = [
+      candidate.marketId,
+      candidate.slug,
+      candidate.marketUrl,
+      candidate.question,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .map((key) => activeSideByKey.get(key) ?? null)
+      .find((side) => side !== null);
+    return enrichLatestOdds(
+      buildStageOneOpportunityTableEvent(candidate, index),
+      activeSide,
+    );
+  });
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -4159,6 +4343,12 @@ function StageOneOutputDialog({
               Latest Bullpen Scan Stage 1 completed at{" "}
               {formatIstDateTime(state.scanCompletedAt)}.
             </p>
+            {latestOddsFetchedAt ? (
+              <p className="text-xs font-semibold text-slate-500">
+                Current Bullpen odds fetched/updated at{" "}
+                {formatIstDateTime(latestOddsFetchedAt)}.
+              </p>
+            ) : null}
           </div>
           <button
             type="button"

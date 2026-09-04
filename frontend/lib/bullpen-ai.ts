@@ -1098,17 +1098,6 @@ export function getBullpenReturnsPerDayBreakdown({
     };
   }
 
-  if (llmYesOdds === null || llmNoOdds === null) {
-    return {
-      currentOdds: null,
-      currentSide: null,
-      daysUntilClose,
-      llmYesOdds,
-      llmNoOdds,
-      result: null,
-    };
-  }
-
   // Polymarket date-only markets close at end-of-day ET, but expired pending-settlement
   // rows are measured from the event date itself. The technical close is therefore
   // one day later than the formula deadline once the row has expired.
@@ -1117,10 +1106,19 @@ export function getBullpenReturnsPerDayBreakdown({
       ? Number((daysUntilClose - 1).toFixed(1))
       : daysUntilClose;
 
-  // Returns/day uses the unpriced upside for the current odds on the side matching the strongest LLM odds:
+  // Returns/day uses the unpriced upside for the current odds on the side matching the strongest LLM odds.
+  // Before a valid LLM result exists, Stage 1 uses the strongest current Bullpen side, matching the backend's
+  // candidate_returns_per_day calculation instead of hiding an otherwise complete candidate metric.
   // Default persisted Excel-style formula:
   // (100 - current odds on strongest(LLM Yes odds, LLM No odds) side) / (days left + 4).
-  const currentSide = llmYesOdds >= llmNoOdds ? "Yes" : "No";
+  const currentSide =
+    llmYesOdds !== null && llmNoOdds !== null
+      ? llmYesOdds >= llmNoOdds
+        ? "Yes"
+        : "No"
+      : yesOdds >= noOdds
+        ? "Yes"
+        : "No";
   const currentOdds = currentSide === "Yes" ? yesOdds : noOdds;
 
   return {
