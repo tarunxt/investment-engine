@@ -88,6 +88,16 @@ test("History active-event ticks are reconciled against current active positions
   assert.match(historyScreen, /hasUsableCurrentPositions && currentPositions/);
 });
 
+test("History refreshes large current-odds sets in gateway-safe batches", () => {
+  assert.match(historyScreen, /MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE = 100/);
+  assert.match(
+    historyScreen,
+    /questions\.slice\(\s*index,\s*index \+ MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE/,
+  );
+  assert.match(historyScreen, /Object\.assign\(mergedMarkets, payload\.markets/);
+  assert.match(historyScreen, /return \{ markets: mergedMarkets, fetchedAt \}/);
+});
+
 test("History keeps deadlines and Returns/day when the latest LLM scan is uncovered", () => {
   assert.match(historyScreen, /conditionId: event\.condition_id \?\? null/);
   assert.match(historyScreen, /slug: event\.slug \?\? null/);
