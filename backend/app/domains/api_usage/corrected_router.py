@@ -29,6 +29,8 @@ from app.domains.bullpen_run_audit.models import (
 )
 from app.domains.fx_rates.service import load_persisted_usd_inr_rate
 from app.domains.jobs.models import Job
+from app.domains.polymarket_auto_live.models import PolymarketAutoLiveRunRecord
+from app.domains.runs.models import Run, RunJob
 from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(prefix="/api-usage", tags=["api-usage"])
@@ -92,17 +94,81 @@ def _classify_job_usage(job: Job) -> tuple[str, str, str]:
     prompt = (job.prompt or "").upper()
     portfolio = str(job.auto_rebalance_portfolio or "").strip().lower()
 
+    label = str(getattr(job, "auto_rebalance_label", None) or "").strip().lower()
+
     if kind == "polymarket_bullpen_event" or "BULLPEN" in kind:
         return "bullpen", "Bullpen", "Bullpen Stage 2 event analysis"
     if portfolio == "india" or "[ZERODHA_" in prompt:
-        workflow = "Zerodha event/threat/rebalance analysis"
+        workflow = _job_workflow_label(
+            prompt=prompt,
+            label=label,
+            source_label="Zerodha",
+        )
         return "zerodha", "Zerodha", workflow
     if portfolio == "indmoney_us" or "[INDMONEY_US_" in prompt:
-        workflow = "INDmoney US event/threat/rebalance analysis"
+        workflow = _job_workflow_label(
+            prompt=prompt,
+            label=label,
+            source_label="INDmoney US",
+        )
         return "indmoney", "INDmoney US", workflow
     if "[STAGE2_SHARED_EVIDENCE_ONLY]" in prompt and "POLYMARKET" in prompt:
         return "bullpen", "Bullpen", "Bullpen evidence-grounded analysis"
     return "other", "Other Cred-X", "Other LLM job"
+
+
+def _job_workflow_label(*, prompt: str, label: str, source_label: str) -> str:
+    markers = (
+        ("_EVENTS]", "Event scan"),
+        ("_THREATS]", "Threat scan"),
+    )
+    for marker, workflow in markers:
+        if marker in prompt:
+            return workflow
+    for needle, workflow in (
+        ("rebalance", "Rebalance"),
+        ("technical", "Technical scan"),
+        ("swing", "Swing scan"),
+        ("actionable", "Actionables"),
+    ):
+        if needle in label or needle.upper() in prompt:
+            return workflow
+    return f"{source_label} analysis"
+
+
+def _job_run_metadata(
+    job: Job,
+    *,
+    app_run_id: int | None,
+    run_sequence: int | None,
+    run_label_value: str | None,
+    stage: int | None,
+) -> dict[str, Any]:
+    sequence = getattr(job, "auto_rebalance_sequence", None) or (
+        run_sequence
+    )
+    label = str(
+        getattr(job, "auto_rebalance_label", None)
+        or run_label_value
+        or ""
+    ).strip()
+    if label:
+        run_label = label
+    elif sequence is not None:
+        run_label = f"Run #{sequence}"
+    elif app_run_id is not None:
+        run_label = f"Run #{app_run_id}"
+    else:
+        run_label = f"Job #{job.id}"
+    status = job.status.value if hasattr(job.status, "value") else str(job.status)
+    return {
+        "job_id": job.id,
+        "app_run_id": app_run_id,
+        "run_number": sequence if sequence is not None else app_run_id,
+        "run_label": run_label,
+        "stage": stage,
+        "status": status,
+    }
 
 
 def _new_usage_row(
@@ -118,9 +184,10 @@ def _new_usage_row(
     estimated_cost: float,
     occurred_at: datetime,
     record_kind: str,
-    record_id: int,
+    record_id: int | str,
+    run_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "provider": provider.strip().lower(),
         "provider_name": LLM_PROVIDER_LABELS.get(
             provider.strip().lower(), provider.strip().title()
@@ -135,8 +202,11 @@ def _new_usage_row(
         "estimated_cost": max(0.0, float(estimated_cost)),
         "occurred_at": occurred_at,
         "record_kind": record_kind,
-        "record_id": int(record_id),
+        "record_id": record_id,
     }
+    if run_metadata:
+        row.update(run_metadata)
+    return row
 
 
 async def _load_usage_rows(
@@ -146,9 +216,18 @@ async def _load_usage_rows(
     start_utc: datetime,
     end_utc: datetime,
 ) -> list[dict[str, Any]]:
-    jobs = (
+    job_rows = (
         await db.execute(
-            select(Job)
+            select(
+                Job,
+                Run.id,
+                Run.auto_rebalance_sequence,
+                Run.auto_rebalance_label,
+                RunJob.stage,
+            )
+            .select_from(Job)
+            .outerjoin(RunJob, RunJob.job_id == Job.id)
+            .outerjoin(Run, Run.id == RunJob.run_id)
             .where(
                 Job.user_id == user_id,
                 Job.created_at >= start_utc,
@@ -156,10 +235,10 @@ async def _load_usage_rows(
             )
             .order_by(Job.created_at.asc(), Job.id.asc())
         )
-    ).scalars().all()
+    ).all()
 
     rows: list[dict[str, Any]] = []
-    for job in jobs:
+    for job, app_run_id, run_sequence, run_label, stage in job_rows:
         source_key, source_label, workflow = _classify_job_usage(job)
         rows.append(
             _new_usage_row(
@@ -175,6 +254,13 @@ async def _load_usage_rows(
                 occurred_at=job.created_at,
                 record_kind="job",
                 record_id=job.id,
+                run_metadata=_job_run_metadata(
+                    job,
+                    app_run_id=app_run_id,
+                    run_sequence=run_sequence,
+                    run_label_value=run_label,
+                    stage=stage,
+                ),
             )
         )
 
@@ -213,8 +299,107 @@ async def _load_usage_rows(
                 occurred_at=subcall.created_at,
                 record_kind="bullpen_run_audit_subcall",
                 record_id=subcall.id,
+                run_metadata={
+                    "job_id": None,
+                    "app_run_id": None,
+                    "run_number": subcall.feedback_id,
+                    "run_label": f"Run-audit feedback #{subcall.feedback_id}",
+                    "stage": None,
+                    "status": "completed",
+                },
             )
         )
+
+    auto_live_runs = (
+        await db.execute(
+            select(PolymarketAutoLiveRunRecord)
+            .where(
+                PolymarketAutoLiveRunRecord.user_id == user_id,
+                PolymarketAutoLiveRunRecord.started_at >= start_utc,
+                PolymarketAutoLiveRunRecord.started_at < end_utc,
+            )
+            .order_by(
+                PolymarketAutoLiveRunRecord.started_at.asc(),
+                PolymarketAutoLiveRunRecord.id.asc(),
+            )
+        )
+    ).scalars().all()
+
+    for auto_live_run in auto_live_runs:
+        payload = (
+            auto_live_run.payload
+            if isinstance(auto_live_run.payload, dict)
+            else {}
+        )
+        stage_results = payload.get("stage_results")
+        if not isinstance(stage_results, list):
+            continue
+        stage_two = next(
+            (
+                stage
+                for stage in stage_results
+                if isinstance(stage, dict)
+                and _safe_int(stage.get("stage_number")) == 2
+            ),
+            None,
+        )
+        if not isinstance(stage_two, dict):
+            continue
+        outputs = stage_two.get("outputs")
+        if not isinstance(outputs, dict):
+            continue
+        target_runs = outputs.get("llm_target_runs")
+        if not isinstance(target_runs, list):
+            continue
+
+        run_label = f"Bullpen run {auto_live_run.id}"
+        for target_index, target in enumerate(target_runs, start=1):
+            if not isinstance(target, dict):
+                continue
+            provider = str(target.get("provider") or "").strip().lower()
+            model = str(
+                target.get("model") or target.get("requested_model") or ""
+            ).strip()
+            if not provider or not model:
+                continue
+            requests = (
+                _safe_int(target.get("primary_request_count"))
+                + _safe_int(target.get("retry_request_count"))
+                + _safe_int(target.get("recovery_batch_count"))
+            )
+            tokens_in = _safe_int(target.get("tokens_in"))
+            tokens_out = _safe_int(target.get("tokens_out"))
+            estimated_cost = max(
+                0.0, float(target.get("estimated_cost") or 0.0)
+            )
+            if requests <= 0 and (tokens_in or tokens_out or estimated_cost):
+                requests = 1
+            if requests <= 0:
+                continue
+            rows.append(
+                _new_usage_row(
+                    provider=provider,
+                    model=model,
+                    source_key="bullpen",
+                    source_label="Bullpen",
+                    workflow="Bullpen Auto-Live Stage 2",
+                    requests=requests,
+                    tokens_in=tokens_in,
+                    tokens_out=tokens_out,
+                    estimated_cost=estimated_cost,
+                    occurred_at=auto_live_run.started_at,
+                    record_kind="bullpen_auto_live_target",
+                    record_id=f"{auto_live_run.id}:{target_index}",
+                    run_metadata={
+                        "job_id": None,
+                        "app_run_id": None,
+                        "run_number": auto_live_run.id,
+                        "run_label": run_label,
+                        "stage": 2,
+                        "status": str(target.get("status") or auto_live_run.status),
+                    },
+                )
+            )
 
     return rows
 
@@ -228,9 +413,20 @@ async def _load_provider_call_rows(
 ) -> list[dict[str, Any]]:
     start_aware = start_utc.replace(tzinfo=UTC)
     end_aware = end_utc.replace(tzinfo=UTC)
-    records = (
+    record_rows = (
         await db.execute(
-            select(LlmProviderUsageCallRecord)
+            select(
+                LlmProviderUsageCallRecord,
+                Job,
+                Run.id,
+                Run.auto_rebalance_sequence,
+                Run.auto_rebalance_label,
+                RunJob.stage,
+            )
+            .select_from(LlmProviderUsageCallRecord)
+            .outerjoin(Job, Job.id == LlmProviderUsageCallRecord.job_id)
+            .outerjoin(RunJob, RunJob.job_id == Job.id)
+            .outerjoin(Run, Run.id == RunJob.run_id)
             .where(
                 LlmProviderUsageCallRecord.user_id == user_id,
                 LlmProviderUsageCallRecord.occurred_at >= start_aware,
@@ -241,24 +437,48 @@ async def _load_provider_call_rows(
                 LlmProviderUsageCallRecord.id.asc(),
             )
         )
-    ).scalars().all()
-    return [
-        _new_usage_row(
-            provider=record.provider,
-            model=record.model,
-            source_key="provider_ledger",
-            source_label=f"{LLM_PROVIDER_LABELS.get(record.provider, record.provider.title())} ledger",
-            workflow="Durably recorded provider response",
-            requests=1,
-            tokens_in=int(record.tokens_in),
-            tokens_out=int(record.tokens_out),
-            estimated_cost=float(record.actual_cost),
-            occurred_at=record.occurred_at,
-            record_kind="provider_usage_call",
-            record_id=record.id,
+    ).all()
+    rows: list[dict[str, Any]] = []
+    for record, job, app_run_id, run_sequence, run_label, stage in record_rows:
+        if job is not None:
+            source_key, source_label, workflow = _classify_job_usage(job)
+            run_metadata = _job_run_metadata(
+                job,
+                app_run_id=app_run_id,
+                run_sequence=run_sequence,
+                run_label_value=run_label,
+                stage=stage,
+            )
+        else:
+            source_key = "other"
+            source_label = "Other Cred-X"
+            workflow = "Unlinked provider response"
+            run_metadata = {
+                "job_id": record.job_id,
+                "app_run_id": None,
+                "run_number": None,
+                "run_label": f"Provider call #{record.id}",
+                "stage": None,
+                "status": "completed",
+            }
+        rows.append(
+            _new_usage_row(
+                provider=record.provider,
+                model=record.model,
+                source_key=source_key,
+                source_label=source_label,
+                workflow=workflow,
+                requests=1,
+                tokens_in=int(record.tokens_in),
+                tokens_out=int(record.tokens_out),
+                estimated_cost=float(record.actual_cost),
+                occurred_at=record.occurred_at,
+                record_kind="provider_usage_call",
+                record_id=record.id,
+                run_metadata=run_metadata,
+            )
         )
-        for record in records
-    ]
+    return rows
 
 
 async def _load_provider_snapshot_rows(
@@ -319,10 +539,18 @@ def _effective_usage_rows(
 ) -> list[dict[str, Any]]:
     """Choose one source of truth for every provider calendar day."""
 
-    def bucket(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
-        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    def bucket(
+        rows: list[dict[str, Any]],
+    ) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
         for row in rows:
-            grouped[(str(row["provider"]), _usage_day_string(row["occurred_at"]))].append(row)
+            grouped[
+                (
+                    str(row["provider"]),
+                    str(row["model"]),
+                    _usage_day_string(row["occurred_at"]),
+                )
+            ].append(row)
         return grouped
 
     local_by_day = bucket(local_rows)
@@ -334,7 +562,7 @@ def _effective_usage_rows(
         if key in snapshots_by_day:
             effective.extend(snapshots_by_day[key])
             continue
-        usage_day = date.fromisoformat(key[1])
+        usage_day = date.fromisoformat(key[2])
         if usage_day >= PROVIDER_LEDGER_COMPLETE_FROM_DATE and key in calls_by_day:
             for row in calls_by_day[key]:
                 row["measurement"] = "actual"
@@ -346,13 +574,17 @@ def _effective_usage_rows(
     return effective
 
 
-async def _load_effective_usage_rows(
+async def _load_usage_sources(
     db: AsyncSession,
     *,
     user_id: int,
     start_utc: datetime,
     end_utc: datetime,
-) -> list[dict[str, Any]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
     local_rows = await _load_usage_rows(
         db, user_id=user_id, start_utc=start_utc, end_utc=end_utc
     )
@@ -369,7 +601,182 @@ async def _load_effective_usage_rows(
     snapshot_rows = await _load_provider_snapshot_rows(
         db, user_id=user_id, start_day=start_day, end_day=end_day
     )
+    return local_rows, call_rows, snapshot_rows
+
+
+async def _load_effective_usage_rows(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> list[dict[str, Any]]:
+    local_rows, call_rows, snapshot_rows = await _load_usage_sources(
+        db,
+        user_id=user_id,
+        start_utc=start_utc,
+        end_utc=end_utc,
+    )
     return _effective_usage_rows(local_rows, call_rows, snapshot_rows)
+
+
+def _allocate_integer_total(total: int, weights: list[int]) -> list[int]:
+    """Allocate an integer total proportionally while preserving it exactly."""
+
+    if not weights:
+        return []
+    normalized = [max(0, int(weight)) for weight in weights]
+    weight_total = sum(normalized)
+    if weight_total <= 0:
+        normalized = [1 for _ in weights]
+        weight_total = len(normalized)
+    raw = [max(0, int(total)) * weight / weight_total for weight in normalized]
+    allocated = [int(value) for value in raw]
+    remainder = max(0, int(total)) - sum(allocated)
+    order = sorted(
+        range(len(raw)),
+        key=lambda index: (raw[index] - allocated[index], -index),
+        reverse=True,
+    )
+    for index in order[:remainder]:
+        allocated[index] += 1
+    return allocated
+
+
+def _allocate_cost_total(total: float, weights: list[float]) -> list[float]:
+    """Allocate a USD total to six decimals and keep the rounded sum exact."""
+
+    if not weights:
+        return []
+    normalized = [max(0.0, float(weight)) for weight in weights]
+    weight_total = sum(normalized)
+    if weight_total <= 0:
+        normalized = [1.0 for _ in weights]
+        weight_total = float(len(normalized))
+    rounded_total = round(max(0.0, float(total)), 6)
+    allocated = [
+        round(rounded_total * weight / weight_total, 6) for weight in normalized
+    ]
+    allocated[-1] = round(allocated[-1] + rounded_total - sum(allocated), 6)
+    return allocated
+
+
+def _reconcile_snapshot_to_runs(
+    snapshot: dict[str, Any],
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not candidates:
+        row = dict(snapshot)
+        row.update(
+            {
+                "source": "unattributed",
+                "source_label": "Unattributed provider usage",
+                "workflow": "Provider daily total",
+                "run_label": "Provider daily total",
+                "run_number": None,
+                "job_id": None,
+                "app_run_id": None,
+                "stage": None,
+                "status": "completed",
+                "measurement": "actual",
+            }
+        )
+        return [row]
+
+    request_allocations = _allocate_integer_total(
+        int(snapshot["requests"]), [int(row["requests"]) for row in candidates]
+    )
+    input_allocations = _allocate_integer_total(
+        int(snapshot["tokens_in"]), [int(row["tokens_in"]) for row in candidates]
+    )
+    output_allocations = _allocate_integer_total(
+        int(snapshot["tokens_out"]), [int(row["tokens_out"]) for row in candidates]
+    )
+    cost_weights = [float(row["estimated_cost"]) for row in candidates]
+    if sum(cost_weights) <= 0:
+        cost_weights = [
+            float(int(row["tokens_in"]) + int(row["tokens_out"]))
+            for row in candidates
+        ]
+    cost_allocations = _allocate_cost_total(
+        float(snapshot["estimated_cost"]), cost_weights
+    )
+    cache_hit_allocations = _allocate_integer_total(
+        int(snapshot.get("cache_hit_tokens", 0)),
+        [int(row["tokens_in"]) for row in candidates],
+    )
+    cache_miss_allocations = _allocate_integer_total(
+        int(snapshot.get("cache_miss_tokens", 0)),
+        [int(row["tokens_in"]) for row in candidates],
+    )
+
+    reconciled: list[dict[str, Any]] = []
+    for index, candidate in enumerate(candidates):
+        row = dict(candidate)
+        row.update(
+            {
+                "requests": request_allocations[index],
+                "tokens_in": input_allocations[index],
+                "tokens_out": output_allocations[index],
+                "estimated_cost": cost_allocations[index],
+                "cache_hit_tokens": cache_hit_allocations[index],
+                "cache_miss_tokens": cache_miss_allocations[index],
+                "measurement": "reconciled",
+                "source_note": (
+                    "Allocated from the authoritative provider daily total in "
+                    "proportion to persisted Cred-X run telemetry."
+                ),
+            }
+        )
+        reconciled.append(row)
+    return reconciled
+
+
+def _run_breakdown_rows(
+    local_rows: list[dict[str, Any]],
+    call_rows: list[dict[str, Any]],
+    snapshot_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return exact provider totals attributed to usage areas and individual runs."""
+
+    def bucket(
+        rows: list[dict[str, Any]],
+    ) -> dict[tuple[str, str, str], list[dict[str, Any]]]:
+        grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            grouped[
+                (
+                    str(row["provider"]),
+                    str(row["model"]),
+                    _usage_day_string(row["occurred_at"]),
+                )
+            ].append(row)
+        return grouped
+
+    local_by_day = bucket(local_rows)
+    calls_by_day = bucket(call_rows)
+    snapshots_by_day = bucket(snapshot_rows)
+    keys = set(local_by_day) | set(calls_by_day) | set(snapshots_by_day)
+    rows: list[dict[str, Any]] = []
+    for key in sorted(keys):
+        if key in snapshots_by_day:
+            snapshot = snapshots_by_day[key][0]
+            rows.extend(
+                _reconcile_snapshot_to_runs(snapshot, local_by_day.get(key, []))
+            )
+            continue
+        usage_day = date.fromisoformat(key[2])
+        if usage_day >= PROVIDER_LEDGER_COMPLETE_FROM_DATE and key in calls_by_day:
+            for call_row in calls_by_day[key]:
+                call_row = dict(call_row)
+                call_row["measurement"] = "actual"
+                rows.append(call_row)
+            continue
+        for local_row in local_by_day.get(key, []):
+            local_row = dict(local_row)
+            local_row["measurement"] = "estimated"
+            rows.append(local_row)
+    return rows
 
 
 def _aggregate_usage(
@@ -408,6 +815,11 @@ def _aggregate_usage(
         )
         if row.get("measurement") == "actual":
             provider_total["measurement"] = "actual"
+        elif (
+            row.get("measurement") == "reconciled"
+            and provider_total["measurement"] == "estimated"
+        ):
+            provider_total["measurement"] = "reconciled"
 
         key = (
             provider,
@@ -461,6 +873,92 @@ def _aggregate_usage(
     for totals in provider_totals.values():
         totals["cost"] = round(float(totals["cost"]), 6)
     return items, dict(provider_totals)
+
+
+def _aggregate_run_items(
+    rows: list[dict[str, Any]],
+    *,
+    usd_inr_rate: float | None,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    for row in rows:
+        job_id = row.get("job_id")
+        app_run_id = row.get("app_run_id")
+        identity = (
+            f"job:{job_id}"
+            if job_id is not None
+            else (
+                f"run:{app_run_id}"
+                if app_run_id is not None
+                else f"record:{row['record_kind']}:{row['record_id']}"
+            )
+        )
+        key = (
+            str(row["provider"]),
+            str(row["model"]),
+            str(row["source"]),
+            str(row["workflow"]),
+            identity,
+        )
+        item = grouped.setdefault(
+            key,
+            {
+                "provider": row["provider"],
+                "provider_name": row["provider_name"],
+                "model": row["model"],
+                "source": row["source"],
+                "source_label": row["source_label"],
+                "workflow": row["workflow"],
+                "run_number": row.get("run_number"),
+                "run_label": row.get("run_label") or identity,
+                "app_run_id": app_run_id,
+                "job_id": job_id,
+                "stage": row.get("stage"),
+                "status": row.get("status") or "completed",
+                "timestamp": row["occurred_at"],
+                "requests": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "estimated_cost": 0.0,
+                "measurement": row.get("measurement", "estimated"),
+                "source_note": row.get("source_note"),
+            },
+        )
+        if row.get("measurement") == "actual":
+            item["measurement"] = "actual"
+        elif (
+            row.get("measurement") == "reconciled"
+            and item["measurement"] != "actual"
+        ):
+            item["measurement"] = "reconciled"
+        if row["occurred_at"] < item["timestamp"]:
+            item["timestamp"] = row["occurred_at"]
+        item["requests"] += int(row["requests"])
+        item["tokens_in"] += int(row["tokens_in"])
+        item["tokens_out"] += int(row["tokens_out"])
+        item["estimated_cost"] += float(row["estimated_cost"])
+
+    items: list[dict[str, Any]] = []
+    for item in grouped.values():
+        cost = round(float(item["estimated_cost"]), 6)
+        item["estimated_cost"] = cost
+        item["estimated_cost_inr"] = _convert_usd_to_inr(cost, usd_inr_rate)
+        timestamp = item["timestamp"]
+        if isinstance(timestamp, datetime):
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+            item["timestamp"] = timestamp.astimezone(API_USAGE_TZ).isoformat()
+        items.append(item)
+
+    items.sort(key=lambda item: str(item["timestamp"]), reverse=True)
+    items.sort(
+        key=lambda item: (
+            str(item["provider_name"]).lower(),
+            str(item["model"]).lower(),
+            str(item["source_label"]).lower(),
+        )
+    )
+    return items
 
 
 def _patch_summary_llm_items(
@@ -583,12 +1081,13 @@ async def llm_usage_breakdown(
 ):
     start_utc, end_utc, period_label = _window_utc(period, custom_start, custom_end)
     fx = await load_persisted_usd_inr_rate()
-    rows = await _load_effective_usage_rows(
+    local_rows, call_rows, snapshot_rows = await _load_usage_sources(
         db,
         user_id=current_user.id,
         start_utc=start_utc,
         end_utc=end_utc,
     )
+    rows = _run_breakdown_rows(local_rows, call_rows, snapshot_rows)
     display_fx_rate = (
         round(fx.valid_value, 4) if fx.valid_value is not None else None
     )
@@ -596,6 +1095,7 @@ async def llm_usage_breakdown(
         rows,
         usd_inr_rate=display_fx_rate,
     )
+    run_items = _aggregate_run_items(rows, usd_inr_rate=display_fx_rate)
     from_day = start_utc.replace(tzinfo=UTC).astimezone(API_USAGE_TZ).date()
     to_day = (
         (end_utc - timedelta(microseconds=1))
@@ -615,11 +1115,12 @@ async def llm_usage_breakdown(
         "fx_status": fx.status,
         "request_metric": "outbound_provider_calls",
         "items": items,
+        "runs": run_items,
         "provider_totals": provider_totals,
         "coverage_note": (
-            "Authoritative provider snapshots and durably recorded provider responses "
-            "take precedence over job-derived estimates. Job attribution is used only "
-            "when a provider-ledger day is not available."
+            "Each model is broken down by usage area and individual run. Provider-day "
+            "totals remain authoritative; when a provider exposes only a daily total, "
+            "it is reconciled across runs in proportion to persisted run telemetry."
         ),
     }
 

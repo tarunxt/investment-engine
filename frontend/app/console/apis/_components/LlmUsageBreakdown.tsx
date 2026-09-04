@@ -15,9 +15,32 @@ type LlmUsageBreakdownItem = {
   tokens_out: number;
   estimated_cost: number;
   estimated_cost_inr: number | null;
-  measurement?: 'actual' | 'estimated';
+  measurement?: 'actual' | 'reconciled' | 'estimated';
   cache_hit_tokens?: number;
   cache_miss_tokens?: number;
+  source_note?: string | null;
+};
+
+type LlmUsageRunItem = {
+  provider: string;
+  provider_name: string;
+  model: string;
+  source: string;
+  source_label: string;
+  workflow: string;
+  run_number: number | string | null;
+  run_label: string;
+  app_run_id: number | null;
+  job_id: number | null;
+  stage: number | null;
+  status: string;
+  timestamp: string;
+  requests: number;
+  tokens_in: number;
+  tokens_out: number;
+  estimated_cost: number;
+  estimated_cost_inr: number | null;
+  measurement: 'actual' | 'reconciled' | 'estimated';
   source_note?: string | null;
 };
 
@@ -31,6 +54,7 @@ type LlmUsageBreakdownResponse = {
   request_metric: string;
   coverage_note: string;
   items: LlmUsageBreakdownItem[];
+  runs: LlmUsageRunItem[];
 };
 
 type UsageGroup = {
@@ -39,6 +63,7 @@ type UsageGroup = {
   providerName: string;
   model: string;
   items: LlmUsageBreakdownItem[];
+  runs: LlmUsageRunItem[];
   totals: {
     requests: number;
     tokensIn: number;
@@ -46,6 +71,14 @@ type UsageGroup = {
     costUsd: number;
     costInr: number | null;
   };
+};
+
+type UsageAreaGroup = {
+  key: string;
+  label: string;
+  items: LlmUsageBreakdownItem[];
+  runs: LlmUsageRunItem[];
+  totals: UsageGroup['totals'];
 };
 
 const API_TIMEZONE = 'Asia/Kolkata';
@@ -92,12 +125,36 @@ function formatCost(inr: number | null, usd: number) {
   return `₹${inr.toFixed(4)}`;
 }
 
+function formatTimestamp(value: string) {
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime())) return value;
+  return timestamp.toLocaleString('en-IN', {
+    timeZone: API_TIMEZONE,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+}
+
+function formatStatus(value: string) {
+  const normalized = value.trim().replaceAll('_', ' ');
+  return normalized ? normalized[0].toUpperCase() + normalized.slice(1) : 'Completed';
+}
+
 function addNullableCost(current: number | null, next: number | null) {
   if (current == null || next == null) return null;
   return current + next;
 }
 
-function buildGroups(items: LlmUsageBreakdownItem[]): UsageGroup[] {
+function buildGroups(
+  items: LlmUsageBreakdownItem[],
+  runs: LlmUsageRunItem[],
+  usdInrRate: number | null,
+): UsageGroup[] {
   const groups = new Map<string, UsageGroup>();
   for (const item of items) {
     const key = `${item.provider}:${item.model}`;
@@ -107,6 +164,7 @@ function buildGroups(items: LlmUsageBreakdownItem[]): UsageGroup[] {
       providerName: item.provider_name,
       model: item.model,
       items: [],
+      runs: [],
       totals: {
         requests: 0,
         tokensIn: 0,
@@ -126,10 +184,64 @@ function buildGroups(items: LlmUsageBreakdownItem[]): UsageGroup[] {
     );
     groups.set(key, group);
   }
+  for (const run of runs) {
+    groups.get(`${run.provider}:${run.model}`)?.runs.push(run);
+  }
+  for (const group of groups.values()) {
+    group.runs.sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+    group.totals.costInr = usdInrRate == null
+      ? null
+      : group.totals.costUsd * usdInrRate;
+  }
   return Array.from(groups.values()).sort((left, right) =>
     `${left.providerName}:${left.model}`.localeCompare(
       `${right.providerName}:${right.model}`,
     ),
+  );
+}
+
+function buildUsageAreas(
+  group: UsageGroup,
+  usdInrRate: number | null,
+): UsageAreaGroup[] {
+  const areas = new Map<string, UsageAreaGroup>();
+  for (const item of group.items) {
+    const area = areas.get(item.source) ?? {
+      key: item.source,
+      label: item.source_label,
+      items: [],
+      runs: [],
+      totals: {
+        requests: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        costUsd: 0,
+        costInr: 0,
+      },
+    };
+    area.items.push(item);
+    area.totals.requests += item.requests;
+    area.totals.tokensIn += item.tokens_in;
+    area.totals.tokensOut += item.tokens_out;
+    area.totals.costUsd += item.estimated_cost;
+    area.totals.costInr = addNullableCost(
+      area.totals.costInr,
+      item.estimated_cost_inr,
+    );
+    areas.set(item.source, area);
+  }
+  for (const run of group.runs) {
+    areas.get(run.source)?.runs.push(run);
+  }
+  for (const area of areas.values()) {
+    area.totals.costInr = usdInrRate == null
+      ? null
+      : area.totals.costUsd * usdInrRate;
+  }
+  const order: Record<string, number> = { indmoney: 0, zerodha: 1, bullpen: 2 };
+  return Array.from(areas.values()).sort((left, right) =>
+    (order[left.key] ?? 99) - (order[right.key] ?? 99)
+    || left.label.localeCompare(right.label),
   );
 }
 
@@ -195,7 +307,14 @@ export default function LlmUsageBreakdown() {
     };
   }, [load]);
 
-  const groups = useMemo(() => buildGroups(data?.items ?? []), [data]);
+  const groups = useMemo(
+    () => buildGroups(
+      data?.items ?? [],
+      data?.runs ?? [],
+      data?.usd_inr_rate ?? null,
+    ),
+    [data],
+  );
 
   return (
     <section className="border border-gray-200 bg-white p-4">
@@ -287,64 +406,102 @@ export default function LlmUsageBreakdown() {
                   {formatCost(group.totals.costInr, group.totals.costUsd)}
                 </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-white text-left text-xs uppercase tracking-wide text-gray-500">
-                    <tr>
-                      <th className="px-4 py-3">Usage Area</th>
-                      <th className="px-4 py-3">Workflow</th>
-                      <th className="px-4 py-3 text-right">Requests</th>
-                      <th className="px-4 py-3 text-right">Tokens In</th>
-                      <th className="px-4 py-3 text-right">Tokens Out</th>
-                      <th className="px-4 py-3 text-right">Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {group.items.map((item) => (
-                      <tr key={`${item.source}:${item.workflow}`}>
-                        <td className="px-4 py-3 font-medium text-gray-900">
-                          {item.source_label}
-                          {item.measurement === 'actual' && (item.cache_hit_tokens || item.cache_miss_tokens) ? (
-                            <div className="mt-1 text-xs font-normal text-gray-500">
-                              Cache hit {formatNumber(item.cache_hit_tokens ?? 0)} · cache miss {formatNumber(item.cache_miss_tokens ?? 0)}
-                            </div>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">{item.workflow}</td>
-                        <td className="px-4 py-3 text-right text-gray-800">
-                          {formatNumber(item.requests)}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-800">
-                          {formatNumber(item.tokens_in)}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-800">
-                          {formatNumber(item.tokens_out)}
-                        </td>
-                        <td className="px-4 py-3 text-right font-medium text-gray-900">
-                          {formatCost(item.estimated_cost_inr, item.estimated_cost)}
-                          {item.measurement === 'actual' ? (
-                            <div className="text-xs font-semibold text-emerald-700">Actual</div>
-                          ) : null}
-                        </td>
-                      </tr>
-                    ))}
-                    <tr className="bg-gray-50 font-semibold text-gray-950">
-                      <td className="px-4 py-3" colSpan={2}>Model total</td>
-                      <td className="px-4 py-3 text-right">
-                        {formatNumber(group.totals.requests)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {formatNumber(group.totals.tokensIn)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {formatNumber(group.totals.tokensOut)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {formatCost(group.totals.costInr, group.totals.costUsd)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div className="space-y-4 p-3">
+                {buildUsageAreas(group, data?.usd_inr_rate ?? null).map((area) => (
+                  <section key={area.key} className="overflow-hidden border border-gray-200">
+                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 py-3">
+                      <div>
+                        <h3 className="font-semibold text-gray-950">{area.label}</h3>
+                        <p className="text-xs text-gray-500">
+                          {formatNumber(area.runs.length)} runs ·{' '}
+                          {formatNumber(area.totals.requests)} requests ·{' '}
+                          {formatNumber(area.totals.tokensIn + area.totals.tokensOut)} tokens
+                        </p>
+                      </div>
+                      <div className="text-right font-semibold text-gray-950">
+                        {formatCost(area.totals.costInr, area.totals.costUsd)}
+                      </div>
+                    </div>
+                    {area.runs.length ? (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+                            <tr>
+                              <th className="px-4 py-3">Run</th>
+                              <th className="px-4 py-3">Timestamp</th>
+                              <th className="px-4 py-3">Workflow</th>
+                              <th className="px-4 py-3">Status</th>
+                              <th className="px-4 py-3 text-right">Requests</th>
+                              <th className="px-4 py-3 text-right">Tokens In</th>
+                              <th className="px-4 py-3 text-right">Tokens Out</th>
+                              <th className="px-4 py-3 text-right">Cost</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100 bg-white">
+                            {area.runs.map((run) => (
+                              <tr key={`${run.source}:${run.job_id ?? run.run_label}:${run.model}`}>
+                                <td className="px-4 py-3 font-medium text-gray-900">
+                                  {run.app_run_id != null ? (
+                                    <a
+                                      href={`/console/runs/${run.app_run_id}`}
+                                      className="text-indigo-700 hover:underline"
+                                    >
+                                      {run.run_label}
+                                    </a>
+                                  ) : run.run_label}
+                                  {run.job_id != null ? (
+                                    <div className="text-xs font-normal text-gray-500">
+                                      Job #{run.job_id}
+                                      {run.stage != null ? ` · Stage ${run.stage}` : ''}
+                                    </div>
+                                  ) : null}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-gray-600">
+                                  {formatTimestamp(run.timestamp)}
+                                </td>
+                                <td className="px-4 py-3 text-gray-600">{run.workflow}</td>
+                                <td className="px-4 py-3 text-gray-700">
+                                  {formatStatus(run.status)}
+                                </td>
+                                <td className="px-4 py-3 text-right text-gray-800">
+                                  {formatNumber(run.requests)}
+                                </td>
+                                <td className="px-4 py-3 text-right text-gray-800">
+                                  {formatNumber(run.tokens_in)}
+                                </td>
+                                <td className="px-4 py-3 text-right text-gray-800">
+                                  {formatNumber(run.tokens_out)}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-gray-900">
+                                  {formatCost(run.estimated_cost_inr, run.estimated_cost)}
+                                  <div className="text-xs font-normal text-gray-500">
+                                    {formatUsd(run.estimated_cost)}
+                                  </div>
+                                  {run.measurement === 'actual' ? (
+                                    <div className="text-xs font-semibold text-emerald-700">Actual</div>
+                                  ) : run.measurement === 'reconciled' ? (
+                                    <div className="text-xs font-semibold text-amber-700">Reconciled</div>
+                                  ) : (
+                                    <div className="text-xs text-gray-500">Estimated</div>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="px-4 py-4 text-sm text-gray-500">
+                        No individual run attribution is available for this provider total.
+                      </div>
+                    )}
+                    {area.runs.some((run) => run.measurement === 'reconciled') ? (
+                      <p className="border-t border-amber-100 bg-amber-50 px-4 py-2 text-xs text-amber-800">
+                        Reconciled rows preserve the provider&apos;s exact daily total and allocate it across runs using persisted run telemetry.
+                      </p>
+                    ) : null}
+                  </section>
+                ))}
               </div>
             </div>
           ))}
