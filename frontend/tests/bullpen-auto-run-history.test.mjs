@@ -269,7 +269,10 @@ test("Stage 1 all-scanned count downloads the maximum available CLI fields", () 
   assert.match(stageOneExcel, /"Market Context"/);
   assert.match(stageOneExcel, /"Resolution Source"/);
   assert.match(stageOneExcel, /"Preflight Evidence"/);
-  assert.match(stageOneExcel, /sheet: exportScope === "all-scanned"/);
+  assert.match(
+    stageOneExcel,
+    /sheet:\s*exportScope === "all-scanned"/,
+  );
   assert.match(stageOneExcel, /bullpen-stage-1-\$\{exportScope\}-events/);
 });
 
