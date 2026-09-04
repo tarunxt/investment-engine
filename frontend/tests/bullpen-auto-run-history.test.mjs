@@ -241,6 +241,8 @@ test("Stage 1 filtered events can be downloaded as a complete Excel workbook", (
     /candidates: filteredEventRows,[\s\S]*?scanCompletedAt: stage\.timerCompletedAt/,
   );
   assert.match(stageOneExcel, /write-excel-file\/browser/);
+  assert.match(stageOneExcel, /backgroundColor: "#E2F3EA"/);
+  assert.match(stageOneExcel, /textColor: "#14532D"/);
   assert.match(stageOneExcel, /"Condition ID"/);
   assert.match(stageOneExcel, /"Current Yes Odds \(%\)"/);
   assert.match(stageOneExcel, /"LLM Yes Odds \(%\)"/);

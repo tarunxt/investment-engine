@@ -91,8 +91,8 @@ export async function downloadStageOneFilteredEventsExcel({
   const headerRow = EXCEL_HEADERS.map((value) => ({
     value,
     fontWeight: "bold" as const,
-    backgroundColor: "E2F3EA",
-    textColor: "14532D",
+    backgroundColor: "#E2F3EA",
+    textColor: "#14532D",
     wrap: true,
   }));
   const dataRows = rows.map((row) =>
