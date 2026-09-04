@@ -4873,6 +4873,10 @@ async def test_console_profile_reviews_all_stage1_events_before_building_ranked_
 
     buy_decisions = [decision for decision in result.decisions if decision.decision == "BUY_NEW"]
 
+    assert [
+        row["returns_per_day"]
+        for row in result.run.stage_results[0].outputs["accepted_candidates"]
+    ] == [1.5, 2.0]
     assert result.run.stage_results[1].outputs["llm_candidate_count"] == 2
     assert len(buy_decisions) == 2
     assert all(decision.order_plan is not None for decision in buy_decisions)
