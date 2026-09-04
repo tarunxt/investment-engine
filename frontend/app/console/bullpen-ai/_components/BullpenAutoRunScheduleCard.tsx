@@ -4157,6 +4157,33 @@ function buildStageOneOpportunityTableEvent(
   };
 }
 
+function stageOneActiveOddsLookupId(
+  position: ScanCandidateDialogState["activePositions"][number],
+  index: number,
+) {
+  const exactIdentity =
+    position.conditionId ??
+    position.slug ??
+    position.marketUrl ??
+    position.marketId ??
+    position.marketTitle;
+  return `stage-one-active-odds-${index}-${exactIdentity}`;
+}
+
+function stageOneCandidateOddsLookupId(
+  candidate: ScanCandidateDialogCandidate,
+  index: number,
+) {
+  const exactIdentity =
+    candidate.conditionId ??
+    candidate.slug ??
+    candidate.marketUrl ??
+    candidate.marketId ??
+    candidate.questionId ??
+    candidate.question;
+  return `stage-one-candidate-odds-${index}-${exactIdentity}`;
+}
+
 function StageOneOutputDialog({
   state,
   onClose,
@@ -4179,11 +4206,7 @@ function StageOneOutputDialog({
     if (state.mode === "all-scanned") return;
     const lookupRows = [
       ...state.activePositions.map((position, index) => ({
-        id:
-          position.marketId ||
-          position.conditionId ||
-          position.slug ||
-          `active-position-${index + 1}`,
+        id: stageOneActiveOddsLookupId(position, index),
         conditionId: position.conditionId,
         slug: position.slug,
         marketUrl: position.marketUrl,
@@ -4191,11 +4214,7 @@ function StageOneOutputDialog({
         category: position.theme,
       })),
       ...state.candidates.map((candidate, index) => ({
-        id:
-          candidate.marketId ||
-          candidate.questionId ||
-          candidate.slug ||
-          `fresh-opportunity-${index + 1}`,
+        id: stageOneCandidateOddsLookupId(candidate, index),
         conditionId: candidate.conditionId,
         slug: candidate.slug,
         marketUrl: candidate.marketUrl,
@@ -4255,8 +4274,9 @@ function StageOneOutputDialog({
   const enrichLatestOdds = (
     event: BullpenEventTableSnapshot,
     chosenSide?: string | null,
+    lookupId: string = event.market_id,
   ): BullpenEventTableSnapshot => {
-    const market = latestOdds[event.market_id];
+    const market = latestOdds[lookupId];
     const currentYesOdds =
       typeof market?.yesOdds === "number"
         ? market.yesOdds
@@ -4335,6 +4355,7 @@ function StageOneOutputDialog({
         ? { ...event, close_time: matchingCandidateCloseTime }
         : event,
       position.side,
+      stageOneActiveOddsLookupId(position, index),
     );
   });
   const freshOpportunityEvents = state.candidates.map((candidate, index) => {
@@ -4351,6 +4372,7 @@ function StageOneOutputDialog({
     return enrichLatestOdds(
       buildStageOneOpportunityTableEvent(candidate, index),
       activeSide,
+      stageOneCandidateOddsLookupId(candidate, index),
     );
   });
   return (
