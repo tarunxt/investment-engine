@@ -143,6 +143,8 @@ test("Stage 1 and history refresh exact contracts instead of shared parent event
   );
   assert.match(historyScreen, /conditionId: event\.condition_id \?\? null/);
   assert.match(historyScreen, /slug: event\.slug \?\? null/);
+  assert.match(scheduleCard, /const candidateCloseTimeByKey = new Map/);
+  assert.match(scheduleCard, /matchingCandidateCloseTime/);
 });
 
 test("Run History Returns/day header opens a persistent Excel-style formula editor", () => {
