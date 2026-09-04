@@ -19,20 +19,28 @@ export function BullpenScanFiltersPopupBridge() {
   const [detailId, setDetailId] = useState<BullpenScanFilterDetailId | null>(null);
   const [oddsFloor, setOddsFloor] = useState(5);
   const [savedOddsFloor, setSavedOddsFloor] = useState(5);
+  const [maxClosingDays, setMaxClosingDays] = useState(30);
+  const [savedMaxClosingDays, setSavedMaxClosingDays] = useState(30);
   const [isFloorLoading, setIsFloorLoading] = useState(false);
   const [isFloorSaving, setIsFloorSaving] = useState(false);
+  const [isClosingDaysSaving, setIsClosingDaysSaving] = useState(false);
   const [floorMessage, setFloorMessage] = useState<string | null>(null);
+  const [closingDaysMessage, setClosingDaysMessage] = useState<string | null>(null);
   const [customExcludePhrases, setCustomExcludePhrases] = useState<string[]>([]);
 
   useEffect(() => {
     async function loadOddsFloor() {
       setIsFloorLoading(true);
       setFloorMessage(null);
+      setClosingDaysMessage(null);
       try {
         const settings = await apiService.getBullpenAutoLiveSettings();
         const saved = settings.console_min_market_odds ?? 5;
+        const savedClosingDays = settings.console_max_closing_days ?? 30;
         setOddsFloor(saved);
         setSavedOddsFloor(saved);
+        setMaxClosingDays(savedClosingDays);
+        setSavedMaxClosingDays(savedClosingDays);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
       } catch {
         setFloorMessage("Could not load the saved odds floor. The default 5% is shown.");
@@ -93,6 +101,30 @@ export function BullpenScanFiltersPopupBridge() {
     }
   }
 
+  async function saveMaxClosingDays() {
+    if (!Number.isInteger(maxClosingDays) || maxClosingDays < 1) {
+      setClosingDaysMessage("Enter a whole number of at least 1 day.");
+      return;
+    }
+    setIsClosingDaysSaving(true);
+    setClosingDaysMessage(null);
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        console_max_closing_days: maxClosingDays,
+      });
+      const saved = settings.console_max_closing_days;
+      setMaxClosingDays(saved);
+      setSavedMaxClosingDays(saved);
+      setClosingDaysMessage(
+        `Saved. Future Stage 1 scans will include events expiring within ${saved} day${saved === 1 ? "" : "s"}.`,
+      );
+    } catch {
+      setClosingDaysMessage("The expiry window could not be saved. Please try again.");
+    } finally {
+      setIsClosingDaysSaving(false);
+    }
+  }
+
   async function saveCustomExcludePhrases(phrases: string[]) {
     setFloorMessage(null);
     try {
@@ -150,6 +182,47 @@ export function BullpenScanFiltersPopupBridge() {
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
             <div className="space-y-3">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="max-w-xl">
+                    <p className="font-semibold text-slate-950 dark:text-slate-50">
+                      Maximum days until expiry
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                      Include only events expiring within this many days. The saved value is used by every future Stage 1 scan until you change it.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <label className="relative">
+                      <span className="sr-only">Maximum days until event expiry</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        value={maxClosingDays}
+                        disabled={isFloorLoading || isClosingDaysSaving}
+                        onChange={(event) => setMaxClosingDays(Number(event.target.value))}
+                        className="h-10 w-28 rounded-xl border border-slate-300 bg-white px-3 pr-12 text-sm font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50"
+                      />
+                      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">days</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void saveMaxClosingDays()}
+                      disabled={isFloorLoading || isClosingDaysSaving || maxClosingDays === savedMaxClosingDays}
+                      className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isClosingDaysSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                      Save window
+                    </button>
+                  </div>
+                </div>
+                {closingDaysMessage ? (
+                  <p className="mt-3 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">
+                    {closingDaysMessage}
+                  </p>
+                ) : null}
+              </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div className="max-w-xl">
