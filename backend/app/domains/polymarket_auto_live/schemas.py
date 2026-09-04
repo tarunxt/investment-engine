@@ -1266,6 +1266,8 @@ class BullpenAutoLiveHistoryPage(BaseModel):
 
 class BullpenAutoLiveEventTrend(BaseModel):
     market_id: str
+    condition_id: str | None = None
+    slug: str | None = None
     market_title: str
     market_url: str | None = None
     close_time: str | None = None
