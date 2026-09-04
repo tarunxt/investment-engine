@@ -15,6 +15,10 @@ type LlmUsageBreakdownItem = {
   tokens_out: number;
   estimated_cost: number;
   estimated_cost_inr: number | null;
+  measurement?: 'actual' | 'estimated';
+  cache_hit_tokens?: number;
+  cache_miss_tokens?: number;
+  source_note?: string | null;
 };
 
 type LlmUsageBreakdownResponse = {
@@ -44,8 +48,18 @@ type UsageGroup = {
   };
 };
 
-function todayUtcIso() {
-  return new Date().toISOString().slice(0, 10);
+const API_TIMEZONE = 'Asia/Kolkata';
+
+function todayUsageIso() {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: API_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 function shiftIsoDate(isoDate: string, days: number) {
@@ -61,7 +75,7 @@ function formatDate(isoDate: string) {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
-    timeZone: 'UTC',
+    timeZone: API_TIMEZONE,
   });
 }
 
@@ -120,11 +134,11 @@ function buildGroups(items: LlmUsageBreakdownItem[]): UsageGroup[] {
 }
 
 export default function LlmUsageBreakdown() {
-  const [selectedDate, setSelectedDate] = useState(todayUtcIso);
+  const [selectedDate, setSelectedDate] = useState(todayUsageIso);
   const [data, setData] = useState<LlmUsageBreakdownResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const today = todayUtcIso();
+  const today = todayUsageIso();
 
   const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -172,8 +186,13 @@ export default function LlmUsageBreakdown() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
+    const timer = window.setTimeout(() => {
+      void load(controller.signal);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [load]);
 
   const groups = useMemo(() => buildGroups(data?.items ?? []), [data]);
@@ -186,8 +205,8 @@ export default function LlmUsageBreakdown() {
             LLM API Usage Breakdown
           </h2>
           <p className="text-sm text-gray-600">
-            Recorded usage by model and Cred-X workflow for the selected UTC day.
-            Bullpen requests expand individual batches, retries and recovery calls.
+            Actual provider-ledger usage where available; older days fall back to
+            reconstructed Cred-X job estimates.
           </p>
         </div>
         <button
@@ -232,7 +251,7 @@ export default function LlmUsageBreakdown() {
           </div>
         </label>
         <div className="pb-2 text-sm font-medium text-gray-700">
-          {formatDate(selectedDate)} · UTC
+          {formatDate(selectedDate)} · {data?.timezone ?? API_TIMEZONE}
         </div>
       </div>
 
@@ -277,7 +296,7 @@ export default function LlmUsageBreakdown() {
                       <th className="px-4 py-3 text-right">Requests</th>
                       <th className="px-4 py-3 text-right">Tokens In</th>
                       <th className="px-4 py-3 text-right">Tokens Out</th>
-                      <th className="px-4 py-3 text-right">Est. Cost</th>
+                      <th className="px-4 py-3 text-right">Cost</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -285,6 +304,11 @@ export default function LlmUsageBreakdown() {
                       <tr key={`${item.source}:${item.workflow}`}>
                         <td className="px-4 py-3 font-medium text-gray-900">
                           {item.source_label}
+                          {item.measurement === 'actual' && (item.cache_hit_tokens || item.cache_miss_tokens) ? (
+                            <div className="mt-1 text-xs font-normal text-gray-500">
+                              Cache hit {formatNumber(item.cache_hit_tokens ?? 0)} · cache miss {formatNumber(item.cache_miss_tokens ?? 0)}
+                            </div>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3 text-gray-600">{item.workflow}</td>
                         <td className="px-4 py-3 text-right text-gray-800">
@@ -298,6 +322,9 @@ export default function LlmUsageBreakdown() {
                         </td>
                         <td className="px-4 py-3 text-right font-medium text-gray-900">
                           {formatCost(item.estimated_cost_inr, item.estimated_cost)}
+                          {item.measurement === 'actual' ? (
+                            <div className="text-xs font-semibold text-emerald-700">Actual</div>
+                          ) : null}
                         </td>
                       </tr>
                     ))}

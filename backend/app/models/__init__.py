@@ -1,6 +1,10 @@
 """Canonical model imports for SQLAlchemy metadata discovery."""
 
 from app.domains.auth.models import ActivityLog, APIKey, User, UserProfile, UserSession
+from app.domains.api_usage.models import (
+    LlmProviderUsageCallRecord,
+    LlmProviderUsageDailySnapshot,
+)
 from app.domains.bullpen_run_audit.models import (
     BullpenRunAuditBlobRecord,
     BullpenRunAuditEventRecord,
@@ -122,6 +126,8 @@ __all__ = [
     "GoogleSheetsCredential",
     "IndMoneyUsPortfolioSnapshot",
     "Job",
+    "LlmProviderUsageCallRecord",
+    "LlmProviderUsageDailySnapshot",
     "OutboxMessage",
     "PolymarketAutoLiveDecisionRecord",
     "PolymarketAutoLiveOrderAttemptRecord",

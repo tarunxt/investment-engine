@@ -1,8 +1,10 @@
 from types import SimpleNamespace
+from datetime import UTC, datetime
 
 from app.domains.api_usage.corrected_router import (
     _aggregate_usage,
     _classify_job_usage,
+    _effective_usage_rows,
     _job_request_count,
 )
 
@@ -97,3 +99,50 @@ def test_usage_aggregation_keeps_model_and_workflow_breakdown():
     assert totals["deepseek"]["cost"] == 0.3
     assert {item["source"] for item in items} == {"bullpen", "zerodha"}
     assert {item["estimated_cost_inr"] for item in items} == {22.5, 4.5}
+
+
+def _usage_row(*, day: int, source: str, requests: int, tokens_in: int, cost: float):
+    return {
+        "provider": "deepseek",
+        "provider_name": "DeepSeek",
+        "model": "deepseek-v4-flash",
+        "source": source,
+        "source_label": source,
+        "workflow": source,
+        "requests": requests,
+        "tokens_in": tokens_in,
+        "tokens_out": 10,
+        "estimated_cost": cost,
+        "occurred_at": datetime(2026, 9, day, 6, tzinfo=UTC),
+        "record_kind": source,
+        "record_id": day,
+    }
+
+
+def test_provider_snapshot_replaces_incomplete_job_estimate_for_same_day():
+    local = [_usage_row(day=3, source="job", requests=163, tokens_in=1_025_454, cost=0.1018)]
+    snapshot = [_usage_row(day=3, source="provider_snapshot", requests=232, tokens_in=4_238_239, cost=2.84)]
+
+    rows = _effective_usage_rows(local, [], snapshot)
+
+    assert rows == snapshot
+
+
+def test_durable_provider_calls_replace_jobs_after_ledger_rollout():
+    local = [_usage_row(day=5, source="job", requests=1, tokens_in=100, cost=0.01)]
+    calls = [_usage_row(day=5, source="provider_ledger", requests=1, tokens_in=500, cost=0.05)]
+
+    rows = _effective_usage_rows(local, calls, [])
+
+    assert rows == calls
+    assert rows[0]["measurement"] == "actual"
+
+
+def test_rollout_day_keeps_job_estimate_until_full_day_ledger_exists():
+    local = [_usage_row(day=4, source="job", requests=2, tokens_in=200, cost=0.02)]
+    partial_calls = [_usage_row(day=4, source="provider_ledger", requests=1, tokens_in=100, cost=0.01)]
+
+    rows = _effective_usage_rows(local, partial_calls, [])
+
+    assert rows == local
+    assert rows[0]["measurement"] == "estimated"

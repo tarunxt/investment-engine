@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,6 +19,10 @@ from app.domains.api_usage.router import (
 )
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import User
+from app.domains.api_usage.models import (
+    LlmProviderUsageCallRecord,
+    LlmProviderUsageDailySnapshot,
+)
 from app.domains.bullpen_run_audit.models import (
     BullpenRunAuditFeedbackRecord,
     BullpenRunAuditFeedbackSubcallRecord,
@@ -28,6 +32,8 @@ from app.domains.jobs.models import Job
 from app.infrastructure.database.session import get_async_db
 
 router = APIRouter(prefix="/api-usage", tags=["api-usage"])
+
+PROVIDER_LEDGER_COMPLETE_FROM_DATE = date(2026, 9, 5)
 
 
 def _safe_int(value: object, default: int = 0) -> int:
@@ -213,21 +219,175 @@ async def _load_usage_rows(
     return rows
 
 
+async def _load_provider_call_rows(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> list[dict[str, Any]]:
+    start_aware = start_utc.replace(tzinfo=UTC)
+    end_aware = end_utc.replace(tzinfo=UTC)
+    records = (
+        await db.execute(
+            select(LlmProviderUsageCallRecord)
+            .where(
+                LlmProviderUsageCallRecord.user_id == user_id,
+                LlmProviderUsageCallRecord.occurred_at >= start_aware,
+                LlmProviderUsageCallRecord.occurred_at < end_aware,
+            )
+            .order_by(
+                LlmProviderUsageCallRecord.occurred_at.asc(),
+                LlmProviderUsageCallRecord.id.asc(),
+            )
+        )
+    ).scalars().all()
+    return [
+        _new_usage_row(
+            provider=record.provider,
+            model=record.model,
+            source_key="provider_ledger",
+            source_label=f"{LLM_PROVIDER_LABELS.get(record.provider, record.provider.title())} ledger",
+            workflow="Durably recorded provider response",
+            requests=1,
+            tokens_in=int(record.tokens_in),
+            tokens_out=int(record.tokens_out),
+            estimated_cost=float(record.actual_cost),
+            occurred_at=record.occurred_at,
+            record_kind="provider_usage_call",
+            record_id=record.id,
+        )
+        for record in records
+    ]
+
+
+async def _load_provider_snapshot_rows(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    start_day: date,
+    end_day: date,
+) -> list[dict[str, Any]]:
+    snapshots = (
+        await db.execute(
+            select(LlmProviderUsageDailySnapshot)
+            .where(
+                LlmProviderUsageDailySnapshot.user_id == user_id,
+                LlmProviderUsageDailySnapshot.timezone == str(API_USAGE_TZ),
+                LlmProviderUsageDailySnapshot.usage_date >= start_day,
+                LlmProviderUsageDailySnapshot.usage_date <= end_day,
+            )
+            .order_by(
+                LlmProviderUsageDailySnapshot.usage_date.asc(),
+                LlmProviderUsageDailySnapshot.id.asc(),
+            )
+        )
+    ).scalars().all()
+    rows: list[dict[str, Any]] = []
+    for snapshot in snapshots:
+        occurred_at = datetime.combine(
+            snapshot.usage_date,
+            time(hour=12),
+            tzinfo=API_USAGE_TZ,
+        ).astimezone(UTC)
+        row = _new_usage_row(
+            provider=snapshot.provider,
+            model=snapshot.model,
+            source_key="provider_snapshot",
+            source_label=f"{LLM_PROVIDER_LABELS.get(snapshot.provider, snapshot.provider.title())} provider ledger",
+            workflow="Authoritative daily provider total",
+            requests=snapshot.requests,
+            tokens_in=snapshot.tokens_in,
+            tokens_out=snapshot.tokens_out,
+            estimated_cost=snapshot.actual_cost,
+            occurred_at=occurred_at,
+            record_kind="provider_usage_daily_snapshot",
+            record_id=snapshot.id,
+        )
+        row["measurement"] = "actual"
+        row["cache_hit_tokens"] = int(snapshot.cache_hit_tokens)
+        row["cache_miss_tokens"] = int(snapshot.cache_miss_tokens)
+        row["source_note"] = snapshot.source
+        rows.append(row)
+    return rows
+
+
+def _effective_usage_rows(
+    local_rows: list[dict[str, Any]],
+    call_rows: list[dict[str, Any]],
+    snapshot_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Choose one source of truth for every provider calendar day."""
+
+    def bucket(rows: list[dict[str, Any]]) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            grouped[(str(row["provider"]), _usage_day_string(row["occurred_at"]))].append(row)
+        return grouped
+
+    local_by_day = bucket(local_rows)
+    calls_by_day = bucket(call_rows)
+    snapshots_by_day = bucket(snapshot_rows)
+    keys = set(local_by_day) | set(calls_by_day) | set(snapshots_by_day)
+    effective: list[dict[str, Any]] = []
+    for key in sorted(keys):
+        if key in snapshots_by_day:
+            effective.extend(snapshots_by_day[key])
+            continue
+        usage_day = date.fromisoformat(key[1])
+        if usage_day >= PROVIDER_LEDGER_COMPLETE_FROM_DATE and key in calls_by_day:
+            for row in calls_by_day[key]:
+                row["measurement"] = "actual"
+            effective.extend(calls_by_day[key])
+            continue
+        for row in local_by_day.get(key, []):
+            row["measurement"] = "estimated"
+        effective.extend(local_by_day.get(key, []))
+    return effective
+
+
+async def _load_effective_usage_rows(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> list[dict[str, Any]]:
+    local_rows = await _load_usage_rows(
+        db, user_id=user_id, start_utc=start_utc, end_utc=end_utc
+    )
+    call_rows = await _load_provider_call_rows(
+        db, user_id=user_id, start_utc=start_utc, end_utc=end_utc
+    )
+    start_day = start_utc.replace(tzinfo=UTC).astimezone(API_USAGE_TZ).date()
+    end_day = (
+        (end_utc - timedelta(microseconds=1))
+        .replace(tzinfo=UTC)
+        .astimezone(API_USAGE_TZ)
+        .date()
+    )
+    snapshot_rows = await _load_provider_snapshot_rows(
+        db, user_id=user_id, start_day=start_day, end_day=end_day
+    )
+    return _effective_usage_rows(local_rows, call_rows, snapshot_rows)
+
+
 def _aggregate_usage(
     rows: list[dict[str, Any]],
     *,
     usd_inr_rate: float | None,
-) -> tuple[list[dict[str, Any]], dict[str, dict[str, float | int]]]:
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     grouped: dict[
         tuple[str, str, str, str, str],
         dict[str, Any],
     ] = {}
-    provider_totals: dict[str, dict[str, float | int]] = defaultdict(
+    provider_totals: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
             "requests": 0,
             "tokens_in": 0,
             "tokens_out": 0,
             "cost": 0.0,
+            "measurement": "estimated",
         }
     )
 
@@ -246,6 +406,8 @@ def _aggregate_usage(
         provider_total["cost"] = float(provider_total["cost"]) + float(
             row["estimated_cost"]
         )
+        if row.get("measurement") == "actual":
+            provider_total["measurement"] = "actual"
 
         key = (
             provider,
@@ -267,12 +429,18 @@ def _aggregate_usage(
                 "tokens_in": 0,
                 "tokens_out": 0,
                 "estimated_cost": 0.0,
+                "measurement": row.get("measurement", "estimated"),
+                "cache_hit_tokens": 0,
+                "cache_miss_tokens": 0,
+                "source_note": row.get("source_note"),
             },
         )
         item["requests"] += int(row["requests"])
         item["tokens_in"] += int(row["tokens_in"])
         item["tokens_out"] += int(row["tokens_out"])
         item["estimated_cost"] += float(row["estimated_cost"])
+        item["cache_hit_tokens"] += int(row.get("cache_hit_tokens", 0))
+        item["cache_miss_tokens"] += int(row.get("cache_miss_tokens", 0))
 
     items: list[dict[str, Any]] = []
     for item in grouped.values():
@@ -297,7 +465,7 @@ def _aggregate_usage(
 
 def _patch_summary_llm_items(
     summary: dict[str, Any],
-    provider_totals: dict[str, dict[str, float | int]],
+    provider_totals: dict[str, dict[str, Any]],
 ) -> None:
     usd_inr_rate = summary.get("usd_inr_rate")
     if not isinstance(usd_inr_rate, (int, float)):
@@ -334,7 +502,13 @@ def _patch_summary_llm_items(
 
         totals = provider_totals.get(
             provider,
-            {"requests": 0, "tokens_in": 0, "tokens_out": 0, "cost": 0.0},
+            {
+                "requests": 0,
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "cost": 0.0,
+                "measurement": "estimated",
+            },
         )
         cost = round(float(totals["cost"]), 6)
         item["daily_requests"] = int(totals["requests"])
@@ -342,10 +516,15 @@ def _patch_summary_llm_items(
         item["daily_tokens_out"] = int(totals["tokens_out"])
         item["daily_estimated_cost"] = cost
         item["daily_estimated_cost_inr"] = _convert_usd_to_inr(cost, usd_inr_rate)
+        item["usage_measurement"] = totals.get("measurement", "estimated")
         existing_note = str(item.get("notes") or "").strip()
         accuracy_note = (
-            "Requests expand persisted Bullpen batches, retries and recovery calls; "
-            "run-audit provider subcalls are included."
+            "Actual provider-ledger requests, tokens and cost."
+            if totals.get("measurement") == "actual"
+            else (
+                "Estimated from persisted Cred-X jobs; provider-ledger data is not "
+                "available for this day."
+            )
         )
         item["notes"] = (
             f"{existing_note} {accuracy_note}".strip()
@@ -370,7 +549,7 @@ async def corrected_api_usage_summary(
         current_user=current_user,
     )
     start_utc, end_utc, _ = _window_utc(period, custom_start, custom_end)
-    rows = await _load_usage_rows(
+    rows = await _load_effective_usage_rows(
         db,
         user_id=current_user.id,
         start_utc=start_utc,
@@ -385,6 +564,7 @@ async def corrected_api_usage_summary(
         "request_metric": "outbound_provider_calls",
         "bullpen_batch_requests_expanded": True,
         "bullpen_run_audit_subcalls_included": True,
+        "provider_ledger_preferred": True,
         "historical_limit": (
             "Older non-Bullpen jobs may only retain a lower-bound request count "
             "when the provider adapter performed internal tool or repair rounds."
@@ -403,7 +583,7 @@ async def llm_usage_breakdown(
 ):
     start_utc, end_utc, period_label = _window_utc(period, custom_start, custom_end)
     fx = await load_persisted_usd_inr_rate()
-    rows = await _load_usage_rows(
+    rows = await _load_effective_usage_rows(
         db,
         user_id=current_user.id,
         start_utc=start_utc,
@@ -413,12 +593,19 @@ async def llm_usage_breakdown(
         rows,
         usd_inr_rate=fx.valid_value,
     )
+    from_day = start_utc.replace(tzinfo=UTC).astimezone(API_USAGE_TZ).date()
+    to_day = (
+        (end_utc - timedelta(microseconds=1))
+        .replace(tzinfo=UTC)
+        .astimezone(API_USAGE_TZ)
+        .date()
+    )
     return {
-        "timezone": "UTC",
+        "timezone": str(API_USAGE_TZ),
         "period": period,
         "period_label": period_label,
-        "from_date": start_utc.date().isoformat(),
-        "to_date": (end_utc - timedelta(microseconds=1)).date().isoformat(),
+        "from_date": from_day.isoformat(),
+        "to_date": to_day.isoformat(),
         "usd_inr_rate": (
             round(fx.valid_value, 4) if fx.valid_value is not None else None
         ),
@@ -429,9 +616,9 @@ async def llm_usage_breakdown(
         "items": items,
         "provider_totals": provider_totals,
         "coverage_note": (
-            "All persisted LLM jobs are included. Bullpen Stage 2 batch attempts, "
-            "retries and recovery calls are expanded from runtime metadata, and "
-            "Bullpen run-audit feedback subcalls are included separately."
+            "Authoritative provider snapshots and durably recorded provider responses "
+            "take precedence over job-derived estimates. Job attribution is used only "
+            "when a provider-ledger day is not available."
         ),
     }
 
@@ -459,7 +646,7 @@ async def corrected_llm_cost_history(
     today = datetime.now(API_USAGE_TZ).date()
     oldest_day = today - timedelta(days=day_limit - 1)
     start_utc, end_utc, _ = _window_utc("custom", oldest_day, today)
-    rows = await _load_usage_rows(
+    rows = await _load_effective_usage_rows(
         db,
         user_id=current_user.id,
         start_utc=start_utc,
@@ -502,7 +689,7 @@ async def corrected_llm_cost_history(
     ]
     payload["request_metric"] = "outbound_provider_calls"
     payload["coverage_note"] = (
-        "Bullpen batch/retry/recovery requests and run-audit subcalls are included "
-        "in day totals. The legacy run list remains job-oriented."
+        "Provider-ledger totals take precedence over reconstructed job estimates. "
+        "The legacy run list remains job-oriented."
     )
     return payload

@@ -619,6 +619,7 @@ export interface ApiUsageItem {
   gemini_key_in_use?: boolean;
   gemini_key_consumed?: boolean;
   gemini_key_hidden_default?: boolean;
+  usage_measurement?: 'actual' | 'estimated';
 }
 
 

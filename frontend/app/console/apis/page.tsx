@@ -7,7 +7,7 @@ import { ApiUsageItem, ApiUsageSummaryResponse, LlmCostHistoryResponse } from '@
 
 type Period = 'day' | 'week' | 'month' | 'custom';
 
-const API_TIMEZONE = 'UTC';
+const API_TIMEZONE = 'Asia/Kolkata';
 
 const COMBINED_LLM_PROVIDERS = [
   { key: 'openai', name: 'OpenAI', color: '#4f46e5' },
@@ -92,6 +92,10 @@ function formatUsd(value: number) {
 
 function formatConvertedCost(inr: number | null, usd: number) {
   return inr == null ? `${formatUsd(usd)} (FX unavailable)` : formatInr(inr);
+}
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 0 }).format(value);
 }
 
 function formatFxTimestamp(value: string | null | undefined) {
@@ -204,7 +208,7 @@ function CombinedLlmCostChart({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-gray-950">Combined LLM API Cost Trend</h2>
-          <p className="text-sm text-gray-600">Daily estimated API cost by provider using UTC day buckets to align with provider consoles. Y-axis is INR cost; X-axis is day.</p>
+          <p className="text-sm text-gray-600">Daily API cost by provider using Asia/Kolkata calendar days. Provider-ledger totals are used where available; Y-axis is INR cost and X-axis is day.</p>
         </div>
         <div className="flex flex-wrap gap-3" aria-label="Toggle LLM API cost lines">
           {COMBINED_LLM_PROVIDERS.map((provider) => (
@@ -426,7 +430,7 @@ function LlmCostHistoryModal({
           <div>
             <h2 className="text-lg font-semibold text-gray-950">LLM Cost History</h2>
             <p className="text-sm text-gray-600">
-              {history?.name ?? 'LLM'} cost history across Cred-X recorded runs (UTC days, matching provider console dates).
+              {history?.name ?? 'LLM'} cost history across Asia/Kolkata calendar days. Provider-ledger totals take precedence over job estimates.
             </p>
             {history?.fx_status === 'valid' && history.usd_inr_rate != null ? (
               <p className="text-xs text-gray-500">
@@ -853,7 +857,7 @@ export default function ApisPage() {
               <th className="px-4 py-3">Requests</th>
               <th className="px-4 py-3">Tokens In</th>
               <th className="px-4 py-3">Tokens Out</th>
-              <th className="px-4 py-3">Est. Cost</th>
+              <th className="px-4 py-3">Cost</th>
               <th className="px-4 py-3">Limit / Day</th>
               <th className="px-4 py-3">Notes</th>
             </tr>
@@ -906,9 +910,9 @@ export default function ApisPage() {
                       {item.configured ? 'Yes' : 'No'}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-800">{item.daily_requests}</td>
-                  <td className="px-4 py-3 text-gray-800">{item.daily_tokens_in}</td>
-                  <td className="px-4 py-3 text-gray-800">{item.daily_tokens_out}</td>
+                  <td className="px-4 py-3 text-gray-800">{formatInteger(item.daily_requests)}</td>
+                  <td className="px-4 py-3 text-gray-800">{formatInteger(item.daily_tokens_in)}</td>
+                  <td className="px-4 py-3 text-gray-800">{formatInteger(item.daily_tokens_out)}</td>
                   <td className="px-4 py-3 text-gray-800">
                     {llmProviderKey ? (
                       <button
@@ -922,6 +926,11 @@ export default function ApisPage() {
                     ) : (
                       <>{formatConvertedCost(item.daily_estimated_cost_inr, item.daily_estimated_cost)}</>
                     )}
+                    {item.usage_measurement === 'actual' ? (
+                      <div className="mt-1 text-xs font-semibold text-emerald-700">
+                        Actual provider total · {formatUsd(item.daily_estimated_cost)}
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-gray-600">{item.daily_limit_requests ?? 'Provider plan'}</td>
                   <td className="px-4 py-3 text-gray-600">{item.notes ?? '-'}</td>

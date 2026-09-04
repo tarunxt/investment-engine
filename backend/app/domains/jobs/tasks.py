@@ -13,6 +13,10 @@ from app.core.config import settings
 from app.core.logging import WorkerLogHelper, get_logger
 from app.domains.ai_providers.availability import is_provider_capacity_error
 from app.domains.ai_providers.web_metadata import merge_web_metadata
+from app.domains.api_usage.recorder import (
+    reset_provider_usage_context,
+    set_provider_usage_context,
+)
 from app.domains.jobs.repository import SyncJobRepository
 from app.domains.jobs.models import Job
 from app.domains.jobs.failure_diagnostics import (
@@ -1149,6 +1153,7 @@ def execute_ai_job(self, job_id: int) -> None:
     web_sources: list[str] | None = None
     runtime_metadata_json: dict | None = None
     job: Job | None = None
+    provider_usage_token = None
 
     def failure_metadata(exc: Exception, *, retry_safe: bool) -> dict[str, object]:
         return merge_failure_diagnostics(
@@ -1172,6 +1177,10 @@ def execute_ai_job(self, job_id: int) -> None:
         if not job:
             logger.warning("Job %s not found", job_id)
             return
+        provider_usage_token = set_provider_usage_context(
+            user_id=getattr(job, "user_id", None),
+            job_id=job.id,
+        )
         if _job_was_cancelled(repo, job_id):
             logger.info("Skipping cancelled job %s", job_id)
             return
@@ -1575,4 +1584,5 @@ def execute_ai_job(self, job_id: int) -> None:
             logger.exception("Job %s exhausted all retries after: %s", job_id, exc)
 
     finally:
+        reset_provider_usage_context(provider_usage_token)
         db.close()
