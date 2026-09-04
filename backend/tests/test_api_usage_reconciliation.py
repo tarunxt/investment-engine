@@ -192,6 +192,35 @@ def test_provider_snapshot_is_reconciled_across_usage_areas_and_runs():
     assert {row["measurement"] for row in rows} == {"reconciled"}
 
 
+def test_bullpen_run_receives_unlinked_provider_call_remainder():
+    local = [
+        _usage_row(day=3, source="indmoney", requests=85, tokens_in=498_561, cost=0.055),
+        _usage_row(day=3, source="zerodha", requests=78, tokens_in=526_893, cost=0.047),
+        _usage_row(day=3, source="bullpen", requests=1, tokens_in=0, cost=0),
+    ]
+    local[-1]["record_kind"] = "bullpen_auto_live_run"
+    snapshot = _usage_row(
+        day=3,
+        source="provider_snapshot",
+        requests=232,
+        tokens_in=4_238_239,
+        cost=2.84,
+    )
+    snapshot["tokens_out"] = 2_708_635
+
+    rows = _run_breakdown_rows(local, [], [snapshot])
+    bullpen = next(row for row in rows if row["source"] == "bullpen")
+
+    assert bullpen["requests"] == 69
+    assert bullpen["tokens_in"] > 0
+    assert bullpen["tokens_out"] > 0
+    assert bullpen["estimated_cost"] > 0
+    assert sum(row["requests"] for row in rows) == 232
+    assert sum(row["tokens_in"] for row in rows) == 4_238_239
+    assert sum(row["tokens_out"] for row in rows) == 2_708_635
+    assert round(sum(row["estimated_cost"] for row in rows), 6) == 2.84
+
+
 def test_provider_calls_are_grouped_into_one_individual_run_row():
     calls = []
     for record_id, cost in ((1, 0.12), (2, 0.18)):

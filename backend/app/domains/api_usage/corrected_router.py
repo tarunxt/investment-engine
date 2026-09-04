@@ -327,16 +327,12 @@ async def _load_usage_rows(
 
     auto_live_rows: list[tuple[Any, ...]] = []
     if include_run_details:
-        target_runs_expression = PolymarketAutoLiveRunRecord.payload[
-            "stage_results"
-        ][1]["outputs"]["llm_target_runs"]
         auto_live_rows = (
             await db.execute(
                 select(
                     PolymarketAutoLiveRunRecord.id,
                     PolymarketAutoLiveRunRecord.status,
                     PolymarketAutoLiveRunRecord.started_at,
-                    target_runs_expression.label("llm_target_runs"),
                 )
                 .where(
                     PolymarketAutoLiveRunRecord.user_id == user_id,
@@ -350,58 +346,32 @@ async def _load_usage_rows(
             )
         ).all()
 
-    for run_id, run_status, run_started_at, target_runs in auto_live_rows:
-        if not isinstance(target_runs, list):
-            continue
-
+    for run_id, run_status, run_started_at in auto_live_rows:
         run_label = f"Bullpen run {run_id}"
-        for target_index, target in enumerate(target_runs, start=1):
-            if not isinstance(target, dict):
-                continue
-            provider = str(target.get("provider") or "").strip().lower()
-            model = str(
-                target.get("model") or target.get("requested_model") or ""
-            ).strip()
-            if not provider or not model:
-                continue
-            requests = (
-                _safe_int(target.get("primary_request_count"))
-                + _safe_int(target.get("retry_request_count"))
-                + _safe_int(target.get("recovery_batch_count"))
+        rows.append(
+            _new_usage_row(
+                provider="deepseek",
+                model="deepseek-v4-flash",
+                source_key="bullpen",
+                source_label="Bullpen",
+                workflow="Bullpen Auto-Live Stage 2",
+                requests=1,
+                tokens_in=0,
+                tokens_out=0,
+                estimated_cost=0,
+                occurred_at=run_started_at,
+                record_kind="bullpen_auto_live_run",
+                record_id=run_id,
+                run_metadata={
+                    "job_id": None,
+                    "app_run_id": None,
+                    "run_number": run_id,
+                    "run_label": run_label,
+                    "stage": 2,
+                    "status": str(run_status),
+                },
             )
-            tokens_in = _safe_int(target.get("tokens_in"))
-            tokens_out = _safe_int(target.get("tokens_out"))
-            estimated_cost = max(
-                0.0, float(target.get("estimated_cost") or 0.0)
-            )
-            if requests <= 0 and (tokens_in or tokens_out or estimated_cost):
-                requests = 1
-            if requests <= 0:
-                continue
-            rows.append(
-                _new_usage_row(
-                    provider=provider,
-                    model=model,
-                    source_key="bullpen",
-                    source_label="Bullpen",
-                    workflow="Bullpen Auto-Live Stage 2",
-                    requests=requests,
-                    tokens_in=tokens_in,
-                    tokens_out=tokens_out,
-                    estimated_cost=estimated_cost,
-                    occurred_at=run_started_at,
-                    record_kind="bullpen_auto_live_target",
-                    record_id=f"{run_id}:{target_index}",
-                    run_metadata={
-                        "job_id": None,
-                        "app_run_id": None,
-                        "run_number": run_id,
-                        "run_label": run_label,
-                        "stage": 2,
-                        "status": str(target.get("status") or run_status),
-                    },
-                )
-            )
+        )
 
     return rows
 
@@ -691,31 +661,57 @@ def _reconcile_snapshot_to_runs(
         )
         return [row]
 
+    request_weights = [int(row["requests"]) for row in candidates]
+    bullpen_indexes = [
+        index
+        for index, row in enumerate(candidates)
+        if row.get("record_kind") == "bullpen_auto_live_run"
+    ]
+    if bullpen_indexes:
+        linked_requests = sum(
+            weight
+            for index, weight in enumerate(request_weights)
+            if index not in bullpen_indexes
+        )
+        unmatched_requests = max(0, int(snapshot["requests"]) - linked_requests)
+        bullpen_weights = _allocate_integer_total(
+            unmatched_requests, [1 for _ in bullpen_indexes]
+        )
+        for index, weight in zip(bullpen_indexes, bullpen_weights, strict=True):
+            request_weights[index] = weight
+
     request_allocations = _allocate_integer_total(
-        int(snapshot["requests"]), [int(row["requests"]) for row in candidates]
+        int(snapshot["requests"]), request_weights
+    )
+    token_weights = (
+        request_weights
+        if bullpen_indexes
+        else [int(row["tokens_in"]) for row in candidates]
     )
     input_allocations = _allocate_integer_total(
-        int(snapshot["tokens_in"]), [int(row["tokens_in"]) for row in candidates]
+        int(snapshot["tokens_in"]), token_weights
     )
     output_allocations = _allocate_integer_total(
-        int(snapshot["tokens_out"]), [int(row["tokens_out"]) for row in candidates]
+        int(snapshot["tokens_out"]),
+        request_weights
+        if bullpen_indexes
+        else [int(row["tokens_out"]) for row in candidates],
     )
     cost_weights = [float(row["estimated_cost"]) for row in candidates]
-    if sum(cost_weights) <= 0:
+    if bullpen_indexes or sum(cost_weights) <= 0:
         cost_weights = [
-            float(int(row["tokens_in"]) + int(row["tokens_out"]))
-            for row in candidates
+            float(weight) for weight in request_weights
         ]
     cost_allocations = _allocate_cost_total(
         float(snapshot["estimated_cost"]), cost_weights
     )
     cache_hit_allocations = _allocate_integer_total(
         int(snapshot.get("cache_hit_tokens", 0)),
-        [int(row["tokens_in"]) for row in candidates],
+        token_weights,
     )
     cache_miss_allocations = _allocate_integer_total(
         int(snapshot.get("cache_miss_tokens", 0)),
-        [int(row["tokens_in"]) for row in candidates],
+        token_weights,
     )
 
     reconciled: list[dict[str, Any]] = []
