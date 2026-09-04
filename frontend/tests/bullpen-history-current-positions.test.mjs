@@ -85,6 +85,18 @@ test("History active-event ticks are reconciled against current active positions
   assert.match(historyScreen, /getIdentity: BullpenEventIdentityResolver\.fromPosition/);
   assert.match(historyScreen, /is_active_position: activePosition !== null/);
   assert.match(historyScreen, /active_position_side: activePosition/);
+  assert.match(
+    historyScreen,
+    /close_time: currentPosition\?\.closeTime \?\? event\.close_time/,
+  );
+  assert.match(
+    historyScreen,
+    /current_yes_odds:\s*currentPosition\?\.yesOdds \?\?/,
+  );
+  assert.match(
+    historyScreen,
+    /current_no_odds:\s*currentPosition\?\.noOdds \?\?/,
+  );
   assert.match(historyScreen, /hasUsableCurrentPositions && currentPositions/);
 });
 
@@ -103,7 +115,7 @@ test("History keeps deadlines and Returns/day when the latest LLM scan is uncove
   assert.match(historyScreen, /slug: event\.slug \?\? null/);
   assert.match(
     historyScreen,
-    /close_time: event\.close_time \?\? currentPosition\?\.closeTime \?\? null/,
+    /close_time: currentPosition\?\.closeTime \?\? event\.close_time \?\? null/,
   );
   assert.match(
     historyScreen,
@@ -127,7 +139,7 @@ test("History keeps deadlines and Returns/day when the latest LLM scan is uncove
   assert.match(historyScreen, /formulaDaysUntilClose \+ 4/);
   assert.match(
     historyScreen,
-    /condition_id: event\.condition_id \?\? currentPosition\?\.conditionId \?\? null/,
+    /condition_id: currentPosition\?\.conditionId \?\? event\.condition_id \?\? null/,
   );
 });
 
