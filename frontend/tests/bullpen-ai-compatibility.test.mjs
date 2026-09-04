@@ -1027,6 +1027,8 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
     currentOddsRouteSource,
     /resolvePolymarketMarketsWithQuestionFallback/,
   );
+  assert.match(currentOddsRouteSource, /conditionId:\s*string \| null/);
+  assert.match(currentOddsRouteSource, /record\.condition_id/);
   assert.match(currentOddsRouteSource, /fetchedAt: new Date\(\)\.toISOString\(\)/);
   assert.match(
     positionsRouteSource,
