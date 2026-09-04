@@ -128,6 +128,10 @@ function currentReturnsPerDay(
   const daysUntilClose = Number(
     ((closeTime - scanTime) / 86_400_000).toFixed(1),
   );
+  const formulaDaysUntilClose =
+    daysUntilClose < 0
+      ? Number((daysUntilClose - 1).toFixed(1))
+      : daysUntilClose;
   const activeSide = event.active_position_side?.trim().toUpperCase();
   const chosenSide =
     activeSide === "YES" || activeSide === "NO"
@@ -148,7 +152,7 @@ function currentReturnsPerDay(
   if (chosenSide === null) return event.returns_per_day ?? null;
   const currentOdds =
     chosenSide === "YES" ? currentYesOdds : currentNoOdds;
-  const denominator = daysUntilClose + 4;
+  const denominator = formulaDaysUntilClose + 4;
   if (currentOdds === null || denominator === 0) {
     return event.returns_per_day ?? null;
   }
@@ -275,6 +279,8 @@ export function applyCurrentBullpenPositionsToEventTrends(
     const currentPosition = activePosition ?? claimablePosition;
     const reconciledEvent: BullpenAutoLiveEventTrend = {
       ...event,
+      condition_id: event.condition_id ?? currentPosition?.conditionId ?? null,
+      slug: event.slug ?? currentPosition?.slug ?? null,
       close_time: event.close_time ?? currentPosition?.closeTime ?? null,
       is_active_position: activePosition !== null,
       is_claimable_position: claimablePosition !== null,
