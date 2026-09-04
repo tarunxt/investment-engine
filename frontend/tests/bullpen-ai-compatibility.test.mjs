@@ -484,6 +484,21 @@ test("Bullpen auto-run persists Trending and Full Universe scan scope", () => {
   assert.match(autoRunCardSource, /new purchases are blocked/);
 });
 
+test("Bullpen Full Universe result snapshots survive browser refresh", () => {
+  const bullpenAiPageSource = readFileSync(
+    new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(bullpenAiPageSource, /window\.indexedDB\.open\(/);
+  assert.match(bullpenAiPageSource, /readBullpenSnapshotsFromIndexedDb\(\)/);
+  assert.match(bullpenAiPageSource, /writeBullpenSnapshotsToIndexedDb\(snapshots\)/);
+  assert.match(
+    bullpenAiPageSource,
+    /indexedDbSnapshots\s*\?\?\s*readBullpenSnapshotsFromStorage\(\)/,
+  );
+});
+
 test("Bullpen x AI shares Stage 2 execution settings across manual and auto LLM runs", () => {
   const bullpenAiPageSource = readFileSync(
     new URL("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx", import.meta.url),
