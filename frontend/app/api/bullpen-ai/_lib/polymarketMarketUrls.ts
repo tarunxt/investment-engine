@@ -54,6 +54,7 @@ type PolymarketEventSupplement = {
 };
 
 type PolymarketMarketResolutionOptions = {
+  allowPartialGammaLookups?: boolean;
   backendAccessToken?: string | null;
   allowRuntimeQuestionFallback?: boolean;
   includeEventSupplements?: boolean;
@@ -697,9 +698,29 @@ export async function resolvePolymarketMarkets<
       index,
       index + MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES,
     );
-    const recordsByBatch = await Promise.all(
+    const lookupResults = await Promise.allSettled(
       batchGroup.map((batch) => fetchGammaMarketLookupBatch(batch)),
     );
+    const recordsByBatch: Record<string, unknown>[][] = [];
+
+    for (let batchIndex = 0; batchIndex < lookupResults.length; batchIndex += 1) {
+      const result = lookupResults[batchIndex];
+      if (result.status === "fulfilled") {
+        recordsByBatch.push(result.value);
+        continue;
+      }
+      if (!options.allowPartialGammaLookups) {
+        throw result.reason;
+      }
+      try {
+        recordsByBatch.push(
+          await fetchGammaMarketLookupBatch(batchGroup[batchIndex]),
+        );
+      } catch {
+        // Keep the other exact-identity results instead of failing the entire
+        // current-odds table because one transient Gamma batch was unavailable.
+      }
+    }
 
     for (const records of recordsByBatch) {
       for (const record of records) {
