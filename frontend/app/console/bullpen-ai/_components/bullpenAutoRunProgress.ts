@@ -19,6 +19,7 @@ export type BullpenAutoRunScanCandidateView = {
   currentNoOdds: number | null;
   volumeUsd: number | null;
   liquidityUsd: number | null;
+  returnsPerDay: number | null;
   forceInclude: boolean;
   scanStatus: "passed" | "filtered";
   filterReasons: string[];
@@ -41,6 +42,7 @@ export type BullpenAutoRunActivePositionView = {
   conditionId: string | null;
   isClaimable: boolean;
   classification: string | null;
+  returnsPerDay: number | null;
 };
 
 export type BullpenAutoRunWorkflowStageView = {
@@ -630,6 +632,7 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
         currentNoOdds: readNumber(record.current_no_odds),
         volumeUsd: readNumber(record.volume_usd),
         liquidityUsd: readNumber(record.liquidity_usd),
+        returnsPerDay: readNumber(record.returns_per_day),
         forceInclude: readBoolean(record.force_include),
         scanStatus,
         filterReasons: Array.isArray(record.reasons)
@@ -692,6 +695,7 @@ function readActivePositionsFound(stage: BullpenAutoLiveStageResult | null) {
         isClaimable:
           readBoolean(record.is_claimable) || readBoolean(record.isClaimable),
         classification,
+        returnsPerDay: readNumber(record.returns_per_day),
       } satisfies BullpenAutoRunActivePositionView;
     })
     .filter((position): position is BullpenAutoRunActivePositionView =>
