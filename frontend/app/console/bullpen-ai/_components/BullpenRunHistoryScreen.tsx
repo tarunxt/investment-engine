@@ -54,6 +54,7 @@ async function fetchCurrentBullpenPositions() {
     cache: "no-store",
     credentials: "same-origin",
     headers: { "Cache-Control": "no-cache" },
+    signal: AbortSignal.timeout(10_000),
   });
   const payload = (await response.json()) as BullpenPositionsResponse;
   if (!response.ok && !payload.positions?.length) {
