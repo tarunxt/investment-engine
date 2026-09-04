@@ -203,6 +203,7 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
                 "llm_execution_mode": "single_combined",
                 "llm_events_per_prompt": 7,
                 "console_min_market_odds": 8.5,
+                "console_max_closing_days": 45,
                 "console_llm_prompt_template": "Saved prompt {{SELECTED_QUESTIONS}}",
             },
         )
@@ -212,6 +213,7 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
         assert update_response.json()["llm_execution_mode"] == "single_combined"
         assert update_response.json()["llm_events_per_prompt"] == 7
         assert update_response.json()["console_min_market_odds"] == 8.5
+        assert update_response.json()["console_max_closing_days"] == 45
         assert (
             update_response.json()["console_llm_prompt_template"]
             == "Saved prompt {{SELECTED_QUESTIONS}}"
@@ -230,6 +232,13 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
         )
         assert invalid_floor_response.status_code == 422
         assert "console_min_market_odds" in str(invalid_floor_response.json())
+
+        invalid_expiry_window_response = await client.put(
+            "/polymarket/auto-live/settings",
+            json={"console_max_closing_days": 0},
+        )
+        assert invalid_expiry_window_response.status_code == 422
+        assert "console_max_closing_days" in str(invalid_expiry_window_response.json())
 
         reset_response = await client.post("/polymarket/auto-live/settings/reset")
         assert reset_response.status_code == 200
