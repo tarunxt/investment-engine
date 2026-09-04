@@ -130,6 +130,32 @@ def test_console_projection_is_bounded_and_does_not_mutate_frozen_run() -> None:
     assert run.model_dump(mode="json") == frozen_payload
 
 
+def test_console_projection_keeps_current_filtered_candidate_universe() -> None:
+    run = _large_run()
+    candidates = [
+        {
+            "question_id": f"question-{index}",
+            "market_id": f"market-{index}",
+            "condition_id": f"condition-{index}",
+            "question": f"Will filtered event {index} happen?",
+            "slug": f"filtered-market-{index}",
+            "close_time": "2026-09-30T23:59:59+00:00",
+            "current_yes_odds": 40,
+            "current_no_odds": 60,
+            "returns_per_day": 1.25,
+        }
+        for index in range(116)
+    ]
+    run.stage_results[0].outputs["accepted_candidates"] = candidates
+    run.stage_results[0].outputs["accepted_candidates_count"] = len(candidates)
+
+    projection = build_run_console_projection(run)
+
+    assert len(
+        projection["stage_results"][0]["outputs"]["accepted_candidates"]
+    ) == 116
+
+
 def test_only_fresh_completed_stage1_wallet_rows_verify_a_portfolio() -> None:
     verified = _large_run()
     verified.stage_results[0].outputs.update(
