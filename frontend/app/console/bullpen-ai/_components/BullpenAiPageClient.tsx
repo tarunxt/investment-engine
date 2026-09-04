@@ -4603,6 +4603,7 @@ function BullpenAiPageContent() {
             });
             independentFilters = {
               ...activeFilters,
+              maxClosingDays: settings.console_max_closing_days ?? 30,
               minYesOdds: settings.console_min_market_odds,
               minNoOdds: settings.console_min_market_odds,
               customExcludeOtherPhrases:

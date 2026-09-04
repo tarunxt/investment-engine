@@ -718,6 +718,7 @@ def console_market_filter_reasons(
     *,
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
     custom_exclude_phrases: list[str] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
@@ -768,9 +769,9 @@ def console_market_filter_reasons(
             days_until_close = (close_time - now).total_seconds() / 86_400
             if days_until_close <= 0:
                 reasons.append("Excluded market that is already closed.")
-            elif days_until_close > CONSOLE_SCAN_WINDOW_DAYS:
+            elif days_until_close > max_closing_days:
                 reasons.append(
-                    f"Excluded market outside the {CONSOLE_SCAN_WINDOW_DAYS}-day Bullpen window."
+                    f"Excluded market outside the {max_closing_days}-day Bullpen window."
                 )
     return reasons
 
@@ -919,6 +920,7 @@ def _build_cli_console_scan_result(
     now: datetime,
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
 ) -> ConsoleScanResult:
@@ -941,6 +943,7 @@ def _build_cli_console_scan_result(
                 market,
                 now=now,
                 min_market_odds=min_market_odds,
+                max_closing_days=max_closing_days,
                 custom_exclude_phrases=custom_exclude_phrases,
             )
             if apply_base_filters
@@ -976,6 +979,7 @@ async def scan_console_profile_markets(
     *,
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
+    max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
@@ -997,6 +1001,7 @@ async def scan_console_profile_markets(
             now=now,
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
+            max_closing_days=max_closing_days,
             custom_exclude_phrases=custom_exclude_phrases,
             apply_base_filters=apply_base_filters,
         )
@@ -1098,6 +1103,7 @@ async def scan_console_profile_markets(
                 market,
                 now=now,
                 min_market_odds=min_market_odds,
+                max_closing_days=max_closing_days,
                 custom_exclude_phrases=custom_exclude_phrases,
             )
             if apply_base_filters

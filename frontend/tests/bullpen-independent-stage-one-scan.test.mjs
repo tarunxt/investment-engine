@@ -66,6 +66,7 @@ test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
   assert.match(pageSource, /archivePrevious: false/);
   assert.match(pageSource, /onRunIndependentStageOne/);
   assert.match(pageSource, /console_min_market_odds/);
+  assert.match(pageSource, /maxClosingDays: settings\.console_max_closing_days/);
   assert.match(pageSource, /filtersOverride: independentFilters/);
   assert.doesNotMatch(
     cardSource,

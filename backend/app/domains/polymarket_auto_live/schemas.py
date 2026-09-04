@@ -221,6 +221,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     max_order_usd: float = Field(default=25, gt=0)
     console_order_usd: float = Field(default=5, gt=0)
     console_min_market_odds: float = Field(default=5, ge=0, lt=50)
+    console_max_closing_days: int = Field(default=30, ge=1)
     console_custom_exclude_phrases: list[str] = Field(default_factory=list)
     returns_per_day_formula: str = (
         "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
@@ -413,6 +414,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     max_order_usd: float | None = Field(default=None, gt=0)
     console_order_usd: float | None = Field(default=None, gt=0)
     console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
+    console_max_closing_days: int | None = Field(default=None, ge=1)
     console_custom_exclude_phrases: list[str] | None = None
     returns_per_day_formula: str | None = None
     min_liquidity_usd: float | None = Field(default=None, ge=0)

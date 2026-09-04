@@ -73,6 +73,13 @@ per-event reasons for analysis; a market rejected by multiple rules is counted
 once under each matching rule. Historical snapshots keep their original reason
 text and remain backward compatible.
 
+The maximum days-until-expiry window is also a persisted per-user Auto-Live
+setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
+including independent previews and scheduled runs, use the saved value until it
+is changed again. The configured window is retained in the immutable settings
+snapshot and appears in each matching rejection reason; historical snapshots
+remain unchanged.
+
 ## Purpose
 
 Bullpen Run Audit captures an immutable, reviewable record of each Bullpen AI auto-live

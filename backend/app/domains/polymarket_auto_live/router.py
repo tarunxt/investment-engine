@@ -451,6 +451,7 @@ async def get_stage1_scan_preview(current_user: User = Depends(get_current_user)
     scan = await scan_console_profile_markets(
         now=datetime.now(UTC),
         min_market_odds=settings.console_min_market_odds,
+        max_closing_days=settings.console_max_closing_days,
         custom_exclude_phrases=settings.console_custom_exclude_phrases,
         scan_scope=settings.console_scan_scope,
     )
