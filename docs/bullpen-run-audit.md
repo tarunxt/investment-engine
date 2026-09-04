@@ -1531,8 +1531,10 @@ uses `null` when the event was absent, and sorts by `latest + 0.5 × previous +
 0.25 × third-latest`. This presentation-only score must not be interpreted as a
 Stage 2 or Stage 3 ranking input.
 
-The newest run's complete Stage 1 `accepted_candidates` slice is also projected
-into the trend response before Stage 2 history is overlaid. Consequently every
+The newest run that actually retained a completed Stage 1 candidate count has
+its complete `accepted_candidates` slice projected into the trend response
+before Stage 2 history is overlaid. Newer queued or payload-only run records do
+not hide that scan. Consequently every
 current filtered candidate retains its deadline and saved Stage 1 Returns/day
 even when no LLM output exists. The browser then refreshes current Bullpen odds
 for those same identities and recalculates Returns/day at that refresh timestamp.
