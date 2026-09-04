@@ -3254,6 +3254,8 @@ def _reused_manual_active_position_context(
 
 def _serialize_scan_candidate(
     market: ScannedMarket,
+    *,
+    returns_per_day: float | None = None,
 ) -> dict[str, object]:
     raw = market.raw if isinstance(market.raw, dict) else {}
     return {
@@ -3282,6 +3284,7 @@ def _serialize_scan_candidate(
         "best_bid_cents": market.best_bid_cents,
         "best_ask_cents": market.best_ask_cents,
         "spread_cents": market.spread_cents,
+        "returns_per_day": returns_per_day,
         "rules": market.description,
         "event_description": market.description,
         "market_context": (
@@ -3310,7 +3313,10 @@ def _serialize_manual_console_candidate(
     row: BullpenAutoLiveConsoleCandidateInput,
     market: ScannedMarket,
 ) -> dict[str, object]:
-    serialized = _serialize_scan_candidate(market)
+    serialized = _serialize_scan_candidate(
+        market,
+        returns_per_day=row.returns_per_day,
+    )
     serialized.update(
         {
             "question_id": row.question_id,
@@ -3347,6 +3353,8 @@ def _serialize_rejected_scan_candidate(
 
 def _serialize_active_wallet_position(
     position: ConsoleWalletPosition,
+    *,
+    returns_per_day: float | None = None,
 ) -> dict[str, object]:
     return {
         "position_key": f"{position.market_id}::{position.side}",
@@ -3365,6 +3373,7 @@ def _serialize_active_wallet_position(
         "current_yes_odds": position.current_yes_odds,
         "current_no_odds": position.current_no_odds,
         "close_time": position.close_time,
+        "returns_per_day": returns_per_day,
         "condition_id": position.condition_id,
         "is_claimable": position.is_claimable,
         "raw_claimable_flag": position.raw_claimable_flag,
@@ -5981,7 +5990,15 @@ class BullpenAutoLiveEngine:
             )
             scanned_total_candidates = scanned.total_candidates
             stage1_accepted_candidates = [
-                _serialize_scan_candidate(market) for market in scanned.accepted
+                _serialize_scan_candidate(
+                    market,
+                    returns_per_day=candidate_returns_per_day(
+                        market,
+                        now=now,
+                        formula=settings.returns_per_day_formula,
+                    ),
+                )
+                for market in scanned.accepted
             ]
             stage1_rejected_candidates = [
                 _serialize_rejected_scan_candidate(rejected)
@@ -6397,15 +6414,36 @@ class BullpenAutoLiveEngine:
             *closed_wallet_positions,
         ]
         serialized_active_positions_found = [
-            _serialize_active_wallet_position(position)
+            _serialize_active_wallet_position(
+                position,
+                returns_per_day=position_returns_per_day(
+                    position,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                ),
+            )
             for position in active_bullpen_wallet_positions
         ]
         serialized_claimable_positions = [
-            _serialize_active_wallet_position(position)
+            _serialize_active_wallet_position(
+                position,
+                returns_per_day=position_returns_per_day(
+                    position,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                ),
+            )
             for position in claimable_wallet_positions
         ]
         serialized_settlement_pending_positions = [
-            _serialize_active_wallet_position(position)
+            _serialize_active_wallet_position(
+                position,
+                returns_per_day=position_returns_per_day(
+                    position,
+                    now=now,
+                    formula=settings.returns_per_day_formula,
+                ),
+            )
             for position in settlement_pending_positions
         ]
         serialized_excluded_position_diagnostics = [
