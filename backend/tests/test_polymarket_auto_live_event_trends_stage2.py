@@ -53,6 +53,8 @@ class _StageTwoOnlySession:
                                 "accepted_candidates": [
                                     {
                                         "market_id": "market-stage1-only",
+                                        "condition_id": "condition-stage1-only",
+                                        "slug": "stage1-only-market",
                                         "question": "Will the Stage 1-only event happen?",
                                         "market_url": "https://example.com/market-stage1-only",
                                         "close_time": "2026-08-20T12:00:00+00:00",
@@ -180,6 +182,8 @@ class _LatestCompletedStageOneSession:
                                 "accepted_candidates": [
                                     {
                                         "market_id": "retained-stage1-market",
+                                        "condition_id": "retained-stage1-condition",
+                                        "slug": "retained-stage1-slug",
                                         "question": "Will retained Stage 1 data be shown?",
                                         "close_time": "2026-08-20T12:00:00+00:00",
                                         "current_yes_odds": 81,
@@ -241,6 +245,8 @@ async def test_event_trends_use_stage2_review_when_stage3_has_no_decisions(monke
         event for event in response.events if event.market_id == "market-stage1-only"
     )
     assert stage1_only.close_time == "2026-08-20T12:00:00+00:00"
+    assert stage1_only.condition_id == "condition-stage1-only"
+    assert stage1_only.slug == "stage1-only-market"
     assert stage1_only.current_yes_odds == 82
     assert stage1_only.current_no_odds == 18
     assert stage1_only.llm_yes_odds is None
@@ -265,5 +271,7 @@ async def test_event_trends_use_latest_run_that_actually_completed_stage1(monkey
     assert session.calls == 4
     assert len(response.events) == 1
     assert response.events[0].market_id == "retained-stage1-market"
+    assert response.events[0].condition_id == "retained-stage1-condition"
+    assert response.events[0].slug == "retained-stage1-slug"
     assert response.events[0].close_time == "2026-08-20T12:00:00+00:00"
     assert response.events[0].returns_per_day == 1.7
