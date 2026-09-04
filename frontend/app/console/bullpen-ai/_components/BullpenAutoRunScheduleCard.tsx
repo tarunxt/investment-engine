@@ -99,7 +99,10 @@ import {
   buildBullpenAutoRunWorkflowView,
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
-import { downloadStageOneFilteredEventsExcel } from "./bullpenStageOneExcel";
+import {
+  downloadStageOneAllScannedEventsExcel,
+  downloadStageOneFilteredEventsExcel,
+} from "./bullpenStageOneExcel";
 import {
   createAbortableBullpenAutoRunRequestDeduper,
   getBullpenAutoRunActiveRunId,
@@ -1383,8 +1386,18 @@ function buildIndependentStageOneView(
     currentNoOdds: question.noOdds,
     volumeUsd: readIndependentScanNumber(question.volume),
     liquidityUsd: readIndependentScanNumber(question.liquidity),
+    bestBidCents: null,
+    bestAskCents: null,
+    spreadCents: null,
     returnsPerDay: null,
     forceInclude: false,
+    forceIncludedPosition: false,
+    selected: null,
+    rules: null,
+    eventDescription: null,
+    marketContext: null,
+    resolutionSource: null,
+    preflightEvidenceBlock: null,
     scanStatus,
     filterReasons,
   });
@@ -2145,6 +2158,16 @@ function StageOneRunStats({
     run,
     decisions,
   });
+  const allScannedEventRows = buildScanCandidateDialogRows({
+    candidates: stage.scannedCandidates,
+    run,
+    decisions,
+  });
+  const downloadAllScannedEvents = () =>
+    void downloadStageOneAllScannedEventsExcel({
+      candidates: allScannedEventRows,
+      scanCompletedAt: stage.timerCompletedAt,
+    });
   const downloadFilteredEvents = () =>
     void downloadStageOneFilteredEventsExcel({
       candidates: filteredEventRows,
@@ -2205,22 +2228,46 @@ function StageOneRunStats({
         </div>
       )}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
-        <button
-          type="button"
-          onClick={() => onOpenScanCandidateDialog(stage, "all-scanned")}
-          className={`${rowClassName} pt-2`}
-        >
-          Total Events Scanned:{" "}
-          <span className="font-semibold tabular-nums">
-            {displayStat(stats.totalScanned)}
-          </span>
-        </button>
+        <div className="flex items-center gap-1.5 pt-2">
+          <button
+            type="button"
+            onClick={() => onOpenScanCandidateDialog(stage, "all-scanned")}
+            className={rowClassName}
+          >
+            Total Events Scanned:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.totalScanned)}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={downloadAllScannedEvents}
+            disabled={hideNumbers || allScannedEventRows.length === 0}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Download Excel with all ${stats.totalScanned} scanned events`}
+            title="Download all scanned events Excel"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </button>
+        </div>
       ) : (
-        <div className="pt-2">
-          Total Events Scanned:{" "}
-          <span className="font-semibold tabular-nums">
-            {displayStat(stats.totalScanned)}
+        <div className="flex items-center gap-1.5 pt-2">
+          <span>
+            Total Events Scanned:{" "}
+            <span className="font-semibold tabular-nums">
+              {displayStat(stats.totalScanned)}
+            </span>
           </span>
+          <button
+            type="button"
+            onClick={downloadAllScannedEvents}
+            disabled={hideNumbers || allScannedEventRows.length === 0}
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Download Excel with all ${stats.totalScanned} scanned events`}
+            title="Download all scanned events Excel"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+          </button>
         </div>
       )}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (

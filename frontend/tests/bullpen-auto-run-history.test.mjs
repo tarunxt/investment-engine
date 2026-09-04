@@ -251,6 +251,31 @@ test("Stage 1 filtered events can be downloaded as a complete Excel workbook", (
   assert.match(stageOneExcel, /candidates\.map/);
 });
 
+test("Stage 1 all-scanned count downloads the maximum available CLI fields", () => {
+  assert.match(scheduleCard, /downloadStageOneAllScannedEventsExcel/);
+  assert.match(
+    scheduleCard,
+    /candidates: allScannedEventRows,[\s\S]*?scanCompletedAt: stage\.timerCompletedAt/,
+  );
+  assert.match(
+    scheduleCard,
+    /Download Excel with all \$\{stats\.totalScanned\} scanned events/,
+  );
+  assert.match(stageOneExcel, /"Best Bid \(cents\)"/);
+  assert.match(stageOneExcel, /"Best Ask \(cents\)"/);
+  assert.match(stageOneExcel, /"Spread \(cents\)"/);
+  assert.match(stageOneExcel, /"Force-Included Position"/);
+  assert.match(stageOneExcel, /"Event Description"/);
+  assert.match(stageOneExcel, /"Market Context"/);
+  assert.match(stageOneExcel, /"Resolution Source"/);
+  assert.match(stageOneExcel, /"Preflight Evidence"/);
+  assert.match(
+    stageOneExcel,
+    /sheet:\s*exportScope === "all-scanned"/,
+  );
+  assert.match(stageOneExcel, /bullpen-stage-1-\$\{exportScope\}-events/);
+});
+
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {
   assert.match(
     urls,
