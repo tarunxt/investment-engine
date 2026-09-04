@@ -24,7 +24,7 @@ _LIST_LIMITS = {
     # Candidate identity rows are required to repopulate the Auto Scan table.
     # Keep the list bounded, while allowing the normal 30-day/EOM scan universe
     # to survive the lightweight dashboard projection without an extra read.
-    "accepted_candidates": 100,
+    "accepted_candidates": 200,
     "rejected_candidates": 100,
     "active_positions_found": 10,
     "available_for_claim": 10,
