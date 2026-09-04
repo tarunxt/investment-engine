@@ -6988,6 +6988,26 @@ def test_console_market_filter_reasons_use_saved_odds_floor():
     assert "Excluded market below the 8.5% Yes/No odds floor." in configured_reasons
 
 
+def test_console_market_filter_reasons_use_saved_expiry_window():
+    market = _market(
+        question="Will candidate X win the general election?",
+        close_time="2026-08-05T12:00:00+00:00",
+    )
+
+    default_reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+    )
+    configured_reasons = console_market_filter_reasons(
+        market,
+        now=datetime(2026, 6, 21, 12, 0, tzinfo=UTC),
+        max_closing_days=60,
+    )
+
+    assert "Excluded market outside the 30-day Bullpen window." in default_reasons
+    assert not any("Bullpen window" in reason for reason in configured_reasons)
+
+
 def test_candidate_filter_reasons_block_trump_insult_markets():
     market = _market(
         question="Will Donald Trump publicly insult someone on June 27, 2026?",
