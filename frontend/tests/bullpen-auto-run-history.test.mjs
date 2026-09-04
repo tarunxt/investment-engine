@@ -25,6 +25,13 @@ const bullpenAi = readFileSync(
   new URL("../lib/bullpen-ai.ts", import.meta.url),
   "utf8",
 );
+const stageOneExcel = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/bullpenStageOneExcel.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("Bullpen history modal loads a compact page and lazy selected-run detail", () => {
   assert.match(scheduleCard, /apiService\.getBullpenAutoLiveHistory\(/);
@@ -220,6 +227,26 @@ test("Stage 1 fresh opportunities and active positions reuse the recurring-event
   assert.match(scheduleCard, /buildStageOneOpportunityTableEvent/);
   assert.match(trendsTable, /"currentOdds", "llmOdds", "returns", "position"/);
   assert.match(trendsTable, /"amount", "volume", "liquidity"/);
+});
+
+test("Stage 1 filtered events can be downloaded as a complete Excel workbook", () => {
+  assert.match(scheduleCard, /Download Excel/);
+  assert.match(scheduleCard, /FileSpreadsheet/);
+  assert.match(
+    scheduleCard,
+    /candidates: filteredEventExportRows,[\s\S]*?scanCompletedAt: state\.scanCompletedAt/,
+  );
+  assert.match(
+    scheduleCard,
+    /candidates: filteredEventRows,[\s\S]*?scanCompletedAt: stage\.timerCompletedAt/,
+  );
+  assert.match(stageOneExcel, /write-excel-file\/browser/);
+  assert.match(stageOneExcel, /"Condition ID"/);
+  assert.match(stageOneExcel, /"Current Yes Odds \(%\)"/);
+  assert.match(stageOneExcel, /"LLM Yes Odds \(%\)"/);
+  assert.match(stageOneExcel, /"Returns\/day \(%\)"/);
+  assert.match(stageOneExcel, /"Filter Reasons"/);
+  assert.match(stageOneExcel, /candidates\.map/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {
