@@ -74,38 +74,59 @@ type CurrentOrderBookOddsResponse = {
   fetchedAt?: string | null;
 };
 
+const MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE = 100;
+
 async function fetchCurrentOrderBookOdds(
   trends: BullpenAutoLiveEventTrendsResponse,
 ): Promise<CurrentOrderBookOddsResponse> {
-  const response = await fetch("/api/bullpen-ai/current-odds", {
-    method: "POST",
-    cache: "no-store",
-    credentials: "same-origin",
-    headers: {
-      "Cache-Control": "no-cache",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      questions: trends.events.map((event) => ({
-        id: event.market_id,
-        conditionId: event.condition_id ?? null,
-        slug: event.slug ?? null,
-        marketUrl: event.market_url ?? null,
-        question: event.market_title,
-        category: null,
-      })),
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const payload = (await response.json()) as CurrentOrderBookOddsResponse & {
-    error?: string;
-  };
-  if (!response.ok) {
-    throw new Error(
-      payload.error || `Current order-book request failed (${response.status}).`,
-    );
+  const questions = trends.events.map((event) => ({
+    id: event.market_id,
+    conditionId: event.condition_id ?? null,
+    slug: event.slug ?? null,
+    marketUrl: event.market_url ?? null,
+    question: event.market_title,
+    category: null,
+  }));
+  const mergedMarkets: Record<string, CurrentOrderBookMarket> = {};
+  let fetchedAt: string | null = null;
+
+  for (
+    let index = 0;
+    index < questions.length;
+    index += MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE
+  ) {
+    const response = await fetch("/api/bullpen-ai/current-odds", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: {
+        "Cache-Control": "no-cache",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        questions: questions.slice(
+          index,
+          index + MAX_CURRENT_ODDS_LOOKUP_BATCH_SIZE,
+        ),
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const payload = (await response.json()) as CurrentOrderBookOddsResponse & {
+      error?: string;
+    };
+    if (!response.ok) {
+      throw new Error(
+        payload.error ||
+          `Current order-book request failed (${response.status}).`,
+      );
+    }
+    Object.assign(mergedMarkets, payload.markets ?? {});
+    if (payload.fetchedAt) {
+      fetchedAt = payload.fetchedAt;
+    }
   }
-  return payload;
+
+  return { markets: mergedMarkets, fetchedAt };
 }
 
 function currentReturnsPerDay(
