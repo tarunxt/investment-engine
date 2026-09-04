@@ -32,6 +32,10 @@ const stageOneExcel = readFileSync(
   ),
   "utf8",
 );
+const backendProxy = readFileSync(
+  new URL("../app/backend-api/[...path]/route.ts", import.meta.url),
+  "utf8",
+);
 
 test("Bullpen history modal loads a compact page and lazy selected-run detail", () => {
   assert.match(scheduleCard, /apiService\.getBullpenAutoLiveHistory\(/);
@@ -252,7 +256,11 @@ test("Stage 1 filtered events can be downloaded as a complete Excel workbook", (
 });
 
 test("Stage 1 all-scanned count downloads the maximum available CLI fields", () => {
-  assert.match(scheduleCard, /downloadStageOneAllScannedEventsExcel/);
+  assert.match(scheduleCard, /downloadCompleteStageOneRunExcel/);
+  assert.match(
+    scheduleCard,
+    /if \(run\?\.id\) \{[\s\S]*?downloadCompleteStageOneRunExcel\(run\.id\)/,
+  );
   assert.match(
     scheduleCard,
     /candidates: allScannedEventRows,[\s\S]*?scanCompletedAt: stage\.timerCompletedAt/,
@@ -274,6 +282,10 @@ test("Stage 1 all-scanned count downloads the maximum available CLI fields", () 
     /sheet:\s*exportScope === "all-scanned"/,
   );
   assert.match(stageOneExcel, /bullpen-stage-1-\$\{exportScope\}-events/);
+  assert.match(stageOneExcel, /URLs\.bullpenAutoLive\.runStageOneExcel\(runId\)/);
+  assert.match(urls, /runStageOneExcel:[\s\S]*?stage-one\.xlsx/);
+  assert.match(backendProxy, /BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 120_000/);
+  assert.match(backendProxy, /isBullpenStageOneExcelDownload/);
 });
 
 test("active run detail keeps polling the exact selected run and stops when hidden or closed", () => {

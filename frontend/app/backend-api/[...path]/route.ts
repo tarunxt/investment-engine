@@ -38,6 +38,7 @@ const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
 const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
 const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
 const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
+const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 120_000;
 const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
 const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
@@ -228,7 +229,17 @@ function isBullpen008Read(method: string, path: string) {
   );
 }
 
+function isBullpenStageOneExcelDownload(method: string, path: string) {
+  return (
+    method === "GET" &&
+    /^polymarket\/auto-live\/runs\/[^/]+\/stage-one\.xlsx$/.test(path)
+  );
+}
+
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (isBullpenStageOneExcelDownload(method, path)) {
+    return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return readBoundedTimeout(
       process.env.BACKEND_PROXY_TIMEOUT_MS,
@@ -257,6 +268,9 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (isBullpenStageOneExcelDownload(method, path)) {
+    return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
+  }
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return getProxyAttemptTimeoutMs(method, path);
   }

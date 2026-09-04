@@ -100,6 +100,7 @@ import {
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
 import {
+  downloadCompleteStageOneRunExcel,
   downloadStageOneAllScannedEventsExcel,
   downloadStageOneFilteredEventsExcel,
 } from "./bullpenStageOneExcel";
@@ -2163,11 +2164,20 @@ function StageOneRunStats({
     run,
     decisions,
   });
-  const downloadAllScannedEvents = () =>
+  const downloadAllScannedEvents = () => {
+    if (run?.id) {
+      downloadCompleteStageOneRunExcel(run.id);
+      return;
+    }
     void downloadStageOneAllScannedEventsExcel({
       candidates: allScannedEventRows,
       scanCompletedAt: stage.timerCompletedAt,
     });
+  };
+  const allScannedDownloadUnavailable =
+    hideNumbers ||
+    stats.totalScanned === 0 ||
+    (!run?.id && allScannedEventRows.length === 0);
   const downloadFilteredEvents = () =>
     void downloadStageOneFilteredEventsExcel({
       candidates: filteredEventRows,
@@ -2242,7 +2252,7 @@ function StageOneRunStats({
           <button
             type="button"
             onClick={downloadAllScannedEvents}
-            disabled={hideNumbers || allScannedEventRows.length === 0}
+            disabled={allScannedDownloadUnavailable}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={`Download Excel with all ${stats.totalScanned} scanned events`}
             title="Download all scanned events Excel"
@@ -2261,7 +2271,7 @@ function StageOneRunStats({
           <button
             type="button"
             onClick={downloadAllScannedEvents}
-            disabled={hideNumbers || allScannedEventRows.length === 0}
+            disabled={allScannedDownloadUnavailable}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
             aria-label={`Download Excel with all ${stats.totalScanned} scanned events`}
             title="Download all scanned events Excel"
