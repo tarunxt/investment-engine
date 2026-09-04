@@ -1,4 +1,5 @@
 import type { BullpenAutoRunScanCandidateView } from "./bullpenAutoRunProgress";
+import { URLs } from "@/lib/urls";
 
 export type BullpenStageOneExcelCandidate = BullpenAutoRunScanCandidateView & {
   llmYesOdds?: number | null;
@@ -195,4 +196,13 @@ export async function downloadStageOneAllScannedEventsExcel({
     scanCompletedAt,
     exportScope: "all-scanned",
   });
+}
+
+export function downloadCompleteStageOneRunExcel(runId: string) {
+  const link = document.createElement("a");
+  link.href = URLs.bullpenAutoLive.runStageOneExcel(runId);
+  link.download = "bullpen-stage-1-all-scanned-events.xlsx";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }

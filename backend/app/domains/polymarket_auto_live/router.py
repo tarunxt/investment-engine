@@ -7,10 +7,13 @@ import time
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from app.core.logging import get_logger
 from app.core.security import JWTUtils
@@ -28,6 +31,9 @@ from app.domains.polymarket_auto_live.console_projection import (
 from app.domains.polymarket_auto_live.console_profile import (
     scan_console_profile_markets,
 )
+from app.domains.polymarket_auto_live.run_recovery import (
+    run_contains_historical_auth_error,
+)
 from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveConsoleRunDetail,
     BullpenAutoLiveDecision,
@@ -44,8 +50,10 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSummarySection,
 )
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
-from app.domains.polymarket_auto_live.run_recovery import (
-    run_contains_historical_auth_error,
+from app.domains.polymarket_auto_live.stage_one_excel import (
+    StageOneExcelExportError,
+    build_stage_one_excel,
+    remove_export,
 )
 from app.infrastructure.database.session import AsyncSessionLocal
 
@@ -811,6 +819,37 @@ async def get_auto_live_run(
         return await bot.get_run(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+
+@router.get("/runs/{run_id}/stage-one.xlsx", response_class=FileResponse)
+async def download_auto_live_stage_one_excel(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """Download every persisted Stage 1 row without using the bounded console projection."""
+
+    bot = await _get_bot(current_user)
+    try:
+        run = await bot.get_run(run_id)
+        path, filename, row_count = await run_in_threadpool(
+            build_stage_one_excel,
+            run,
+        )
+    except StageOneExcelExportError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+    return FileResponse(
+        path,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Export-Row-Count": str(row_count),
+        },
+        background=BackgroundTask(remove_export, path),
+    )
 
 
 @router.get(
