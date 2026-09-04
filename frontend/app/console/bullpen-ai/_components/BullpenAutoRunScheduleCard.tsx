@@ -21,6 +21,7 @@ import {
   Copy,
   History,
   ExternalLink,
+  FileSpreadsheet,
   Info,
   Bot,
   RefreshCw,
@@ -98,6 +99,7 @@ import {
   buildBullpenAutoRunWorkflowView,
   isBullpenAutoRunWorkflowSettled,
 } from "./bullpenAutoRunProgress";
+import { downloadStageOneFilteredEventsExcel } from "./bullpenStageOneExcel";
 import {
   createAbortableBullpenAutoRunRequestDeduper,
   getBullpenAutoRunActiveRunId,
@@ -2138,6 +2140,16 @@ function StageOneRunStats({
   const rowClassName = renderInteractiveRows
     ? "block text-left underline-offset-2 transition hover:underline focus:outline-none focus:ring-2 focus:ring-emerald-300"
     : undefined;
+  const filteredEventRows = buildScanCandidateDialogRows({
+    candidates: stage.scanCandidates,
+    run,
+    decisions,
+  });
+  const downloadFilteredEvents = () =>
+    void downloadStageOneFilteredEventsExcel({
+      candidates: filteredEventRows,
+      scanCompletedAt: stage.timerCompletedAt,
+    });
 
   return (
     <div className="space-y-0.5">
@@ -2213,19 +2225,31 @@ function StageOneRunStats({
       )}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              onOpenScanCandidateDialog(stage, "fresh-opportunities")
-            }
-            className={rowClassName}
-          >
-            Events that passed Filters:{" "}
-            <span className="font-semibold tabular-nums">
-              {displayStat(stats.passedFilters)}
-            </span>
-            {includedActiveLabel}
-          </button>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() =>
+                onOpenScanCandidateDialog(stage, "fresh-opportunities")
+              }
+              className={rowClassName}
+            >
+              Events that passed Filters:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.passedFilters)}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={hideNumbers || filteredEventRows.length === 0}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+              title="Download Excel"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+            </button>
+            {includedActiveLabel ? <span>{includedActiveLabel}</span> : null}
+          </div>
           {onOpenScanFilters ? (
             <button
               type="button"
@@ -2239,12 +2263,24 @@ function StageOneRunStats({
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2">
-          <span>
-            Events that passed Filters:{" "}
-            <span className="font-semibold tabular-nums">
-              {displayStat(stats.passedFilters)}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span>
+              Events that passed Filters:{" "}
+              <span className="font-semibold tabular-nums">
+                {displayStat(stats.passedFilters)}
+              </span>
             </span>
-            {includedActiveLabel}
+            <button
+              type="button"
+              onClick={downloadFilteredEvents}
+              disabled={hideNumbers || filteredEventRows.length === 0}
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+              title="Download Excel"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+            </button>
+            {includedActiveLabel ? <span>{includedActiveLabel}</span> : null}
           </span>
           {onOpenScanFilters ? (
             <button
@@ -4375,6 +4411,21 @@ function StageOneOutputDialog({
       stageOneCandidateOddsLookupId(candidate, index),
     );
   });
+  const filteredEventExportRows = state.candidates.map((candidate, index) => {
+    const event = freshOpportunityEvents[index];
+    return {
+      ...candidate,
+      currentYesOdds: event.current_yes_odds ?? candidate.currentYesOdds,
+      currentNoOdds: event.current_no_odds ?? candidate.currentNoOdds,
+      llmYesOdds: event.llm_yes_odds ?? candidate.llmYesOdds,
+      llmNoOdds: event.llm_no_odds ?? candidate.llmNoOdds,
+      returnsPerDay: event.returns_per_day ?? candidate.returnsPerDay,
+      amountToBeInvested:
+        event.amount_to_be_invested ?? candidate.amountToBeInvested,
+      volumeUsd: event.volume_usd ?? candidate.volumeUsd,
+      liquidityUsd: event.liquidity_usd ?? candidate.liquidityUsd,
+    };
+  });
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -4401,14 +4452,30 @@ function StageOneOutputDialog({
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
-            aria-label="Close Stage 1 output"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                void downloadStageOneFilteredEventsExcel({
+                  candidates: filteredEventExportRows,
+                  scanCompletedAt: state.scanCompletedAt,
+                })
+              }
+              disabled={filteredEventExportRows.length === 0}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Download Excel
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              aria-label="Close Stage 1 output"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5">
