@@ -145,6 +145,13 @@ test("Stage 1 and history refresh exact contracts instead of shared parent event
   assert.match(historyScreen, /slug: event\.slug \?\? null/);
   assert.match(scheduleCard, /const candidateCloseTimeByKey = new Map/);
   assert.match(scheduleCard, /matchingCandidateCloseTime/);
+  assert.match(scheduleCard, /snapshot_id: snapshot\.snapshotId/);
+  assert.match(scheduleCard, /function hasTruncatedStageOneCandidates/);
+  assert.match(
+    scheduleCard,
+    /!hasTruncatedStageOneCandidates\(runDetail\.run\)/,
+  );
+  assert.match(scheduleCard, /isAutoRunSnapshot/);
 });
 
 test("Run History Returns/day header opens a persistent Excel-style formula editor", () => {

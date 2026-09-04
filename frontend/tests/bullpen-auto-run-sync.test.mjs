@@ -223,6 +223,7 @@ function createAcceptedCandidate(overrides = {}) {
   return {
     question_id: "question-1",
     market_id: "market-1",
+    condition_id: "condition-1",
     question: "Will event one happen?",
     market_title: "Will event one happen?",
     market_url: "https://example.com/market-1",
@@ -386,6 +387,7 @@ test("Bullpen auto-run sync applies Stage 2 LLM odds before decisions are persis
   assert.ok(syncedQuestion);
   assert.equal(syncedQuestion.llmYesOdds, 12);
   assert.equal(syncedQuestion.llmNoOdds, 88);
+  assert.equal(syncedQuestion.conditionId, "condition-1");
   assert.equal(syncedQuestion.amountToBeInvested, 5);
   assert.equal(typeof syncedQuestion.daysUntilClose, "number");
   assert.equal(typeof syncedQuestion.returnsPerDay, "number");
@@ -881,4 +883,3 @@ test("Bullpen auto-run sync rebuilds Auto Scan from Stage 2 when compact Stage 1
     88,
   );
 });
-
