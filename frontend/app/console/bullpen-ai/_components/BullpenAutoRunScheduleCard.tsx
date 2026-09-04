@@ -1428,6 +1428,7 @@ function buildIndependentStageOneView(
     inputs: { filters: snapshot.filters },
     outputs: {
       independent_stage1_scan: true,
+      snapshot_id: snapshot.snapshotId,
       scanned_at: snapshot.scannedAt,
       scanned_candidates: snapshot.totalCandidates,
       total_items: snapshot.totalCandidates,
@@ -11694,6 +11695,19 @@ export function BullpenAutoRunScheduleCard({
     };
   }
 
+  function hasTruncatedStageOneCandidates(run: BullpenAutoLiveRun) {
+    const scanStage = buildBullpenAutoRunWorkflowView(run).stages.find(
+      (stage) => stage.key === "scan",
+    );
+    if (!scanStage) return false;
+    const acceptedCount =
+      readStageOutputNumber(scanStage.outputs.accepted_candidates_count) ??
+      readStageOutputNumber(scanStage.outputs.stage1_accepted_candidate_count);
+    return (
+      acceptedCount !== null && acceptedCount > scanStage.scanCandidates.length
+    );
+  }
+
   async function hydrateTerminalRunEvidence({
     summary: nextSummary,
     run,
@@ -11730,12 +11744,14 @@ export function BullpenAutoRunScheduleCard({
         ]);
         if (signal?.aborted) return;
 
-        const fullRun = runDetail.projection_available
-          ? runDetail.run
-          : await apiService.getBullpenAutoLiveRun(run.id, {
-              signal,
-              timeoutMs: 15_000,
-            });
+        const fullRun =
+          runDetail.projection_available &&
+          !hasTruncatedStageOneCandidates(runDetail.run)
+            ? runDetail.run
+            : await apiService.getBullpenAutoLiveRun(run.id, {
+                signal,
+                timeoutMs: 15_000,
+              });
         if (signal?.aborted) return;
         const mergedRun = mergeBullpenConsoleRunProjection({
           existing: fullRun,
@@ -13251,8 +13267,21 @@ export function BullpenAutoRunScheduleCard({
     const isIndependentStage = Boolean(
       stage.outputs.independent_stage1_scan,
     );
-    const sourceRun = isIndependentStage ? null : workflowRunForMonitor;
-    const sourceDecisions = isIndependentStage
+    const independentSnapshotId =
+      typeof stage.outputs.snapshot_id === "string"
+        ? stage.outputs.snapshot_id
+        : null;
+    const autoSnapshotRunId = independentSnapshotId?.startsWith(
+      "bullpen-auto-live-",
+    )
+      ? independentSnapshotId.slice("bullpen-auto-live-".length)
+      : null;
+    const isAutoRunSnapshot = Boolean(
+      autoSnapshotRunId && workflowRunForMonitor?.id === autoSnapshotRunId,
+    );
+    const sourceRun =
+      isIndependentStage && !isAutoRunSnapshot ? null : workflowRunForMonitor;
+    const sourceDecisions = isIndependentStage && !isAutoRunSnapshot
       ? []
       : summary?.recent_decisions ?? [];
 
@@ -13272,12 +13301,12 @@ export function BullpenAutoRunScheduleCard({
       }),
     );
 
-    if (!sourceRun?.id || isIndependentStage) return;
+    if (!sourceRun?.id || (isIndependentStage && !isAutoRunSnapshot)) return;
 
     void Promise.all([
-      apiService.getBullpenAutoLiveRun(sourceRun.id, { timeoutMs: 10_000 }),
+      apiService.getBullpenAutoLiveRun(sourceRun.id, { timeoutMs: 20_000 }),
       apiService.getBullpenAutoLiveRunDecisions(sourceRun.id, {
-        timeoutMs: 10_000,
+        timeoutMs: 20_000,
       }),
     ])
       .then(([exactRun, exactDecisions]) => {
