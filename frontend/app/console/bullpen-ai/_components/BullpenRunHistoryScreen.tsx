@@ -111,13 +111,16 @@ function currentReturnsPerDay(
   event: BullpenAutoLiveEventTrend,
   currentYesOdds: number | null,
   currentNoOdds: number | null,
+  asOfTimestamp?: string | null,
 ) {
   if (event.is_claimable_position || !event.close_time) {
     return event.returns_per_day ?? null;
   }
-  const latestScan = event.scan_timestamps.find(Boolean);
   const closeTime = new Date(event.close_time).getTime();
-  const scanTime = latestScan ? new Date(latestScan).getTime() : Number.NaN;
+  const latestScan = event.scan_timestamps.find(Boolean);
+  const scanTime = new Date(
+    asOfTimestamp ?? latestScan ?? "",
+  ).getTime();
   if (!Number.isFinite(closeTime) || !Number.isFinite(scanTime)) {
     return event.returns_per_day ?? null;
   }
@@ -132,10 +135,16 @@ function currentReturnsPerDay(
         ? event.llm_yes_odds >= event.llm_no_odds
           ? "YES"
           : "NO"
-        : null;
-  if (chosenSide === null) {
-    return event.returns_per_day ?? null;
-  }
+        : currentYesOdds !== null && currentNoOdds !== null
+          ? currentYesOdds >= currentNoOdds
+            ? "YES"
+            : "NO"
+          : currentYesOdds !== null
+            ? "YES"
+            : currentNoOdds !== null
+              ? "NO"
+              : null;
+  if (chosenSide === null) return event.returns_per_day ?? null;
   const currentOdds =
     chosenSide === "YES" ? currentYesOdds : currentNoOdds;
   const denominator = daysUntilClose + 4;
@@ -170,6 +179,7 @@ export function applyCurrentOrderBookOddsToEventTrends(
           event,
           currentYesOdds,
           currentNoOdds,
+          response.fetchedAt ?? trends.generated_at,
         ),
       };
     }),
@@ -279,6 +289,7 @@ export function applyCurrentBullpenPositionsToEventTrends(
           reconciledEvent,
           reconciledEvent.current_yes_odds ?? null,
           reconciledEvent.current_no_odds ?? null,
+          trends.current_odds_fetched_at ?? trends.generated_at,
         ) ?? activePosition?.returnsPerDay ?? event.returns_per_day ?? null,
     };
   });
