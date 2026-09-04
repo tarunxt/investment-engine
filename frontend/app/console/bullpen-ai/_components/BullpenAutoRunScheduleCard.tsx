@@ -4292,6 +4292,19 @@ function StageOneOutputDialog({
     };
   };
   const activeSideByKey = new Map<string, string>();
+  const candidateCloseTimeByKey = new Map<string, string>();
+  for (const candidate of state.candidates) {
+    if (!candidate.closeTime) continue;
+    [
+      candidate.conditionId,
+      candidate.slug,
+      candidate.marketUrl,
+      candidate.question,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .forEach((key) => candidateCloseTimeByKey.set(key, candidate.closeTime as string));
+  }
   for (const position of activePositions) {
     if (!position.side) continue;
     [
@@ -4304,12 +4317,25 @@ function StageOneOutputDialog({
       .filter((key): key is string => Boolean(key))
       .forEach((key) => activeSideByKey.set(key, position.side as string));
   }
-  const activePositionEvents = activePositions.map((position, index) =>
-    enrichLatestOdds(
-      buildStageOnePositionTableEvent(position, index, dialogOpenedAt),
+  const activePositionEvents = activePositions.map((position, index) => {
+    const matchingCandidateCloseTime = [
+      position.conditionId,
+      position.slug,
+      position.marketUrl,
+      position.marketTitle,
+    ]
+      .map(normalizeMatchKey)
+      .filter((key): key is string => Boolean(key))
+      .map((key) => candidateCloseTimeByKey.get(key) ?? null)
+      .find((closeTime) => closeTime !== null);
+    const event = buildStageOnePositionTableEvent(position, index, dialogOpenedAt);
+    return enrichLatestOdds(
+      matchingCandidateCloseTime
+        ? { ...event, close_time: matchingCandidateCloseTime }
+        : event,
       position.side,
-    ),
-  );
+    );
+  });
   const freshOpportunityEvents = state.candidates.map((candidate, index) => {
     const activeSide = [
       candidate.conditionId,
