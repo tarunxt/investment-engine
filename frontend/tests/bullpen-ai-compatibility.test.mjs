@@ -1032,12 +1032,16 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
     /includeEventSupplements:\s*false/,
   );
   assert.match(
+    currentOddsRouteSource,
+    /allowPartialGammaLookups:\s*true/,
+  );
+  assert.match(
     marketUrlsSource,
     /MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES = 4/,
   );
   assert.match(
     marketUrlsSource,
-    /Promise\.all\(\s*batchGroup\.map/,
+    /Promise\.allSettled\(\s*batchGroup\.map/,
   );
   assert.match(currentOddsRouteSource, /conditionId:\s*string \| null/);
   assert.match(currentOddsRouteSource, /record\.condition_id/);
