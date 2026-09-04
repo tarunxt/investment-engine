@@ -72,6 +72,7 @@ test("History primes the shared portfolio from a forced current wallet refresh",
   assert.match(historyScreen, /caller_source: "ui-history-portfolio-refresh"/);
   assert.match(historyScreen, /force_fresh: "true"/);
   assert.match(historyScreen, /max_age_seconds: "0"/);
+  assert.match(historyScreen, /signal: AbortSignal\.timeout\(10_000\)/);
   assert.match(historyScreen, /fetchCurrentBullpenPositions\(\)\.catch\(\(\) => null\)/);
   assert.match(historyScreen, /isUsableBullpenPositionsSnapshot/);
   assert.match(historyScreen, /portfolioReady \? \(/);
