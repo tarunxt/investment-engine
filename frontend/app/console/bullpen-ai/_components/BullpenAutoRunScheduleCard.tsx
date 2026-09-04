@@ -4206,7 +4206,7 @@ function StageOneOutputDialog({
     if (lookupRows.length === 0) return;
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 10_000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 20_000);
     void fetch("/api/bullpen-ai/current-odds", {
       method: "POST",
       cache: "no-store",

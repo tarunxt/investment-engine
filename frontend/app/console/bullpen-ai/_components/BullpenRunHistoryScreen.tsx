@@ -95,7 +95,7 @@ async function fetchCurrentOrderBookOdds(
         category: null,
       })),
     }),
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(20_000),
   });
   const payload = (await response.json()) as CurrentOrderBookOddsResponse & {
     error?: string;

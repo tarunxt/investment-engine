@@ -11,6 +11,7 @@ import {
 const POLYMARKET_EVENT_BASE_URL = "https://polymarket.com/event";
 const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
 const MAX_GAMMA_LOOKUP_BATCH_SIZE = 25;
+const MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES = 4;
 const MAX_EVENT_DETAIL_BATCH_SIZE = 8;
 const MARKET_CONTEXT_CAPTURE_CHARS = 40_000;
 const MAX_MARKET_CONTEXT_UPDATES = 6;
@@ -55,6 +56,7 @@ type PolymarketEventSupplement = {
 type PolymarketMarketResolutionOptions = {
   backendAccessToken?: string | null;
   allowRuntimeQuestionFallback?: boolean;
+  includeEventSupplements?: boolean;
   maxRuntimeQuestionFallbacks?: number;
   runtimeSearch?: (
     path: string,
@@ -664,7 +666,10 @@ async function fetchGammaMarketLookupBatch(
 
 export async function resolvePolymarketMarkets<
   T extends CanonicalizableQuestion,
->(questions: T[]) {
+>(
+  questions: T[],
+  options: PolymarketMarketResolutionOptions = {},
+) {
   const resolvedByQuestionId: Record<string, ResolvedPolymarketMarket> = {};
   if (questions.length === 0) return resolvedByQuestionId;
 
@@ -672,21 +677,42 @@ export async function resolvePolymarketMarkets<
   const recordsBySlug = new Map<string, Record<string, unknown>>();
   const recordsByConditionId = new Map<string, Record<string, unknown>>();
 
+  const lookupBatches: CanonicalizableQuestion[][] = [];
   for (
     let index = 0;
     index < questions.length;
     index += MAX_GAMMA_LOOKUP_BATCH_SIZE
   ) {
-    const batch = questions.slice(index, index + MAX_GAMMA_LOOKUP_BATCH_SIZE);
-    const records = await fetchGammaMarketLookupBatch(batch);
+    lookupBatches.push(
+      questions.slice(index, index + MAX_GAMMA_LOOKUP_BATCH_SIZE),
+    );
+  }
 
-    for (const record of records) {
-      const id = readString(record, ["id"]);
-      const slug = getCanonicalPolymarketMarketSlug(record);
-      const conditionId = readString(record, ["conditionId", "condition_id"]);
-      if (id) recordsById.set(id, record);
-      if (slug) recordsBySlug.set(slug, record);
-      if (conditionId) recordsByConditionId.set(conditionId, record);
+  for (
+    let index = 0;
+    index < lookupBatches.length;
+    index += MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES
+  ) {
+    const batchGroup = lookupBatches.slice(
+      index,
+      index + MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES,
+    );
+    const recordsByBatch = await Promise.all(
+      batchGroup.map((batch) => fetchGammaMarketLookupBatch(batch)),
+    );
+
+    for (const records of recordsByBatch) {
+      for (const record of records) {
+        const id = readString(record, ["id"]);
+        const slug = getCanonicalPolymarketMarketSlug(record);
+        const conditionId = readString(record, [
+          "conditionId",
+          "condition_id",
+        ]);
+        if (id) recordsById.set(id, record);
+        if (slug) recordsBySlug.set(slug, record);
+        if (conditionId) recordsByConditionId.set(conditionId, record);
+      }
     }
   }
 
@@ -708,6 +734,10 @@ export async function resolvePolymarketMarkets<
         uniqueMarketUrls.add(resolved.marketUrl);
       }
     }
+  }
+
+  if (options.includeEventSupplements === false) {
+    return resolvedByQuestionId;
   }
 
   const supplementsByMarketUrl = await fetchPolymarketEventSupplements(
@@ -799,7 +829,7 @@ async function searchBullpenMarketByQuestion(
     } satisfies CanonicalizableQuestion;
 
     try {
-      const resolved = await resolvePolymarketMarkets([fallbackMarket]);
+      const resolved = await resolvePolymarketMarkets([fallbackMarket], options);
       const refreshed = resolved[fallbackMarket.id];
       if (refreshed) {
         return refreshed;
@@ -843,7 +873,7 @@ export async function resolvePolymarketMarketsWithQuestionFallback<
   questions: T[],
   options: PolymarketMarketResolutionOptions = {},
 ) {
-  const resolvedByQuestionId = await resolvePolymarketMarkets(questions);
+  const resolvedByQuestionId = await resolvePolymarketMarkets(questions, options);
   if (options.allowRuntimeQuestionFallback === false) {
     return resolvedByQuestionId;
   }
