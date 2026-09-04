@@ -134,6 +134,17 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
 });
 
+test("Stage 1 and history refresh exact contracts instead of shared parent events", () => {
+  assert.match(scheduleCard, /conditionId: candidate\.conditionId/);
+  assert.match(scheduleCard, /const activeSide = \[\s*candidate\.conditionId/);
+  assert.doesNotMatch(
+    scheduleCard,
+    /const activeSide = \[\s*candidate\.marketId/,
+  );
+  assert.match(historyScreen, /conditionId: event\.condition_id \?\? null/);
+  assert.match(historyScreen, /slug: event\.slug \?\? null/);
+});
+
 test("Run History Returns/day header opens a persistent Excel-style formula editor", () => {
   const historyContent = readFileSync(
     new URL(

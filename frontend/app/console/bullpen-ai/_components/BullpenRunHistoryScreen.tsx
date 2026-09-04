@@ -88,7 +88,8 @@ async function fetchCurrentOrderBookOdds(
     body: JSON.stringify({
       questions: trends.events.map((event) => ({
         id: event.market_id,
-        slug: null,
+        conditionId: event.condition_id ?? null,
+        slug: event.slug ?? null,
         marketUrl: event.market_url ?? null,
         question: event.market_title,
         category: null,

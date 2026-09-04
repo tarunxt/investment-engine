@@ -1371,6 +1371,7 @@ function buildIndependentStageOneView(
   ): WorkflowStageView["scanCandidates"][number] => ({
     questionId: question.questionId ?? question.id,
     marketId: question.marketId ?? question.id,
+    conditionId: question.conditionId ?? null,
     question: question.question,
     marketUrl: question.marketUrl ?? question.sourceUrl ?? null,
     slug: question.slug,
@@ -4182,6 +4183,7 @@ function StageOneOutputDialog({
           position.conditionId ||
           position.slug ||
           `active-position-${index + 1}`,
+        conditionId: position.conditionId,
         slug: position.slug,
         marketUrl: position.marketUrl,
         question: position.marketTitle,
@@ -4193,6 +4195,7 @@ function StageOneOutputDialog({
           candidate.questionId ||
           candidate.slug ||
           `fresh-opportunity-${index + 1}`,
+        conditionId: candidate.conditionId,
         slug: candidate.slug,
         marketUrl: candidate.marketUrl,
         question: candidate.question,
@@ -4292,7 +4295,6 @@ function StageOneOutputDialog({
   for (const position of activePositions) {
     if (!position.side) continue;
     [
-      position.marketId,
       position.conditionId,
       position.slug,
       position.marketUrl,
@@ -4310,7 +4312,7 @@ function StageOneOutputDialog({
   );
   const freshOpportunityEvents = state.candidates.map((candidate, index) => {
     const activeSide = [
-      candidate.marketId,
+      candidate.conditionId,
       candidate.slug,
       candidate.marketUrl,
       candidate.question,

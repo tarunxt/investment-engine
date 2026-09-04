@@ -3024,6 +3024,8 @@ export interface BullpenAutoLiveHistoryPage {
 
 export interface BullpenAutoLiveEventTrend {
   market_id: string;
+  condition_id?: string | null;
+  slug?: string | null;
   market_title: string;
   market_url?: string | null;
   close_time?: string | null;

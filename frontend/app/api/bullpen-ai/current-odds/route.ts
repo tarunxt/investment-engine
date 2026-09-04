@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 
 type LookupQuestion = {
   id: string;
+  conditionId: string | null;
   slug: string | null;
   marketUrl: string | null;
   question: string | null;
@@ -27,6 +28,12 @@ function normalizeLookupQuestion(value: unknown): LookupQuestion | null {
 
   return {
     id,
+    conditionId:
+      typeof record.conditionId === "string" && record.conditionId.trim()
+        ? record.conditionId.trim()
+        : typeof record.condition_id === "string" && record.condition_id.trim()
+          ? record.condition_id.trim()
+          : null,
     slug:
       typeof record.slug === "string" && record.slug.trim()
         ? record.slug.trim()

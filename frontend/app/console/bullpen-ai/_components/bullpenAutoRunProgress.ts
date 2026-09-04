@@ -10,6 +10,7 @@ type WorkflowStageKey = "scan" | "llm" | "invest";
 export type BullpenAutoRunScanCandidateView = {
   questionId: string | null;
   marketId: string | null;
+  conditionId: string | null;
   question: string;
   marketUrl: string | null;
   slug: string | null;
@@ -623,6 +624,7 @@ function readScanCandidates(stage: BullpenAutoLiveStageResult | null) {
       return {
         questionId: readString(record.question_id),
         marketId: readString(record.market_id),
+        conditionId: readString(record.condition_id),
         question,
         marketUrl: readString(record.market_url),
         slug: readString(record.slug),
