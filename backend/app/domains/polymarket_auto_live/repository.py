@@ -1287,6 +1287,35 @@ class AsyncPolymarketAutoLiveRepository:
         run_index = {run_id: index for index, run_id in enumerate(run_ids)}
         event_scores: dict[str, dict[str, object]] = {}
 
+        def retained_stage1_candidate_count(run_row: object) -> int:
+            raw_stages = getattr(run_row, "trend_stage_results", None)
+            if not isinstance(raw_stages, list):
+                return 0
+            for raw_stage in raw_stages:
+                try:
+                    stage = BullpenAutoLiveStageResult.model_validate(raw_stage)
+                except ValidationError:
+                    continue
+                if workflow_stage_key(stage) != "scan":
+                    continue
+                accepted_rows = stage.outputs.get("accepted_candidates")
+                if isinstance(accepted_rows, list) and accepted_rows:
+                    return len(accepted_rows)
+                accepted_count = stage.outputs.get("accepted_candidates_count")
+                if isinstance(accepted_count, (int, float)) and accepted_count > 0:
+                    return int(accepted_count)
+            return 0
+
+        latest_stage1_run_row = next(
+            (
+                run_row
+                for run_row in run_rows
+                if retained_stage1_candidate_count(run_row) > 0
+            ),
+            run_rows[0],
+        )
+        latest_stage1_run_id = str(latest_stage1_run_row.id)
+
         # Projections created before per-model trend retention kept only the
         # first ten Stage-2 rows and removed their llm_outputs. Read just the
         # latest run's frozen stage slice as a compatibility overlay. This is
@@ -1310,6 +1339,26 @@ class AsyncPolymarketAutoLiveRepository:
                 completed_at=run_rows[0].completed_at,
                 updated_at=run_rows[0].updated_at,
             ))
+        if latest_stage1_run_id != run_ids[0]:
+            latest_stage1_frozen_row = (await self.session.execute(
+                select(
+                    run.payload["stage_results"].label("trend_stage_results")
+                )
+                .where(run.user_id == user_id)
+                .where(run.id == latest_stage1_run_row.id)
+            )).first()
+            if latest_stage1_frozen_row is not None and isinstance(
+                latest_stage1_frozen_row.trend_stage_results, list
+            ):
+                trend_run_rows.append(SimpleNamespace(
+                    id=latest_stage1_run_row.id,
+                    trend_stage_results=(
+                        latest_stage1_frozen_row.trend_stage_results
+                    ),
+                    started_at=latest_stage1_run_row.started_at,
+                    completed_at=latest_stage1_run_row.completed_at,
+                    updated_at=latest_stage1_run_row.updated_at,
+                ))
 
         def as_record(value: object) -> dict[str, object]:
             return value if isinstance(value, dict) else {}
@@ -1357,7 +1406,7 @@ class AsyncPolymarketAutoLiveRepository:
         # candidates still receive their deadline and current-market metrics
         # when no model produced usable Yes/No odds.
         for run_row in trend_run_rows:
-            if str(run_row.id) != run_ids[0]:
+            if str(run_row.id) != latest_stage1_run_id:
                 continue
             raw_stages = run_row.trend_stage_results
             if not isinstance(raw_stages, list):
