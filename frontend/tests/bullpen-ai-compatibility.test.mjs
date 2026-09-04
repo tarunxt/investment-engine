@@ -1027,6 +1027,18 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
     currentOddsRouteSource,
     /resolvePolymarketMarketsWithQuestionFallback/,
   );
+  assert.match(
+    currentOddsRouteSource,
+    /includeEventSupplements:\s*false/,
+  );
+  assert.match(
+    marketUrlsSource,
+    /MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES = 4/,
+  );
+  assert.match(
+    marketUrlsSource,
+    /Promise\.all\(\s*batchGroup\.map/,
+  );
   assert.match(currentOddsRouteSource, /conditionId:\s*string \| null/);
   assert.match(currentOddsRouteSource, /record\.condition_id/);
   assert.match(currentOddsRouteSource, /fetchedAt: new Date\(\)\.toISOString\(\)/);
