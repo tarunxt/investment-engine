@@ -25,6 +25,8 @@ export type StageOneGammaExportMetadata = {
   rowCount: number;
   completed: boolean;
   processedPages: string[];
+  eventKeys?: string[];
+  marketKeys?: string[];
 };
 
 function assertExportId(exportId: string) {
@@ -103,6 +105,8 @@ export async function appendStageOneGammaExportPage({
       rowCount: 0,
       completed: false,
       processedPages: [],
+      eventKeys: [],
+      marketKeys: [],
     };
     await writeFile(paths.rows, "", "utf8");
   }
@@ -112,6 +116,14 @@ export async function appendStageOneGammaExportPage({
     if (payload) await appendFile(paths.rows, `${payload}\n`, "utf8");
     metadata.rowCount += rows.length;
     metadata.processedPages.push(pageKey);
+    const eventKeys = new Set(metadata.eventKeys ?? []);
+    const marketKeys = new Set(metadata.marketKeys ?? []);
+    for (const row of rows) {
+      Object.keys(row.event).forEach((key) => eventKeys.add(key));
+      Object.keys(row.market).forEach((key) => marketKeys.add(key));
+    }
+    metadata.eventKeys = Array.from(eventKeys).sort();
+    metadata.marketKeys = Array.from(marketKeys).sort();
   }
   metadata.completed ||= completed;
   metadata.updatedAt = new Date().toISOString();
