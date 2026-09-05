@@ -116,6 +116,22 @@ test("latest completed Stage 1 snapshot synchronizes across browsers and devices
     cardSource,
     /independentScanSnapshot\.snapshotId !== stageOneResultSelection\.snapshotId[\s\S]{0,100}\? "independent"/,
   );
+  assert.match(
+    cardSource,
+    /const showStageNumbers =[\s\S]{0,220}stageOneResultSource === "independent"[\s\S]{0,100}independentStageOneView !== null/,
+  );
+});
+
+test("independent Stage 1 survives an empty dashboard refresh failure", () => {
+  assert.match(
+    cardSource,
+    /const isTransientDashboardRead =[\s\S]{0,120}nextError === null[\s\S]{0,80}nextError === undefined/,
+  );
+  assert.match(
+    cardSource,
+    /The dashboard refresh failed without returning error details\./,
+  );
+  assert.doesNotMatch(cardSource, /message: formatUnknownError\(error\),/);
 });
 
 test("independent scan retains filtered rows and reasons for Stage 1 output dialogs", () => {
