@@ -809,6 +809,8 @@ type StageTwoLlmRunBreakupKind =
 
 type ScanCandidateDialogState = {
   mode: ScanCandidateDialogMode;
+  isIndependentStageOne: boolean;
+  scanExportId: string | null;
   scanCompletedAt: string | null;
   totalScanned: number;
   passedFilterCount: number;
@@ -2126,7 +2128,9 @@ function StageOneRunStats({
     mode: ScanCandidateDialogMode,
   ) => void;
   onOpenScanFilters?: () => void;
-  onRecoverLegacyExport?: () => void;
+  onRecoverLegacyExport?: (
+    exportScope: "filtered" | "all-scanned",
+  ) => void;
 }) {
   const stats = getStageOneStats(stage);
   const includedActiveCount = getStageOneIncludedActiveCount(
@@ -2178,7 +2182,7 @@ function StageOneRunStats({
       if (independentExportId) {
         downloadIndependentStageOneExcel(independentExportId);
       } else {
-        onRecoverLegacyExport?.();
+        onRecoverLegacyExport?.("all-scanned");
       }
       return;
     }
@@ -2205,11 +2209,20 @@ function StageOneRunStats({
   const allScannedDownloadTitle = isLegacyExportRecovery
     ? "Run a fresh exhaustive scan and download all events Excel"
     : "Download all scanned events Excel";
-  const downloadFilteredEvents = () =>
+  const downloadFilteredEvents = () => {
+    if (isIndependentStageOne) {
+      if (independentExportId) {
+        downloadIndependentStageOneExcel(independentExportId, "filtered");
+      } else {
+        onRecoverLegacyExport?.("filtered");
+      }
+      return;
+    }
     void downloadStageOneFilteredEventsExcel({
       candidates: filteredEventRows,
       scanCompletedAt: stage.timerCompletedAt,
     });
+  };
 
   return (
     <div className="space-y-0.5">
@@ -4307,9 +4320,13 @@ function stageOneCandidateOddsLookupId(
 function StageOneOutputDialog({
   state,
   onClose,
+  onRecoverLegacyExport,
 }: {
   state: ScanCandidateDialogState;
   onClose: () => void;
+  onRecoverLegacyExport?: (
+    exportScope: "filtered" | "all-scanned",
+  ) => void;
 }) {
   const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
     useState(false);
@@ -4510,6 +4527,21 @@ function StageOneOutputDialog({
       liquidityUsd: event.liquidity_usd ?? candidate.liquidityUsd,
     };
   });
+  const downloadFilteredEvents = () => {
+    if (state.scanExportId) {
+      downloadIndependentStageOneExcel(state.scanExportId, "filtered");
+      return;
+    }
+    if (state.isIndependentStageOne && onRecoverLegacyExport) {
+      onClose();
+      onRecoverLegacyExport("filtered");
+      return;
+    }
+    void downloadStageOneFilteredEventsExcel({
+      candidates: filteredEventExportRows,
+      scanCompletedAt: state.scanCompletedAt,
+    });
+  };
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/55 p-4">
       <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,0.45)]">
@@ -4539,12 +4571,7 @@ function StageOneOutputDialog({
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() =>
-                void downloadStageOneFilteredEventsExcel({
-                  candidates: filteredEventExportRows,
-                  scanCompletedAt: state.scanCompletedAt,
-                })
-              }
+              onClick={downloadFilteredEvents}
               disabled={filteredEventExportRows.length === 0}
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -5311,6 +5338,8 @@ function buildRunDetailScanCandidateDialogState({
 
   return {
     mode,
+    isIndependentStageOne: stage.outputs.independent_stage1_scan === true,
+    scanExportId: readStageOutputString(stage.outputs.scan_export_id),
     scanCompletedAt: stage.timerCompletedAt,
     totalScanned: stageOneStats.totalScanned,
     passedFilterCount: stageOneStats.passedFilters,
@@ -13387,7 +13416,7 @@ export function BullpenAutoRunScheduleCard({
     ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
     : null;
   const handleIndependentStageOneScan = async (
-    downloadExcelWhenComplete = false,
+    downloadScope: "filtered" | "all-scanned" | null = null,
   ) => {
     if (!onRunIndependentStageOne) return;
     if (isIndependentStageOneScanning) {
@@ -13427,9 +13456,12 @@ export function BullpenAutoRunScheduleCard({
       if (controller.signal.aborted) return;
       if (result.snapshot) {
         setStageOneResultSource("independent");
-        if (downloadExcelWhenComplete) {
+        if (downloadScope) {
           if (result.snapshot.scanExportId) {
-            downloadIndependentStageOneExcel(result.snapshot.scanExportId);
+            downloadIndependentStageOneExcel(
+              result.snapshot.scanExportId,
+              downloadScope,
+            );
           } else {
             setIndependentStageOneError(
               "The exhaustive scan completed without an export file. Please run the scan again.",
@@ -13439,7 +13471,7 @@ export function BullpenAutoRunScheduleCard({
       }
       if (result.error) {
         setIndependentStageOneError(result.error);
-      } else if (downloadExcelWhenComplete && !result.snapshot) {
+      } else if (downloadScope && !result.snapshot) {
         setIndependentStageOneError(
           "The exhaustive scan did not produce an export file. Please run the scan again.",
         );
@@ -15045,8 +15077,8 @@ export function BullpenAutoRunScheduleCard({
                           renderInteractiveRows
                           onOpenScanCandidateDialog={openScanCandidateDialog}
                           onOpenScanFilters={onOpenScanFilters}
-                          onRecoverLegacyExport={() =>
-                            void handleIndependentStageOneScan(true)
+                          onRecoverLegacyExport={(exportScope) =>
+                            void handleIndependentStageOneScan(exportScope)
                           }
                         />
                       ) : null}
@@ -15508,6 +15540,9 @@ export function BullpenAutoRunScheduleCard({
           <StageOneOutputDialog
             state={scanCandidateDialog}
             onClose={() => setScanCandidateDialog(null)}
+            onRecoverLegacyExport={(exportScope) =>
+              void handleIndependentStageOneScan(exportScope)
+            }
           />
         ) : null}
 

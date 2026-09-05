@@ -9,6 +9,13 @@ const cardSource = fs.readFileSync(
   ),
   "utf8",
 );
+const downloadSource = fs.readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/bullpenStageOneExcel.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const pageSource = fs.readFileSync(
   new URL(
     "../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx",
@@ -170,13 +177,17 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   );
   assert.match(cardSource, /isIndependentStageOne/);
   assert.match(cardSource, /downloadIndependentStageOneExcel\(independentExportId\)/);
-  assert.match(cardSource, /onRecoverLegacyExport\?\.\(\)/);
+  assert.match(cardSource, /onRecoverLegacyExport\?\.\("all-scanned"\)/);
   assert.match(cardSource, /!independentExportId &&\s*!onRecoverLegacyExport/);
-  assert.match(cardSource, /handleIndependentStageOneScan\(true\)/);
+  assert.match(cardSource, /handleIndependentStageOneScan\(exportScope\)/);
   assert.match(
     cardSource,
-    /downloadIndependentStageOneExcel\(result\.snapshot\.scanExportId\)/,
+    /downloadIndependentStageOneExcel\([\s\S]{0,120}result\.snapshot\.scanExportId,[\s\S]{0,80}downloadScope/,
   );
+  assert.match(cardSource, /downloadIndependentStageOneExcel\(independentExportId, "filtered"\)/);
+  assert.match(cardSource, /onRecoverLegacyExport\?\.\("filtered"\)/);
+  assert.match(cardSource, /state\.scanExportId, "filtered"/);
+  assert.match(downloadSource, /new URLSearchParams\(\{ exportId, scope: exportScope \}\)/);
   assert.match(excelSource, /\.\.\.LEGACY_HEADERS, \.\.\.gammaHeaders/);
   assert.match(excelSource, /event\.\$\{key\}/);
   assert.match(excelSource, /market\.\$\{key\}/);
@@ -188,4 +199,7 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   assert.match(excelSource, /if \(safe === ""\) return ""/);
   assert.match(excelSource, /metadata\.eventKeys/);
   assert.match(excelSource, /metadata\.marketKeys/);
+  assert.match(excelSource, /row\.scanStatus === "passed"/);
+  assert.match(excelSource, /scope === "filtered" \? "Filtered Events"/);
+  assert.match(excelSource, /buildWorkbookStream\(rowsPath, exportRowCount, indexedGammaHeaders, scope\)/);
 });
