@@ -222,6 +222,13 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     console_order_usd: float = Field(default=5, gt=0)
     console_min_market_odds: float = Field(default=0, ge=0, lt=50)
     console_max_closing_days: int = Field(default=30, ge=1)
+    console_exclude_sports: bool = True
+    console_exclude_weather: bool = True
+    console_exclude_market_predictions: bool = True
+    console_exclude_tweet_count_questions: bool = True
+    console_exclude_released_by_events: bool = True
+    console_only_binary_yes_no: bool = True
+    console_exclude_custom_phrases: bool = True
     console_custom_exclude_phrases: list[str] = Field(default_factory=list)
     returns_per_day_formula: str = (
         "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
@@ -415,6 +422,13 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     console_order_usd: float | None = Field(default=None, gt=0)
     console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
     console_max_closing_days: int | None = Field(default=None, ge=1)
+    console_exclude_sports: bool | None = None
+    console_exclude_weather: bool | None = None
+    console_exclude_market_predictions: bool | None = None
+    console_exclude_tweet_count_questions: bool | None = None
+    console_exclude_released_by_events: bool | None = None
+    console_only_binary_yes_no: bool | None = None
+    console_exclude_custom_phrases: bool | None = None
     console_custom_exclude_phrases: list[str] | None = None
     returns_per_day_formula: str | None = None
     min_liquidity_usd: float | None = Field(default=None, ge=0)

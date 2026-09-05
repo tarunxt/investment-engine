@@ -71,6 +71,10 @@ import {
   type BullpenScanFilterDetailId,
 } from "@/lib/bullpenScanExclusions";
 import {
+  BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+  applyBullpenStageOneSettings,
+} from "@/lib/bullpenStageOneSettings";
+import {
   buildBullpenLlmRunTargetSet,
   buildBullpenQuestionRowFromActivePosition,
   extractBullpenActivePositionLlmAnalysis,
@@ -95,6 +99,7 @@ import type {
   BullpenAutoLiveDecision,
   BullpenAutoLiveRun,
   BullpenAutoLiveRunOnceRequest,
+  BullpenAutoLiveSettings,
   BullpenLlmExecutionMode,
   PolymarketEventRunContext,
   PolymarketManualInvestOrderRequest,
@@ -1753,6 +1758,43 @@ function BullpenAiPageContent() {
       },
     };
   });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applySettings = (settings: BullpenAutoLiveSettings) => {
+      if (cancelled) return;
+      setFiltersByMode((current) => ({
+        "30-days": applyBullpenStageOneSettings(current["30-days"], settings),
+        "end-of-month": applyBullpenStageOneSettings(
+          current["end-of-month"],
+          settings,
+        ),
+      }));
+    };
+
+    const handleSettingsUpdated = (event: Event) => {
+      applySettings(
+        (event as CustomEvent<BullpenAutoLiveSettings>).detail,
+      );
+    };
+
+    window.addEventListener(
+      BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+      handleSettingsUpdated,
+    );
+    void apiService.getBullpenAutoLiveSettings().then(applySettings).catch(() => {
+      // Each scan retries this settings read before building its request.
+    });
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener(
+        BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+        handleSettingsUpdated,
+      );
+    };
+  }, []);
   const [snapshotsByMode, setSnapshotsByMode] = useState<
     Record<ScanMode, BullpenSnapshotHistory>
   >(createEmptySnapshotHistory);
@@ -3216,8 +3258,7 @@ function BullpenAiPageContent() {
     signal?: AbortSignal;
     onProgress?: (progress: BullpenIndependentStageOneProgress) => void;
   }) {
-    const scanFilters = options?.filtersOverride ?? activeFilters;
-    const params = buildBullpenScanQueryParams(activeMode, scanFilters);
+    let scanFilters = options?.filtersOverride ?? activeFilters;
     const scanAbortController = new AbortController();
     const pageSignal = pageRequestAbortControllerRef.current?.signal;
     const callerSignal = options?.signal;
@@ -3229,6 +3270,19 @@ function BullpenAiPageContent() {
       callerSignal?.addEventListener("abort", abortScan, { once: true });
     }
     const scanSignal = scanAbortController.signal;
+    try {
+      const settings = await apiService.getBullpenAutoLiveSettings({
+        signal: scanSignal,
+      });
+      scanFilters = applyBullpenStageOneSettings(scanFilters, settings);
+    } catch (settingsError) {
+      if (scanSignal.aborted || isBullpenRequestAbort(settingsError)) {
+        throw settingsError;
+      }
+      // Preserve the last synchronized in-memory settings if a transient
+      // settings read fails; the scan API still receives every filter value.
+    }
+    const params = buildBullpenScanQueryParams(activeMode, scanFilters);
     setScanningMode(activeMode);
     setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
     setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
@@ -4723,27 +4777,9 @@ function BullpenAiPageContent() {
       <BullpenAutoRunScheduleCard
         independentScanSnapshot={activeCurrentSnapshot}
         onRunIndependentStageOne={async (signal, onProgress) => {
-          let independentFilters = activeFilters;
-          try {
-            const settings = await apiService.getBullpenAutoLiveSettings({
-              signal,
-            });
-            independentFilters = {
-              ...activeFilters,
-              maxClosingDays: settings.console_max_closing_days ?? 30,
-              minYesOdds: settings.console_min_market_odds,
-              minNoOdds: settings.console_min_market_odds,
-              customExcludeOtherPhrases:
-                settings.console_custom_exclude_phrases ?? [],
-            };
-          } catch {
-            // The scan route still has safe filter defaults when the settings
-            // request is temporarily unavailable.
-          }
           const result = await executeBullpenScan({
             resetSelections: true,
             archivePrevious: false,
-            filtersOverride: independentFilters,
             signal,
             onProgress,
           });

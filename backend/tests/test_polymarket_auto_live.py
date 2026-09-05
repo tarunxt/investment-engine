@@ -6967,6 +6967,46 @@ def test_console_market_filter_reasons_block_player_prop_ou_markets():
     assert "Excluded sports market." in reasons
 
 
+def test_console_market_filter_reasons_honor_saved_section_toggles():
+    market = _market(
+        question=(
+            "Will Wimbledon rain move Bitcoin after 10 tweets and a model "
+            "is released by July 1?"
+        ),
+        theme="Sports",
+        close_time="2026-06-25T12:00:00+00:00",
+        outcome_labels=["Option A", "Option B"],
+    )
+    now = datetime(2026, 6, 21, 12, 0, tzinfo=UTC)
+
+    enabled_reasons = console_market_filter_reasons(
+        market,
+        now=now,
+        custom_exclude_phrases=["model"],
+    )
+    disabled_reasons = console_market_filter_reasons(
+        market,
+        now=now,
+        exclude_sports=False,
+        exclude_weather=False,
+        exclude_market_predictions=False,
+        exclude_tweet_count_questions=False,
+        exclude_released_by_events=False,
+        only_binary_yes_no=False,
+        exclude_custom_phrases=False,
+        custom_exclude_phrases=["model"],
+    )
+
+    assert "Excluded sports market." in enabled_reasons
+    assert "Excluded weather market." in enabled_reasons
+    assert "Excluded market-prediction or finance market." in enabled_reasons
+    assert "Excluded tweet-count or social-post-count market." in enabled_reasons
+    assert "Excluded release-by event market." in enabled_reasons
+    assert "Excluded unclear non-binary market." in enabled_reasons
+    assert 'Excluded by custom phrase "model".' in enabled_reasons
+    assert disabled_reasons == []
+
+
 def test_console_market_filter_reasons_use_saved_odds_floor():
     market = _market(
         question="Will candidate X win the primary?",

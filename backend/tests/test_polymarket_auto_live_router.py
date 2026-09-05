@@ -204,6 +204,13 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
                 "llm_events_per_prompt": 7,
                 "console_min_market_odds": 8.5,
                 "console_max_closing_days": 45,
+                "console_exclude_sports": False,
+                "console_exclude_weather": False,
+                "console_exclude_market_predictions": False,
+                "console_exclude_tweet_count_questions": False,
+                "console_exclude_released_by_events": False,
+                "console_only_binary_yes_no": False,
+                "console_exclude_custom_phrases": False,
                 "console_llm_prompt_template": "Saved prompt {{SELECTED_QUESTIONS}}",
             },
         )
@@ -214,6 +221,13 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
         assert update_response.json()["llm_events_per_prompt"] == 7
         assert update_response.json()["console_min_market_odds"] == 8.5
         assert update_response.json()["console_max_closing_days"] == 45
+        assert update_response.json()["console_exclude_sports"] is False
+        assert update_response.json()["console_exclude_weather"] is False
+        assert update_response.json()["console_exclude_market_predictions"] is False
+        assert update_response.json()["console_exclude_tweet_count_questions"] is False
+        assert update_response.json()["console_exclude_released_by_events"] is False
+        assert update_response.json()["console_only_binary_yes_no"] is False
+        assert update_response.json()["console_exclude_custom_phrases"] is False
         assert (
             update_response.json()["console_llm_prompt_template"]
             == "Saved prompt {{SELECTED_QUESTIONS}}"

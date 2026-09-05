@@ -2347,6 +2347,13 @@ export interface BullpenAutoLiveSettings {
   console_order_usd: number;
   console_min_market_odds: number;
   console_max_closing_days: number;
+  console_exclude_sports: boolean;
+  console_exclude_weather: boolean;
+  console_exclude_market_predictions: boolean;
+  console_exclude_tweet_count_questions: boolean;
+  console_exclude_released_by_events: boolean;
+  console_only_binary_yes_no: boolean;
+  console_exclude_custom_phrases: boolean;
   console_custom_exclude_phrases: string[];
   returns_per_day_formula: string;
   min_liquidity_usd: number;

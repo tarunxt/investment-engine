@@ -445,8 +445,8 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     customExcludeTweetCountQuestionsKeywords: [],
     customExcludeOtherPhrases: [],
     onlyBinaryYesNo: true,
-    minYesOdds: 5,
-    minNoOdds: 5,
+    minYesOdds: 0,
+    minNoOdds: 0,
   },
   "end-of-month": {
     maxClosingDays: 30,
@@ -462,8 +462,8 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     customExcludeTweetCountQuestionsKeywords: [],
     customExcludeOtherPhrases: [],
     onlyBinaryYesNo: true,
-    minYesOdds: 5,
-    minNoOdds: 5,
+    minYesOdds: 0,
+    minNoOdds: 0,
   },
 };
 

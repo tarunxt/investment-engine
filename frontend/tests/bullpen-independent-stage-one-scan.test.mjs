@@ -41,6 +41,10 @@ const latestSnapshotRouteSource = fs.readFileSync(
   ),
   "utf8",
 );
+const stageOneSettingsSource = fs.readFileSync(
+  new URL("../lib/bullpenStageOneSettings.ts", import.meta.url),
+  "utf8",
+);
 
 test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () => {
   assert.match(cardSource, />\s*Original\s*</);
@@ -86,9 +90,12 @@ test("active independent Stage 1 shows live page progress instead of stale total
 test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
   assert.match(pageSource, /archivePrevious: false/);
   assert.match(pageSource, /onRunIndependentStageOne/);
-  assert.match(pageSource, /console_min_market_odds/);
-  assert.match(pageSource, /maxClosingDays: settings\.console_max_closing_days/);
-  assert.match(pageSource, /filtersOverride: independentFilters/);
+  assert.match(pageSource, /applyBullpenStageOneSettings\(scanFilters, settings\)/);
+  assert.match(pageSource, /getBullpenAutoLiveSettings/);
+  assert.match(stageOneSettingsSource, /console_min_market_odds/);
+  assert.match(stageOneSettingsSource, /console_max_closing_days/);
+  assert.match(stageOneSettingsSource, /console_exclude_sports/);
+  assert.match(stageOneSettingsSource, /console_only_binary_yes_no/);
   assert.doesNotMatch(
     cardSource,
     /handleIndependentStageOneScan[\s\S]{0,500}handleInvestOnly/,

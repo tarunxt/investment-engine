@@ -7,12 +7,40 @@ import {
   BULLPEN_SCAN_FILTER_DETAILS,
   type BullpenScanFilterDetailId,
 } from "@/lib/bullpenScanExclusions";
+import {
+  BULLPEN_SCAN_FILTER_SETTING_KEYS,
+  BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+  getBullpenScanFilterToggles,
+  type BullpenScanFilterToggleState,
+} from "@/lib/bullpenStageOneSettings";
 import { BullpenScanFilterDetailsDialog } from "./BullpenScanFilterDetailsDialog";
 import { apiService } from "@/services/api";
+import type {
+  BullpenAutoLiveSettings,
+  BullpenAutoLiveSettingsUpdate,
+} from "@/types/api";
 
 const FILTER_ORDER = Object.keys(
   BULLPEN_SCAN_FILTER_DETAILS,
 ) as BullpenScanFilterDetailId[];
+
+const DEFAULT_FILTER_TOGGLES: BullpenScanFilterToggleState = {
+  excludeSports: true,
+  excludeWeather: true,
+  excludeMarketPredictions: true,
+  excludeTweetCountQuestions: true,
+  excludeReleasedByEvents: true,
+  onlyBinaryYesNo: true,
+  excludeOthers: true,
+};
+
+function publishStageOneSettings(settings: BullpenAutoLiveSettings) {
+  window.dispatchEvent(
+    new CustomEvent(BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT, {
+      detail: settings,
+    }),
+  );
+}
 
 export function BullpenScanFiltersPopupBridge() {
   const [isOpen, setIsOpen] = useState(false);
@@ -27,12 +55,17 @@ export function BullpenScanFiltersPopupBridge() {
   const [floorMessage, setFloorMessage] = useState<string | null>(null);
   const [closingDaysMessage, setClosingDaysMessage] = useState<string | null>(null);
   const [customExcludePhrases, setCustomExcludePhrases] = useState<string[]>([]);
+  const [filterToggles, setFilterToggles] = useState(DEFAULT_FILTER_TOGGLES);
+  const [savingFilterId, setSavingFilterId] =
+    useState<BullpenScanFilterDetailId | null>(null);
+  const [filterMessage, setFilterMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadOddsFloor() {
       setIsFloorLoading(true);
       setFloorMessage(null);
       setClosingDaysMessage(null);
+      setFilterMessage(null);
       try {
         const settings = await apiService.getBullpenAutoLiveSettings();
         const saved = settings.console_min_market_odds ?? 0;
@@ -42,6 +75,8 @@ export function BullpenScanFiltersPopupBridge() {
         setMaxClosingDays(savedClosingDays);
         setSavedMaxClosingDays(savedClosingDays);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
+        setFilterToggles(getBullpenScanFilterToggles(settings));
+        publishStageOneSettings(settings);
       } catch {
         setFloorMessage("Could not load the saved odds floor. The default 0% is shown.");
       } finally {
@@ -88,6 +123,7 @@ export function BullpenScanFiltersPopupBridge() {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_min_market_odds: oddsFloor,
       });
+      publishStageOneSettings(settings);
       const saved = settings.console_min_market_odds;
       setOddsFloor(saved);
       setSavedOddsFloor(saved);
@@ -112,6 +148,7 @@ export function BullpenScanFiltersPopupBridge() {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_max_closing_days: maxClosingDays,
       });
+      publishStageOneSettings(settings);
       const saved = settings.console_max_closing_days;
       setMaxClosingDays(saved);
       setSavedMaxClosingDays(saved);
@@ -132,9 +169,38 @@ export function BullpenScanFiltersPopupBridge() {
         console_custom_exclude_phrases: phrases,
       });
       setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
+      publishStageOneSettings(settings);
       setFloorMessage("Saved. Future Stage 1 scans will filter out these words and phrases.");
     } catch {
       setFloorMessage("The custom exclusions could not be saved. Please try again.");
+    }
+  }
+
+  async function saveFilterToggle(
+    id: BullpenScanFilterDetailId,
+    enabled: boolean,
+  ) {
+    if (savingFilterId) return;
+    const previous = filterToggles[id];
+    const settingKey = BULLPEN_SCAN_FILTER_SETTING_KEYS[id];
+    setSavingFilterId(id);
+    setFilterMessage(null);
+    setFilterToggles((current) => ({ ...current, [id]: enabled }));
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        [settingKey]: enabled,
+      } as BullpenAutoLiveSettingsUpdate);
+      const savedToggles = getBullpenScanFilterToggles(settings);
+      setFilterToggles(savedToggles);
+      publishStageOneSettings(settings);
+      setFilterMessage(
+        `${BULLPEN_SCAN_FILTER_DETAILS[id].label} is now ${savedToggles[id] ? "applied" : "not applied"} to every future Trending and Full Universe scan.`,
+      );
+    } catch {
+      setFilterToggles((current) => ({ ...current, [id]: previous }));
+      setFilterMessage("The filter choice could not be saved. Please try again.");
+    } finally {
+      setSavingFilterId(null);
     }
   }
 
@@ -267,27 +333,56 @@ export function BullpenScanFiltersPopupBridge() {
               </div>
               {FILTER_ORDER.map((id) => {
                 const detail = BULLPEN_SCAN_FILTER_DETAILS[id];
+                const enabled = filterToggles[id];
                 return (
-                  <button
+                  <div
                     key={id}
-                    type="button"
-                    onClick={() => setDetailId(id)}
-                    className="flex w-full items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left transition hover:border-emerald-300 hover:bg-emerald-50 focus:outline-none focus:ring-2 focus:ring-emerald-300 dark:border-slate-700 dark:bg-slate-900/70 dark:hover:border-emerald-500/60 dark:hover:bg-emerald-950/30"
+                    className={`flex w-full items-start gap-4 rounded-2xl border px-4 py-4 text-left transition ${
+                      enabled
+                        ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-950/30"
+                        : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/70"
+                    }`}
                   >
-                    <div>
+                    <label className="mt-0.5 inline-flex shrink-0 cursor-pointer items-center">
+                      <input
+                        type="checkbox"
+                        checked={enabled}
+                        disabled={isFloorLoading || savingFilterId !== null}
+                        onChange={(event) =>
+                          void saveFilterToggle(id, event.target.checked)
+                        }
+                        aria-label={`Apply ${detail.label} filter`}
+                        className="h-5 w-5 cursor-pointer rounded border-slate-300 text-emerald-700 focus:ring-2 focus:ring-emerald-300 disabled:cursor-wait"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setDetailId(id)}
+                      className="min-w-0 flex-1 text-left focus:outline-none focus-visible:rounded-lg focus-visible:ring-2 focus-visible:ring-emerald-300"
+                    >
                       <p className="font-semibold text-slate-950 dark:text-slate-50">
                         {detail.label}
                       </p>
                       <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                         {detail.description}
                       </p>
-                    </div>
-                    <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailId(id)}
+                      aria-label={`View ${detail.label} filter details`}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-emerald-300 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
                       <Info className="h-4 w-4" />
-                    </span>
-                  </button>
+                    </button>
+                  </div>
                 );
               })}
+              {filterMessage ? (
+                <p className="px-1 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">
+                  {filterMessage}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>

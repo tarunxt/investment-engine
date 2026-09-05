@@ -5724,6 +5724,21 @@ class BullpenAutoLiveEngine:
                         now=now,
                         min_market_odds=settings.console_min_market_odds,
                         max_closing_days=settings.console_max_closing_days,
+                        exclude_sports=settings.console_exclude_sports,
+                        exclude_weather=settings.console_exclude_weather,
+                        exclude_market_predictions=(
+                            settings.console_exclude_market_predictions
+                        ),
+                        exclude_tweet_count_questions=(
+                            settings.console_exclude_tweet_count_questions
+                        ),
+                        exclude_released_by_events=(
+                            settings.console_exclude_released_by_events
+                        ),
+                        only_binary_yes_no=settings.console_only_binary_yes_no,
+                        exclude_custom_phrases=(
+                            settings.console_exclude_custom_phrases
+                        ),
                         custom_exclude_phrases=settings.console_custom_exclude_phrases,
                     )
                     if rejection_reasons:
@@ -5974,6 +5989,19 @@ class BullpenAutoLiveEngine:
                 now=now,
                 min_market_odds=settings.console_min_market_odds,
                 max_closing_days=settings.console_max_closing_days,
+                exclude_sports=settings.console_exclude_sports,
+                exclude_weather=settings.console_exclude_weather,
+                exclude_market_predictions=(
+                    settings.console_exclude_market_predictions
+                ),
+                exclude_tweet_count_questions=(
+                    settings.console_exclude_tweet_count_questions
+                ),
+                exclude_released_by_events=(
+                    settings.console_exclude_released_by_events
+                ),
+                only_binary_yes_no=settings.console_only_binary_yes_no,
+                exclude_custom_phrases=settings.console_exclude_custom_phrases,
                 custom_exclude_phrases=settings.console_custom_exclude_phrases,
                 scan_scope=scan_scope,
             )

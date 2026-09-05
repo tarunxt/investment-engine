@@ -75,6 +75,13 @@ once under each matching rule. Historical snapshots keep their original reason
 text and remain backward compatible.
 
 Trending and Full Universe scans share this complete saved Stage 1 filter base.
+Each named filter section in the Scan Filters popup has a persisted checkbox:
+sports, weather, market predictions, tweet counts, release-by events, Yes/No-only,
+and custom Others phrases. Checked means the rule is applied; unchecked means the
+rule is bypassed. Manual, independent, scheduled, Trending, and Full Universe
+scans all reload this server-backed toggle set before filtering. New immutable
+settings snapshots record each toggle, while historical snapshots remain valid
+through the default-on compatibility values.
 Full Universe pagination does not filter parent events by the child-market
 deadline window: every open parent is expanded first, and the saved expiry
 window is applied to each child market. Active wallet positions are force

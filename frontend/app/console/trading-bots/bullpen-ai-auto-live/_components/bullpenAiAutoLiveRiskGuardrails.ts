@@ -74,6 +74,13 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   console_order_usd: 5,
   console_min_market_odds: 0,
   console_max_closing_days: 30,
+  console_exclude_sports: true,
+  console_exclude_weather: true,
+  console_exclude_market_predictions: true,
+  console_exclude_tweet_count_questions: true,
+  console_exclude_released_by_events: true,
+  console_only_binary_yes_no: true,
+  console_exclude_custom_phrases: true,
   console_custom_exclude_phrases: [],
   returns_per_day_formula:
     "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)",

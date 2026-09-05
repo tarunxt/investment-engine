@@ -71,10 +71,10 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
     {
         "algorithm_key": "stage1_common_scan_filters_and_wallet_union",
         "stage": "stage-1",
-        "algorithm_version": "v1",
+        "algorithm_version": "v2",
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "scan_console_profile_markets",
-        "label": "Saved common filters, child deadlines, and active-wallet union",
+        "label": "Saved toggleable filters, child deadlines, and active-wallet union",
     },
     {
         "algorithm_key": "stage1_wallet_handoff_circuit_breaker",

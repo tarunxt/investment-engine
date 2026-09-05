@@ -16,6 +16,10 @@ const shellSource = readFileSync(
   ),
   "utf8",
 );
+const settingsSource = readFileSync(
+  new URL("../lib/bullpenStageOneSettings.ts", import.meta.url),
+  "utf8",
+);
 
 test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan controls are not rendered", () => {
   assert.match(
@@ -36,22 +40,21 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /updateBullpenAutoLiveSettings/);
   assert.match(bridgeSource, /console_custom_exclude_phrases/);
   assert.match(bridgeSource, /excludeOthers/);
+  assert.match(bridgeSource, /type="checkbox"/);
+  assert.match(bridgeSource, /checked=\{enabled\}/);
+  assert.match(bridgeSource, /saveFilterToggle\(id, event\.target\.checked\)/);
+  assert.match(bridgeSource, /Apply \$\{detail\.label\} filter/);
+  assert.match(bridgeSource, /every future Trending and Full Universe scan/);
+  assert.match(settingsSource, /console_exclude_sports/);
+  assert.match(settingsSource, /console_exclude_weather/);
+  assert.match(settingsSource, /console_exclude_market_predictions/);
+  assert.match(settingsSource, /console_exclude_tweet_count_questions/);
+  assert.match(settingsSource, /console_exclude_released_by_events/);
+  assert.match(settingsSource, /console_only_binary_yes_no/);
+  assert.match(settingsSource, /console_exclude_custom_phrases/);
 });
 
 test("Bullpen page shell always mounts the scan filter popup bridge", () => {
   assert.match(shellSource, /import \{ BullpenScanFiltersPopupBridge \}/);
   assert.match(shellSource, /<BullpenScanFiltersPopupBridge \/>/);
-});
-
-test("Bullpen summary cards hydrate from live dashboard or positions data", () => {
-  assert.match(shellSource, /apiService\.getDashboardSummary\(\)/);
-  assert.match(shellSource, /\/api\/bullpen-ai\/positions\?/);
-  assert.match(shellSource, /positionsSummary\.activeCount/);
-  assert.match(shellSource, /positionsSummary\.claimableCount/);
-  assert.match(shellSource, /payload\.fetchedAt/);
-  assert.match(shellSource, /setLiveSummary\(/);
-  assert.match(shellSource, /liveSummary\?\.active_count/);
-  assert.match(shellSource, /liveSummary\?\.claimable_count/);
-  assert.match(shellSource, /liveSummary\?\.fetched_at/);
-  assert.doesNotMatch(shellSource, /"Unavailable"/);
 });

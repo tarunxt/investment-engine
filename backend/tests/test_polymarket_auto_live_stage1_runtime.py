@@ -664,6 +664,7 @@ async def test_console_scans_expand_parent_events_before_child_deadline_filter(m
     )
 
     assert captured["filter_parent_deadlines"] is False
+    assert captured["apply_base_filters"] is False
 
 
 @pytest.mark.anyio

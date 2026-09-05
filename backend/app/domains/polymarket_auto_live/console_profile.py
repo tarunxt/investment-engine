@@ -719,32 +719,45 @@ def console_market_filter_reasons(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    exclude_sports: bool = True,
+    exclude_weather: bool = True,
+    exclude_market_predictions: bool = True,
+    exclude_tweet_count_questions: bool = True,
+    exclude_released_by_events: bool = True,
+    only_binary_yes_no: bool = True,
+    exclude_custom_phrases: bool = True,
     custom_exclude_phrases: list[str] | None = None,
 ) -> list[str]:
     reasons: list[str] = []
     search_text = build_market_filter_search_text(market)
-    for phrase in custom_exclude_phrases or []:
-        normalized_phrase = _normalize_text(phrase)
-        if normalized_phrase and normalized_phrase in search_text:
-            reasons.append(f'Excluded by custom phrase "{phrase}".')
-            break
-    if is_sports_market_text(search_text):
+    if exclude_custom_phrases:
+        for phrase in custom_exclude_phrases or []:
+            normalized_phrase = _normalize_text(phrase)
+            if normalized_phrase and normalized_phrase in search_text:
+                reasons.append(f'Excluded by custom phrase "{phrase}".')
+                break
+    if exclude_sports and is_sports_market_text(search_text):
         reasons.append("Excluded sports market.")
-    if _includes_any(search_text, WEATHER_KEYWORDS):
+    if exclude_weather and _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")
-    if _includes_any(search_text, MARKET_PREDICTION_KEYWORDS) or any(
-        pattern.search(search_text) for pattern in MARKET_PREDICTION_PATTERNS
+    if exclude_market_predictions and (
+        _includes_any(search_text, MARKET_PREDICTION_KEYWORDS)
+        or any(pattern.search(search_text) for pattern in MARKET_PREDICTION_PATTERNS)
     ):
         reasons.append("Excluded market-prediction or finance market.")
-    if _includes_any(search_text, TWEET_COUNT_KEYWORDS) and any(
-        pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS
+    if (
+        exclude_tweet_count_questions
+        and _includes_any(search_text, TWEET_COUNT_KEYWORDS)
+        and any(pattern.search(search_text) for pattern in TWEET_COUNT_PATTERNS)
     ):
         reasons.append("Excluded tweet-count or social-post-count market.")
-    if _includes_any(search_text, RELEASED_BY_EVENT_KEYWORDS):
+    if exclude_released_by_events and _includes_any(
+        search_text, RELEASED_BY_EVENT_KEYWORDS
+    ):
         reasons.append("Excluded release-by event market.")
     if is_insult_market_text(search_text):
         reasons.append("Excluded insult or name-calling market.")
-    if not _is_binary_yes_no(
+    if only_binary_yes_no and not _is_binary_yes_no(
         market.outcome_labels,
         market.current_yes_odds,
         market.current_no_odds,
@@ -921,6 +934,13 @@ def _build_cli_console_scan_result(
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    exclude_sports: bool = True,
+    exclude_weather: bool = True,
+    exclude_market_predictions: bool = True,
+    exclude_tweet_count_questions: bool = True,
+    exclude_released_by_events: bool = True,
+    only_binary_yes_no: bool = True,
+    exclude_custom_phrases: bool = True,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
 ) -> ConsoleScanResult:
@@ -944,6 +964,13 @@ def _build_cli_console_scan_result(
                 now=now,
                 min_market_odds=min_market_odds,
                 max_closing_days=max_closing_days,
+                exclude_sports=exclude_sports,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
                 custom_exclude_phrases=custom_exclude_phrases,
             )
             if apply_base_filters
@@ -980,6 +1007,13 @@ async def scan_console_profile_markets(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    exclude_sports: bool = True,
+    exclude_weather: bool = True,
+    exclude_market_predictions: bool = True,
+    exclude_tweet_count_questions: bool = True,
+    exclude_released_by_events: bool = True,
+    only_binary_yes_no: bool = True,
+    exclude_custom_phrases: bool = True,
     custom_exclude_phrases: list[str] | None = None,
     apply_base_filters: bool = True,
     use_keyset_pagination: bool = False,
@@ -1002,6 +1036,13 @@ async def scan_console_profile_markets(
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
             max_closing_days=max_closing_days,
+            exclude_sports=exclude_sports,
+            exclude_weather=exclude_weather,
+            exclude_market_predictions=exclude_market_predictions,
+            exclude_tweet_count_questions=exclude_tweet_count_questions,
+            exclude_released_by_events=exclude_released_by_events,
+            only_binary_yes_no=only_binary_yes_no,
+            exclude_custom_phrases=exclude_custom_phrases,
             custom_exclude_phrases=custom_exclude_phrases,
             apply_base_filters=apply_base_filters,
         )
@@ -1038,7 +1079,11 @@ async def scan_console_profile_markets(
         gamma_scan_coro = scan_candidate_markets(
             min_liquidity_usd=0,
             existing_position_slugs=set(),
-            apply_base_filters=apply_base_filters,
+            # The console profile owns the user-configurable Stage 1 rules.
+            # Fetch the complete active catalogue here, then apply the saved
+            # toggle set below so a disabled section cannot be pre-filtered by
+            # the lower-level scanner.
+            apply_base_filters=False,
             use_keyset_pagination=effective_keyset_pagination,
             use_deadline_cursor_pagination=use_deadline_cursor_pagination,
             preserve_partial_on_error=scan_scope == "full_universe",
@@ -1105,6 +1150,13 @@ async def scan_console_profile_markets(
                 now=now,
                 min_market_odds=min_market_odds,
                 max_closing_days=max_closing_days,
+                exclude_sports=exclude_sports,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
                 custom_exclude_phrases=custom_exclude_phrases,
             )
             if apply_base_filters
