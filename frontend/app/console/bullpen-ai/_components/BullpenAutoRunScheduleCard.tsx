@@ -135,6 +135,7 @@ import {
   type BullpenEventTableSnapshot,
 } from "./BullpenEventTrendsTable";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
+import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import {
   buildBullpenStage3InvestPreviewSteps,
   buildBullpenStage3OnlyInvestExecutionPlan,
@@ -10122,6 +10123,7 @@ function isUsableBullpenBalance(
 }
 
 function BullpenPortfolioSnapshot({
+  useHistoryPortfolioSource,
   state,
   lastUsableBalance,
   activePositions,
@@ -10142,6 +10144,7 @@ function BullpenPortfolioSnapshot({
   recentDecisions,
   onRefresh,
 }: {
+  useHistoryPortfolioSource: boolean;
   state: PolymarketBotState | null;
   lastUsableBalance:
     | (PolymarketBotState["live"]["balance"] & { status: "ready" })
@@ -10467,6 +10470,13 @@ function BullpenPortfolioSnapshot({
       detail: balanceStatus,
     },
   ];
+
+  // The History portfolio is the canonical current-portfolio view. Reuse that
+  // exact loader and renderer on the main Bullpen page so the two routes cannot
+  // preserve different browser-local snapshots or calculate different totals.
+  if (useHistoryPortfolioSource) {
+    return <BullpenHistoryPortfolio />;
+  }
 
   return (
     <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-sky-950 p-5 text-white shadow-xl shadow-slate-950/10">
@@ -13864,6 +13874,7 @@ export function BullpenAutoRunScheduleCard({
     <Card className="border-fuchsia-200 bg-[linear-gradient(135deg,rgba(253,242,248,0.98),rgba(239,246,255,0.98))] shadow-sm dark:border-fuchsia-500/30 dark:bg-[linear-gradient(135deg,rgba(91,33,182,0.24),rgba(15,23,42,0.94),rgba(14,165,233,0.16))]">
       <CardContent className="space-y-4 p-5">
         <BullpenPortfolioSnapshot
+          useHistoryPortfolioSource
           state={portfolioState}
           lastUsableBalance={lastUsablePortfolioBalance}
           activePositions={portfolioActivePositions}

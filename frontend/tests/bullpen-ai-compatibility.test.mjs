@@ -1407,7 +1407,8 @@ test("Bullpen portfolio uses Stage 1 verification only as a live-data fallback",
   );
 
   assert.match(source, /shouldUseVerifiedStage1PortfolioFallback/);
-  assert.match(source, /positionsVerifiedByStage1={useVerifiedStage1Fallback}/);
+  assert.match(source, /useHistoryPortfolioSource/);
+  assert.match(source, /return <BullpenHistoryPortfolio \/>/);
   assert.doesNotMatch(
     source,
     /verifiedStage1Portfolio\?\.activePositions \?\? activePositions/,

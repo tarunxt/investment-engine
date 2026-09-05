@@ -16,11 +16,28 @@ const screen = readFileSync(
   ),
   "utf8",
 );
+const mainScheduleCard = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("history renders the Bullpen portfolio before run history", () => {
   assert.ok(
     screen.indexOf("<BullpenHistoryPortfolio />") <
       screen.indexOf("<BullpenRunHistoryContent"),
+  );
+});
+
+test("main Bullpen page reuses the History portfolio as its canonical current-value source", () => {
+  assert.match(mainScheduleCard, /import \{ BullpenHistoryPortfolio \}/);
+  assert.match(mainScheduleCard, /useHistoryPortfolioSource/);
+  assert.match(mainScheduleCard, /return <BullpenHistoryPortfolio \/>/);
+  assert.match(
+    mainScheduleCard,
+    /<BullpenPortfolioSnapshot\s+useHistoryPortfolioSource/,
   );
 });
 
