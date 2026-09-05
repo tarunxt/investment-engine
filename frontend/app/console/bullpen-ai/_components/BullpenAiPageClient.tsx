@@ -249,6 +249,8 @@ const INVESTMENT_PROGRESS_POLL_MS = 1_500;
 const EMPTY_SELECTED_IDS = new Set<string>();
 const BULLPEN_UI_REQUEST_TIMEOUT_MS = 8_000;
 const BULLPEN_SCAN_REQUEST_TIMEOUT_MS = 3_600_000;
+const BULLPEN_SNAPSHOT_SYNC_REQUEST_TIMEOUT_MS = 60_000;
+const BULLPEN_SNAPSHOT_SYNC_INTERVAL_MS = 30_000;
 const SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS = 500;
 const SCAN_SNAPSHOT_MAX_REJECTED_ROWS = 500;
 const BULLPEN_SCAN_POLL_MS = 250;
@@ -1207,6 +1209,37 @@ function createEmptyStoredBullpenSnapshots(): StoredBullpenSnapshots {
   };
 }
 
+function mergeLatestServerManualSnapshot(
+  stored: Record<ScanMode, BullpenSnapshotHistory>,
+  serverSnapshot: BullpenScanSnapshot | null,
+) {
+  if (!serverSnapshot) return stored;
+  const mode = serverSnapshot.mode;
+  const previous = stored[mode].current;
+  if (
+    previous &&
+    Date.parse(previous.scannedAt) >= Date.parse(serverSnapshot.scannedAt)
+  ) {
+    return stored;
+  }
+  return {
+    ...stored,
+    [mode]: {
+      current: serverSnapshot,
+      history: previous
+        ? [archiveBullpenScanSnapshot(previous), ...stored[mode].history]
+            .filter(
+              (snapshot, index, snapshots) =>
+                snapshots.findIndex(
+                  (candidate) => candidate.snapshotId === snapshot.snapshotId,
+                ) === index,
+            )
+            .slice(0, MAX_BULLPEN_SNAPSHOT_HISTORY)
+        : stored[mode].history,
+    },
+  };
+}
+
 function readBullpenSnapshotsFromStorage(): StoredBullpenSnapshots {
   if (typeof window === "undefined") {
     return createEmptyStoredBullpenSnapshots();
@@ -1887,6 +1920,7 @@ function BullpenAiPageContent() {
 
   useEffect(() => {
     let cancelled = false;
+    const syncController = new AbortController();
 
     void (async () => {
       const indexedDbSnapshots = await readBullpenSnapshotsFromIndexedDb();
@@ -1894,7 +1928,26 @@ function BullpenAiPageContent() {
 
       const storedSnapshots =
         indexedDbSnapshots ?? readBullpenSnapshotsFromStorage();
-      setSnapshotsByMode(storedSnapshots.manual);
+      let manualSnapshots = storedSnapshots.manual;
+      try {
+        const latestServerSnapshot = await fetchBullpenUiJson<{
+          snapshot?: BullpenScanSnapshot | null;
+        }>(
+          "/api/bullpen-ai/stage-one-snapshot",
+          { cache: "no-store", signal: syncController.signal },
+          BULLPEN_SNAPSHOT_SYNC_REQUEST_TIMEOUT_MS,
+        );
+        if (!cancelled && latestServerSnapshot.response.ok) {
+          manualSnapshots = mergeLatestServerManualSnapshot(
+            manualSnapshots,
+            normalizeSnapshot(latestServerSnapshot.payload.snapshot),
+          );
+        }
+      } catch {
+        // Keep the device-local snapshot available if server synchronization fails.
+      }
+      if (cancelled) return;
+      setSnapshotsByMode(manualSnapshots);
       setAutoSnapshotsByMode(storedSnapshots.auto);
       setLastLlmTargets(readLastLlmTargetsFromStorage());
       setBullpenLlmPromptTemplate(readBullpenLlmPromptFromStorage());
@@ -1910,6 +1963,7 @@ function BullpenAiPageContent() {
 
     return () => {
       cancelled = true;
+      syncController.abort();
     };
   }, []);
 
@@ -1922,6 +1976,45 @@ function BullpenAiPageContent() {
     void writeBullpenSnapshotsToIndexedDb(snapshots);
     writeBullpenSnapshotsToLocalStorage(snapshots);
   }, [autoSnapshotsByMode, hasLoadedStorage, snapshotsByMode]);
+
+  useEffect(() => {
+    if (!hasLoadedStorage) return;
+    const controller = new AbortController();
+    const syncLatestSnapshot = async () => {
+      try {
+        const result = await fetchBullpenUiJson<{
+          snapshot?: BullpenScanSnapshot | null;
+        }>(
+          "/api/bullpen-ai/stage-one-snapshot",
+          { cache: "no-store", signal: controller.signal },
+          BULLPEN_SNAPSHOT_SYNC_REQUEST_TIMEOUT_MS,
+        );
+        if (!result.response.ok || controller.signal.aborted) return;
+        const snapshot = normalizeSnapshot(result.payload.snapshot);
+        if (!snapshot) return;
+        setSnapshotsByMode((current) =>
+          mergeLatestServerManualSnapshot(current, snapshot),
+        );
+      } catch {
+        // The current device-local snapshot remains usable while offline.
+      }
+    };
+    const interval = window.setInterval(
+      () => void syncLatestSnapshot(),
+      BULLPEN_SNAPSHOT_SYNC_INTERVAL_MS,
+    );
+    const syncWhenVisible = () => {
+      if (document.visibilityState === "visible") void syncLatestSnapshot();
+    };
+    window.addEventListener("focus", syncWhenVisible);
+    document.addEventListener("visibilitychange", syncWhenVisible);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      window.removeEventListener("focus", syncWhenVisible);
+      document.removeEventListener("visibilitychange", syncWhenVisible);
+    };
+  }, [hasLoadedStorage]);
 
   useEffect(() => {
     if (!hasLoadedStorage) return;

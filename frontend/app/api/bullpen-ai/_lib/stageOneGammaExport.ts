@@ -3,7 +3,11 @@ import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { BullpenQuestion } from "@/lib/bullpen-ai";
+import type {
+  BullpenQuestion,
+  BullpenScanFilters,
+  ScanMode,
+} from "@/lib/bullpen-ai";
 
 const EXPORT_DIRECTORY = join(tmpdir(), "credx-bullpen-stage-one-exports");
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -29,6 +33,15 @@ export type StageOneGammaExportMetadata = {
   processedPages: string[];
   eventKeys?: string[];
   marketKeys?: string[];
+  mode?: ScanMode;
+  filters?: BullpenScanFilters;
+  sourceUrl?: string;
+  sourceLabel?: string;
+  scannedAt?: string;
+  acceptedCount?: number;
+  rejectedCount?: number;
+  acceptedSample?: BullpenQuestion[];
+  rejectedSample?: Array<BullpenQuestion & { filterReasons: string[] }>;
 };
 
 function assertExportId(exportId: string) {
@@ -120,12 +133,20 @@ export async function appendStageOneGammaExportPage({
   pageKey,
   rows,
   completed,
+  snapshot,
 }: {
   exportId: string | null;
   ownerKey: string;
   pageKey: string;
   rows: StageOneGammaExportRow[];
   completed: boolean;
+  snapshot?: {
+    mode: ScanMode;
+    filters: BullpenScanFilters;
+    sourceUrl: string;
+    sourceLabel: string;
+    scannedAt: string;
+  };
 }) {
   await cleanupExpiredExports();
   const resolvedExportId = exportId || randomUUID();
@@ -152,6 +173,11 @@ export async function appendStageOneGammaExportPage({
       processedPages: [],
       eventKeys: [],
       marketKeys: [],
+      ...snapshot,
+      acceptedCount: 0,
+      rejectedCount: 0,
+      acceptedSample: [],
+      rejectedSample: [],
     };
     await writeFile(paths.rows, "", "utf8");
   }
@@ -166,6 +192,23 @@ export async function appendStageOneGammaExportPage({
     for (const row of rows) {
       Object.keys(row.event).forEach((key) => eventKeys.add(key));
       Object.keys(row.market).forEach((key) => marketKeys.add(key));
+      if (row.scanStatus === "passed") {
+        metadata.acceptedCount = (metadata.acceptedCount ?? 0) + 1;
+        if ((metadata.acceptedSample?.length ?? 0) < 500) {
+          metadata.acceptedSample = [
+            ...(metadata.acceptedSample ?? []),
+            row.candidate,
+          ];
+        }
+      } else {
+        metadata.rejectedCount = (metadata.rejectedCount ?? 0) + 1;
+        if ((metadata.rejectedSample?.length ?? 0) < 500) {
+          metadata.rejectedSample = [
+            ...(metadata.rejectedSample ?? []),
+            { ...row.candidate, filterReasons: row.filterReasons },
+          ];
+        }
+      }
     }
     metadata.eventKeys = Array.from(eventKeys).sort();
     metadata.marketKeys = Array.from(marketKeys).sort();
@@ -174,6 +217,62 @@ export async function appendStageOneGammaExportPage({
   metadata.updatedAt = new Date().toISOString();
   await saveMetadata(metadata);
   return { exportId: resolvedExportId, rowCount: metadata.rowCount };
+}
+
+export async function cacheStageOneGammaExportSummary({
+  metadata,
+  ownerKey,
+  acceptedCount,
+  rejectedCount,
+  acceptedSample,
+  rejectedSample,
+}: {
+  metadata: StageOneGammaExportMetadata;
+  ownerKey: string;
+  acceptedCount: number;
+  rejectedCount: number;
+  acceptedSample: BullpenQuestion[];
+  rejectedSample: Array<BullpenQuestion & { filterReasons: string[] }>;
+}) {
+  if (metadata.ownerHash !== ownerHash(ownerKey)) {
+    throw new Error("Stage 1 export does not belong to this session.");
+  }
+  await saveMetadata({
+    ...metadata,
+    acceptedCount,
+    rejectedCount,
+    acceptedSample,
+    rejectedSample,
+  });
+}
+
+export async function openLatestStageOneGammaExport({
+  ownerKey,
+}: {
+  ownerKey: string;
+}) {
+  await cleanupExpiredExports();
+  const expectedOwnerHash = ownerHash(ownerKey);
+  const names = await readdir(EXPORT_DIRECTORY).catch(() => [] as string[]);
+  const matching = (
+    await Promise.all(
+      names
+        .filter((name) => name.endsWith(".json"))
+        .map(async (name) => {
+          const exportId = name.slice(0, -".json".length);
+          if (!EXPORT_ID_PATTERN.test(exportId)) return null;
+          const metadata = await readMetadata(exportId).catch(() => null);
+          return metadata?.completed && metadata.ownerHash === expectedOwnerHash
+            ? metadata
+            : null;
+        }),
+    )
+  )
+    .filter((metadata): metadata is StageOneGammaExportMetadata => Boolean(metadata))
+    .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
+  const metadata = matching[0];
+  if (!metadata) return null;
+  return { metadata, rowsPath: exportPaths(metadata.exportId).rows };
 }
 
 export async function readStageOneGammaExport({

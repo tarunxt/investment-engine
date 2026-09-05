@@ -34,6 +34,13 @@ const exportLedgerSource = fs.readFileSync(
   ),
   "utf8",
 );
+const latestSnapshotRouteSource = fs.readFileSync(
+  new URL(
+    "../app/api/bullpen-ai/stage-one-snapshot/route.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () => {
   assert.match(cardSource, />\s*Original\s*</);
@@ -86,6 +93,25 @@ test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
     cardSource,
     /handleIndependentStageOneScan[\s\S]{0,500}handleInvestOnly/,
   );
+});
+
+test("latest completed Stage 1 snapshot synchronizes across browsers and devices", () => {
+  assert.match(exportLedgerSource, /openLatestStageOneGammaExport/);
+  assert.match(latestSnapshotRouteSource, /openLatestStageOneGammaExport/);
+  assert.match(latestSnapshotRouteSource, /createReadStream\(latest\.rowsPath/);
+  assert.match(latestSnapshotRouteSource, /hasCachedSummary/);
+  assert.match(latestSnapshotRouteSource, /cacheStageOneGammaExportSummary/);
+  assert.match(latestSnapshotRouteSource, /totalCandidates: latest\.metadata\.rowCount/);
+  assert.match(latestSnapshotRouteSource, /totalAcceptedQuestions: acceptedCount/);
+  assert.match(latestSnapshotRouteSource, /totalRejectedQuestions: rejectedCount/);
+  assert.match(latestSnapshotRouteSource, /scanExportId: latest\.metadata\.exportId/);
+  assert.match(pageSource, /\/api\/bullpen-ai\/stage-one-snapshot/);
+  assert.match(pageSource, /mergeLatestServerManualSnapshot/);
+  assert.match(pageSource, /latestServerSnapshot\.response\.ok/);
+  assert.match(pageSource, /BULLPEN_SNAPSHOT_SYNC_INTERVAL_MS = 30_000/);
+  assert.match(pageSource, /document\.addEventListener\("visibilitychange"/);
+  assert.match(pageSource, /window\.addEventListener\("focus"/);
+  assert.match(pageSource, /server synchronization fails/);
 });
 
 test("independent scan retains filtered rows and reasons for Stage 1 output dialogs", () => {
