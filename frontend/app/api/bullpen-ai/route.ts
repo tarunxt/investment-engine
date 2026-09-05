@@ -13,8 +13,11 @@ import {
 import { fetchBackendRuntimeJson } from "./_lib/backendBullpenRuntime";
 import {
   createBackendSessionContext,
-  fetchBackendJsonWithSession,
 } from "./_lib/serverBackendSession";
+import {
+  appendStageOneGammaExportPage,
+  type StageOneGammaExportRow,
+} from "./_lib/stageOneGammaExport";
 import {
   BULLPEN_SOURCE_URLS,
   normalizeBullpenScanFilters,
@@ -58,9 +61,9 @@ type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
 const CLI_SOURCE_LABEL = "Bullpen CLI";
 const WEB_SOURCE_LABEL = "Bullpen trending page";
 const GAMMA_SOURCE_LABEL = "Polymarket Gamma API";
-const POLYMARKET_GAMMA_MARKETS_URL = "https://gamma-api.polymarket.com/markets";
-const POLYMARKET_GAMMA_MARKETS_KEYSET_URL = `${POLYMARKET_GAMMA_MARKETS_URL}/keyset`;
-const GAMMA_MARKET_PAGE_SIZE = 100;
+const POLYMARKET_GAMMA_EVENTS_URL = "https://gamma-api.polymarket.com/events";
+const POLYMARKET_GAMMA_EVENTS_KEYSET_URL = `${POLYMARKET_GAMMA_EVENTS_URL}/keyset`;
+const GAMMA_EVENT_PAGE_SIZE = 500;
 const GAMMA_PAGE_TIMEOUT_MS = 20_000;
 const GAMMA_TERMINAL_CURSOR = "LTE=";
 
@@ -146,37 +149,6 @@ const FILTER_TEXT_KEYS = [
   "breadcrumbs",
   "breadcrumb",
 ];
-const GAMMA_MARKET_NORMALIZATION_KEYS = Array.from(
-  new Set([
-    "id",
-    "marketId",
-    "conditionId",
-    "questionID",
-    ...QUESTION_KEYS,
-    ...MARKET_SLUG_KEYS,
-    ...CLOSE_TIME_KEYS,
-    ...CATEGORY_KEYS,
-    ...FILTER_TEXT_KEYS,
-    "outcomes",
-    "options",
-    "tokens",
-    "outcomePrices",
-    "bestBid",
-    "bestAsk",
-    "spread",
-    "volume",
-    "volume24hr",
-    "volume24h",
-    "totalVolume",
-    "volumeNum",
-    "volumeUsd",
-    "volumeUSD",
-    "liquidity",
-    "liquidityNum",
-    "liquidityUsd",
-    "liquidityUSD",
-  ]),
-);
 const OUTCOME_LABEL_KEYS = ["name", "label", "outcome", "title", "side"];
 const INSULT_MARKET_PATTERNS = [
   /\b(?:donald\s+)?trump\b.{0,80}\bpublic(?:ly)?\s+insult(?:s|ed|ing)?\b/i,
@@ -1258,7 +1230,14 @@ async function runBullpenDiscover() {
   return fetchBackendRuntimeJson("/polymarket/runtime/discover");
 }
 
-async function fetchGammaMarketPage({
+type GammaPageCandidate = {
+  candidateId: string;
+  candidate: FilterableBullpenQuestion;
+  event: Record<string, unknown>;
+  market: Record<string, unknown>;
+};
+
+async function fetchGammaEventPage({
   cursor,
   currentUniverseStart,
   currentUniverseEnd,
@@ -1268,19 +1247,20 @@ async function fetchGammaMarketPage({
   currentUniverseEnd: Date;
 }) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
+  const exportCandidates: GammaPageCandidate[] = [];
   const params = new URLSearchParams({
     archived: "false",
     closed: "false",
     end_date_min: currentUniverseStart.toISOString(),
     end_date_max: currentUniverseEnd.toISOString(),
-    limit: String(GAMMA_MARKET_PAGE_SIZE),
+    limit: String(GAMMA_EVENT_PAGE_SIZE),
   });
   if (cursor) params.set("after_cursor", cursor);
 
   let response: Response;
   try {
     response = await fetch(
-      `${POLYMARKET_GAMMA_MARKETS_KEYSET_URL}?${params.toString()}`,
+      `${POLYMARKET_GAMMA_EVENTS_KEYSET_URL}?${params.toString()}`,
       {
         cache: "no-store",
         headers: { accept: "application/json" },
@@ -1296,6 +1276,7 @@ async function fetchGammaMarketPage({
     ) {
       return {
         candidates,
+        exportCandidates,
         nextCursor: cursor,
         retryableFailure: true,
         retryReason:
@@ -1309,6 +1290,7 @@ async function fetchGammaMarketPage({
   if (response.status === 429 || response.status >= 500) {
     return {
       candidates,
+      exportCandidates,
       nextCursor: cursor,
       retryableFailure: true,
       retryReason:
@@ -1322,39 +1304,39 @@ async function fetchGammaMarketPage({
   }
 
   const payload = (await response.json()) as Record<string, unknown>;
-  const markets = Array.isArray(payload.markets) ? payload.markets : [];
-  for (const marketValue of markets) {
-    if (!marketValue || typeof marketValue !== "object") continue;
-    const market = marketValue as Record<string, unknown>;
-    if (market.closed === true || market.archived === true) continue;
-
-    const parentEvent = toArray(market.events).find(
-      (value): value is Record<string, unknown> =>
-        Boolean(value) && typeof value === "object",
+  const events = Array.isArray(payload.events) ? payload.events : [];
+  for (const eventValue of events) {
+    if (!eventValue || typeof eventValue !== "object") continue;
+    const event = eventValue as Record<string, unknown>;
+    if (event.closed === true || event.archived === true) continue;
+    const eventWithoutMarkets = Object.fromEntries(
+      Object.entries(event).filter(([key]) => key !== "markets"),
     );
-    const eventIdentity = parentEvent
-      ? {
-          id: parentEvent.id,
-          slug: parentEvent.slug,
-          title: parentEvent.title,
-        }
-      : null;
-    const marketForNormalization = Object.fromEntries(
-      GAMMA_MARKET_NORMALIZATION_KEYS.flatMap((key) =>
-        key in market ? [[key, market[key]]] : [],
-      ),
-    );
-    marketForNormalization.events = eventIdentity ? [eventIdentity] : [];
-    const normalized = normalizeGammaMarket(
-      marketForNormalization,
-      POLYMARKET_GAMMA_MARKETS_URL,
-    );
-    if (!normalized) continue;
-    const closeDate = toValidDate(normalized.closeTime);
-    if (closeDate && closeDate.getTime() < currentUniverseStart.getTime()) {
-      continue;
+    for (const marketValue of toArray(event.markets)) {
+      if (!marketValue || typeof marketValue !== "object") continue;
+      const market = marketValue as Record<string, unknown>;
+      if (market.closed === true || market.archived === true) continue;
+      const marketForNormalization = {
+        ...market,
+        events: [eventWithoutMarkets],
+      };
+      const normalized = normalizeGammaMarket(
+        marketForNormalization,
+        POLYMARKET_GAMMA_EVENTS_URL,
+      );
+      if (!normalized) continue;
+      const closeDate = toValidDate(normalized.closeTime);
+      if (closeDate && closeDate.getTime() < currentUniverseStart.getTime()) {
+        continue;
+      }
+      candidates.set(normalized.id, normalized);
+      exportCandidates.push({
+        candidateId: normalized.id,
+        candidate: normalized,
+        event: eventWithoutMarkets,
+        market,
+      });
     }
-    candidates.set(normalized.id, normalized);
   }
 
   const rawNextCursor =
@@ -1362,13 +1344,13 @@ async function fetchGammaMarketPage({
       ? payload.next_cursor
       : null;
   const reachedEnd =
-    markets.length < GAMMA_MARKET_PAGE_SIZE ||
     !rawNextCursor ||
     rawNextCursor === GAMMA_TERMINAL_CURSOR ||
     rawNextCursor === cursor;
   const nextCursor = reachedEnd ? null : rawNextCursor;
   return {
     candidates,
+    exportCandidates,
     nextCursor,
     retryableFailure: false,
     retryReason: null,
@@ -1464,6 +1446,10 @@ async function buildResponse({
 }
 
 export async function GET(request: NextRequest) {
+  const backendSession = await createBackendSessionContext(request);
+  if (!backendSession.hasAuthJsSession || !backendSession.accessToken) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
   const searchParams = request.nextUrl.searchParams;
   const mode: ScanMode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
@@ -1478,6 +1464,7 @@ export async function GET(request: NextRequest) {
       ? requestedScannedAtDate.toISOString()
       : new Date().toISOString();
   const cursor = searchParams.get("scanCursor");
+  const requestedExportId = searchParams.get("scanExportId");
   const currentUniverseStart = new Date(scannedAt);
   const currentUniverseEnd = new Date(
     currentUniverseStart.getTime() + filters.maxClosingDays * MILLISECONDS_PER_DAY,
@@ -1486,10 +1473,11 @@ export async function GET(request: NextRequest) {
   try {
     const {
       candidates,
+      exportCandidates,
       nextCursor,
       retryableFailure,
       retryReason,
-    } = await fetchGammaMarketPage({
+    } = await fetchGammaEventPage({
       cursor,
       currentUniverseStart,
       currentUniverseEnd,
@@ -1503,6 +1491,7 @@ export async function GET(request: NextRequest) {
           resultChunk: true,
           scanStartedAt: scannedAt,
           nextCursor: cursor,
+          scanExportId: requestedExportId,
           retryReason,
           totalCandidates: 0,
           questions: [],
@@ -1514,7 +1503,7 @@ export async function GET(request: NextRequest) {
 
     const result = await buildResponse({
       mode,
-      sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+      sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
       sourceLabel: GAMMA_SOURCE_LABEL,
       scannedAt,
       filters,
@@ -1526,11 +1515,38 @@ export async function GET(request: NextRequest) {
               "Polymarket Gamma scanned every open market in the configured closing window before filters were applied.",
           }),
     });
+    const acceptedIds = new Set(result.questions.map((question) => question.id));
+    const rejectedReasons = new Map(
+      result.rejectedQuestions.map((question) => [
+        question.id,
+        question.filterReasons,
+      ]),
+    );
+    const exportRows: StageOneGammaExportRow[] = exportCandidates.map(
+      ({ candidateId, candidate, event, market }) => ({
+        candidate: stripFilterMetadata(candidate),
+        event,
+        market,
+        scanStatus: acceptedIds.has(candidateId) ? "passed" : "filtered",
+        filterReasons: rejectedReasons.get(candidateId) ?? [],
+      }),
+    );
+    const exportState = request.signal.aborted
+      ? { exportId: requestedExportId, rowCount: 0 }
+      : await appendStageOneGammaExportPage({
+          exportId: requestedExportId,
+          ownerKey:
+            backendSession.sessionSubject ?? backendSession.sessionGeneration,
+          pageKey: cursor || "__FIRST__",
+          rows: exportRows,
+          completed: nextCursor === null,
+        });
     const chunk = {
       ...result,
       resultChunk: true,
       scanStartedAt: scannedAt,
       nextCursor,
+      scanExportId: exportState.exportId,
       ...(nextCursor
         ? {
             status: "scanning",
@@ -1546,7 +1562,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         mode,
-        sourceUrl: POLYMARKET_GAMMA_MARKETS_URL,
+        sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
         sourceLabel: GAMMA_SOURCE_LABEL,
         scannedAt,
         filters,
