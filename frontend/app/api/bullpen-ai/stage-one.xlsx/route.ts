@@ -25,6 +25,8 @@ const LEGACY_HEADERS = [
   "Resolution Source", "Preflight Evidence",
 ] as const;
 
+type ExportScope = "filtered" | "all-scanned";
+
 function readNumber(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string" || !value.trim()) return null;
@@ -88,6 +90,19 @@ async function discoverHeaders(path: string) {
   };
 }
 
+function includeExportRow(row: StageOneGammaExportRow, scope: ExportScope) {
+  return scope === "all-scanned" || row.scanStatus === "passed";
+}
+
+async function countExportRows(path: string, scope: ExportScope) {
+  if (scope === "all-scanned") return null;
+  let count = 0;
+  await forEachRow(path, (row) => {
+    if (includeExportRow(row, scope)) count += 1;
+  });
+  return count;
+}
+
 function legacyValues(row: StageOneGammaExportRow, index: number) {
   const candidate = row.candidate;
   return [
@@ -141,6 +156,7 @@ function buildWorkbookStream(
   path: string,
   expectedRows: number,
   indexedGammaHeaders: string[] | null,
+  scope: ExportScope,
 ) {
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -162,13 +178,18 @@ function buildWorkbookStream(
       });
       addText(zip, "[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>');
       addText(zip, "_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>');
-      addText(zip, "xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="All Scanned Events" sheetId="1" r:id="rId1"/></sheets></workbook>');
+      const sheetName = scope === "filtered" ? "Filtered Events" : "All Scanned Events";
+      addText(zip, "xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${sheetName}" sheetId="1" r:id="rId1"/></sheets></workbook>`);
       addText(zip, "xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
       addText(zip, "xl/styles.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/><color rgb="FF14532D"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2F3EA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs></styleSheet>');
 
       void (async () => {
         const discovered = indexedGammaHeaders ? null : await discoverHeaders(path);
-        if (discovered && discovered.rowCount !== expectedRows) throw new Error(`Stage 1 export row count mismatch (${discovered.rowCount}/${expectedRows}).`);
+        if (
+          scope === "all-scanned" &&
+          discovered &&
+          discovered.rowCount !== expectedRows
+        ) throw new Error(`Stage 1 export row count mismatch (${discovered.rowCount}/${expectedRows}).`);
         const gammaHeaders = indexedGammaHeaders ?? discovered?.gammaHeaders ?? [];
         const headers = [...LEGACY_HEADERS, ...gammaHeaders];
         const sheet = new ZipDeflate("xl/worksheets/sheet1.xml", { level: 1 });
@@ -180,16 +201,19 @@ function buildWorkbookStream(
         }).join("");
         const headerCells = headers.map((value, index) => cell(value, index, 1, 1)).join("");
         sheet.push(strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:${lastColumn}${expectedRows + 1}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths}</cols><sheetData><row r="1">${headerCells}</row>`), false);
-        const written = await forEachRow(path, (row, index) => {
+        let written = 0;
+        await forEachRow(path, (row) => {
+          if (!includeExportRow(row, scope)) return;
           const gammaValues = headers.slice(LEGACY_HEADERS.length).map((header) => {
             const separator = header.indexOf(".");
             const scope = header.slice(0, separator);
             const key = header.slice(separator + 1);
             return scope === "event" ? row.event[key] : row.market[key];
           });
-          const values = [...legacyValues(row, index), ...gammaValues];
-          const rowNumber = index + 2;
+          const values = [...legacyValues(row, written), ...gammaValues];
+          const rowNumber = written + 2;
           sheet.push(strToU8(`<row r="${rowNumber}">${values.map((value, column) => cell(value, column, rowNumber)).join("")}</row>`), false);
+          written += 1;
         });
         if (written !== expectedRows) throw new Error(`Stage 1 export row count changed (${written}/${expectedRows}).`);
         sheet.push(strToU8(`</sheetData><autoFilter ref="A1:${lastColumn}${expectedRows + 1}"/></worksheet>`), true);
@@ -204,9 +228,17 @@ export async function GET(request: NextRequest) {
   if (!session.hasAuthJsSession || !session.accessToken) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const exportId = request.nextUrl.searchParams.get("exportId")?.trim();
   if (!exportId) return NextResponse.json({ error: "Missing Stage 1 export identifier." }, { status: 400 });
+  const requestedScope = request.nextUrl.searchParams.get("scope")?.trim() || "all-scanned";
+  if (requestedScope !== "filtered" && requestedScope !== "all-scanned") {
+    return NextResponse.json({ error: "Invalid Stage 1 export scope." }, { status: 400 });
+  }
+  const scope: ExportScope = requestedScope;
   try {
     const { metadata, rowsPath } = await openStageOneGammaExport({ exportId, ownerKey: session.sessionSubject ?? session.sessionGeneration });
     if (!metadata.rowCount) return NextResponse.json({ error: "This Stage 1 scan has no retained rows." }, { status: 409 });
+    const filteredRowCount = await countExportRows(rowsPath, scope);
+    const exportRowCount = filteredRowCount ?? metadata.rowCount;
+    if (!exportRowCount) return NextResponse.json({ error: "This Stage 1 export has no matching rows." }, { status: 409 });
     const stamp = metadata.createdAt.replace(/[:.]/g, "-");
     const indexedGammaHeaders = metadata.eventKeys?.length && metadata.marketKeys?.length
       ? [
@@ -214,12 +246,12 @@ export async function GET(request: NextRequest) {
           ...metadata.marketKeys.map((key) => `market.${key}`),
         ]
       : null;
-    return new NextResponse(buildWorkbookStream(rowsPath, metadata.rowCount, indexedGammaHeaders), {
+    return new NextResponse(buildWorkbookStream(rowsPath, exportRowCount, indexedGammaHeaders, scope), {
       headers: {
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "content-disposition": `attachment; filename="bullpen-stage-1-all-scanned-events-${stamp}.xlsx"`,
+        "content-disposition": `attachment; filename="bullpen-stage-1-${scope}-events-${stamp}.xlsx"`,
         "cache-control": "no-store",
-        "x-bullpen-export-rows": String(metadata.rowCount),
+        "x-bullpen-export-rows": String(exportRowCount),
       },
     });
   } catch (error: unknown) {

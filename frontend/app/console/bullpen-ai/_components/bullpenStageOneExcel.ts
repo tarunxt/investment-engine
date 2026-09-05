@@ -207,10 +207,14 @@ export function downloadCompleteStageOneRunExcel(runId: string) {
   document.body.removeChild(link);
 }
 
-export function downloadIndependentStageOneExcel(exportId: string) {
+export function downloadIndependentStageOneExcel(
+  exportId: string,
+  exportScope: "filtered" | "all-scanned" = "all-scanned",
+) {
   const link = document.createElement("a");
-  link.href = `/api/bullpen-ai/stage-one.xlsx?exportId=${encodeURIComponent(exportId)}`;
-  link.download = "bullpen-stage-1-all-scanned-events.xlsx";
+  const params = new URLSearchParams({ exportId, scope: exportScope });
+  link.href = `/api/bullpen-ai/stage-one.xlsx?${params.toString()}`;
+  link.download = `bullpen-stage-1-${exportScope}-events.xlsx`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
