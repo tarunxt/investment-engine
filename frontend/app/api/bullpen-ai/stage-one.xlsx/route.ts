@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import { access, open as openFile, rename, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
 
 import { strToU8, Zip, ZipDeflate, ZipPassThrough } from "fflate";
@@ -94,13 +95,50 @@ function includeExportRow(row: StageOneGammaExportRow, scope: ExportScope) {
   return scope === "all-scanned" || row.scanStatus === "passed";
 }
 
-async function countExportRows(path: string, scope: ExportScope) {
-  if (scope === "all-scanned") return null;
-  let count = 0;
-  await forEachRow(path, (row) => {
-    if (includeExportRow(row, scope)) count += 1;
-  });
-  return count;
+async function prepareFilteredRows(
+  rowsPath: string,
+  filteredRowsPath: string,
+  expectedRows: number | null,
+) {
+  try {
+    await access(filteredRowsPath);
+    if (expectedRows !== null) {
+      return { path: filteredRowsPath, rowCount: expectedRows };
+    }
+    return {
+      path: filteredRowsPath,
+      rowCount: await forEachRow(filteredRowsPath, () => undefined),
+    };
+  } catch (error: unknown) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  // Backward compatibility for scans created before the compact filtered
+  // ledger existed. Materialize it completely before starting the HTTP body,
+  // so the proxy never sees a long idle gap after the ZIP headers.
+  const temporaryPath = `${filteredRowsPath}.${process.pid}.${Date.now()}.tmp`;
+  const output = await openFile(temporaryPath, "wx");
+  let rowCount = 0;
+  try {
+    await forEachRow(rowsPath, async (row) => {
+      if (!includeExportRow(row, "filtered")) return;
+      await output.write(`${JSON.stringify(row)}\n`);
+      rowCount += 1;
+    });
+  } catch (error: unknown) {
+    await output.close();
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+  await output.close();
+  if (expectedRows !== null && rowCount !== expectedRows) {
+    await rm(temporaryPath, { force: true });
+    throw new Error(`Stage 1 filtered export row count changed (${rowCount}/${expectedRows}).`);
+  }
+  await rename(temporaryPath, filteredRowsPath);
+  return { path: filteredRowsPath, rowCount };
 }
 
 function legacyValues(row: StageOneGammaExportRow, index: number) {
@@ -236,10 +274,18 @@ export async function GET(request: NextRequest) {
   }
   const scope: ExportScope = requestedScope;
   try {
-    const { metadata, rowsPath } = await openStageOneGammaExport({ exportId, ownerKey: session.sessionSubject ?? session.sessionGeneration });
+    const { metadata, rowsPath, filteredRowsPath } = await openStageOneGammaExport({ exportId, ownerKey: session.sessionSubject ?? session.sessionGeneration });
     if (!metadata.rowCount) return NextResponse.json({ error: "This Stage 1 scan has no retained rows." }, { status: 409 });
-    const filteredRowCount = await countExportRows(rowsPath, scope);
-    const exportRowCount = filteredRowCount ?? metadata.rowCount;
+    if (!metadata.completed) return NextResponse.json({ error: "This Stage 1 scan is still running." }, { status: 409 });
+    const preparedFilteredRows = scope === "filtered"
+      ? await prepareFilteredRows(
+          rowsPath,
+          filteredRowsPath,
+          typeof metadata.acceptedCount === "number" ? metadata.acceptedCount : null,
+        )
+      : null;
+    const exportRowsPath = preparedFilteredRows?.path ?? rowsPath;
+    const exportRowCount = preparedFilteredRows?.rowCount ?? metadata.rowCount;
     if (!exportRowCount) return NextResponse.json({ error: "This Stage 1 export has no matching rows." }, { status: 409 });
     const stamp = metadata.createdAt.replace(/[:.]/g, "-");
     const indexedGammaHeaders = metadata.eventKeys?.length && metadata.marketKeys?.length
@@ -248,7 +294,7 @@ export async function GET(request: NextRequest) {
           ...metadata.marketKeys.map((key) => `market.${key}`),
         ]
       : null;
-    return new NextResponse(buildWorkbookStream(rowsPath, exportRowCount, indexedGammaHeaders, scope), {
+    return new NextResponse(buildWorkbookStream(exportRowsPath, exportRowCount, indexedGammaHeaders, scope), {
       headers: {
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "content-disposition": `attachment; filename="bullpen-stage-1-${scope}-events-${stamp}.xlsx"`,

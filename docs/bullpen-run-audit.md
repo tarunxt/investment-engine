@@ -87,6 +87,12 @@ deadline window: every open parent is expanded first, and the saved expiry
 window is applied to each child market. Active wallet positions are force
 included in Stage 1 results and in both Passed Filters and All Scanned exports,
 even when the position was absent from the fetched catalogue.
+Independent scans also retain a compact passed-row ledger beside the exhaustive
+raw Gamma ledger. Passed Filters Excel generation reads that compact ledger, so
+large Trending and Full Universe scans do not pause the download stream while
+rescanning hundreds of thousands of rejected rows. Scans created before this
+ledger was introduced materialize it once before response headers are sent;
+their frozen scan facts and filter reasons are unchanged.
 
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,

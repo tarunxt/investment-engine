@@ -238,6 +238,8 @@ test("independent Stage 1 carries keyset and exhaustive-export progress in each 
   assert.match(exportLedgerSource, /ORPHAN_EXPORT_GRACE_MS/);
   assert.match(exportLedgerSource, /isAbandonedOrphan/);
   assert.match(exportLedgerSource, /metadata\?\.ownerHash === expectedOwnerHash/);
+  assert.match(exportLedgerSource, /filteredRows: join\(EXPORT_DIRECTORY/);
+  assert.match(exportLedgerSource, /row\.scanStatus === "passed"/);
 });
 
 test("independent Stage 1 Excel uses its own complete export instead of a stale auto-run", () => {
@@ -274,5 +276,9 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   assert.match(excelSource, /metadata\.marketKeys/);
   assert.match(excelSource, /row\.scanStatus === "passed"/);
   assert.match(excelSource, /scope === "filtered" \? "Filtered Events"/);
-  assert.match(excelSource, /buildWorkbookStream\(rowsPath, exportRowCount, indexedGammaHeaders, scope\)/);
+  assert.match(excelSource, /buildWorkbookStream\(exportRowsPath, exportRowCount, indexedGammaHeaders, scope\)/);
+  assert.match(excelSource, /prepareFilteredRows/);
+  assert.match(excelSource, /filteredRowsPath/);
+  assert.match(excelSource, /proxy never sees a long idle gap/);
+  assert.doesNotMatch(excelSource, /countExportRows/);
 });
