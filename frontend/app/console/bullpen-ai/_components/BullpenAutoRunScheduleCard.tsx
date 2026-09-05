@@ -11067,9 +11067,20 @@ export function BullpenAutoRunScheduleCard({
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
-  const [stageOneResultSource, setStageOneResultSource] = useState<
-    "original" | "independent"
-  >("original");
+  const [stageOneResultSelection, setStageOneResultSelection] = useState<{
+    source: "original" | "independent";
+    snapshotId: string | null;
+  }>({ source: "original", snapshotId: null });
+  const stageOneResultSource =
+    independentScanSnapshot &&
+    independentScanSnapshot.snapshotId !== stageOneResultSelection.snapshotId
+      ? "independent"
+      : stageOneResultSelection.source;
+  const setStageOneResultSource = (source: "original" | "independent") =>
+    setStageOneResultSelection({
+      source,
+      snapshotId: independentScanSnapshot?.snapshotId ?? null,
+    });
   const [isIndependentStageOneScanning, setIsIndependentStageOneScanning] =
     useState(false);
   const [independentStageOneStartedAt, setIndependentStageOneStartedAt] =
