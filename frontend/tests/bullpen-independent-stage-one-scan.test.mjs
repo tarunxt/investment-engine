@@ -27,6 +27,13 @@ const routeSource = fs.readFileSync(
   new URL("../app/api/bullpen-ai/route.ts", import.meta.url),
   "utf8",
 );
+const exportLedgerSource = fs.readFileSync(
+  new URL(
+    "../app/api/bullpen-ai/_lib/stageOneGammaExport.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () => {
   assert.match(cardSource, />\s*Original\s*</);
@@ -165,6 +172,10 @@ test("independent Stage 1 carries keyset and exhaustive-export progress in each 
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
   assert.match(routeSource, /configured closing window/);
   assert.match(routeSource, /appendStageOneGammaExportPage/);
+  assert.match(exportLedgerSource, /cleanupSupersededOwnerExports\(ownerKey\)/);
+  assert.match(exportLedgerSource, /ORPHAN_EXPORT_GRACE_MS/);
+  assert.match(exportLedgerSource, /isAbandonedOrphan/);
+  assert.match(exportLedgerSource, /metadata\?\.ownerHash === expectedOwnerHash/);
 });
 
 test("independent Stage 1 Excel uses its own complete export instead of a stale auto-run", () => {
