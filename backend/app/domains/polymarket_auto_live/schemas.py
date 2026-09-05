@@ -220,7 +220,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     min_order_usd: float = Field(default=1, gt=0)
     max_order_usd: float = Field(default=25, gt=0)
     console_order_usd: float = Field(default=5, gt=0)
-    console_min_market_odds: float = Field(default=5, ge=0, lt=50)
+    console_min_market_odds: float = Field(default=0, ge=0, lt=50)
     console_max_closing_days: int = Field(default=30, ge=1)
     console_custom_exclude_phrases: list[str] = Field(default_factory=list)
     returns_per_day_formula: str = (

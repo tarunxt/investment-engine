@@ -17,8 +17,8 @@ const FILTER_ORDER = Object.keys(
 export function BullpenScanFiltersPopupBridge() {
   const [isOpen, setIsOpen] = useState(false);
   const [detailId, setDetailId] = useState<BullpenScanFilterDetailId | null>(null);
-  const [oddsFloor, setOddsFloor] = useState(5);
-  const [savedOddsFloor, setSavedOddsFloor] = useState(5);
+  const [oddsFloor, setOddsFloor] = useState(0);
+  const [savedOddsFloor, setSavedOddsFloor] = useState(0);
   const [maxClosingDays, setMaxClosingDays] = useState(30);
   const [savedMaxClosingDays, setSavedMaxClosingDays] = useState(30);
   const [isFloorLoading, setIsFloorLoading] = useState(false);
@@ -35,7 +35,7 @@ export function BullpenScanFiltersPopupBridge() {
       setClosingDaysMessage(null);
       try {
         const settings = await apiService.getBullpenAutoLiveSettings();
-        const saved = settings.console_min_market_odds ?? 5;
+        const saved = settings.console_min_market_odds ?? 0;
         const savedClosingDays = settings.console_max_closing_days ?? 30;
         setOddsFloor(saved);
         setSavedOddsFloor(saved);
@@ -43,7 +43,7 @@ export function BullpenScanFiltersPopupBridge() {
         setSavedMaxClosingDays(savedClosingDays);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
       } catch {
-        setFloorMessage("Could not load the saved odds floor. The default 5% is shown.");
+        setFloorMessage("Could not load the saved odds floor. The default 0% is shown.");
       } finally {
         setIsFloorLoading(false);
       }

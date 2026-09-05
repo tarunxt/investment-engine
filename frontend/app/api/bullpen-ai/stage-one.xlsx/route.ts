@@ -113,7 +113,9 @@ function legacyValues(row: StageOneGammaExportRow, index: number) {
     candidate.closeTime ?? "", candidate.category, candidate.yesOdds, candidate.noOdds,
     readCents(row.market.bestBid), readCents(row.market.bestAsk), readCents(row.market.spread),
     "", "", "", "", readNumber(candidate.volume), readNumber(candidate.liquidity),
-    "No", "No", "", row.scanStatus, row.filterReasons.join(" | "),
+    row.forceIncluded ? "Yes" : "No",
+    row.forceIncludedPosition ? "Yes" : "No",
+    "", row.scanStatus, row.filterReasons.join(" | "),
     candidate.rules ?? row.market.description ?? "", row.event.description ?? "",
     candidate.marketContext ?? "", candidate.resolutionSource ?? row.event.resolutionSource ?? "", "",
   ];

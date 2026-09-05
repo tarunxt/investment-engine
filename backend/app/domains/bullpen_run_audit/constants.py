@@ -4,11 +4,11 @@ from typing import Final
 
 BULLPEN_RUN_AUDIT_SCHEMA_VERSION: Final[int] = 2
 BULLPEN_RUN_AUDIT_RULE_VERSION: Final[str] = (
-    "2026-07-27-stage3-submission-evidence-v29"
+    "2026-09-05-stage1-common-filters-v30"
 )
 BULLPEN_RUN_AUDIT_PROMPT_VERSION: Final[str] = "bullpen-run-audit-v1"
 BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION: Final[str] = (
-    "2026-07-27-stage3-submission-evidence-v29"
+    "2026-09-05-stage1-common-filters-v30"
 )
 
 SNAPSHOT_SOURCE_NATIVE: Final[str] = "native"
@@ -67,6 +67,14 @@ AUDITED_ALGORITHM_REGISTRY: Final[tuple[dict[str, str], ...]] = (
         "source_module": "app.domains.polymarket_auto_live.console_profile",
         "source_function": "candidate_returns_per_day",
         "label": "Candidate returns per day",
+    },
+    {
+        "algorithm_key": "stage1_common_scan_filters_and_wallet_union",
+        "stage": "stage-1",
+        "algorithm_version": "v1",
+        "source_module": "app.domains.polymarket_auto_live.console_profile",
+        "source_function": "scan_console_profile_markets",
+        "label": "Saved common filters, child deadlines, and active-wallet union",
     },
     {
         "algorithm_key": "stage1_wallet_handoff_circuit_breaker",

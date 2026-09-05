@@ -72,7 +72,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   min_order_usd: 1,
   max_order_usd: 25,
   console_order_usd: 5,
-  console_min_market_odds: 5,
+  console_min_market_odds: 0,
   console_max_closing_days: 30,
   console_custom_exclude_phrases: [],
   returns_per_day_formula:

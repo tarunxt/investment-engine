@@ -51,7 +51,6 @@ from app.domains.polymarket.position_classification import (
 from app.domains.polymarket_auto_live.console_profile import (
     DEFAULT_CONSOLE_ORDER_USD,
     CONSOLE_MIN_LLM_STRONG_SIDE_ODDS,
-    CONSOLE_MIN_MARKET_ODDS,
     CONSOLE_PROFILE_ID,
     CONSOLE_RANKED_EVENT_LIMIT,
     CONSOLE_SCHEDULE_HOURS,
@@ -5725,6 +5724,7 @@ class BullpenAutoLiveEngine:
                         now=now,
                         min_market_odds=settings.console_min_market_odds,
                         max_closing_days=settings.console_max_closing_days,
+                        custom_exclude_phrases=settings.console_custom_exclude_phrases,
                     )
                     if rejection_reasons:
                         rejected = ScanRejectedMarket(
@@ -6490,6 +6490,79 @@ class BullpenAutoLiveEngine:
                 if row.get("condition_id") or row.get("market_id") or row.get("slug")
             }
         )
+        active_identity_keys = {
+            str(value).strip().lower()
+            for row in serialized_active_positions_found
+            for value in (
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("slug"),
+            )
+            if value is not None and str(value).strip()
+        }
+        for row in stage1_accepted_candidates:
+            row_identity_keys = {
+                str(value).strip().lower()
+                for value in (
+                    row.get("market_id"),
+                    row.get("condition_id"),
+                    row.get("slug"),
+                )
+                if value is not None and str(value).strip()
+            }
+            if row_identity_keys & active_identity_keys:
+                row["force_include"] = True
+                row["force_included_position"] = True
+
+        retained_rejected_candidates: list[dict[str, object]] = []
+        for row in stage1_rejected_candidates:
+            row_identity_keys = {
+                str(value).strip().lower()
+                for value in (
+                    row.get("market_id"),
+                    row.get("condition_id"),
+                    row.get("slug"),
+                )
+                if value is not None and str(value).strip()
+            }
+            if not (row_identity_keys & active_identity_keys):
+                retained_rejected_candidates.append(row)
+        stage1_rejected_candidates = retained_rejected_candidates
+
+        accepted_identity_keys = {
+            str(value).strip().lower()
+            for row in stage1_accepted_candidates
+            for value in (
+                row.get("market_id"),
+                row.get("condition_id"),
+                row.get("slug"),
+            )
+            if value is not None and str(value).strip()
+        }
+        for position_row in serialized_active_positions_found:
+            position_identity_keys = {
+                str(value).strip().lower()
+                for value in (
+                    position_row.get("market_id"),
+                    position_row.get("condition_id"),
+                    position_row.get("slug"),
+                )
+                if value is not None and str(value).strip()
+            }
+            if position_identity_keys & accepted_identity_keys:
+                continue
+            stage1_accepted_candidates.append(
+                {
+                    **position_row,
+                    "question_id": position_row.get("market_id"),
+                    "force_include": True,
+                    "force_included_position": True,
+                    "scan_status": "passed",
+                    "filter_reasons": [],
+                }
+            )
+            accepted_identity_keys.update(position_identity_keys)
+        scanned_total_candidates += active_wallet_markets_added_to_union
         missing_active_market_count = 0
 
         position_snapshots: list[PositionSnapshot] = []
@@ -9580,7 +9653,7 @@ class BullpenAutoLiveEngine:
                             current_no_probability=current_no_probability,
                             selected_side=selected_side,
                             held_side=current_position.side,
-                            minimum_market_probability=CONSOLE_MIN_MARKET_ODDS / 100,
+                            minimum_market_probability=settings.console_min_market_odds / 100,
                             now=now,
                         ),
                         snapshot=event_exit_snapshot,

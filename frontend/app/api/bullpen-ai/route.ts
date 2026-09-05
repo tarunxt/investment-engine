@@ -38,6 +38,7 @@ import {
   SPORTS_PATTERNS,
   WEATHER_KEYWORDS,
 } from "@/lib/bullpenScanExclusions";
+import type { BullpenActivePositionView } from "@/lib/bullpenPositions";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -1239,20 +1240,14 @@ type GammaPageCandidate = {
 
 async function fetchGammaEventPage({
   cursor,
-  currentUniverseStart,
-  currentUniverseEnd,
 }: {
   cursor: string | null;
-  currentUniverseStart: Date;
-  currentUniverseEnd: Date;
 }) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   const exportCandidates: GammaPageCandidate[] = [];
   const params = new URLSearchParams({
     archived: "false",
     closed: "false",
-    end_date_min: currentUniverseStart.toISOString(),
-    end_date_max: currentUniverseEnd.toISOString(),
     limit: String(GAMMA_EVENT_PAGE_SIZE),
   });
   if (cursor) params.set("after_cursor", cursor);
@@ -1325,10 +1320,6 @@ async function fetchGammaEventPage({
         POLYMARKET_GAMMA_EVENTS_URL,
       );
       if (!normalized) continue;
-      const closeDate = toValidDate(normalized.closeTime);
-      if (closeDate && closeDate.getTime() < currentUniverseStart.getTime()) {
-        continue;
-      }
       candidates.set(normalized.id, normalized);
       exportCandidates.push({
         candidateId: normalized.id,
@@ -1391,6 +1382,7 @@ async function buildResponse({
   candidates,
   warning,
   details,
+  forcedIdentityKeys = new Set<string>(),
 }: {
   mode: ScanMode;
   sourceUrl: string;
@@ -1400,6 +1392,7 @@ async function buildResponse({
   candidates: FilterableBullpenQuestion[];
   warning?: string;
   details?: string;
+  forcedIdentityKeys?: Set<string>;
 }) {
   const candidatesWithFilters = candidates.map((question) => ({
     ...question,
@@ -1413,7 +1406,11 @@ async function buildResponse({
   }));
   const evaluatedCandidates = candidatesWithFilters.map((question) => ({
     question,
-    filterReasons: getFilterReasons(question, mode, filters),
+    filterReasons: questionIdentityKeys(question).some((key) =>
+      forcedIdentityKeys.has(key),
+    )
+      ? []
+      : getFilterReasons(question, mode, filters),
   }));
   const acceptedCandidates = evaluatedCandidates
     .filter(({ filterReasons }) => filterReasons.length === 0)
@@ -1445,7 +1442,75 @@ async function buildResponse({
   };
 }
 
-export async function GET(request: NextRequest) {
+function normalizeIdentity(value: unknown) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().toLowerCase()
+    : null;
+}
+
+function questionIdentityKeys(question: {
+  conditionId?: string | null;
+  marketId?: string | null;
+  slug?: string | null;
+  id: string;
+}) {
+  return [
+    question.conditionId,
+    question.marketId,
+    question.slug,
+    question.id,
+  ]
+    .map(normalizeIdentity)
+    .filter((value): value is string => Boolean(value));
+}
+
+function positionIdentityKeys(position: BullpenActivePositionView) {
+  return [position.conditionId, position.marketId, position.marketSlug, position.slug]
+    .map(normalizeIdentity)
+    .filter((value): value is string => Boolean(value));
+}
+
+function activePositionCandidate(position: BullpenActivePositionView): FilterableBullpenQuestion {
+  const id = position.conditionId || position.marketId || position.marketSlug || position.key;
+  const publicQuestion: BullpenQuestion = {
+    id,
+    question: position.marketTitle,
+    positionKey: position.key,
+    conditionId: position.conditionId,
+    marketId: position.marketId,
+    closeTime: position.closeTime,
+    category: "Active Bullpen Position",
+    yesOdds: position.yesOdds,
+    noOdds: position.noOdds,
+    volume: null,
+    liquidity: null,
+    sourceUrl: position.marketUrl || POLYMARKET_GAMMA_EVENTS_URL,
+    slug: position.marketSlug || position.slug,
+    marketUrl: position.marketUrl,
+    outcomeLabels: ["Yes", "No"],
+    outcomeCount: 2,
+    isBinaryYesNo: true,
+    daysUntilClose: null,
+    rules: position.rules,
+    marketContext: position.marketContext,
+    resolutionSource: position.resolutionSource,
+  };
+  return {
+    ...publicQuestion,
+    _categorySearchText: "",
+    _searchText: "",
+    _customExcludeSportsKeywords: [],
+    _customExcludeWeatherKeywords: [],
+    _customExcludeMarketPredictionsKeywords: [],
+    _customExcludeTweetCountQuestionsKeywords: [],
+    _customExcludeOtherPhrases: [],
+  };
+}
+
+async function handleScan(
+  request: NextRequest,
+  activePositions: BullpenActivePositionView[],
+) {
   const backendSession = await createBackendSessionContext(request);
   if (!backendSession.hasAuthJsSession || !backendSession.accessToken) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -1465,9 +1530,8 @@ export async function GET(request: NextRequest) {
       : new Date().toISOString();
   const cursor = searchParams.get("scanCursor");
   const requestedExportId = searchParams.get("scanExportId");
-  const currentUniverseStart = new Date(scannedAt);
-  const currentUniverseEnd = new Date(
-    currentUniverseStart.getTime() + filters.maxClosingDays * MILLISECONDS_PER_DAY,
+  const forcedIdentityKeys = new Set(
+    activePositions.flatMap(positionIdentityKeys),
   );
 
   try {
@@ -1479,8 +1543,6 @@ export async function GET(request: NextRequest) {
       retryReason,
     } = await fetchGammaEventPage({
       cursor,
-      currentUniverseStart,
-      currentUniverseEnd,
     });
 
     if (retryableFailure) {
@@ -1501,18 +1563,23 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const gammaCandidates = Array.from(candidates.values());
+    const resultCandidates = nextCursor
+      ? gammaCandidates
+      : [...gammaCandidates, ...activePositions.map(activePositionCandidate)];
     const result = await buildResponse({
       mode,
       sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
       sourceLabel: GAMMA_SOURCE_LABEL,
       scannedAt,
       filters,
-      candidates: sortQuestions(Array.from(candidates.values())),
+      candidates: sortQuestions(resultCandidates),
+      forcedIdentityKeys,
       ...(nextCursor
         ? {}
         : {
             details:
-              "Polymarket Gamma scanned every open market in the configured closing window before filters were applied.",
+              "Polymarket Gamma scanned every open parent event, applied the configured window to child markets, and merged active wallet positions.",
           }),
     });
     const acceptedIds = new Set(result.questions.map((question) => question.id));
@@ -1529,8 +1596,33 @@ export async function GET(request: NextRequest) {
         market,
         scanStatus: acceptedIds.has(candidateId) ? "passed" : "filtered",
         filterReasons: rejectedReasons.get(candidateId) ?? [],
+        forceIncluded: questionIdentityKeys(candidate).some((key) =>
+          forcedIdentityKeys.has(key),
+        ),
+        forceIncludedPosition: questionIdentityKeys(candidate).some((key) =>
+          forcedIdentityKeys.has(key),
+        ),
       }),
     );
+    if (nextCursor === null) {
+      for (const position of activePositions) {
+        const candidate = activePositionCandidate(position);
+        exportRows.push({
+          candidate: stripFilterMetadata(candidate),
+          event: { source: "active_wallet_position" },
+          market: {
+            id: position.marketId,
+            conditionId: position.conditionId,
+            slug: position.marketSlug || position.slug,
+            source: "active_wallet_position",
+          },
+          scanStatus: "passed",
+          filterReasons: [],
+          forceIncluded: true,
+          forceIncludedPosition: true,
+        });
+      }
+    }
     const exportState = request.signal.aborted
       ? { exportId: requestedExportId, rowCount: 0 }
       : await appendStageOneGammaExportPage({
@@ -1581,4 +1673,18 @@ export async function GET(request: NextRequest) {
       { status: 502 },
     );
   }
+}
+
+export async function GET(request: NextRequest) {
+  return handleScan(request, []);
+}
+
+export async function POST(request: NextRequest) {
+  const payload = (await request.json().catch(() => ({}))) as {
+    activePositions?: BullpenActivePositionView[];
+  };
+  return handleScan(
+    request,
+    Array.isArray(payload.activePositions) ? payload.activePositions.slice(0, 250) : [],
+  );
 }

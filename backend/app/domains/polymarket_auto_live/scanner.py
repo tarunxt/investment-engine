@@ -649,18 +649,20 @@ async def _fetch_gamma_page(
     client: httpx.AsyncClient,
     *,
     offset: int,
-    end_date_min: str,
+    end_date_min: str | None,
 ) -> tuple[list[dict[str, Any]], int]:
+    params = {
+        "active": "true",
+        "archived": "false",
+        "closed": "false",
+        "limit": str(GAMMA_EVENT_PAGE_SIZE),
+        "offset": str(offset),
+    }
+    if end_date_min is not None:
+        params["end_date_min"] = end_date_min
     response = await client.get(
         POLYMARKET_GAMMA_EVENTS_URL,
-        params={
-            "active": "true",
-            "archived": "false",
-            "closed": "false",
-            "end_date_min": end_date_min,
-            "limit": str(GAMMA_EVENT_PAGE_SIZE),
-            "offset": str(offset),
-        },
+        params=params,
     )
     response.raise_for_status()
     payload = response.json()
@@ -702,7 +704,7 @@ async def _fetch_gamma_keyset_page(
     client: httpx.AsyncClient,
     *,
     after_cursor: str | None,
-    end_date_min: str,
+    end_date_min: str | None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """Fetch one high-throughput event-keyset page for exhaustive discovery.
 
@@ -711,11 +713,12 @@ async def _fetch_gamma_keyset_page(
     proving the complete cursor chain.
     """
 
-    params = {
+    params: dict[str, str] = {
         "closed": "false",
-        "end_date_min": end_date_min,
         "limit": str(GAMMA_KEYSET_EVENT_PAGE_SIZE),
     }
+    if end_date_min is not None:
+        params["end_date_min"] = end_date_min
     if after_cursor:
         params["after_cursor"] = after_cursor
     response = await client.get(POLYMARKET_GAMMA_EVENTS_KEYSET_URL, params=params)
@@ -1086,12 +1089,13 @@ async def scan_candidate_markets(
     use_deadline_cursor_pagination: bool = False,
     preserve_partial_on_error: bool = False,
     pagination_deadline_seconds: float | None = None,
+    filter_parent_deadlines: bool = True,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
     rejected: list[ScanRejectedMarket] = []
     seen_market_ids: set[str] = set()
-    current_universe_start = _now_iso()
+    current_universe_start = _now_iso() if filter_parent_deadlines else None
     pagination_error: Exception | None = None
     pagination_started_at = time.monotonic()
 
@@ -1119,7 +1123,7 @@ async def scan_candidate_markets(
                         await _fetch_gamma_deadline_cursor_page(
                             client,
                             offset=offset,
-                            end_date_min=current_universe_start,
+                            end_date_min=current_universe_start or _now_iso(),
                         )
                     )
                     next_cursor = None

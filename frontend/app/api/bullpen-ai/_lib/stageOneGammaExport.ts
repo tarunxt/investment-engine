@@ -21,6 +21,8 @@ export type StageOneGammaExportRow = {
   market: Record<string, unknown>;
   scanStatus: "passed" | "filtered";
   filterReasons: string[];
+  forceIncluded?: boolean;
+  forceIncludedPosition?: boolean;
 };
 
 export type StageOneGammaExportMetadata = {
@@ -33,6 +35,7 @@ export type StageOneGammaExportMetadata = {
   processedPages: string[];
   eventKeys?: string[];
   marketKeys?: string[];
+  identityKeys?: string[];
   mode?: ScanMode;
   filters?: BullpenScanFilters;
   sourceUrl?: string;
@@ -173,6 +176,7 @@ export async function appendStageOneGammaExportPage({
       processedPages: [],
       eventKeys: [],
       marketKeys: [],
+      identityKeys: [],
       ...snapshot,
       acceptedCount: 0,
       rejectedCount: 0,
@@ -183,13 +187,27 @@ export async function appendStageOneGammaExportPage({
   }
 
   if (!metadata.processedPages.includes(pageKey)) {
-    const payload = rows.map((row) => JSON.stringify(row)).join("\n");
+    const identityKeys = new Set(metadata.identityKeys ?? []);
+    const uniqueRows = rows.filter((row) => {
+      const keys = [
+        row.candidate.conditionId,
+        row.candidate.marketId,
+        row.candidate.slug,
+        row.candidate.id,
+      ]
+        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        .map((value) => value.trim().toLowerCase());
+      if (keys.some((key) => identityKeys.has(key))) return false;
+      keys.forEach((key) => identityKeys.add(key));
+      return true;
+    });
+    const payload = uniqueRows.map((row) => JSON.stringify(row)).join("\n");
     if (payload) await appendFile(paths.rows, `${payload}\n`, "utf8");
-    metadata.rowCount += rows.length;
+    metadata.rowCount += uniqueRows.length;
     metadata.processedPages.push(pageKey);
     const eventKeys = new Set(metadata.eventKeys ?? []);
     const marketKeys = new Set(metadata.marketKeys ?? []);
-    for (const row of rows) {
+    for (const row of uniqueRows) {
       Object.keys(row.event).forEach((key) => eventKeys.add(key));
       Object.keys(row.market).forEach((key) => marketKeys.add(key));
       if (row.scanStatus === "passed") {
@@ -212,6 +230,7 @@ export async function appendStageOneGammaExportPage({
     }
     metadata.eventKeys = Array.from(eventKeys).sort();
     metadata.marketKeys = Array.from(marketKeys).sort();
+    metadata.identityKeys = Array.from(identityKeys);
   }
   metadata.completed ||= completed;
   metadata.updatedAt = new Date().toISOString();

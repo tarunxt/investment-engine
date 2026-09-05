@@ -65,13 +65,21 @@ normalized scan text contains the phrase "released by" so release-deadline
 markets are consistently represented in new run-audit snapshots without
 rewriting historical frozen snapshots.
 
-The Yes/No market-odds floor is a persisted per-user Auto-Live setting. New
+The Yes/No market-odds floor is a persisted per-user Auto-Live setting and
+defaults to 0%, so there is no hidden minimum-side floor. New
 Stage 1 scans use that saved value for both Yes and No sides, include the exact
 configured percentage in every matching rejection reason, and retain it in the
 run's immutable settings snapshot. The console aggregates all retained
 per-event reasons for analysis; a market rejected by multiple rules is counted
 once under each matching rule. Historical snapshots keep their original reason
 text and remain backward compatible.
+
+Trending and Full Universe scans share this complete saved Stage 1 filter base.
+Full Universe pagination does not filter parent events by the child-market
+deadline window: every open parent is expanded first, and the saved expiry
+window is applied to each child market. Active wallet positions are force
+included in Stage 1 results and in both Passed Filters and All Scanned exports,
+even when the position was absent from the fetched catalogue.
 
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
@@ -911,7 +919,7 @@ history but are not reintroduced into current Stage 3 decisions or audit finding
 
 Defined in `AUDITED_ALGORITHM_REGISTRY`.
 The current registry version is
-`2026-07-27-stage3-submission-evidence-v29`. The
+`2026-09-05-stage1-common-filters-v30`. The
 `bullpen_position_claimability` entry is algorithm version `v4`; historical
 frozen bundles retain their earlier registry provenance and child findings.
 
@@ -1065,7 +1073,7 @@ updated in the same change.
 Defined in `validators.py` with `BULLPEN_RUN_AUDIT_RULE_VERSION`.
 
 Rule version
-`2026-07-27-stage3-submission-evidence-v29` retains deterministic
+`2026-09-05-stage1-common-filters-v30` retains deterministic
 duplicate coalescing, buffered affordable-buy validation, verified-only Stage 1
 portfolio formulas, and remote-write-boundary sell-preflight validation. It also
 audits the v2 redeem wallet-lineage fence while registering alias-aware sell

@@ -2727,13 +2727,14 @@ def test_algorithm_registry_contains_required_audit_keys():
     assert BULLPEN_RUN_AUDIT_SCHEMA_VERSION == 2
     assert (
         BULLPEN_RUN_AUDIT_ALGORITHM_REGISTRY_VERSION
-        == "2026-07-27-stage3-submission-evidence-v29"
+        == "2026-09-05-stage1-common-filters-v30"
     )
     assert (
         BULLPEN_RUN_AUDIT_RULE_VERSION
-        == "2026-07-27-stage3-submission-evidence-v29"
+        == "2026-09-05-stage1-common-filters-v30"
     )
     keys = {entry["algorithm_key"] for entry in AUDITED_ALGORITHM_REGISTRY}
+    assert "stage1_common_scan_filters_and_wallet_union" in keys
     assert keys >= {
         "run_execution_handoff_fallback",
         "stage2_consensus_statistics",

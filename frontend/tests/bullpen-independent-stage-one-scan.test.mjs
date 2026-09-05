@@ -137,7 +137,7 @@ test("independent Stage 1 survives an empty dashboard refresh failure", () => {
 test("independent scan retains filtered rows and reasons for Stage 1 output dialogs", () => {
   assert.match(routeSource, /rejectedQuestions/);
   assert.match(routeSource, /getFilterReasons/);
-  assert.match(routeSource, /configured closing window/);
+  assert.match(routeSource, /getFilterReasons\(question, mode, filters\)/);
   assert.match(cardSource, /scannedCandidates: \[\.\.\.acceptedCandidates, \.\.\.rejectedCandidates\]/);
   assert.match(cardSource, /independent_stage1_scan: true/);
 });
@@ -148,9 +148,9 @@ test("Stage 1 scans complete Gamma events and expands every child market", () =>
   assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 500/);
   assert.match(routeSource, /after_cursor/);
   assert.match(routeSource, /next_cursor/);
-  assert.match(routeSource, /end_date_min: currentUniverseStart\.toISOString\(\)/);
-  assert.match(routeSource, /end_date_max: currentUniverseEnd\.toISOString\(\)/);
-  assert.match(routeSource, /filters\.maxClosingDays \* MILLISECONDS_PER_DAY/);
+  assert.doesNotMatch(routeSource, /end_date_min:/);
+  assert.doesNotMatch(routeSource, /end_date_max:/);
+  assert.match(routeSource, /getFilterReasons\(question, mode, filters\)/);
   assert.match(routeSource, /for \(const eventValue of events\)/);
   assert.match(routeSource, /for \(const marketValue of toArray\(event\.markets\)\)/);
   assert.match(routeSource, /events: \[eventWithoutMarkets\]/);
@@ -161,7 +161,9 @@ test("Stage 1 scans complete Gamma events and expands every child market", () =>
   assert.match(routeSource, /market\.archived === true/);
   assert.match(routeSource, /exportCandidates\.push/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
-  assert.match(routeSource, /configured closing window/);
+  assert.match(routeSource, /applied the configured window to child markets/);
+  assert.match(routeSource, /activePositions\.map\(activePositionCandidate\)/);
+  assert.match(routeSource, /forcedIdentityKeys/);
 });
 
 test("interrupted independent Stage 1 preserves its latest partial snapshot", () => {
@@ -209,14 +211,17 @@ test("independent Stage 1 carries keyset and exhaustive-export progress in each 
   assert.match(pageSource, /scanParams\.set\("scanCursor", scanCursor\)/);
   assert.match(pageSource, /scanParams\.set\("scanStartedAt", scanStartedAt\)/);
   assert.match(pageSource, /scanParams\.set\("scanExportId", scanExportId\)/);
-  assert.match(pageSource, /chunkedTotalCandidates \+= pendingPayload\.totalCandidates/);
+  assert.match(pageSource, /acceptedQuestionsByKey/);
+  assert.match(pageSource, /rejectedQuestionsByKey/);
+  assert.match(pageSource, /method: "POST"/);
+  assert.match(pageSource, /activePositions: scanActivePositions/);
   assert.match(pageSource, /totalCandidates: chunkedTotalCandidates/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
   assert.match(pageSource, /BULLPEN_SCAN_TRANSIENT_RETRY_MS = 1_000/);
   assert.match(pageSource, /retryablePollFailure/);
   assert.match(pageSource, /unexpected token\|not valid json\|http/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
-  assert.match(routeSource, /configured closing window/);
+  assert.match(routeSource, /applied the configured window to child markets/);
   assert.match(routeSource, /appendStageOneGammaExportPage/);
   assert.match(exportLedgerSource, /cleanupSupersededOwnerExports\(ownerKey\)/);
   assert.match(exportLedgerSource, /ORPHAN_EXPORT_GRACE_MS/);

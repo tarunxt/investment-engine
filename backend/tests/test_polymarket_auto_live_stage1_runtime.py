@@ -625,6 +625,46 @@ async def test_gamma_keyset_page_uses_cursor_and_returns_nested_markets():
     ]
     assert next_cursor == "cursor-2"
 
+    await _fetch_gamma_keyset_page(
+        FakeClient(),
+        after_cursor=None,
+        end_date_min=None,
+    )
+    assert "end_date_min" not in captured["params"]
+
+
+@pytest.mark.anyio
+async def test_console_scans_expand_parent_events_before_child_deadline_filter(monkeypatch):
+    captured: dict[str, object] = {}
+
+    async def fake_scan_candidate_markets(**kwargs):
+        captured.update(kwargs)
+        return ScanResult(
+            source_label="Gamma",
+            source_url="https://gamma-api.polymarket.com/events",
+            scanned_at="2026-09-05T00:00:00+00:00",
+            accepted=[],
+            rejected=[],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.run_first_bullpen_json",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("CLI unavailable")),
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.console_profile.scan_candidate_markets",
+        fake_scan_candidate_markets,
+    )
+
+    await scan_console_profile_markets(
+        now=datetime(2026, 9, 5, tzinfo=UTC),
+        min_market_odds=0,
+        max_closing_days=7,
+        scan_scope="full_universe",
+    )
+
+    assert captured["filter_parent_deadlines"] is False
+
 
 @pytest.mark.anyio
 async def test_008_keyset_scan_follows_every_cursor(monkeypatch):

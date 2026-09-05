@@ -58,7 +58,7 @@ CONSOLE_SCAN_WINDOW_DAYS = 30
 CONSOLE_RANKED_EVENT_LIMIT = 10
 DEFAULT_CONSOLE_ORDER_USD = 5.0
 CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
-CONSOLE_MIN_MARKET_ODDS = 5.0
+CONSOLE_MIN_MARKET_ODDS = 0.0
 CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
 CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS = 90
 CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS = 300
@@ -1047,6 +1047,7 @@ async def scan_console_profile_markets(
                 if scan_scope == "full_universe"
                 else None
             ),
+            filter_parent_deadlines=False,
         )
         gamma_scan = (
             await gamma_scan_coro

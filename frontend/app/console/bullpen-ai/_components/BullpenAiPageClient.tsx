@@ -3243,6 +3243,15 @@ function BullpenAiPageContent() {
     const scanRequestStartedAt = Date.now();
     const chunkedQuestions: ScanResult["questions"] = [];
     const chunkedRejectedQuestions: NonNullable<ScanResult["rejectedQuestions"]> = [];
+    const acceptedQuestionsByKey = new Map<string, ScanResult["questions"][number]>();
+    const rejectedQuestionsByKey = new Map<
+      string,
+      NonNullable<ScanResult["rejectedQuestions"]>[number]
+    >();
+    const questionKey = (question: ScanResult["questions"][number]) =>
+      String(
+        question.conditionId || question.marketId || question.slug || question.id,
+      ).trim().toLowerCase();
     let receivedResultChunk = false;
     let chunkedTotalCandidates = 0;
     let completedPages = 0;
@@ -3253,6 +3262,10 @@ function BullpenAiPageContent() {
     let scanResponse: { response: Response; payload: ScanResult } | null = null;
 
     try {
+      const refreshedPositions = await positionsRefreshTask;
+      const scanActivePositions = refreshedPositions.positions.filter(
+        isActiveBullpenPosition,
+      );
       while (true) {
         const requestedCursor = scanCursor;
         const scanParams = new URLSearchParams(params);
@@ -3265,6 +3278,9 @@ function BullpenAiPageContent() {
             {
               cache: "no-store",
               signal: scanSignal,
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ activePositions: scanActivePositions }),
             },
             BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
           );
@@ -3311,11 +3327,29 @@ function BullpenAiPageContent() {
         };
         if (pendingPayload.resultChunk) {
           receivedResultChunk = true;
-          chunkedTotalCandidates += pendingPayload.totalCandidates || 0;
-          chunkedQuestions.push(...(pendingPayload.questions || []));
-          chunkedRejectedQuestions.push(
-            ...(pendingPayload.rejectedQuestions || []),
+          for (const question of pendingPayload.questions || []) {
+            const key = questionKey(question);
+            acceptedQuestionsByKey.set(key, question);
+            rejectedQuestionsByKey.delete(key);
+          }
+          for (const question of pendingPayload.rejectedQuestions || []) {
+            const key = questionKey(question);
+            if (!acceptedQuestionsByKey.has(key)) {
+              rejectedQuestionsByKey.set(key, question);
+            }
+          }
+          chunkedQuestions.splice(
+            0,
+            chunkedQuestions.length,
+            ...acceptedQuestionsByKey.values(),
           );
+          chunkedRejectedQuestions.splice(
+            0,
+            chunkedRejectedQuestions.length,
+            ...rejectedQuestionsByKey.values(),
+          );
+          chunkedTotalCandidates =
+            acceptedQuestionsByKey.size + rejectedQuestionsByKey.size;
           if (!pendingPayload.retryReason) {
             completedPages += 1;
           }
@@ -3382,8 +3416,6 @@ function BullpenAiPageContent() {
           }
         : scanResponse.payload;
       const isSuccessfulScan = response.ok && !payload.error;
-
-      void positionsRefreshTask;
 
       const nextSnapshot = isSuccessfulScan
         ? createBullpenScanSnapshot({
