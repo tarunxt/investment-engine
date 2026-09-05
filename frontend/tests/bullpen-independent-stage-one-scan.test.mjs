@@ -175,4 +175,7 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   assert.match(excelSource, /event\.\$\{key\}/);
   assert.match(excelSource, /market\.\$\{key\}/);
   assert.match(excelSource, /x-bullpen-export-rows/);
+  assert.match(excelSource, /new ReadableStream<Uint8Array>/);
+  assert.match(excelSource, /new ZipDeflate/);
+  assert.doesNotMatch(excelSource, /writeXlsxFile/);
 });
