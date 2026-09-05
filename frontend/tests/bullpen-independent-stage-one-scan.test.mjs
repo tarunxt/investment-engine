@@ -112,6 +112,10 @@ test("latest completed Stage 1 snapshot synchronizes across browsers and devices
   assert.match(pageSource, /document\.addEventListener\("visibilitychange"/);
   assert.match(pageSource, /window\.addEventListener\("focus"/);
   assert.match(pageSource, /server synchronization fails/);
+  assert.match(
+    cardSource,
+    /independentScanSnapshot\.snapshotId !== stageOneResultSelection\.snapshotId[\s\S]{0,100}\? "independent"/,
+  );
 });
 
 test("independent scan retains filtered rows and reasons for Stage 1 output dialogs", () => {
