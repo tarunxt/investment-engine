@@ -2113,6 +2113,7 @@ function StageOneRunStats({
   renderInteractiveRows = false,
   onOpenScanCandidateDialog,
   onOpenScanFilters,
+  onRecoverLegacyExport,
 }: {
   stage: WorkflowStageView;
   llmStage?: WorkflowStageView;
@@ -2125,6 +2126,7 @@ function StageOneRunStats({
     mode: ScanCandidateDialogMode,
   ) => void;
   onOpenScanFilters?: () => void;
+  onRecoverLegacyExport?: () => void;
 }) {
   const stats = getStageOneStats(stage);
   const includedActiveCount = getStageOneIncludedActiveCount(
@@ -2175,6 +2177,8 @@ function StageOneRunStats({
     if (isIndependentStageOne) {
       if (independentExportId) {
         downloadIndependentStageOneExcel(independentExportId);
+      } else {
+        onRecoverLegacyExport?.();
       }
       return;
     }
@@ -2190,8 +2194,17 @@ function StageOneRunStats({
   const allScannedDownloadUnavailable =
     hideNumbers ||
     stats.totalScanned === 0 ||
-    (isIndependentStageOne && !independentExportId) ||
-    (!run?.id && allScannedEventRows.length === 0);
+    (isIndependentStageOne
+      ? !independentExportId && !onRecoverLegacyExport
+      : !run?.id && allScannedEventRows.length === 0);
+  const isLegacyExportRecovery =
+    isIndependentStageOne && !independentExportId;
+  const allScannedDownloadLabel = isLegacyExportRecovery
+    ? `Rescan and download Excel with all currently active events; legacy scan contained ${stats.totalScanned} events`
+    : `Download Excel with all ${stats.totalScanned} scanned events`;
+  const allScannedDownloadTitle = isLegacyExportRecovery
+    ? "Run a fresh exhaustive scan and download all events Excel"
+    : "Download all scanned events Excel";
   const downloadFilteredEvents = () =>
     void downloadStageOneFilteredEventsExcel({
       candidates: filteredEventRows,
@@ -2268,8 +2281,8 @@ function StageOneRunStats({
             onClick={downloadAllScannedEvents}
             disabled={allScannedDownloadUnavailable}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label={`Download Excel with all ${stats.totalScanned} scanned events`}
-            title="Download all scanned events Excel"
+            aria-label={allScannedDownloadLabel}
+            title={allScannedDownloadTitle}
           >
             <FileSpreadsheet className="h-4 w-4" />
           </button>
@@ -2287,8 +2300,8 @@ function StageOneRunStats({
             onClick={downloadAllScannedEvents}
             disabled={allScannedDownloadUnavailable}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
-            aria-label={`Download Excel with all ${stats.totalScanned} scanned events`}
-            title="Download all scanned events Excel"
+            aria-label={allScannedDownloadLabel}
+            title={allScannedDownloadTitle}
           >
             <FileSpreadsheet className="h-4 w-4" />
           </button>
@@ -13373,7 +13386,9 @@ export function BullpenAutoRunScheduleCard({
   const independentStageOneView = independentScanSnapshot
     ? buildIndependentStageOneView(independentScanSnapshot, activePositions)
     : null;
-  const handleIndependentStageOneScan = async () => {
+  const handleIndependentStageOneScan = async (
+    downloadExcelWhenComplete = false,
+  ) => {
     if (!onRunIndependentStageOne) return;
     if (isIndependentStageOneScanning) {
       independentStageOneAbortControllerRef.current?.abort();
@@ -13412,9 +13427,22 @@ export function BullpenAutoRunScheduleCard({
       if (controller.signal.aborted) return;
       if (result.snapshot) {
         setStageOneResultSource("independent");
+        if (downloadExcelWhenComplete) {
+          if (result.snapshot.scanExportId) {
+            downloadIndependentStageOneExcel(result.snapshot.scanExportId);
+          } else {
+            setIndependentStageOneError(
+              "The exhaustive scan completed without an export file. Please run the scan again.",
+            );
+          }
+        }
       }
       if (result.error) {
         setIndependentStageOneError(result.error);
+      } else if (downloadExcelWhenComplete && !result.snapshot) {
+        setIndependentStageOneError(
+          "The exhaustive scan did not produce an export file. Please run the scan again.",
+        );
       }
     } catch (scanError) {
       if (!controller.signal.aborted) {
@@ -15017,6 +15045,9 @@ export function BullpenAutoRunScheduleCard({
                           renderInteractiveRows
                           onOpenScanCandidateDialog={openScanCandidateDialog}
                           onOpenScanFilters={onOpenScanFilters}
+                          onRecoverLegacyExport={() =>
+                            void handleIndependentStageOneScan(true)
+                          }
                         />
                       ) : null}
                       {stageTwoBypassed ? (

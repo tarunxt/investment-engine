@@ -170,7 +170,13 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   );
   assert.match(cardSource, /isIndependentStageOne/);
   assert.match(cardSource, /downloadIndependentStageOneExcel\(independentExportId\)/);
-  assert.match(cardSource, /isIndependentStageOne && !independentExportId/);
+  assert.match(cardSource, /onRecoverLegacyExport\?\.\(\)/);
+  assert.match(cardSource, /!independentExportId &&\s*!onRecoverLegacyExport/);
+  assert.match(cardSource, /handleIndependentStageOneScan\(true\)/);
+  assert.match(
+    cardSource,
+    /downloadIndependentStageOneExcel\(result\.snapshot\.scanExportId\)/,
+  );
   assert.match(excelSource, /\.\.\.LEGACY_HEADERS, \.\.\.gammaHeaders/);
   assert.match(excelSource, /event\.\$\{key\}/);
   assert.match(excelSource, /market\.\$\{key\}/);
