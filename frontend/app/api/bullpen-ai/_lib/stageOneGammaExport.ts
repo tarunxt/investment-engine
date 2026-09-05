@@ -17,7 +17,7 @@ export type StageOneGammaExportRow = {
   filterReasons: string[];
 };
 
-type StageOneGammaExportMetadata = {
+export type StageOneGammaExportMetadata = {
   exportId: string;
   ownerHash: string;
   createdAt: string;
@@ -137,4 +137,19 @@ export async function readStageOneGammaExport({
     .filter(Boolean)
     .map((line) => JSON.parse(line) as StageOneGammaExportRow);
   return { metadata, rows };
+}
+
+export async function openStageOneGammaExport({
+  exportId,
+  ownerKey,
+}: {
+  exportId: string;
+  ownerKey: string;
+}) {
+  await cleanupExpiredExports();
+  const metadata = await readMetadata(exportId);
+  if (metadata.ownerHash !== ownerHash(ownerKey)) {
+    throw new Error("Stage 1 export does not belong to this session.");
+  }
+  return { metadata, rowsPath: exportPaths(exportId).rows };
 }
