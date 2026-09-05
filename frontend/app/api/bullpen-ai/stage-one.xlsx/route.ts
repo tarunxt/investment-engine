@@ -123,6 +123,7 @@ function columnName(index: number) {
 
 function cell(value: unknown, column: number, row: number, style = 0) {
   const safe = safeValue(value);
+  if (safe === "") return "";
   const ref = `${columnName(column)}${row}`;
   const styleAttribute = style ? ` s="${style}"` : "";
   if (typeof safe === "number") return `<c r="${ref}"${styleAttribute}><v>${safe}</v></c>`;
@@ -136,7 +137,11 @@ function addText(zip: Zip, name: string, content: string) {
   entry.push(strToU8(content), true);
 }
 
-function buildWorkbookStream(path: string, expectedRows: number) {
+function buildWorkbookStream(
+  path: string,
+  expectedRows: number,
+  indexedGammaHeaders: string[] | null,
+) {
   return new ReadableStream<Uint8Array>({
     start(controller) {
       let finished = false;
@@ -162,9 +167,9 @@ function buildWorkbookStream(path: string, expectedRows: number) {
       addText(zip, "xl/styles.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/><color rgb="FF14532D"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2F3EA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs></styleSheet>');
 
       void (async () => {
-        const discovered = await discoverHeaders(path);
-        if (discovered.rowCount !== expectedRows) throw new Error(`Stage 1 export row count mismatch (${discovered.rowCount}/${expectedRows}).`);
-        const gammaHeaders = discovered.gammaHeaders;
+        const discovered = indexedGammaHeaders ? null : await discoverHeaders(path);
+        if (discovered && discovered.rowCount !== expectedRows) throw new Error(`Stage 1 export row count mismatch (${discovered.rowCount}/${expectedRows}).`);
+        const gammaHeaders = indexedGammaHeaders ?? discovered?.gammaHeaders ?? [];
         const headers = [...LEGACY_HEADERS, ...gammaHeaders];
         const sheet = new ZipDeflate("xl/worksheets/sheet1.xml", { level: 1 });
         zip.add(sheet);
@@ -203,7 +208,13 @@ export async function GET(request: NextRequest) {
     const { metadata, rowsPath } = await openStageOneGammaExport({ exportId, ownerKey: session.sessionSubject ?? session.sessionGeneration });
     if (!metadata.rowCount) return NextResponse.json({ error: "This Stage 1 scan has no retained rows." }, { status: 409 });
     const stamp = metadata.createdAt.replace(/[:.]/g, "-");
-    return new NextResponse(buildWorkbookStream(rowsPath, metadata.rowCount), {
+    const indexedGammaHeaders = metadata.eventKeys?.length && metadata.marketKeys?.length
+      ? [
+          ...metadata.eventKeys.map((key) => `event.${key}`),
+          ...metadata.marketKeys.map((key) => `market.${key}`),
+        ]
+      : null;
+    return new NextResponse(buildWorkbookStream(rowsPath, metadata.rowCount, indexedGammaHeaders), {
       headers: {
         "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "content-disposition": `attachment; filename="bullpen-stage-1-all-scanned-events-${stamp}.xlsx"`,

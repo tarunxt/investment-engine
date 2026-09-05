@@ -178,4 +178,8 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   assert.match(excelSource, /new ReadableStream<Uint8Array>/);
   assert.match(excelSource, /new ZipDeflate/);
   assert.doesNotMatch(excelSource, /writeXlsxFile/);
+  assert.match(excelSource, /indexedGammaHeaders/);
+  assert.match(excelSource, /if \(safe === ""\) return ""/);
+  assert.match(excelSource, /metadata\.eventKeys/);
+  assert.match(excelSource, /metadata\.marketKeys/);
 });
