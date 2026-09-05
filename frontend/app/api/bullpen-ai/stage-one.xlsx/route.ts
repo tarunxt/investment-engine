@@ -232,7 +232,14 @@ function buildWorkbookStream(
         ) throw new Error(`Stage 1 export row count mismatch (${discovered.rowCount}/${expectedRows}).`);
         const gammaHeaders = indexedGammaHeaders ?? discovered?.gammaHeaders ?? [];
         const headers = [...LEGACY_HEADERS, ...gammaHeaders];
-        const sheet = new ZipDeflate("xl/worksheets/sheet1.xml", { level: 1 });
+        // Filtered exports contain a comparatively small row set but each row
+        // can carry large raw Gamma JSON fields. Deflating those fields inline
+        // kept the HTTP download open for minutes and could be terminated by
+        // the browser/proxy. Store this worksheet without ZIP compression;
+        // exhaustive exports retain lightweight level-1 compression.
+        const sheet = scope === "filtered"
+          ? new ZipPassThrough("xl/worksheets/sheet1.xml")
+          : new ZipDeflate("xl/worksheets/sheet1.xml", { level: 1 });
         zip.add(sheet);
         const lastColumn = columnName(headers.length - 1);
         const widths = headers.map((header, index) => {

@@ -93,6 +93,12 @@ large Trending and Full Universe scans do not pause the download stream while
 rescanning hundreds of thousands of rejected rows. Scans created before this
 ledger was introduced materialize it once before response headers are sent;
 their frozen scan facts and filter reasons are unchanged.
+The compact Passed Filters worksheet is stored without inline ZIP deflation so
+large raw Gamma fields cannot stall the response after its ZIP headers. The
+frontend proxy gives this authenticated export route a ten-minute streaming
+window. Browser progress totals and the export ledger use the same multi-key
+market identity coalescing, so the displayed passed count matches the unique
+worksheet row count.
 
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,

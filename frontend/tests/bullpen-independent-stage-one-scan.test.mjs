@@ -219,6 +219,8 @@ test("independent Stage 1 carries keyset and exhaustive-export progress in each 
   assert.match(pageSource, /scanParams\.set\("scanStartedAt", scanStartedAt\)/);
   assert.match(pageSource, /scanParams\.set\("scanExportId", scanExportId\)/);
   assert.match(pageSource, /acceptedQuestionsByKey/);
+  assert.match(pageSource, /canonicalKeyByIdentity/);
+  assert.match(pageSource, /identityKeys\.forEach\(\(key\) => canonicalKeyByIdentity\.set/);
   assert.match(pageSource, /rejectedQuestionsByKey/);
   assert.match(pageSource, /Array\.from\(acceptedQuestionsByKey\.values\(\)\)/);
   assert.match(pageSource, /Array\.from\([\s\S]{0,80}rejectedQuestionsByKey\.values\(\)/);
@@ -269,6 +271,7 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   assert.match(excelSource, /x-bullpen-export-rows/);
   assert.match(excelSource, /new ReadableStream<Uint8Array>/);
   assert.match(excelSource, /new ZipDeflate/);
+  assert.match(excelSource, /scope === "filtered"[\s\S]{0,120}new ZipPassThrough/);
   assert.doesNotMatch(excelSource, /writeXlsxFile/);
   assert.match(excelSource, /indexedGammaHeaders/);
   assert.match(excelSource, /if \(safe === ""\) return ""/);

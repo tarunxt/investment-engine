@@ -3300,10 +3300,25 @@ function BullpenAiPageContent() {
       string,
       NonNullable<ScanResult["rejectedQuestions"]>[number]
     >();
-    const questionKey = (question: ScanResult["questions"][number]) =>
-      String(
-        question.conditionId || question.marketId || question.slug || question.id,
-      ).trim().toLowerCase();
+    const canonicalKeyByIdentity = new Map<string, string>();
+    const questionKey = (question: ScanResult["questions"][number]) => {
+      const identityKeys = [
+        question.conditionId,
+        question.marketId,
+        question.slug,
+        question.id,
+      ]
+        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
+        .map((value) => value.trim().toLowerCase());
+      const canonicalKey =
+        identityKeys
+          .map((key) => canonicalKeyByIdentity.get(key))
+          .find((key): key is string => Boolean(key)) ??
+        identityKeys[0] ??
+        "unknown-market";
+      identityKeys.forEach((key) => canonicalKeyByIdentity.set(key, canonicalKey));
+      return canonicalKey;
+    };
     let receivedResultChunk = false;
     let chunkedTotalCandidates = 0;
     let completedPages = 0;
