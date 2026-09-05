@@ -7,7 +7,9 @@ import type { BullpenQuestion } from "@/lib/bullpen-ai";
 
 const EXPORT_DIRECTORY = join(tmpdir(), "credx-bullpen-stage-one-exports");
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
+const ORPHAN_EXPORT_GRACE_MS = 2 * 60 * 1_000;
 const EXPORT_ID_PATTERN = /^[0-9a-f-]{36}$/;
+const EXPORT_FILE_PATTERN = /^([0-9a-f-]{36})\.(json|jsonl)$/;
 
 export type StageOneGammaExportRow = {
   candidate: BullpenQuestion;
@@ -51,14 +53,53 @@ async function cleanupExpiredExports() {
   await mkdir(EXPORT_DIRECTORY, { recursive: true });
   const now = Date.now();
   const names = await readdir(EXPORT_DIRECTORY).catch(() => [] as string[]);
+  const nameSet = new Set(names);
   await Promise.all(
     names.map(async (name) => {
       const path = join(EXPORT_DIRECTORY, name);
       const details = await stat(path).catch(() => null);
-      if (details && now - details.mtimeMs > EXPORT_RETENTION_MS) {
+      const match = name.match(EXPORT_FILE_PATTERN);
+      const counterpart = match
+        ? `${match[1]}.${match[2] === "json" ? "jsonl" : "json"}`
+        : null;
+      const isExpired = Boolean(
+        details && now - details.mtimeMs > EXPORT_RETENTION_MS,
+      );
+      const isAbandonedOrphan = Boolean(
+        details &&
+          counterpart &&
+          !nameSet.has(counterpart) &&
+          now - details.mtimeMs > ORPHAN_EXPORT_GRACE_MS,
+      );
+      if (isExpired || isAbandonedOrphan) {
         await rm(path, { force: true });
       }
     }),
+  );
+}
+
+async function removeExport(exportId: string) {
+  const paths = exportPaths(exportId);
+  await Promise.all([
+    rm(paths.rows, { force: true }),
+    rm(paths.metadata, { force: true }),
+  ]);
+}
+
+async function cleanupSupersededOwnerExports(ownerKey: string) {
+  const expectedOwnerHash = ownerHash(ownerKey);
+  const names = await readdir(EXPORT_DIRECTORY).catch(() => [] as string[]);
+  await Promise.all(
+    names
+      .filter((name) => name.endsWith(".json"))
+      .map(async (name) => {
+        const exportId = name.slice(0, -".json".length);
+        if (!EXPORT_ID_PATTERN.test(exportId)) return;
+        const metadata = await readMetadata(exportId).catch(() => null);
+        if (metadata?.ownerHash === expectedOwnerHash) {
+          await removeExport(exportId);
+        }
+      }),
   );
 }
 
@@ -97,6 +138,10 @@ export async function appendStageOneGammaExportPage({
       throw new Error("Stage 1 export does not belong to this session.");
     }
   } else {
+    // Only the latest exhaustive scan is selectable in the console. Retaining
+    // every superseded raw Gamma ledger can consume several gigabytes and
+    // eventually makes the next scan fail with EDQUOT (-122).
+    await cleanupSupersededOwnerExports(ownerKey);
     metadata = {
       exportId: resolvedExportId,
       ownerHash: ownerHash(ownerKey),
