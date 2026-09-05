@@ -1538,9 +1538,16 @@ export async function GET(request: NextRequest) {
           ownerKey:
             backendSession.sessionSubject ?? backendSession.sessionGeneration,
           pageKey: cursor || "__FIRST__",
-          rows: exportRows,
-          completed: nextCursor === null,
-        });
+        rows: exportRows,
+        completed: nextCursor === null,
+        snapshot: {
+          mode,
+          filters,
+          sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
+          sourceLabel: GAMMA_SOURCE_LABEL,
+          scannedAt,
+        },
+      });
     const chunk = {
       ...result,
       resultChunk: true,
