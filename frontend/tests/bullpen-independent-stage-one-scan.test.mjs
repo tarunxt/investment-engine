@@ -213,6 +213,10 @@ test("independent Stage 1 carries keyset and exhaustive-export progress in each 
   assert.match(pageSource, /scanParams\.set\("scanExportId", scanExportId\)/);
   assert.match(pageSource, /acceptedQuestionsByKey/);
   assert.match(pageSource, /rejectedQuestionsByKey/);
+  assert.match(pageSource, /Array\.from\(acceptedQuestionsByKey\.values\(\)\)/);
+  assert.match(pageSource, /Array\.from\([\s\S]{0,80}rejectedQuestionsByKey\.values\(\)/);
+  assert.doesNotMatch(pageSource, /\.\.\.acceptedQuestionsByKey\.values\(\)/);
+  assert.doesNotMatch(pageSource, /\.\.\.rejectedQuestionsByKey\.values\(\)/);
   assert.match(pageSource, /method: "POST"/);
   assert.match(pageSource, /activePositions: scanActivePositions/);
   assert.match(pageSource, /totalCandidates: chunkedTotalCandidates/);

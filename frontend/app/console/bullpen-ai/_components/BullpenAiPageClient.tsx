@@ -3241,8 +3241,6 @@ function BullpenAiPageContent() {
       error: `Failed to refresh Bullpen wallet positions during scan: ${normalizeError(error)}.`,
     }));
     const scanRequestStartedAt = Date.now();
-    const chunkedQuestions: ScanResult["questions"] = [];
-    const chunkedRejectedQuestions: NonNullable<ScanResult["rejectedQuestions"]> = [];
     const acceptedQuestionsByKey = new Map<string, ScanResult["questions"][number]>();
     const rejectedQuestionsByKey = new Map<
       string,
@@ -3338,16 +3336,6 @@ function BullpenAiPageContent() {
               rejectedQuestionsByKey.set(key, question);
             }
           }
-          chunkedQuestions.splice(
-            0,
-            chunkedQuestions.length,
-            ...acceptedQuestionsByKey.values(),
-          );
-          chunkedRejectedQuestions.splice(
-            0,
-            chunkedRejectedQuestions.length,
-            ...rejectedQuestionsByKey.values(),
-          );
           chunkedTotalCandidates =
             acceptedQuestionsByKey.size + rejectedQuestionsByKey.size;
           if (!pendingPayload.retryReason) {
@@ -3403,6 +3391,10 @@ function BullpenAiPageContent() {
       if (!scanResponse) {
         throw new Error("Bullpen scan ended without returning a result.");
       }
+      const chunkedQuestions = Array.from(acceptedQuestionsByKey.values());
+      const chunkedRejectedQuestions = Array.from(
+        rejectedQuestionsByKey.values(),
+      );
       const { response } = scanResponse;
       const payload = receivedResultChunk
         ? {
@@ -3457,6 +3449,10 @@ function BullpenAiPageContent() {
       };
     } catch (scanError) {
       void positionsRefreshTask;
+      const chunkedQuestions = Array.from(acceptedQuestionsByKey.values());
+      const chunkedRejectedQuestions = Array.from(
+        rejectedQuestionsByKey.values(),
+      );
       const wasStopped = scanSignal.aborted || isBullpenRequestAbort(scanError);
       const message =
         wasStopped
