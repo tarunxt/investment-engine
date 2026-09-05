@@ -1044,7 +1044,10 @@ function normalizeError(error: unknown) {
   }
 
   return {
-    message: formatUnknownError(error),
+    message:
+      error === null || error === undefined
+        ? "The dashboard refresh failed without returning error details."
+        : formatUnknownError(error),
     details: null,
   } satisfies ErrorState;
 }
@@ -12099,6 +12102,8 @@ export function BullpenAutoRunScheduleCard({
         return null;
       }
       const isTransientDashboardRead =
+        nextError === null ||
+        nextError === undefined ||
         nextError instanceof RequestTimeoutError ||
         (nextError instanceof APIError && nextError.status >= 500);
       if (isTransientDashboardRead && visiblePersistedAutoRunStatus) {
@@ -14791,7 +14796,14 @@ export function BullpenAutoRunScheduleCard({
                     : stage.tone,
               );
               const showStageRunDetails = true;
-              const showStageNumbers = workflowRunForMonitor !== null;
+              // A completed independent scan is durable evidence in its own
+              // right. Keep its counts visible even when the separate
+              // auto-run dashboard projection is unavailable or still queued.
+              const showStageNumbers =
+                workflowRunForMonitor !== null ||
+                (stage.key === "scan" &&
+                  stageOneResultSource === "independent" &&
+                  independentStageOneView !== null);
               const stageStatusLabel = isIndependentStageOneActive
                 ? "Working"
                 : immediateSuccess
