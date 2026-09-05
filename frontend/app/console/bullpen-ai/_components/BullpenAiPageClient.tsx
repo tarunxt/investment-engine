@@ -3156,6 +3156,7 @@ function BullpenAiPageContent() {
     let retryCount = 0;
     let scanCursor: string | null = null;
     let scanStartedAt: string | null = null;
+    let scanExportId: string | null = null;
     let scanResponse: { response: Response; payload: ScanResult } | null = null;
 
     try {
@@ -3164,6 +3165,7 @@ function BullpenAiPageContent() {
         const scanParams = new URLSearchParams(params);
         if (scanCursor) scanParams.set("scanCursor", scanCursor);
         if (scanStartedAt) scanParams.set("scanStartedAt", scanStartedAt);
+        if (scanExportId) scanParams.set("scanExportId", scanExportId);
         try {
           scanResponse = await fetchBullpenUiJson<ScanResult>(
             `/api/bullpen-ai?${scanParams.toString()}`,
@@ -3211,6 +3213,7 @@ function BullpenAiPageContent() {
           resultChunk?: boolean;
           nextCursor?: string | null;
           scanStartedAt?: string | null;
+          scanExportId?: string | null;
           retryReason?: string | null;
         };
         if (pendingPayload.resultChunk) {
@@ -3226,6 +3229,7 @@ function BullpenAiPageContent() {
         }
         scanCursor = pendingPayload.nextCursor ?? null;
         scanStartedAt = pendingPayload.scanStartedAt ?? scanStartedAt;
+        scanExportId = pendingPayload.scanExportId ?? scanExportId;
         const isRetryingPage = Boolean(
           pendingPayload.retryReason ||
             (scanResponse.response.status === 202 &&
@@ -3281,6 +3285,7 @@ function BullpenAiPageContent() {
             rejectedQuestions: chunkedRejectedQuestions,
             pagesScanned: completedPages,
             totalRejectedQuestions: chunkedRejectedQuestions.length,
+            scanExportId,
           }
         : scanResponse.payload;
       const isSuccessfulScan = response.ok && !payload.error;
@@ -3354,6 +3359,7 @@ function BullpenAiPageContent() {
               pagesScanned: completedPages,
               totalAcceptedQuestions: chunkedQuestions.length,
               totalRejectedQuestions: chunkedRejectedQuestions.length,
+              scanExportId,
             })
           : null;
       if (partialSnapshot) {

@@ -206,3 +206,12 @@ export function downloadCompleteStageOneRunExcel(runId: string) {
   link.click();
   document.body.removeChild(link);
 }
+
+export function downloadIndependentStageOneExcel(exportId: string) {
+  const link = document.createElement("a");
+  link.href = `/api/bullpen-ai/stage-one.xlsx?exportId=${encodeURIComponent(exportId)}`;
+  link.download = "bullpen-stage-1-all-scanned-events.xlsx";
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

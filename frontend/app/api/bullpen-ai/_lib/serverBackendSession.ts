@@ -33,6 +33,7 @@ export type BackendSessionContext = {
   accessTokenExpiresAt: number | null;
   hasAuthJsSession: boolean;
   sessionGeneration: string;
+  sessionSubject: string | null;
   rotatedTokens: RotatedBackendTokens | null;
 };
 
@@ -109,6 +110,8 @@ export async function createBackendSessionContext(
     typeof token?.sub === "string" ? token.sub : "",
     typeof token?.iat === "number" ? token.iat : "",
   ];
+  const sessionSubject =
+    typeof token?.sub === "string" && token.sub.trim() ? token.sub.trim() : null;
 
   return {
     accessToken: accessToken || null,
@@ -116,6 +119,7 @@ export async function createBackendSessionContext(
     accessTokenExpiresAt: expiresAt,
     hasAuthJsSession: Boolean(token),
     sessionGeneration: generationParts.join(":"),
+    sessionSubject,
     rotatedTokens: null,
   };
 }

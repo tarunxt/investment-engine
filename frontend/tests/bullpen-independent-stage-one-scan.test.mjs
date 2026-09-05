@@ -83,22 +83,23 @@ test("independent scan retains filtered rows and reasons for Stage 1 output dial
 });
 
 
-test("Stage 1 scans the complete open Gamma universe before applying filters", () => {
-  assert.match(routeSource, /POLYMARKET_GAMMA_MARKETS_KEYSET_URL/);
-  assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
+test("Stage 1 scans complete Gamma events and expands every child market", () => {
+  assert.match(routeSource, /POLYMARKET_GAMMA_EVENTS_KEYSET_URL/);
+  assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 500/);
   assert.match(routeSource, /after_cursor/);
   assert.match(routeSource, /next_cursor/);
   assert.match(routeSource, /end_date_min: currentUniverseStart\.toISOString\(\)/);
   assert.match(routeSource, /end_date_max: currentUniverseEnd\.toISOString\(\)/);
   assert.match(routeSource, /filters\.maxClosingDays \* MILLISECONDS_PER_DAY/);
-  assert.match(routeSource, /toArray\(market\.events\)\.find/);
-  assert.match(routeSource, /eventIdentity \? \[eventIdentity\] : \[\]/);
+  assert.match(routeSource, /for \(const eventValue of events\)/);
+  assert.match(routeSource, /for \(const marketValue of toArray\(event\.markets\)\)/);
+  assert.match(routeSource, /events: \[eventWithoutMarkets\]/);
   assert.doesNotMatch(routeSource, /active: "true"/);
   assert.doesNotMatch(routeSource, /event\.active === false/);
   assert.doesNotMatch(routeSource, /market\.active === false/);
   assert.match(routeSource, /market\.closed === true/);
   assert.match(routeSource, /market\.archived === true/);
-  assert.match(routeSource, /GAMMA_MARKET_NORMALIZATION_KEYS/);
+  assert.match(routeSource, /exportCandidates\.push/);
   assert.doesNotMatch(routeSource, /DISCOVER_FALLBACK_LIMIT/);
   assert.match(routeSource, /configured closing window/);
 });
@@ -125,16 +126,15 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
 });
 
 
-test("independent Stage 1 carries stateless keyset progress in each poll", () => {
+test("independent Stage 1 carries keyset and exhaustive-export progress in each poll", () => {
   assert.doesNotMatch(routeSource, /__bullpenGammaScanJobs/);
   assert.doesNotMatch(routeSource, /GammaScanJob/);
   assert.match(routeSource, /searchParams\.get\("scanCursor"\)/);
   assert.match(routeSource, /searchParams\.get\("scanStartedAt"\)/);
   assert.match(routeSource, /status: "scanning",\s+retryAfterMs: 250/);
-  assert.match(routeSource, /GAMMA_MARKET_PAGE_SIZE = 100/);
+  assert.match(routeSource, /GAMMA_EVENT_PAGE_SIZE = 500/);
   assert.match(routeSource, /GAMMA_PAGE_TIMEOUT_MS = 20_000/);
   assert.match(routeSource, /GAMMA_TERMINAL_CURSOR = "LTE="/);
-  assert.match(routeSource, /markets\.length < GAMMA_MARKET_PAGE_SIZE/);
   assert.match(routeSource, /rawNextCursor === GAMMA_TERMINAL_CURSOR/);
   assert.match(routeSource, /rawNextCursor === cursor/);
   assert.match(routeSource, /resultChunk: true/);
@@ -148,6 +148,7 @@ test("independent Stage 1 carries stateless keyset progress in each poll", () =>
   assert.match(pageSource, /let scanCursor: string \| null = null/);
   assert.match(pageSource, /scanParams\.set\("scanCursor", scanCursor\)/);
   assert.match(pageSource, /scanParams\.set\("scanStartedAt", scanStartedAt\)/);
+  assert.match(pageSource, /scanParams\.set\("scanExportId", scanExportId\)/);
   assert.match(pageSource, /chunkedTotalCandidates \+= pendingPayload\.totalCandidates/);
   assert.match(pageSource, /totalCandidates: chunkedTotalCandidates/);
   assert.match(pageSource, /BULLPEN_SCAN_POLL_MS = 250/);
@@ -156,4 +157,22 @@ test("independent Stage 1 carries stateless keyset progress in each poll", () =>
   assert.match(pageSource, /unexpected token\|not valid json\|http/);
   assert.match(pageSource, /scanResponse\.response\.status !== 202/);
   assert.match(routeSource, /configured closing window/);
+  assert.match(routeSource, /appendStageOneGammaExportPage/);
+});
+
+test("independent Stage 1 Excel uses its own complete export instead of a stale auto-run", () => {
+  const excelSource = fs.readFileSync(
+    new URL(
+      "../app/api/bullpen-ai/stage-one.xlsx/route.ts",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(cardSource, /isIndependentStageOne/);
+  assert.match(cardSource, /downloadIndependentStageOneExcel\(independentExportId\)/);
+  assert.match(cardSource, /isIndependentStageOne && !independentExportId/);
+  assert.match(excelSource, /\.\.\.LEGACY_HEADERS, \.\.\.gammaHeaders/);
+  assert.match(excelSource, /event\.\$\{key\}/);
+  assert.match(excelSource, /market\.\$\{key\}/);
+  assert.match(excelSource, /x-bullpen-export-rows/);
 });

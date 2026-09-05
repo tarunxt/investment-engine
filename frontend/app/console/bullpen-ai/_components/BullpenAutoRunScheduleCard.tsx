@@ -101,6 +101,7 @@ import {
 } from "./bullpenAutoRunProgress";
 import {
   downloadCompleteStageOneRunExcel,
+  downloadIndependentStageOneExcel,
   downloadStageOneAllScannedEventsExcel,
   downloadStageOneFilteredEventsExcel,
 } from "./bullpenStageOneExcel";
@@ -1445,6 +1446,7 @@ function buildIndependentStageOneView(
     outputs: {
       independent_stage1_scan: true,
       snapshot_id: snapshot.snapshotId,
+      scan_export_id: snapshot.scanExportId ?? null,
       scanned_at: snapshot.scannedAt,
       scanned_candidates: snapshot.totalCandidates,
       total_items: snapshot.totalCandidates,
@@ -2164,7 +2166,17 @@ function StageOneRunStats({
     run,
     decisions,
   });
+  const isIndependentStageOne = stage.outputs.independent_stage1_scan === true;
+  const independentExportId = readStageOutputString(
+    stage.outputs.scan_export_id,
+  );
   const downloadAllScannedEvents = () => {
+    if (isIndependentStageOne) {
+      if (independentExportId) {
+        downloadIndependentStageOneExcel(independentExportId);
+      }
+      return;
+    }
     if (run?.id) {
       downloadCompleteStageOneRunExcel(run.id);
       return;
@@ -2177,6 +2189,7 @@ function StageOneRunStats({
   const allScannedDownloadUnavailable =
     hideNumbers ||
     stats.totalScanned === 0 ||
+    (isIndependentStageOne && !independentExportId) ||
     (!run?.id && allScannedEventRows.length === 0);
   const downloadFilteredEvents = () =>
     void downloadStageOneFilteredEventsExcel({
