@@ -48,6 +48,10 @@ export function applyBullpenStageOneSettings(
   return {
     ...filters,
     maxClosingDays: settings.console_max_closing_days ?? 30,
+    minVolumeUsd: settings.console_min_volume_usd ?? 100,
+    minLiquidityUsd: settings.console_min_liquidity_usd ?? 100,
+    rejectedThemePattern:
+      settings.console_rejected_theme_pattern ?? "crypto prices|twitter|Mentions",
     minYesOdds: settings.console_min_market_odds ?? 0,
     minNoOdds: settings.console_min_market_odds ?? 0,
     excludeSports: toggles.excludeSports,
