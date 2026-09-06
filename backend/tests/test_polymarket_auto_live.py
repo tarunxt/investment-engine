@@ -7054,6 +7054,8 @@ def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filt
         liquidity_usd=100,
     )
     market.volume_usd = 100
+    market.volume_24hr_usd = 100
+    market.spread_cents = 10
 
     reasons = console_market_filter_reasons(
         market,
@@ -7065,10 +7067,14 @@ def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filt
 
     assert "Excluded market with Volume USD not greater than 100." in reasons
     assert "Excluded market with Liquidity USD not greater than 100." in reasons
+    assert "Excluded market with volume24hr USD not greater than 100." in reasons
+    assert "Excluded market with spread not below 10 cents." in reasons
     assert any("theme-name pattern" in reason for reason in reasons)
 
     passing = _market(theme="Politics", liquidity_usd=100.01)
     passing.volume_usd = 100.01
+    passing.volume_24hr_usd = 100.01
+    passing.spread_cents = 9.99
     passing_reasons = console_market_filter_reasons(
         passing,
         now=datetime.now(UTC),
@@ -7078,6 +7084,8 @@ def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filt
     )
     assert not any("Volume USD" in reason for reason in passing_reasons)
     assert not any("Liquidity USD" in reason for reason in passing_reasons)
+    assert not any("volume24hr USD" in reason for reason in passing_reasons)
+    assert not any("spread not below" in reason for reason in passing_reasons)
     assert not any("theme-name pattern" in reason for reason in passing_reasons)
 
 
