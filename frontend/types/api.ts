@@ -2350,6 +2350,8 @@ export interface BullpenAutoLiveSettings {
   console_max_closing_days: number;
   console_min_volume_usd: number;
   console_min_liquidity_usd: number;
+  console_min_volume_24hr_usd: number;
+  console_max_spread_cents: number;
   console_rejected_theme_pattern: string;
   console_exclude_sports: boolean;
   console_exclude_weather: boolean;
