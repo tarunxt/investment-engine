@@ -1192,6 +1192,32 @@ function getFilterReasons(
         : `Excluded market below the ${filters.minNoOdds}% No odds floor.`,
     );
   }
+  if (filters.minLowerOutcomeOdds > 0) {
+    const lowerOutcomeOdds =
+      question.yesOdds === null || question.noOdds === null
+        ? null
+        : Math.min(question.yesOdds, question.noOdds);
+    if (lowerOutcomeOdds === null || lowerOutcomeOdds <= filters.minLowerOutcomeOdds) {
+      reasons.push(
+        lowerOutcomeOdds === null
+          ? "Excluded market without a complete Yes/No odds pair."
+          : `Excluded because min(Yes, No) must be above ${filters.minLowerOutcomeOdds}%.`,
+      );
+    }
+  }
+  if (filters.minHigherOutcomeOdds > 0) {
+    const higherOutcomeOdds =
+      question.yesOdds === null || question.noOdds === null
+        ? null
+        : Math.max(question.yesOdds, question.noOdds);
+    if (higherOutcomeOdds === null || higherOutcomeOdds <= filters.minHigherOutcomeOdds) {
+      reasons.push(
+        higherOutcomeOdds === null
+          ? "Excluded market without a complete Yes/No odds pair."
+          : `Excluded because max(Yes, No) must be above ${filters.minHigherOutcomeOdds}%.`,
+      );
+    }
+  }
   return reasons;
 }
 
