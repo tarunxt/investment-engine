@@ -56,8 +56,10 @@ export function applyBullpenStageOneSettings(
     minLiquidityUsd: settings.console_min_liquidity_usd ?? 100,
     rejectedThemePattern:
       settings.console_rejected_theme_pattern ?? "crypto prices|twitter|Mentions",
-    minYesOdds: settings.console_min_market_odds ?? 0,
-    minNoOdds: settings.console_min_market_odds ?? 0,
+    minYesOdds: 0,
+    minNoOdds: 0,
+    minLowerOutcomeOdds: settings.console_min_market_odds ?? 1,
+    minHigherOutcomeOdds: settings.console_min_highest_market_odds ?? 90,
     excludeSports: toggles.excludeSports,
     excludeWeather: toggles.excludeWeather,
     excludeMarketPredictions: toggles.excludeMarketPredictions,
