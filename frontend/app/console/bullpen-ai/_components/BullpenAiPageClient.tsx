@@ -3604,16 +3604,37 @@ function BullpenAiPageContent() {
       const params = buildBullpenScanQueryParams(activeMode, filters);
       params.set("reapplyExportId", exportId);
       try {
-        const { response, payload } = await fetchBullpenUiJson<ScanResult>(
-          `/api/bullpen-ai?${params.toString()}`,
-          {
-            cache: "no-store",
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ activePositions: openActivePositions }),
-          },
-          BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
-        );
+        let reapplyCursor: number | null = null;
+        let response: Response;
+        let payload: ScanResult;
+        while (true) {
+          const requestParams = new URLSearchParams(params);
+          if (reapplyCursor !== null) {
+            requestParams.set("reapplyCursor", String(reapplyCursor));
+          }
+          const result = await fetchBullpenUiJson<ScanResult & {
+            status?: string;
+            reapplyCursor?: number;
+          }>(
+            `/api/bullpen-ai?${requestParams.toString()}`,
+            {
+              cache: "no-store",
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ activePositions: openActivePositions }),
+            },
+            BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
+          );
+          response = result.response;
+          payload = result.payload;
+          if (response.status !== 202 || result.payload.status !== "reapplying") {
+            break;
+          }
+          reapplyCursor = result.payload.reapplyCursor ?? null;
+          if (reapplyCursor === null) {
+            throw new Error("The stored-universe re-filter did not return a progress cursor.");
+          }
+        }
         if (!response.ok || payload.error) {
           throw new Error(payload.error || "The stored Full Universe data could not be re-filtered.");
         }
