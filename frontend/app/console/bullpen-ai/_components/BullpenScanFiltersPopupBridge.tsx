@@ -411,7 +411,7 @@ export function BullpenScanFiltersPopupBridge() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                      <span className="relative mt-1 block">
+                    <label className="relative">
                       <span className="sr-only">Maximum days until event expiry</span>
                       <input
                         type="number"
@@ -507,7 +507,7 @@ export function BullpenScanFiltersPopupBridge() {
                     </label>
                     <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
                       ii) Minimum value of max(Yes, No Odds) &gt;
-                    <label className="relative">
+                      <span className="relative mt-1 block">
                       <input
                         aria-label="Minimum value of max Yes No Odds"
                         type="number"
