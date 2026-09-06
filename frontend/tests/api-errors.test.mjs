@@ -87,3 +87,25 @@ test("deriveApiErrorMessage handles nested and string payloads", async () => {
     "HTTP 503: The run audit database is unavailable or its schema migration is incomplete. Details: Code: RUN_AUDIT_DATABASE_UNAVAILABLE • Required migration: u7v8w9x0y1z2_add_bullpen_run_audit_tables • Run ID: run-123",
   );
 });
+
+test("deriveApiErrorMessage preserves actionable server diagnostics", async () => {
+  const { deriveApiErrorMessage } = await loadApiErrorsModule();
+
+  const message = deriveApiErrorMessage({
+    error: "INTERNAL_SERVER_ERROR",
+    message: "Bullpen run audit could not be generated",
+    details: {
+      error_type: "IntegrityError",
+      correlation_id: "corr-123",
+      request_path: "/bullpen-ai/run-audits/run-123",
+      resolution: "Inspect backend logs using the correlation ID.",
+    },
+  });
+
+  assert.match(message, /Bullpen run audit could not be generated/);
+  assert.match(message, /Code: INTERNAL_SERVER_ERROR/);
+  assert.match(message, /IntegrityError/);
+  assert.match(message, /corr-123/);
+  assert.match(message, /\/bullpen-ai\/run-audits\/run-123/);
+  assert.match(message, /Inspect backend logs using the correlation ID\./);
+});
