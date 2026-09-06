@@ -7048,6 +7048,36 @@ def test_console_market_filter_reasons_use_saved_expiry_window():
     assert not any("Bullpen window" in reason for reason in configured_reasons)
 
 
+def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filters():
+    market = _market(theme="Twitter", liquidity_usd=100)
+    market.volume_usd = 100
+
+    reasons = console_market_filter_reasons(
+        market,
+        now=datetime.now(UTC),
+        min_volume_usd=100,
+        min_liquidity_usd=100,
+        rejected_theme_pattern="crypto prices|twitter|Mentions",
+    )
+
+    assert "Excluded market with Volume USD not greater than 100." in reasons
+    assert "Excluded market with Liquidity USD not greater than 100." in reasons
+    assert 'Excluded theme "Twitter" by theme-name pattern.' in reasons
+
+    passing = _market(theme="Politics", liquidity_usd=100.01)
+    passing.volume_usd = 100.01
+    passing_reasons = console_market_filter_reasons(
+        passing,
+        now=datetime.now(UTC),
+        min_volume_usd=100,
+        min_liquidity_usd=100,
+        rejected_theme_pattern="crypto prices|twitter|Mentions",
+    )
+    assert not any("Volume USD" in reason for reason in passing_reasons)
+    assert not any("Liquidity USD" in reason for reason in passing_reasons)
+    assert not any("theme-name pattern" in reason for reason in passing_reasons)
+
+
 def test_candidate_filter_reasons_block_trump_insult_markets():
     market = _market(
         question="Will Donald Trump publicly insult someone on June 27, 2026?",
