@@ -7025,7 +7025,7 @@ def test_console_market_filter_reasons_use_saved_odds_floor():
     )
 
     assert not any("odds floor" in reason for reason in default_reasons)
-    assert "Excluded market below the 8.5% Yes/No odds floor." in configured_reasons
+    assert "Excluded because min(Yes, No) must be above 8.5%." in configured_reasons
 
 
 def test_console_market_filter_reasons_use_saved_expiry_window():
