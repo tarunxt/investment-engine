@@ -75,6 +75,12 @@ once under each matching rule. Historical snapshots keep their original reason
 text and remain backward compatible.
 
 Trending and Full Universe scans share this complete saved Stage 1 filter base.
+They also share persisted, user-editable minimum Volume (USD) and Liquidity
+(USD) thresholds (both default to 100 and require values strictly greater than
+the configured floor), plus a case-insensitive regular expression matched only
+against the normalized theme name. The default rejected-theme expression is
+`crypto prices|twitter|Mentions`. These values are captured in each new run's
+settings snapshot; historical snapshots remain unchanged.
 Each named filter section in the Scan Filters popup has a persisted checkbox:
 sports, weather, market predictions, tweet counts, release-by events, Yes/No-only,
 and custom Others phrases. Checked means the rule is applied; unchecked means the
