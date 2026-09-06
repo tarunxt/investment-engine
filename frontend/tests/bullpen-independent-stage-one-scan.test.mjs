@@ -93,6 +93,9 @@ test("independent Stage 1 scan overwrites only its persisted snapshot", () => {
   assert.match(pageSource, /applyBullpenStageOneSettings\(scanFilters, settings\)/);
   assert.match(pageSource, /getBullpenAutoLiveSettings/);
   assert.match(stageOneSettingsSource, /console_min_market_odds/);
+  assert.match(stageOneSettingsSource, /console_min_highest_market_odds/);
+  assert.match(routeSource, /min\(Yes, No\) must be above/);
+  assert.match(routeSource, /max\(Yes, No\) must be above/);
   assert.match(stageOneSettingsSource, /console_max_closing_days/);
   assert.match(stageOneSettingsSource, /console_exclude_sports/);
   assert.match(stageOneSettingsSource, /console_only_binary_yes_no/);

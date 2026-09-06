@@ -30,8 +30,9 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /aria-labelledby="bullpen-stage-one-scan-filters-title"/);
   assert.match(bridgeSource, />\s*Scan Filters\s*</);
   assert.match(bridgeSource, /console_min_market_odds/);
-  assert.match(bridgeSource, /useState\(0\)/);
-  assert.match(bridgeSource, /console_min_market_odds \?\? 0/);
+  assert.match(bridgeSource, /useState\(1\)/);
+  assert.match(bridgeSource, /console_min_market_odds \?\? 1/);
+  assert.match(bridgeSource, /console_min_highest_market_odds \?\? 90/);
   assert.doesNotMatch(bridgeSource, /default 5%/);
   assert.match(bridgeSource, /console_max_closing_days/);
   assert.match(bridgeSource, /console_min_volume_usd/);
@@ -46,7 +47,10 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT/);
   assert.match(bridgeSource, />\s*Maximum days until expiry\s*</);
   assert.match(bridgeSource, /Save window/);
-  assert.match(bridgeSource, /Save floor/);
+  assert.match(bridgeSource, /Save thresholds/);
+  assert.match(bridgeSource, /Minimum value of min\(Yes, No Odds\)/);
+  assert.match(bridgeSource, /Minimum value of max\(Yes, No Odds\)/);
+  assert.doesNotMatch(bridgeSource, /Default: <code>crypto prices/);
   assert.match(bridgeSource, /updateBullpenAutoLiveSettings/);
   assert.match(bridgeSource, /console_custom_exclude_phrases/);
   assert.match(bridgeSource, /excludeOthers/);

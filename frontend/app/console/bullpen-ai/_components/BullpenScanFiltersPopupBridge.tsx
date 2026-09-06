@@ -47,8 +47,10 @@ function publishStageOneSettings(settings: BullpenAutoLiveSettings) {
 export function BullpenScanFiltersPopupBridge() {
   const [isOpen, setIsOpen] = useState(false);
   const [detailId, setDetailId] = useState<BullpenScanFilterDetailId | null>(null);
-  const [oddsFloor, setOddsFloor] = useState(0);
-  const [savedOddsFloor, setSavedOddsFloor] = useState(0);
+  const [oddsFloor, setOddsFloor] = useState(1);
+  const [savedOddsFloor, setSavedOddsFloor] = useState(1);
+  const [highestOddsFloor, setHighestOddsFloor] = useState(90);
+  const [savedHighestOddsFloor, setSavedHighestOddsFloor] = useState(90);
   const [maxClosingDays, setMaxClosingDays] = useState(30);
   const [savedMaxClosingDays, setSavedMaxClosingDays] = useState(30);
   const [minVolumeUsd, setMinVolumeUsd] = useState(100);
@@ -81,10 +83,13 @@ export function BullpenScanFiltersPopupBridge() {
       setFilterMessage(null);
       try {
         const settings = await apiService.getBullpenAutoLiveSettings();
-        const saved = settings.console_min_market_odds ?? 0;
+        const saved = settings.console_min_market_odds ?? 1;
+        const savedHighest = settings.console_min_highest_market_odds ?? 90;
         const savedClosingDays = settings.console_max_closing_days ?? 30;
         setOddsFloor(saved);
         setSavedOddsFloor(saved);
+        setHighestOddsFloor(savedHighest);
+        setSavedHighestOddsFloor(savedHighest);
         setMaxClosingDays(savedClosingDays);
         setSavedMaxClosingDays(savedClosingDays);
         const savedVolume = settings.console_min_volume_usd ?? 100;
@@ -101,7 +106,7 @@ export function BullpenScanFiltersPopupBridge() {
         publishStageOneSettings(settings);
         setReapplyDirty(false);
       } catch {
-        setFloorMessage("Could not load the saved odds floor. The default 0% is shown.");
+        setFloorMessage("Could not load the saved odds thresholds. Defaults 1% and 90% are shown.");
       } finally {
         setIsFloorLoading(false);
       }
@@ -161,7 +166,11 @@ export function BullpenScanFiltersPopupBridge() {
       return;
     }
     if (!Number.isFinite(oddsFloor) || oddsFloor < 0 || oddsFloor >= 50) {
-      setReapplyMessage("Enter a valid odds floor from 0 up to 49.9% first.");
+      setReapplyMessage("Enter a valid minimum lower-side odds value from 0 up to 49.9% first.");
+      return;
+    }
+    if (!Number.isFinite(highestOddsFloor) || highestOddsFloor < 50 || highestOddsFloor >= 100) {
+      setReapplyMessage("Enter a valid minimum higher-side odds value from 50 up to 99.9% first.");
       return;
     }
     if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0) {
@@ -174,6 +183,7 @@ export function BullpenScanFiltersPopupBridge() {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_max_closing_days: maxClosingDays,
         console_min_market_odds: oddsFloor,
+        console_min_highest_market_odds: highestOddsFloor,
         console_min_volume_usd: minVolumeUsd,
         console_min_liquidity_usd: minLiquidityUsd,
         console_rejected_theme_pattern: rejectedThemePattern,
@@ -202,18 +212,26 @@ export function BullpenScanFiltersPopupBridge() {
       setFloorMessage("Enter a number from 0 up to 49.9%.");
       return;
     }
+    if (!Number.isFinite(highestOddsFloor) || highestOddsFloor < 50 || highestOddsFloor >= 100) {
+      setFloorMessage("Enter a higher-side value from 50 up to 99.9%.");
+      return;
+    }
     setIsFloorSaving(true);
     setFloorMessage(null);
     try {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_min_market_odds: oddsFloor,
+        console_min_highest_market_odds: highestOddsFloor,
       });
       publishStageOneSettings(settings);
       const saved = settings.console_min_market_odds;
+      const savedHighest = settings.console_min_highest_market_odds;
       setOddsFloor(saved);
       setSavedOddsFloor(saved);
+      setHighestOddsFloor(savedHighest);
+      setSavedHighestOddsFloor(savedHighest);
       setFloorMessage(
-        `Saved. Future Stage 1 scans will use a ${Number(saved.toFixed(2))}% odds floor.`,
+        `Saved. Future Stage 1 scans require min(Yes, No) > ${Number(saved.toFixed(2))}% and max(Yes, No) > ${Number(savedHighest.toFixed(2))}%.`,
       );
     } catch {
       setFloorMessage("The odds floor could not be saved. Please try again.");
@@ -393,7 +411,7 @@ export function BullpenScanFiltersPopupBridge() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <label className="relative">
+                      <span className="relative mt-1 block">
                       <span className="sr-only">Maximum days until event expiry</span>
                       <input
                         type="number"
@@ -447,8 +465,7 @@ export function BullpenScanFiltersPopupBridge() {
                     <input aria-label="Rejected Theme Names pattern" type="text" value={rejectedThemePattern} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setRejectedThemePattern(event.target.value); setReapplyDirty(true); }} placeholder="crypto prices|twitter|Mentions" className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
                   </label>
                 </div>
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <p className="text-xs text-slate-600 dark:text-slate-300">Default: <code>crypto prices|twitter|Mentions</code></p>
+                <div className="mt-3 flex items-center justify-end gap-3">
                   <button type="button" onClick={() => void saveAdditionalFilters()} disabled={isFloorLoading || isAdditionalFiltersSaving || (minVolumeUsd === savedMinVolumeUsd && minLiquidityUsd === savedMinLiquidityUsd && rejectedThemePattern === savedRejectedThemePattern)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
                     {isAdditionalFiltersSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                     Save filters
@@ -457,41 +474,68 @@ export function BullpenScanFiltersPopupBridge() {
                 {additionalFiltersMessage ? <p className="mt-3 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">{additionalFiltersMessage}</p> : null}
               </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="max-w-xl">
+                <div className="space-y-4">
+                  <div>
                     <p className="font-semibold text-slate-950 dark:text-slate-50">
-                      Yes/No odds floor
+                      Yes/No odds thresholds
                     </p>
                     <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                      Exclude a market when either its Yes or No odds are below this percentage. The saved value is used by every future Stage 1 scan.
+                      Both conditions must pass. Values are saved for every future Stage 1 scan.
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                      i) Minimum value of min(Yes, No Odds) &gt;
+                      <span className="relative mt-1 block">
+                        <input
+                          aria-label="Minimum value of min Yes No Odds"
+                          type="number"
+                          min={0}
+                          max={49.9}
+                          step={0.1}
+                          value={oddsFloor}
+                          disabled={isFloorLoading || isFloorSaving}
+                          onChange={(event) => {
+                            setOddsFloor(Number(event.target.value));
+                            setReapplyDirty(true);
+                          }}
+                          className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 pr-8 text-sm font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50"
+                        />
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
+                      </span>
+                      <span className="mt-1 block text-xs font-normal text-slate-500">Default: above 1%</span>
+                    </label>
+                    <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                      ii) Minimum value of max(Yes, No Odds) &gt;
                     <label className="relative">
-                      <span className="sr-only">Yes/No odds floor percentage</span>
                       <input
+                        aria-label="Minimum value of max Yes No Odds"
                         type="number"
-                        min={0}
-                        max={49.9}
+                        min={50}
+                        max={99.9}
                         step={0.1}
-                        value={oddsFloor}
+                        value={highestOddsFloor}
                         disabled={isFloorLoading || isFloorSaving}
                         onChange={(event) => {
-                          setOddsFloor(Number(event.target.value));
+                          setHighestOddsFloor(Number(event.target.value));
                           setReapplyDirty(true);
                         }}
-                        className="h-10 w-28 rounded-xl border border-slate-300 bg-white px-3 pr-8 text-sm font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50"
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 pr-8 text-sm font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50"
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
+                      </span>
+                      <span className="mt-1 block text-xs font-normal text-slate-500">Default: above 90%</span>
                     </label>
+                  </div>
+                  <div className="flex justify-end">
                     <button
                       type="button"
                       onClick={() => void saveOddsFloor()}
-                      disabled={isFloorLoading || isFloorSaving || oddsFloor === savedOddsFloor}
+                      disabled={isFloorLoading || isFloorSaving || (oddsFloor === savedOddsFloor && highestOddsFloor === savedHighestOddsFloor)}
                       className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFloorSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                      Save floor
+                      Save thresholds
                     </button>
                   </div>
                 </div>

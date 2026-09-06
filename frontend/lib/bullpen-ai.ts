@@ -125,6 +125,8 @@ export type BullpenScanFilters = {
   onlyBinaryYesNo: boolean;
   minYesOdds: number;
   minNoOdds: number;
+  minLowerOutcomeOdds: number;
+  minHigherOutcomeOdds: number;
 };
 
 export type ScanResult = {
@@ -453,6 +455,8 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     onlyBinaryYesNo: true,
     minYesOdds: 0,
     minNoOdds: 0,
+    minLowerOutcomeOdds: 1,
+    minHigherOutcomeOdds: 90,
   },
   "end-of-month": {
     maxClosingDays: 30,
@@ -473,6 +477,8 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     onlyBinaryYesNo: true,
     minYesOdds: 0,
     minNoOdds: 0,
+    minLowerOutcomeOdds: 1,
+    minHigherOutcomeOdds: 90,
   },
 };
 
@@ -597,6 +603,20 @@ export function normalizeBullpenScanFilters(
       0,
       parseNumberSearchParam(searchParams.get("minNoOdds"), defaults.minNoOdds),
     ),
+    minLowerOutcomeOdds: Math.max(
+      0,
+      parseNumberSearchParam(
+        searchParams.get("minLowerOutcomeOdds"),
+        defaults.minLowerOutcomeOdds,
+      ),
+    ),
+    minHigherOutcomeOdds: Math.max(
+      50,
+      parseNumberSearchParam(
+        searchParams.get("minHigherOutcomeOdds"),
+        defaults.minHigherOutcomeOdds,
+      ),
+    ),
   };
 }
 
@@ -648,6 +668,8 @@ export function buildBullpenScanQueryParams(
   params.set("onlyBinaryYesNo", String(filters.onlyBinaryYesNo));
   params.set("minYesOdds", String(filters.minYesOdds));
   params.set("minNoOdds", String(filters.minNoOdds));
+  params.set("minLowerOutcomeOdds", String(filters.minLowerOutcomeOdds));
+  params.set("minHigherOutcomeOdds", String(filters.minHigherOutcomeOdds));
   return params;
 }
 

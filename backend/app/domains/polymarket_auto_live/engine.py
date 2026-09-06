@@ -5723,6 +5723,7 @@ class BullpenAutoLiveEngine:
                         market,
                         now=now,
                         min_market_odds=settings.console_min_market_odds,
+                        min_highest_market_odds=settings.console_min_highest_market_odds,
                         max_closing_days=settings.console_max_closing_days,
                         min_volume_usd=settings.console_min_volume_usd,
                         min_liquidity_usd=settings.console_min_liquidity_usd,
@@ -5991,6 +5992,7 @@ class BullpenAutoLiveEngine:
             scanned = await scan_console_profile_markets(
                 now=now,
                 min_market_odds=settings.console_min_market_odds,
+                min_highest_market_odds=settings.console_min_highest_market_odds,
                 max_closing_days=settings.console_max_closing_days,
                 min_volume_usd=settings.console_min_volume_usd,
                 min_liquidity_usd=settings.console_min_liquidity_usd,
