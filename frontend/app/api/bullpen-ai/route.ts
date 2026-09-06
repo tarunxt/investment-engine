@@ -1117,6 +1117,24 @@ function getFilterReasons(
   filters: BullpenScanFilters,
 ) {
   const reasons: string[] = [];
+  const volumeUsd = question.volume === null ? null : Number(question.volume);
+  const liquidityUsd = question.liquidity === null ? null : Number(question.liquidity);
+  if (volumeUsd === null || !Number.isFinite(volumeUsd) || volumeUsd <= filters.minVolumeUsd) {
+    reasons.push(`Excluded market with Volume USD not greater than ${filters.minVolumeUsd}.`);
+  }
+  if (liquidityUsd === null || !Number.isFinite(liquidityUsd) || liquidityUsd <= filters.minLiquidityUsd) {
+    reasons.push(`Excluded market with Liquidity USD not greater than ${filters.minLiquidityUsd}.`);
+  }
+  if (filters.rejectedThemePattern) {
+    try {
+      if (new RegExp(filters.rejectedThemePattern, "i").test(question.category ?? "")) {
+        reasons.push("Excluded by the Theme Names pattern.");
+      }
+    } catch {
+      // The persisted settings API validates the expression. Ignore malformed
+      // direct query-string values so this compatibility route remains usable.
+    }
+  }
   if (!passesTimeFilter(question, mode, filters)) {
     reasons.push("Excluded market outside the selected scan window.");
   }

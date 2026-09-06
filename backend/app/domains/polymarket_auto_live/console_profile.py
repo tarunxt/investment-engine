@@ -719,6 +719,9 @@ def console_market_filter_reasons(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    min_volume_usd: float = 100,
+    min_liquidity_usd: float = 100,
+    rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
     exclude_sports: bool = True,
     exclude_weather: bool = True,
     exclude_market_predictions: bool = True,
@@ -730,6 +733,20 @@ def console_market_filter_reasons(
 ) -> list[str]:
     reasons: list[str] = []
     search_text = build_market_filter_search_text(market)
+    if market.volume_usd is None or market.volume_usd <= min_volume_usd:
+        reasons.append(
+            f"Excluded market with Volume USD not greater than {min_volume_usd:g}."
+        )
+    if market.liquidity_usd is None or market.liquidity_usd <= min_liquidity_usd:
+        reasons.append(
+            f"Excluded market with Liquidity USD not greater than {min_liquidity_usd:g}."
+        )
+    if rejected_theme_pattern and re.search(
+        rejected_theme_pattern, market.theme or "", flags=re.IGNORECASE
+    ):
+        reasons.append(
+            f'Excluded theme "{market.theme}" by theme-name pattern.'
+        )
     if exclude_custom_phrases:
         for phrase in custom_exclude_phrases or []:
             normalized_phrase = _normalize_text(phrase)
@@ -934,6 +951,9 @@ def _build_cli_console_scan_result(
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    min_volume_usd: float = 100,
+    min_liquidity_usd: float = 100,
+    rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
     exclude_sports: bool = True,
     exclude_weather: bool = True,
     exclude_market_predictions: bool = True,
@@ -964,6 +984,9 @@ def _build_cli_console_scan_result(
                 now=now,
                 min_market_odds=min_market_odds,
                 max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                rejected_theme_pattern=rejected_theme_pattern,
                 exclude_sports=exclude_sports,
                 exclude_weather=exclude_weather,
                 exclude_market_predictions=exclude_market_predictions,
@@ -1007,6 +1030,9 @@ async def scan_console_profile_markets(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
+    min_volume_usd: float = 100,
+    min_liquidity_usd: float = 100,
+    rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
     exclude_sports: bool = True,
     exclude_weather: bool = True,
     exclude_market_predictions: bool = True,
@@ -1036,6 +1062,9 @@ async def scan_console_profile_markets(
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
             max_closing_days=max_closing_days,
+            min_volume_usd=min_volume_usd,
+            min_liquidity_usd=min_liquidity_usd,
+            rejected_theme_pattern=rejected_theme_pattern,
             exclude_sports=exclude_sports,
             exclude_weather=exclude_weather,
             exclude_market_predictions=exclude_market_predictions,
@@ -1150,6 +1179,9 @@ async def scan_console_profile_markets(
                 now=now,
                 min_market_odds=min_market_odds,
                 max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                rejected_theme_pattern=rejected_theme_pattern,
                 exclude_sports=exclude_sports,
                 exclude_weather=exclude_weather,
                 exclude_market_predictions=exclude_market_predictions,

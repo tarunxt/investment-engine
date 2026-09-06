@@ -222,6 +222,9 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     console_order_usd: float = Field(default=5, gt=0)
     console_min_market_odds: float = Field(default=0, ge=0, lt=50)
     console_max_closing_days: int = Field(default=30, ge=1)
+    console_min_volume_usd: float = Field(default=100, ge=0)
+    console_min_liquidity_usd: float = Field(default=100, ge=0)
+    console_rejected_theme_pattern: str = "crypto prices|twitter|Mentions"
     console_exclude_sports: bool = True
     console_exclude_weather: bool = True
     console_exclude_market_predictions: bool = True
@@ -354,6 +357,21 @@ class BullpenAutoLiveSettingsBase(BaseModel):
             raise ValueError("no more than 100 custom exclusion phrases are allowed")
         return normalized
 
+    @field_validator("console_rejected_theme_pattern")
+    @classmethod
+    def validate_console_rejected_theme_pattern(cls, value: str) -> str:
+        import re
+
+        candidate = value.strip()
+        if len(candidate) > 500:
+            raise ValueError("theme rejection pattern must be at most 500 characters")
+        if candidate:
+            try:
+                re.compile(candidate, re.IGNORECASE)
+            except re.error as exc:
+                raise ValueError(f"invalid theme rejection pattern: {exc}") from exc
+        return candidate
+
     @field_validator("returns_per_day_formula")
     @classmethod
     def validate_returns_per_day_formula_field(cls, value: str) -> str:
@@ -422,6 +440,9 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     console_order_usd: float | None = Field(default=None, gt=0)
     console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
     console_max_closing_days: int | None = Field(default=None, ge=1)
+    console_min_volume_usd: float | None = Field(default=None, ge=0)
+    console_min_liquidity_usd: float | None = Field(default=None, ge=0)
+    console_rejected_theme_pattern: str | None = None
     console_exclude_sports: bool | None = None
     console_exclude_weather: bool | None = None
     console_exclude_market_predictions: bool | None = None

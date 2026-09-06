@@ -108,6 +108,9 @@ export function hasBullpenLlmAnalysis(
 
 export type BullpenScanFilters = {
   maxClosingDays: number;
+  minVolumeUsd: number;
+  minLiquidityUsd: number;
+  rejectedThemePattern: string;
   targetDate: string;
   excludeSports: boolean;
   excludeWeather: boolean;
@@ -433,6 +436,9 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
 > = {
   "30-days": {
     maxClosingDays: 30,
+    minVolumeUsd: 100,
+    minLiquidityUsd: 100,
+    rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
     excludeSports: true,
     excludeWeather: true,
@@ -450,6 +456,9 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
   },
   "end-of-month": {
     maxClosingDays: 30,
+    minVolumeUsd: 100,
+    minLiquidityUsd: 100,
+    rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
     excludeSports: true,
     excludeWeather: true,
@@ -534,6 +543,9 @@ export function normalizeBullpenScanFilters(
       1,
       parseNumberSearchParam(searchParams.get("maxClosingDays"), defaults.maxClosingDays),
     ),
+    minVolumeUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minVolumeUsd"), defaults.minVolumeUsd)),
+    minLiquidityUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minLiquidityUsd"), defaults.minLiquidityUsd)),
+    rejectedThemePattern: searchParams.get("rejectedThemePattern") ?? defaults.rejectedThemePattern,
     targetDate: parseDateSearchParam(
       searchParams.get("targetDate"),
       defaults.targetDate,
@@ -595,6 +607,9 @@ export function buildBullpenScanQueryParams(
   const params = new URLSearchParams();
   params.set("mode", mode);
   params.set("maxClosingDays", String(filters.maxClosingDays));
+  params.set("minVolumeUsd", String(filters.minVolumeUsd));
+  params.set("minLiquidityUsd", String(filters.minLiquidityUsd));
+  params.set("rejectedThemePattern", filters.rejectedThemePattern);
   params.set("targetDate", filters.targetDate);
   params.set("excludeSports", String(filters.excludeSports));
   params.set("excludeWeather", String(filters.excludeWeather));
