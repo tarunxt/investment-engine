@@ -26,6 +26,8 @@ export type BullpenQuestion = {
   investmentTableAddedAt?: string | null;
   volume: string | null;
   liquidity: string | null;
+  volume24hr?: string | null;
+  spreadCents?: number | null;
   sourceUrl: string;
   slug: string | null;
   marketUrl: string | null;
@@ -110,6 +112,8 @@ export type BullpenScanFilters = {
   maxClosingDays: number;
   minVolumeUsd: number;
   minLiquidityUsd: number;
+  minVolume24hrUsd: number;
+  maxSpreadCents: number;
   rejectedThemePattern: string;
   targetDate: string;
   excludeSports: boolean;
@@ -440,6 +444,8 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     maxClosingDays: 30,
     minVolumeUsd: 100,
     minLiquidityUsd: 100,
+    minVolume24hrUsd: 100,
+    maxSpreadCents: 10,
     rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
     excludeSports: true,
@@ -462,6 +468,8 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     maxClosingDays: 30,
     minVolumeUsd: 100,
     minLiquidityUsd: 100,
+    minVolume24hrUsd: 100,
+    maxSpreadCents: 10,
     rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
     excludeSports: true,
@@ -551,6 +559,8 @@ export function normalizeBullpenScanFilters(
     ),
     minVolumeUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minVolumeUsd"), defaults.minVolumeUsd)),
     minLiquidityUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minLiquidityUsd"), defaults.minLiquidityUsd)),
+    minVolume24hrUsd: Math.max(0, parseNumberSearchParam(searchParams.get("minVolume24hrUsd"), defaults.minVolume24hrUsd)),
+    maxSpreadCents: Math.max(0, parseNumberSearchParam(searchParams.get("maxSpreadCents"), defaults.maxSpreadCents)),
     rejectedThemePattern: searchParams.get("rejectedThemePattern") ?? defaults.rejectedThemePattern,
     targetDate: parseDateSearchParam(
       searchParams.get("targetDate"),
@@ -629,6 +639,8 @@ export function buildBullpenScanQueryParams(
   params.set("maxClosingDays", String(filters.maxClosingDays));
   params.set("minVolumeUsd", String(filters.minVolumeUsd));
   params.set("minLiquidityUsd", String(filters.minLiquidityUsd));
+  params.set("minVolume24hrUsd", String(filters.minVolume24hrUsd));
+  params.set("maxSpreadCents", String(filters.maxSpreadCents));
   params.set("rejectedThemePattern", filters.rejectedThemePattern);
   params.set("targetDate", filters.targetDate);
   params.set("excludeSports", String(filters.excludeSports));

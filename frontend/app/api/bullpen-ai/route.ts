@@ -942,6 +942,8 @@ function normalizeGammaMarket(
       "liquidityUsd",
       "liquidityUSD",
     ]),
+    volume24hr: readDisplayValue(record, ["volume24hr", "volume24h"]),
+    spreadCents: normalizeOdds(readNumber(record, ["spread"])),
     sourceUrl,
     slug,
     marketUrl: buildPolymarketEventUrl(eventSlug),
@@ -1067,6 +1069,8 @@ function normalizeQuestion(
       "liquidityUsd",
       "liquidityUSD",
     ]),
+    volume24hr: readDisplayValue(record, ["volume24hr", "volume24h"]),
+    spreadCents: normalizeOdds(readNumber(record, ["spread"])),
     sourceUrl,
     slug,
     marketUrl: buildPolymarketEventUrl(eventSlug),
@@ -1125,6 +1129,15 @@ function getFilterReasons(
   }
   if (liquidityUsd === null || !Number.isFinite(liquidityUsd) || liquidityUsd <= filters.minLiquidityUsd) {
     reasons.push(`Excluded market with Liquidity USD not greater than ${filters.minLiquidityUsd}.`);
+  }
+  const volume24hrUsd = question.volume24hr === null || question.volume24hr === undefined
+    ? null
+    : Number(question.volume24hr.replace(/,/g, ""));
+  if (volume24hrUsd === null || !Number.isFinite(volume24hrUsd) || volume24hrUsd <= filters.minVolume24hrUsd) {
+    reasons.push(`Excluded market with volume24hr USD not greater than ${filters.minVolume24hrUsd}.`);
+  }
+  if (question.spreadCents === null || question.spreadCents === undefined || question.spreadCents >= filters.maxSpreadCents) {
+    reasons.push(`Excluded market with spread not below ${filters.maxSpreadCents} cents.`);
   }
   if (filters.rejectedThemePattern) {
     try {
@@ -1224,10 +1237,20 @@ function getFilterReasons(
 function hydrateStoredCandidateForFiltering(
   question: BullpenQuestion,
   filters: BullpenScanFilters,
+  market: Record<string, unknown>,
+  event: Record<string, unknown>,
 ): FilterableBullpenQuestion {
   const theme = question.category ?? "";
   return {
     ...question,
+    volume24hr:
+      question.volume24hr ??
+      readDisplayValue(market, ["volume24hr", "volume24h"]) ??
+      readDisplayValue(event, ["volume24hr", "volume24h"]),
+    spreadCents:
+      question.spreadCents ??
+      normalizeOdds(readNumber(market, ["spread"])) ??
+      normalizeOdds(readNumber(event, ["spread"])),
     category: question.category,
     // Gamma's complete dot-separated Theme trail is persisted in `category`.
     // Re-filter it as one composite value, matching the Theme Excel column.
@@ -1619,9 +1642,9 @@ async function handleScan(
           backendSession.sessionSubject ?? backendSession.sessionGeneration,
         filters,
         cursor: Number.isFinite(reapplyCursor) ? reapplyCursor : undefined,
-        evaluate: (candidate) =>
+        evaluate: (candidate, market, event) =>
           getFilterReasons(
-            hydrateStoredCandidateForFiltering(candidate, filters),
+            hydrateStoredCandidateForFiltering(candidate, filters, market, event),
             mode,
             filters,
           ),

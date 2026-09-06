@@ -57,6 +57,10 @@ export function BullpenScanFiltersPopupBridge() {
   const [savedMinVolumeUsd, setSavedMinVolumeUsd] = useState(100);
   const [minLiquidityUsd, setMinLiquidityUsd] = useState(100);
   const [savedMinLiquidityUsd, setSavedMinLiquidityUsd] = useState(100);
+  const [minVolume24hrUsd, setMinVolume24hrUsd] = useState(100);
+  const [savedMinVolume24hrUsd, setSavedMinVolume24hrUsd] = useState(100);
+  const [maxSpreadCents, setMaxSpreadCents] = useState(10);
+  const [savedMaxSpreadCents, setSavedMaxSpreadCents] = useState(10);
   const [rejectedThemePattern, setRejectedThemePattern] = useState("crypto prices|twitter|Mentions");
   const [savedRejectedThemePattern, setSavedRejectedThemePattern] = useState("crypto prices|twitter|Mentions");
   const [isFloorLoading, setIsFloorLoading] = useState(false);
@@ -94,11 +98,17 @@ export function BullpenScanFiltersPopupBridge() {
         setSavedMaxClosingDays(savedClosingDays);
         const savedVolume = settings.console_min_volume_usd ?? 100;
         const savedLiquidity = settings.console_min_liquidity_usd ?? 100;
+        const savedVolume24hr = settings.console_min_volume_24hr_usd ?? 100;
+        const savedSpread = settings.console_max_spread_cents ?? 10;
         const savedThemePattern = settings.console_rejected_theme_pattern ?? "crypto prices|twitter|Mentions";
         setMinVolumeUsd(savedVolume);
         setSavedMinVolumeUsd(savedVolume);
         setMinLiquidityUsd(savedLiquidity);
         setSavedMinLiquidityUsd(savedLiquidity);
+        setMinVolume24hrUsd(savedVolume24hr);
+        setSavedMinVolume24hrUsd(savedVolume24hr);
+        setMaxSpreadCents(savedSpread);
+        setSavedMaxSpreadCents(savedSpread);
         setRejectedThemePattern(savedThemePattern);
         setSavedRejectedThemePattern(savedThemePattern);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
@@ -173,8 +183,8 @@ export function BullpenScanFiltersPopupBridge() {
       setReapplyMessage("Enter a valid minimum higher-side odds value from 50 up to 99.9% first.");
       return;
     }
-    if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0) {
-      setReapplyMessage("Volume and liquidity must be numbers of at least 0.");
+    if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0 || !Number.isFinite(minVolume24hrUsd) || minVolume24hrUsd < 0 || !Number.isFinite(maxSpreadCents) || maxSpreadCents < 0) {
+      setReapplyMessage("Volume, liquidity, volume24hr, and spread must be numbers of at least 0.");
       return;
     }
     setIsReapplying(true);
@@ -186,6 +196,8 @@ export function BullpenScanFiltersPopupBridge() {
         console_min_highest_market_odds: highestOddsFloor,
         console_min_volume_usd: minVolumeUsd,
         console_min_liquidity_usd: minLiquidityUsd,
+        console_min_volume_24hr_usd: minVolume24hrUsd,
+        console_max_spread_cents: maxSpreadCents,
         console_rejected_theme_pattern: rejectedThemePattern,
         console_custom_exclude_phrases: customExcludePhrases,
         ...Object.fromEntries(
@@ -266,8 +278,8 @@ export function BullpenScanFiltersPopupBridge() {
   }
 
   async function saveAdditionalFilters() {
-    if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0) {
-      setAdditionalFiltersMessage("Volume and liquidity must be numbers of at least 0.");
+    if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0 || !Number.isFinite(minVolume24hrUsd) || minVolume24hrUsd < 0 || !Number.isFinite(maxSpreadCents) || maxSpreadCents < 0) {
+      setAdditionalFiltersMessage("Volume, liquidity, volume24hr, and spread must be numbers of at least 0.");
       return;
     }
     setIsAdditionalFiltersSaving(true);
@@ -276,6 +288,8 @@ export function BullpenScanFiltersPopupBridge() {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_min_volume_usd: minVolumeUsd,
         console_min_liquidity_usd: minLiquidityUsd,
+        console_min_volume_24hr_usd: minVolume24hrUsd,
+        console_max_spread_cents: maxSpreadCents,
         console_rejected_theme_pattern: rejectedThemePattern,
       });
       publishStageOneSettings(settings);
@@ -283,6 +297,10 @@ export function BullpenScanFiltersPopupBridge() {
       setSavedMinVolumeUsd(settings.console_min_volume_usd);
       setMinLiquidityUsd(settings.console_min_liquidity_usd);
       setSavedMinLiquidityUsd(settings.console_min_liquidity_usd);
+      setMinVolume24hrUsd(settings.console_min_volume_24hr_usd);
+      setSavedMinVolume24hrUsd(settings.console_min_volume_24hr_usd);
+      setMaxSpreadCents(settings.console_max_spread_cents);
+      setSavedMaxSpreadCents(settings.console_max_spread_cents);
       setRejectedThemePattern(settings.console_rejected_theme_pattern);
       setSavedRejectedThemePattern(settings.console_rejected_theme_pattern);
       setAdditionalFiltersMessage("Saved. Every future Trending and Full Universe scan will use these filters.");
@@ -446,7 +464,7 @@ export function BullpenScanFiltersPopupBridge() {
               </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
                 <div>
-                  <p className="font-semibold text-slate-950 dark:text-slate-50">Volume, liquidity and theme names</p>
+                  <p className="font-semibold text-slate-950 dark:text-slate-50">Volume, liquidity, spread and theme names</p>
                   <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
                     Keep only markets strictly above the USD floors, and reject themes matching the case-insensitive regular expression.
                   </p>
@@ -460,13 +478,21 @@ export function BullpenScanFiltersPopupBridge() {
                     Liquidity (USD) &gt;
                     <input aria-label="Minimum Liquidity USD" type="number" min={0} step={1} value={minLiquidityUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setMinLiquidityUsd(Number(event.target.value)); setReapplyDirty(true); }} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
                   </label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    market.volume24hr (USD) &gt;
+                    <input aria-label="Minimum market volume24hr USD" type="number" min={0} step={1} value={minVolume24hrUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setMinVolume24hrUsd(Number(event.target.value)); setReapplyDirty(true); }} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                  </label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Spread (cents) &lt;
+                    <input aria-label="Maximum Spread cents" type="number" min={0} step={0.1} value={maxSpreadCents} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setMaxSpreadCents(Number(event.target.value)); setReapplyDirty(true); }} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                  </label>
                   <label className="text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
                     Theme Names to reject (regular expression)
                     <input aria-label="Rejected Theme Names pattern" type="text" value={rejectedThemePattern} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setRejectedThemePattern(event.target.value); setReapplyDirty(true); }} placeholder="crypto prices|twitter|Mentions" className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
                   </label>
                 </div>
                 <div className="mt-3 flex items-center justify-end gap-3">
-                  <button type="button" onClick={() => void saveAdditionalFilters()} disabled={isFloorLoading || isAdditionalFiltersSaving || (minVolumeUsd === savedMinVolumeUsd && minLiquidityUsd === savedMinLiquidityUsd && rejectedThemePattern === savedRejectedThemePattern)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
+                  <button type="button" onClick={() => void saveAdditionalFilters()} disabled={isFloorLoading || isAdditionalFiltersSaving || (minVolumeUsd === savedMinVolumeUsd && minLiquidityUsd === savedMinLiquidityUsd && minVolume24hrUsd === savedMinVolume24hrUsd && maxSpreadCents === savedMaxSpreadCents && rejectedThemePattern === savedRejectedThemePattern)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
                     {isAdditionalFiltersSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                     Save filters
                   </button>

@@ -227,6 +227,8 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     console_max_closing_days: int = Field(default=30, ge=1)
     console_min_volume_usd: float = Field(default=100, ge=0)
     console_min_liquidity_usd: float = Field(default=100, ge=0)
+    console_min_volume_24hr_usd: float = Field(default=100, ge=0)
+    console_max_spread_cents: float = Field(default=10, ge=0)
     console_rejected_theme_pattern: str = "crypto prices|twitter|Mentions"
     console_exclude_sports: bool = True
     console_exclude_weather: bool = True
@@ -446,6 +448,8 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     console_max_closing_days: int | None = Field(default=None, ge=1)
     console_min_volume_usd: float | None = Field(default=None, ge=0)
     console_min_liquidity_usd: float | None = Field(default=None, ge=0)
+    console_min_volume_24hr_usd: float | None = Field(default=None, ge=0)
+    console_max_spread_cents: float | None = Field(default=None, ge=0)
     console_rejected_theme_pattern: str | None = None
     console_exclude_sports: bool | None = None
     console_exclude_weather: bool | None = None

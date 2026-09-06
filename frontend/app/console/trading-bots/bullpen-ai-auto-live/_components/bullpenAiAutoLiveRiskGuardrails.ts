@@ -77,6 +77,8 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   console_max_closing_days: 30,
   console_min_volume_usd: 100,
   console_min_liquidity_usd: 100,
+  console_min_volume_24hr_usd: 100,
+  console_max_spread_cents: 10,
   console_rejected_theme_pattern: "crypto prices|twitter|Mentions",
   console_exclude_sports: true,
   console_exclude_weather: true,

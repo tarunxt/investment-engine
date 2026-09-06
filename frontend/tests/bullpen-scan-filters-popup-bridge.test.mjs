@@ -37,9 +37,13 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /console_max_closing_days/);
   assert.match(bridgeSource, /console_min_volume_usd/);
   assert.match(bridgeSource, /console_min_liquidity_usd/);
+  assert.match(bridgeSource, /console_min_volume_24hr_usd/);
+  assert.match(bridgeSource, /console_max_spread_cents/);
   assert.match(bridgeSource, /console_rejected_theme_pattern/);
   assert.match(bridgeSource, />\s*Volume \(USD\) &gt;\s*</);
   assert.match(bridgeSource, />\s*Liquidity \(USD\) &gt;\s*</);
+  assert.match(bridgeSource, />\s*market\.volume24hr \(USD\) &gt;\s*</);
+  assert.match(bridgeSource, />\s*Spread \(cents\) &lt;\s*</);
   assert.match(bridgeSource, /crypto prices\|twitter\|Mentions/);
   assert.match(bridgeSource, /"Reapply Filters"/);
   assert.match(bridgeSource, /bg-blue-600/);
