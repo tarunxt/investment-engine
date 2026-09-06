@@ -49,11 +49,19 @@ export function BullpenScanFiltersPopupBridge() {
   const [savedOddsFloor, setSavedOddsFloor] = useState(0);
   const [maxClosingDays, setMaxClosingDays] = useState(30);
   const [savedMaxClosingDays, setSavedMaxClosingDays] = useState(30);
+  const [minVolumeUsd, setMinVolumeUsd] = useState(100);
+  const [savedMinVolumeUsd, setSavedMinVolumeUsd] = useState(100);
+  const [minLiquidityUsd, setMinLiquidityUsd] = useState(100);
+  const [savedMinLiquidityUsd, setSavedMinLiquidityUsd] = useState(100);
+  const [rejectedThemePattern, setRejectedThemePattern] = useState("crypto prices|twitter|Mentions");
+  const [savedRejectedThemePattern, setSavedRejectedThemePattern] = useState("crypto prices|twitter|Mentions");
   const [isFloorLoading, setIsFloorLoading] = useState(false);
   const [isFloorSaving, setIsFloorSaving] = useState(false);
   const [isClosingDaysSaving, setIsClosingDaysSaving] = useState(false);
   const [floorMessage, setFloorMessage] = useState<string | null>(null);
   const [closingDaysMessage, setClosingDaysMessage] = useState<string | null>(null);
+  const [additionalFiltersMessage, setAdditionalFiltersMessage] = useState<string | null>(null);
+  const [isAdditionalFiltersSaving, setIsAdditionalFiltersSaving] = useState(false);
   const [customExcludePhrases, setCustomExcludePhrases] = useState<string[]>([]);
   const [filterToggles, setFilterToggles] = useState(DEFAULT_FILTER_TOGGLES);
   const [savingFilterId, setSavingFilterId] =
@@ -74,6 +82,15 @@ export function BullpenScanFiltersPopupBridge() {
         setSavedOddsFloor(saved);
         setMaxClosingDays(savedClosingDays);
         setSavedMaxClosingDays(savedClosingDays);
+        const savedVolume = settings.console_min_volume_usd ?? 100;
+        const savedLiquidity = settings.console_min_liquidity_usd ?? 100;
+        const savedThemePattern = settings.console_rejected_theme_pattern ?? "crypto prices|twitter|Mentions";
+        setMinVolumeUsd(savedVolume);
+        setSavedMinVolumeUsd(savedVolume);
+        setMinLiquidityUsd(savedLiquidity);
+        setSavedMinLiquidityUsd(savedLiquidity);
+        setRejectedThemePattern(savedThemePattern);
+        setSavedRejectedThemePattern(savedThemePattern);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
         setFilterToggles(getBullpenScanFilterToggles(settings));
         publishStageOneSettings(settings);
@@ -159,6 +176,34 @@ export function BullpenScanFiltersPopupBridge() {
       setClosingDaysMessage("The expiry window could not be saved. Please try again.");
     } finally {
       setIsClosingDaysSaving(false);
+    }
+  }
+
+  async function saveAdditionalFilters() {
+    if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0) {
+      setAdditionalFiltersMessage("Volume and liquidity must be numbers of at least 0.");
+      return;
+    }
+    setIsAdditionalFiltersSaving(true);
+    setAdditionalFiltersMessage(null);
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        console_min_volume_usd: minVolumeUsd,
+        console_min_liquidity_usd: minLiquidityUsd,
+        console_rejected_theme_pattern: rejectedThemePattern,
+      });
+      publishStageOneSettings(settings);
+      setMinVolumeUsd(settings.console_min_volume_usd);
+      setSavedMinVolumeUsd(settings.console_min_volume_usd);
+      setMinLiquidityUsd(settings.console_min_liquidity_usd);
+      setSavedMinLiquidityUsd(settings.console_min_liquidity_usd);
+      setRejectedThemePattern(settings.console_rejected_theme_pattern);
+      setSavedRejectedThemePattern(settings.console_rejected_theme_pattern);
+      setAdditionalFiltersMessage("Saved. Every future Trending and Full Universe scan will use these filters.");
+    } catch {
+      setAdditionalFiltersMessage("The additional filters could not be saved. Check the theme pattern and try again.");
+    } finally {
+      setIsAdditionalFiltersSaving(false);
     }
   }
 
@@ -288,6 +333,36 @@ export function BullpenScanFiltersPopupBridge() {
                     {closingDaysMessage}
                   </p>
                 ) : null}
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
+                <div>
+                  <p className="font-semibold text-slate-950 dark:text-slate-50">Volume, liquidity and theme names</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    Keep only markets strictly above the USD floors, and reject themes matching the case-insensitive regular expression.
+                  </p>
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Volume (USD) &gt;
+                    <input aria-label="Minimum Volume USD" type="number" min={0} step={1} value={minVolumeUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => setMinVolumeUsd(Number(event.target.value))} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                  </label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Liquidity (USD) &gt;
+                    <input aria-label="Minimum Liquidity USD" type="number" min={0} step={1} value={minLiquidityUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => setMinLiquidityUsd(Number(event.target.value))} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                  </label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
+                    Theme Names to reject (regular expression)
+                    <input aria-label="Rejected Theme Names pattern" type="text" value={rejectedThemePattern} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => setRejectedThemePattern(event.target.value)} placeholder="crypto prices|twitter|Mentions" className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                  </label>
+                </div>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <p className="text-xs text-slate-600 dark:text-slate-300">Default: <code>crypto prices|twitter|Mentions</code></p>
+                  <button type="button" onClick={() => void saveAdditionalFilters()} disabled={isFloorLoading || isAdditionalFiltersSaving || (minVolumeUsd === savedMinVolumeUsd && minLiquidityUsd === savedMinLiquidityUsd && rejectedThemePattern === savedRejectedThemePattern)} className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    {isAdditionalFiltersSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    Save filters
+                  </button>
+                </div>
+                {additionalFiltersMessage ? <p className="mt-3 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">{additionalFiltersMessage}</p> : null}
               </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
