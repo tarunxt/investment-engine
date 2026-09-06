@@ -5724,6 +5724,9 @@ class BullpenAutoLiveEngine:
                         now=now,
                         min_market_odds=settings.console_min_market_odds,
                         max_closing_days=settings.console_max_closing_days,
+                        min_volume_usd=settings.console_min_volume_usd,
+                        min_liquidity_usd=settings.console_min_liquidity_usd,
+                        rejected_theme_pattern=settings.console_rejected_theme_pattern,
                         exclude_sports=settings.console_exclude_sports,
                         exclude_weather=settings.console_exclude_weather,
                         exclude_market_predictions=(
@@ -5989,6 +5992,9 @@ class BullpenAutoLiveEngine:
                 now=now,
                 min_market_odds=settings.console_min_market_odds,
                 max_closing_days=settings.console_max_closing_days,
+                min_volume_usd=settings.console_min_volume_usd,
+                min_liquidity_usd=settings.console_min_liquidity_usd,
+                rejected_theme_pattern=settings.console_rejected_theme_pattern,
                 exclude_sports=settings.console_exclude_sports,
                 exclude_weather=settings.console_exclude_weather,
                 exclude_market_predictions=(
