@@ -740,6 +740,8 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
     left.maxClosingDays === right.maxClosingDays &&
     left.minVolumeUsd === right.minVolumeUsd &&
     left.minLiquidityUsd === right.minLiquidityUsd &&
+    left.minVolume24hrUsd === right.minVolume24hrUsd &&
+    left.maxSpreadCents === right.maxSpreadCents &&
     left.rejectedThemePattern === right.rejectedThemePattern &&
     left.targetDate === right.targetDate &&
     left.excludeSports === right.excludeSports &&
