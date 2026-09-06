@@ -459,6 +459,7 @@ async def get_stage1_scan_preview(current_user: User = Depends(get_current_user)
     scan = await scan_console_profile_markets(
         now=datetime.now(UTC),
         min_market_odds=settings.console_min_market_odds,
+        min_highest_market_odds=settings.console_min_highest_market_odds,
         max_closing_days=settings.console_max_closing_days,
         min_volume_usd=settings.console_min_volume_usd,
         min_liquidity_usd=settings.console_min_liquidity_usd,
