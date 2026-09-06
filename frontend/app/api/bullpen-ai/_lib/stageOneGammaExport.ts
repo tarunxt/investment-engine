@@ -370,7 +370,11 @@ export async function reapplyStageOneGammaExportFilters({
   exportId: string;
   ownerKey: string;
   filters: BullpenScanFilters;
-  evaluate: (candidate: BullpenQuestion) => string[];
+  evaluate: (
+    candidate: BullpenQuestion,
+    market: Record<string, unknown>,
+    event: Record<string, unknown>,
+  ) => string[];
   cursor?: number;
 }) {
   await cleanupExpiredExports();
@@ -423,7 +427,7 @@ export async function reapplyStageOneGammaExportFilters({
       const row = JSON.parse(line) as StageOneGammaExportRow;
       const filterReasons = row.forceIncludedPosition || row.forceIncluded
         ? []
-        : evaluate(row.candidate);
+        : evaluate(row.candidate, row.market, row.event);
       const passed = filterReasons.length === 0;
       const nextRow: StageOneGammaExportRow = {
         ...row,
