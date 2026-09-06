@@ -300,6 +300,7 @@ class ScannedMarket:
     best_bid_cents: float | None
     best_ask_cents: float | None
     spread_cents: float | None
+    volume_24hr_usd: float | None = None
     force_include: bool = False
     raw: dict[str, Any] | None = None
 
