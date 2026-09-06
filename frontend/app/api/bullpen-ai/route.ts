@@ -16,6 +16,7 @@ import {
 } from "./_lib/serverBackendSession";
 import {
   appendStageOneGammaExportPage,
+  reapplyStageOneGammaExportFilters,
   type StageOneGammaExportRow,
 } from "./_lib/stageOneGammaExport";
 import {
@@ -1194,6 +1195,33 @@ function getFilterReasons(
   return reasons;
 }
 
+function hydrateStoredCandidateForFiltering(
+  question: BullpenQuestion,
+  filters: BullpenScanFilters,
+): FilterableBullpenQuestion {
+  const theme = question.category ?? "";
+  return {
+    ...question,
+    category: question.category,
+    // Gamma's complete dot-separated Theme trail is persisted in `category`.
+    // Re-filter it as one composite value, matching the Theme Excel column.
+    _categorySearchText: normalizeSearchTextParts([theme]),
+    _searchText: normalizeSearchTextParts([
+      question.question,
+      theme,
+      question.slug,
+      question.outcomeLabels.join(" "),
+    ]),
+    _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
+    _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
+    _customExcludeMarketPredictionsKeywords:
+      filters.customExcludeMarketPredictionsKeywords,
+    _customExcludeTweetCountQuestionsKeywords:
+      filters.customExcludeTweetCountQuestionsKeywords,
+    _customExcludeOtherPhrases: filters.customExcludeOtherPhrases,
+  };
+}
+
 function collectQuestions(payloads: unknown[], sourceUrl: string) {
   const candidates = new Map<string, FilterableBullpenQuestion>();
   for (const payload of payloads) {
@@ -1548,11 +1576,43 @@ async function handleScan(
       : new Date().toISOString();
   const cursor = searchParams.get("scanCursor");
   const requestedExportId = searchParams.get("scanExportId");
+  const reapplyExportId = searchParams.get("reapplyExportId");
   const forcedIdentityKeys = new Set(
     activePositions.flatMap(positionIdentityKeys),
   );
 
   try {
+    if (reapplyExportId) {
+      const metadata = await reapplyStageOneGammaExportFilters({
+        exportId: reapplyExportId,
+        ownerKey:
+          backendSession.sessionSubject ?? backendSession.sessionGeneration,
+        filters,
+        evaluate: (candidate) =>
+          getFilterReasons(
+            hydrateStoredCandidateForFiltering(candidate, filters),
+            mode,
+            filters,
+          ),
+      });
+      return NextResponse.json({
+        mode,
+        sourceUrl:
+          metadata.sourceUrl ?? POLYMARKET_GAMMA_EVENTS_KEYSET_URL,
+        sourceLabel: metadata.sourceLabel ?? GAMMA_SOURCE_LABEL,
+        scannedAt: new Date().toISOString(),
+        filters,
+        totalCandidates: metadata.rowCount,
+        questions: metadata.acceptedSample ?? [],
+        rejectedQuestions: metadata.rejectedSample ?? [],
+        totalAcceptedQuestions: metadata.acceptedCount ?? 0,
+        totalRejectedQuestions: metadata.rejectedCount ?? 0,
+        pagesScanned: metadata.processedPages.length,
+        scanExportId: metadata.exportId,
+        details:
+          "Reapplied saved Stage 1 filters to the existing Full Universe data without fetching Gamma again.",
+      });
+    }
     const {
       candidates,
       exportCandidates,
@@ -1587,7 +1647,7 @@ async function handleScan(
       : [...gammaCandidates, ...activePositions.map(activePositionCandidate)];
     const result = await buildResponse({
       mode,
-      sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
+      sourceUrl: POLYMARKET_GAMMA_EVENTS_KEYSET_URL,
       sourceLabel: GAMMA_SOURCE_LABEL,
       scannedAt,
       filters,
@@ -1653,7 +1713,7 @@ async function handleScan(
         snapshot: {
           mode,
           filters,
-          sourceUrl: POLYMARKET_GAMMA_EVENTS_URL,
+          sourceUrl: POLYMARKET_GAMMA_EVENTS_KEYSET_URL,
           sourceLabel: GAMMA_SOURCE_LABEL,
           scannedAt,
         },

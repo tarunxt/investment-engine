@@ -81,6 +81,19 @@ the configured floor), plus a case-insensitive regular expression matched only
 against the normalized theme name. The default rejected-theme expression is
 `crypto prices|twitter|Mentions`. These values are captured in each new run's
 settings snapshot; historical snapshots remain unchanged.
+The Theme regex is evaluated case-insensitively against the complete composite
+Gamma theme trail retained in the `Theme` export column (including `·`-separated
+labels such as asset, cadence, market type, category, and tags), so a term such
+as `crypto prices` matches anywhere in that incoming value.
+
+The Scan Filters popup exposes **Reapply Filters**. It remains grey until a
+filter draft changes, then turns blue. Activating it saves the complete filter
+set and streams the existing completed Full Universe raw ledger through the
+same Stage 1 predicates without another Gamma request. It atomically replaces
+the compact passed-row ledger and updates accepted/rejected counts and samples,
+so the Stage 1 totals, passed-events popup, and downloadable filtered workbook
+all reflect the reapplied settings while the exhaustive scanned total remains
+unchanged.
 Each named filter section in the Scan Filters popup has a persisted checkbox:
 sports, weather, market predictions, tweet counts, release-by events, Yes/No-only,
 and custom Others phrases. Checked means the rule is applied; unchecked means the

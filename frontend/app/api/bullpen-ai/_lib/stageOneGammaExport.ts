@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 
 import type {
   BullpenQuestion,
@@ -347,4 +349,95 @@ export async function openStageOneGammaExport({
     rowsPath: paths.rows,
     filteredRowsPath: paths.filteredRows,
   };
+}
+
+export async function reapplyStageOneGammaExportFilters({
+  exportId,
+  ownerKey,
+  filters,
+  evaluate,
+}: {
+  exportId: string;
+  ownerKey: string;
+  filters: BullpenScanFilters;
+  evaluate: (candidate: BullpenQuestion) => string[];
+}) {
+  await cleanupExpiredExports();
+  const metadata = await readMetadata(exportId);
+  if (metadata.ownerHash !== ownerHash(ownerKey)) {
+    throw new Error("Stage 1 export does not belong to this session.");
+  }
+  if (!metadata.completed) {
+    throw new Error("Only a completed Full Universe scan can be re-filtered.");
+  }
+
+  const paths = exportPaths(exportId);
+  const temporaryFilteredPath = `${paths.filteredRows}.${process.pid}.${Date.now()}.tmp`;
+  const lines = createInterface({
+    input: createReadStream(paths.rows, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  let acceptedCount = 0;
+  let rejectedCount = 0;
+  let processedCount = 0;
+  const acceptedSample: BullpenQuestion[] = [];
+  const rejectedSample: Array<BullpenQuestion & { filterReasons: string[] }> = [];
+  let filteredBuffer = "";
+
+  try {
+    await writeFile(temporaryFilteredPath, "", { encoding: "utf8", flag: "wx" });
+    for await (const line of lines) {
+      if (!line) continue;
+      const row = JSON.parse(line) as StageOneGammaExportRow;
+      const filterReasons = row.forceIncludedPosition || row.forceIncluded
+        ? []
+        : evaluate(row.candidate);
+      const passed = filterReasons.length === 0;
+      const nextRow: StageOneGammaExportRow = {
+        ...row,
+        scanStatus: passed ? "passed" : "filtered",
+        filterReasons,
+      };
+      processedCount += 1;
+      if (passed) {
+        acceptedCount += 1;
+        if (acceptedSample.length < 500) acceptedSample.push(row.candidate);
+        filteredBuffer += `${JSON.stringify(nextRow)}\n`;
+        if (filteredBuffer.length >= 1_000_000) {
+          await appendFile(temporaryFilteredPath, filteredBuffer, "utf8");
+          filteredBuffer = "";
+        }
+      } else {
+        rejectedCount += 1;
+        if (rejectedSample.length < 500) {
+          rejectedSample.push({ ...row.candidate, filterReasons });
+        }
+      }
+    }
+    if (filteredBuffer) {
+      await appendFile(temporaryFilteredPath, filteredBuffer, "utf8");
+    }
+    if (processedCount !== metadata.rowCount) {
+      throw new Error(
+        `Stored Full Universe row count changed (${processedCount}/${metadata.rowCount}).`,
+      );
+    }
+    await rename(temporaryFilteredPath, paths.filteredRows);
+  } catch (error) {
+    lines.close();
+    await rm(temporaryFilteredPath, { force: true });
+    throw error;
+  }
+
+  const updatedMetadata: StageOneGammaExportMetadata = {
+    ...metadata,
+    filters,
+    updatedAt: new Date().toISOString(),
+    acceptedCount,
+    rejectedCount,
+    acceptedSample,
+    rejectedSample,
+  };
+  await saveMetadata(updatedMetadata);
+  return updatedMetadata;
 }

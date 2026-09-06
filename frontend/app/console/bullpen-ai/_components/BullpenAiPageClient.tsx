@@ -71,6 +71,8 @@ import {
   type BullpenScanFilterDetailId,
 } from "@/lib/bullpenScanExclusions";
 import {
+  BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
+  BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
   BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
   applyBullpenStageOneSettings,
 } from "@/lib/bullpenStageOneSettings";
@@ -3583,6 +3585,80 @@ function BullpenAiPageContent() {
   async function runScan() {
     await executeBullpenScan({ resetSelections: true });
   }
+
+  const reapplyExistingStageOneFilters = useEffectEvent(
+    async (settings: BullpenAutoLiveSettings) => {
+      const exportId = activeCurrentSnapshot?.scanExportId;
+      if (!exportId) {
+        window.dispatchEvent(
+          new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
+            detail: {
+              success: false,
+              message: "No completed Full Universe data is available. Run Full Universe Scan first.",
+            },
+          }),
+        );
+        return;
+      }
+      const filters = applyBullpenStageOneSettings(activeFilters, settings);
+      const params = buildBullpenScanQueryParams(activeMode, filters);
+      params.set("reapplyExportId", exportId);
+      try {
+        const { response, payload } = await fetchBullpenUiJson<ScanResult>(
+          `/api/bullpen-ai?${params.toString()}`,
+          {
+            cache: "no-store",
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ activePositions: openActivePositions }),
+          },
+          BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
+        );
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error || "The stored Full Universe data could not be re-filtered.");
+        }
+        const nextSnapshot = createBullpenScanSnapshot(payload);
+        syncBullpenScanSnapshot(nextSnapshot, {
+          resetSelections: true,
+          archivePrevious: false,
+        });
+        window.dispatchEvent(
+          new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
+            detail: {
+              success: true,
+              message: `Reapplied filters to ${payload.totalCandidates.toLocaleString("en-IN")} stored markets. ${(
+                payload.totalAcceptedQuestions ?? payload.questions.length
+              ).toLocaleString("en-IN")} events now pass and the filtered Excel has been rebuilt.`,
+            },
+          }),
+        );
+      } catch (error) {
+        window.dispatchEvent(
+          new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
+            detail: { success: false, message: formatUnknownError(error) },
+          }),
+        );
+      }
+    },
+  );
+
+  useEffect(() => {
+    const handleReapply = (event: Event) => {
+      void reapplyExistingStageOneFilters(
+        (event as CustomEvent<BullpenAutoLiveSettings>).detail,
+      );
+    };
+    window.addEventListener(
+      BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
+      handleReapply,
+    );
+    return () => {
+      window.removeEventListener(
+        BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
+        handleReapply,
+      );
+    };
+  }, []);
 
   async function runLlm(targets: ProviderModelTarget[]) {
     if (targets.length === 0) {

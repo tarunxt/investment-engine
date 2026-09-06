@@ -9,6 +9,8 @@ import {
 } from "@/lib/bullpenScanExclusions";
 import {
   BULLPEN_SCAN_FILTER_SETTING_KEYS,
+  BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
+  BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
   BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
   getBullpenScanFilterToggles,
   type BullpenScanFilterToggleState,
@@ -67,6 +69,9 @@ export function BullpenScanFiltersPopupBridge() {
   const [savingFilterId, setSavingFilterId] =
     useState<BullpenScanFilterDetailId | null>(null);
   const [filterMessage, setFilterMessage] = useState<string | null>(null);
+  const [reapplyDirty, setReapplyDirty] = useState(false);
+  const [isReapplying, setIsReapplying] = useState(false);
+  const [reapplyMessage, setReapplyMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadOddsFloor() {
@@ -94,6 +99,7 @@ export function BullpenScanFiltersPopupBridge() {
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
         setFilterToggles(getBullpenScanFilterToggles(settings));
         publishStageOneSettings(settings);
+        setReapplyDirty(false);
       } catch {
         setFloorMessage("Could not load the saved odds floor. The default 0% is shown.");
       } finally {
@@ -123,11 +129,73 @@ export function BullpenScanFiltersPopupBridge() {
 
     document.addEventListener("click", handleClick, true);
     document.addEventListener("keydown", handleKeyDown);
+    const handleReapplyFinished = (event: Event) => {
+      const detail = (event as CustomEvent<{ success: boolean; message?: string }>).detail;
+      setIsReapplying(false);
+      setReapplyDirty(!detail.success);
+      setReapplyMessage(
+        detail.message ??
+          (detail.success
+            ? "Filters reapplied to the saved Full Universe scan."
+            : "Filters could not be reapplied."),
+      );
+    };
+    window.addEventListener(
+      BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
+      handleReapplyFinished,
+    );
     return () => {
       document.removeEventListener("click", handleClick, true);
       document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener(
+        BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
+        handleReapplyFinished,
+      );
     };
   }, [detailId]);
+
+  async function reapplyFilters() {
+    if (!reapplyDirty || isReapplying) return;
+    if (!Number.isInteger(maxClosingDays) || maxClosingDays < 1) {
+      setReapplyMessage("Enter a valid whole-number expiry window first.");
+      return;
+    }
+    if (!Number.isFinite(oddsFloor) || oddsFloor < 0 || oddsFloor >= 50) {
+      setReapplyMessage("Enter a valid odds floor from 0 up to 49.9% first.");
+      return;
+    }
+    if (!Number.isFinite(minVolumeUsd) || minVolumeUsd < 0 || !Number.isFinite(minLiquidityUsd) || minLiquidityUsd < 0) {
+      setReapplyMessage("Volume and liquidity must be numbers of at least 0.");
+      return;
+    }
+    setIsReapplying(true);
+    setReapplyMessage("Saving and reapplying filters to the existing Full Universe data…");
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        console_max_closing_days: maxClosingDays,
+        console_min_market_odds: oddsFloor,
+        console_min_volume_usd: minVolumeUsd,
+        console_min_liquidity_usd: minLiquidityUsd,
+        console_rejected_theme_pattern: rejectedThemePattern,
+        console_custom_exclude_phrases: customExcludePhrases,
+        ...Object.fromEntries(
+          Object.entries(BULLPEN_SCAN_FILTER_SETTING_KEYS).map(([id, key]) => [
+            key,
+            filterToggles[id as BullpenScanFilterDetailId],
+          ]),
+        ),
+      } as BullpenAutoLiveSettingsUpdate);
+      publishStageOneSettings(settings);
+      window.dispatchEvent(
+        new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT, {
+          detail: settings,
+        }),
+      );
+    } catch {
+      setIsReapplying(false);
+      setReapplyMessage("The filters could not be saved. Check the values and try again.");
+    }
+  }
 
   async function saveOddsFloor() {
     if (!Number.isFinite(oddsFloor) || oddsFloor < 0 || oddsFloor >= 50) {
@@ -281,15 +349,36 @@ export function BullpenScanFiltersPopupBridge() {
                 These are the filters used by Stage 1 before events are passed to the LLM stage. Select any filter to see its exact matching logic.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
-              aria-label="Close scan filters"
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void reapplyFilters()}
+                disabled={!reapplyDirty || isReapplying || isFloorLoading}
+                className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition ${
+                  reapplyDirty
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "bg-slate-400"
+                } disabled:cursor-not-allowed disabled:opacity-70`}
+              >
+                {isReapplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                {isReapplying ? "Reapplying…" : "Reapply Filters"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsOpen(false)}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-900 dark:hover:text-white"
+                aria-label="Close scan filters"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
           </div>
+
+          {reapplyMessage ? (
+            <p className="border-b border-slate-200 px-6 py-2 text-xs font-medium text-slate-700 dark:border-slate-700 dark:text-slate-200" role="status">
+              {reapplyMessage}
+            </p>
+          ) : null}
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
             <div className="space-y-3">
@@ -312,7 +401,10 @@ export function BullpenScanFiltersPopupBridge() {
                         step={1}
                         value={maxClosingDays}
                         disabled={isFloorLoading || isClosingDaysSaving}
-                        onChange={(event) => setMaxClosingDays(Number(event.target.value))}
+                        onChange={(event) => {
+                          setMaxClosingDays(Number(event.target.value));
+                          setReapplyDirty(true);
+                        }}
                         className="h-10 w-28 rounded-xl border border-slate-300 bg-white px-3 pr-12 text-sm font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50"
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">days</span>
@@ -344,15 +436,15 @@ export function BullpenScanFiltersPopupBridge() {
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
                     Volume (USD) &gt;
-                    <input aria-label="Minimum Volume USD" type="number" min={0} step={1} value={minVolumeUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => setMinVolumeUsd(Number(event.target.value))} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                    <input aria-label="Minimum Volume USD" type="number" min={0} step={1} value={minVolumeUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setMinVolumeUsd(Number(event.target.value)); setReapplyDirty(true); }} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
                   </label>
                   <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
                     Liquidity (USD) &gt;
-                    <input aria-label="Minimum Liquidity USD" type="number" min={0} step={1} value={minLiquidityUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => setMinLiquidityUsd(Number(event.target.value))} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                    <input aria-label="Minimum Liquidity USD" type="number" min={0} step={1} value={minLiquidityUsd} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setMinLiquidityUsd(Number(event.target.value)); setReapplyDirty(true); }} className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
                   </label>
                   <label className="text-sm font-medium text-slate-700 dark:text-slate-200 sm:col-span-2">
                     Theme Names to reject (regular expression)
-                    <input aria-label="Rejected Theme Names pattern" type="text" value={rejectedThemePattern} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => setRejectedThemePattern(event.target.value)} placeholder="crypto prices|twitter|Mentions" className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
+                    <input aria-label="Rejected Theme Names pattern" type="text" value={rejectedThemePattern} disabled={isFloorLoading || isAdditionalFiltersSaving} onChange={(event) => { setRejectedThemePattern(event.target.value); setReapplyDirty(true); }} placeholder="crypto prices|twitter|Mentions" className="mt-1 h-10 w-full rounded-xl border border-slate-300 bg-white px-3 font-mono text-sm text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50" />
                   </label>
                 </div>
                 <div className="mt-3 flex items-center justify-between gap-3">
@@ -384,7 +476,10 @@ export function BullpenScanFiltersPopupBridge() {
                         step={0.1}
                         value={oddsFloor}
                         disabled={isFloorLoading || isFloorSaving}
-                        onChange={(event) => setOddsFloor(Number(event.target.value))}
+                        onChange={(event) => {
+                          setOddsFloor(Number(event.target.value));
+                          setReapplyDirty(true);
+                        }}
                         className="h-10 w-28 rounded-xl border border-slate-300 bg-white px-3 pr-8 text-sm font-semibold text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-50"
                       />
                       <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
@@ -423,9 +518,10 @@ export function BullpenScanFiltersPopupBridge() {
                         type="checkbox"
                         checked={enabled}
                         disabled={isFloorLoading || savingFilterId !== null}
-                        onChange={(event) =>
-                          void saveFilterToggle(id, event.target.checked)
-                        }
+                        onChange={(event) => {
+                          setReapplyDirty(true);
+                          void saveFilterToggle(id, event.target.checked);
+                        }}
                         aria-label={`Apply ${detail.label} filter`}
                         className="h-5 w-5 cursor-pointer rounded border-slate-300 text-emerald-700 focus:ring-2 focus:ring-emerald-300 disabled:cursor-wait"
                       />
@@ -468,7 +564,10 @@ export function BullpenScanFiltersPopupBridge() {
           detailId={detailId}
           customKeywords={detailId === "excludeOthers" ? customExcludePhrases : []}
           onSaveCustomKeywords={(keywords) => {
-            if (detailId === "excludeOthers") void saveCustomExcludePhrases(keywords);
+            if (detailId === "excludeOthers") {
+              setReapplyDirty(true);
+              void saveCustomExcludePhrases(keywords);
+            }
           }}
           onClose={() => setDetailId(null)}
         />

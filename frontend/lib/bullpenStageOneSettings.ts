@@ -4,6 +4,10 @@ import type { BullpenAutoLiveSettings } from "@/types/api";
 
 export const BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT =
   "bullpen-stage-one-settings-updated";
+export const BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT =
+  "bullpen-stage-one-reapply-filters";
+export const BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT =
+  "bullpen-stage-one-reapply-finished";
 
 export const BULLPEN_SCAN_FILTER_SETTING_KEYS = {
   excludeSports: "console_exclude_sports",
