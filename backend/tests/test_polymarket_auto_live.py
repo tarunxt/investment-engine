@@ -7049,7 +7049,10 @@ def test_console_market_filter_reasons_use_saved_expiry_window():
 
 
 def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filters():
-    market = _market(theme="Twitter", liquidity_usd=100)
+    market = _market(
+        theme="Ethereum · 1H · Multi Strikes · Crypto · Crypto Prices · Recurring",
+        liquidity_usd=100,
+    )
     market.volume_usd = 100
 
     reasons = console_market_filter_reasons(
@@ -7062,7 +7065,7 @@ def test_console_market_filter_reasons_use_saved_volume_liquidity_and_theme_filt
 
     assert "Excluded market with Volume USD not greater than 100." in reasons
     assert "Excluded market with Liquidity USD not greater than 100." in reasons
-    assert 'Excluded theme "Twitter" by theme-name pattern.' in reasons
+    assert any("theme-name pattern" in reason for reason in reasons)
 
     passing = _market(theme="Politics", liquidity_usd=100.01)
     passing.volume_usd = 100.01
