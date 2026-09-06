@@ -220,6 +220,8 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     min_order_usd: float = Field(default=1, gt=0)
     max_order_usd: float = Field(default=25, gt=0)
     console_order_usd: float = Field(default=5, gt=0)
+    # Stage 1 requires both the lower and higher side of a binary odds pair
+    # to clear their independently editable strict thresholds.
     console_min_market_odds: float = Field(default=1, ge=0, lt=50)
     console_min_highest_market_odds: float = Field(default=90, ge=50, lt=100)
     console_max_closing_days: int = Field(default=30, ge=1)
