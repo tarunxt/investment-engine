@@ -54,6 +54,8 @@ export function applyBullpenStageOneSettings(
     maxClosingDays: settings.console_max_closing_days ?? 30,
     minVolumeUsd: settings.console_min_volume_usd ?? 100,
     minLiquidityUsd: settings.console_min_liquidity_usd ?? 100,
+    minVolume24hrUsd: settings.console_min_volume_24hr_usd ?? 100,
+    maxSpreadCents: settings.console_max_spread_cents ?? 10,
     rejectedThemePattern:
       settings.console_rejected_theme_pattern ?? "crypto prices|twitter|Mentions",
     minYesOdds: 0,
