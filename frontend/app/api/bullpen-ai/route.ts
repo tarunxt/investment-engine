@@ -1577,17 +1577,22 @@ async function handleScan(
   const cursor = searchParams.get("scanCursor");
   const requestedExportId = searchParams.get("scanExportId");
   const reapplyExportId = searchParams.get("reapplyExportId");
+  const reapplyCursorValue = searchParams.get("reapplyCursor");
+  const reapplyCursor = reapplyCursorValue === null
+    ? undefined
+    : Number.parseInt(reapplyCursorValue, 10);
   const forcedIdentityKeys = new Set(
     activePositions.flatMap(positionIdentityKeys),
   );
 
   try {
     if (reapplyExportId) {
-      const metadata = await reapplyStageOneGammaExportFilters({
+      const reapplyResult = await reapplyStageOneGammaExportFilters({
         exportId: reapplyExportId,
         ownerKey:
           backendSession.sessionSubject ?? backendSession.sessionGeneration,
         filters,
+        cursor: Number.isFinite(reapplyCursor) ? reapplyCursor : undefined,
         evaluate: (candidate) =>
           getFilterReasons(
             hydrateStoredCandidateForFiltering(candidate, filters),
@@ -1595,6 +1600,19 @@ async function handleScan(
             filters,
           ),
       });
+      const metadata = reapplyResult.metadata;
+      if (!reapplyResult.completed) {
+        return NextResponse.json(
+          {
+            status: "reapplying",
+            retryAfterMs: 100,
+            reapplyCursor: metadata.reapplyState?.processedCount ?? 0,
+            processedCandidates: metadata.reapplyState?.processedCount ?? 0,
+            totalCandidates: metadata.rowCount,
+          },
+          { status: 202 },
+        );
+      }
       return NextResponse.json({
         mode,
         sourceUrl:
