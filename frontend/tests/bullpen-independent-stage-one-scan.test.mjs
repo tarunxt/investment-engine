@@ -200,6 +200,9 @@ test("saved Full Universe rows can be re-filtered without refetching Gamma", () 
   assert.match(pageSource, /Reapplied filters to/);
   assert.match(routeSource, /reapplyStageOneGammaExportFilters/);
   assert.match(routeSource, /existing Full Universe data without fetching Gamma again/);
+  assert.match(routeSource, /status: "reapplying"/);
+  assert.match(routeSource, /reapplyCursor/);
+  assert.match(pageSource, /response\.status !== 202/);
 });
 
 
