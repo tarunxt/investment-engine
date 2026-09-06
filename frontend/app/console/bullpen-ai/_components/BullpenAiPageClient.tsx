@@ -736,6 +736,9 @@ function writeStoredCustomExclusionKeywords(filters: BullpenScanFilters) {
 function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
   return (
     left.maxClosingDays === right.maxClosingDays &&
+    left.minVolumeUsd === right.minVolumeUsd &&
+    left.minLiquidityUsd === right.minLiquidityUsd &&
+    left.rejectedThemePattern === right.rejectedThemePattern &&
     left.targetDate === right.targetDate &&
     left.excludeSports === right.excludeSports &&
     left.excludeWeather === right.excludeWeather &&
