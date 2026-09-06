@@ -761,7 +761,9 @@ function filtersEqual(left: BullpenScanFilters, right: BullpenScanFilters) {
       right.customExcludeOtherPhrases.join(",") &&
     left.onlyBinaryYesNo === right.onlyBinaryYesNo &&
     left.minYesOdds === right.minYesOdds &&
-    left.minNoOdds === right.minNoOdds
+    left.minNoOdds === right.minNoOdds &&
+    left.minLowerOutcomeOdds === right.minLowerOutcomeOdds &&
+    left.minHigherOutcomeOdds === right.minHigherOutcomeOdds
   );
 }
 
@@ -3647,9 +3649,11 @@ function BullpenAiPageContent() {
           new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
             detail: {
               success: true,
-              message: `Reapplied filters to ${payload.totalCandidates.toLocaleString("en-IN")} stored markets. ${(
+              message: `Reapplied filters to ${payload.totalCandidates.toLocaleString("en-IN")} stored markets. Events passing filters: ${(
+                activeCurrentSnapshot.totalAcceptedQuestions ?? activeCurrentSnapshot.questions.length
+              ).toLocaleString("en-IN")} before → ${(
                 payload.totalAcceptedQuestions ?? payload.questions.length
-              ).toLocaleString("en-IN")} events now pass and the filtered Excel has been rebuilt.`,
+              ).toLocaleString("en-IN")} after. The filtered Excel has been rebuilt.`,
             },
           }),
         );
