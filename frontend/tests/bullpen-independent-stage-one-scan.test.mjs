@@ -194,6 +194,14 @@ test("independent Stage 1 allows the exhaustive catalog scan to finish", () => {
   );
 });
 
+test("saved Full Universe rows can be re-filtered without refetching Gamma", () => {
+  assert.match(pageSource, /reapplyExportId/);
+  assert.match(pageSource, /BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT/);
+  assert.match(pageSource, /Reapplied filters to/);
+  assert.match(routeSource, /reapplyStageOneGammaExportFilters/);
+  assert.match(routeSource, /existing Full Universe data without fetching Gamma again/);
+});
+
 
 test("independent Stage 1 carries keyset and exhaustive-export progress in each poll", () => {
   assert.doesNotMatch(routeSource, /__bullpenGammaScanJobs/);
