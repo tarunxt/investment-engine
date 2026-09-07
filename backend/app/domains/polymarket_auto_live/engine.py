@@ -3342,6 +3342,8 @@ def _serialize_manual_console_candidate(
 def _serialize_rejected_scan_candidate(
     rejected: ScanRejectedMarket,
 ) -> dict[str, object]:
+    if rejected.serialized_candidate is not None:
+        return dict(rejected.serialized_candidate)
     return {
         **(_serialize_scan_candidate(rejected.source_market) if rejected.source_market is not None else {}),
         "market_id": rejected.market_id,
@@ -5665,7 +5667,10 @@ class BullpenAutoLiveEngine:
                 if isinstance(outputs.get("scan_progress"), dict):
                     latest_scan_progress.update(outputs["scan_progress"])
             if latest_scan_progress:
-                progress_outputs["scan_progress"] = {**latest_scan_progress, "message": reason}
+                progress_outputs["scan_progress"] = {
+                    **latest_scan_progress, "message": reason,
+                    "lastUpdatedAt": datetime.now(UTC).isoformat(),
+                }
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
@@ -6019,32 +6024,45 @@ class BullpenAutoLiveEngine:
                     },
                 )
 
-            scanned = await scan_console_profile_markets(
-                now=now,
-                min_market_odds=settings.console_min_market_odds,
-                min_highest_market_odds=settings.console_min_highest_market_odds,
-                max_closing_days=settings.console_max_closing_days,
-                min_volume_usd=settings.console_min_volume_usd,
-                min_liquidity_usd=settings.console_min_liquidity_usd,
-                min_volume_24hr_usd=settings.console_min_volume_24hr_usd,
-                max_spread_cents=settings.console_max_spread_cents,
-                rejected_theme_pattern=settings.console_rejected_theme_pattern,
-                exclude_sports=settings.console_exclude_sports,
-                exclude_weather=settings.console_exclude_weather,
-                exclude_market_predictions=(
-                    settings.console_exclude_market_predictions
-                ),
-                exclude_tweet_count_questions=(
-                    settings.console_exclude_tweet_count_questions
-                ),
-                exclude_released_by_events=(
-                    settings.console_exclude_released_by_events
-                ),
-                only_binary_yes_no=settings.console_only_binary_yes_no,
-                exclude_custom_phrases=settings.console_exclude_custom_phrases,
-                custom_exclude_phrases=settings.console_custom_exclude_phrases,
-                scan_scope=scan_scope,
-                progress_callback=report_scan_page,
+            from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
+            with ScanSourceWriter() as streaming_sources:
+                def store_rejected_source(rejected: ScanRejectedMarket) -> None:
+                    rejected.serialized_candidate = streaming_sources.store(
+                        _serialize_rejected_scan_candidate(rejected)
+                    )
+                    rejected.source_market = None
+
+                scanned = await scan_console_profile_markets(
+                    now=now,
+                    min_market_odds=settings.console_min_market_odds,
+                    min_highest_market_odds=settings.console_min_highest_market_odds,
+                    max_closing_days=settings.console_max_closing_days,
+                    min_volume_usd=settings.console_min_volume_usd,
+                    min_liquidity_usd=settings.console_min_liquidity_usd,
+                    min_volume_24hr_usd=settings.console_min_volume_24hr_usd,
+                    max_spread_cents=settings.console_max_spread_cents,
+                    rejected_theme_pattern=settings.console_rejected_theme_pattern,
+                    exclude_sports=settings.console_exclude_sports,
+                    exclude_weather=settings.console_exclude_weather,
+                    exclude_market_predictions=(
+                        settings.console_exclude_market_predictions
+                    ),
+                    exclude_tweet_count_questions=(
+                        settings.console_exclude_tweet_count_questions
+                    ),
+                    exclude_released_by_events=(
+                        settings.console_exclude_released_by_events
+                    ),
+                    only_binary_yes_no=settings.console_only_binary_yes_no,
+                    exclude_custom_phrases=settings.console_exclude_custom_phrases,
+                    custom_exclude_phrases=settings.console_custom_exclude_phrases,
+                    scan_scope=scan_scope,
+                    progress_callback=report_scan_page,
+                    rejected_callback=store_rejected_source,
+                )
+            report_stage1_progress(
+                "Stage 1 pagination finished; preparing candidate exports and wallet handoff.",
+                completed_items=scanned.total_candidates,
             )
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
@@ -6079,7 +6097,12 @@ class BullpenAutoLiveEngine:
             with ScanSourceWriter() as source_store:
                 for candidate in stage1_accepted_candidates:
                     source_store.store(candidate)
-                for rejected in scanned.rejected:
+                for rejected_index, rejected in enumerate(scanned.rejected, 1):
+                    if rejected_index % 5000 == 0:
+                        report_stage1_progress(
+                            f"Preparing Stage 1 exports: {rejected_index:,} rejected rows processed.",
+                            completed_items=scanned_total_candidates,
+                        )
                     stage1_rejected_candidates.append(source_store.store(
                         _serialize_rejected_scan_candidate(rejected)
                     ))
@@ -13753,3 +13776,4 @@ class BullpenAutoLiveEngine:
             stage_results=candidate.stage_results,
             guardrail_checks=guardrail_checks,
         )
+

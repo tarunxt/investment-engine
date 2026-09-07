@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -314,6 +315,7 @@ class ScanRejectedMarket:
     reasons: list[str]
     force_included_position: bool = False
     source_market: ScannedMarket | None = None
+    serialized_candidate: dict[str, object] | None = None
 
 
 @dataclass
@@ -1097,6 +1099,8 @@ async def scan_candidate_markets(
     pagination_deadline_seconds: float | None = None,
     filter_parent_deadlines: bool = True,
     progress_callback: Callable[[int, int], None] | None = None,
+    market_filter: Callable[[ScannedMarket], list[str]] | None = None,
+    rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
@@ -1126,29 +1130,36 @@ async def scan_candidate_markets(
                     raise TimeoutError(
                         "Gamma pagination exceeded its full-universe deadline."
                     )
-                if use_deadline_cursor_pagination:
-                    rows, event_count, last_deadline, boundary_count = (
-                        await _fetch_gamma_deadline_cursor_page(
+                # HTTPX read timeouts reset on every received chunk. Bound the
+                # entire page request too, including a slow trickling response.
+                page_budget = 60.0
+                if pagination_deadline_seconds is not None:
+                    page_budget = min(page_budget, max(0.001,
+                        pagination_deadline_seconds - (time.monotonic() - pagination_started_at)))
+                async with asyncio.timeout(page_budget):
+                    if use_deadline_cursor_pagination:
+                        rows, event_count, last_deadline, boundary_count = (
+                            await _fetch_gamma_deadline_cursor_page(
+                                client,
+                                offset=offset,
+                                end_date_min=current_universe_start or _now_iso(),
+                            )
+                        )
+                        next_cursor = None
+                    elif use_keyset_pagination:
+                        rows, next_cursor = await _fetch_gamma_keyset_page(
+                            client,
+                            after_cursor=after_cursor,
+                            end_date_min=current_universe_start,
+                        )
+                        event_count = 0
+                    else:
+                        rows, event_count = await _fetch_gamma_page(
                             client,
                             offset=offset,
-                            end_date_min=current_universe_start or _now_iso(),
+                            end_date_min=current_universe_start,
                         )
-                    )
-                    next_cursor = None
-                elif use_keyset_pagination:
-                    rows, next_cursor = await _fetch_gamma_keyset_page(
-                        client,
-                        after_cursor=after_cursor,
-                        end_date_min=current_universe_start,
-                    )
-                    event_count = 0
-                else:
-                    rows, event_count = await _fetch_gamma_page(
-                        client,
-                        offset=offset,
-                        end_date_min=current_universe_start,
-                    )
-                    next_cursor = None
+                        next_cursor = None
             except Exception as exc:
                 if not preserve_partial_on_error or not seen_market_ids:
                     raise
@@ -1173,7 +1184,7 @@ async def scan_candidate_markets(
                 if normalized is None or normalized.market_id in seen_market_ids:
                     continue
                 seen_market_ids.add(normalized.market_id)
-                reasons = (
+                reasons = market_filter(normalized) if market_filter is not None else (
                     _evaluate_filter_reasons(
                         normalized,
                         min_liquidity_usd=min_liquidity_usd,
@@ -1182,8 +1193,7 @@ async def scan_candidate_markets(
                     else []
                 )
                 if reasons and not normalized.force_include:
-                    rejected.append(
-                        ScanRejectedMarket(
+                    rejected_market = ScanRejectedMarket(
                             market_id=normalized.market_id,
                             question=normalized.question,
                             slug=normalized.slug,
@@ -1191,7 +1201,9 @@ async def scan_candidate_markets(
                             reasons=reasons,
                             source_market=normalized,
                         )
-                    )
+                    if rejected_callback is not None:
+                        rejected_callback(rejected_market)
+                    rejected.append(rejected_market)
                     continue
                 accepted.append(normalized)
             completed_pages += 1
@@ -1271,3 +1283,4 @@ async def scan_candidate_markets(
             else None
         ),
     )
+

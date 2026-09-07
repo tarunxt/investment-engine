@@ -1046,6 +1046,7 @@ def _build_cli_console_scan_result(
     )
 
 
+
 async def scan_console_profile_markets(
     *,
     now: datetime,
@@ -1071,6 +1072,7 @@ async def scan_console_profile_markets(
     gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
     scan_scope: ConsoleScanScope = "trending",
     progress_callback: Callable[[int, int], None] | None = None,
+    rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -1132,6 +1134,34 @@ async def scan_console_profile_markets(
         else gamma_scan_timeout_seconds
     )
 
+    # Opt-in streaming keeps legacy callers compatible. The engine persists
+    # rejected source data before the next page can grow the raw catalogue.
+    def filter_market(market: ScannedMarket) -> list[str]:
+        return (
+            console_market_filter_reasons(
+                market,
+                now=now,
+                min_market_odds=min_market_odds,
+                min_highest_market_odds=min_highest_market_odds,
+                max_closing_days=max_closing_days,
+                min_volume_usd=min_volume_usd,
+                min_liquidity_usd=min_liquidity_usd,
+                min_volume_24hr_usd=min_volume_24hr_usd,
+                max_spread_cents=max_spread_cents,
+                rejected_theme_pattern=rejected_theme_pattern,
+                exclude_sports=exclude_sports,
+                exclude_weather=exclude_weather,
+                exclude_market_predictions=exclude_market_predictions,
+                exclude_tweet_count_questions=exclude_tweet_count_questions,
+                exclude_released_by_events=exclude_released_by_events,
+                only_binary_yes_no=only_binary_yes_no,
+                exclude_custom_phrases=exclude_custom_phrases,
+                custom_exclude_phrases=custom_exclude_phrases,
+            )
+            if apply_base_filters
+            else []
+        )
+
     try:
         gamma_scan_coro = scan_candidate_markets(
             min_liquidity_usd=0,
@@ -1151,6 +1181,8 @@ async def scan_console_profile_markets(
             ),
             filter_parent_deadlines=False,
             **({"progress_callback": progress_callback} if progress_callback else {}),
+            **({"market_filter": filter_market, "rejected_callback": rejected_callback}
+               if rejected_callback is not None else {}),
         )
         gamma_scan = (
             await gamma_scan_coro
@@ -1202,30 +1234,7 @@ async def scan_console_profile_markets(
     accepted: list[ScannedMarket] = []
     rejected = list(gamma_scan.rejected)
     for market in gamma_scan.accepted:
-        reasons = (
-            console_market_filter_reasons(
-                market,
-                now=now,
-                min_market_odds=min_market_odds,
-                min_highest_market_odds=min_highest_market_odds,
-                max_closing_days=max_closing_days,
-                min_volume_usd=min_volume_usd,
-                min_liquidity_usd=min_liquidity_usd,
-                min_volume_24hr_usd=min_volume_24hr_usd,
-                max_spread_cents=max_spread_cents,
-                rejected_theme_pattern=rejected_theme_pattern,
-                exclude_sports=exclude_sports,
-                exclude_weather=exclude_weather,
-                exclude_market_predictions=exclude_market_predictions,
-                exclude_tweet_count_questions=exclude_tweet_count_questions,
-                exclude_released_by_events=exclude_released_by_events,
-                only_binary_yes_no=only_binary_yes_no,
-                exclude_custom_phrases=exclude_custom_phrases,
-                custom_exclude_phrases=custom_exclude_phrases,
-            )
-            if apply_base_filters
-            else []
-        )
+        reasons = [] if rejected_callback is not None else filter_market(market)
         if reasons:
             rejected.append(
                 ScanRejectedMarket(
@@ -2332,3 +2341,4 @@ async def enrich_console_wallet_positions_authoritatively(
         "lookup_duration_ms": lookup_duration_ms,
         "lookup_errors": lookup_errors,
     }
+

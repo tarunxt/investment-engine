@@ -1807,3 +1807,20 @@ must be included in run backups and retained alongside their referencing runs;
 the temporary XLSX cleanup does not delete them. All Docker production scan,
 export and API workers share the source volume. No historical snapshots are
 rewritten by this change.
+
+
+### Stage 1 streaming rejection and page deadlines
+
+The automatic scan now applies the same configured console filters during Gamma
+pagination. Rejected rows are serialized with the existing candidate adapter and
+written to immutable source-v1 packs before their raw market objects are released.
+The final snapshot retains the same candidate fields, rejection reasons, source
+references and complete-universe flag. Accepted markets retain their raw data for
+wallet reconciliation and Stage 2. Legacy scanner callers keep their prior behavior.
+
+Each page has a 60-second total request budget in addition to HTTPX's inactivity
+timeout, capped by the remaining full-universe deadline. A timed-out scan preserves
+successful pages with complete_universe=false and the existing warning; it must
+not be reported as exhaustive. Progress timestamps now describe current Stage 1
+work, including export preparation, rather than retaining the last page timestamp
+through the handoff. No historical audit snapshots or eligibility rules are changed.
