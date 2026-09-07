@@ -284,7 +284,7 @@ test("Stage 1 all-scanned count downloads the maximum available CLI fields", () 
   assert.match(stageOneExcel, /bullpen-stage-1-\$\{exportScope\}-events/);
   assert.match(stageOneExcel, /URLs\.bullpenAutoLive\.runStageOneExcel\(runId\)/);
   assert.match(urls, /runStageOneExcel:[\s\S]*?stage-one\.xlsx/);
-  assert.match(backendProxy, /BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 120_000/);
+  assert.match(backendProxy, /BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000/);
   assert.match(backendProxy, /isBullpenStageOneExcelDownload/);
 });
 

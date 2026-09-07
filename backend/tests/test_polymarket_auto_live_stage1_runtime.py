@@ -92,7 +92,11 @@ async def test_console_profile_scan_uses_fast_timeout_without_login_wait(
                     "slug": "will-the-fast-stage-1-scan-finish",
                     "endDate": "2026-07-19T00:00:00Z",
                     "outcomes": "[\"Yes\", \"No\"]",
-                    "outcomePrices": "[0.42, 0.58]",
+                    "outcomePrices": "[0.05, 0.95]",
+                    "volume": 7000,
+                    "liquidity": 1000,
+                    "volume24hr": 500,
+                    "spread": 0.02,
                 }
             ]
         }
@@ -864,10 +868,11 @@ async def test_console_scan_does_not_treat_large_cli_payload_as_complete(monkeyp
         slug="will-iran-target-a-arab-country-on-august-30-2026",
         close_time="2026-08-30T20:59:59+00:00",
         theme="World",
-        current_yes_odds=10.0,
-        current_no_odds=90.0,
+        current_yes_odds=5.0,
+        current_no_odds=95.0,
         volume_usd=7_000.0,
         liquidity_usd=1_000.0,
+        volume_24hr_usd=500.0,
         description=None,
         outcome_labels=["Yes", "No"],
         event_slug="will-iran-target-a-arab-country-onptptpt-20260801004719118",
