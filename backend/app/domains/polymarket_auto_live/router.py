@@ -860,8 +860,8 @@ async def auto_live_stage_one_excel_status(
     run_id: str, scope: Literal["all-scanned", "filtered"] = "all-scanned",
     current_user: User = Depends(get_current_user),
 ):
-    from app.domains.polymarket_auto_live.export_jobs import read_job, job_key, public_state
-    state = await run_in_threadpool(read_job, job_key(current_user.id, run_id, scope))
+    from app.domains.polymarket_auto_live.export_jobs import read_or_recover_job, public_state
+    state = await run_in_threadpool(read_or_recover_job, current_user.id, run_id, scope)
     if state is None:
         raise HTTPException(status_code=404, detail="Export expired; prepare it again")
     return public_state(state)

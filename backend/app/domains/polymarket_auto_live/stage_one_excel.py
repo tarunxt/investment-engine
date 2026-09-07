@@ -53,12 +53,14 @@ def decode_scan_export_data(row: dict[str, Any]) -> dict[str, Any]:
     return json.loads(zlib.decompress(compressed))
 
 
-def _export_headers(rows: Iterable[dict[str, Any]]) -> tuple[str, ...]:
+def _export_headers(rows: Iterable[dict[str, Any]], progress_callback=None, total=0) -> tuple[str, ...]:
     extra = set()
-    for row in rows:
+    for index, row in enumerate(rows, 1):
         data = decode_scan_export_data(row)
         for prefix in ("event", "market"):
             extra.update(f"{prefix}.{key}" for key in data[prefix])
+        if progress_callback and (index % 1000 == 0 or index == total):
+            progress_callback("Reading source columns", index, total)
     return (*EXCEL_HEADERS, *sorted(extra.difference(EXCEL_HEADERS)), "export.source", "export.fetchedAt", "export.status")
 
 
@@ -194,6 +196,9 @@ def _column_name(index: int) -> str:
     return name
 
 
+_INVALID_XML_CONTROLS = dict.fromkeys(code for code in range(32) if code not in (9, 10, 13))
+
+
 def _cell_xml(reference: str, value: Any, *, style: int | None = None) -> str:
     if value is None or value == "" or value == "N/A":
         return f'<c r="{reference}" t="s"><v>0</v></c>'
@@ -201,11 +206,7 @@ def _cell_xml(reference: str, value: Any, *, style: int | None = None) -> str:
     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
         return f'<c r="{reference}"{style_attr}><v>{value}</v></c>'
     text = "" if value is None else json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
-    text = "".join(
-        character
-        for character in text
-        if character in "\t\n\r" or ord(character) >= 32
-    )[:EXCEL_MAX_CELL_CHARACTERS]
+    text = text.translate(_INVALID_XML_CONTROLS)[:EXCEL_MAX_CELL_CHARACTERS]
     return f'<c r="{reference}" t="inlineStr"{style_attr}><is><t xml:space="preserve">{escape(text)}</t></is></c>'
 
 
@@ -214,6 +215,7 @@ def _write_sheet(
     rows: Iterable[tuple[dict[str, Any], str]],
     row_count: int,
     headers: tuple[str, ...] = EXCEL_HEADERS,
+    progress_callback=None,
 ) -> None:
     stream.write(
         ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -232,33 +234,40 @@ def _write_sheet(
         for column, header in enumerate(headers, start=1)
     )
     stream.write(f'<row r="1">{header_cells}</row>'.encode("utf-8"))
+    column_names = tuple(_column_name(column) for column in range(1, len(headers) + 1))
     for excel_row, (candidate, scan_status) in enumerate(rows, start=2):
         cells = "".join(
-            _cell_xml(f"{_column_name(column)}{excel_row}", value)
-            for column, value in enumerate(
-                _row_values(candidate, excel_row - 1, scan_status, headers),
-                start=1,
-            )
+            _cell_xml(f"{column}{excel_row}", value)
+            for column, value in zip(column_names,
+                _row_values(candidate, excel_row - 1, scan_status, headers))
         )
         stream.write(f'<row r="{excel_row}">{cells}</row>'.encode("utf-8"))
+        if progress_callback and ((excel_row - 1) % 1000 == 0 or excel_row - 1 == row_count):
+            progress_callback("Writing Excel", excel_row - 1, row_count)
     stream.write(f'</sheetData><autoFilter ref="A1:{_column_name(len(headers))}{row_count + 1}"/></worksheet>'.encode("utf-8"))
 
 
-def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", enrich_missing: bool = False, *, enrichment_budget_seconds: float = 420) -> tuple[Path, str, int]:
+def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", enrich_missing: bool = False, *, enrichment_budget_seconds: float = 420, progress_callback=None) -> tuple[Path, str, int]:
     accepted, rejected, row_count = _candidate_rows(run)
     # Copy export rows before supplementing absent fields; frozen run is untouched.
-    accepted = [dict(row) for row in accepted]
-    rejected = [dict(row) for row in rejected]
     if enrich_missing:
+        accepted = [dict(row) for row in accepted]
+        if scope != "filtered":
+            rejected = [dict(row) for row in rejected]
+        if progress_callback:
+            progress_callback("Checking saved source fields", 0, len(accepted) if scope == "filtered" else row_count)
         from app.domains.polymarket_auto_live.stage_one_export_enrichment import enrich_export_rows
         try:
-            enrich_export_rows(accepted if scope == "filtered" else accepted + rejected, budget_seconds=enrichment_budget_seconds)
+            enrich_export_rows(accepted if scope == "filtered" else accepted + rejected,
+                budget_seconds=enrichment_budget_seconds,
+                **({"progress_callback": progress_callback} if progress_callback else {}))
         except Exception as exc:
             # Source availability must never prevent downloading saved scan evidence.
             logging.getLogger(__name__).warning("Stage 1 export enrichment unavailable: %s", type(exc).__name__)
             for row in accepted if scope == "filtered" else accepted + rejected:
                 row.setdefault("export_metadata", {"source": "Saved scan", "fetchedAt": "N/A", "status": "Current source lookup unavailable; saved values retained."})
-    headers = _export_headers([*accepted, *rejected])
+    from itertools import chain
+    headers = _export_headers(chain(accepted, rejected), progress_callback, len(accepted) + len(rejected))
     if scope == "filtered":
         rejected = []
         row_count = len(accepted)
@@ -281,7 +290,7 @@ def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", e
             workbook.writestr("xl/styles.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/><color rgb="FF14532D"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2F3EA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs></styleSheet>')
             workbook.writestr("xl/sharedStrings.xml", '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="1"><si><t>N/A</t></si></sst>')
             with workbook.open("xl/worksheets/sheet1.xml", "w", force_zip64=True) as sheet:
-                _write_sheet(sheet, _iter_candidates(accepted, rejected), row_count, headers)
+                _write_sheet(sheet, _iter_candidates(accepted, rejected), row_count, headers, progress_callback)
     except Exception:
         path.unlink(missing_ok=True)
         raise
