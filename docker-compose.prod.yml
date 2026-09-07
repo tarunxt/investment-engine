@@ -133,6 +133,8 @@ services:
   # Isolated Auto-Live Stage 1/2 planning worker. Stage 3 execution and
   # reconciliation remain on the general ai worker above.
   celery_auto_live_worker:
+    volumes:
+      - stage_one_exports:/backend/.stage-one-exports
     build: ./backend
     restart: always
 

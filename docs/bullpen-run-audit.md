@@ -1788,3 +1788,22 @@ uses prepared=true to serve only a completed artifact.
 The preparation/status proxy has a dedicated 30-second budget. A transient
 502/503/504 triggers bounded status checks before any repeat submission, so a
 successful publish followed by a proxy timeout does not become a false failure.
+
+### Full Universe source memory protection
+
+Full Universe handoff now writes exhaustive Gamma source payloads to immutable
+source packs before wallet reconciliation. Persisted rows retain a versioned
+`source-v1` reference with a per-row SHA-256 digest, offset and byte length instead
+of copying the base64 payload into every run serialization and lifecycle update.
+Rejected raw market objects and the completed catalogue container are released
+before the wallet handoff. Normalized candidate fields, filter reasons, run
+membership, eligibility and wallet safety gates are unchanged.
+
+Excel resolves both legacy embedded source data and versioned references, verifies
+the source bytes, and fails explicitly on corruption instead of silently dropping
+columns. Source packs live under BULLPEN_EXPORT_DIR/scan-sources, or the backend's
+.stage-one-exports/scan-sources directory by default. These immutable audit sources
+must be included in run backups and retained alongside their referencing runs;
+the temporary XLSX cleanup does not delete them. All Docker production scan,
+export and API workers share the source volume. No historical snapshots are
+rewritten by this change.
