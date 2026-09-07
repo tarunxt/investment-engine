@@ -124,7 +124,7 @@ export type BufferedTransportResponse = {
   status: number;
   statusText: string;
   headers: Headers;
-  body: ArrayBuffer | null;
+  body: ArrayBuffer | ReadableStream<Uint8Array> | null;
 };
 
 type ExecuteBoundedApiRequestOptions = {

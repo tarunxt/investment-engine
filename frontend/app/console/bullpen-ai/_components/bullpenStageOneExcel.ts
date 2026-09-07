@@ -131,7 +131,7 @@ async function downloadStageOneEventsExcel({
   }));
   const dataRows = rows.map((row) =>
     EXCEL_HEADERS.map((header) => ({
-      value: (row as Record<string, string | number | null>)[header] ?? "",
+      value: (() => { const value = (row as Record<string, string | number | null>)[header]; return value === null || value === undefined || value === "" ? "N/A" : value; })(),
       wrap:
         header === "Event" ||
         header === "Filter Reasons" ||

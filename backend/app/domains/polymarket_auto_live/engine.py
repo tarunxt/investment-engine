@@ -6596,6 +6596,12 @@ class BullpenAutoLiveEngine:
             }
             if not (row_identity_keys & active_identity_keys):
                 retained_rejected_candidates.append(row)
+            else:
+                # Preserve source fields when promoting a filtered wallet market.
+                stage1_accepted_candidates.append({
+                    **row, "force_include": True, "force_included_position": True,
+                    "scan_status": "passed", "reasons": [],
+                })
         stage1_rejected_candidates = retained_rejected_candidates
 
         accepted_identity_keys = {

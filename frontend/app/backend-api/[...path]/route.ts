@@ -38,7 +38,7 @@ const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
 const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
 const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
 const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
-const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 120_000;
+const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000;
 const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
 const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
 const DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS = 8_000;
@@ -395,6 +395,14 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
           cache: "no-store",
           signal,
         });
+        if (isBullpenStageOneExcelDownload(request.method, path) && response.ok) {
+          return {
+            body: response.body,
+            status: response.status,
+            statusText: response.statusText,
+            headers: buildResponseHeaders(response),
+          };
+        }
         return bufferBackendResponse(
           response,
           request.method,
