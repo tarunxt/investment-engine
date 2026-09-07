@@ -1824,3 +1824,21 @@ successful pages with complete_universe=false and the existing warning; it must
 not be reported as exhaustive. Progress timestamps now describe current Stage 1
 work, including export preparation, rather than retaining the last page timestamp
 through the handoff. No historical audit snapshots or eligibility rules are changed.
+
+### Full Universe completion budget and visible partial results
+
+The Full Universe scan budget is 90 minutes (formerly five minutes), inside the
+planner's two-hour soft limit. Streaming filter/source-pack time is included.
+A scan becomes complete only after traversing the final cursor. Transient keyset
+transport failures, HTTP 429 and 5xx responses retry the same cursor up to three
+attempts inside the existing 60-second total page budget; permanent errors and
+invalid payloads do not retry. Exhausted failures retain explicit incomplete
+status and prior successful pages. No new-purchase completeness gate is relaxed.
+
+The Stage 1 monitor renders finished Full Universe results without completion
+proof as Incomplete, in amber, with a partial-result label instead of a full
+progress bar. The count warning includes the saved scan error where available;
+legacy snapshots without proof remain unverified rather than inferred complete.
+The Gamma normalizer now populates volume_24hr_usd from volume24hr so the saved
+24-hour-volume filter evaluates actual data instead of an always-missing field.
+Historical snapshots and filter thresholds are not rewritten.

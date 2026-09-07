@@ -138,3 +138,75 @@ async def test_console_applies_saved_filters_once_per_market(monkeypatch, stream
     assert result.complete_universe
     assert len(result.accepted) == len(result.rejected) == 1
     assert len(saved) == int(streaming)
+
+
+@pytest.mark.asyncio
+async def test_full_universe_continues_after_old_five_minute_cutoff(monkeypatch):
+    from types import SimpleNamespace
+    elapsed = 0
+    cursors = []
+    async def fetch(*args, **kwargs):
+        nonlocal elapsed
+        cursors.append(kwargs['after_cursor'])
+        elapsed += 301
+        return [row(str(elapsed))], 'next' if len(cursors) == 1 else None
+    monkeypatch.setattr(scanner, 'time', SimpleNamespace(monotonic=lambda: elapsed))
+    monkeypatch.setattr(scanner, '_fetch_gamma_keyset_page', fetch)
+    result = await scanner.scan_candidate_markets(
+        min_liquidity_usd=0, apply_base_filters=False, use_keyset_pagination=True,
+        pagination_deadline_seconds=5400, preserve_partial_on_error=True)
+    assert cursors == [None, 'next']
+    assert result.complete_universe
+    assert len(result.accepted) == 2
+
+
+@pytest.mark.asyncio
+async def test_transient_keyset_failure_retries_same_cursor_without_duplicate_rows(monkeypatch):
+    import httpx
+    cursors = []
+    async def fetch(*args, **kwargs):
+        cursors.append(kwargs['after_cursor'])
+        if len(cursors) == 1:
+            return [row('first')], 'next'
+        if len(cursors) == 2:
+            request = httpx.Request('GET', scanner.POLYMARKET_GAMMA_EVENTS_KEYSET_URL)
+            raise httpx.HTTPStatusError('busy', request=request, response=httpx.Response(503, request=request))
+        return [row('first'), row('second')], None
+    async def no_sleep(_):
+        pass
+    monkeypatch.setattr(scanner, '_fetch_gamma_keyset_page', fetch)
+    monkeypatch.setattr(scanner.asyncio, 'sleep', no_sleep)
+    result = await scanner.scan_candidate_markets(
+        min_liquidity_usd=0, apply_base_filters=False, use_keyset_pagination=True)
+    assert cursors == [None, 'next', 'next']
+    assert result.complete_universe
+    assert [m.market_id for m in result.accepted] == ['first', 'second']
+
+
+@pytest.mark.asyncio
+async def test_exhausted_transient_retries_preserve_incomplete_results(monkeypatch):
+    import httpx
+    calls = 0
+    async def fetch(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return [row('first')], 'next'
+        raise httpx.ReadTimeout('upstream timeout')
+    async def no_sleep(_):
+        pass
+    monkeypatch.setattr(scanner, '_fetch_gamma_keyset_page', fetch)
+    monkeypatch.setattr(scanner.asyncio, 'sleep', no_sleep)
+    result = await scanner.scan_candidate_markets(
+        min_liquidity_usd=0, apply_base_filters=False, use_keyset_pagination=True,
+        preserve_partial_on_error=True)
+    assert calls == 4
+    assert not result.complete_universe
+    assert len(result.accepted) == 1
+    assert result.details == 'upstream timeout'
+
+
+@pytest.mark.parametrize('volume', [0, 123.45])
+def test_gamma_daily_volume_reaches_saved_filter(volume):
+    market = scanner._normalize_market({**row('volume'), 'volume24hr': volume})
+    assert market.volume_24hr_usd == volume

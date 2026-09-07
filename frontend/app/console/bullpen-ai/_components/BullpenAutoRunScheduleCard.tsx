@@ -2285,6 +2285,14 @@ function StageOneRunStats({
           </span>
         </div>
       )}
+      {scanScope === "full_universe" && scanCompleteness !== "complete" && (
+        <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+          Full Universe is incomplete. This count covers only collected markets.
+          {readStageOutputString(stage.outputs.scan_details) || readStageOutputString(stage.outputs.scan_warning)
+            ? ` ${readStageOutputString(stage.outputs.scan_details) || readStageOutputString(stage.outputs.scan_warning)}`
+            : " Completion of the final API page has not been verified."}
+        </p>
+      )}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center gap-1.5 pt-2">
           <button
@@ -14812,8 +14820,12 @@ export function BullpenAutoRunScheduleCard({
                     status: "scanning",
                     retryCount: 0,
                   };
+              const isIncompleteUniverse = stage.key === "scan" &&
+                stage.outputs.scan_scope === "full_universe" &&
+                stage.outputs.scan_completeness !== "complete" &&
+                !isStageOneActive && stage.state === "finished";
               const toneClasses = getWorkflowToneClasses(
-                isStageOneActive
+                isStageOneActive || isIncompleteUniverse
                   ? "yellow"
                   : selectedRunSummaryTile === "next" && !runIsActive
                   ? "slate"
@@ -14830,7 +14842,9 @@ export function BullpenAutoRunScheduleCard({
                 (stage.key === "scan" &&
                   stageOneResultSource === "independent" &&
                   independentStageOneView !== null);
-              const stageStatusLabel = isStageOneActive
+              const stageStatusLabel = isIncompleteUniverse
+                ? "Incomplete"
+                : isStageOneActive
                 ? "Working"
                 : immediateSuccess
                 ? "Finished"
@@ -14842,13 +14856,17 @@ export function BullpenAutoRunScheduleCard({
                       ? "Finished"
                       : "In Queue";
               const stageProgressPercent =
-                isStageOneActive
+                isIncompleteUniverse
+                  ? 0
+                  : isStageOneActive
                   ? 100
                   : immediateSuccess || investPreviewFinished
                   ? 100
                   : stage.progressPercent;
               const stageProgressLabel =
-                isStageOneActive
+                isIncompleteUniverse
+                  ? "Partial results · full catalogue not verified"
+                  : isStageOneActive
                   ? `${displayedScanProgress?.scannedMarkets.toLocaleString("en-IN") ?? "0"} markets scanned · Page ${displayedScanProgress?.currentPage ?? 1}`
                   : investPreviewFinished && stage.key === "invest"
                   ? "Finished"
@@ -15885,3 +15903,4 @@ export function BullpenAutoRunScheduleCard({
     </Card>
   );
 }
+
