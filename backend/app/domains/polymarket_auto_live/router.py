@@ -54,9 +54,9 @@ from app.domains.polymarket_auto_live.schemas import (
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
 from app.domains.polymarket_auto_live.stage_one_excel import (
     StageOneExcelExportError,
-    build_stage_one_excel,
     remove_export,
 )
+from app.domains.polymarket_auto_live.export_source import build_owned_stage_one_excel
 from app.infrastructure.database.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/polymarket/auto-live", tags=["polymarket"])
@@ -885,14 +885,12 @@ async def download_auto_live_stage_one_excel(
         return FileResponse(state["path"], filename=state["filename"],
                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             headers={"Cache-Control": "private, no-store", "X-Export-Row-Count": str(state["row_count"])})
-    bot = await _get_bot(current_user)
     try:
-        run = await bot.get_run(run_id)
         path, filename, row_count = await run_in_threadpool(
-            build_stage_one_excel,
-            run,
+            build_owned_stage_one_excel,
+            current_user.id,
+            run_id,
             scope,
-            True,
         )
     except StageOneExcelExportError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -528,11 +528,13 @@ def test_redelivery_executes_stages_once_and_same_id_duplicate_exits_while_owned
         7,
         "run-duplicate",
     )
-    tasks_module.execute_polymarket_auto_live_run.run.__func__(  # type: ignore[attr-defined]
-        _FakeTask(),
-        7,
-        "run-duplicate",
-    )
+    with pytest.raises(tasks_module.Ignore):
+        tasks_module.execute_polymarket_auto_live_run.run.__func__(  # type: ignore[attr-defined]
+            _FakeTask(),
+            7,
+            "run-duplicate",
+        )
+
 
     assert len(execution_calls) == 1
     assert execution_calls[0][1:3] == (7, "run-duplicate")

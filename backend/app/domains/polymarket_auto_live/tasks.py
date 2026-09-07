@@ -5,7 +5,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from celery.exceptions import SoftTimeLimitExceeded
+from celery.exceptions import Ignore, SoftTimeLimitExceeded
 from sqlalchemy import and_, select
 
 from app.core.logging import get_logger
@@ -819,7 +819,7 @@ def execute_polymarket_auto_live_run(
                     task_id,
                     run_id,
                 )
-                return
+                raise Ignore()
             logger.info(
                 "Auto-Live redelivery %s for run %s is waiting for stale lease "
                 "owner expiry.",
@@ -866,7 +866,9 @@ def execute_polymarket_auto_live_run(
             run_id,
             owner.task_id if owner is not None else "unknown",
         )
-        return
+        # A same-ID duplicate must not overwrite the real owner's Celery
+        # result with SUCCESS while its workflow is still executing.
+        raise Ignore()
 
     worker_hostname = getattr(self.request, "hostname", None)
     heartbeat: AutoLiveRunHeartbeat | None = None
@@ -906,7 +908,7 @@ def execute_polymarket_auto_live_run(
                 task_id,
                 run_id,
             )
-            return
+            raise Ignore()
         with SyncSessionLocal() as lifecycle_session:
             started_run = mark_auto_live_run_task_started_sync(
                 lifecycle_session,

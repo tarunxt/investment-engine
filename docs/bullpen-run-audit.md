@@ -1291,3 +1291,12 @@ Export-time enrichment also carries `candidate_text_fields_v1` through source
 re-encoding, so recovering a missing API field cannot replace frozen normalized
 text with the current API description. A mocked Gamma recovery regression verifies
 both the recovered field and the exact original normalized rules.
+
+### Duplicate planner delivery outcomes
+
+Duplicate deliveries rejected by the Redis lease or PostgreSQL execution fence
+raise Celery Ignore, preserving the executing owner's result and lifecycle.
+Recovery does not synthesize a failed audit snapshot from a retained SUCCESS
+result while inspection still observes that task active, reserved, or scheduled.
+The absolute runtime breaker remains authoritative. Existing frozen snapshots
+are unchanged; this uses the existing lifecycle and stage-status schema.

@@ -48,6 +48,8 @@ jobs:
           pytest -q
           backend/tests/test_dashboard_summary.py
           backend/tests/test_polymarket_auto_live_stage1_runtime.py
+          backend/tests/test_polymarket_auto_live_lifecycle_safety.py
+          backend/tests/test_polymarket_auto_live_run_recovery.py
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
