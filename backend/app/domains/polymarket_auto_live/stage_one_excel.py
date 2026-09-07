@@ -229,7 +229,7 @@ def _write_sheet(
     stream.write(f'</sheetData><autoFilter ref="A1:{_column_name(len(headers))}{row_count + 1}"/></worksheet>'.encode("utf-8"))
 
 
-def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", enrich_missing: bool = False) -> tuple[Path, str, int]:
+def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", enrich_missing: bool = False, *, enrichment_budget_seconds: float = 420) -> tuple[Path, str, int]:
     accepted, rejected, row_count = _candidate_rows(run)
     # Copy export rows before supplementing absent fields; frozen run is untouched.
     accepted = [dict(row) for row in accepted]
@@ -237,7 +237,7 @@ def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", e
     if enrich_missing:
         from app.domains.polymarket_auto_live.stage_one_export_enrichment import enrich_export_rows
         try:
-            enrich_export_rows(accepted if scope == "filtered" else accepted + rejected)
+            enrich_export_rows(accepted if scope == "filtered" else accepted + rejected, budget_seconds=enrichment_budget_seconds)
         except Exception as exc:
             # Source availability must never prevent downloading saved scan evidence.
             logging.getLogger(__name__).warning("Stage 1 export enrichment unavailable: %s", type(exc).__name__)

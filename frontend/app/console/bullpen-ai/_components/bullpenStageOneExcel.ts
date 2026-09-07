@@ -202,13 +202,51 @@ export async function downloadStageOneAllScannedEventsExcel({
   });
 }
 
-export function downloadCompleteStageOneRunExcel(runId: string, scope: "filtered" | "all-scanned" = "all-scanned") {
-  const link = document.createElement("a");
-  link.href = `${URLs.bullpenAutoLive.runStageOneExcel(runId)}?scope=${scope}`;
-  link.download = `bullpen-stage-1-${scope}-events.xlsx`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+const pendingExports = new Set<string>();
+
+export async function downloadCompleteStageOneRunExcel(runId: string, scope: "filtered" | "all-scanned" = "all-scanned") {
+  const fileUrl = URLs.bullpenAutoLive.runStageOneExcel(runId);
+  const jobUrl = fileUrl.replace(/stage-one\.xlsx$/, "stage-one-export") + `?scope=${scope}`;
+  if (pendingExports.has(jobUrl)) return;
+  pendingExports.add(jobUrl);
+  const notice = document.createElement("div");
+  notice.setAttribute("role", "status");
+  notice.style.cssText = "position:fixed;bottom:24px;right:24px;z-index:9999;max-width:420px;padding:16px;border:1px solid #f59e0b;border-radius:12px;background:#fffbeb;color:#78350f;box-shadow:0 4px 12px #0002";
+  notice.textContent = "Preparing Excel. You can continue using this page.";
+  document.body.appendChild(notice);
+  try {
+    const started = Date.now();
+    let method = "POST";
+    while (Date.now() - started < 35 * 60 * 1000) {
+      const response = await fetch(jobUrl, { method, credentials: "same-origin", cache: "no-store" });
+      if (!response.ok) throw new Error(`Excel preparation request failed (${response.status}). Please try again.`);
+      const state = await response.json();
+      if (state.status === "failed") throw new Error(state.message);
+      if (state.status === "ready") {
+        const link = document.createElement("a");
+        link.href = `${fileUrl}?scope=${scope}&prepared=true`;
+        link.download = state.filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        notice.textContent = "Excel is ready. Download started.";
+        window.setTimeout(() => notice.remove(), 10000);
+        return;
+      }
+      notice.textContent = `${state.message || "Preparing Excel"}. Keep this tab open; download starts when ready.`;
+      method = "GET";
+      await new Promise(resolve => window.setTimeout(resolve, 3000));
+    }
+    throw new Error("Excel is still preparing. Click the download icon again to check its status.");
+  } catch (error) {
+    notice.textContent = error instanceof Error ? error.message : "Excel preparation failed. Please try again.";
+    const dismiss = document.createElement("button");
+    dismiss.textContent = " Dismiss";
+    dismiss.onclick = () => notice.remove();
+    notice.appendChild(dismiss);
+  } finally {
+    pendingExports.delete(jobUrl);
+  }
 }
 
 export function downloadIndependentStageOneExcel(

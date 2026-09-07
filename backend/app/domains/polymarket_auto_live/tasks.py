@@ -2146,3 +2146,6 @@ def reconcile_all_pending_auto_live_orders(limit: int = 100) -> None:
             str(intent_id),
             source="periodic-pending-reconciliation",
         )
+
+# Register read-only Excel jobs with the existing worker task discovery.
+from app.domains.polymarket_auto_live.export_tasks import prepare_stage_one_excel  # noqa: E402,F401

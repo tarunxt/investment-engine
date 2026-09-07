@@ -1768,3 +1768,20 @@ provenance remains explicit; frozen scan odds, eligibility and audit records are
 unchanged. HTTP failures include status codes, and missing/closed historical
 markets or bounded incomplete recovery are distinguished from successful recovery.
 Full Universe scanning also explicitly sends `archived=false` to Gamma keyset.
+
+### Prepared Stage 1 Excel downloads
+
+The console now submits a read-only Celery export job and polls compact status
+responses before requesting the completed XLSX. Source recovery and workbook
+creation no longer hold the browser download request open. Jobs are keyed by
+user, run and scope; requests verify run ownership and status/download keys
+remain user-scoped. Repeated clicks reuse queued/working/completed artifacts.
+Failures are logged and displayed, and explicit retries can queue failed jobs.
+Worker redelivery is protected by a Redis lock. Frozen audit snapshots and
+trading state are unchanged. Export recovery is bounded to 25 minutes with a
+30-minute worker soft limit. Completed files are reusable for one hour and
+old generated artifacts are pruned after one day when a new export completes.
+Docker production workers and API share the export volume; systemd uses the
+same backend export directory. BULLPEN_EXPORT_DIR may override that location.
+The legacy direct endpoint is retained for compatibility, while the console
+uses prepared=true to serve only a completed artifact.

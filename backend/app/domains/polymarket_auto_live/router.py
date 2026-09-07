@@ -838,14 +838,53 @@ async def get_auto_live_run(
         raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
 
 
+@router.post("/runs/{run_id}/stage-one-export")
+async def prepare_auto_live_stage_one_excel(
+    run_id: str, scope: Literal["all-scanned", "filtered"] = "all-scanned",
+    current_user: User = Depends(get_current_user),
+):
+    from app.domains.polymarket_auto_live.models import PolymarketAutoLiveRunRecord
+    from app.domains.polymarket_auto_live.export_jobs import ensure_job, public_state
+    async with AsyncSessionLocal() as session:
+        owned = await session.scalar(select(PolymarketAutoLiveRunRecord.id).where(
+            PolymarketAutoLiveRunRecord.id == run_id,
+            PolymarketAutoLiveRunRecord.user_id == current_user.id,
+        ))
+    if owned is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return public_state(await run_in_threadpool(ensure_job, current_user.id, run_id, scope))
+
+
+@router.get("/runs/{run_id}/stage-one-export")
+async def auto_live_stage_one_excel_status(
+    run_id: str, scope: Literal["all-scanned", "filtered"] = "all-scanned",
+    current_user: User = Depends(get_current_user),
+):
+    from app.domains.polymarket_auto_live.export_jobs import read_job, job_key, public_state
+    state = await run_in_threadpool(read_job, job_key(current_user.id, run_id, scope))
+    if state is None:
+        raise HTTPException(status_code=404, detail="Export expired; prepare it again")
+    return public_state(state)
+
+
 @router.get("/runs/{run_id}/stage-one.xlsx", response_class=FileResponse)
 async def download_auto_live_stage_one_excel(
     run_id: str,
     scope: Literal["all-scanned", "filtered"] = "all-scanned",
     current_user: User = Depends(get_current_user),
+    prepared: bool = False,
 ):
     """Download every persisted Stage 1 row without using the bounded console projection."""
 
+    if prepared:
+        from app.domains.polymarket_auto_live.export_jobs import read_job, job_key
+        from pathlib import Path
+        state = await run_in_threadpool(read_job, job_key(current_user.id, run_id, scope))
+        if not state or state["status"] != "ready" or not Path(state["path"]).is_file():
+            raise HTTPException(status_code=409, detail="Excel is not ready; prepare it again")
+        return FileResponse(state["path"], filename=state["filename"],
+                            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            headers={"Cache-Control": "private, no-store", "X-Export-Row-Count": str(state["row_count"])})
     bot = await _get_bot(current_user)
     try:
         run = await bot.get_run(run_id)

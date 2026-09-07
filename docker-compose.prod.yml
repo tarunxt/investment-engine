@@ -45,6 +45,8 @@ services:
       - app_network
 
   backend:
+    volumes:
+      - stage_one_exports:/backend/.stage-one-exports
     build: ./backend
     restart: always
 
@@ -89,6 +91,8 @@ services:
       - "8000"
 
   celery_worker:
+    volumes:
+      - stage_one_exports:/backend/.stage-one-exports
     build: ./backend
     restart: always
 
@@ -287,6 +291,7 @@ services:
       - "6379"
 
 volumes:
+  stage_one_exports:
   postgres_data:
     driver: local
   postgres_backups:
