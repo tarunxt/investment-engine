@@ -2207,6 +2207,12 @@ function StageOneRunStats({
       : !run?.id && allScannedEventRows.length === 0);
   const isLegacyExportRecovery =
     isIndependentStageOne && !independentExportId;
+  const filteredDownloadUnavailable =
+    hideNumbers ||
+    stats.passedFilters === 0 ||
+    (isIndependentStageOne
+      ? !independentExportId && !onRecoverLegacyExport
+      : !run?.id && filteredEventRows.length === 0);
   const allScannedDownloadLabel = isLegacyExportRecovery
     ? `Rescan and download Excel with all currently active events; legacy scan contained ${stats.totalScanned} events`
     : `Download Excel with all ${stats.totalScanned} scanned events`;
@@ -2354,7 +2360,7 @@ function StageOneRunStats({
             <button
               type="button"
               onClick={downloadFilteredEvents}
-              disabled={hideNumbers || filteredEventRows.length === 0}
+              disabled={filteredDownloadUnavailable}
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
               aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
               title="Download Excel"
@@ -2386,7 +2392,7 @@ function StageOneRunStats({
             <button
               type="button"
               onClick={downloadFilteredEvents}
-              disabled={hideNumbers || filteredEventRows.length === 0}
+              disabled={filteredDownloadUnavailable}
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
               aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
               title="Download Excel"
@@ -4593,7 +4599,12 @@ function StageOneOutputDialog({
             <button
               type="button"
               onClick={downloadFilteredEvents}
-              disabled={filteredEventExportRows.length === 0}
+              disabled={
+                !state.scanExportId &&
+                !(state.isIndependentStageOne && onRecoverLegacyExport) &&
+                !(!state.isIndependentStageOne && state.runId) &&
+                filteredEventExportRows.length === 0
+              }
               className="inline-flex h-10 items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <FileSpreadsheet className="h-4 w-4" />

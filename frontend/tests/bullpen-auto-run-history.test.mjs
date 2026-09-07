@@ -233,6 +233,20 @@ test("Stage 1 fresh opportunities and active positions reuse the recurring-event
   assert.match(trendsTable, /"amount", "volume", "liquidity"/);
 });
 
+test("Stage 1 filtered exports remain available without projected browser rows", () => {
+  const expression = scheduleCard.match(/const filteredDownloadUnavailable =([\s\S]*?);/)[1];
+  const unavailable = new Function("hideNumbers", "stats", "isIndependentStageOne", "independentExportId", "onRecoverLegacyExport", "run", "filteredEventRows", `return (${expression});`);
+  assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, { id: 123 }, []), false);
+  assert.equal(unavailable(false, { passedFilters: 80 }, true, "saved-scan", null, null, []), false);
+  assert.equal(unavailable(false, { passedFilters: 80 }, true, null, () => {}, null, []), false);
+  assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, null, []), true);
+  assert.equal(unavailable(false, { passedFilters: 0 }, false, null, null, { id: 123 }, []), true);
+  assert.equal(unavailable(true, { passedFilters: 80 }, false, null, null, { id: 123 }, []), true);
+  assert.equal(unavailable(false, { passedFilters: 80 }, false, null, null, null, [{}]), false);
+  assert.equal((scheduleCard.match(/disabled=\{filteredDownloadUnavailable\}/g) || []).length, 2);
+  assert.doesNotMatch(scheduleCard, /disabled=\{filteredEventExportRows.length === 0\}/);
+});
+
 test("Stage 1 filtered events can be downloaded as a complete Excel workbook", () => {
   assert.match(scheduleCard, /Download Excel/);
   assert.match(scheduleCard, /FileSpreadsheet/);
