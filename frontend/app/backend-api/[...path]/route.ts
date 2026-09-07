@@ -237,6 +237,7 @@ function isBullpenStageOneExcelDownload(method: string, path: string) {
 }
 
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {
     return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
   }
@@ -268,6 +269,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {
     return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
   }

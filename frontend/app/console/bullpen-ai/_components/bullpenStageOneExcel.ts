@@ -217,9 +217,18 @@ export async function downloadCompleteStageOneRunExcel(runId: string, scope: "fi
   try {
     const started = Date.now();
     let method = "POST";
+    let transientFailures = 0;
     while (Date.now() - started < 35 * 60 * 1000) {
       const response = await fetch(jobUrl, { method, credentials: "same-origin", cache: "no-store" });
+      if ([502, 503, 504].includes(response.status) || (response.status === 404 && method === "GET")) {
+        if (++transientFailures > 10) throw new Error("Export service is temporarily unavailable. Click again to check the existing job.");
+        method = response.status === 404 ? "POST" : "GET";
+        notice.textContent = "Connecting to the export worker. Checking existing preparation status…";
+        await new Promise(resolve => window.setTimeout(resolve, 3000));
+        continue;
+      }
       if (!response.ok) throw new Error(`Excel preparation request failed (${response.status}). Please try again.`);
+      transientFailures = 0;
       const state = await response.json();
       if (state.status === "failed") throw new Error(state.message);
       if (state.status === "ready") {
