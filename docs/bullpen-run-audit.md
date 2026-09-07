@@ -1740,3 +1740,20 @@ Compact console projections omit that payload. Auto Run filtered downloads read
 the full persisted run through the existing Excel endpoint with `scope=filtered`,
 which retains the default all-scanned behaviour for existing callers. Header parity
 and source-value tests cover both selections and the frontend schema copy.
+
+## Large Stage 1 downloads and missing-field enrichment
+
+Successful Auto Run XLSX responses stream through the BFF without arrayBuffer
+materialization. The dedicated production proxy paths allow 600 seconds for
+workbook preparation and delivery; ordinary JSON request deadlines stay bounded.
+ZIP compression uses level 1 to reduce preparation time. Wallet rows promoted from
+rejected to accepted preserve their complete source snapshot.
+
+For older runs that did not retain source fields, the export may supplement missing
+fields using bounded, exact-ID Gamma lookups. This operates on export copies only:
+no frozen audit, historical odds, scan selection, or trading decision is rewritten.
+`export.source`, `export.fetchedAt`, and `export.status` explicitly distinguish
+current source enrichment from saved scan-time data and identify lookup failures.
+Absent/non-applicable fields and uncomputed LLM/allocation values display N/A.
+The workbook writer enables ZIP64 for worksheets above the standard ZIP size
+limit. Repeated N/A cells share one string entry to keep exhaustive exports small.

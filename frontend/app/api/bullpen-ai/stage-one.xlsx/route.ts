@@ -52,7 +52,7 @@ function formatIst(value: string | null) {
 }
 
 function safeValue(value: unknown): string | number | boolean {
-  if (value === null || value === undefined) return "";
+  if (value === null || value === undefined || value === "") return "N/A";
   if (typeof value === "number") return Number.isFinite(value) ? value : "";
   if (typeof value === "boolean") return value;
   const text = typeof value === "string" ? value : JSON.stringify(value);

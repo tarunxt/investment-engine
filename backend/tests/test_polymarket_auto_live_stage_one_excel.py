@@ -59,7 +59,7 @@ def test_stage_one_excel_exports_more_than_the_old_1000_row_projection():
             assert workbook.testzip() is None
             sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
         assert sheet.count('<row r="') == 1_502
-        assert f'<autoFilter ref="A1:{_column_name(len(EXCEL_HEADERS))}1502"/>' in sheet
+        assert f'<autoFilter ref="A1:{_column_name(len(EXCEL_HEADERS) + 3)}1502"/>' in sheet
         assert "Accepted market 0" in sheet
         assert "Rejected market 1500" in sheet
         assert ">passed<" in sheet
@@ -107,3 +107,29 @@ def test_exhaustive_schema_and_raw_values_for_both_exports(scope, expected):
         assert json.loads(frontend_schema.read_text()) == list(EXCEL_HEADERS)
     finally:
         remove_export(path)
+
+
+def test_export_enrichment_preserves_frozen_odds_and_fills_source_fields(monkeypatch):
+    from app.domains.polymarket_auto_live.stage_one_export_enrichment import enrich_export_rows
+    from app.domains.polymarket_auto_live.stage_one_excel import decode_scan_export_data, _row_values
+    class Response:
+        def raise_for_status(self): pass
+        def json(self):
+            return [{"id": "123", "volume": "456", "bestBid": 0.42,
+                     "events": [{"id": "e1", "description": "Event rules"}]}]
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def get(self, url, params):
+            assert ("id", "123") in params
+            return Response()
+    monkeypatch.setattr("app.domains.polymarket_auto_live.stage_one_export_enrichment.httpx.Client", Client)
+    row = {"market_id": "123", "current_yes_odds": 90}
+    enrich_export_rows([row])
+    assert decode_scan_export_data(row)["market"]["volume"] == "456"
+    assert row["current_yes_odds"] == 90
+    values = dict(zip(EXCEL_HEADERS, _row_values(row, 1, "passed")))
+    assert values["Volume (USD)"] == "456"
+    assert values["Best Bid (cents)"] == 42
+    assert "export time" in row["export_metadata"]["source"]

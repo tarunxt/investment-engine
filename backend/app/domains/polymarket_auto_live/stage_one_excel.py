@@ -3,12 +3,14 @@ from __future__ import annotations
 import base64
 import json
 import zlib
+import logging
 import math
 import os
 import tempfile
 import zipfile
 from datetime import datetime
 from html import escape
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Iterator
 from zoneinfo import ZoneInfo
@@ -49,7 +51,7 @@ def _export_headers(rows: Iterable[dict[str, Any]]) -> tuple[str, ...]:
         data = decode_scan_export_data(row)
         for prefix in ("event", "market"):
             extra.update(f"{prefix}.{key}" for key in data[prefix])
-    return (*EXCEL_HEADERS, *sorted(extra.difference(EXCEL_HEADERS)))
+    return (*EXCEL_HEADERS, *sorted(extra.difference(EXCEL_HEADERS)), "export.source", "export.fetchedAt", "export.status")
 
 
 def _scan_outputs(run: BullpenAutoLiveRun) -> dict[str, Any]:
@@ -112,12 +114,46 @@ def _yes_no(value: Any) -> str:
     return "Yes" if bool(value) else "No"
 
 
+@lru_cache(maxsize=16)
+def _extra_keys(headers: tuple[str, ...]):
+    return tuple(header.split(".", 1) for header in headers[BASE_COLUMN_COUNT:])
+
+
+def _source_fallbacks(row: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    market, event = data["market"], data["event"]
+    enriched = dict(row)
+    mapping = {
+        "question_id": market.get("questionID"), "condition_id": market.get("conditionId"),
+        "volume_usd": market.get("volumeNum", market.get("volume")),
+        "liquidity_usd": market.get("liquidityNum", market.get("liquidity")),
+        "rules": market.get("resolutionCriteria") or market.get("description"),
+        "event_description": event.get("description"),
+        "resolution_source": market.get("resolutionSource") or event.get("resolutionSource"),
+        "market_context": market.get("description"),
+    }
+    for normalized, raw in (("best_bid_cents", "bestBid"), ("best_ask_cents", "bestAsk"), ("spread_cents", "spread")):
+        try:
+            value = float(market[raw])
+            mapping[normalized] = value * 100 if abs(value) <= 1 else value
+        except (KeyError, TypeError, ValueError):
+            pass
+    for key, value in mapping.items():
+        if enriched.get(key) is None or enriched.get(key) == "":
+            enriched[key] = value
+    return enriched
+
+
 def _row_values(row: dict[str, Any], index: int, scan_status: str, headers: tuple[str, ...] = EXCEL_HEADERS) -> tuple[Any, ...]:
     reasons = row.get("reasons")
     filter_reasons = " | ".join(str(item) for item in reasons) if isinstance(reasons, list) else ""
     selected = row.get("selected")
     data = decode_scan_export_data(row)
-    extra = tuple(data[prefix].get(key) for prefix, key in (header.split(".", 1) for header in headers[BASE_COLUMN_COUNT:]))
+    row = _source_fallbacks(row, data)
+    data["export"] = row.get("export_metadata") or {
+        "source": "Saved scan source", "fetchedAt": "N/A",
+        "status": "N/A means source field unavailable, not applicable, or LLM/allocation not calculated.",
+    }
+    extra = tuple(data[prefix].get(key) for prefix, key in _extra_keys(headers))
     return (
         index, row.get("question_id", ""), row.get("market_id", ""),
         row.get("condition_id", ""), row.get("question") or row.get("market_title") or "",
@@ -144,8 +180,8 @@ def _column_name(index: int) -> str:
 
 
 def _cell_xml(reference: str, value: Any, *, style: int | None = None) -> str:
-    if value is None or value == "":
-        return ""
+    if value is None or value == "" or value == "N/A":
+        return f'<c r="{reference}" t="s"><v>0</v></c>'
     style_attr = f' s="{style}"' if style is not None else ""
     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
         return f'<c r="{reference}"{style_attr}><v>{value}</v></c>'
@@ -193,8 +229,20 @@ def _write_sheet(
     stream.write(f'</sheetData><autoFilter ref="A1:{_column_name(len(headers))}{row_count + 1}"/></worksheet>'.encode("utf-8"))
 
 
-def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned") -> tuple[Path, str, int]:
+def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned", enrich_missing: bool = False) -> tuple[Path, str, int]:
     accepted, rejected, row_count = _candidate_rows(run)
+    # Copy export rows before supplementing absent fields; frozen run is untouched.
+    accepted = [dict(row) for row in accepted]
+    rejected = [dict(row) for row in rejected]
+    if enrich_missing:
+        from app.domains.polymarket_auto_live.stage_one_export_enrichment import enrich_export_rows
+        try:
+            enrich_export_rows(accepted if scope == "filtered" else accepted + rejected)
+        except Exception as exc:
+            # Source availability must never prevent downloading saved scan evidence.
+            logging.getLogger(__name__).warning("Stage 1 export enrichment unavailable: %s", type(exc).__name__)
+            for row in accepted if scope == "filtered" else accepted + rejected:
+                row.setdefault("export_metadata", {"source": "Saved scan", "fetchedAt": "N/A", "status": "Current source lookup unavailable; saved values retained."})
     headers = _export_headers([*accepted, *rejected])
     if scope == "filtered":
         rejected = []
@@ -210,13 +258,14 @@ def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned") -
     handle.close()
     path = Path(handle.name)
     try:
-        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as workbook:
-            workbook.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as workbook:
+            workbook.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>')
             workbook.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
             workbook.writestr("xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="All Scanned Events" sheetId="1" r:id="rId1"/></sheets></workbook>')
-            workbook.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+            workbook.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>')
             workbook.writestr("xl/styles.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/><color rgb="FF14532D"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2F3EA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs></styleSheet>')
-            with workbook.open("xl/worksheets/sheet1.xml", "w") as sheet:
+            workbook.writestr("xl/sharedStrings.xml", '<?xml version="1.0" encoding="UTF-8"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" uniqueCount="1"><si><t>N/A</t></si></sst>')
+            with workbook.open("xl/worksheets/sheet1.xml", "w", force_zip64=True) as sheet:
                 _write_sheet(sheet, _iter_candidates(accepted, rejected), row_count, headers)
     except Exception:
         path.unlink(missing_ok=True)

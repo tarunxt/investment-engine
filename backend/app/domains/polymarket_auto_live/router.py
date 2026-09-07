@@ -853,6 +853,7 @@ async def download_auto_live_stage_one_excel(
             build_stage_one_excel,
             run,
             scope,
+            True,
         )
     except StageOneExcelExportError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
