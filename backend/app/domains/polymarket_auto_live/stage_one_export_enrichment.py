@@ -61,7 +61,8 @@ def enrich_export_rows(rows: list[dict[str, Any]], *, budget_seconds: float = 42
                         combined = {**market, **{k: v for k, v in saved['market'].items() if v is not None and v != ''}}
                         combined['_export_event'] = {**{k: v for k, v in event.items() if k != 'markets'},
                                                      **{k: v for k, v in saved['event'].items() if v is not None and v != ''}}
-                        row['scan_export_data'] = encode_scan_export_data(combined)
+                        row['scan_export_data'] = encode_scan_export_data(
+                            combined, candidate_text_fields_v1=saved.get('candidate_text_fields_v1'))
                         row['export_metadata'] = {
                             'source': 'Gamma events/keyset at export time (not historical scan time)',
                             'fetchedAt': timestamp,

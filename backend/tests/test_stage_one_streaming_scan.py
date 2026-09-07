@@ -356,3 +356,25 @@ def test_rejected_text_storage_preserves_every_excel_cell_and_legacy_sources(mon
         assert count == 1
     finally:
         path.unlink()
+
+
+def test_export_enrichment_preserves_externalized_normalized_text(monkeypatch, tmp_path):
+    import httpx
+    from app.domains.polymarket_auto_live import stage_one_export_enrichment as enrichment
+    from app.domains.polymarket_auto_live.stage_one_excel import _source_fallbacks
+    monkeypatch.setattr(scan_source_store, 'SOURCE_ROOT', tmp_path / 'sources')
+    raw = row('missing-volume')
+    del raw['volume']
+    with scan_source_store.ScanSourceWriter() as writer:
+        compact = writer.store_rejected({'market_id': 'missing-volume',
+            'rules': 'Frozen normalized rules', 'scan_export_data': encode_scan_export_data(raw)})
+    response = {'events': [{'id': 'event', 'description': 'Current description',
+        'markets': [{'id': 'missing-volume', 'volume': 100, 'outcomes': ['Yes', 'No'],
+                     'description': 'Current market description'}]}], 'next_cursor': None}
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=response)))
+    monkeypatch.setattr(enrichment.httpx, 'Client', lambda **kwargs: client)
+    enrichment.enrich_export_rows([compact])
+    source = decode_scan_export_data(compact)
+    assert source['market']['volume'] == 100
+    assert source['candidate_text_fields_v1']['rules'] == 'Frozen normalized rules'
+    assert _source_fallbacks(compact, source)['rules'] == 'Frozen normalized rules'
