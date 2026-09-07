@@ -1,0 +1,21 @@
+name: Diagnose Stage 1 export
+on:
+  push:
+    branches: [fix/export-diagnostics]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          command_timeout: 2m
+          script: |
+            set -eu
+            sudo systemctl show investor-backend investor-celery-worker --property=ActiveState,MemoryCurrent
+            sudo journalctl -u investor-backend -u investor-celery-worker --since '15 minutes ago' --no-pager | python3 -c 'import sys,re; lines=sys.stdin; patterns=[r"(?:ModuleNotFoundError|ImportError|TimeoutError|ConnectionError|OperationalError|PermissionError|TypeError|AttributeError|RedisError|ValueError):[^\n]*",r"Stage 1 Excel preparation failed",r"Could not queue Stage 1 export",r"Received unregistered task[^\n]*",r"POST /polymarket/auto-live/runs/[^ ]+/stage-one-export[^\n]*"]; [print(m.group(0)[:300]) for line in lines for pattern in patterns if (m:=re.search(pattern,line)) and not re.search(r"password|token|secret|key=|://",m.group(0),re.I)]'
