@@ -3260,7 +3260,7 @@ def _serialize_scan_candidate(
 ) -> dict[str, object]:
     raw = market.raw if isinstance(market.raw, dict) else {}
     return {
-        "scan_export_data": encode_scan_export_data(raw),
+        "scan_export_data": raw.get("_scan_export_data") or encode_scan_export_data(raw),
         "question_id": (
             str(raw.get("question_id")).strip()
             if isinstance(raw.get("question_id"), str)
@@ -3707,7 +3707,8 @@ def _trade_analysis_llm_payloads(
 
 
 def _trade_analysis_event_snapshot(market: ScannedMarket) -> dict[str, object]:
-    raw = market.raw if isinstance(market.raw, dict) else {}
+    from app.domains.polymarket_auto_live.scan_source_store import restore_market_raw
+    raw = restore_market_raw(market)
     return sanitize_json_value(
         {
             "market_id": market.market_id,
@@ -3727,6 +3728,7 @@ def _trade_analysis_event_snapshot(market: ScannedMarket) -> dict[str, object]:
 
 
 def _trade_analysis_market_snapshot(market: ScannedMarket) -> dict[str, object]:
+    from app.domains.polymarket_auto_live.scan_source_store import restore_market_raw
     return sanitize_json_value(
         {
             "market_id": market.market_id,
@@ -3737,7 +3739,7 @@ def _trade_analysis_market_snapshot(market: ScannedMarket) -> dict[str, object]:
             "liquidity_usd": market.liquidity_usd,
             "description": market.description,
             "outcome_labels": market.outcome_labels,
-            "raw": market.raw or {},
+            "raw": restore_market_raw(market),
         }
     )
 
@@ -6059,6 +6061,8 @@ class BullpenAutoLiveEngine:
                     scan_scope=scan_scope,
                     progress_callback=report_scan_page,
                     rejected_callback=store_rejected_source,
+                    accepted_callback=streaming_sources.store_market,
+                    page_cache_key=run.id if scan_scope == "full_universe" else None,
                 )
             report_stage1_progress(
                 "Stage 1 pagination finished; preparing candidate exports and wallet handoff.",

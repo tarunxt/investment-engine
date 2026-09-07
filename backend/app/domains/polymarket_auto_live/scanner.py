@@ -1130,6 +1130,8 @@ async def scan_candidate_markets(
     progress_callback: Callable[[int, int], None] | None = None,
     market_filter: Callable[[ScannedMarket], list[str]] | None = None,
     rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
+    accepted_callback: Callable[[ScannedMarket], None] | None = None,
+    page_cache_key: str | None = None,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
@@ -1139,6 +1141,8 @@ async def scan_candidate_markets(
     pagination_error: Exception | None = None
     pagination_started_at = time.monotonic()
     completed_pages = 0
+    from app.domains.polymarket_auto_live.scan_page_cache import ScanPageCache
+    page_cache = ScanPageCache(page_cache_key) if page_cache_key else None
 
     async with httpx.AsyncClient(
         timeout=20,
@@ -1176,11 +1180,17 @@ async def scan_candidate_markets(
                         )
                         next_cursor = None
                     elif use_keyset_pagination:
-                        rows, next_cursor = await _fetch_gamma_keyset_page_with_retries(
-                            client,
-                            after_cursor=after_cursor,
-                            end_date_min=current_universe_start,
-                        )
+                        cached = page_cache.read(after_cursor, current_universe_start) if page_cache else None
+                        if cached is not None:
+                            rows, next_cursor = cached
+                        else:
+                            rows, next_cursor = await _fetch_gamma_keyset_page_with_retries(
+                                client,
+                                after_cursor=after_cursor,
+                                end_date_min=current_universe_start,
+                            )
+                            if page_cache is not None:
+                                page_cache.write(after_cursor, current_universe_start, rows, next_cursor)
                         event_count = 0
                     else:
                         rows, event_count = await _fetch_gamma_page(
@@ -1234,6 +1244,8 @@ async def scan_candidate_markets(
                         rejected_callback(rejected_market)
                     rejected.append(rejected_market)
                     continue
+                if accepted_callback is not None:
+                    accepted_callback(normalized)
                 accepted.append(normalized)
             completed_pages += 1
             if progress_callback is not None:
