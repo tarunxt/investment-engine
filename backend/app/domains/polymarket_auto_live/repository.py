@@ -44,6 +44,10 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveVerifiedPortfolioSnapshot,
 )
 
+from app.domains.polymarket_auto_live.trend_snapshot import (
+    frozen_trend_stages, needs_frozen_trend_overlay,
+)
+
 logger = get_logger("app.domains.polymarket_auto_live.repository")
 
 
@@ -1323,10 +1327,11 @@ class AsyncPolymarketAutoLiveRepository:
         # twenty complete historical payloads.
         latest_frozen_stage_row = (await self.session.execute(
             select(
-                run.payload["stage_results"].label("trend_stage_results")
+                frozen_trend_stages(run).label("trend_stage_results")
             )
             .where(run.user_id == user_id)
             .where(run.id == run_rows[0].id)
+            .where(needs_frozen_trend_overlay(run_rows[0].trend_stage_results))
         )).first()
         trend_run_rows = list(run_rows)
         if latest_frozen_stage_row is not None and isinstance(
@@ -1342,10 +1347,11 @@ class AsyncPolymarketAutoLiveRepository:
         if latest_stage1_run_id != run_ids[0]:
             latest_stage1_frozen_row = (await self.session.execute(
                 select(
-                    run.payload["stage_results"].label("trend_stage_results")
+                    frozen_trend_stages(run).label("trend_stage_results")
                 )
                 .where(run.user_id == user_id)
                 .where(run.id == latest_stage1_run_row.id)
+                .where(needs_frozen_trend_overlay(latest_stage1_run_row.trend_stage_results))
             )).first()
             if latest_stage1_frozen_row is not None and isinstance(
                 latest_stage1_frozen_row.trend_stage_results, list

@@ -50,6 +50,8 @@ jobs:
           backend/tests/test_polymarket_auto_live_stage1_runtime.py
           backend/tests/test_polymarket_auto_live_lifecycle_safety.py
           backend/tests/test_polymarket_auto_live_run_recovery.py
+          backend/tests/test_polymarket_auto_live_event_trends_stage2.py
+          backend/tests/test_bullpen_trend_snapshot.py
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests

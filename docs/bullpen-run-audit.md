@@ -1935,3 +1935,10 @@ Recovery does not synthesize a failed audit snapshot from a retained SUCCESS
 result while inspection still observes that task active, reserved, or scheduled.
 The absolute runtime breaker remains authoritative. Existing frozen snapshots
 are unchanged; this uses the existing lifecycle and stage-status schema.
+
+### Event-trend read isolation
+
+History skips frozen overlays when retained candidate and per-model coverage is
+complete. Compatibility overlays select only stage metadata, accepted candidates
+and reviewed LLM rows in PostgreSQL. Rejected scan rows and export sources are
+excluded before HTTP transfer; frozen audit snapshots and exports remain unchanged.
