@@ -14,9 +14,11 @@ import httpx
 from app.domains.polymarket_auto_live.stage_one_excel import encode_scan_export_data, decode_scan_export_data
 
 
-def enrich_export_rows(rows: list[dict[str, Any]], *, budget_seconds: float = 420) -> None:
+def enrich_export_rows(rows: list[dict[str, Any]], *, budget_seconds: float = 420, progress_callback=None) -> None:
     by_id: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
+    for index, row in enumerate(rows, 1):
+        if progress_callback and (index % 1000 == 0 or index == len(rows)):
+            progress_callback('Checking saved source fields', index, len(rows))
         saved = decode_scan_export_data(row)
         if saved['event'] and all(key in saved['market'] for key in ('id', 'outcomes', 'volume')):
             continue
@@ -27,6 +29,7 @@ def enrich_export_rows(rows: list[dict[str, Any]], *, budget_seconds: float = 42
             by_id.setdefault(identity, []).append(row)
     if not by_id:
         return
+    missing_count = len(by_id)
     deadline = time.monotonic() + budget_seconds
     timestamp = datetime.now(UTC).isoformat()
     cursor = None
@@ -34,6 +37,8 @@ def enrich_export_rows(rows: list[dict[str, Any]], *, budget_seconds: float = 42
     failure = 'Market absent from current open, unarchived Gamma events; historical source unavailable.'
     with httpx.Client(timeout=20, headers={'User-Agent': 'investment-engine-stage-one-export/1.0'}) as client:
         while by_id:
+            if progress_callback:
+                progress_callback('Recovering missing API fields', missing_count - len(by_id), missing_count)
             if time.monotonic() >= deadline:
                 failure = 'Gamma event keyset recovery time limit reached; source unavailable.'
                 break
