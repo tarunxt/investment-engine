@@ -613,6 +613,7 @@ async def test_gamma_keyset_page_uses_cursor_and_returns_nested_markets():
     assert captured == {
         "url": "https://gamma-api.polymarket.com/events/keyset",
         "params": {
+            "archived": "false",
             "closed": "false",
             "end_date_min": "2026-08-30T00:00:00+00:00",
             "limit": "500",
