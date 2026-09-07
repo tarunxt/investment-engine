@@ -41,3 +41,7 @@ jobs:
                     print('Active task:', task.get('name'), 'seconds:', round(time.time() - (task.get('time_start') or time.time())))
             PY
             sudo journalctl -k --since '2 hours ago' --no-pager | python3 -c 'import sys,re; [print(line.strip()) for line in sys.stdin if re.search(r"Out of memory: Killed process|oom-kill:|Memory cgroup out of memory",line)]'
+
+            ps -eo pid,ppid,pcpu,rss,etime,comm --sort=-pcpu | head -12
+            command -v py-spy || true
+            test ! -x .venv/bin/py-spy || echo py-spy-available
