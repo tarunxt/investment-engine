@@ -62,7 +62,10 @@ CONSOLE_MIN_LLM_STRONG_SIDE_ODDS = 80.0
 CONSOLE_MIN_MARKET_ODDS = 1.0
 CONSOLE_DISCOVER_TIMEOUT_SECONDS = 5
 CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS = 90
-CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS = 300
+# Full Universe includes streaming filtering and source-pack writes. Five
+# minutes truncates ordinary catalogues. Keep a bounded scan budget below the
+# planner's two-hour limit, leaving time for wallet/LLM work and finalization.
+CONSOLE_FULL_UNIVERSE_SCAN_TIMEOUT_SECONDS = 5400
 CONSOLE_POSITIONS_TIMEOUT_SECONDS = 20
 CONSOLE_POSITIONS_TIMEOUT_ENV_VAR = "BULLPEN_CONSOLE_POSITIONS_TIMEOUT_SECONDS"
 # The broker may wait for a shared authenticated CLI refresh before it runs the

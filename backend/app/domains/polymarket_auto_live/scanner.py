@@ -632,6 +632,7 @@ def _normalize_market(
         current_yes_odds=yes_odds,
         current_no_odds=no_odds,
         volume_usd=_parse_float(row.get("volumeNum") or row.get("volume")),
+        volume_24hr_usd=_parse_float(row.get("volume24hr")),
         liquidity_usd=_parse_float(row.get("liquidityNum") or row.get("liquidity")),
         description=(
             row.get("description").strip()
@@ -778,6 +779,34 @@ async def _fetch_gamma_keyset_page(
     if normalized_cursor in {"LTE=", "-1"}:
         normalized_cursor = None
     return markets, normalized_cursor
+
+
+async def _fetch_gamma_keyset_page_with_retries(
+    client: httpx.AsyncClient,
+    *,
+    after_cursor: str | None,
+    end_date_min: str | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Retry the same cursor only for transient read failures; never skip pages.
+
+    The caller's total page budget also bounds retries and backoff. Cancellation,
+    invalid payloads, and permanent HTTP errors propagate immediately.
+    """
+    for attempt in range(3):
+        try:
+            return await _fetch_gamma_keyset_page(
+                client, after_cursor=after_cursor, end_date_min=end_date_min,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 429 and exc.response.status_code < 500:
+                raise
+            if attempt == 2:
+                raise
+        except httpx.TransportError:
+            if attempt == 2:
+                raise
+        await asyncio.sleep(attempt + 1)
+    raise RuntimeError("Gamma page retries exhausted")
 
 
 async def _fetch_gamma_deadline_cursor_page(
@@ -1147,7 +1176,7 @@ async def scan_candidate_markets(
                         )
                         next_cursor = None
                     elif use_keyset_pagination:
-                        rows, next_cursor = await _fetch_gamma_keyset_page(
+                        rows, next_cursor = await _fetch_gamma_keyset_page_with_retries(
                             client,
                             after_cursor=after_cursor,
                             end_date_min=current_universe_start,
