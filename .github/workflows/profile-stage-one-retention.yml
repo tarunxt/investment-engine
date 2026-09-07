@@ -1,0 +1,66 @@
+name: Profile Stage 1 retained data
+on:
+  push:
+    branches: [fix/profile-stage-one-retention]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          fingerprint: ${{ secrets.EC2_SSH_FINGERPRINT }}
+          command_timeout: 5m
+          script: |
+            set -eu
+            runtime_dir="$(sudo systemctl show investor-backend -p WorkingDirectory --value)"
+            cd "$runtime_dir"
+            sudo .venv/bin/python - <<'PY'
+            import os, gzip, json, resource, ast, tracemalloc, tempfile
+            from pathlib import Path
+            from datetime import datetime, timezone
+            from dotenv import dotenv_values
+            os.environ.update({k:v for k,v in dotenv_values('/etc/investor/backend.env').items() if v is not None})
+            resource.setrlimit(resource.RLIMIT_AS, (1100*1024*1024,1100*1024*1024))
+            from app.domains.polymarket_auto_live import scanner, scan_source_store
+            from app.domains.polymarket_auto_live.stage_one_excel import encode_scan_export_data
+            root=scan_source_store.SOURCE_ROOT.parent/'scan-pages-v1'
+            dirs=list(root.glob('*'))
+            print('cache_runs',len(dirs),flush=True)
+            if not dirs: raise SystemExit()
+            latest=max(dirs,key=lambda p:p.stat().st_mtime)
+            files=sorted(latest.glob('*.gz'),key=lambda p:p.stat().st_mtime)
+            print('pages',len(files),'compressed_bytes',sum(p.stat().st_size for p in files),flush=True)
+            print('largest_compressed_page',max(p.stat().st_size for p in files),flush=True)
+            tree=ast.parse(Path('app/domains/polymarket_auto_live/engine.py').read_text())
+            names={'_serialize_scan_candidate','_serialize_rejected_scan_candidate'}
+            nodes=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in names]
+            ns={'ScannedMarket':scanner.ScannedMarket,'ScanRejectedMarket':scanner.ScanRejectedMarket,'encode_scan_export_data':encode_scan_export_data}
+            exec(compile(ast.Module(body=nodes,type_ignores=[]),'engine-adapters','exec'),ns)
+            tracemalloc.start(5)
+            retained=[]
+            count=0
+            with tempfile.TemporaryDirectory(prefix='scan-memory-probe-') as tmp:
+                scan_source_store.SOURCE_ROOT=Path(tmp)
+                with scan_source_store.ScanSourceWriter() as writer:
+                    for file in files:
+                        with gzip.open(file,'rt') as handle: rows=json.load(handle)['rows']
+                        for row in rows:
+                            m=scanner._normalize_market(row)
+                            if m is None: continue
+                            rejected=scanner.ScanRejectedMarket(m.market_id,m.question,m.slug,m.market_url,['test'],source_market=m)
+                            rejected.serialized_candidate=writer.store(ns['_serialize_rejected_scan_candidate'](rejected))
+                            rejected.source_market=None
+                            retained.append(rejected)
+                            count+=1
+                        current,peak=tracemalloc.get_traced_memory()
+                        print('sample',count,'retained_MB',round(current/1e6),'peak_MB',round(peak/1e6),'rss_MB',round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024),flush=True)
+                        if count>=10000 or current>350*1024*1024: break
+                for stat in tracemalloc.take_snapshot().statistics('lineno')[:8]: print('allocation',stat,flush=True)
+            
+            PY
