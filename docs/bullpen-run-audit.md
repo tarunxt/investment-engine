@@ -1942,3 +1942,11 @@ History skips frozen overlays when retained candidate and per-model coverage is
 complete. Compatibility overlays select only stage metadata, accepted candidates
 and reviewed LLM rows in PostgreSQL. Rejected scan rows and export sources are
 excluded before HTTP transfer; frozen audit snapshots and exports remain unchanged.
+# Stage 1 export availability
+
+Filtered Excel downloads use the frozen run ID or independent scan export ID even
+when the dashboard projection omits candidate rows. A positive filtered count must
+not be disabled solely because the browser has no candidate rows. The output popup
+uses the same server export sources, with local rows only as a fallback. This changes
+download availability only; frozen audit snapshots, filter results and export contents
+remain unchanged and need no schema migration.
