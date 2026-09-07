@@ -717,6 +717,7 @@ async def _fetch_gamma_keyset_page(
     """
 
     params: dict[str, str] = {
+        "archived": "false",
         "closed": "false",
         "limit": str(GAMMA_KEYSET_EVENT_PAGE_SIZE),
     }
