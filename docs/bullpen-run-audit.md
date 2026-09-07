@@ -1757,3 +1757,14 @@ current source enrichment from saved scan-time data and identify lookup failures
 Absent/non-applicable fields and uncomputed LLM/allocation values display N/A.
 The workbook writer enables ZIP64 for worksheets above the standard ZIP size
 limit. Repeated N/A cells share one string entry to keep exhaustive exports small.
+
+### Gamma keyset export recovery
+
+Legacy Stage 1 exports for both Trending and Full Universe now recover missing
+source data from `/events/keyset?archived=false&closed=false&limit=500`, following
+`next_cursor` even for short pages. Exact child-market IDs preserve exported row
+membership. Complete parent event and child market fields are retained. Export-time
+provenance remains explicit; frozen scan odds, eligibility and audit records are
+unchanged. HTTP failures include status codes, and missing/closed historical
+markets or bounded incomplete recovery are distinguished from successful recovery.
+Full Universe scanning also explicitly sends `archived=false` to Gamma keyset.

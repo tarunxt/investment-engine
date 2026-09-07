@@ -115,14 +115,14 @@ def test_export_enrichment_preserves_frozen_odds_and_fills_source_fields(monkeyp
     class Response:
         def raise_for_status(self): pass
         def json(self):
-            return [{"id": "123", "volume": "456", "bestBid": 0.42,
-                     "events": [{"id": "e1", "description": "Event rules"}]}]
+            return {"events": [{"id": "e1", "description": "Event rules", "markets": [{"id": "123", "volume": "456", "bestBid": 0.42}]}], "next_cursor": None}
     class Client:
         def __init__(self, **kwargs): pass
         def __enter__(self): return self
         def __exit__(self, *args): pass
         def get(self, url, params):
-            assert ("id", "123") in params
+            assert url.endswith("/events/keyset")
+            assert params == {"archived": "false", "closed": "false", "limit": "500"}
             return Response()
     monkeypatch.setattr("app.domains.polymarket_auto_live.stage_one_export_enrichment.httpx.Client", Client)
     row = {"market_id": "123", "current_yes_odds": 90}
@@ -133,3 +133,29 @@ def test_export_enrichment_preserves_frozen_odds_and_fills_source_fields(monkeyp
     assert values["Volume (USD)"] == "456"
     assert values["Best Bid (cents)"] == 42
     assert "export time" in row["export_metadata"]["source"]
+
+
+def test_keyset_enrichment_follows_short_pages_and_preserves_false(monkeypatch):
+    from app.domains.polymarket_auto_live.stage_one_export_enrichment import enrich_export_rows
+    from app.domains.polymarket_auto_live.stage_one_excel import decode_scan_export_data
+    calls = []
+    class Response:
+        def __init__(self, payload): self.payload = payload
+        def raise_for_status(self): pass
+        def json(self): return self.payload
+    class Client:
+        def __init__(self, **kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def get(self, url, params):
+            calls.append(dict(params))
+            if 'after_cursor' not in params:
+                return Response({'events': [], 'next_cursor': 'next'})
+            return Response({'events': [{'id': 'e', 'active': False, 'volume': 0,
+                             'markets': [{'id': '123', 'volume': 0, 'outcomes': ['Yes', 'No']}]}], 'next_cursor': None})
+    monkeypatch.setattr('app.domains.polymarket_auto_live.stage_one_export_enrichment.httpx.Client', Client)
+    row = {'market_id': '123'}
+    enrich_export_rows([row])
+    assert calls[1]['after_cursor'] == 'next'
+    assert decode_scan_export_data(row)['event']['active'] is False
+    assert decode_scan_export_data(row)['market']['volume'] == 0
