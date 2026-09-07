@@ -1,3 +1,4 @@
+import exhaustiveHeaders from "@/lib/bullpenStageOneExcelColumns.json";
 import { createReadStream } from "node:fs";
 import { access, open as openFile, rename, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -230,7 +231,8 @@ function buildWorkbookStream(
           discovered &&
           discovered.rowCount !== expectedRows
         ) throw new Error(`Stage 1 export row count mismatch (${discovered.rowCount}/${expectedRows}).`);
-        const gammaHeaders = indexedGammaHeaders ?? discovered?.gammaHeaders ?? [];
+        const discoveredGammaHeaders = indexedGammaHeaders ?? discovered?.gammaHeaders ?? [];
+        const gammaHeaders = [...exhaustiveHeaders.slice(LEGACY_HEADERS.length), ...discoveredGammaHeaders.filter((header) => !exhaustiveHeaders.includes(header))];
         const headers = [...LEGACY_HEADERS, ...gammaHeaders];
         // Filtered exports contain a comparatively small row set but each row
         // can carry large raw Gamma JSON fields. Deflating those fields inline

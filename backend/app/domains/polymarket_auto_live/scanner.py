@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -313,6 +313,7 @@ class ScanRejectedMarket:
     market_url: str | None
     reasons: list[str]
     force_included_position: bool = False
+    source_market: ScannedMarket | None = None
 
 
 @dataclass
@@ -696,6 +697,7 @@ async def _fetch_gamma_page(
             ):
                 continue
             normalized_row = dict(market)
+            normalized_row["_export_event"] = {key: value for key, value in event.items() if key != "markets"}
             normalized_row.setdefault("events", [event_identity])
             markets.append(normalized_row)
     return markets, len(events)
@@ -758,6 +760,7 @@ async def _fetch_gamma_keyset_page(
             ):
                 continue
             normalized_row = dict(market)
+            normalized_row["_export_event"] = {key: value for key, value in event.items() if key != "markets"}
             normalized_row.setdefault("events", [event_identity])
             markets.append(normalized_row)
 
@@ -837,6 +840,7 @@ async def _fetch_gamma_deadline_cursor_page(
             ):
                 continue
             normalized_row = dict(market)
+            normalized_row["_export_event"] = {key: value for key, value in event.items() if key != "markets"}
             normalized_row.setdefault("events", [event_identity])
             markets.append(normalized_row)
 
@@ -1091,6 +1095,7 @@ async def scan_candidate_markets(
     preserve_partial_on_error: bool = False,
     pagination_deadline_seconds: float | None = None,
     filter_parent_deadlines: bool = True,
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
@@ -1099,6 +1104,7 @@ async def scan_candidate_markets(
     current_universe_start = _now_iso() if filter_parent_deadlines else None
     pagination_error: Exception | None = None
     pagination_started_at = time.monotonic()
+    completed_pages = 0
 
     async with httpx.AsyncClient(
         timeout=20,
@@ -1182,10 +1188,14 @@ async def scan_candidate_markets(
                             slug=normalized.slug,
                             market_url=normalized.market_url,
                             reasons=reasons,
+                            source_market=normalized,
                         )
                     )
                     continue
                 accepted.append(normalized)
+            completed_pages += 1
+            if progress_callback is not None:
+                progress_callback(len(seen_market_ids), completed_pages)
             if use_deadline_cursor_pagination:
                 if event_count < GAMMA_DEADLINE_CURSOR_PAGE_SIZE:
                     break

@@ -20,6 +20,7 @@ function stageIdentity(stage: BullpenAutoLiveStageResult) {
 const AUTHORITATIVE_LIVE_OUTPUT_KEYS = [
   "phase_status",
   "progress_commentary",
+  "scan_progress",
   "cancellation_state",
   "current_blockage",
   "error_message",

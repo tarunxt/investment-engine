@@ -1,3 +1,4 @@
+import exhaustiveHeaders from "@/lib/bullpenStageOneExcelColumns.json";
 import type { BullpenAutoRunScanCandidateView } from "./bullpenAutoRunProgress";
 import { URLs } from "@/lib/urls";
 
@@ -8,7 +9,7 @@ export type BullpenStageOneExcelCandidate = BullpenAutoRunScanCandidateView & {
   amountToBeInvested?: number | null;
 };
 
-const EXCEL_HEADERS = [
+const BASE_HEADERS = [
   "S. No.",
   "Question ID",
   "Market ID",
@@ -41,6 +42,8 @@ const EXCEL_HEADERS = [
   "Resolution Source",
   "Preflight Evidence",
 ] as const;
+
+const EXCEL_HEADERS = [...BASE_HEADERS, ...exhaustiveHeaders.slice(BASE_HEADERS.length)];
 
 const formatIstTimestamp = (value: string | null) => {
   if (!value) return "";
@@ -128,7 +131,7 @@ async function downloadStageOneEventsExcel({
   }));
   const dataRows = rows.map((row) =>
     EXCEL_HEADERS.map((header) => ({
-      value: row[header] ?? "",
+      value: (row as Record<string, string | number | null>)[header] ?? "",
       wrap:
         header === "Event" ||
         header === "Filter Reasons" ||
@@ -165,6 +168,7 @@ async function downloadStageOneEventsExcel({
       { width: 60 },
       { width: 48 },
       { width: 72 },
+      ...EXCEL_HEADERS.slice(BASE_HEADERS.length).map(() => ({ width: 24 })),
     ],
   });
   await workbook.toFile(buildExportFilename(scanCompletedAt, exportScope));
@@ -198,10 +202,10 @@ export async function downloadStageOneAllScannedEventsExcel({
   });
 }
 
-export function downloadCompleteStageOneRunExcel(runId: string) {
+export function downloadCompleteStageOneRunExcel(runId: string, scope: "filtered" | "all-scanned" = "all-scanned") {
   const link = document.createElement("a");
-  link.href = URLs.bullpenAutoLive.runStageOneExcel(runId);
-  link.download = "bullpen-stage-1-all-scanned-events.xlsx";
+  link.href = `${URLs.bullpenAutoLive.runStageOneExcel(runId)}?scope=${scope}`;
+  link.download = `bullpen-stage-1-${scope}-events.xlsx`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

@@ -5,6 +5,9 @@ import pytest
 
 from app.domains.polymarket_auto_live.stage_one_excel import (
     StageOneExcelExportError,
+    EXCEL_HEADERS,
+    encode_scan_export_data,
+    _column_name,
     build_stage_one_excel,
     remove_export,
 )
@@ -56,7 +59,7 @@ def test_stage_one_excel_exports_more_than_the_old_1000_row_projection():
             assert workbook.testzip() is None
             sheet = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
         assert sheet.count('<row r="') == 1_502
-        assert '<autoFilter ref="A1:AE1502"/>' in sheet
+        assert f'<autoFilter ref="A1:{_column_name(len(EXCEL_HEADERS))}1502"/>' in sheet
         assert "Accepted market 0" in sheet
         assert "Rejected market 1500" in sheet
         assert ">passed<" in sheet
@@ -74,3 +77,33 @@ def test_stage_one_excel_refuses_a_truncated_run_snapshot():
 
     with pytest.raises(StageOneExcelExportError, match="1 detailed rows.*95,586 scanned events"):
         build_stage_one_excel(run)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("scope,expected", [("all-scanned", 2), ("filtered", 1)])
+def test_exhaustive_schema_and_raw_values_for_both_exports(scope, expected):
+    import json
+    from pathlib import Path
+    from xml.etree import ElementTree as ET
+    raw = {"id": "001234", "volume24hr": 123.45, "active": False,
+           "outcomes": ["Yes", "No"], "newApiField": "kept",
+           "_export_event": {"id": "event-1", "countryName": "India", "tags": [{"label": "Macro"}]}}
+    rows = [{"market_id": "001234", "question": "Example", "scan_export_data": encode_scan_export_data(raw)}]
+    run = _run_with_candidates(accepted=rows, rejected=[{**rows[0], "market_id": "rejected"}], scanned=2)
+    path, _, count = build_stage_one_excel(run, scope)
+    try:
+        assert count == expected
+        with ZipFile(path) as workbook:
+            root = ET.fromstring(workbook.read("xl/worksheets/sheet1.xml"))
+        ns = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+        xmlrows = root.findall("m:sheetData/m:row", ns)
+        headers = ["".join(cell.itertext()) for cell in xmlrows[0]]
+        assert headers[:len(EXCEL_HEADERS)] == list(EXCEL_HEADERS)
+        assert len(EXCEL_HEADERS) == 220
+        assert "market.newApiField" in headers
+        cells = {cell.attrib["r"]: "".join(cell.itertext()) for cell in xmlrows[1]}
+        for header, value in [("market.id", "001234"), ("market.volume24hr", "123.45"), ("event.countryName", "India"), ("market.newApiField", "kept")]:
+            assert cells[f"{_column_name(headers.index(header)+1)}2"] == value
+        frontend_schema = Path(__file__).resolve().parents[2] / "frontend/lib/bullpenStageOneExcelColumns.json"
+        assert json.loads(frontend_schema.read_text()) == list(EXCEL_HEADERS)
+    finally:
+        remove_export(path)

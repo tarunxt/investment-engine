@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import json
 import os
 import re
@@ -1026,6 +1027,7 @@ def _build_cli_console_scan_result(
                     slug=market.slug,
                     market_url=market.market_url,
                     reasons=reasons,
+                    source_market=market,
                 )
             )
             continue
@@ -1068,6 +1070,7 @@ async def scan_console_profile_markets(
     use_deadline_cursor_pagination: bool = False,
     gamma_scan_timeout_seconds: float = CONSOLE_GAMMA_SCAN_TIMEOUT_SECONDS,
     scan_scope: ConsoleScanScope = "trending",
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -1147,6 +1150,7 @@ async def scan_console_profile_markets(
                 else None
             ),
             filter_parent_deadlines=False,
+            **({"progress_callback": progress_callback} if progress_callback else {}),
         )
         gamma_scan = (
             await gamma_scan_coro
@@ -1230,6 +1234,7 @@ async def scan_console_profile_markets(
                     slug=market.slug,
                     market_url=market.market_url,
                     reasons=reasons,
+                    source_market=market,
                 )
             )
             continue

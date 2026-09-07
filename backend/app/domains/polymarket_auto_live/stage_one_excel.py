@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import json
+import zlib
 import math
 import os
 import tempfile
@@ -14,23 +17,39 @@ if TYPE_CHECKING:
     from app.domains.polymarket_auto_live.schemas import BullpenAutoLiveRun
 
 
-EXCEL_HEADERS = (
-    "S. No.", "Question ID", "Market ID", "Condition ID", "Event",
-    "Market URL", "Slug", "Deadline (IST)", "Deadline (ISO)", "Theme",
-    "Current Yes Odds (%)", "Current No Odds (%)", "Best Bid (cents)",
-    "Best Ask (cents)", "Spread (cents)", "LLM Yes Odds (%)",
-    "LLM No Odds (%)", "Returns/day (%)", "Amount to be Invested (USD)",
-    "Volume (USD)", "Liquidity (USD)", "Force Included",
-    "Force-Included Position", "Selected", "Scan Status", "Filter Reasons",
-    "Rules", "Event Description", "Market Context", "Resolution Source",
-    "Preflight Evidence",
-)
+EXCEL_HEADERS = tuple(json.loads(Path(__file__).with_name("stage_one_excel_columns.json").read_text()))
+BASE_COLUMN_COUNT = 31
 EXCEL_MAX_DATA_ROWS = 1_048_575
 EXCEL_MAX_CELL_CHARACTERS = 32_767
 
 
 class StageOneExcelExportError(ValueError):
     pass
+
+
+def encode_scan_export_data(raw: dict[str, Any]) -> str:
+    events = raw.get("events")
+    event = raw.get("_export_event") or (events[0] if isinstance(events, list) and events else {})
+    event = {key: value for key, value in event.items() if key != "markets"} if isinstance(event, dict) else {}
+    market = {key: value for key, value in raw.items() if key not in {"_export_event", "events"}}
+    payload = json.dumps({"event": event, "market": market}, ensure_ascii=False, separators=(",", ":"))
+    return base64.b64encode(zlib.compress(payload.encode("utf-8"))).decode("ascii")
+
+
+def decode_scan_export_data(row: dict[str, Any]) -> dict[str, Any]:
+    value = row.get("scan_export_data")
+    if not value:
+        return {"event": {}, "market": {}}
+    return json.loads(zlib.decompress(base64.b64decode(value)))
+
+
+def _export_headers(rows: Iterable[dict[str, Any]]) -> tuple[str, ...]:
+    extra = set()
+    for row in rows:
+        data = decode_scan_export_data(row)
+        for prefix in ("event", "market"):
+            extra.update(f"{prefix}.{key}" for key in data[prefix])
+    return (*EXCEL_HEADERS, *sorted(extra.difference(EXCEL_HEADERS)))
 
 
 def _scan_outputs(run: BullpenAutoLiveRun) -> dict[str, Any]:
@@ -93,10 +112,12 @@ def _yes_no(value: Any) -> str:
     return "Yes" if bool(value) else "No"
 
 
-def _row_values(row: dict[str, Any], index: int, scan_status: str) -> tuple[Any, ...]:
+def _row_values(row: dict[str, Any], index: int, scan_status: str, headers: tuple[str, ...] = EXCEL_HEADERS) -> tuple[Any, ...]:
     reasons = row.get("reasons")
     filter_reasons = " | ".join(str(item) for item in reasons) if isinstance(reasons, list) else ""
     selected = row.get("selected")
+    data = decode_scan_export_data(row)
+    extra = tuple(data[prefix].get(key) for prefix, key in (header.split(".", 1) for header in headers[BASE_COLUMN_COUNT:]))
     return (
         index, row.get("question_id", ""), row.get("market_id", ""),
         row.get("condition_id", ""), row.get("question") or row.get("market_title") or "",
@@ -111,7 +132,7 @@ def _row_values(row: dict[str, Any], index: int, scan_status: str) -> tuple[Any,
         filter_reasons, row.get("rules", ""), row.get("event_description", ""),
         row.get("market_context", ""), row.get("resolution_source", ""),
         row.get("preflight_evidence_block", ""),
-    )
+    ) + extra
 
 
 def _column_name(index: int) -> str:
@@ -123,10 +144,12 @@ def _column_name(index: int) -> str:
 
 
 def _cell_xml(reference: str, value: Any, *, style: int | None = None) -> str:
+    if value is None or value == "":
+        return ""
     style_attr = f' s="{style}"' if style is not None else ""
     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
         return f'<c r="{reference}"{style_attr}><v>{value}</v></c>'
-    text = "" if value is None else str(value)
+    text = "" if value is None else json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value)
     text = "".join(
         character
         for character in text
@@ -139,6 +162,7 @@ def _write_sheet(
     stream: Any,
     rows: Iterable[tuple[dict[str, Any], str]],
     row_count: int,
+    headers: tuple[str, ...] = EXCEL_HEADERS,
 ) -> None:
     stream.write(
         ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -149,35 +173,39 @@ def _write_sheet(
          '<col min="2" max="4" width="24" customWidth="1"/>'
          '<col min="5" max="5" width="60" customWidth="1"/>'
          '<col min="6" max="7" width="42" customWidth="1"/>'
-         '<col min="8" max="31" width="22" customWidth="1"/>'
+         f'<col min="8" max="{len(headers)}" width="22" customWidth="1"/>'
          '</cols><sheetData>').encode("utf-8")
     )
     header_cells = "".join(
         _cell_xml(f"{_column_name(column)}1", header, style=1)
-        for column, header in enumerate(EXCEL_HEADERS, start=1)
+        for column, header in enumerate(headers, start=1)
     )
     stream.write(f'<row r="1">{header_cells}</row>'.encode("utf-8"))
     for excel_row, (candidate, scan_status) in enumerate(rows, start=2):
         cells = "".join(
             _cell_xml(f"{_column_name(column)}{excel_row}", value)
             for column, value in enumerate(
-                _row_values(candidate, excel_row - 1, scan_status),
+                _row_values(candidate, excel_row - 1, scan_status, headers),
                 start=1,
             )
         )
         stream.write(f'<row r="{excel_row}">{cells}</row>'.encode("utf-8"))
-    stream.write(f'</sheetData><autoFilter ref="A1:AE{row_count + 1}"/></worksheet>'.encode("utf-8"))
+    stream.write(f'</sheetData><autoFilter ref="A1:{_column_name(len(headers))}{row_count + 1}"/></worksheet>'.encode("utf-8"))
 
 
-def build_stage_one_excel(run: BullpenAutoLiveRun) -> tuple[Path, str, int]:
+def build_stage_one_excel(run: BullpenAutoLiveRun, scope: str = "all-scanned") -> tuple[Path, str, int]:
     accepted, rejected, row_count = _candidate_rows(run)
+    headers = _export_headers([*accepted, *rejected])
+    if scope == "filtered":
+        rejected = []
+        row_count = len(accepted)
     timestamp = datetime.fromisoformat(
         (run.completed_at or run.started_at).strip().replace("Z", "+00:00")
     )
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC"))
     stamp = timestamp.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H-%M-%SZ")
-    filename = f"bullpen-stage-1-all-scanned-events-{stamp}.xlsx"
+    filename = f"bullpen-stage-1-{scope}-events-{stamp}.xlsx"
     handle = tempfile.NamedTemporaryFile(prefix="bullpen-stage-one-", suffix=".xlsx", delete=False)
     handle.close()
     path = Path(handle.name)
@@ -189,7 +217,7 @@ def build_stage_one_excel(run: BullpenAutoLiveRun) -> tuple[Path, str, int]:
             workbook.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
             workbook.writestr("xl/styles.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font/><font><b/><color rgb="FF14532D"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE2F3EA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf></cellXfs></styleSheet>')
             with workbook.open("xl/worksheets/sheet1.xml", "w") as sheet:
-                _write_sheet(sheet, _iter_candidates(accepted, rejected), row_count)
+                _write_sheet(sheet, _iter_candidates(accepted, rejected), row_count, headers)
     except Exception:
         path.unlink(missing_ok=True)
         raise
