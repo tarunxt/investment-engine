@@ -127,6 +127,13 @@ def _extra_keys(headers: tuple[str, ...]):
 def _source_fallbacks(row: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     market, event = data["market"], data["event"]
     enriched = dict(row)
+    # New scans externalize duplicate normalized text. Restore it one row at
+    # a time before raw-field fallbacks; older source packs remain unchanged.
+    stored_text = data.get("candidate_text_fields_v1")
+    if isinstance(stored_text, dict):
+        for key, value in stored_text.items():
+            if enriched.get(key) is None or enriched.get(key) == "":
+                enriched[key] = value
     mapping = {
         "question_id": market.get("questionID"), "condition_id": market.get("conditionId"),
         "volume_usd": market.get("volumeNum", market.get("volume")),

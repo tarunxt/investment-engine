@@ -2,8 +2,10 @@
 from __future__ import annotations
 import base64
 import hashlib
+import json
 import os
 import re
+import zlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,6 +29,29 @@ class ScanSourceWriter:
         self.handle.write(data)
         row['scan_export_data'] = f'source-v1:{self.identity}:{offset}:{len(data)}:{hashlib.sha256(data).hexdigest()}'
         return row
+
+    def store_rejected(self, row: dict) -> dict:
+        """Keep exhaustive text once on disk, not in every run JSON copy."""
+        value = row.get('scan_export_data')
+        if not value or str(value).startswith('source-v1:'):
+            return self.store(row)
+        fields = {key: row[key] for key in (
+            'rules', 'event_description', 'market_context',
+            'resolution_source', 'preflight_evidence_block',
+        ) if isinstance(row.get(key), str) and row[key]}
+        if not fields:
+            return self.store(row)
+        source = json.loads(zlib.decompress(base64.b64decode(value, validate=True)))
+        source['candidate_text_fields_v1'] = fields
+        compressed = zlib.compress(json.dumps(source, ensure_ascii=False,
+                                             separators=(',', ':')).encode())
+        compact = dict(row)
+        compact['scan_export_data'] = base64.b64encode(compressed).decode('ascii')
+        self.store(compact)
+        for key in fields:
+            compact[key] = None
+        compact['scan_text_storage_version'] = 1
+        return compact
 
     def __exit__(self, *args):
         # Close and flush before any run snapshot is persisted with these references.

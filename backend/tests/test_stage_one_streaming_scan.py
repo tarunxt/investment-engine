@@ -312,3 +312,47 @@ def test_page_cache_isolates_runs_and_ignores_torn_writes(monkeypatch, tmp_path)
     assert first.read(None, 'different-query') is None
     first.path(None, None).write_bytes(b'broken gzip')
     assert first.read(None, None) is None
+
+
+def test_rejected_text_storage_preserves_every_excel_cell_and_legacy_sources(monkeypatch, tmp_path):
+    import json
+    from app.domains.polymarket_auto_live.stage_one_excel import _row_values, _export_headers, build_stage_one_excel
+    from types import SimpleNamespace
+    monkeypatch.setattr(scan_source_store, 'SOURCE_ROOT', tmp_path / 'sources')
+    raw = row('reject-text')
+    raw['description'] = 'Original rules ' * 250
+    original = serializers()(scanner.ScanRejectedMarket(
+        'reject-text', 'Question', 'reject-text', None, ['rule A', 'rule B'],
+        source_market=scanner._normalize_market(raw)))
+    original.update(market_context='Exact normalized context ' * 200,
+                    resolution_source='Exact normalized source',
+                    preflight_evidence_block='Exact evidence ' * 200)
+    headers = _export_headers([original])
+    expected = _row_values(original, 1, 'filtered', headers)
+    with scan_source_store.ScanSourceWriter() as writer:
+        compact = writer.store_rejected(original)
+    assert original['rules']  # No mutation of the caller's evidence.
+    assert compact['rules'] is None and compact['event_description'] is None
+    assert compact['scan_text_storage_version'] == 1
+    assert compact['reasons'] == original['reasons']
+    assert _row_values(compact, 1, 'filtered', headers) == expected
+    assert _export_headers([compact]) == headers
+    assert len(json.dumps(compact)) < len(json.dumps(original)) / 3
+    source = decode_scan_export_data(compact)
+    assert source['market'] == decode_scan_export_data(original)['market']
+    assert source['candidate_text_fields_v1']['rules'] == original['rules']
+    run = SimpleNamespace(stage_results=[SimpleNamespace(stage_number=1, outputs={
+        'workflow_stage_key': 'scan', 'scanned_candidates': 1,
+        'accepted_candidates': [], 'rejected_candidates': [compact]})],
+        started_at='2026-09-07T00:00:00+00:00', completed_at=None)
+    path, _, count = build_stage_one_excel(run)
+    try:
+        import zipfile
+        with zipfile.ZipFile(path) as workbook:
+            xml = workbook.read('xl/worksheets/sheet1.xml').decode()
+            assert original['rules'] in xml
+            assert original['market_context'] in xml
+            assert original['preflight_evidence_block'] in xml
+        assert count == 1
+    finally:
+        path.unlink()
