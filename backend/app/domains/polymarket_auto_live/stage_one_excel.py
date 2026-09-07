@@ -29,12 +29,15 @@ class StageOneExcelExportError(ValueError):
     pass
 
 
-def encode_scan_export_data(raw: dict[str, Any]) -> str:
+def encode_scan_export_data(raw: dict[str, Any], *, candidate_text_fields_v1: dict[str, Any] | None = None) -> str:
     events = raw.get("events")
     event = raw.get("_export_event") or (events[0] if isinstance(events, list) and events else {})
     event = {key: value for key, value in event.items() if key != "markets"} if isinstance(event, dict) else {}
     market = {key: value for key, value in raw.items() if key not in {"_export_event", "events"}}
-    payload = json.dumps({"event": event, "market": market}, ensure_ascii=False, separators=(",", ":"))
+    source = {"event": event, "market": market}
+    if candidate_text_fields_v1:
+        source["candidate_text_fields_v1"] = candidate_text_fields_v1
+    payload = json.dumps(source, ensure_ascii=False, separators=(",", ":"))
     return base64.b64encode(zlib.compress(payload.encode("utf-8"))).decode("ascii")
 
 
