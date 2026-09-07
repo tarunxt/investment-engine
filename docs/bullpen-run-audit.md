@@ -1868,3 +1868,27 @@ reuse the reference; Excel and trade-analysis audit snapshots restore the stored
 source fields. Historical frozen snapshots and filter/trading eligibility are
 unchanged. Tests cover accepted-source fidelity, interrupted pagination replay,
 terminal-cursor reuse, deduplication, run/query isolation and corrupt-page fallback.
+
+### Bounded Stage 1 handoff text (normalized source extension v1)
+
+Rejected rows keep identity, pricing and rejection reasons in run JSON. Repeated
+rules, event descriptions, context, resolution sources and preflight text are now
+stored losslessly as `candidate_text_fields_v1` inside the existing checksummed
+source pack. `scan_text_storage_version: 1` identifies compact rows; their nullable
+text fields are restored one row at a time by Excel before raw-source fallbacks.
+This is an additive source-payload extension, not a rewrite of frozen snapshots.
+Older inline/base64 and source-v1 rows continue to export as before. Accepted LLM
+inputs and eligibility are unchanged. All original API fields remain in the pack.
+
+The pagination-to-wallet handoff transfers compact rejected dictionaries instead
+of copying the full list of dictionaries again. Regression verification compares
+every Excel cell before/after compaction, opens an actual generated workbook, and
+exercises 220,000 rows through in-memory result plus JSON persistence copies under
+an explicit process memory limit. The raw-page cache remains available for retries;
+page counts during replay describe reconstructed working results, not lost fetches.
+
+Reproduce the full-size handoff check with
+`PYTHONPATH=backend python backend/tests/bench_stage_one_handoff.py`.
+The September 7 check completed 220,000 rows with a 198,720,037-byte JSON payload,
+709 MiB peak RSS and a 1,800 MiB address-space limit. This is an isolated synthetic
+handoff measurement, not a claim that a production scan or export has completed.

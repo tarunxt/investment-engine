@@ -6029,7 +6029,7 @@ class BullpenAutoLiveEngine:
             from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
             with ScanSourceWriter() as streaming_sources:
                 def store_rejected_source(rejected: ScanRejectedMarket) -> None:
-                    rejected.serialized_candidate = streaming_sources.store(
+                    rejected.serialized_candidate = streaming_sources.store_rejected(
                         _serialize_rejected_scan_candidate(rejected)
                     )
                     rejected.source_market = None
@@ -6107,9 +6107,15 @@ class BullpenAutoLiveEngine:
                             f"Preparing Stage 1 exports: {rejected_index:,} rejected rows processed.",
                             completed_items=scanned_total_candidates,
                         )
-                    stage1_rejected_candidates.append(source_store.store(
-                        _serialize_rejected_scan_candidate(rejected)
-                    ))
+                    # Transfer ownership instead of copying the full rejected
+                    # catalogue again during the export/wallet handoff.
+                    candidate = rejected.serialized_candidate
+                    if candidate is None:
+                        candidate = source_store.store_rejected(
+                            _serialize_rejected_scan_candidate(rejected)
+                        )
+                    stage1_rejected_candidates.append(candidate)
+                    rejected.serialized_candidate = None
                     rejected.source_market = None
 
             market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
@@ -13780,4 +13786,3 @@ class BullpenAutoLiveEngine:
             stage_results=candidate.stage_results,
             guardrail_checks=guardrail_checks,
         )
-
