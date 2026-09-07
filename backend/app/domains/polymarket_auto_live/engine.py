@@ -6071,10 +6071,20 @@ class BullpenAutoLiveEngine:
                 )
                 for market in scanned.accepted
             ]
-            stage1_rejected_candidates = [
-                _serialize_rejected_scan_candidate(rejected)
-                for rejected in scanned.rejected
-            ]
+            # Gamma source payloads must survive for exhaustive Excel exports, but
+            # retaining raw objects plus base64 payloads in every run/heartbeat copy
+            # can exhaust the planner's memory at Full Universe scale.
+            from app.domains.polymarket_auto_live.scan_source_store import ScanSourceWriter
+            stage1_rejected_candidates = []
+            with ScanSourceWriter() as source_store:
+                for candidate in stage1_accepted_candidates:
+                    source_store.store(candidate)
+                for rejected in scanned.rejected:
+                    stage1_rejected_candidates.append(source_store.store(
+                        _serialize_rejected_scan_candidate(rejected)
+                    ))
+                    rejected.source_market = None
+
             market_by_slug = {market.slug: market for market in scanned.accepted if market.slug}
             market_by_id = {market.market_id: market for market in scanned.accepted}
             scan_seed_markets = scanned.accepted
@@ -6104,6 +6114,10 @@ class BullpenAutoLiveEngine:
                         ),
                         reason=reason,
                     )
+
+            # Only accepted ScannedMarket objects are used by later review stages.
+            # Drop the catalogue container before wallet reconciliation/persistence.
+            del scanned
 
         def fail_stage_one_wallet_refresh(reason: str) -> EngineResult:
             completed_at = utc_now_iso()

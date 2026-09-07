@@ -42,7 +42,12 @@ def decode_scan_export_data(row: dict[str, Any]) -> dict[str, Any]:
     value = row.get("scan_export_data")
     if not value:
         return {"event": {}, "market": {}}
-    return json.loads(zlib.decompress(base64.b64decode(value)))
+    if str(value).startswith("source-v1:"):
+        from app.domains.polymarket_auto_live.scan_source_store import read_scan_source
+        compressed = read_scan_source(value)
+    else:
+        compressed = base64.b64decode(value)
+    return json.loads(zlib.decompress(compressed))
 
 
 def _export_headers(rows: Iterable[dict[str, Any]]) -> tuple[str, ...]:
