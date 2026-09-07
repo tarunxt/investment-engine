@@ -1785,3 +1785,6 @@ Docker production workers and API share the export volume; systemd uses the
 same backend export directory. BULLPEN_EXPORT_DIR may override that location.
 The legacy direct endpoint is retained for compatibility, while the console
 uses prepared=true to serve only a completed artifact.
+The preparation/status proxy has a dedicated 30-second budget. A transient
+502/503/504 triggers bounded status checks before any repeat submission, so a
+successful publish followed by a proxy timeout does not become a false failure.
