@@ -70,6 +70,10 @@ _STAGE_INPUT_KEYS = {
     "source_run_id",
 }
 _STAGE_OUTPUT_KEYS = {
+    "scan_scope",
+    "scan_completeness",
+    "scan_warning",
+    "scan_details",
     "workflow_stage_key",
     "phase_status",
     "progress_commentary",
@@ -642,6 +646,10 @@ def build_minimal_workflow_stage_results(
             stage.outputs,
             (
                 "phase_status",
+                "scan_scope",
+                "scan_completeness",
+                "scan_warning",
+                "scan_details",
                 "scanned_candidates",
                 "completed_items",
                 "total_items",

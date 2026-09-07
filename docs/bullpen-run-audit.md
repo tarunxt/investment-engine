@@ -1842,3 +1842,10 @@ legacy snapshots without proof remain unverified rather than inferred complete.
 The Gamma normalizer now populates volume_24hr_usd from volume24hr so the saved
 24-hour-volume filter evaluates actual data instead of an always-missing field.
 Historical snapshots and filter thresholds are not rewritten.
+
+The compact console projection and minimal-stage fallback now retain bounded
+`scan_scope`, `scan_completeness`, `scan_warning`, and `scan_details` fields so
+clients can distinguish partial Full Universe results. This is an additive v2
+projection change; existing frozen snapshots are not rewritten or assigned
+completion evidence they never recorded. Projection regression tests cover both
+partial and complete outcomes, warning truncation, and exclusion of raw exports.

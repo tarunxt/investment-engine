@@ -210,3 +210,34 @@ async def test_exhausted_transient_retries_preserve_incomplete_results(monkeypat
 def test_gamma_daily_volume_reaches_saved_filter(volume):
     market = scanner._normalize_market({**row('volume'), 'volume24hr': volume})
     assert market.volume_24hr_usd == volume
+
+@pytest.mark.parametrize('completeness', ['partial', 'complete'])
+def test_console_projections_preserve_scan_completion_evidence(completeness):
+    from typing import Any, Iterable
+    from types import SimpleNamespace
+    path = Path(__file__).parents[1] / 'app/domains/polymarket_auto_live/console_projection.py'
+    tree = ast.parse(path.read_text())
+    functions = {'_bounded_value', '_select_keys', '_compact_stage', 'build_minimal_workflow_stage_results'}
+    nodes = [n for n in tree.body if
+             (isinstance(n, ast.FunctionDef) and n.name in functions) or
+             (isinstance(n, ast.Assign) and all(isinstance(t, ast.Name) and t.id.startswith('_') for t in n.targets))]
+    class Stage(SimpleNamespace):
+        def model_dump(self, **kwargs):
+            return vars(self).copy()
+        def model_copy(self, update):
+            return Stage(**(vars(self) | update))
+    ns = {'Any': Any, 'Iterable': Iterable, 'BullpenAutoLiveStageResult': Stage,
+          'canonical_workflow_stage_results': lambda stages: stages,
+          'workflow_stage_key': lambda stage: 'scan'}
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(path), 'exec'), ns)
+    evidence = dict(scan_scope='full_universe', scan_completeness=completeness,
+                    scan_warning='Warning ' * 200, scan_details='Cursor status')
+    stage = Stage(inputs={}, outputs=evidence | {'scan_export_data': 'large raw payload'}, guardrails_checked=[])
+    for outputs in (ns['_compact_stage'](stage)['outputs'],
+                    ns['build_minimal_workflow_stage_results']([stage])[0].outputs):
+        assert outputs['scan_scope'] == 'full_universe'
+        assert outputs['scan_completeness'] == completeness
+        assert outputs['scan_details'] == 'Cursor status'
+        assert outputs['scan_warning'].startswith('Warning ')
+        assert len(outputs['scan_warning']) <= ns['_MAX_STRING_LENGTH'] + 1
+        assert 'scan_export_data' not in outputs
