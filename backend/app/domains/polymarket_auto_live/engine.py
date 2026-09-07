@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket_auto_live.stage_one_excel import encode_scan_export_data
+
 from dataclasses import asdict
 
 import asyncio
@@ -3258,6 +3260,7 @@ def _serialize_scan_candidate(
 ) -> dict[str, object]:
     raw = market.raw if isinstance(market.raw, dict) else {}
     return {
+        "scan_export_data": encode_scan_export_data(raw),
         "question_id": (
             str(raw.get("question_id")).strip()
             if isinstance(raw.get("question_id"), str)
@@ -3340,6 +3343,7 @@ def _serialize_rejected_scan_candidate(
     rejected: ScanRejectedMarket,
 ) -> dict[str, object]:
     return {
+        **(_serialize_scan_candidate(rejected.source_market) if rejected.source_market is not None else {}),
         "market_id": rejected.market_id,
         "question": rejected.question,
         "market_title": rejected.question,
@@ -5643,6 +5647,8 @@ class BullpenAutoLiveEngine:
             max_llm_candidates_per_run=max(1, settings.max_llm_candidates_per_run),
         )
 
+        latest_scan_progress: dict[str, object] = {}
+
         def report_stage1_progress(
             reason: str,
             *,
@@ -5656,6 +5662,10 @@ class BullpenAutoLiveEngine:
             }
             if outputs:
                 progress_outputs.update(outputs)
+                if isinstance(outputs.get("scan_progress"), dict):
+                    latest_scan_progress.update(outputs["scan_progress"])
+            if latest_scan_progress:
+                progress_outputs["scan_progress"] = {**latest_scan_progress, "message": reason}
             set_run_stage_result(
                 run,
                 build_workflow_stage_result(
@@ -5991,6 +6001,24 @@ class BullpenAutoLiveEngine:
                     "used_manual_console_rows": False,
                 },
             )
+            def report_scan_page(scanned_markets: int, completed_pages: int) -> None:
+                label = "Full Universe" if scan_scope == "full_universe" else "Trending"
+                message = f"Scanning {label}: {scanned_markets:,} markets across {completed_pages} pages."
+                report_stage1_progress(
+                    message,
+                    completed_items=scanned_markets,
+                    outputs={
+                        "scan_scope": scan_scope,
+                        "scan_progress": {
+                            "scannedMarkets": scanned_markets,
+                            "completedPages": completed_pages,
+                            "currentPage": completed_pages,
+                            "lastUpdatedAt": datetime.now(UTC).isoformat(),
+                            "message": message,
+                        },
+                    },
+                )
+
             scanned = await scan_console_profile_markets(
                 now=now,
                 min_market_odds=settings.console_min_market_odds,
@@ -6016,6 +6044,7 @@ class BullpenAutoLiveEngine:
                 exclude_custom_phrases=settings.console_exclude_custom_phrases,
                 custom_exclude_phrases=settings.console_custom_exclude_phrases,
                 scan_scope=scan_scope,
+                progress_callback=report_scan_page,
             )
             scan_source_label = scanned.source_label
             scan_source_url = scanned.source_url
@@ -6924,6 +6953,7 @@ class BullpenAutoLiveEngine:
                 item_label="events",
                 outputs={
                     **stage1_wallet_position_outputs,
+                    **({"scan_progress": dict(latest_scan_progress)} if latest_scan_progress else {}),
                     "pending_historical_exit_positions": len(pending_historical_sell_keys),
                     "pending_historical_redeem_conditions": len(
                         pending_historical_redeem_condition_ids

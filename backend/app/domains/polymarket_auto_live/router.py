@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 import asyncio
 import hashlib
 import json
@@ -839,6 +841,7 @@ async def get_auto_live_run(
 @router.get("/runs/{run_id}/stage-one.xlsx", response_class=FileResponse)
 async def download_auto_live_stage_one_excel(
     run_id: str,
+    scope: Literal["all-scanned", "filtered"] = "all-scanned",
     current_user: User = Depends(get_current_user),
 ):
     """Download every persisted Stage 1 row without using the bounded console projection."""
@@ -849,6 +852,7 @@ async def download_auto_live_stage_one_excel(
         path, filename, row_count = await run_in_threadpool(
             build_stage_one_excel,
             run,
+            scope,
         )
     except StageOneExcelExportError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

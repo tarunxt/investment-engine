@@ -808,6 +808,7 @@ type StageTwoLlmRunBreakupKind =
   | "unique-llm-rows";
 
 type ScanCandidateDialogState = {
+  runId?: string | null;
   mode: ScanCandidateDialogMode;
   isIndependentStageOne: boolean;
   scanExportId: string | null;
@@ -2219,6 +2220,10 @@ function StageOneRunStats({
       } else {
         onRecoverLegacyExport?.("filtered");
       }
+      return;
+    }
+    if (run?.id) {
+      downloadCompleteStageOneRunExcel(run.id, "filtered");
       return;
     }
     void downloadStageOneFilteredEventsExcel({
@@ -4532,15 +4537,20 @@ function StageOneOutputDialog({
   });
   const downloadFilteredEvents = () => {
     if (state.scanExportId) {
-      downloadIndependentStageOneExcel(state.scanExportId, "filtered");
+      downloadIndependentStageOneExcel(state.scanExportId, state.mode === "all-scanned" ? "all-scanned" : "filtered");
       return;
     }
     if (state.isIndependentStageOne && onRecoverLegacyExport) {
       onClose();
-      onRecoverLegacyExport("filtered");
+      onRecoverLegacyExport(state.mode === "all-scanned" ? "all-scanned" : "filtered");
       return;
     }
-    void downloadStageOneFilteredEventsExcel({
+    if (state.runId && !state.isIndependentStageOne) {
+      downloadCompleteStageOneRunExcel(state.runId, state.mode === "all-scanned" ? "all-scanned" : "filtered");
+      return;
+    }
+    const download = state.mode === "all-scanned" ? downloadStageOneAllScannedEventsExcel : downloadStageOneFilteredEventsExcel;
+    void download({
       candidates: filteredEventExportRows,
       scanCompletedAt: state.scanCompletedAt,
     });
@@ -5341,6 +5351,7 @@ function buildRunDetailScanCandidateDialogState({
 
   return {
     mode,
+    runId: run?.id ?? null,
     isIndependentStageOne: stage.outputs.independent_stage1_scan === true,
     scanExportId: readStageOutputString(stage.outputs.scan_export_id),
     scanCompletedAt: stage.timerCompletedAt,
@@ -14692,6 +14703,7 @@ export function BullpenAutoRunScheduleCard({
               const stage =
                 workflowStage.key === "scan" &&
                 stageOneResultSource === "independent" &&
+                !runIsActive &&
                 independentStageOneView
                   ? independentStageOneView
                   : workflowStage;
@@ -14786,8 +14798,22 @@ export function BullpenAutoRunScheduleCard({
                 );
               const isIndependentStageOneActive =
                 stage.key === "scan" && isIndependentStageOneScanning;
+              const isAutoStageOneActive =
+                stage.key === "scan" && runIsActive && stage.isCurrent;
+              const isStageOneActive = isIndependentStageOneActive || isAutoStageOneActive;
+              const autoScanProgress = isRecord(stage.outputs.scan_progress) ? stage.outputs.scan_progress : null;
+              const displayedScanProgress = isIndependentStageOneActive
+                ? independentStageOneProgress
+                : {
+                    scannedMarkets: readStageOutputNumber(autoScanProgress?.scannedMarkets) ?? 0,
+                    currentPage: readStageOutputNumber(autoScanProgress?.currentPage) ?? 1,
+                    lastUpdatedAt: readStageOutputString(autoScanProgress?.lastUpdatedAt) ?? stage.timerStartedAt ?? "",
+                    message: readStageOutputString(autoScanProgress?.message) ?? stage.detail ?? "Starting scan…",
+                    status: "scanning",
+                    retryCount: 0,
+                  };
               const toneClasses = getWorkflowToneClasses(
-                isIndependentStageOneActive
+                isStageOneActive
                   ? "yellow"
                   : selectedRunSummaryTile === "next" && !runIsActive
                   ? "slate"
@@ -14804,7 +14830,7 @@ export function BullpenAutoRunScheduleCard({
                 (stage.key === "scan" &&
                   stageOneResultSource === "independent" &&
                   independentStageOneView !== null);
-              const stageStatusLabel = isIndependentStageOneActive
+              const stageStatusLabel = isStageOneActive
                 ? "Working"
                 : immediateSuccess
                 ? "Finished"
@@ -14816,19 +14842,19 @@ export function BullpenAutoRunScheduleCard({
                       ? "Finished"
                       : "In Queue";
               const stageProgressPercent =
-                isIndependentStageOneActive
+                isStageOneActive
                   ? 100
                   : immediateSuccess || investPreviewFinished
                   ? 100
                   : stage.progressPercent;
               const stageProgressLabel =
-                isIndependentStageOneActive
-                  ? `${independentStageOneProgress?.scannedMarkets.toLocaleString("en-IN") ?? "0"} markets scanned · Page ${independentStageOneProgress?.currentPage ?? 1}`
+                isStageOneActive
+                  ? `${displayedScanProgress?.scannedMarkets.toLocaleString("en-IN") ?? "0"} markets scanned · Page ${displayedScanProgress?.currentPage ?? 1}`
                   : investPreviewFinished && stage.key === "invest"
                   ? "Finished"
                   : stage.progressLabel;
               const showStageSpinner =
-                isIndependentStageOneActive ||
+                isStageOneActive ||
                 (stage.isCurrent && !immediateSuccess && !investPreviewFinished);
               const displayedStageTimerStartedAt = isIndependentStageOneActive
                 ? independentStageOneStartedAt
@@ -15050,25 +15076,25 @@ export function BullpenAutoRunScheduleCard({
                           )}
                         </span>
                       </div>
-                      {stage.key === "scan" && isIndependentStageOneActive ? (
+                      {stage.key === "scan" && isStageOneActive ? (
                         <div
                           className={`mt-2 rounded-lg border px-3 py-2 ${
-                            independentStageOneProgress?.status === "retrying"
+                            displayedScanProgress?.status === "retrying"
                               ? "border-red-300 bg-red-50 text-red-800 dark:border-red-400/40 dark:bg-red-950/40 dark:text-red-100"
                               : "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-400/40 dark:bg-amber-950/40 dark:text-amber-100"
                           }`}
                           aria-live="polite"
                         >
                           <div className="font-semibold">
-                            {independentStageOneProgress?.message ??
+                            {displayedScanProgress?.message ??
                               "Starting Full Universe scan..."}
                           </div>
                           <div className="mt-1 tabular-nums">
-                            {(independentStageOneProgress?.scannedMarkets ?? 0).toLocaleString("en-IN")} markets scanned
-                            {" · "}Page {independentStageOneProgress?.currentPage ?? 1}
+                            {(displayedScanProgress?.scannedMarkets ?? 0).toLocaleString("en-IN")} markets scanned
+                            {" · "}Page {displayedScanProgress?.currentPage ?? 1}
                             {" · "}Last update {(() => {
                               const updatedAt = Date.parse(
-                                independentStageOneProgress?.lastUpdatedAt ?? "",
+                                displayedScanProgress?.lastUpdatedAt ?? "",
                               );
                               if (!Number.isFinite(updatedAt)) return "just now";
                               const seconds = Math.max(
@@ -15078,9 +15104,9 @@ export function BullpenAutoRunScheduleCard({
                               return seconds < 2 ? "just now" : `${seconds}s ago`;
                             })()}
                           </div>
-                          {(independentStageOneProgress?.retryCount ?? 0) > 0 ? (
+                          {(displayedScanProgress?.retryCount ?? 0) > 0 ? (
                             <div className="mt-1 font-semibold">
-                              Retry attempts: {independentStageOneProgress?.retryCount}
+                              Retry attempts: {displayedScanProgress?.retryCount}
                             </div>
                           ) : null}
                         </div>

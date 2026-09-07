@@ -1715,3 +1715,28 @@ Bullpen Trending rows, complete-catalogue markets, active wallet positions,
 filter-eligible markets, wallet markets added to the union, and the final missing
 wallet-market count. A complete Full Universe handoff requires
 `missing_active_market_count=0`.
+
+## Active Auto Run Stage 1 progress
+
+The active Auto Run takes precedence over a previously selected independent scan
+in the worker card. While Stage 1 runs, the card is yellow and shows live elapsed
+time plus the worker's normalized market count, page count, and last update age.
+The scanner emits progress after each successfully processed Gamma page. The
+additive `scan_progress` Stage 1 output is persisted and preserved by compact
+console projections and live detail merging; audit Stage 1 outputs retain the
+same evidence. Counts are not an estimated percentage of an unknown universe.
+Older snapshots without this field remain readable. No scan filters, LLM inputs,
+or execution eligibility change.
+
+## Exhaustive Stage 1 Excel schema
+
+All Stage 1 Excel downloads use the same ordered 220-column baseline, regardless
+of scope, trigger, or passed/all selection. Additional observed API fields append
+after that baseline. Missing historical fields remain blank; exports never fetch
+current values to silently rewrite a frozen scan. New scans retain compressed,
+export-only `scan_export_data` on both accepted and rejected rows, including parent
+event fields (excluding its repeated markets array) and child-market fields.
+Compact console projections omit that payload. Auto Run filtered downloads read
+the full persisted run through the existing Excel endpoint with `scope=filtered`,
+which retains the default all-scanned behaviour for existing callers. Header parity
+and source-value tests cover both selections and the frontend schema copy.

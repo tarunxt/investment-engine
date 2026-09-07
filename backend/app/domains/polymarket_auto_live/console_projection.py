@@ -42,6 +42,7 @@ _LIST_LIMITS = {
     "llm_target_runs": 0,
 }
 _DROPPED_KEYS = {
+    "scan_export_data",
     "raw",
     "raw_output",
     "raw_response",
@@ -72,6 +73,7 @@ _STAGE_OUTPUT_KEYS = {
     "workflow_stage_key",
     "phase_status",
     "progress_commentary",
+    "scan_progress",
     "error_message",
     "failure_category",
     "cancellation_state",

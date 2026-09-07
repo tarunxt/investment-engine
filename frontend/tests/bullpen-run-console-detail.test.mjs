@@ -477,3 +477,17 @@ test("compact polls cannot erase the terminal authoritative Stage 2 contract", a
   assert.equal(outputs.stage2_actionable_buy_count, 5);
   assert.equal(outputs.orders_processed, 9);
 });
+
+ test("active scan page counts advance through compact polling", async () => {
+  const { mergeBullpenConsoleRunProjection } = await loadModule();
+  const scanStage = (count) => ({ ...stage("pass", {
+    workflow_stage_key: "scan", phase_status: "running",
+    scan_progress: { scannedMarkets: count, currentPage: count / 100 },
+  }), stage_number: 1 });
+  const merged = mergeBullpenConsoleRunProjection({
+    existing: run(scanStage(100)), projected: run(scanStage(200)), projectionAvailable: true,
+  });
+  assert.deepEqual(merged.stage_results[0].outputs.scan_progress, {
+    scannedMarkets: 200, currentPage: 2,
+  });
+});
