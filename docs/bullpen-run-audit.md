@@ -1849,3 +1849,22 @@ clients can distinguish partial Full Universe results. This is an additive v2
 projection change; existing frozen snapshots are not rewritten or assigned
 completion evidence they never recorded. Projection regression tests cover both
 partial and complete outcomes, warning truncation, and exclusion of raw exports.
+
+### Stage 1 worker-loss recovery and accepted-source retention
+
+Full Universe Auto Runs cache each successfully fetched Gamma keyset page under a
+run-scoped, versioned directory before applying filters. Writes use gzip, fsync,
+and atomic replacement. Worker redelivery replays those saved pages with the run's
+filters, deduplicates market IDs, then continues from the first unfetched cursor.
+A new run has a separate cache. A corrupt page is refetched. Completion still
+requires the terminal cursor; cached pages do not fabricate completion. This
+preserves original fetched source evidence rather than silently replacing it on
+retry. Existing runs without cached pages cannot recover work from before rollout.
+
+Accepted markets now spool exhaustive source data during pagination as rejected
+markets already did. In-memory raw values keep scalar identity/routing fields and
+a source reference, avoiding accumulated nested event payloads. Stage 1 serializers
+reuse the reference; Excel and trade-analysis audit snapshots restore the stored
+source fields. Historical frozen snapshots and filter/trading eligibility are
+unchanged. Tests cover accepted-source fidelity, interrupted pagination replay,
+terminal-cursor reuse, deduplication, run/query isolation and corrupt-page fallback.

@@ -241,3 +241,74 @@ def test_console_projections_preserve_scan_completion_evidence(completeness):
         assert outputs['scan_warning'].startswith('Warning ')
         assert len(outputs['scan_warning']) <= ns['_MAX_STRING_LENGTH'] + 1
         assert 'scan_export_data' not in outputs
+
+@pytest.mark.asyncio
+async def test_passed_markets_spool_nested_payloads_and_keep_exact_excel_source(monkeypatch, tmp_path):
+    from app.domains.polymarket_auto_live.scan_source_store import restore_market_raw
+    monkeypatch.setattr(scan_source_store, 'SOURCE_ROOT', tmp_path / 'sources')
+    original = row('accepted')
+    original['conditionId'] = 'condition-123'
+    original['_export_event']['metadata'] = {'large': ['x' * 1000] * 1000}
+    async def fetch(*args, **kwargs):
+        return [original], None
+    monkeypatch.setattr(scanner, '_fetch_gamma_keyset_page', fetch)
+    with scan_source_store.ScanSourceWriter() as writer:
+        result = await scanner.scan_candidate_markets(
+            min_liquidity_usd=0, apply_base_filters=False, use_keyset_pagination=True,
+            accepted_callback=writer.store_market)
+    market = result.accepted[0]
+    assert market.raw['conditionId'] == 'condition-123'
+    assert all(not isinstance(value, (list, dict)) for value in market.raw.values())
+    expected = decode_scan_export_data({'scan_export_data': encode_scan_export_data(original)})
+    actual = decode_scan_export_data({'scan_export_data': market.raw['_scan_export_data']})
+    assert actual == expected
+    assert restore_market_raw(market)['_export_event'] == expected['event']
+    # Exercise the production serializer, including its stored-reference path.
+    path = Path(__file__).parents[1] / 'app/domains/polymarket_auto_live/engine.py'
+    node = next(n for n in ast.parse(path.read_text()).body if isinstance(n, ast.FunctionDef) and n.name == '_serialize_scan_candidate')
+    ns = {'ScannedMarket': scanner.ScannedMarket, 'encode_scan_export_data': encode_scan_export_data}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), 'exec'), ns)
+    assert decode_scan_export_data(ns['_serialize_scan_candidate'](market)) == expected
+
+
+@pytest.mark.asyncio
+async def test_worker_redelivery_replays_saved_pages_then_continues_cursor(monkeypatch, tmp_path):
+    monkeypatch.setattr(scan_source_store, 'SOURCE_ROOT', tmp_path / 'sources')
+    calls = []
+    async def crash_after_first_page(client, *, after_cursor=None, **kwargs):
+        calls.append(after_cursor)
+        if after_cursor is None:
+            return [row('first')], 'next'
+        raise asyncio.CancelledError()
+    monkeypatch.setattr(scanner, '_fetch_gamma_keyset_page', crash_after_first_page)
+    options = dict(min_liquidity_usd=0, apply_base_filters=False, use_keyset_pagination=True,
+                   page_cache_key='run-123', filter_parent_deadlines=False)
+    with pytest.raises(asyncio.CancelledError):
+        await scanner.scan_candidate_markets(**options)
+    assert calls == [None, 'next']
+    calls.clear()
+    async def finish(client, *, after_cursor=None, **kwargs):
+        calls.append(after_cursor)
+        assert after_cursor == 'next'
+        return [row('first'), row('last')], None
+    monkeypatch.setattr(scanner, '_fetch_gamma_keyset_page', finish)
+    result = await scanner.scan_candidate_markets(**options)
+    assert calls == ['next']
+    assert result.complete_universe
+    assert [m.market_id for m in result.accepted] == ['first', 'last']
+    calls.clear()
+    replay = await scanner.scan_candidate_markets(**options, market_filter=lambda m: ['new filter'])
+    assert calls == []
+    assert replay.complete_universe and len(replay.rejected) == 2
+
+
+def test_page_cache_isolates_runs_and_ignores_torn_writes(monkeypatch, tmp_path):
+    from app.domains.polymarket_auto_live.scan_page_cache import ScanPageCache
+    monkeypatch.setattr(scan_source_store, 'SOURCE_ROOT', tmp_path / 'sources')
+    first, second = ScanPageCache('run1'), ScanPageCache('run2')
+    first.write(None, None, [row('one')], 'next')
+    assert first.read(None, None)[1] == 'next'
+    assert second.read(None, None) is None
+    assert first.read(None, 'different-query') is None
+    first.path(None, None).write_bytes(b'broken gzip')
+    assert first.read(None, None) is None

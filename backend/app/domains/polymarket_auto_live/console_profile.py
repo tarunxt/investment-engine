@@ -1076,6 +1076,8 @@ async def scan_console_profile_markets(
     scan_scope: ConsoleScanScope = "trending",
     progress_callback: Callable[[int, int], None] | None = None,
     rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
+    accepted_callback: Callable[[ScannedMarket], None] | None = None,
+    page_cache_key: str | None = None,
 ) -> ConsoleScanResult:
     scanned_at = datetime.now(UTC).isoformat()
     cli_result: ConsoleScanResult | None = None
@@ -1186,6 +1188,8 @@ async def scan_console_profile_markets(
             **({"progress_callback": progress_callback} if progress_callback else {}),
             **({"market_filter": filter_market, "rejected_callback": rejected_callback}
                if rejected_callback is not None else {}),
+            **({"accepted_callback": accepted_callback} if accepted_callback else {}),
+            **({"page_cache_key": page_cache_key} if page_cache_key else {}),
         )
         gamma_scan = (
             await gamma_scan_coro

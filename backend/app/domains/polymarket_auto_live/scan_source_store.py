@@ -34,6 +34,24 @@ class ScanSourceWriter:
         os.fsync(self.handle.fileno())
         self.handle.close()
 
+    def store_market(self, market) -> None:
+        """Retain cheap routing fields; preserve every original field on disk."""
+        from app.domains.polymarket_auto_live.stage_one_excel import encode_scan_export_data
+        raw = market.raw or {}
+        stored = self.store({'scan_export_data': encode_scan_export_data(raw)})
+        market.raw = {key: value for key, value in raw.items()
+                      if value is None or isinstance(value, (str, int, float, bool))}
+        market.raw['_scan_export_data'] = stored['scan_export_data']
+
+
+def restore_market_raw(market) -> dict:
+    raw = market.raw or {}
+    if not raw.get('_scan_export_data'):
+        return raw
+    from app.domains.polymarket_auto_live.stage_one_excel import decode_scan_export_data
+    source = decode_scan_export_data({'scan_export_data': raw['_scan_export_data']})
+    return {**source['market'], '_export_event': source['event'], 'events': [source['event']]}
+
 
 def read_scan_source(value: str) -> bytes:
     match = _REFERENCE.fullmatch(value)
