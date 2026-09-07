@@ -20,3 +20,24 @@ jobs:
             sudo systemctl show investor-backend investor-celery-worker --property=ActiveState,MemoryCurrent
             sudo journalctl -u investor-backend -u investor-celery-worker --since '15 minutes ago' --no-pager | python3 -c 'import sys,re; lines=sys.stdin; patterns=[r"Task app.domains.polymarket_auto_live.export_tasks.prepare_stage_one_excel[^\\n]*",r"(?:ModuleNotFoundError|ImportError|TimeoutError|ConnectionError|OperationalError|PermissionError|TypeError|AttributeError|RedisError|ValueError):[^\n]*",r"Stage 1 Excel preparation failed",r"Could not queue Stage 1 export",r"Received unregistered task[^\n]*",r"POST /polymarket/auto-live/runs/[^ ]+/stage-one-export[^\n]*"]; [print(m.group(0)[:300]) for line in lines for pattern in patterns if (m:=re.search(pattern,line)) and not re.search(r"password|token|secret|key=|://",m.group(0),re.I)]'
             sudo find '${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}/backend/.stage-one-exports' -maxdepth 1 -name '*.xlsx' -printf 'Prepared workbook bytes: %s\n' 2>/dev/null || true
+            sudo bash <<'CHECK'
+            set -a
+            . /etc/investor/backend.env
+            set +a
+            cd "${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}/backend"
+            timeout 25 .venv/bin/python - <<'PY'
+            import json, time
+            from app.domains.polymarket_auto_live.export_jobs import client
+            from app.infrastructure.messaging.celery_app import celery
+            with client() as cache:
+                for key in cache.scan_iter('bullpen:excel:v2:*'):
+                    if key.endswith(':lock'):
+                        continue
+                    data = json.loads(cache.get(key) or '{}')
+                    print('Export state:', data.get('status'), 'rows:', data.get('row_count'), 'ttl:', cache.ttl(key))
+            active = celery.control.inspect(timeout=5).active() or {}
+            for tasks in active.values():
+                for task in tasks:
+                    print('Active task:', task.get('name'), 'seconds:', round(time.time() - (task.get('time_start') or time.time())))
+            PY
+            CHECK
