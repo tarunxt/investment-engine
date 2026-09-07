@@ -1926,3 +1926,12 @@ expires. It does not create jobs for absent status keys or steal a live lease, a
 keeps the same user/run/scope ownership key. This repairs old orphaned `working`
 records as well as new worker failures without rescanning markets. The targeted
 export/scanner suite passes 23 tests including this recovery boundary.
+
+### Duplicate planner delivery outcomes
+
+Duplicate deliveries rejected by the Redis lease or PostgreSQL execution fence
+raise Celery Ignore, preserving the executing owner's result and lifecycle.
+Recovery does not synthesize a failed audit snapshot from a retained SUCCESS
+result while inspection still observes that task active, reserved, or scheduled.
+The absolute runtime breaker remains authoritative. Existing frozen snapshots
+are unchanged; this uses the existing lifecycle and stage-status schema.

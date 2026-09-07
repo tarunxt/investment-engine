@@ -1028,6 +1028,15 @@ def reconcile_running_auto_live_run(
             run.task_lifecycle.task_id if run.task_lifecycle is not None else None
         ),
     )
+    # Older workers could publish SUCCESS when a same-ID duplicate exited.
+    # Live worker evidence wins over that retained result, but never over the
+    # absolute runtime breaker. Do this before the Stage 3 handoff as well.
+    if (
+        (runtime_snapshot.state or "").strip().upper() == "SUCCESS"
+        and runtime_snapshot.is_live
+        and reference_now - normalized_started_at < AUTO_LIVE_RUN_ABSOLUTE_TIMEOUT
+    ):
+        return None
     if (
         (runtime_snapshot.state or "").strip().upper() == "SUCCESS"
         and _task_snapshot_matches_current_lifecycle(run, runtime_snapshot)

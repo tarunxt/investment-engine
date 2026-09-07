@@ -1399,3 +1399,23 @@ async def test_run_once_queues_new_run_after_recovering_stale_running_record(mon
     assert added_record.status == "running"
     assert result.task_lifecycle.state == "QUEUED"
     assert result.task_lifecycle.queue == "auto_live"
+
+
+@pytest.mark.parametrize("live_field", ["is_active", "is_reserved", "is_scheduled"])
+def test_duplicate_success_does_not_fail_live_planner(live_field):
+    run = BullpenAutoLiveRun(
+        id="live-duplicate-success", triggered_by="manual", status="running",
+        dry_run=True, started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 1 finished; Stage 2 pending.",
+    )
+    recovered = reconcile_running_auto_live_run(
+        run, started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 20, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 21, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="same-id", state="SUCCESS", **{live_field: True},
+        ),
+    )
+    assert recovered is None
+    assert run.status == "running"
+    assert run.error_message is None
