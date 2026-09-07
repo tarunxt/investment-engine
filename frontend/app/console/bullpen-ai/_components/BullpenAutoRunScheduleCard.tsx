@@ -14010,7 +14010,7 @@ export function BullpenAutoRunScheduleCard({
           recentDecisions={recentDecisions}
           onRefresh={() => void refreshPortfolioSnapshot(true)}
         />
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-fuchsia-700">
@@ -14102,7 +14102,7 @@ export function BullpenAutoRunScheduleCard({
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap gap-2 xl:shrink-0 xl:justify-end">
             <Button
               type="button"
               variant="outline"
@@ -14170,34 +14170,6 @@ export function BullpenAutoRunScheduleCard({
                 )}
               </Button>
             )}
-            {optimisticSchedulerState ? (
-              <div
-                className="basis-full rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold leading-5 text-sky-900 shadow-sm"
-                aria-live="polite"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Loader2
-                    className="h-3.5 w-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                  {optimisticSchedulerState.message}
-                </span>
-              </div>
-            ) : null}
-            {startNowProgress ? (
-              <div
-                className="basis-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 shadow-sm"
-                aria-live="polite"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Loader2
-                    className="h-3.5 w-3.5 animate-spin"
-                    aria-hidden="true"
-                  />
-                  {startNowProgress}
-                </span>
-              </div>
-            ) : null}
             {showRunTimer ? (
               <div
                 className="inline-flex items-center justify-center gap-1 text-center text-xs font-semibold tabular-nums text-sky-800"
@@ -14209,6 +14181,34 @@ export function BullpenAutoRunScheduleCard({
             ) : null}
           </div>
         </div>
+        {optimisticSchedulerState ? (
+          <div
+            className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold leading-5 text-sky-900 shadow-sm"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Loader2
+                className="h-3.5 w-3.5 shrink-0 animate-spin"
+                aria-hidden="true"
+              />
+              {optimisticSchedulerState.message}
+            </span>
+          </div>
+        ) : null}
+        {startNowProgress ? (
+          <div
+            className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold leading-5 text-emerald-900 shadow-sm"
+            aria-live="polite"
+          >
+            <span className="inline-flex items-center gap-2">
+              <Loader2
+                className="h-3.5 w-3.5 shrink-0 animate-spin"
+                aria-hidden="true"
+              />
+              {startNowProgress}
+            </span>
+          </div>
+        ) : null}
 
         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
           <fieldset className="mb-4">
@@ -15903,4 +15903,3 @@ export function BullpenAutoRunScheduleCard({
     </Card>
   );
 }
-
