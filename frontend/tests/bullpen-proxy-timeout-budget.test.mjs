@@ -97,3 +97,10 @@ test("the updated backend proxy route parses as TypeScript", () => {
     [],
   );
 });
+
+test("database history routes use fixed circuit scopes distinct from wallet reads", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+  assert.match(source, /path === "polymarket\/auto-live\/history"/);
+  assert.match(source, /path === "polymarket\/auto-live\/history\/event-trends"/);
+  assert.match(source, /circuitScope: historyCircuitScope/);
+});

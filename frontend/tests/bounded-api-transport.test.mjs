@@ -363,3 +363,35 @@ test("concurrent token refreshes share exactly one single-flight operation", asy
     { accessToken: "server-only" },
   ]);
 });
+
+test("slow wallet requests cannot suppress history or trends on the same origin", async () => {
+  const circuit = new ApiOriginCircuitBreaker(1, 30_000);
+  circuit.recordFailure(direct, "normal", 0);
+  circuit.recordFailure(proxy, "normal", 0);
+  const calls = [];
+  for (const scope of ["polymarket/auto-live/history", "polymarket/auto-live/history/event-trends"]) {
+    const candidates = [direct, proxy].map(candidate => ({ ...candidate, circuitScope: scope }));
+    const result = await executeBoundedApiRequest(baseOptions({
+      circuit,
+      candidates,
+      fetchCandidate: async candidate => {
+        calls.push(candidate.circuitScope);
+        return response(200, '{"page":2}');
+      },
+    }));
+    assert.equal(result.response.status, 200);
+    // Independent success must not erase the wallet transport's failed state.
+    assert.equal(circuit.snapshot(direct).phase, "open");
+  }
+  assert.deepEqual(calls, ["polymarket/auto-live/history", "polymarket/auto-live/history/event-trends"]);
+});
+
+test("history circuit still opens after its own failures", () => {
+  const circuit = new ApiOriginCircuitBreaker(1, 30_000);
+  const history = { ...direct, circuitScope: "polymarket/auto-live/history" };
+  const trends = { ...direct, circuitScope: "polymarket/auto-live/history/event-trends" };
+  circuit.recordFailure(history, "normal", 0);
+  assert.equal(circuit.acquire(history, 1), "skip");
+  assert.equal(circuit.acquire(trends, 1), "normal");
+  assert.equal(circuit.acquire(direct, 1), "normal");
+});

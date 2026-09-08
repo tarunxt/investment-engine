@@ -349,7 +349,18 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   const correlationId = createProxyCorrelationId(request);
   let outcome = "unreachable";
   let responseStatus: number | undefined;
-  const resolvedCandidates = resolveBackendApiCandidates(request);
+  // Slow wallet/CLI reads must not open the circuit for healthy database-only
+  // history reads on the same backend origin. Use two fixed scopes so this
+  // registry remains bounded; never key circuit state by user or run ID.
+  const historyCircuitScope =
+    SAFE_FALLBACK_METHODS.has(request.method) &&
+    (path === "polymarket/auto-live/history" ||
+      path === "polymarket/auto-live/history/event-trends")
+      ? path
+      : undefined;
+  const resolvedCandidates = resolveBackendApiCandidates(request).map(
+    (candidate) => ({ ...candidate, circuitScope: historyCircuitScope }),
+  );
   const isPublicRequest = PUBLIC_BACKEND_PATHS.has(path);
   const backendSession = isPublicRequest
     ? null
