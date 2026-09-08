@@ -1,0 +1,292 @@
+[
+  {
+    "event_name": "Will the ECB announce no change at the September 2026 meeting?",
+    "market_id": "2587796",
+    "cluster_id": "C01"
+  },
+  {
+    "event_name": "Will the ECB announce a 25 bps increase at the September 2026 meeting?",
+    "market_id": "2587797",
+    "cluster_id": "C01"
+  },
+  {
+    "event_name": "Will the ECB announce a 50+ bps increase at the September 2026 meeting?",
+    "market_id": "2587798",
+    "cluster_id": "C01"
+  },
+  {
+    "event_name": "Will David Morales be the Democratic nominee for Mayor of Providence?",
+    "market_id": "3195077",
+    "cluster_id": "C02"
+  },
+  {
+    "event_name": "Will Brett Smiley be the Democratic nominee for Mayor of Providence?",
+    "market_id": "3195078",
+    "cluster_id": "C02"
+  },
+  {
+    "event_name": "US announces end of Iranian blockade by September 7, 2026?",
+    "market_id": "3702025",
+    "cluster_id": "C03"
+  },
+  {
+    "event_name": "Will Smotrich and Ben Gvir run on the same party list?",
+    "market_id": "3719929",
+    "cluster_id": "C04"
+  },
+  {
+    "event_name": "Will Kim Ahern be the Rhode Island Attorney General Democratic nominee?",
+    "market_id": "3752064",
+    "cluster_id": "C05"
+  },
+  {
+    "event_name": "Will Keith Hoffmann be the Rhode Island Attorney General Democratic nominee?",
+    "market_id": "3752066",
+    "cluster_id": "C05"
+  },
+  {
+    "event_name": "Will Joseph Solomon Jr. be the Rhode Island Attorney General Democratic nominee?",
+    "market_id": "3752071",
+    "cluster_id": "C05"
+  },
+  {
+    "event_name": "Israel x Lebanon diplomatic meeting by September 9, 2026?",
+    "market_id": "3869756",
+    "cluster_id": "C06"
+  },
+  {
+    "event_name": "Will Russia target Kyiv on September 8, 2026?",
+    "market_id": "4046821",
+    "cluster_id": "C07"
+  },
+  {
+    "event_name": "Will Susan R. Anderbois be the Rhode Island Lieutenant Governor Democratic nominee?",
+    "market_id": "4065124",
+    "cluster_id": "C08"
+  },
+  {
+    "event_name": "Will Cynthia Armour Coyne be the Rhode Island Lieutenant Governor Democratic nominee?",
+    "market_id": "4065125",
+    "cluster_id": "C08"
+  },
+  {
+    "event_name": "Will Ross McCurdy be the Rhode Island Lieutenant Governor Democratic nominee?",
+    "market_id": "4065127",
+    "cluster_id": "C08"
+  },
+  {
+    "event_name": "Will Apple release a foldable iPhone by September 9?",
+    "market_id": "4167002",
+    "cluster_id": "C09"
+  },
+  {
+    "event_name": "Will Apple release a foldable iPhone by September 10?",
+    "market_id": "4167008",
+    "cluster_id": "C09"
+  },
+  {
+    "event_name": "Will \"Grand Theft Auto VI: An Extended Look\" be the #2 global Netflix movie this week?",
+    "market_id": "4176969",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"The Whisper Man\" be the #2 global Netflix movie this week?",
+    "market_id": "4176970",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"The Last House\" be the #2 global Netflix movie this week?",
+    "market_id": "4176971",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"Don't Say Good Luck\" be the #2 global Netflix movie this week?",
+    "market_id": "4176972",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"The Heat\" be the #2 global Netflix movie this week?",
+    "market_id": "4176973",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"Turning Point: Generation 9/11\" be the #2 global Netflix movie this week?",
+    "market_id": "4176974",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"Untold Raygun: Breaking Badly\" be the #2 global Netflix movie this week?",
+    "market_id": "4176975",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"Ready or Not\" be the #2 global Netflix movie this week?",
+    "market_id": "4176976",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"Jaws\" be the #2 global Netflix movie this week?",
+    "market_id": "4176977",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"The Prince of Egypt\" be the #2 global Netflix movie this week?",
+    "market_id": "4176978",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will the #1 global Netflix movie have at least 30 million views this week?",
+    "market_id": "4178226",
+    "cluster_id": "C10"
+  },
+  {
+    "event_name": "Will \"The Whisper Man\" be the top US Netflix movie this week?",
+    "market_id": "4177017",
+    "cluster_id": "C11"
+  },
+  {
+    "event_name": "Will \"The Secret Woman\" be the #2 US Netflix movie this week?",
+    "market_id": "4177692",
+    "cluster_id": "C11"
+  },
+  {
+    "event_name": "Will \"Death of the Pastor's Wife: Season 1\" be the top global Netflix show this week?",
+    "market_id": "4177712",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Beauty in Black: Season 3\" be the top global Netflix show this week?",
+    "market_id": "4177713",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Outer Banks: Season 5\" be the top global Netflix show this week?",
+    "market_id": "4177714",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Danny Go!: Season 2\" be the top global Netflix show this week?",
+    "market_id": "4177716",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Talamasca: The Secret Order: Season 1\" be the top global Netflix show this week?",
+    "market_id": "4177717",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Earle Meets World: Season 1\" be the top global Netflix show this week?",
+    "market_id": "4177720",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"The Sex Lives of College Girls: Season 1\" be the top global Netflix show this week?",
+    "market_id": "4177721",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Beauty in Black: Season 3\" be the #2 global Netflix show this week?",
+    "market_id": "4177784",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"The Gentlemen: Season 2\" be the #2 global Netflix show this week?",
+    "market_id": "4177841",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will the #1 global Netflix show have at least 12 million views this week?",
+    "market_id": "4178231",
+    "cluster_id": "C12"
+  },
+  {
+    "event_name": "Will \"Death of the Pastor's Wife: Season 1\" be the #2 US Netflix show this week?",
+    "market_id": "4178185",
+    "cluster_id": "C13"
+  },
+  {
+    "event_name": "Will \"Beauty in Black: Season 3\" be the #2 US Netflix show this week?",
+    "market_id": "4178186",
+    "cluster_id": "C13"
+  },
+  {
+    "event_name": "Will \"Talamasca: The Secret Order: Season 1\" be the #2 US Netflix show this week?",
+    "market_id": "4178190",
+    "cluster_id": "C13"
+  },
+  {
+    "event_name": "Will \"Instadocs: The Decoy Plane\" be the #2 US Netflix show this week?",
+    "market_id": "4178192",
+    "cluster_id": "C13"
+  },
+  {
+    "event_name": "Will \"Earle Meets World: Season 1\" be the #2 US Netflix show this week?",
+    "market_id": "4178193",
+    "cluster_id": "C13"
+  },
+  {
+    "event_name": "Will \"The Sex Lives of College Girls: Season 1\" be the #2 US Netflix show this week?",
+    "market_id": "4178194",
+    "cluster_id": "C13"
+  },
+  {
+    "event_name": "Israel military action against Lebanon on September 8?",
+    "market_id": "4178250",
+    "cluster_id": "C14"
+  },
+  {
+    "event_name": "Israel military action against Lebanon on September 9?",
+    "market_id": "4178251",
+    "cluster_id": "C15"
+  },
+  {
+    "event_name": "Apple Announces Foldable iPhone at “Surprise and Shine” Event?",
+    "market_id": "4178413",
+    "cluster_id": "C16"
+  },
+  {
+    "event_name": "Will Melody Morris be evicted in Big Brother season 28 (Week 9)?",
+    "market_id": "4230261",
+    "cluster_id": "C17"
+  },
+  {
+    "event_name": "Will Taylor Brown be evicted in Big Brother season 28 (Week 9)?",
+    "market_id": "4230262",
+    "cluster_id": "C17"
+  },
+  {
+    "event_name": "Will Angela Murray be evicted in Big Brother season 28 (Week 9)?",
+    "market_id": "4230265",
+    "cluster_id": "C17"
+  },
+  {
+    "event_name": "Israel Election: The Reservists & Blue and White Run on Same List?",
+    "market_id": "4296205",
+    "cluster_id": "C18"
+  },
+  {
+    "event_name": "Israel Election: New Economic Party & Amcha Yisrael Run on Same List?",
+    "market_id": "4296206",
+    "cluster_id": "C19"
+  },
+  {
+    "event_name": "Will MrBeast's latest video get less than 56 million views on day 3?",
+    "market_id": "4338091",
+    "cluster_id": "C20"
+  },
+  {
+    "event_name": "Will MrBeast's latest video get between 56 and 57 million views on day 3?",
+    "market_id": "4338092",
+    "cluster_id": "C20"
+  },
+  {
+    "event_name": "Will MrBeast's latest video get between 57 and 58 million views on day 3?",
+    "market_id": "4338093",
+    "cluster_id": "C20"
+  },
+  {
+    "event_name": "Will MrBeast's latest video get at least 62 million views on day 3?",
+    "market_id": "4338098",
+    "cluster_id": "C20"
+  }
+]

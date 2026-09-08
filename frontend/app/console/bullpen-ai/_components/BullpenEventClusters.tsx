@@ -3,29 +3,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import { normalizeClusterId, parseClusterJson, type ClusterAssignment } from "@/lib/bullpen-event-clusters";
+import { loadClusterOverrides, normalizeClusterId, parseClusterJson, type ClusterAssignment } from "@/lib/bullpen-event-clusters";
+import publishedJson from "@/data/bullpen-event-clusters.json";
+
+const publishedRows = parseClusterJson(JSON.stringify(publishedJson));
+const publishedRevision = JSON.stringify(publishedRows);
 
 export function useBullpenEventClusters() {
   const { user } = useAuth();
-  const storageKey = user ? `bullpen-event-clusters-v1:${user.id}` : null;
+  const storageKey = user ? `bullpen-event-clusters-v2:${user.id}` : null;
   const [saved, setSaved] = useState<{ key: string; rows: ClusterAssignment[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     if (!storageKey) return;
     const read = () => {
-      try { setSaved({ key: storageKey, rows: parseClusterJson(localStorage.getItem(storageKey) ?? "[]") }); setError(null); }
-      catch { setError("Saved cluster JSON could not be loaded. Open Add Cluster json to replace it."); }
+      try { setSaved({ key: storageKey, rows: loadClusterOverrides(publishedRows, localStorage.getItem(storageKey)) }); setError(null); }
+      catch { setSaved({ key: storageKey, rows: publishedRows }); setError("Browser overrides could not be loaded. Showing the published cluster mapping."); }
     };
     const timer = window.setTimeout(read, 0);
     const sync = (event: StorageEvent) => { if (event.key === storageKey) read(); };
     window.addEventListener("storage", sync);
     return () => { window.clearTimeout(timer); window.removeEventListener("storage", sync); };
   }, [storageKey]);
-  const rows = useMemo(() => saved?.key === storageKey ? saved?.rows ?? [] : [], [saved, storageKey]);
+  const rows = useMemo(() => saved?.key === storageKey ? saved?.rows ?? publishedRows : publishedRows, [saved, storageKey]);
   const clusters = useMemo(() => new Map(rows.map(row => [row.market_id, row.cluster_id])), [rows]);
   const save = (next: ClusterAssignment[]) => {
     if (!storageKey) throw new Error("Sign in before saving cluster assignments.");
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); }
+    try { localStorage.setItem(storageKey, JSON.stringify({ revision: publishedRevision, rows: next })); }
     catch { throw new Error("Cluster IDs could not be saved in this browser. Check available browser storage and retry."); }
     setSaved({ key: storageKey, rows: next });
     setError(null);
@@ -39,16 +43,16 @@ export function useBullpenEventClusters() {
 }
 
 export function ClusterIdInput({ value, eventName, onSave }: { value: string; eventName: string; onSave: (value: string) => void }) {
-  const [draft, setDraft] = useState(value);
+  const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const commit = () => {
-    try { const normalized = draft.trim() ? normalizeClusterId(draft) : ""; if (normalized !== value) onSave(normalized); setDraft(normalized); setError(null); }
+    try { const text = draft ?? value; const normalized = text.trim() ? normalizeClusterId(text) : ""; if (normalized !== value) onSave(normalized); setDraft(null); setError(null); }
     catch (reason) { setError((reason as Error).message); }
   };
-  return <div><input aria-label={`Cluster ID for ${eventName}`} aria-invalid={Boolean(error)} value={draft} placeholder="—" maxLength={7}
+  return <div><input aria-label={`Cluster ID for ${eventName}`} aria-invalid={Boolean(error)} value={draft ?? value} placeholder="—" maxLength={7}
     className={`w-full rounded-md border bg-white px-2 py-1 text-xs font-bold uppercase text-sky-900 focus:outline-none focus:ring-2 focus:ring-sky-400 ${error ? "border-red-500" : "border-slate-200"}`}
     onChange={event => setDraft(event.target.value)} onBlur={commit}
-    onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(value); setError(null); } }} />
+    onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(null); setError(null); } }} />
     {error && <span role="alert" className="text-[10px] text-red-700">{error}</span>}</div>;
 }
 
@@ -77,6 +81,7 @@ export function BullpenClusterJsonDialog({ rows, marketIds, onApply, onClose }: 
       <button type="button" aria-label="Close Cluster JSON" onClick={onClose} className="rounded-lg border p-2"><X className="h-4 w-4" /></button>
     </div></div>
     <p className="my-3 text-sm text-slate-600">Paste the LLM cluster output below. Market ID identifies the event. Apply or refresh replaces the saved mapping; inline Cluster ID edits also appear here.</p>
+    <p className="mb-3 text-xs text-slate-500">Published clusters load in every browser. Edits here apply only to this browser until the next published mapping update.</p>
     <p className="mb-3 text-xs text-slate-500">Cluster views include assigned events with valid Current Odds and Returns/day. Unassigned events remain in the default view.</p>
     <label htmlFor="cluster-json" className="text-xs font-semibold">Event name, market ID and Cluster ID</label>
     <textarea id="cluster-json" autoFocus value={draft} onChange={event => { setDraft(event.target.value); setStatus(null); }} spellCheck={false}

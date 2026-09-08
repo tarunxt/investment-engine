@@ -5,8 +5,34 @@ import ts from "typescript";
 
 const source = readFileSync(new URL("../lib/bullpen-event-clusters.ts", import.meta.url), "utf8");
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
-const { parseClusterJson, normalizeClusterId, arrangeClusterEvents } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
+const { parseClusterJson, normalizeClusterId, arrangeClusterEvents, loadClusterOverrides } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString("base64")}`);
 const event = (id, returns, odds = 90) => ({ market_id: id, market_title: id, returns_per_day: returns, current_yes_odds: odds });
+
+test("published JSON is valid, unique and deterministically numbered", () => {
+  const raw = JSON.parse(readFileSync(new URL("../data/bullpen-event-clusters.json", import.meta.url), "utf8"));
+  const rows = parseClusterJson(JSON.stringify(raw));
+  assert.deepEqual(rows, raw);
+  assert.equal(new Set(rows.map(row => row.market_id)).size, rows.length);
+  for (const row of rows) {
+    assert.deepEqual(Object.keys(row).sort(), ["cluster_id", "event_name", "market_id"]);
+    assert.ok(Object.values(row).every(value => typeof value === "string"));
+  }
+  const groups = Map.groupBy(rows, row => row.cluster_id);
+  const sorted = [...groups.values()].map(group => group.map(row => row.market_id).sort()).sort((a,b) => a[0].localeCompare(b[0]));
+  sorted.forEach((ids, index) => ids.forEach(id => assert.equal(rows.find(row => row.market_id === id).cluster_id, `C${String(index + 1).padStart(2, "0")}`)));
+});
+
+test("new browsers and new deployments load published clusters; current overrides remain editable", () => {
+  const published = [{ event_name: "Example", market_id: "1", cluster_id: "C01" }];
+  const overrides = [{ ...published[0], cluster_id: "C02" }];
+  assert.deepEqual(loadClusterOverrides(published, null), published);
+  assert.deepEqual(loadClusterOverrides(published, JSON.stringify(overrides)), published);
+  const stored = JSON.stringify({ revision: JSON.stringify(published), rows: overrides });
+  assert.deepEqual(loadClusterOverrides(published, stored), overrides);
+  const updated = [{ ...published[0], cluster_id: "C03" }];
+  assert.deepEqual(loadClusterOverrides(updated, stored), updated);
+  assert.deepEqual(loadClusterOverrides(published, JSON.stringify({ revision: JSON.stringify(published), rows: [] })), []);
+});
 
 test("cluster import accepts LLM field styles and normalizes IDs without changing market identity", () => {
   assert.deepEqual(parseClusterJson(JSON.stringify({ events: [{ "Event name": "Example", "market ID": 123, "Cluster ID": "c3" }] })), [{ event_name: "Example", market_id: "123", cluster_id: "C03" }]);
