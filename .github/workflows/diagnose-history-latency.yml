@@ -1,0 +1,35 @@
+name: Diagnose history read latency
+on:
+  push:
+    branches: [fix/history-read-diagnostics]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 180s
+          script: |
+            set -eu
+            df -h /
+            free -m
+            ps -eo comm,pcpu,pmem,rss --sort=-rss | head -15
+            sudo journalctl -u investor-backend --since '-8 minutes' --no-pager -o cat | python3 -c '
+            import sys,json
+            rows=[]
+            for line in sys.stdin:
+                if "request_performance " not in line: continue
+                try: r=json.loads(line.split("request_performance ",1)[1])
+                except ValueError: continue
+                path=r.get("path","")
+                if any(x in path for x in ("history","dashboard/summary","wallet","positions","health/")):
+                    rows.append({k:r.get(k) for k in ("method","path","status","total_ms","auth_ms","db_query_count","db_ms","redis_ms","external_ms","serialization_ms","response_bytes")})
+            for r in rows[-70:]: print(json.dumps(r))
+            '
+            sudo -u postgres psql -X -d postgres -P pager=off -c "SELECT state, wait_event_type, wait_event, count(*), max(clock_timestamp()-query_start) AS oldest FROM pg_stat_activity WHERE backend_type='client backend' GROUP BY state, wait_event_type, wait_event;"
