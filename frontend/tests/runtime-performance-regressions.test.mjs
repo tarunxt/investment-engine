@@ -132,3 +132,23 @@ test("Nginx caches only immutable assets and bypasses buffering for sockets", ()
   assert.match(nginx, /location \/ws\/[\s\S]*proxy_buffering off/);
   assert.match(nginx, /upstream investor_backend[\s\S]*keepalive 32/);
 });
+
+
+test("a failed sole transport remains available during circuit cooldown", () => {
+  const { ApiReadCircuitBreaker } = loadCircuitModule();
+  const circuit = new ApiReadCircuitBreaker(1, 30_000);
+  circuit.recordFailure(direct, 100);
+  assert.deepEqual(circuit.order([direct], 101), [direct]);
+  assert.deepEqual(circuit.order([direct], 102), [direct]);
+  circuit.recordSuccess(direct);
+  assert.equal(circuit.snapshot(direct).phase, "closed");
+});
+
+test("a sole transport remains available while a multi-transport probe is pending", () => {
+  const { ApiReadCircuitBreaker } = loadCircuitModule();
+  const circuit = new ApiReadCircuitBreaker(1, 100);
+  circuit.recordFailure(direct, 0);
+  circuit.order([direct, proxy], 101);
+  assert.equal(circuit.snapshot(direct).phase, "half-open");
+  assert.deepEqual(circuit.order([direct], 102), [direct]);
+});

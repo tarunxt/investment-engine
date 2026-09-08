@@ -1950,3 +1950,19 @@ not be disabled solely because the browser has no candidate rows. The output pop
 uses the same server export sources, with local rows only as a fallback. This changes
 download availability only; frozen audit snapshots, filter results and export contents
 remain unchanged and need no schema migration.
+
+
+### History read resilience (September 2026)
+
+History and event-trend HTTP reads authenticate and query through one short-lived
+SQLAlchemy session. The existing four-second deadline now covers authentication
+and pool checkout as well as the history query. This prevents concurrent reads
+from retaining one auth connection while waiting for a second data connection.
+The browser retains its sole transport during circuit cooldown and reports a
+structured timeout if its read budget expires before an attempt. Missing error
+details no longer render as `Unexpected error: null`.
+
+These are read-path changes only: frozen run snapshots, Stage 1–3 capture,
+formulas, decisions, audit versions, and historical findings are unchanged.
+Regression tests cover session reuse, timeout cleanup, sole-transport recovery,
+and null error rendering.

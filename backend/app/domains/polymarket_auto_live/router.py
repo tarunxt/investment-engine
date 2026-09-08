@@ -52,6 +52,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveSummarySection,
 )
 from app.domains.polymarket_auto_live.service import polymarket_auto_live_bot_manager
+from app.domains.polymarket_auto_live.repository import AsyncPolymarketAutoLiveRepository
 from app.domains.polymarket_auto_live.stage_one_excel import (
     StageOneExcelExportError,
     remove_export,
@@ -761,20 +762,40 @@ async def get_auto_live_dashboard_summary(
     return summary
 
 
+async def _read_history(
+    credentials: HTTPAuthorizationCredentials | None,
+    *,
+    page: int = 1,
+    size: int = 20,
+    event_trends: bool = False,
+) -> BullpenAutoLiveHistoryPage | BullpenAutoLiveEventTrendsResponse:
+    """Authenticate and read using one checkout, inside the route deadline.
+
+    Holding the profile dependency's connection while the bot opened a second
+    session could exhaust the pool during concurrent dashboard reads. Auth
+    pool waits also used to fall outside HISTORY_TIMEOUT_SECONDS.
+    """
+    async with AsyncSessionLocal() as session:
+        user_id = await _resolve_persisted_status_user_id(credentials, session)
+        repo = AsyncPolymarketAutoLiveRepository(session)
+        if event_trends:
+            return await repo.list_recent_event_trends(user_id)
+        return await repo.list_run_history_page(user_id, page=page, size=size)
+
+
 @router.get("/history", response_model=BullpenAutoLiveHistoryPage)
 async def list_auto_live_history(
     response: Response,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=50),
-    current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Return a compact, database-paginated run list for the History dialog."""
 
     started_at = time.perf_counter()
-    bot = await _get_bot(current_user)
     try:
         history = await asyncio.wait_for(
-            bot.list_run_history(page=page, size=size),
+            _read_history(credentials, page=page, size=size),
             timeout=HISTORY_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError as exc:
@@ -796,12 +817,14 @@ async def list_auto_live_history(
 @router.get("/history/event-trends", response_model=BullpenAutoLiveEventTrendsResponse)
 async def list_auto_live_history_event_trends(
     response: Response,
-    current_user: User = Depends(get_current_user),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Return the strongest-side score heatmap for the latest 20 scans."""
-    bot = await _get_bot(current_user)
     try:
-        trends = await asyncio.wait_for(bot.list_recent_event_trends(), timeout=HISTORY_TIMEOUT_SECONDS)
+        trends = await asyncio.wait_for(
+            _read_history(credentials, event_trends=True),
+            timeout=HISTORY_TIMEOUT_SECONDS,
+        )
     except asyncio.TimeoutError as exc:
         raise HTTPException(status_code=503, detail="Auto-Live event trends are temporarily delayed. Retry shortly.", headers={"Cache-Control": "no-store"}) from exc
     except SQLAlchemyError as exc:
