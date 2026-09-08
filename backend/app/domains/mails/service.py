@@ -27,6 +27,9 @@ MAIL_CATEGORY_ACCOUNT = "account"
 STAGE2_WARNING_ACTION = "mail.stage2_position_warning"
 MANUAL_TEST_ACTION = "mail.manual_test"
 STAGE2_WARNING_THRESHOLD = 80.0
+BULLPEN_WALLET_PORTFOLIO_URL = (
+    "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3"
+)
 
 TEST_RECIPIENTS = ("tarun.singh6893@gmail.com",)
 TEST_SUBJECT = "Message from Tarun's Cred-X"
@@ -500,7 +503,9 @@ def build_stage2_warning_email(
         )
         html_rows.append(
             "<li style=\"margin-bottom:16px\">"
-            f"<strong>{html.escape(warning.question)}</strong>"
+            f'<strong><a href="{BULLPEN_WALLET_PORTFOLIO_URL}" '
+            'style="color:inherit;text-decoration:underline">'
+            f"{html.escape(warning.question)}</a></strong>"
             f"<p>Held side: {warning.position_side}</p>"
             f"<p>Consolidated held-side LLM odds: "
             f"<strong>{html.escape(llm_value)}</strong></p>"

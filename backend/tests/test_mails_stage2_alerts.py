@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from app.domains.mails.service import (
+    BULLPEN_WALLET_PORTFOLIO_URL,
     STAGE2_WARNING_THRESHOLD,
     _initial_sell_action,
     _sell_handoff_email_footer,
@@ -132,6 +133,11 @@ def test_stage2_warning_email_is_actionable_and_identifies_pre_stage3_timing():
     assert "Actual current held-side Bullpen odds: 84%" in text_content
     assert "Alert triggered by: LLM odds" in text_content
     assert "Example event" in html_content
+    assert (
+        f'href="{BULLPEN_WALLET_PORTFOLIO_URL}" '
+        'style="color:inherit;text-decoration:underline">Example event</a>'
+        in html_content
+    )
     assert "immediate exit review" in remarks
 
 

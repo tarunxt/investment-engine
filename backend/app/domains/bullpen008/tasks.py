@@ -2953,7 +2953,11 @@ def enqueue_due_bullpen008_runs() -> int:
 def refresh_bullpen008_position_alerts() -> int:
     """Refresh actual held-side odds independently of six-stage run completion."""
     from app.domains.bullpen008.alerts import evaluate_held_position_alerts
-    from app.domains.mails.service import TEST_RECIPIENTS, send_logged_email_sync
+    from app.domains.mails.service import (
+        BULLPEN_WALLET_PORTFOLIO_URL,
+        TEST_RECIPIENTS,
+        send_logged_email_sync,
+    )
 
     with SyncSessionLocal() as session:
         user_ids = session.execute(
@@ -3135,7 +3139,10 @@ def refresh_bullpen008_position_alerts() -> int:
                     "LLM odds, actual current held-side Bullpen odds, or both are "
                     f"below {safe(alert['threshold'])}%.</p>"
                     '<ol style="padding-left:28px"><li style="margin-bottom:20px">'
-                    f'<p><strong>{safe(alert["question"])}</strong></p>'
+                    '<p><strong><a '
+                    f'href="{BULLPEN_WALLET_PORTFOLIO_URL}" '
+                    'style="color:inherit;text-decoration:underline">'
+                    f'{safe(alert["question"])}</a></strong></p>'
                     f'<p>Held side: <strong>{safe(alert["side"])}</strong></p>'
                     "<p>Consolidated held-side LLM odds: "
                     f'<strong>{safe(alert.get("llm_odds"))}%</strong></p>'

@@ -30,6 +30,7 @@ from app.domains.bullpen008.tasks import (
     _stage2_input_rows,
     _stage2_repair_market_ids,
 )
+from app.domains.mails.service import BULLPEN_WALLET_PORTFOLIO_URL
 
 
 def test_008_namespaces_do_not_alias_007_resources() -> None:
@@ -54,6 +55,16 @@ def test_008_namespaces_do_not_alias_007_resources() -> None:
         "bullpen008_stage_outputs",
         "bullpen008_portfolio_certificates",
     }
+
+
+def test_008_warning_event_title_links_to_bullpen_wallet_portfolio() -> None:
+    task = Path("app/domains/bullpen008/tasks.py").read_text()
+
+    assert "BULLPEN_WALLET_PORTFOLIO_URL" in task
+    assert "safe(alert[\"question\"])}</a>" in task
+    assert BULLPEN_WALLET_PORTFOLIO_URL == (
+        "https://app.bullpen.fi/wallet/predictions?ref=intrepid-crane-3"
+    )
 
 
 def test_008_kill_and_history_recovery_remain_profile_isolated() -> None:
