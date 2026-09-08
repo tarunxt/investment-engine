@@ -698,7 +698,7 @@ class apiServiceClass implements IApiService {
       }
     }
 
-    throw lastError;
+    throw lastError ?? new RequestTimeoutError("GET", url, totalBudgetMs);
   }
 
   get<T>(url: string, options: ApiRequestOptions = {}): Promise<T> {

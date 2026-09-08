@@ -16,6 +16,7 @@ from app.domains.auth.dependencies import get_current_user
 from app.domains.polymarket_auto_live.router import (
     _fit_dashboard_response_budget,
     _read_dashboard_summary,
+    _read_history,
 )
 from app.domains.polymarket_auto_live.router import router as auto_live_router
 from app.domains.polymarket_auto_live.schemas import (
@@ -564,6 +565,12 @@ async def test_history_is_paginated_and_full_decisions_are_lazy(monkeypatch):
         "app.domains.polymarket_auto_live.router._get_bot",
         fake_get_bot,
     )
+    async def fake_read_history(_credentials, *, page=1, size=20, event_trends=False):
+        if event_trends:
+            return await FakeBot().list_recent_event_trends()
+        return await FakeBot().list_run_history(page=page, size=size)
+
+    monkeypatch.setattr("app.domains.polymarket_auto_live.router._read_history", fake_read_history)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
@@ -602,6 +609,12 @@ async def test_history_event_trends_returns_bounded_scan_heatmap(monkeypatch):
         return FakeBot()
 
     monkeypatch.setattr("app.domains.polymarket_auto_live.router._get_bot", fake_get_bot)
+    async def fake_read_history(_credentials, *, page=1, size=20, event_trends=False):
+        if event_trends:
+            return await FakeBot().list_recent_event_trends()
+        return await FakeBot().list_run_history(page=page, size=size)
+
+    monkeypatch.setattr("app.domains.polymarket_auto_live.router._read_history", fake_read_history)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
         response = await client.get("/polymarket/auto-live/history/event-trends")
@@ -620,3 +633,73 @@ def test_polymarket_manual_invest_route_remains_available():
     ).read_text()
     assert '@router.post("/manual-invest"' in source
     assert "execute_manual_investments" in source
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("event_trends", [False, True])
+async def test_history_auth_and_read_share_one_session(monkeypatch, event_trends):
+    session = object()
+    events = []
+    expected = object()
+
+    class Context:
+        async def __aenter__(self):
+            events.append("enter")
+            return session
+
+        async def __aexit__(self, *args):
+            events.append("exit")
+
+    async def auth(credentials, db):
+        assert db is session
+        events.append("auth")
+        return 7
+
+    class Repo:
+        def __init__(self, db):
+            assert db is session
+
+        async def list_run_history_page(self, user_id, *, page, size):
+            assert (user_id, page, size) == (7, 2, 10)
+            events.append("history")
+            return expected
+
+        async def list_recent_event_trends(self, user_id):
+            assert user_id == 7
+            events.append("trends")
+            return expected
+
+    prefix = "app.domains.polymarket_auto_live.router."
+    monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
+    monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", auth)
+    monkeypatch.setattr(prefix + "AsyncPolymarketAutoLiveRepository", Repo)
+    assert await _read_history(None, page=2, size=10, event_trends=event_trends) is expected
+    assert events == ["enter", "auth", "trends" if event_trends else "history", "exit"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("suffix", ["", "/event-trends"])
+async def test_history_deadline_includes_auth_pool_wait(monkeypatch, suffix):
+    import asyncio
+    closed = []
+
+    class Context:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *args):
+            closed.append(True)
+
+    async def blocked_auth(credentials, session):
+        await asyncio.Event().wait()
+
+    prefix = "app.domains.polymarket_auto_live.router."
+    monkeypatch.setattr(prefix + "AsyncSessionLocal", Context)
+    monkeypatch.setattr(prefix + "_resolve_persisted_status_user_id", blocked_auth)
+    monkeypatch.setattr(prefix + "HISTORY_TIMEOUT_SECONDS", 0.01)
+    app = _build_test_app(auto_live_router)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+        response = await client.get("/polymarket/auto-live/history" + suffix)
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    assert closed == [True]
