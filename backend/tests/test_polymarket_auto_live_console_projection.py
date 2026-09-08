@@ -439,3 +439,44 @@ def test_projection_and_history_keep_one_canonical_row_per_workflow_stage() -> N
         for stage in projection["stage_results"]
     ] == ["scan", "invest"]
     assert [stage.key for stage in history.stages] == ["scan", "invest"]
+
+
+def test_history_metadata_projection_preserves_list_response_without_candidate_arrays():
+    from app.domains.polymarket_auto_live.history_projection import HISTORY_OUTPUT_KEYS
+    run = _large_run()
+    stages = [stage.model_copy(update={
+        "inputs": {},
+        "outputs": {key: stage.outputs.get(key) for key in HISTORY_OUTPUT_KEYS},
+        "guardrails_checked": [],
+    }) for stage in run.stage_results]
+    slim = run.model_copy(update={"stage_results": stages})
+    kwargs = {"latest_update_at": run.completed_at, "projection_available": True}
+    assert build_history_item(slim, **kwargs) == build_history_item(run, **kwargs)
+    assert len(json.dumps([stage.model_dump() for stage in stages])) < 5000
+
+
+def test_history_sql_projects_metadata_without_full_candidate_or_frozen_payload():
+    from sqlalchemy import Column, Integer, JSON, select
+    from sqlalchemy.orm import DeclarativeBase
+    from sqlalchemy.dialects import postgresql
+    from app.domains.polymarket_auto_live.history_projection import history_console_projection
+
+    class Base(DeclarativeBase):
+        pass
+
+    class Record(Base):
+        __tablename__ = "runs"
+        id = Column(Integer, primary_key=True)
+        console_projection = Column(JSON)
+
+    sql = str(select(history_console_projection(Record)).select_from(Record).compile(
+        dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+    ))
+    assert "accepted_candidates_count" in sql
+    assert "stage2_reviewed_rows" in sql
+    assert "stage2_universe_blocker_summary" in sql
+    assert "'accepted_candidates'" not in sql
+    assert "llm_reviewed_candidates" not in sql
+    assert "payload" not in sql
+    assert "ORDER BY history_stage.ordinality" in sql
+    assert sql.count("FROM runs") == 1
