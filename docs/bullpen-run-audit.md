@@ -1966,3 +1966,11 @@ These are read-path changes only: frozen run snapshots, Stage 1–3 capture,
 formulas, decisions, audit versions, and historical findings are unchanged.
 Regression tests cover session reuse, timeout cleanup, sole-transport recovery,
 and null error rendering.
+
+The same-origin backend proxy also isolates the two database history routes
+with fixed circuit scopes. Production diagnostics showed wallet display reads
+exceeding their proxy budget and opening the shared origin circuit, which then
+returned 504 for history without forwarding a request. History/trend circuit
+failures and recovery now remain independent of wallet failures and each other.
+No audit data or trading behavior changes. Regression tests reproduce wallet
+circuit failures followed by successful history reads on the same origin.

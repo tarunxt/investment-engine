@@ -4,6 +4,7 @@ export type BoundedApiCandidate = {
   baseUrl: string;
   stage: ApiCandidateStage;
   transport: string;
+  circuitScope?: string;
 };
 
 export type CircuitPhase = "closed" | "open" | "half-open";
@@ -18,7 +19,8 @@ type CircuitRecord = {
 export type CircuitLease = "normal" | "probe" | "skip";
 
 function candidateOrigin(candidate: BoundedApiCandidate) {
-  return new URL(candidate.baseUrl).origin;
+  const origin = new URL(candidate.baseUrl).origin;
+  return candidate.circuitScope ? `${origin}|${candidate.circuitScope}` : origin;
 }
 
 export class ApiOriginCircuitBreaker {

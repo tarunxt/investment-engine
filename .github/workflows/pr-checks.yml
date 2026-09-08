@@ -114,6 +114,8 @@ jobs:
         run: >-
           node --test
           tests/api-read-fallbacks.test.mjs
+          tests/bounded-api-transport.test.mjs
+          tests/bullpen-proxy-timeout-budget.test.mjs
           tests/runtime-performance-regressions.test.mjs
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs
