@@ -17,28 +17,13 @@ jobs:
           command_timeout: 180s
           script: |
             set -eu
-            df -h /
-            free -m
-            ps -eo comm,pcpu,pmem,rss --sort=-rss | head -15
-            sudo journalctl -u investor-backend --since '-8 minutes' --no-pager -o cat | python3 -c '
-            import sys,json
-            rows=[]
-            for line in sys.stdin:
-                if "request_performance " not in line: continue
-                try: r=json.loads(line.split("request_performance ",1)[1])
-                except ValueError: continue
-                path=r.get("path","")
-                if any(x in path for x in ("history","dashboard/summary","wallet","positions","health/")):
-                    rows.append({k:r.get(k) for k in ("method","path","status","total_ms","auth_ms","db_query_count","db_ms","redis_ms","external_ms","serialization_ms","response_bytes")})
-            for r in rows[-70:]: print(json.dumps(r))
-            '
-            sudo journalctl -u investor-frontend --since '-8 minutes' --no-pager -o cat | python3 -c '
-            import sys,json
-            for line in sys.stdin:
-                if "backend_api_proxy_failure" not in line: continue
-                try: r=json.loads(line[line.index("{"):])
-                except ValueError: continue
-                if "history" in r.get("path",""): print(json.dumps({k:r.get(k) for k in ("event","path","outcome","duration_ms","status","error_type")}))
-            '
-            sudo -u postgres psql -X -d aidb -P pager=off -c "SELECT ((n-1)/20)::int AS page_index, count(*), sum(bytes) AS projection_bytes, max(bytes) AS largest_projection FROM (SELECT row_number() OVER (ORDER BY started_at DESC, created_at DESC) AS n, octet_length(console_projection::text) AS bytes FROM polymarket_auto_live_runs ORDER BY started_at DESC, created_at DESC LIMIT 60) t GROUP BY page_index ORDER BY page_index;"
-            sudo -u postgres psql -X -d postgres -P pager=off -c "SELECT state, wait_event_type, wait_event, count(*), max(clock_timestamp()-query_start) AS oldest FROM pg_stat_activity WHERE backend_type='client backend' GROUP BY state, wait_event_type, wait_event;"
+            sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d aidb -P pager=off <<'SQL'
+            BEGIN READ ONLY;
+            SET LOCAL statement_timeout = '30s';
+            \timing on
+            SELECT octet_length(CAST(json_build_object('version', polymarket_auto_live_runs.console_projection -> 'version', 'order_funnel', polymarket_auto_live_runs.console_projection -> 'order_funnel', 'stage_results', coalesce((SELECT json_agg(json_build_object('stage_number', history_stage.value -> 'stage_number', 'stage_name', history_stage.value -> 'stage_name', 'status', history_stage.value -> 'status', 'reason', history_stage.value -> 'reason', 'started_at', history_stage.value -> 'started_at', 'completed_at', history_stage.value -> 'completed_at', 'outputs', json_build_object('workflow_stage_key', (history_stage.value -> 'outputs') -> 'workflow_stage_key', 'phase_status', (history_stage.value -> 'outputs') -> 'phase_status', 'total_items', (history_stage.value -> 'outputs') -> 'total_items', 'scanned_candidates', (history_stage.value -> 'outputs') -> 'scanned_candidates', 'completed_items', (history_stage.value -> 'outputs') -> 'completed_items', 'accepted_candidates_count', (history_stage.value -> 'outputs') -> 'accepted_candidates_count', 'stage1_accepted_candidate_count', (history_stage.value -> 'outputs') -> 'stage1_accepted_candidate_count', 'failed_items', (history_stage.value -> 'outputs') -> 'failed_items', 'llm_candidate_count', (history_stage.value -> 'outputs') -> 'llm_candidate_count', 'stage2_eligible_rows_total', (history_stage.value -> 'outputs') -> 'stage2_eligible_rows_total', 'stage2_reviewed_rows', (history_stage.value -> 'outputs') -> 'stage2_reviewed_rows', 'llm_usable_provider_target_count', (history_stage.value -> 'outputs') -> 'llm_usable_provider_target_count', 'llm_successful_provider_target_count', (history_stage.value -> 'outputs') -> 'llm_successful_provider_target_count', 'llm_failed_provider_target_count', (history_stage.value -> 'outputs') -> 'llm_failed_provider_target_count', 'llm_failed_model_count', (history_stage.value -> 'outputs') -> 'llm_failed_model_count', 'orders_planned', (history_stage.value -> 'outputs') -> 'orders_planned', 'orders_processed', (history_stage.value -> 'outputs') -> 'orders_processed', 'orders_submitted', (history_stage.value -> 'outputs') -> 'orders_submitted', 'permanent_failure_count', (history_stage.value -> 'outputs') -> 'permanent_failure_count', 'current_blockage', (history_stage.value -> 'outputs') -> 'current_blockage', 'execution_gate_reason', (history_stage.value -> 'outputs') -> 'execution_gate_reason', 'error_message', (history_stage.value -> 'outputs') -> 'error_message', 'stage2_universe_blocker_summary', (history_stage.value -> 'outputs') -> 'stage2_universe_blocker_summary')) ORDER BY history_stage.ordinality) AS json_agg_1 
+            FROM json_array_elements(CASE WHEN (json_typeof((polymarket_auto_live_runs.console_projection -> 'stage_results')) = 'array') THEN polymarket_auto_live_runs.console_projection -> 'stage_results' ELSE CAST('[]' AS JSON) END) WITH ORDINALITY AS history_stage(value, ordinality)), CAST('[]' AS JSON))) AS TEXT)) AS list_projection_bytes 
+            FROM polymarket_auto_live_runs ORDER BY polymarket_auto_live_runs.started_at DESC, polymarket_auto_live_runs.created_at DESC 
+             LIMIT 40;
+            ROLLBACK;
+            SQL
