@@ -1,5 +1,13 @@
 export type ClusterAssignment = { event_name: string; market_id: string; cluster_id: string };
 export type ClusterMode = 0 | 1 | 2;
+
+// A changed published mapping invalidates old browser overrides without deleting them.
+export function loadClusterOverrides(published: ClusterAssignment[], stored: string | null): ClusterAssignment[] {
+  if (!stored) return published;
+  const snapshot = JSON.parse(stored);
+  if (snapshot?.revision !== JSON.stringify(published)) return published;
+  return parseClusterJson(JSON.stringify(snapshot.rows));
+}
 type ClusterEvent = {
   market_id: string; market_title: string; returns_per_day?: number | null;
   current_yes_odds?: number | null; current_no_odds?: number | null;
