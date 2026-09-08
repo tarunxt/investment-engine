@@ -26,7 +26,7 @@ const mainScheduleCard = readFileSync(
 
 test("history renders the Bullpen portfolio before run history", () => {
   assert.ok(
-    screen.indexOf("<BullpenHistoryPortfolio />") <
+    screen.indexOf("<BullpenHistoryPortfolio") <
       screen.indexOf("<BullpenRunHistoryContent"),
   );
 });
@@ -42,7 +42,8 @@ test("main Bullpen page reuses the History portfolio as its canonical current-va
 });
 
 test("history uses the same verified Stage 1 fallback contract as the main Bullpen portfolio", () => {
-  assert.match(component, /getBullpenAutoLiveSummary/);
+  assert.match(component, /getBullpenAutoLiveDashboardSummary/);
+  assert.doesNotMatch(component, /getBullpenAutoLiveSummary\(/);
   assert.match(component, /resolveVerifiedStage1PortfolioSnapshot/);
   assert.match(component, /resolveLatestVerifiedStage1Portfolio/);
   assert.match(component, /selectLatestVerifiedStage1Portfolio/);

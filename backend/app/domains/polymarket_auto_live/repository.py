@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.domains.polymarket_auto_live.history_projection import history_console_projection
+
 from datetime import UTC, datetime
 from math import ceil
 from types import SimpleNamespace
@@ -1221,7 +1223,7 @@ class AsyncPolymarketAutoLiveRepository:
                     record.orders_submitted,
                     record.summary,
                     record.error_message,
-                    record.console_projection,
+                    history_console_projection(record).label("console_projection"),
                     record.updated_at,
                 )
                 .where(record.user_id == user_id)

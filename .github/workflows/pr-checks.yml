@@ -53,6 +53,7 @@ jobs:
           backend/tests/test_polymarket_auto_live_event_trends_stage2.py
           backend/tests/test_bullpen_trend_snapshot.py
           backend/tests/test_polymarket_auto_live_router.py
+          backend/tests/test_polymarket_auto_live_console_projection.py
 
   deployment-contracts:
     name: Deployment scope, artifact, slot, and rollback tests
@@ -116,6 +117,7 @@ jobs:
           tests/api-read-fallbacks.test.mjs
           tests/bounded-api-transport.test.mjs
           tests/bullpen-proxy-timeout-budget.test.mjs
+          tests/bullpen-history-portfolio.test.mjs
           tests/runtime-performance-regressions.test.mjs
           tests/bullpen-server-auth.test.mjs
           tests/dashboard-refresh-errors.test.mjs

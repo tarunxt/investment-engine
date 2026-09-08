@@ -1974,3 +1974,13 @@ returned 504 for history without forwarding a request. History/trend circuit
 failures and recovery now remain independent of wallet failures and each other.
 No audit data or trading behavior changes. Regression tests reproduce wallet
 circuit failures followed by successful history reads on the same origin.
+
+
+The shared History portfolio card now uses the compact dashboard summary. It
+must never invoke the legacy full-run summary on mount or refresh: that endpoint
+loads ten frozen scan payloads and can block the HTTP process while decoding
+large universes. The paginated history query now selects only order-funnel and
+stage identity, counts, timings, and blocker fields in PostgreSQL before rows
+reach Python. Production history pages previously transferred 40–44 MB of
+console projections to produce a roughly 36 KB response. Frozen snapshots and
+all history response fields remain unchanged; only the read projection changes.
