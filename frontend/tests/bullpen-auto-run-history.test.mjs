@@ -215,7 +215,8 @@ test("event trends support deadlines, persistent table controls, and stable scan
   assert.match(trendsTable, /localStorage\.setItem\(storageKey/);
   assert.match(trendsTable, /draggable/);
   assert.match(trendsTable, /cursor-col-resize/);
-  assert.match(trendsTable, /rowIndex===9/);
+  assert.match(trendsTable, /data-returns-divider="0\.1"/);
+  assert.doesNotMatch(trendsTable, /rowIndex===9/);
   assert.match(trendsTable, /Click the event circle to keep these details open/);
   assert.match(trendsTable, /scan_llm_outputs/);
   assert.match(llmDialog, /Individual LLM odds and commentary/);

@@ -1,5 +1,15 @@
 # Bullpen Run Audit
 
+## History returns/day display cutoff
+
+The recurring-events table partitions its filtered rows at 0.1% Returns/day,
+placing finite values strictly above 0.1% before a red divider and values at or
+below the cutoff (or unavailable) after it. The selected ordering is retained
+within each section. The divider is independent of claimable and alert styling.
+This is a live history presentation rule only: it does not change return formulas,
+cluster selection, stage rankings, execution decisions, or frozen audit snapshots.
+No audit schema or capture change is required.
+
 ## Bullpen 008 six-stage additive audit namespace
 
 Bullpen 008 does not rewrite or reinterpret the frozen three-stage snapshots
