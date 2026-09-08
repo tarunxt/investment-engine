@@ -1984,3 +1984,20 @@ stage identity, counts, timings, and blocker fields in PostgreSQL before rows
 reach Python. Production history pages previously transferred 40–44 MB of
 console projections to produce a roughly 36 KB response. Frozen snapshots and
 all history response fields remain unchanged; only the read projection changes.
+# History cluster display
+
+History accepts externally generated cluster JSON (`event_name`, `market_id`,
+`cluster_id`) matched by exact market ID. Cluster IDs normalize to C01, C02, etc.
+Assignments are editable and saved per signed-in user in the current browser;
+applying JSON replaces that browser mapping. No model is invoked by the import.
+This is a user-controlled history display, not a Stage 1/2/3 execution input.
+Frozen audit snapshots and automated trading rankings remain unchanged.
+
+Cluster display algorithm v1: apply the existing visible-row filter, exclude
+unassigned events, require at least one finite Current Odds value in (0, 100],
+and require finite numeric Returns/day. Group by cluster ID, sort each group by
+descending Returns/day (market ID breaks ties), and sort groups by their maximum
+Returns/day (numeric cluster ID breaks ties). Grouped mode shows every eligible
+member; top mode shows the first member of each group, including singletons.
+Default mode restores the existing table sort and position priorities. Tests:
+`frontend/tests/bullpen-event-clusters.test.mjs`.

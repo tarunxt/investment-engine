@@ -92,7 +92,7 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Recurring Events Across the Last 20 Scans/);
   assert.match(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
   assert.match(trendsTable, /event\.scan_scores\.map\(\(score,i\) =>/);
-  assert.match(historyContent, /Grey = not covered \/ no valid LLM score/);
+  assert.doesNotMatch(historyContent, /Grey = not covered \/ no valid LLM score/);
   assert.match(historyContent, /Latest saved run:/);
   assert.match(historyContent, /Latest scored LLM scan:/);
   assert.match(historyContent, /Current Bullpen Odds fetched\/updated:/);
