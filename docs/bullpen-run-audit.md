@@ -16,6 +16,14 @@ falls back to the legacy internal `last_rebalance_at` value until the first
 external result is recorded. The internal Auto-Live rebalance timestamp remains
 unchanged, so an external workflow result cannot impersonate an engine run.
 
+The authenticated History page also accepts a one-shot
+`hourlyRebalanceResult=failed|completed` browser handoff. It records that result
+through the same authenticated endpoint before the heavier History reads finish,
+then removes the query parameter after a successful write so refreshes cannot
+duplicate or advance the timestamp. The visible buttons remain a manual fallback.
+This avoids losing the operational record when a browser workflow cannot locate
+the controls while History data is still loading.
+
 External hourly attempts are operational metadata, not Auto-Live Stage 1/2/3
 runs. They therefore do not create, mutate, or rematerialize frozen Bullpen run
 audit snapshots. The History controls are the browser-visible reporting surface

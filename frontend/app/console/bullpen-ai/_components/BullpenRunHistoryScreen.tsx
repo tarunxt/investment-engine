@@ -30,6 +30,23 @@ const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
 const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v1";
 const HISTORY_READ_TIMEOUT_MS = 20_000;
 const HISTORY_READ_RETRY_DELAY_MS = 750;
+const HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult";
+
+type HourlyRebalanceResult = "completed" | "failed";
+
+function requestedHourlyRebalanceResult(): HourlyRebalanceResult | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get(
+    HOURLY_REBALANCE_RESULT_QUERY_PARAM,
+  );
+  return value === "completed" || value === "failed" ? value : null;
+}
+
+function clearHourlyRebalanceResultRequest() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete(HOURLY_REBALANCE_RESULT_QUERY_PARAM);
+  window.history.replaceState(window.history.state, "", url);
+}
 
 function readCachedHistoryPage(): BullpenAutoLiveHistoryPage | null {
   if (typeof window === "undefined") return null;
@@ -413,6 +430,7 @@ export function BullpenRunHistoryScreen() {
     setError(null);
     setTrendsError(null);
     try {
+      const requestedRebalanceResult = requestedHourlyRebalanceResult();
       const positionsPromise = fetchCurrentBullpenPositions().catch(() => null);
       const historyRequestOptions = { timeoutMs: HISTORY_READ_TIMEOUT_MS };
       // Do not make the two heaviest database reads compete for the same small
@@ -436,10 +454,21 @@ export function BullpenRunHistoryScreen() {
         ]);
         return [pageResult, trendsResult] as const;
       })();
+      const runtimeStatePromise = requestedRebalanceResult
+        ? apiService
+            .recordBullpenHourlyRebalanceResult(
+              requestedRebalanceResult,
+              "Reported by the authenticated Hourly Bullpen Rebalance browser handoff.",
+            )
+            .then((state) => {
+              clearHourlyRebalanceResultRequest();
+              return state;
+            })
+        : apiService.getBullpenAutoLiveState();
       const [[pageResult, trendsResult], currentPositions, runtimeState] = await Promise.all([
         historyAndTrendsPromise,
         positionsPromise,
-        apiService.getBullpenAutoLiveState().catch(() => null),
+        runtimeStatePromise.catch(() => null),
       ]);
       if (runtimeState) {
         setLastRebalanceAt(runtimeState.last_rebalance_at ?? null);
