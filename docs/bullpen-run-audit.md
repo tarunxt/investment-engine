@@ -1,5 +1,17 @@
 # Bullpen Run Audit
 
+## Scheduled-slot preemption
+
+Every enabled Auto-Live schedule slot creates a new durable run even when the
+previous run is still marked `running` or `confirming`. Before the new run is
+queued, the scheduler revokes the previous worker, marks that run failed with a
+`next_scheduled_slot` cancellation reason, terminalizes unfinished stages,
+cancels its unsubmitted Stage 3 intents, and freezes its audit snapshot.
+Already-submitted intents retain their durable reconciliation path and are never
+blindly resubmitted. This keeps calendar execution independent of stale runner
+state without allowing two scheduled runs to reuse one lifecycle or duplicate
+unsubmitted orders.
+
 ## External Hourly Bullpen Rebalance status
 
 The ChatGPT Work automation named **Hourly Bullpen Rebalance** reports each
