@@ -14,6 +14,12 @@ import { BullpenEventTrendsTable } from "./BullpenEventTrendsTable";
 import { BullpenReturnsPerDayFormulaDialog } from "./BullpenReturnsPerDayInfo";
 import clusterMetadata from "@/data/bullpen-event-clusters-metadata.json";
 
+type ClusterMetadata = {
+  status?: "completed" | "failed";
+  completed_at?: string | null;
+  failed_at?: string | null;
+};
+
 const formatTime = (value?: string | null) => formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", second: "2-digit" });
 
 const findLatestOperationalStage = (
@@ -30,12 +36,17 @@ const findLatestOperationalStage = (
 
 const formatOperationalStage = (
   stage: BullpenAutoLiveHistoryItem["stages"][number] | null,
-) => stage?.status !== "fail" && stage?.completed_at
-  ? formatTime(stage.completed_at)
-  : "Failed";
+) => {
+  if (!stage) return "Not recorded";
+  if (stage.status === "fail") {
+    return stage.completed_at ? `Failed at ${formatTime(stage.completed_at)}` : "Failed";
+  }
+  if (stage.completed_at) return formatTime(stage.completed_at);
+  return stage.started_at ? `In progress since ${formatTime(stage.started_at)}` : "In progress";
+};
 
 const formatOperationalTimestamp = (value?: string | null) =>
-  value ? formatTime(value) : "Failed";
+  value ? formatTime(value) : "Not recorded";
 
 const formatHourlyRebalance = (
   status?: "completed" | "failed" | null,
@@ -43,9 +54,34 @@ const formatHourlyRebalance = (
   legacyCompletedAt?: string | null,
 ) => {
   if (status && attemptedAt) {
-    return `${status === "completed" ? "Completed" : "Failed"} · ${formatTime(attemptedAt)}`;
+    return status === "completed"
+      ? formatTime(attemptedAt)
+      : `Failed at ${formatTime(attemptedAt)}`;
   }
-  return legacyCompletedAt ? `Completed · ${formatTime(legacyCompletedAt)}` : "Failed";
+  if (status === "failed") return "Failed";
+  return legacyCompletedAt ? formatTime(legacyCompletedAt) : "Not recorded";
+};
+
+const formatClusteringStatus = (
+  metadata: ClusterMetadata,
+  latestStage1CompletedAt?: string | null,
+) => {
+  if (metadata.status === "failed") {
+    return metadata.failed_at
+      ? `Failed at ${formatTime(metadata.failed_at)}`
+      : "Failed";
+  }
+  const clusteredAt = Date.parse(metadata.completed_at ?? "");
+  const stage1At = Date.parse(latestStage1CompletedAt ?? "");
+  if (metadata.status === "completed" && Number.isFinite(clusteredAt)) {
+    if (!Number.isFinite(stage1At) || clusteredAt >= stage1At) {
+      return formatTime(metadata.completed_at);
+    }
+    return `Pending since ${formatTime(latestStage1CompletedAt)}`;
+  }
+  return Number.isFinite(stage1At)
+    ? `Pending since ${formatTime(latestStage1CompletedAt)}`
+    : "Not recorded";
 };
 
 export const calculateTrendDaysUntilClose = (event: BullpenAutoLiveEventTrend) => {
@@ -127,14 +163,10 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const latestStage1 = findLatestOperationalStage(operationalRuns, "scan");
   const latestStage2 = findLatestOperationalStage(operationalRuns, "llm");
   const latestStage3 = findLatestOperationalStage(operationalRuns, "invest");
-  const clusteringCompletedAt = Date.parse(clusterMetadata.completed_at);
-  const latestStage1CompletedAt = Date.parse(latestStage1?.completed_at ?? "");
-  const clusteringStatus = clusterMetadata.status === "completed" && (
-    !Number.isFinite(latestStage1CompletedAt) ||
-    clusteringCompletedAt >= latestStage1CompletedAt
-  )
-    ? formatOperationalTimestamp(clusterMetadata.completed_at)
-    : "Failed";
+  const clusteringStatus = formatClusteringStatus(
+    clusterMetadata as ClusterMetadata,
+    latestStage1?.completed_at,
+  );
   return <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,.45)]">
     <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5"><div><p className="text-xs font-semibold uppercase tracking-[.22em] text-slate-500">{eyebrow}</p><h1 className="mt-2 text-xl font-semibold text-slate-950">{title}</h1><p className="mt-1 text-xs text-slate-500">{loading ? "Loading compact history…" : page ? `${page.total.toLocaleString("en-IN")} saved run${page.total === 1 ? "" : "s"}` : "History has not been loaded"}</p></div>
       <div className="flex flex-wrap justify-end gap-2">{showFullScreen && <Button variant="outline" onClick={() => window.open(fullScreenPath, "_blank", "noopener,noreferrer")}><ExternalLink className="mr-2 h-4 w-4" />Full Screen</Button>}<Button variant="outline" onClick={onRefresh} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>{onClose && <Button variant="outline" size="icon" onClick={onClose} aria-label="Close Bullpen run history"><X className="h-4 w-4" /></Button>}</div>
