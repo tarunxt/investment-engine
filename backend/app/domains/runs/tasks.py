@@ -10,13 +10,14 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.domains.auth.models import User
+from app.domains.mails.completion_preferences import stock_segment, stock_run_preference
 from app.domains.mails.service import MAIL_CATEGORY_RUNS, send_logged_email_sync
 from app.domains.runs.final_actionable_history import (
     backfill_user_history,
     final_actionable_history_backfill_key,
     is_rebalance_run,
 )
-from app.domains.runs.models import Run, RunJob
+from app.domains.runs.models import Run, RunJob, AutoRebalanceWorkflow
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.infrastructure.messaging.celery_app import celery
 from app.shared.types import JobStatus
@@ -264,6 +265,7 @@ def send_auto_rebalance_success_email_task(
                 db,
                 user_id=user_id,
                 action="mail.auto_rebalance_success",
+                completion_preference=f"completion.{stock_segment(portfolio)}.overall",
                 trigger="Auto-rebalance completion",
                 category=MAIL_CATEGORY_RUNS,
                 recipients=(str(user.email),),
@@ -338,11 +340,20 @@ def send_run_completion_email_task(self, run_id: int) -> None:
                 logger.info("Run completion email skipped: user %s has no email", run.user_id)
                 return
 
+            if run.auto_rebalance_portfolio and run.auto_rebalance_sequence is not None:
+                workflow = db.execute(select(AutoRebalanceWorkflow.id).where(
+                    AutoRebalanceWorkflow.user_id == run.user_id,
+                    AutoRebalanceWorkflow.portfolio == run.auto_rebalance_portfolio,
+                    AutoRebalanceWorkflow.sequence == run.auto_rebalance_sequence,
+                )).scalar_one_or_none()
+                if workflow is not None:
+                    return  # The workflow stage transition owns the notification.
             subject, html_content, text_content = _build_run_completion_email(run)
             delivery = send_logged_email_sync(
                 db,
                 user_id=int(run.user_id),
                 action="mail.run_completion",
+                completion_preference=stock_run_preference(run),
                 trigger="Run completion",
                 category=MAIL_CATEGORY_RUNS,
                 recipients=(str(user.email),),

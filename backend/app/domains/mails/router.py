@@ -95,6 +95,7 @@ class MailPreferenceItem(BaseModel):
     category: str
     segments: list[str]
     enabled: bool
+    group: str | None = None
 
 
 class MailPreferencesResponse(BaseModel):

@@ -741,6 +741,16 @@ async def update_auto_rebalance_stage(
         workflow.status = "processing" if status != "skipped" else workflow.status
         if status != "failed":
             workflow.error_message = None
+    if status in {"completed", "partial"} and existing_status not in AUTO_REBALANCE_TERMINAL_STATUSES:
+        from app.domains.mails.completion_events import add_completion_event
+        from app.domains.mails.completion_preferences import STOCK_STAGES, stock_segment
+        add_completion_event(db, user_id=current_user.id, payload={
+            "schema_version": 1, "segment": stock_segment(portfolio), "stage": stage,
+            "label": dict(STOCK_STAGES)[stage],
+            "run_id": str(stage_record.run_id or f"{portfolio}:{sequence}"),
+            "completed_at": stage_record.completed_at.isoformat(),
+            "summary": f"{workflow.label}: {status}",
+        })
     await db.commit()
 
     history = await _build_auto_rebalance_history(
