@@ -29,6 +29,7 @@ test("missing, invalid, due, past and claimable estimates never manufacture retu
 });
 test("import preserves claim date by exact market ID and supports legacy three-field rows", () => {
   const base = { market_id: "1", event_name: "Example", cluster_id: "C01" };
+  assert.equal(parseClusterJson(JSON.stringify([{ ...base, claim_date: null }]))[0].claim_date, null);
   const rows = parseClusterJson(JSON.stringify([{ ...base, claim_date: "2026-09-12T12:30:00Z" }, { ...base, market_id: "2" }]));
   assert.equal(rows[0].claim_date, "2026-09-12T12:30:00Z");
   assert.equal(rows[1].claim_date, undefined);
