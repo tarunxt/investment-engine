@@ -39,8 +39,10 @@ test("import preserves claim date by exact market ID and supports legacy three-f
   assert.equal(projected[1].returns_per_day, null);
   assert.deepEqual(arrangeClusterEvents(projected, new Map([["1", "C01"], ["2", "C01"]]), 2).map(x => x.market_id), ["1"]);
 });
-test("all fourteen requested markets are seeded with timezone-aware estimates", () => {
+test("published clustering uses the workflow's exact three-field schema", () => {
   const rows = parseClusterJson(readFileSync(new URL("../data/bullpen-event-clusters.json", import.meta.url), "utf8"));
-  const ids = [1193094,2304228,4178251,4408539,4230345,4175132,3701624,4230915,3953546,2587796,4167008,4192222,4046823,4230930];
-  for (const id of ids) assert.ok(Date.parse(rows.find(r => r.market_id === String(id)).claim_date));
+  assert.equal(rows.length, 74);
+  for (const row of rows) {
+    assert.deepEqual(Object.keys(row).sort(), ["cluster_id", "event_name", "market_id"]);
+  }
 });
