@@ -30,7 +30,7 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             reservation_block.index("session.commit()"),
         )
 
-    def test_scheduler_trigger_reuses_an_existing_active_run(self) -> None:
+    def test_scheduler_trigger_supersedes_an_existing_active_run(self) -> None:
         source = (
             ROOT / "backend/app/domains/polymarket_auto_live/bot.py"
         ).read_text(encoding="utf-8")
@@ -38,9 +38,10 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             "    async def start(", 1
         )[0]
 
-        self.assertIn("Canonical full Auto-Live run template", run_once)
-        self.assertIn('if triggered_by == "scheduler":', run_once)
-        self.assertIn("return running_run", run_once)
+        self.assertIn('triggered_by == "scheduler"', run_once)
+        self.assertIn('requested_by="scheduler"', run_once)
+        self.assertIn("revoke_registered_auto_live_run_task", run_once)
+        self.assertNotIn("Scheduled Auto-Live trigger for user %s reused active run", run_once)
 
     def test_start_now_queues_backend_template_without_browser_scan_wait(self) -> None:
         source = (
