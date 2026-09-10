@@ -99,6 +99,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Latest Stage 1 Clustering:/);
   assert.match(historyContent, /Latest Bullpen Rebalance:/);
   assert.match(historyContent, /formatHourlyRebalance\(hourlyRebalanceStatus, hourlyRebalanceAt, lastRebalanceAt\)/);
+  assert.match(historyContent, /`Failed at \$\{formatTime\(attemptedAt\)\}`/);
+  assert.match(historyContent, /return legacyCompletedAt \? formatTime\(legacyCompletedAt\) : "Not recorded"/);
+  assert.match(historyContent, /`Pending since \$\{formatTime\(latestStage1CompletedAt\)\}`/);
+  assert.match(historyContent, /metadata\.failed_at[\s\S]*?`Failed at \$\{formatTime\(metadata\.failed_at\)\}`/);
   assert.match(historyContent, /Record Hourly Rebalance Completed/);
   assert.match(historyContent, /Record Hourly Rebalance Failed/);
   assert.match(historyScreen, /recordBullpenHourlyRebalanceResult\(status\)/);
@@ -109,8 +113,8 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "scan"\)/);
   assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "llm"\)/);
   assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "invest"\)/);
-  assert.match(historyContent, /clusterMetadata\.status === "completed"/);
-  assert.match(historyContent, /clusteringCompletedAt >= latestStage1CompletedAt/);
+  assert.match(historyContent, /formatClusteringStatus\(/);
+  assert.match(historyContent, /clusteredAt >= stage1At/);
   assert.match(historyContent, /lastRebalanceAt/);
   assert.match(historyContent, /Current Bullpen Odds fetched\/updated:/);
   assert.match(historyContent, /currentOddsUpdatedAt = trends\?\.current_odds_fetched_at \?\? latestScoredScanAt \?\? trends\?\.generated_at/);
