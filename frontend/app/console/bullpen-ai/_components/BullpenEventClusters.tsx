@@ -36,7 +36,7 @@ export function useBullpenEventClusters() {
   };
   const edit = (marketId: string, eventName: string, value: string) => {
     const next = rows.filter(row => row.market_id !== marketId);
-    if (value.trim()) next.push({ market_id: marketId, event_name: eventName, cluster_id: normalizeClusterId(value) });
+    if (value.trim()) next.push({ ...rows.find(row => row.market_id === marketId), market_id: marketId, event_name: eventName, cluster_id: normalizeClusterId(value) });
     save(next);
   };
   return { rows, clusters, save, edit, error };
@@ -84,10 +84,10 @@ export function BullpenClusterJsonDialog({ rows, marketIds, onApply, onClose }: 
     <p className="my-3 text-sm text-slate-600">Paste the LLM cluster output below. Market ID identifies the event. Apply or refresh replaces the saved mapping; inline Cluster ID edits also appear here.</p>
     <p className="mb-3 text-xs text-slate-500">Published clusters load in every browser. Edits here apply only to this browser until the next published mapping update.</p>
     <p className="mb-3 text-xs text-slate-500">Cluster views include assigned events with valid Current Odds and Returns/day. Unassigned events remain in the default view.</p>
-    <label htmlFor="cluster-json" className="text-xs font-semibold">Event name, market ID and Cluster ID</label>
+    <label htmlFor="cluster-json" className="text-xs font-semibold">Event name, market ID, Cluster ID and estimated claim date</label>
     <textarea id="cluster-json" autoFocus value={draft} onChange={event => { setDraft(event.target.value); setStatus(null); }} spellCheck={false}
       className="mt-2 h-72 w-full rounded-xl border border-slate-300 bg-slate-50 p-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-sky-400" />
-    <p className="mt-2 text-xs text-slate-500">Example: {`[{"event_name":"Example event","market_id":"12345","cluster_id":"C01"}]`}</p>
+    <p className="mt-2 text-xs text-slate-500">Example: {`[{"event_name":"Example event","market_id":"12345","cluster_id":"C01","claim_date":"2026-09-12T12:30:00Z"}]`}</p>
     {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
     {status && <p role="status" className="mt-3 text-sm text-emerald-700">{status}</p>}
     <div className="mt-4 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border px-4 py-2 text-sm">Close</button><button type="button" onClick={apply} className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white">Apply Cluster JSON</button></div>

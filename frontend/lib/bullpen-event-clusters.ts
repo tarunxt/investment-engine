@@ -1,4 +1,4 @@
-export type ClusterAssignment = { event_name: string; market_id: string; cluster_id: string };
+export type ClusterAssignment = { event_name: string; market_id: string; cluster_id: string; claim_date?: string | null };
 export type ClusterMode = 0 | 1 | 2;
 
 // A changed published mapping invalidates old browser overrides without deleting them.
@@ -39,7 +39,13 @@ export function parseClusterJson(text: string): ClusterAssignment[] {
     const id = String(market).trim();
     const previous = assignments.get(id);
     if (previous && previous.cluster_id !== cluster) throw new Error(`Row ${index + 1}: market ${id} has conflicting Cluster IDs.`);
-    assignments.set(id, { event_name: name.trim(), market_id: id, cluster_id: cluster });
+    const claim = fields.claimdate;
+    if (claim !== undefined && claim !== null && (typeof claim !== "string" ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(claim) || !Number.isFinite(Date.parse(claim)))) {
+      throw new Error(`Row ${index + 1}: claim_date must be an ISO 8601 timestamp with timezone, or null.`);
+    }
+    if (previous && previous.claim_date !== claim) throw new Error(`Row ${index + 1}: market ${id} has conflicting claim dates.`);
+    assignments.set(id, { event_name: name.trim(), market_id: id, cluster_id: cluster, ...(claim !== undefined ? { claim_date: claim as string | null } : {}) });
   });
   return [...assignments.values()];
 }

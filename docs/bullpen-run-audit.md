@@ -2082,3 +2082,36 @@ responses in browser storage. A transient database or gateway delay therefore
 does not replace a usable History table with a false empty/error state. Frozen
 run records, stage semantics, scoring, clustering, and trading behavior are
 unchanged.
+
+## History claim-date Returns/day (2026-09-10)
+
+The live recurring-events projection uses algorithm `history-claim-date-v1`
+(`frontend/lib/bullpen-claim-returns.ts`). Inputs are exact market ID, the
+published or supported browser-imported `claim_date`, current Yes/No odds,
+latest LLM Yes/No odds, authoritative claimability, and calculation timestamp.
+Outputs retain claim date, calculation timestamp, side and side source, exact
+fractional days left for claim, formula version, and result. The row calculator
+renders this same projection; cluster ranking and the 0.1% divider consume it.
+
+Formula: `(100 - current odds on strongest LLM side) / ((claim_date - now) / 86400000)`.
+The existing strongest-current-side fallback applies when both LLM odds are not
+available. There is no deadline adjustment, four-day buffer, day rounding or
+minimum denominator. Nonfuture/missing/invalid estimates, invalid chosen odds,
+and claimable positions produce null, never a cached backend return. The live
+clock refreshes every 30 seconds and on window focus. Null-return rows remain
+available in the default all-events view and are excluded from ranked clusters.
+
+The shared cluster array accepts optional `claim_date` (timezone-qualified ISO
+8601 or null) while legacy three-field rows remain readable. Existing inline
+cluster edits preserve estimates. The initial fourteen estimates reproduce the
+requested planning table; they are guesses, not oracle finality evidence. In
+particular the ceasefire estimate is conditional and the Swedish PM estimate
+requires government formation. Future clustering runs research and refresh
+estimates with source/rationale metadata; missing evidence must be reported.
+
+This live History projection does not rewrite historical Stage 1/2/3 decisions,
+execution formulas or frozen audit snapshots. Their original versions and inputs
+remain authoritative for those runs. No database schema change is needed.
+Deterministic validators: `frontend/tests/bullpen-claim-returns.test.mjs` and
+`frontend/tests/bullpen-event-clusters.test.mjs` cover math, timezones, nulls,
+identity mapping, import compatibility and ranking.

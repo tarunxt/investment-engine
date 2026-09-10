@@ -128,6 +128,7 @@ jobs:
           tests/bullpen-auto-run-status.test.mjs
           tests/bullpen-auto-run-history.test.mjs
           tests/bullpen-event-clusters.test.mjs
+          tests/bullpen-claim-returns.test.mjs
 
   frontend-build-benchmark:
     name: Frontend ${{ matrix.bundler }} cold build and runtime verification
