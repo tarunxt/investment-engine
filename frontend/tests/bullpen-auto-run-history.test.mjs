@@ -106,6 +106,11 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /Record Hourly Rebalance Completed/);
   assert.match(historyContent, /Record Hourly Rebalance Failed/);
   assert.match(historyScreen, /recordBullpenHourlyRebalanceResult\(status\)/);
+  assert.match(historyScreen, /HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult"/);
+  assert.match(historyScreen, /value === "completed" \|\| value === "failed"/);
+  assert.match(historyScreen, /recordBullpenHourlyRebalanceResult\([\s\S]*?requestedRebalanceResult/);
+  assert.match(historyScreen, /clearHourlyRebalanceResultRequest\(\)/);
+  assert.match(historyScreen, /window\.history\.replaceState/);
   assert.match(historyScreen, /latest_hourly_rebalance_status/);
   assert.match(historyScreen, /latest_hourly_rebalance_at/);
   assert.match(historyContent, /Latest Stage 2 LLM scan:/);
