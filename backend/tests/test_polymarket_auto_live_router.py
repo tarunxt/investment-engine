@@ -24,6 +24,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveEventTrend,
     BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
+    BullpenHourlyRebalanceResultRequest,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOnceRequest,
     BullpenAutoLiveStageResult,
@@ -118,6 +119,7 @@ async def test_trading_bots_summary_route_returns_four_cards(monkeypatch):
 class _FakeAutoLiveBot:
     def __init__(self) -> None:
         self.settings = BullpenAutoLiveSettings()
+        self.state = BullpenAutoLiveState()
         self.run_once_request: BullpenAutoLiveRunOnceRequest | None = None
 
     async def get_settings(self) -> BullpenAutoLiveSettings:
@@ -135,6 +137,15 @@ class _FakeAutoLiveBot:
     async def reset_settings(self) -> BullpenAutoLiveSettings:
         self.settings = BullpenAutoLiveSettings()
         return self.settings
+
+    async def record_hourly_rebalance_result(
+        self,
+        request: BullpenHourlyRebalanceResultRequest,
+    ) -> BullpenAutoLiveState:
+        self.state.latest_hourly_rebalance_status = request.status
+        self.state.latest_hourly_rebalance_at = "2026-09-10T07:15:00+00:00"
+        self.state.latest_hourly_rebalance_detail = request.detail
+        return self.state
 
     async def run_once(
         self,
@@ -264,6 +275,38 @@ async def test_auto_live_settings_routes_load_validate_and_reset(monkeypatch):
         reset_response = await client.post("/polymarket/auto-live/settings/reset")
         assert reset_response.status_code == 200
         assert reset_response.json() == BullpenAutoLiveSettings().model_dump(mode="json")
+
+
+@pytest.mark.anyio
+async def test_hourly_rebalance_result_records_terminal_status(monkeypatch):
+    app = _build_test_app(auto_live_router)
+    fake_bot = _FakeAutoLiveBot()
+
+    async def fake_get_bot(user_id: int):
+        assert user_id == 7
+        return fake_bot
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.router.polymarket_auto_live_bot_manager.get_bot",
+        fake_get_bot,
+    )
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.post(
+            "/polymarket/auto-live/hourly-rebalance/result",
+            json={"status": "failed", "detail": "Bullpen reconciliation was blocked."},
+        )
+        invalid_response = await client.post(
+            "/polymarket/auto-live/hourly-rebalance/result",
+            json={"status": "running"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["latest_hourly_rebalance_status"] == "failed"
+    assert response.json()["latest_hourly_rebalance_at"] == "2026-09-10T07:15:00+00:00"
+    assert response.json()["latest_hourly_rebalance_detail"] == "Bullpen reconciliation was blocked."
+    assert invalid_response.status_code == 422
 
 
 @pytest.mark.anyio

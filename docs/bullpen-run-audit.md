@@ -1,5 +1,27 @@
 # Bullpen Run Audit
 
+## External Hourly Bullpen Rebalance status
+
+The ChatGPT Work automation named **Hourly Bullpen Rebalance** reports each
+terminal attempt through the authenticated
+`POST /polymarket/auto-live/hourly-rebalance/result` route. The backend assigns
+the timestamp when it accepts either `completed` or `failed`; clients cannot
+backdate a result. The latest status, server timestamp, and optional compact
+detail are stored additively in the existing per-user Auto-Live state payload as
+`latest_hourly_rebalance_status`, `latest_hourly_rebalance_at`, and
+`latest_hourly_rebalance_detail`.
+
+The Run History header displays the external status and timestamp together. It
+falls back to the legacy internal `last_rebalance_at` value until the first
+external result is recorded. The internal Auto-Live rebalance timestamp remains
+unchanged, so an external workflow result cannot impersonate an engine run.
+
+External hourly attempts are operational metadata, not Auto-Live Stage 1/2/3
+runs. They therefore do not create, mutate, or rematerialize frozen Bullpen run
+audit snapshots. The History controls are the browser-visible reporting surface
+used by the Cloud Browser automation; a failed result is recorded only after the
+workflow reaches its terminal reporting step.
+
 ## History returns/day display cutoff
 
 The recurring-events table partitions its filtered rows at 0.1% Returns/day,

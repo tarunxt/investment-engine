@@ -2903,6 +2903,9 @@ export interface BullpenAutoLiveState {
   last_scan_at?: string | null;
   last_llm_run_at?: string | null;
   last_rebalance_at?: string | null;
+  latest_hourly_rebalance_status?: "completed" | "failed" | null;
+  latest_hourly_rebalance_at?: string | null;
+  latest_hourly_rebalance_detail?: string | null;
   next_scan_at?: string | null;
   next_llm_run_at?: string | null;
   next_rebalance_at?: string | null;

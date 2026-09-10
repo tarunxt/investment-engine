@@ -236,6 +236,8 @@ const bullpenAutoLiveApiUrls = {
   dashboardSummary: () =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/summary/dashboard`,
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
+  hourlyRebalanceResult: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/hourly-rebalance/result`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
   history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
   historyEventTrends: () =>

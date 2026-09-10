@@ -37,6 +37,17 @@ const formatOperationalStage = (
 const formatOperationalTimestamp = (value?: string | null) =>
   value ? formatTime(value) : "Failed";
 
+const formatHourlyRebalance = (
+  status?: "completed" | "failed" | null,
+  attemptedAt?: string | null,
+  legacyCompletedAt?: string | null,
+) => {
+  if (status && attemptedAt) {
+    return `${status === "completed" ? "Completed" : "Failed"} · ${formatTime(attemptedAt)}`;
+  }
+  return legacyCompletedAt ? `Completed · ${formatTime(legacyCompletedAt)}` : "Failed";
+};
+
 export const calculateTrendDaysUntilClose = (event: BullpenAutoLiveEventTrend) => {
   if (!event.close_time) return null;
   const closeTime = new Date(event.close_time).getTime();
@@ -91,12 +102,17 @@ export type BullpenRunHistoryContentProps = {
   onOpenRun: (run: BullpenAutoLiveHistoryItem) => void; onClose?: () => void; showFullScreen?: boolean;
   eyebrow?: string; title?: string; fullScreenPath?: string;
   lastRebalanceAt?: string | null;
+  hourlyRebalanceStatus?: "completed" | "failed" | null;
+  hourlyRebalanceAt?: string | null;
+  hourlyRebalanceRecording?: boolean;
+  hourlyRebalanceError?: string | null;
+  onRecordHourlyRebalance?: (status: "completed" | "failed") => void;
   latestRuns?: BullpenAutoLiveHistoryItem[];
   loadReturnsFormula?: () => Promise<string>;
   saveReturnsFormula?: (formula: string) => Promise<string>;
 };
 
-export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading, error, trendsError, detailLoadingId, onRefresh, onPage, onOpenRun, onClose, showFullScreen = true, eyebrow = "Run History", title = "Bullpen Auto and Manual Runs", fullScreenPath = "/console/bullpen-ai/history", lastRebalanceAt, latestRuns, loadReturnsFormula, saveReturnsFormula }: BullpenRunHistoryContentProps) {
+export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading, error, trendsError, detailLoadingId, onRefresh, onPage, onOpenRun, onClose, showFullScreen = true, eyebrow = "Run History", title = "Bullpen Auto and Manual Runs", fullScreenPath = "/console/bullpen-ai/history", lastRebalanceAt, hourlyRebalanceStatus, hourlyRebalanceAt, hourlyRebalanceRecording = false, hourlyRebalanceError, onRecordHourlyRebalance, latestRuns, loadReturnsFormula, saveReturnsFormula }: BullpenRunHistoryContentProps) {
   const [scoreEvent, setScoreEvent] = useState<BullpenAutoLiveEventTrend | null>(null);
   const [llmQuestion, setLlmQuestion] = useState<BullpenQuestionRow | null>(null);
   const [returnsQuestion, setReturnsQuestion] = useState<BullpenQuestionRow | null>(null);
@@ -124,7 +140,7 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
       <div className="flex flex-wrap justify-end gap-2">{showFullScreen && <Button variant="outline" onClick={() => window.open(fullScreenPath, "_blank", "noopener,noreferrer")}><ExternalLink className="mr-2 h-4 w-4" />Full Screen</Button>}<Button variant="outline" onClick={onRefresh} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>{onClose && <Button variant="outline" size="icon" onClick={onClose} aria-label="Close Bullpen run history"><X className="h-4 w-4" /></Button>}</div>
     </header>
     <div className="max-h-[74vh] overflow-y-auto px-6 py-5">
-      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3"><div><h2 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h2><div className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] font-semibold text-slate-600 sm:grid-cols-2"><p>Latest Stage 1: {formatOperationalStage(latestStage1)}</p><p>Latest Stage 1 Clustering: {clusteringStatus}</p><p>Current Bullpen Odds fetched/updated: {formatOperationalTimestamp(currentOddsUpdatedAt)}</p><p>Latest Bullpen Rebalance: {formatOperationalTimestamp(lastRebalanceAt)}</p><p>Latest Stage 2 LLM scan: {formatOperationalStage(latestStage2)}</p><p>Latest Stage 3 completion: {formatOperationalStage(latestStage3)}</p></div></div><div className="flex flex-wrap items-center gap-2">
+      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3"><div><h2 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h2><div className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] font-semibold text-slate-600 sm:grid-cols-2"><p>Latest Stage 1: {formatOperationalStage(latestStage1)}</p><p>Latest Stage 1 Clustering: {clusteringStatus}</p><p>Current Bullpen Odds fetched/updated: {formatOperationalTimestamp(currentOddsUpdatedAt)}</p><div><p>Latest Bullpen Rebalance: {formatHourlyRebalance(hourlyRebalanceStatus, hourlyRebalanceAt, lastRebalanceAt)}</p>{onRecordHourlyRebalance && <div className="mt-1 flex flex-wrap gap-1"><button type="button" onClick={() => onRecordHourlyRebalance("completed")} disabled={hourlyRebalanceRecording} className="rounded border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[9px] font-bold uppercase text-emerald-800 disabled:opacity-50">Record Hourly Rebalance Completed</button><button type="button" onClick={() => onRecordHourlyRebalance("failed")} disabled={hourlyRebalanceRecording} className="rounded border border-red-300 bg-red-50 px-2 py-0.5 text-[9px] font-bold uppercase text-red-800 disabled:opacity-50">Record Hourly Rebalance Failed</button></div>}{hourlyRebalanceError && <p role="alert" className="mt-1 text-[10px] text-red-700">{hourlyRebalanceError}</p>}</div><p>Latest Stage 2 LLM scan: {formatOperationalStage(latestStage2)}</p><p>Latest Stage 3 completion: {formatOperationalStage(latestStage3)}</p></div></div><div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setShowClusterJson(true)} className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold uppercase text-slate-600 hover:border-sky-400">Add Cluster json</button>
           <button type="button" aria-pressed={clusterMode !== 0} data-cluster-mode={clusterMode} title={clusterMode === 0 ? "All events. Click to group clusters." : clusterMode === 1 ? "Grouped clusters. Click to show only each cluster’s top event." : "Top event per cluster. Click to show all events."} onClick={() => setClusterMode(value => ((value + 1) % 3) as ClusterMode)} className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${clusterMode === 2 ? "border-blue-800 bg-blue-800 text-white" : clusterMode === 1 ? "border-sky-300 bg-sky-200 text-sky-950" : "border-slate-300 bg-slate-100 text-slate-600"}`}>Cluster Top Events</button>
           <button type="button" role="switch" aria-checked={showStrongestOnly} onClick={() => setShowStrongestOnly(value => !value)} className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${showStrongestOnly ? "border-violet-700 bg-violet-700 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-violet-400 hover:text-violet-700"}`}>Strongest LLM odds ≥80%</button></div></div>

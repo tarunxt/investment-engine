@@ -1156,6 +1156,9 @@ class BullpenAutoLiveState(BaseModel):
     last_scan_at: str | None = None
     last_llm_run_at: str | None = None
     last_rebalance_at: str | None = None
+    latest_hourly_rebalance_status: Literal["completed", "failed"] | None = None
+    latest_hourly_rebalance_at: str | None = None
+    latest_hourly_rebalance_detail: str | None = Field(default=None, max_length=600)
     next_scan_at: str | None = None
     next_llm_run_at: str | None = None
     next_rebalance_at: str | None = None
@@ -1181,6 +1184,11 @@ class BullpenAutoLiveState(BaseModel):
     today_skipped_orders: int = Field(default=0, ge=0)
     doctor_status: AutoLiveGuardrailStatus = "watch"
     balance_status: AutoLiveGuardrailStatus = "watch"
+
+
+class BullpenHourlyRebalanceResultRequest(BaseModel):
+    status: Literal["completed", "failed"]
+    detail: str | None = Field(default=None, max_length=600)
 
 
 class BullpenAutoLiveStatusConfiguration(BaseModel):
