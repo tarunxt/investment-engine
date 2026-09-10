@@ -1264,6 +1264,194 @@ async def test_healthy_active_auth_recovery_removes_running_run_block(monkeypatc
 
 
 @pytest.mark.anyio
+async def test_scheduled_preemption_terminalizes_previous_run_for_audit(monkeypatch):
+    active_run = BullpenAutoLiveRun(
+        id="previous-slot",
+        triggered_by="scheduler",
+        status="confirming",
+        dry_run=False,
+        started_at="2026-09-10T12:30:00+00:00",
+        summary="Stage 3 is confirming.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="previous-task",
+        ),
+        stage_results=[
+            _stage_result(
+                stage_number=3,
+                workflow_stage_key="invest",
+                phase_status="running",
+                reason="Confirming durable intents.",
+                completed_at=None,
+            )
+        ],
+    )
+    saved: list[BullpenAutoLiveRun] = []
+
+    class _Repo:
+        async def get_running_run_record(self, user_id: int, *, for_update: bool):
+            assert (user_id, for_update) == (7, True)
+            return SimpleNamespace(id=active_run.id)
+
+        async def save_run(self, user_id: int, run: BullpenAutoLiveRun):
+            assert user_id == 7
+            saved.append(run.model_copy(deep=True))
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.record_to_run",
+        lambda _record: active_run.model_copy(deep=True),
+    )
+
+    result = await BullpenAutoLiveBot(user_id=7)._cancel_active_run_if_needed(
+        _Repo(),  # type: ignore[arg-type]
+        requested_by="scheduler",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message == "Superseded by the next scheduled Auto-Live run."
+    assert result.audit_metadata["cancellation"]["reason"] == "next_scheduled_slot"
+    assert result.task_lifecycle is not None
+    assert result.task_lifecycle.state == "REVOKED"
+    assert result.stage_results[0].completed_at is not None
+    assert result.stage_results[0].outputs["phase_status"] == "superseded"
+    assert saved == [result]
+
+
+@pytest.mark.anyio
+async def test_scheduled_run_preempts_active_worker_and_queues_new_slot(monkeypatch):
+    settings = BullpenAutoLiveSettings(auto_live_enabled=True, dry_run=True)
+    state = BullpenAutoLiveState(running=True, paused=False, status="running")
+    active_run = BullpenAutoLiveRun(
+        id="previous-slot",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=True,
+        started_at="2026-09-10T12:30:00+00:00",
+        summary="Stage 2 is still running.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="STARTED",
+            task_id="previous-task",
+        ),
+    )
+    superseded_run = active_run.model_copy(
+        update={
+            "status": "failed",
+            "completed_at": "2026-09-10T18:30:00+00:00",
+            "summary": "Auto-Live run was superseded so the next scheduled run could start.",
+        }
+    )
+    calls: list[object] = []
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.added: list[object] = []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def add(self, record) -> None:
+            self.added.append(record)
+
+        async def commit(self) -> None:
+            calls.append("commit")
+
+    fake_session = _FakeSession()
+
+    class _FakeRepo:
+        def __init__(self, session) -> None:
+            assert session is fake_session
+
+        async def ensure_settings(self, user_id: int):
+            assert user_id == 7
+            return settings
+
+        async def ensure_state(self, user_id: int):
+            assert user_id == 7
+            return state
+
+        async def lock_state_record(self, user_id: int):
+            assert user_id == 7
+            return state
+
+        async def save_state(self, user_id: int, next_state: BullpenAutoLiveState):
+            assert user_id == 7
+            calls.append(("save-state", next_state.last_run_id))
+
+    bot = BullpenAutoLiveBot(user_id=7)
+
+    async def _active(_repo, _settings, next_state):
+        return active_run, next_state
+
+    async def _cancel(_repo, *, requested_by: str):
+        calls.append(("cancel-run", requested_by))
+        return superseded_run
+
+    async def _revoke(run_id: str):
+        calls.append(("revoke", run_id))
+        return "previous-task"
+
+    async def _register(run_id: str, task_id: str):
+        calls.append(("register", run_id, task_id))
+
+    def _cancel_intents(*, user_id: int, run_id: str):
+        calls.append(("cancel-intents", user_id, run_id))
+
+    def _freeze(*, user_id: int, run_id: str):
+        calls.append(("freeze", user_id, run_id))
+
+    def _publish(_task, *, user_id: int, run: BullpenAutoLiveRun, task_id: str, logger):
+        calls.append(("publish", user_id, run.id, task_id))
+        return SimpleNamespace(id=task_id), False
+
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncSessionLocal",
+        lambda: fake_session,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.AsyncPolymarketAutoLiveRepository",
+        _FakeRepo,
+    )
+    monkeypatch.setattr(bot, "_get_active_run_or_recover", _active)
+    monkeypatch.setattr(bot, "_cancel_active_run_if_needed", _cancel)
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.revoke_registered_auto_live_run_task",
+        _revoke,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.cancel_unsubmitted_run_order_intents_for_user_sync",
+        _cancel_intents,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot._freeze_cancelled_run_audit_sync",
+        _freeze,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.publish_auto_live_task_with_fallback",
+        _publish,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.bot.register_auto_live_run_task",
+        _register,
+    )
+
+    result = await bot.run_once(triggered_by="scheduler")
+
+    assert result.status == "running"
+    assert result.id != active_run.id
+    assert ("revoke", active_run.id) in calls
+    assert ("cancel-run", "scheduler") in calls
+    assert ("cancel-intents", 7, active_run.id) in calls
+    assert ("freeze", 7, active_run.id) in calls
+    assert any(call[0] == "publish" and call[2] == result.id for call in calls if isinstance(call, tuple))
+    assert len(fake_session.added) == 1
+    assert fake_session.added[0].id == result.id
+
+
+@pytest.mark.anyio
 async def test_run_once_queues_new_run_after_recovering_stale_running_record(monkeypatch):
     settings = BullpenAutoLiveSettings(auto_live_enabled=True, dry_run=True)
     state = BullpenAutoLiveState(running=False, paused=False, status="stopped")
