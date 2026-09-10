@@ -2058,3 +2058,19 @@ and deduplicate by run ID before publishing any cluster mapping. Bullpen scan
 notifications default on; LLM, invest and overall notifications default off.
 Individual saved preferences override defaults and legacy stock email switches.
 Tests: backend/tests/test_completion_notifications.py.
+
+## History read resilience (September 2026)
+
+History and event-trend first paint remain read-only projections over frozen run
+evidence. The trends query now reads immutable decision JSON only for legacy
+rows whose bounded Stage 2 projection lacks per-model output; current projected
+rows no longer force PostgreSQL to de-TOAST every full decision payload.
+
+The backend keeps a firm twelve-second History deadline, with the same-origin
+proxy and browser request budgets ordered outside it. The dedicated History
+screen serializes its two heavy database reads, retries one transient
+network/429/5xx failure, and retains the last good page-one and event-trend
+responses in browser storage. A transient database or gateway delay therefore
+does not replace a usable History table with a false empty/error state. Frozen
+run records, stage semantics, scoring, clustering, and trading behavior are
+unchanged.

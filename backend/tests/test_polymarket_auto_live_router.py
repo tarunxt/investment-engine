@@ -746,3 +746,22 @@ async def test_history_deadline_includes_auth_pool_wait(monkeypatch, suffix):
     assert response.status_code == 503
     assert response.headers["cache-control"] == "no-store"
     assert closed == [True]
+
+
+def test_event_trends_defer_immutable_decision_payload_reads():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app/domains/polymarket_auto_live/repository.py"
+    ).read_text()
+    decision_query = source.index(
+        "# Decision rows preserve legacy history and enrich the newest scan"
+    )
+    fallback_query = source.index(
+        "frozen_outputs_by_decision_id",
+        decision_query,
+    )
+    initial_slice = source[decision_query:fallback_query]
+
+    assert 'decision.payload["llm_outputs"]' not in initial_slice
+    assert "fallback_decision_ids" in source[fallback_query:]
+    assert 'decision.payload["llm_outputs"]' in source[fallback_query:]

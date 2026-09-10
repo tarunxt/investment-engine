@@ -76,7 +76,11 @@ DASHBOARD_AUTH_CACHE_TIMEOUT_SECONDS = 0.25
 DASHBOARD_SUMMARY_CACHE_CONTROL = "private, no-cache"
 DASHBOARD_SUMMARY_MAX_BYTES = 150_000
 DASHBOARD_SUMMARY_SLOW_THRESHOLD_MS = 1_500.0
-HISTORY_TIMEOUT_SECONDS = 4.0
+# Event-trend reads inspect up to twenty bounded console projections. Four
+# seconds was below normal p95 while a scan was persisting or the database pool
+# was briefly busy, so healthy reads were cancelled and surfaced as false
+# outages. Keep a firm deadline while allowing a short pool wait.
+HISTORY_TIMEOUT_SECONDS = 12.0
 CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 4.0
 
 

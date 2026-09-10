@@ -62,7 +62,12 @@ test("History opens a dedicated run-details screen instead of a popup", () => {
 });
 test("History keeps usable run or trend data when the sibling request times out", () => {
   assert.match(historyScreen, /Promise\.allSettled/);
-  assert.match(historyScreen, /historyRequestOptions = \{ timeoutMs: 10_000 \}/);
+  assert.match(historyScreen, /HISTORY_READ_TIMEOUT_MS = 20_000/);
+  assert.match(historyScreen, /readHistoryWithRetry/);
+  assert.match(historyScreen, /HISTORY_READ_RETRY_DELAY_MS = 750/);
+  assert.match(historyScreen, /historyAndTrendsPromise/);
+  assert.match(historyScreen, /cacheHistoryPage\(pageResult\.value\)/);
+  assert.match(historyScreen, /readCachedHistoryPage\(\)/);
   assert.match(historyScreen, /pageResult\.status === "fulfilled"/);
   assert.match(historyScreen, /trendsResult\.status === "fulfilled"/);
   assert.match(historyScreen, /setTrendsError/);

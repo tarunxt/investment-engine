@@ -11,7 +11,12 @@ import {
   type BullpenActivePositionView,
   type BullpenPositionsResponse,
 } from "@/lib/bullpenPositions";
-import { apiService } from "@/services/api";
+import {
+  APIError,
+  InvalidAPIResponseError,
+  NetworkError,
+  apiService,
+} from "@/services/api";
 import type {
   BullpenAutoLiveEventTrend,
   BullpenAutoLiveEventTrendsResponse,
@@ -22,6 +27,50 @@ import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 
 const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
+const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v1";
+const HISTORY_READ_TIMEOUT_MS = 20_000;
+const HISTORY_READ_RETRY_DELAY_MS = 750;
+
+function readCachedHistoryPage(): BullpenAutoLiveHistoryPage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(HISTORY_PAGE_CACHE_KEY) || "null",
+    ) as BullpenAutoLiveHistoryPage | null;
+    return parsed?.page === 1 && Array.isArray(parsed.items) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheHistoryPage(page: BullpenAutoLiveHistoryPage) {
+  if (page.page !== 1) return;
+  try {
+    window.localStorage.setItem(HISTORY_PAGE_CACHE_KEY, JSON.stringify(page));
+  } catch {
+    // Storage can be unavailable in private/restricted browser contexts.
+  }
+}
+
+function isRetryableHistoryReadError(error: unknown) {
+  return (
+    error instanceof NetworkError ||
+    error instanceof InvalidAPIResponseError ||
+    (error instanceof APIError && (error.status === 429 || error.status >= 500))
+  );
+}
+
+async function readHistoryWithRetry<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return await load();
+  } catch (error) {
+    if (!isRetryableHistoryReadError(error)) throw error;
+    await new Promise<void>((resolve) =>
+      window.setTimeout(resolve, HISTORY_READ_RETRY_DELAY_MS),
+    );
+    return load();
+  }
+}
 
 function readCachedEventTrends(): BullpenAutoLiveEventTrendsResponse | null {
   if (typeof window === "undefined") return null;
@@ -339,7 +388,8 @@ export function applyCurrentBullpenPositionsToEventTrends(
 
 export function BullpenRunHistoryScreen() {
   const router = useRouter();
-  const [page, setPage] = useState<BullpenAutoLiveHistoryPage | null>(null);
+  const [page, setPage] =
+    useState<BullpenAutoLiveHistoryPage | null>(() => readCachedHistoryPage());
   const [trends, setTrends] =
     useState<BullpenAutoLiveEventTrendsResponse | null>(() =>
       readCachedEventTrends(),
@@ -354,7 +404,9 @@ export function BullpenRunHistoryScreen() {
   const [hourlyRebalanceAt, setHourlyRebalanceAt] = useState<string | null>(null);
   const [hourlyRebalanceRecording, setHourlyRebalanceRecording] = useState(false);
   const [hourlyRebalanceError, setHourlyRebalanceError] = useState<string | null>(null);
-  const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>([]);
+  const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>(
+    () => readCachedHistoryPage()?.items ?? [],
+  );
 
   const load = useCallback(async (pageNumber = 1) => {
     setLoading(true);
@@ -362,17 +414,30 @@ export function BullpenRunHistoryScreen() {
     setTrendsError(null);
     try {
       const positionsPromise = fetchCurrentBullpenPositions().catch(() => null);
-      const historyRequestOptions = { timeoutMs: 10_000 };
+      const historyRequestOptions = { timeoutMs: HISTORY_READ_TIMEOUT_MS };
+      // Do not make the two heaviest database reads compete for the same small
+      // connection pool. Each read receives one bounded retry after a
+      // transient gateway/database failure.
+      const historyAndTrendsPromise = (async () => {
+        const [pageResult] = await Promise.allSettled([
+          readHistoryWithRetry(() =>
+            apiService.getBullpenAutoLiveHistory(
+              { page: pageNumber, size: 20 },
+              historyRequestOptions,
+            ),
+          ),
+        ]);
+        const [trendsResult] = await Promise.allSettled([
+          readHistoryWithRetry(() =>
+            apiService.getBullpenAutoLiveHistoryEventTrends(
+              historyRequestOptions,
+            ),
+          ),
+        ]);
+        return [pageResult, trendsResult] as const;
+      })();
       const [[pageResult, trendsResult], currentPositions, runtimeState] = await Promise.all([
-        Promise.allSettled([
-          apiService.getBullpenAutoLiveHistory(
-            { page: pageNumber, size: 20 },
-            historyRequestOptions,
-          ),
-          apiService.getBullpenAutoLiveHistoryEventTrends(
-            historyRequestOptions,
-          ),
-        ]),
+        historyAndTrendsPromise,
         positionsPromise,
         apiService.getBullpenAutoLiveState().catch(() => null),
       ]);
@@ -390,11 +455,20 @@ export function BullpenRunHistoryScreen() {
       );
       if (pageResult.status === "fulfilled") {
         setPage(pageResult.value);
-        if (pageResult.value.page === 1) setLatestRuns(pageResult.value.items);
+        if (pageResult.value.page === 1) {
+          setLatestRuns(pageResult.value.items);
+          cacheHistoryPage(pageResult.value);
+        }
       } else {
-        setError(
-          `Run history is temporarily unavailable. ${formatUnknownError(pageResult.reason)}`,
-        );
+        const cachedPage = pageNumber === 1 ? readCachedHistoryPage() : null;
+        if (cachedPage) {
+          setPage(cachedPage);
+          setLatestRuns(cachedPage.items);
+        } else {
+          setError(
+            `Run history is temporarily unavailable. ${formatUnknownError(pageResult.reason)}`,
+          );
+        }
       }
       if (trendsResult.status === "fulfilled") {
         const positionTrends =
