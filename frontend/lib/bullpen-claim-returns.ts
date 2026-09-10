@@ -37,6 +37,12 @@ export function claimReturns(event: ClaimEvent, claimDate: string | null | undef
 }
 
 export function applyClaimReturns<T extends ClaimEvent>(events: T[], assignments: ClusterAssignment[], now: number) {
-  const claims = new Map(assignments.map(row => [row.market_id, row.claim_date]));
-  return events.map(event => ({ ...event, ...claimReturns(event, claims.get(event.market_id), now) }));
+  const claims = new Map(assignments.flatMap(row => row.claim_date ? [[row.market_id, row.claim_date] as const] : []));
+  return events.map(event => {
+    const claimDate = claims.get(event.market_id);
+    // Clustering output deliberately uses the portable three-field schema. Only
+    // replace the History API's authoritative Returns/day when an explicit,
+    // source-backed claim date is present.
+    return claimDate ? { ...event, ...claimReturns(event, claimDate, now) } : event;
+  });
 }
