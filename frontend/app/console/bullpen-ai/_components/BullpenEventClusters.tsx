@@ -43,14 +43,22 @@ export function useBullpenEventClusters() {
 }
 
 export function ClusterIdInput({ value, eventName, onSave }: { value: string; eventName: string; onSave: (value: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => { setDraft(value); setError(null); }, [value]);
+  useEffect(() => {
+    setDraft(value);
+    setError(null);
+    // Chrome can restore an old form value after React hydrates. When React state
+    // already equals the published value, setState is a no-op and that stale DOM
+    // value would remain visible even though the row has the correct cluster.
+    if (input.current && document.activeElement !== input.current && input.current.value !== value) input.current.value = value;
+  }, [value]);
   const commit = () => {
     try { const normalized = draft.trim() ? normalizeClusterId(draft) : ""; if (normalized !== value) onSave(normalized); setDraft(normalized); setError(null); }
     catch (reason) { setError((reason as Error).message); }
   };
-  return <div><input aria-label={`Cluster ID for ${eventName}`} aria-invalid={Boolean(error)} value={draft} placeholder={value || "—"} maxLength={7} autoComplete="off"
+  return <div><input ref={input} aria-label={`Cluster ID for ${eventName}`} aria-invalid={Boolean(error)} value={draft} placeholder={value || "—"} maxLength={7} autoComplete="off"
     className={`w-full rounded-md border bg-white px-2 py-1 text-xs font-bold uppercase text-sky-900 placeholder:text-sky-900 placeholder:opacity-100 focus:outline-none focus:ring-2 focus:ring-sky-400 ${error ? "border-red-500" : "border-slate-200"}`}
     onChange={event => setDraft(event.target.value)} onBlur={commit}
     onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(value); setError(null); } }} />
