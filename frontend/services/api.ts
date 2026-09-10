@@ -1767,6 +1767,16 @@ class apiServiceClass implements IApiService {
     );
   }
 
+  recordBullpenHourlyRebalanceResult(
+    status: "completed" | "failed",
+    detail?: string,
+  ): Promise<BullpenAutoLiveState> {
+    return this.post<BullpenAutoLiveState>(
+      URLs.bullpenAutoLive.hourlyRebalanceResult(),
+      { status, detail },
+    );
+  }
+
   getBullpenAutoLiveSettings(
     options?: ApiRequestControl,
   ): Promise<BullpenAutoLiveSettings> {

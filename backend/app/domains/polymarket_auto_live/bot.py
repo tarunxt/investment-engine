@@ -56,6 +56,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveGuardrailCheck,
     BullpenAutoLiveHistoryPage,
+    BullpenHourlyRebalanceResultRequest,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunDiagnostics,
     BullpenAutoLiveRunOrdersResponse,
@@ -621,6 +622,23 @@ class BullpenAutoLiveBot:
                 return state
 
         return state
+
+    async def record_hourly_rebalance_result(
+        self,
+        request: BullpenHourlyRebalanceResultRequest,
+    ) -> BullpenAutoLiveState:
+        """Persist the terminal result reported by the external hourly workflow."""
+
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            await repo.ensure_state(self.user_id)
+            state = await repo.lock_state_record(self.user_id)
+            state.latest_hourly_rebalance_status = request.status
+            state.latest_hourly_rebalance_at = utc_now()
+            state.latest_hourly_rebalance_detail = request.detail
+            await repo.save_state(self.user_id, state)
+            await session.commit()
+            return state
 
     async def _get_summary_with_run_limit(
         self,

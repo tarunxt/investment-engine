@@ -41,6 +41,7 @@ from app.domains.polymarket_auto_live.schemas import (
     BullpenAutoLiveDecision,
     BullpenAutoLiveEventTrendsResponse,
     BullpenAutoLiveHistoryPage,
+    BullpenHourlyRebalanceResultRequest,
     BullpenAutoLiveRun,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
@@ -551,6 +552,20 @@ async def get_auto_live_state(current_user: User = Depends(get_current_user)):
     bot = await _get_bot(current_user)
     try:
         return await bot.get_state()
+    except SQLAlchemyError as exc:
+        raise _database_not_ready_error(exc) from exc
+
+
+@router.post("/hourly-rebalance/result", response_model=BullpenAutoLiveState)
+async def record_hourly_rebalance_result(
+    request: BullpenHourlyRebalanceResultRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Record one terminal ChatGPT Hourly Bullpen Rebalance attempt."""
+
+    bot = await _get_bot(current_user)
+    try:
+        return await bot.record_hourly_rebalance_result(request)
     except SQLAlchemyError as exc:
         raise _database_not_ready_error(exc) from exc
 

@@ -259,6 +259,10 @@ export interface IApiService {
     getBullpenAutoLiveSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveDashboardSummary(options?: ApiRequestControl): Promise<BullpenAutoLiveSummaryResponse>;
     getBullpenAutoLiveState(): Promise<BullpenAutoLiveState>;
+    recordBullpenHourlyRebalanceResult(
+      status: "completed" | "failed",
+      detail?: string,
+    ): Promise<BullpenAutoLiveState>;
     getBullpenAutoLiveSettings(options?: ApiRequestControl): Promise<BullpenAutoLiveSettings>;
     updateBullpenAutoLiveSettings(data: BullpenAutoLiveSettingsUpdate): Promise<BullpenAutoLiveSettings>;
     resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings>;
