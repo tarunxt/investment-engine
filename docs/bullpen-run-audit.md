@@ -2011,3 +2011,28 @@ Returns/day (numeric cluster ID breaks ties). Grouped mode shows every eligible
 member; top mode shows the first member of each group, including singletons.
 Default mode restores the existing table sort and position priorities. Tests:
 `frontend/tests/bullpen-event-clusters.test.mjs`.
+
+
+## Completion email handoff (September 2026)
+
+The console run repository records a completion notification in ActivityLog in the
+same transaction as each scan/LLM/invest completion transition. The source uses
+existing frozen stage fields: workflow_stage_key, phase_status, completed_at,
+scan_completeness and accepted_candidates_count. A Stage 1 handoff requires a
+complete scan and a concrete filtered count (including zero); it does not wait
+for Stage 2 or overall completion. No scoring, execution or historical snapshot
+schema changes are introduced.
+
+The outbox records schema_version 1, user, run ID, stage, completion time and
+filtered count. After commit it queues the email worker; periodic outbox recovery
+handles a broker outage. Mail reservations and Redis serialization prevent
+concurrent recovery deliveries; an ambiguous SMTP reservation is never resent
+automatically. Delivery details remain in the existing Mails audit, with exact
+source run ID and outcome. Failed mail is observable independently of trading.
+
+The stable subject `Cred-X: Bullpen Stage 1 completed` is the GPT Work clustering
+wake-up signal. The automation must still verify the actual completed source run
+and deduplicate by run ID before publishing any cluster mapping. Bullpen scan
+notifications default on; LLM, invest and overall notifications default off.
+Individual saved preferences override defaults and legacy stock email switches.
+Tests: backend/tests/test_completion_notifications.py.

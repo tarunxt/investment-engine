@@ -8,9 +8,9 @@ from types import SimpleNamespace
 from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
 
 from pydantic import ValidationError
-from sqlalchemy import Select, and_, desc, exists, func, or_, select
+from sqlalchemy import Select, and_, desc, exists, func, inspect, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.core.logging import get_logger
 from app.domains.polymarket_auto_live.console_projection import (
@@ -428,6 +428,16 @@ def apply_run_to_record(
 ) -> None:
     if record.id != run.id or record.user_id != user_id:
         raise ValueError("Auto-Live run ownership mismatch.")
+    # All persistence paths (including deferred Stage 3 reconciliation) use this
+    # adapter. Record the completion in the same transaction before replacing
+    # the previous payload, so mail cannot observe uncommitted output.
+    attached_session = object_session(record) if inspect(record, raiseerr=False) is not None else None
+    if attached_session is not None:
+        from app.domains.mails.completion_events import record_bullpen_completions
+        record_bullpen_completions(
+            attached_session, user_id=user_id, previous=record.payload,
+            current=run.model_dump(mode="json"),
+        )
     record.id = run.id
     record.user_id = user_id
     record.status = run.status

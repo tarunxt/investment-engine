@@ -18,6 +18,10 @@ from app.domains.polymarket_auto_live.schemas import (
 from app.infrastructure.database.sync_session import SyncSessionLocal
 from app.services.email import EmailSendResult, EmailService
 
+from app.domains.mails.completion_preferences import (
+    COMPLETION_CATALOG, COMPLETION_DEFAULTS, inherit_legacy_preferences,
+)
+
 MAIL_ACTION_PREFIX = "mail."
 MAIL_RESOURCE_TYPE = "cred_x_mail"
 MAIL_CATEGORY_ALL = "all"
@@ -61,9 +65,9 @@ MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
     {
         "key": "run_completion",
         "label": "Stage and scan completion",
-        "description": "Swing Scan, Rebalance Scan, Technical Scan and other individual run-completion emails.",
+        "description": "Choose individual stages and overall completion for Zerodha, IndMoney and Bullpen.",
         "category": MAIL_CATEGORY_RUNS,
-        "segments": ("Zerodha", "IndMoney"),
+        "segments": ("Zerodha", "IndMoney", "Bullpen"),
     },
     {
         "key": "auto_rebalance_success",
@@ -87,7 +91,9 @@ MAIL_PREFERENCE_CATALOG: tuple[dict[str, object], ...] = (
         "segments": ("All",),
     },
 )
+MAIL_PREFERENCE_CATALOG += COMPLETION_CATALOG
 DEFAULT_MAIL_PREFERENCES: dict[str, bool] = {
+    **COMPLETION_DEFAULTS,
     "run_completion": False,
     "auto_rebalance_success": True,
     "stage2_position_warning": True,
@@ -246,6 +252,7 @@ def get_mail_preferences_from_session(
         return preferences
     saved = _details_from_row(row).get("preferences")
     if isinstance(saved, dict):
+        inherit_legacy_preferences(preferences, saved)
         for key in preferences:
             value = saved.get(key)
             if isinstance(value, bool):
@@ -268,6 +275,9 @@ def update_mail_preferences_sync(
 ) -> list[dict[str, object]]:
     with SyncSessionLocal() as session:
         preferences = get_mail_preferences_from_session(session, user_id)
+        # Old clients can still toggle the coarse switches. New clients submit
+        # explicit child keys, which take precedence over legacy values.
+        inherit_legacy_preferences(preferences, updates)
         for key, value in updates.items():
             if key in preferences and isinstance(value, bool):
                 preferences[key] = value
@@ -585,18 +595,23 @@ def send_logged_email_sync(
     warnings: list[dict[str, object]] | None = None,
     category: str = MAIL_CATEGORY_ALERTS,
     audit_message: str | None = None,
+    completion_preference: str | None = None,
 ) -> LoggedMailDelivery:
     """Reserve, send, and finalize a user-visible delivery record.
 
     The reservation is committed before SMTP. A redelivered Stage 2 task therefore
     observes the existing idempotency key and never sends a duplicate message.
     """
-    if not _mail_type_enabled(session, user_id, action):
+    enabled = (
+        get_mail_preferences_from_session(session, user_id).get(completion_preference, False)
+        if completion_preference else _mail_type_enabled(session, user_id, action)
+    )
+    if not enabled:
         details: dict[str, object] = {
             "status": "skipped",
             "provider_code": "EMAIL_DISABLED_BY_USER",
             "provider_summary": "This email type is disabled in Mail settings.",
-            "preference_key": MAIL_PREFERENCE_BY_ACTION.get(action),
+            "preference_key": completion_preference or MAIL_PREFERENCE_BY_ACTION.get(action),
         }
         return LoggedMailDelivery(
             history_id=0,

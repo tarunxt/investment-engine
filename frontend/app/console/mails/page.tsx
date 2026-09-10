@@ -14,6 +14,8 @@ import {
   Wrench,
 } from 'lucide-react';
 
+import { CompletionPreferences } from '@/components/mails/completion-preferences';
+
 import { URLs } from '@/lib/urls';
 
 const RECIPIENT = 'tarun.singh6893@gmail.com';
@@ -97,6 +99,7 @@ type SellAction = {
 type MailHistoryTab = 'all' | 'runs' | 'alerts' | 'account' | 'github';
 
 type MailPreference = {
+  group?: string | null;
   key: string;
   label: string;
   description: string;
@@ -925,7 +928,16 @@ export default function MailsPage() {
               </div>
             ) : (
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                {preferences.map((preference) => (
+                <CompletionPreferences
+                  items={preferences.filter((item) => item.group === 'completion')}
+                  disabled={preferencesSaving}
+                  onApply={(values) => {
+                    setPreferences((current) => current.map((item) => item.key in values ? { ...item, enabled: values[item.key] } : item));
+                    setPreferencesDirty(true);
+                    setPreferencesSaved(false);
+                  }}
+                />
+                {preferences.filter((item) => item.group !== 'completion' && !['run_completion', 'auto_rebalance_success'].includes(item.key)).map((preference) => (
                   <label
                     key={preference.key}
                     className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-card p-4 transition hover:bg-muted/40"

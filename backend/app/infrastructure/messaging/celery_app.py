@@ -41,6 +41,8 @@ celery.conf.task_default_queue = "ai"
 
 celery.conf.task_routes = {
     "app.domains.jobs.tasks.*": {"queue": "ai"},
+    "app.domains.mails.tasks.deliver_completion_email": {"queue": "email"},
+    "app.domains.mails.tasks.recover_completion_emails": {"queue": "beat"},
     "app.domains.auth.tasks.*": {"queue": "email"},
     "app.domains.runs.tasks.backfill_final_actionable_history_task": {"queue": "ai"},
     "app.domains.runs.tasks.*": {"queue": "email"},
@@ -76,6 +78,10 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "completion-mail-outbox-recovery": {
+        "task": "app.domains.mails.tasks.recover_completion_emails",
+        "schedule": crontab(minute="*"),
+    },
     "verified-usd-inr-rate-refresh": {
         "task": "app.domains.fx_rates.tasks.refresh_usd_inr_rate",
         "schedule": crontab(minute=7, hour="*/6"),
@@ -150,6 +156,7 @@ celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 celery.autodiscover_tasks([
     "app.domains.jobs",
     "app.domains.auth",
+    "app.domains.mails",
     "app.domains.runs",
     "app.domains.google_sheets",
     "app.domains.bullpen_run_audit",
