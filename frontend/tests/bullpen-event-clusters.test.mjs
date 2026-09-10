@@ -70,3 +70,10 @@ test("ties are deterministic and changing a cluster assignment immediately chang
   clusters.set("a", "C01");
   assert.deepEqual(arrangeClusterEvents(rows, clusters, 2).map(row => row.market_id), ["a"]);
 });
+test("published cluster inputs repair browser-restored DOM values after hydration", () => {
+  const component = readFileSync(new URL("../app/console/bullpen-ai/_components/BullpenEventClusters.tsx", import.meta.url), "utf8");
+  assert.match(component, /document\.activeElement !== input\.current/);
+  assert.match(component, /input\.current\.value !== value/);
+  assert.match(component, /input\.current\.value = value/);
+});
+
