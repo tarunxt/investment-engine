@@ -90,15 +90,25 @@ test("Bullpen history requests bypass caches and remain abortable", () => {
 
 test("Bullpen history shows scored event trends for exactly 20 newest-first scans", () => {
   assert.match(historyContent, /Recurring Events Across the Last 20 Scans/);
-  assert.match(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
+  assert.doesNotMatch(historyContent, /latest \+ 0\.5 × previous \+ 0\.25 × third-latest/);
   assert.match(trendsTable, /event\.scan_scores\.map\(\(score,i\) =>/);
   assert.doesNotMatch(historyContent, /Grey = not covered \/ no valid LLM score/);
-  assert.match(historyContent, /Latest saved run:/);
-  assert.match(historyContent, /Latest scored LLM scan:/);
+  assert.doesNotMatch(historyContent, /Latest saved run:/);
+  assert.doesNotMatch(historyContent, /Latest scored LLM scan:/);
+  assert.match(historyContent, /Latest Stage 1:/);
+  assert.match(historyContent, /Latest Stage 1 Clustering:/);
+  assert.match(historyContent, /Latest Bullpen Rebalance:/);
+  assert.match(historyContent, /Latest Stage 2 LLM scan:/);
+  assert.match(historyContent, /Latest Stage 3 completion:/);
+  assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "scan"\)/);
+  assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "llm"\)/);
+  assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "invest"\)/);
+  assert.match(historyContent, /clusterMetadata\.status === "completed"/);
+  assert.match(historyContent, /clusteringCompletedAt >= latestStage1CompletedAt/);
+  assert.match(historyContent, /lastRebalanceAt/);
   assert.match(historyContent, /Current Bullpen Odds fetched\/updated:/);
   assert.match(historyContent, /currentOddsUpdatedAt = trends\?\.current_odds_fetched_at \?\? latestScoredScanAt \?\? trends\?\.generated_at/);
   assert.match(historyScreen, /current_odds_fetched_at: response\.fetchedAt/);
-  assert.match(historyContent, /page\?\.page === 1 \? page\.items\[0\]\?\.started_at/);
   assert.match(historyContent, /Strongest LLM odds ≥80%/);
   assert.match(historyContent, /role="switch" aria-checked=\{showStrongestOnly\}/);
   assert.match(trendsTable, /\(event\.scan_scores\[0\] \?\? -1\) >= 80/);

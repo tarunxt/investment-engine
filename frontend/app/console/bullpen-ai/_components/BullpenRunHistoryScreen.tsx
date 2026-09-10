@@ -349,6 +349,8 @@ export function BullpenRunHistoryScreen() {
   const [trendsError, setTrendsError] = useState<string | null>(null);
   const [portfolioReady, setPortfolioReady] = useState(false);
   const [portfolioVersion, setPortfolioVersion] = useState(0);
+  const [lastRebalanceAt, setLastRebalanceAt] = useState<string | null>(null);
+  const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>([]);
 
   const load = useCallback(async (pageNumber = 1) => {
     setLoading(true);
@@ -357,7 +359,7 @@ export function BullpenRunHistoryScreen() {
     try {
       const positionsPromise = fetchCurrentBullpenPositions().catch(() => null);
       const historyRequestOptions = { timeoutMs: 10_000 };
-      const [[pageResult, trendsResult], currentPositions] = await Promise.all([
+      const [[pageResult, trendsResult], currentPositions, runtimeState] = await Promise.all([
         Promise.allSettled([
           apiService.getBullpenAutoLiveHistory(
             { page: pageNumber, size: 20 },
@@ -368,7 +370,9 @@ export function BullpenRunHistoryScreen() {
           ),
         ]),
         positionsPromise,
+        apiService.getBullpenAutoLiveState().catch(() => null),
       ]);
+      if (runtimeState) setLastRebalanceAt(runtimeState.last_rebalance_at ?? null);
       const hasUsableCurrentPositions = Boolean(
         currentPositions &&
           isUsableBullpenPositionsSnapshot({
@@ -378,6 +382,7 @@ export function BullpenRunHistoryScreen() {
       );
       if (pageResult.status === "fulfilled") {
         setPage(pageResult.value);
+        if (pageResult.value.page === 1) setLatestRuns(pageResult.value.items);
       } else {
         setError(
           `Run history is temporarily unavailable. ${formatUnknownError(pageResult.reason)}`,
@@ -453,6 +458,8 @@ export function BullpenRunHistoryScreen() {
           onPage={(next) => void load(next)}
           onOpenRun={openRun}
           showFullScreen={false}
+          lastRebalanceAt={lastRebalanceAt}
+          latestRuns={latestRuns}
         />
       </div>
     </main>
