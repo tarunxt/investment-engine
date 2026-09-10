@@ -43,16 +43,17 @@ export function useBullpenEventClusters() {
 }
 
 export function ClusterIdInput({ value, eventName, onSave }: { value: string; eventName: string; onSave: (value: string) => void }) {
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setDraft(value); setError(null); }, [value]);
   const commit = () => {
-    try { const text = draft ?? value; const normalized = text.trim() ? normalizeClusterId(text) : ""; if (normalized !== value) onSave(normalized); setDraft(null); setError(null); }
+    try { const normalized = draft.trim() ? normalizeClusterId(draft) : ""; if (normalized !== value) onSave(normalized); setDraft(normalized); setError(null); }
     catch (reason) { setError((reason as Error).message); }
   };
-  return <div><input aria-label={`Cluster ID for ${eventName}`} aria-invalid={Boolean(error)} value={draft ?? value} placeholder="—" maxLength={7}
+  return <div><input aria-label={`Cluster ID for ${eventName}`} aria-invalid={Boolean(error)} value={draft} placeholder="—" maxLength={7} autoComplete="off"
     className={`w-full rounded-md border bg-white px-2 py-1 text-xs font-bold uppercase text-sky-900 focus:outline-none focus:ring-2 focus:ring-sky-400 ${error ? "border-red-500" : "border-slate-200"}`}
     onChange={event => setDraft(event.target.value)} onBlur={commit}
-    onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(null); setError(null); } }} />
+    onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") { setDraft(value); setError(null); } }} />
     {error && <span role="alert" className="text-[10px] text-red-700">{error}</span>}</div>;
 }
 
