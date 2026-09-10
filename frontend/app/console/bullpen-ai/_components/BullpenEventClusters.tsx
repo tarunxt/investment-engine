@@ -52,7 +52,12 @@ export function ClusterIdInput({ value, eventName, onSave }: { value: string; ev
     // Chrome can restore an old form value after React hydrates. When React state
     // already equals the published value, setState is a no-op and that stale DOM
     // value would remain visible even though the row has the correct cluster.
-    if (input.current && document.activeElement !== input.current && input.current.value !== value) input.current.value = value;
+    const syncPublishedValue = () => {
+      if (input.current && document.activeElement !== input.current && input.current.value !== value) input.current.value = value;
+    };
+    syncPublishedValue();
+    const timer = window.setTimeout(syncPublishedValue, 250);
+    return () => window.clearTimeout(timer);
   }, [value]);
   const commit = () => {
     try { const normalized = draft.trim() ? normalizeClusterId(draft) : ""; if (normalized !== value) onSave(normalized); setDraft(normalized); setError(null); }

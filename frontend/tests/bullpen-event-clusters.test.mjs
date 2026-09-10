@@ -75,5 +75,6 @@ test("published cluster inputs repair browser-restored DOM values after hydratio
   assert.match(component, /document\.activeElement !== input\.current/);
   assert.match(component, /input\.current\.value !== value/);
   assert.match(component, /input\.current\.value = value/);
+  assert.match(component, /setTimeout\(syncPublishedValue, 250\)/);
 });
 
