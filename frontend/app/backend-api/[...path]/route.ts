@@ -30,14 +30,16 @@ const FORWARDED_HEADER_BLOCKLIST = new Set([
 const RESPONSE_HEADER_BLOCKLIST = new Set(["content-encoding", "content-length"]);
 const DEFAULT_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 1_200;
 const DEFAULT_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_000;
-// Auto-Live dashboard, history, and exact-run reads intentionally have backend
-// deadlines of up to four seconds. Give those routes enough time to return
-// their own compact 503/degraded response while keeping the BFF below the
-// console's five-second poll deadline.
 const DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200;
 const DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750;
 const MAX_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_500;
 const MAX_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_900;
+// History reads have a twelve-second backend deadline because the bounded
+// twenty-scan projection can briefly wait behind a persistence transaction.
+// Keep only these two BFF routes outside that deadline; fast dashboard polling
+// retains its existing strict budget.
+const BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500;
+const BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000;
 const BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS = 600_000;
 const BULLPEN008_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 10_000;
 const BULLPEN008_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 12_000;
@@ -229,6 +231,14 @@ function isBullpen008Read(method: string, path: string) {
   );
 }
 
+function isBullpenHistoryRead(method: string, path: string) {
+  return (
+    SAFE_FALLBACK_METHODS.has(method) &&
+    (path === "polymarket/auto-live/history" ||
+      path === "polymarket/auto-live/history/event-trends")
+  );
+}
+
 function isBullpenStageOneExcelDownload(method: string, path: string) {
   return (
     method === "GET" &&
@@ -247,6 +257,10 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
       DEFAULT_BACKEND_PROXY_MUTATION_TIMEOUT_MS,
       30_000,
     );
+  }
+
+  if (isBullpenHistoryRead(method, path)) {
+    return BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS;
   }
 
   if (isBullpenAutoLiveRead(method, path)) {
@@ -275,6 +289,10 @@ function getProxyTotalTimeoutMs(method: string, path: string) {
   }
   if (!SAFE_FALLBACK_METHODS.has(method)) {
     return getProxyAttemptTimeoutMs(method, path);
+  }
+
+  if (isBullpenHistoryRead(method, path)) {
+    return BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS;
   }
 
   if (isBullpenAutoLiveRead(method, path)) {

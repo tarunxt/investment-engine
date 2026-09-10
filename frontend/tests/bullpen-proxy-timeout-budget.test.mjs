@@ -7,24 +7,25 @@ function read(relativePath) {
   return readFileSync(new URL(relativePath, import.meta.url), "utf8");
 }
 
-test("Bullpen Auto-Live reads outlive the backend's four-second route deadline", () => {
+test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", () => {
   const proxySource = read("../app/backend-api/[...path]/route.ts");
   const backendSource = read(
     "../../backend/app/domains/polymarket_auto_live/router.py",
   );
 
   assert.match(backendSource, /DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 4\.0/);
-  assert.match(backendSource, /HISTORY_TIMEOUT_SECONDS = 4\.0/);
+  assert.match(backendSource, /HISTORY_TIMEOUT_SECONDS = 12\.0/);
   assert.match(backendSource, /CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 4\.0/);
 
   assert.match(
     proxySource,
-    /DEFAULT_BULLPEN_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 4_200/,
+    /BULLPEN_HISTORY_BACKEND_PROXY_ATTEMPT_TIMEOUT_MS = 12_500/,
   );
   assert.match(
     proxySource,
-    /DEFAULT_BULLPEN_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 4_750/,
+    /BULLPEN_HISTORY_BACKEND_PROXY_TOTAL_TIMEOUT_MS = 14_000/,
   );
+  assert.match(proxySource, /isBullpenHistoryRead\(method, path\)/);
   assert.match(proxySource, /path\.startsWith\("polymarket\/auto-live\/"\)/);
   assert.match(
     proxySource,

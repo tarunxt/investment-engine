@@ -1718,11 +1718,24 @@ class AsyncPolymarketAutoLiveRepository:
             decision.market_title, decision.side, decision.decision,
             decision.risk_status, decision.edge_pp, decision.score,
             decision.console_projection,
-            decision.console_projection["llm_outputs"].label("trend_llm_outputs"),
-            decision.payload["llm_outputs"].label("trend_frozen_llm_outputs"),
             decision.created_at, decision.updated_at,
         ).where(decision.user_id == user_id).where(decision.run_id.in_(run_ids))
-          .where(decision.console_projection.is_not(None)).where(_visible_decision_filter()))).all()
+          .where(decision.console_projection.is_not(None)))).all()
+
+        # Current run projections already retain the per-model Stage-2 output
+        # used by the heatmap. Reading the immutable decision payload for every
+        # row forces PostgreSQL to de-TOAST and parse large JSON that will
+        # normally never be used. Identify genuine legacy gaps first, then
+        # fetch the frozen output slice only for that bounded subset.
+        projected_rows: list[
+            tuple[
+                object,
+                BullpenAutoLiveDecision,
+                int,
+                list[BullpenAutoLiveLlmOutput],
+            ]
+        ] = []
+        fallback_decision_ids: list[str] = []
         for row in rows:
             try:
                 projected = projected_row_to_decision(row)
@@ -1736,6 +1749,42 @@ class AsyncPolymarketAutoLiveRepository:
             index = run_index.get(str(row.run_id))
             if index is None:
                 continue
+            projected_llm_outputs = list(projected.llm_outputs)
+            projected_rows.append(
+                (row, projected, index, projected_llm_outputs)
+            )
+            existing_entry = event_scores.get(projected.market_id)
+            existing_outputs = (
+                existing_entry["llm_outputs"][index]
+                if existing_entry is not None
+                else []
+            )
+            if not existing_outputs and not projected_llm_outputs:
+                fallback_decision_ids.append(str(row.id))
+
+        frozen_outputs_by_decision_id: dict[
+            str, list[BullpenAutoLiveLlmOutput]
+        ] = {}
+        if fallback_decision_ids:
+            frozen_rows = (await self.session.execute(
+                select(
+                    decision.id,
+                    decision.payload["llm_outputs"].label(
+                        "trend_frozen_llm_outputs"
+                    ),
+                )
+                .where(decision.user_id == user_id)
+                .where(decision.id.in_(fallback_decision_ids))
+                .where(decision.console_projection.is_not(None))
+            )).all()
+            frozen_outputs_by_decision_id = {
+                str(row.id): _event_trend_llm_outputs(
+                    row.trend_frozen_llm_outputs
+                )
+                for row in frozen_rows
+            }
+
+        for row, projected, index, projected_llm_outputs in projected_rows:
             yes_score = (
                 projected.fair_yes_probability_pct
                 if projected.fair_yes_probability_pct is not None
@@ -1750,13 +1799,10 @@ class AsyncPolymarketAutoLiveRepository:
             strongest_side = "YES" if yes_score >= no_score else "NO"
             entry = ensure_entry(projected.market_id, projected.market_title)
             scores = entry["scores"]
-            frozen_llm_outputs = _event_trend_llm_outputs(
-                getattr(row, "trend_frozen_llm_outputs", None)
-            )
-            projected_llm_outputs = _event_trend_llm_outputs(
-                row.trend_llm_outputs
-            )
-            decision_llm_outputs = frozen_llm_outputs or projected_llm_outputs
+            decision_llm_outputs = frozen_outputs_by_decision_id.get(
+                str(row.id),
+                [],
+            ) or projected_llm_outputs
             if (
                 isinstance(scores, list)
                 and scores[index] is None
