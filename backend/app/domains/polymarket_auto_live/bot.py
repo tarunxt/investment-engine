@@ -124,7 +124,7 @@ def _summarize_run_for_list(run: BullpenAutoLiveRun) -> BullpenAutoLiveRun:
 
 
 def _freeze_cancelled_run_audit_sync(*, user_id: int, run_id: str) -> None:
-    """Freeze the cancellation snapshot even when Celery is terminated first."""
+    """Freeze a preempted-run snapshot even when Celery is terminated first."""
     with SyncSessionLocal() as session:
         materialize_run_audit_snapshot_sync(
             session,
@@ -455,6 +455,8 @@ class BullpenAutoLiveBot:
     async def _cancel_active_run_if_needed(
         self,
         repo: AsyncPolymarketAutoLiveRepository,
+        *,
+        requested_by: str = "user",
     ) -> BullpenAutoLiveRun | None:
         active_run_record = await repo.get_running_run_record(
             self.user_id,
@@ -465,26 +467,48 @@ class BullpenAutoLiveBot:
 
         active_run = record_to_run(active_run_record)
         cancelled_at = utc_now()
+        scheduled_preemption = requested_by == "scheduler"
+        cancellation_reason = (
+            "Superseded by the next scheduled Auto-Live run."
+            if scheduled_preemption
+            else "Cancelled by user"
+        )
+        cancellation_summary = (
+            "Auto-Live run was superseded so the next scheduled run could start."
+            if scheduled_preemption
+            else "Auto-Live run cancelled by user."
+        )
+        stage_cancellation_reason = (
+            cancellation_reason if scheduled_preemption else "Cancelled by user."
+        )
         active_run.status = "failed"
         active_run.completed_at = cancelled_at
-        active_run.error_message = "Cancelled by user"
-        active_run.summary = "Auto-Live run cancelled by user."
+        active_run.error_message = cancellation_reason
+        active_run.summary = cancellation_summary
         active_run.audit_metadata = {
             **active_run.audit_metadata,
             "cancellation": {
-                "requested_by": "user",
+                "requested_by": requested_by,
                 "cancelled_at": cancelled_at,
                 "terminalized_stages": True,
+                "reason": "next_scheduled_slot" if scheduled_preemption else "user_request",
             },
         }
+        if active_run.task_lifecycle is not None:
+            active_run.task_lifecycle = active_run.task_lifecycle.model_copy(
+                update={
+                    "state": "REVOKED",
+                    "detail": cancellation_reason,
+                }
+            )
         for stage_result in active_run.stage_results:
             if stage_result.completed_at is None:
                 stage_result.status = "fail"
                 stage_result.completed_at = cancelled_at
-                stage_result.reason = "Cancelled by user."
+                stage_result.reason = stage_cancellation_reason
                 stage_result.outputs = {
                     **stage_result.outputs,
-                    "phase_status": "cancelled",
+                    "phase_status": "superseded" if scheduled_preemption else "cancelled",
                 }
         await repo.save_run(self.user_id, active_run)
         return active_run
@@ -1034,14 +1058,32 @@ class BullpenAutoLiveBot:
                 await session.commit()
                 return run
 
+            superseded_run: BullpenAutoLiveRun | None = None
+            if running_run is not None and triggered_by == "scheduler":
+                revoked_task_id = await revoke_registered_auto_live_run_task(
+                    running_run.id
+                )
+                if revoked_task_id is None and running_run.task_lifecycle is not None:
+                    revoked_task_id = running_run.task_lifecycle.task_id
+                    if revoked_task_id:
+                        await asyncio.to_thread(
+                            revoke_auto_live_run_task_sync,
+                            revoked_task_id,
+                        )
+                superseded_run = await self._cancel_active_run_if_needed(
+                    repo,
+                    requested_by="scheduler",
+                )
+                logger.warning(
+                    "Scheduled Auto-Live trigger for user %s superseded active run %s; "
+                    "worker task %s was revoked before the new slot was queued.",
+                    self.user_id,
+                    running_run.id,
+                    revoked_task_id or "unregistered",
+                )
+                running_run = None
+
             if running_run is not None:
-                if triggered_by == "scheduler":
-                    logger.info(
-                        "Scheduled Auto-Live trigger for user %s reused active run %s.",
-                        self.user_id,
-                        running_run.id,
-                    )
-                    return running_run
                 run = BullpenAutoLiveRun(
                     id=requested_run_id or str(uuid4()),
                     triggered_by=triggered_by,  # type: ignore[arg-type]
@@ -1098,6 +1140,29 @@ class BullpenAutoLiveBot:
                 self._schedule_next_cycles(settings, state, reference_time=datetime.now(UTC))
             await repo.save_state(self.user_id, state)
             await session.commit()
+            if superseded_run is not None:
+                try:
+                    await asyncio.to_thread(
+                        cancel_unsubmitted_run_order_intents_for_user_sync,
+                        user_id=self.user_id,
+                        run_id=superseded_run.id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to cancel unsubmitted Stage 3 intents for superseded run %s.",
+                        superseded_run.id,
+                    )
+                try:
+                    await asyncio.to_thread(
+                        _freeze_cancelled_run_audit_sync,
+                        user_id=self.user_id,
+                        run_id=superseded_run.id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to freeze Bullpen audit after scheduled run %s was superseded.",
+                        superseded_run.id,
+                    )
             try:
                 task, fallback_used = publish_auto_live_task_with_fallback(
                     execute_polymarket_auto_live_run,
