@@ -14,6 +14,7 @@ import { BullpenReturnsPerDayHeaderInfo } from "./BullpenReturnsPerDayInfo";
 type ColumnKey =
   | "event"
   | "deadline"
+  | "claimDate"
   | "score"
   | "currentOdds"
   | "llmOdds"
@@ -27,6 +28,7 @@ type SortDirection = "asc" | "desc";
 type Preferences = { order: ColumnKey[]; widths: Record<ColumnKey, number>; sort: { key: ColumnKey; direction: SortDirection } };
 
 export type BullpenEventTableSnapshot = BullpenAutoLiveEventTrend & {
+  claim_date?: string | null;
   position_side?: string | null;
   position_shares?: number | null;
   position_exposure_usd?: number | null;
@@ -47,6 +49,7 @@ const isAboveReturnsDivider = (event: BullpenEventTableSnapshot) =>
   event.returns_per_day > RETURNS_PER_DAY_DIVIDER_THRESHOLD;
 const columns: Array<{ key: ColumnKey; label: string; width: number }> = [
   { key: "event", label: "Event", width: 330 }, { key: "deadline", label: "Deadline", width: 105 },
+  { key: "claimDate", label: "Claim date", width: 120 },
   { key: "score", label: "Score", width: 90 }, { key: "currentOdds", label: "Current Odds", width: 125 },
   { key: "llmOdds", label: "LLM Odds", width: 125 }, { key: "returns", label: "Returns/day", width: 110 },
   { key: "scans", label: "20 scans · newest to oldest", width: 420 },
@@ -57,7 +60,7 @@ const columnKeysForVariant = (variant: BullpenEventTableVariant): ColumnKey[] =>
   ? ["event", "deadline", "currentOdds", "llmOdds", "returns", "position"]
   : variant === "fresh-opportunities"
     ? ["event", "deadline", "currentOdds", "llmOdds", "returns", "amount", "volume", "liquidity"]
-    : ["event", "deadline", "score", "currentOdds", "llmOdds", "returns", "scans"];
+    : ["event", "deadline", "claimDate", "score", "currentOdds", "llmOdds", "returns", "scans"];
 const defaultsForVariant = (variant: BullpenEventTableVariant): Preferences => ({
   order: columnKeysForVariant(variant),
   widths: Object.fromEntries(columns.map(({ key, width }) => [key, width])) as Record<ColumnKey, number>,
@@ -109,7 +112,7 @@ export const isExpiredNotYetClaimablePosition = (event: BullpenAutoLiveEventTren
   return Number.isFinite(closeTime) && closeTime < Date.now();
 };
 
-export function BullpenEventTrendsTable({ events, variant = "trends", showStrongestOnly = false, clusters, clusterMode = 0, onClusterEdit, onScore, onLlm, onReturns, onReturnsFormula }: { events: BullpenEventTableSnapshot[]; variant?: BullpenEventTableVariant; showStrongestOnly?: boolean; clusters?: ReadonlyMap<string, string>; clusterMode?: ClusterMode; onClusterEdit?: (marketId: string, eventName: string, value: string) => void; onScore?: (event: BullpenAutoLiveEventTrend) => void; onLlm?: (question: BullpenQuestionRow) => void; onReturns?: (question: BullpenQuestionRow) => void; onReturnsFormula: () => void }) {
+export function BullpenEventTrendsTable({ events, variant = "trends", showStrongestOnly = false, clusters, clusterMode = 0, onClusterEdit, onScore, onLlm, onReturns, onClaimReturns, onReturnsFormula }: { events: BullpenEventTableSnapshot[]; variant?: BullpenEventTableVariant; showStrongestOnly?: boolean; clusters?: ReadonlyMap<string, string>; clusterMode?: ClusterMode; onClusterEdit?: (marketId: string, eventName: string, value: string) => void; onScore?: (event: BullpenAutoLiveEventTrend) => void; onLlm?: (question: BullpenQuestionRow) => void; onReturns?: (question: BullpenQuestionRow) => void; onClaimReturns?: (event: BullpenEventTableSnapshot) => void; onReturnsFormula: () => void }) {
   const defaults = useMemo(() => defaultsForVariant(variant), [variant]);
   const visibleColumns = useMemo(() => columns.filter(({ key }) => defaults.order.includes(key)), [defaults]);
   const storageKey = `${STORAGE_KEY}:${variant}`;
@@ -119,7 +122,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
   const [hovered, setHovered] = useState<{ event: BullpenAutoLiveEventTrend; index: number } | null>(null);
   useEffect(() => { const timer = window.setTimeout(() => { try { const saved = JSON.parse(localStorage.getItem(storageKey) || "null") as Partial<Preferences> | null; if (saved?.order?.length === visibleColumns.length && saved.order.every(key => defaults.order.includes(key))) setPreferences({ order: saved.order, widths: { ...defaults.widths, ...saved.widths }, sort: saved.sort && defaults.order.includes(saved.sort.key) ? saved.sort : defaults.sort }); else setPreferences(defaults); } catch { setPreferences(defaults); } preferencesLoaded.current = true; }); return () => window.clearTimeout(timer); }, [defaults, storageKey, visibleColumns.length]);
   useEffect(() => { if (preferencesLoaded.current) localStorage.setItem(storageKey, JSON.stringify(preferences)); }, [preferences, storageKey]);
-  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const key = preferences.sort.key; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * (preferences.sort.direction === "asc" ? 1 : -1); }), [events, preferences.sort, showStrongestOnly]);
+  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const key = preferences.sort.key; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "claimDate" ? (event.claim_date ? Date.parse(event.claim_date) : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * (preferences.sort.direction === "asc" ? 1 : -1); }), [events, preferences.sort, showStrongestOnly]);
   const showClusters = variant === "trends" && Boolean(clusters && onClusterEdit);
   const displayed = useMemo(() => {
     const arranged = arrangeClusterEvents(sorted, clusters ?? new Map(), showClusters ? clusterMode : 0);
@@ -144,6 +147,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
       : undefined;
     if (key === "event") return <span className="flex min-w-0 items-center gap-2">{!showClusters && event.is_active_position && <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-600 text-white ring-2 ring-green-200/80 shadow-sm shadow-green-950/40 dark:bg-green-400 dark:text-slate-950 dark:ring-green-100" title={`Active Bullpen position: ${event.active_position_side ?? "unknown side"}`}><Check className="h-4 w-4 stroke-[4.5]" aria-label="Active Bullpen position" /></span>}<a className="truncate text-xs font-semibold hover:text-sky-700 hover:underline" title={`Open ${event.market_title} in Bullpen`} href={buildBullpenMarketUrl(event.market_id)} target="_blank" rel="noreferrer">{event.market_title}</a>{event.market_url && <a className="shrink-0 text-blue-600 hover:text-blue-800" title={`Open ${event.market_title} on Polymarket`} aria-label={`Open ${event.market_title} on Polymarket`} href={event.market_url} target="_blank" rel="noreferrer"><PolymarketIcon className="h-4 w-4" /></a>}</span>;
     if (key === "deadline") return event.is_claimable_position ? <span className="inline-flex min-w-20 items-center justify-center rounded-lg bg-green-700 px-3 py-1.5 text-sm font-black uppercase tracking-wide text-white shadow-md ring-2 ring-green-300 dark:bg-green-500 dark:text-slate-950 dark:ring-green-200" title="This resolved winning position is available to claim now">Claim</span> : <span className="text-xs font-semibold" title={formatTime(event.close_time)}>{formatDeadline(event.close_time)}</span>;
+    if (key === "claimDate") return <span className="text-xs font-semibold" title="Best-guess claim availability; not a guaranteed settlement time">{formatDeadline(event.claim_date)}</span>;
     if (key === "score") return onScore ? <button className="text-right text-xs font-bold underline decoration-dotted" onClick={() => onScore(event)}>{event.score.toFixed(2)}</button> : <span className="text-right text-xs font-bold">{event.score.toFixed(2)}</span>;
     if (key === "currentOdds") return <span className="text-xs font-semibold">Yes {odds(event.current_yes_odds)}<br/>No {odds(event.current_no_odds)}</span>;
     if (key === "llmOdds") {
@@ -153,6 +157,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
       const content = <><span className={activePositionSide === "YES" ? activeSideClass : undefined} title={activePositionSide === "YES" ? activeSideTitle : undefined}>Yes {odds(event.llm_yes_odds)}</span><br/><span className={activePositionSide === "NO" ? activeSideClass : undefined} title={activePositionSide === "NO" ? activeSideTitle : undefined}>No {odds(event.llm_no_odds)}</span></>;
       return onLlm ? <button className="text-left text-xs font-semibold text-violet-700 underline" onClick={() => onLlm(questionFor(event))}>{content}</button> : <span className="text-xs font-semibold text-violet-700">{content}</span>;
     }
+    if (key === "returns" && onClaimReturns) return <button className="text-left text-xs font-bold underline decoration-dotted" onClick={() => onClaimReturns(event)}>{odds(event.returns_per_day)}</button>;
     if (key === "returns") return onReturns ? <button className="text-left text-xs font-bold underline decoration-dotted" disabled={event.returns_per_day == null} onClick={() => onReturns(questionFor(event))}>{odds(event.returns_per_day)}</button> : <span className="text-left text-xs font-bold">{odds(event.returns_per_day)}</span>;
     if (key === "position") return <span className="text-xs font-semibold">{event.position_side ?? "—"}<br/>Shares {event.position_shares?.toLocaleString("en-IN", { maximumFractionDigits: 6 }) ?? "—"}<br/>Exposure {event.position_exposure_usd == null ? "—" : `$${event.position_exposure_usd.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}<br/>Avg {event.position_average_price_cents == null ? "—" : `${event.position_average_price_cents.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`}</span>;
     if (key === "amount") return <span className="text-xs font-semibold">{event.amount_to_be_invested == null ? "—" : `$${event.amount_to_be_invested.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`}</span>;

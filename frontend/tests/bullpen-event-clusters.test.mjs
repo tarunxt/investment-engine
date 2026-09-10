@@ -14,7 +14,7 @@ test("published JSON is valid, unique and deterministically numbered", () => {
   assert.deepEqual(rows, raw);
   assert.equal(new Set(rows.map(row => row.market_id)).size, rows.length);
   for (const row of rows) {
-    assert.deepEqual(Object.keys(row).sort(), ["cluster_id", "event_name", "market_id"]);
+    assert.deepEqual(Object.keys(row).sort(), [...(row.claim_date !== undefined ? ["claim_date"] : []), "cluster_id", "event_name", "market_id"]);
     assert.ok(Object.values(row).every(value => typeof value === "string"));
   }
   const groups = Map.groupBy(rows, row => row.cluster_id);

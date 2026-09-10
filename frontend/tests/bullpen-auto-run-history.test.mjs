@@ -164,7 +164,7 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(trendsTable, /ALERT: held-side LLM odds are below 80%/);
   assert.match(trendsTable, /border-\[1\.5px\] border-black/);
   assert.match(historyContent, /<BullpenLlmBreakdownDialog question=\{llmQuestion\}/);
-  assert.match(historyContent, /<BullpenInvestmentMathDialog focus="returnsPerDay"/);
+  assert.match(historyContent, /<BullpenClaimReturnsDialog event=\{returnsEvent\}/);
   assert.match(historyContent, /calculateTrendDaysUntilClose/);
   assert.match(historyContent, /event\.scan_timestamps\.find\(Boolean\)/);
   assert.match(historyContent, /daysUntilClose: calculateTrendDaysUntilClose\(event\)/);
@@ -190,7 +190,7 @@ test("Stage 1 and history refresh exact contracts instead of shared parent event
   assert.match(scheduleCard, /isAutoRunSnapshot/);
 });
 
-test("Run History Returns/day header opens a persistent Excel-style formula editor", () => {
+test("Run History Returns/day header explains the claim-date formula", () => {
   const historyContent = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx",
@@ -207,20 +207,17 @@ test("Run History Returns/day header opens a persistent Excel-style formula edit
   );
   const formulaDialog = readFileSync(
     new URL(
-      "../app/console/bullpen-ai/_components/BullpenReturnsPerDayInfo.tsx",
+      "../app/console/bullpen-ai/_components/BullpenClaimReturnsDialog.tsx",
       import.meta.url,
     ),
     "utf8",
   );
 
   assert.match(trendsTable, /BullpenReturnsPerDayHeaderInfo/);
-  assert.match(historyContent, /BullpenReturnsPerDayFormulaDialog/);
-  assert.match(formulaDialog, /Excel-style formula/);
-  assert.match(formulaDialog, /returns_per_day_formula: formula/);
-  assert.match(
-    formulaDialog,
-    /=\(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS\)\/\(DAYS_UNTIL_CLOSE\+4\)/,
-  );
+  assert.match(historyContent, /BullpenClaimReturnsDialog/);
+  assert.match(formulaDialog, /CLAIM_RETURNS_FORMULA/);
+  assert.match(formulaDialog, /Days left for claim/);
+  assert.match(formulaDialog, /fractional days without rounding or a four-day buffer/);
 });
 
 test("Bullpen event links use the direct market route instead of the trending search", () => {

@@ -17,3 +17,20 @@ storage falls back to the published mapping with a visible error.
 
 These are display assignments only. They do not change trading stages, audit
 snapshots, eligibility, ranking formulas, or order execution.
+
+### Claim estimates
+
+Each row may also contain `claim_date`, an ISO 8601 timestamp with explicit
+`Z` or offset (example `2026-09-12T18:00:00+05:30`), or null when no defensible
+estimate is available. The History **Claim date** column immediately follows
+Deadline and uses its IST date/time formatter. This is estimated redeem
+availability, not simply event expiry. History Returns/day and cluster ranking
+use fractional time to this estimate; the formula popup explains missing/stale
+estimates. Legacy rows without the field continue to import, showing no estimate.
+
+The Update Stage 1 Clusters automation must generate this fourth field for each
+classified market, research the market's specific resolution rules and oracle
+state, and publish it together with the cluster mapping. Keep per-market
+research time, source URLs, uncertainty and rationale in clustering metadata;
+never treat a high trading probability or a request timestamp as proof of payout.
+Validate with `node --test tests/bullpen-event-clusters.test.mjs tests/bullpen-claim-returns.test.mjs`.
