@@ -9,6 +9,7 @@ type ClaimEvent = {
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
   is_claimable_position?: boolean;
+  returns_per_day?: number | null;
 };
 const validOdds = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100;
@@ -43,6 +44,9 @@ export function applyClaimReturns<T extends ClaimEvent>(events: T[], assignments
     // Clustering output deliberately uses the portable three-field schema. Only
     // replace the History API's authoritative Returns/day when an explicit,
     // source-backed claim date is present.
-    return claimDate ? { ...event, ...claimReturns(event, claimDate, now) } : event;
+    if (claimDate) return { ...event, ...claimReturns(event, claimDate, now) };
+    const sourceReturn = typeof event.returns_per_day === "number" && Number.isFinite(event.returns_per_day)
+      ? event.returns_per_day : null;
+    return { ...event, ...claimReturns(event, null, now), returns_per_day: sourceReturn };
   });
 }
