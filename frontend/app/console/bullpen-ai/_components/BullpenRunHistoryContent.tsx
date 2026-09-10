@@ -12,8 +12,30 @@ import { BullpenClusterJsonDialog, useBullpenEventClusters } from "./BullpenEven
 import type { ClusterMode } from "@/lib/bullpen-event-clusters";
 import { BullpenEventTrendsTable } from "./BullpenEventTrendsTable";
 import { BullpenReturnsPerDayFormulaDialog } from "./BullpenReturnsPerDayInfo";
+import clusterMetadata from "@/data/bullpen-event-clusters-metadata.json";
 
 const formatTime = (value?: string | null) => formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", second: "2-digit" });
+
+const findLatestOperationalStage = (
+  runs: BullpenAutoLiveHistoryItem[],
+  key: BullpenAutoLiveHistoryItem["stages"][number]["key"],
+) => {
+  for (const run of runs) {
+    const stage = run.stages.find((candidate) => candidate.key === key);
+    if (!stage || stage.status === "skipped") continue;
+    return stage;
+  }
+  return null;
+};
+
+const formatOperationalStage = (
+  stage: BullpenAutoLiveHistoryItem["stages"][number] | null,
+) => stage?.status !== "fail" && stage?.completed_at
+  ? formatTime(stage.completed_at)
+  : "Failed";
+
+const formatOperationalTimestamp = (value?: string | null) =>
+  value ? formatTime(value) : "Failed";
 
 export const calculateTrendDaysUntilClose = (event: BullpenAutoLiveEventTrend) => {
   if (!event.close_time) return null;
@@ -68,11 +90,13 @@ export type BullpenRunHistoryContentProps = {
   detailLoadingId?: string | null; onRefresh: () => void; onPage: (page: number) => void;
   onOpenRun: (run: BullpenAutoLiveHistoryItem) => void; onClose?: () => void; showFullScreen?: boolean;
   eyebrow?: string; title?: string; fullScreenPath?: string;
+  lastRebalanceAt?: string | null;
+  latestRuns?: BullpenAutoLiveHistoryItem[];
   loadReturnsFormula?: () => Promise<string>;
   saveReturnsFormula?: (formula: string) => Promise<string>;
 };
 
-export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading, error, trendsError, detailLoadingId, onRefresh, onPage, onOpenRun, onClose, showFullScreen = true, eyebrow = "Run History", title = "Bullpen Auto and Manual Runs", fullScreenPath = "/console/bullpen-ai/history", loadReturnsFormula, saveReturnsFormula }: BullpenRunHistoryContentProps) {
+export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading, error, trendsError, detailLoadingId, onRefresh, onPage, onOpenRun, onClose, showFullScreen = true, eyebrow = "Run History", title = "Bullpen Auto and Manual Runs", fullScreenPath = "/console/bullpen-ai/history", lastRebalanceAt, latestRuns, loadReturnsFormula, saveReturnsFormula }: BullpenRunHistoryContentProps) {
   const [scoreEvent, setScoreEvent] = useState<BullpenAutoLiveEventTrend | null>(null);
   const [llmQuestion, setLlmQuestion] = useState<BullpenQuestionRow | null>(null);
   const [returnsQuestion, setReturnsQuestion] = useState<BullpenQuestionRow | null>(null);
@@ -81,15 +105,26 @@ export function BullpenRunHistoryContent({ page, trends, loading, trendsLoading,
   const [showClusterJson, setShowClusterJson] = useState(false);
   const [clusterMode, setClusterMode] = useState<ClusterMode>(2);
   const [showStrongestOnly, setShowStrongestOnly] = useState(false);
+  const operationalRuns = latestRuns ?? (page?.page === 1 ? page.items : []);
   const latestScoredScanAt = trends?.events.flatMap(event => event.scan_timestamps.map((timestamp, index) => event.scan_scores[index] == null ? null : timestamp)).find(Boolean) ?? null;
-  const latestSavedRunAt = page?.page === 1 ? page.items[0]?.started_at ?? null : null;
   const currentOddsUpdatedAt = trends?.current_odds_fetched_at ?? latestScoredScanAt ?? trends?.generated_at ?? null;
+  const latestStage1 = findLatestOperationalStage(operationalRuns, "scan");
+  const latestStage2 = findLatestOperationalStage(operationalRuns, "llm");
+  const latestStage3 = findLatestOperationalStage(operationalRuns, "invest");
+  const clusteringCompletedAt = Date.parse(clusterMetadata.completed_at);
+  const latestStage1CompletedAt = Date.parse(latestStage1?.completed_at ?? "");
+  const clusteringStatus = clusterMetadata.status === "completed" && (
+    !Number.isFinite(latestStage1CompletedAt) ||
+    clusteringCompletedAt >= latestStage1CompletedAt
+  )
+    ? formatOperationalTimestamp(clusterMetadata.completed_at)
+    : "Failed";
   return <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-[0_32px_90px_-32px_rgba(15,23,42,.45)]">
     <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5"><div><p className="text-xs font-semibold uppercase tracking-[.22em] text-slate-500">{eyebrow}</p><h1 className="mt-2 text-xl font-semibold text-slate-950">{title}</h1><p className="mt-1 text-xs text-slate-500">{loading ? "Loading compact history…" : page ? `${page.total.toLocaleString("en-IN")} saved run${page.total === 1 ? "" : "s"}` : "History has not been loaded"}</p></div>
       <div className="flex flex-wrap justify-end gap-2">{showFullScreen && <Button variant="outline" onClick={() => window.open(fullScreenPath, "_blank", "noopener,noreferrer")}><ExternalLink className="mr-2 h-4 w-4" />Full Screen</Button>}<Button variant="outline" onClick={onRefresh} disabled={loading}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />Refresh</Button>{onClose && <Button variant="outline" size="icon" onClick={onClose} aria-label="Close Bullpen run history"><X className="h-4 w-4" /></Button>}</div>
     </header>
     <div className="max-h-[74vh] overflow-y-auto px-6 py-5">
-      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3"><div><h2 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h2><p className="mt-0.5 text-[11px] text-slate-500">Latest scan is leftmost. Score = latest + 0.5 × previous + 0.25 × third-latest.</p><p className="mt-1 text-[11px] font-semibold text-slate-600">Latest saved run: {formatTime(latestSavedRunAt ?? latestScoredScanAt ?? trends?.generated_at)}{latestScoredScanAt ? <> · Latest scored LLM scan: {formatTime(latestScoredScanAt)}</> : null}</p>{currentOddsUpdatedAt ? <p className="mt-0.5 text-[11px] font-semibold text-slate-600">Current Bullpen Odds fetched/updated: {formatTime(currentOddsUpdatedAt)}</p> : null}</div><div className="flex flex-wrap items-center gap-2">
+      <section className="mb-5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/70"><div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3"><div><h2 className="text-sm font-bold text-slate-950">Recurring Events Across the Last 20 Scans</h2><div className="mt-1 grid gap-x-6 gap-y-0.5 text-[11px] font-semibold text-slate-600 sm:grid-cols-2"><p>Latest Stage 1: {formatOperationalStage(latestStage1)}</p><p>Latest Stage 1 Clustering: {clusteringStatus}</p><p>Current Bullpen Odds fetched/updated: {formatOperationalTimestamp(currentOddsUpdatedAt)}</p><p>Latest Bullpen Rebalance: {formatOperationalTimestamp(lastRebalanceAt)}</p><p>Latest Stage 2 LLM scan: {formatOperationalStage(latestStage2)}</p><p>Latest Stage 3 completion: {formatOperationalStage(latestStage3)}</p></div></div><div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => setShowClusterJson(true)} className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-[10px] font-bold uppercase text-slate-600 hover:border-sky-400">Add Cluster json</button>
           <button type="button" aria-pressed={clusterMode !== 0} data-cluster-mode={clusterMode} title={clusterMode === 0 ? "All events. Click to group clusters." : clusterMode === 1 ? "Grouped clusters. Click to show only each cluster’s top event." : "Top event per cluster. Click to show all events."} onClick={() => setClusterMode(value => ((value + 1) % 3) as ClusterMode)} className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${clusterMode === 2 ? "border-blue-800 bg-blue-800 text-white" : clusterMode === 1 ? "border-sky-300 bg-sky-200 text-sky-950" : "border-slate-300 bg-slate-100 text-slate-600"}`}>Cluster Top Events</button>
           <button type="button" role="switch" aria-checked={showStrongestOnly} onClick={() => setShowStrongestOnly(value => !value)} className={`rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase transition-colors ${showStrongestOnly ? "border-violet-700 bg-violet-700 text-white" : "border-slate-300 bg-white text-slate-600 hover:border-violet-400 hover:text-violet-700"}`}>Strongest LLM odds ≥80%</button></div></div>
