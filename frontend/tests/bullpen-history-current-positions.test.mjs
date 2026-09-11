@@ -80,7 +80,7 @@ test("History keeps usable run or trend data when the sibling request times out"
   assert.match(historyScreen, /setTrendsError/);
 });
 
-test("History refreshes automatically every minute without overlapping requests", () => {
+test("History uses a saved configurable refresh interval without overlapping requests", () => {
   const historyContent = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenRunHistoryContent.tsx",
@@ -89,12 +89,17 @@ test("History refreshes automatically every minute without overlapping requests"
     "utf8",
   );
 
-  assert.match(historyScreen, /RUN_HISTORY_AUTO_REFRESH_MS = 60_000/);
+  assert.match(historyScreen, /DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300/);
+  assert.match(historyScreen, /RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY/);
+  assert.match(historyScreen, /window\.localStorage\.getItem/);
+  assert.match(historyScreen, /window\.localStorage\.setItem/);
   assert.match(historyScreen, /const refreshInProgress = useRef\(false\)/);
   assert.match(historyScreen, /if \(refreshInProgress\.current\) return/);
-  assert.match(historyScreen, /window\.setInterval\([\s\S]*?RUN_HISTORY_AUTO_REFRESH_MS/);
+  assert.match(historyScreen, /window\.setInterval\([\s\S]*?refreshIntervalSeconds \* 1_000/);
   assert.match(historyScreen, /window\.clearInterval\(interval\)/);
-  assert.match(historyContent, /Auto-refreshes every minute/);
+  assert.match(historyContent, /Set Run History refresh time/);
+  assert.match(historyContent, /Refresh every \(seconds\)/);
+  assert.match(historyContent, /Default: 300 seconds/);
 });
 
 test("History primes the shared portfolio from a forced current wallet refresh", () => {
