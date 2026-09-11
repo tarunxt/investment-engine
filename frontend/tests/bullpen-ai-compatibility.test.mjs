@@ -1051,6 +1051,10 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
     /allowPartialGammaLookups:\s*true/,
   );
   assert.match(
+    currentOddsRouteSource,
+    /allowRuntimeQuestionFallback:\s*false/,
+  );
+  assert.match(
     marketUrlsSource,
     /MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES = 4/,
   );
@@ -1061,6 +1065,10 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
   assert.match(currentOddsRouteSource, /conditionId:\s*string \| null/);
   assert.match(currentOddsRouteSource, /marketId:\s*string \| null/);
   assert.match(currentOddsRouteSource, /id: question\.marketId \?\? question\.id/);
+  assert.match(
+    currentOddsRouteSource,
+    /conditionId: question\.marketId \? null : question\.conditionId/,
+  );
   assert.match(currentOddsRouteSource, /record\.condition_id/);
   assert.match(currentOddsRouteSource, /fetchedAt: new Date\(\)\.toISOString\(\)/);
   assert.match(

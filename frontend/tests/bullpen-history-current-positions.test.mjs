@@ -118,6 +118,16 @@ test("History refreshes each multi-outcome contract by exact market id", () => {
   assert.match(currentOddsRoute, /id: question\.marketId \?\? question\.id/);
   assert.match(
     currentOddsRoute,
+    /conditionId: question\.marketId \? null : question\.conditionId/,
+  );
+  assert.match(currentOddsRoute, /slug: question\.marketId \? null : question\.slug/);
+  assert.match(
+    currentOddsRoute,
+    /marketUrl: question\.marketId \? null : question\.marketUrl/,
+  );
+  assert.match(currentOddsRoute, /allowRuntimeQuestionFallback: false/);
+  assert.match(
+    currentOddsRoute,
     /gammaMarketsByLookupId\[question\.marketId \?\? question\.id\]/,
   );
 });

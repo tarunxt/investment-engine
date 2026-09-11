@@ -171,6 +171,13 @@ export async function POST(request: NextRequest) {
     const resolverQuestions = questions.map((question) => ({
       ...question,
       id: question.marketId ?? question.id,
+      // When History provides a canonical numeric market id, make it the only
+      // lookup identity. A stale condition id or shared parent-event URL/slug
+      // must not prevent the exact contract from being fetched or select a
+      // sibling outcome in a multi-outcome event.
+      conditionId: question.marketId ? null : question.conditionId,
+      slug: question.marketId ? null : question.slug,
+      marketUrl: question.marketId ? null : question.marketUrl,
     }));
     const gammaMarketsByLookupId =
       await resolvePolymarketMarketsWithQuestionFallback(
@@ -178,6 +185,7 @@ export async function POST(request: NextRequest) {
       {
         allowPartialGammaLookups: true,
         includeEventSupplements: false,
+        allowRuntimeQuestionFallback: false,
       },
     );
     const gammaMarkets = Object.fromEntries(
