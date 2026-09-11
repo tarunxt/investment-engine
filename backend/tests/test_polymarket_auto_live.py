@@ -82,6 +82,7 @@ from app.domains.polymarket_auto_live.normalization import (
 )
 from app.domains.polymarket_auto_live.repository import (
     AsyncPolymarketAutoLiveRepository,
+    SyncPolymarketAutoLiveRepository,
     _event_trend_llm_outputs,
     apply_state_to_record,
     normalize_auto_live_status,
@@ -6268,6 +6269,55 @@ def test_apply_state_to_record_normalizes_legacy_status_assignments():
 
     assert record.status == "stopped"
     assert record.payload["status"] == "stopped"
+
+
+def test_state_save_preserves_newer_external_hourly_rebalance_result():
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=True,
+        paused=False,
+        status="running",
+        mode="live-trading",
+        payload={
+            "latest_hourly_rebalance_status": "failed",
+            "latest_hourly_rebalance_at": "2026-09-11T02:49:00+00:00",
+            "latest_hourly_rebalance_detail": "Live reconciliation was blocked.",
+        },
+    )
+    stale_worker_state = BullpenAutoLiveState(
+        running=True,
+        status="running",
+        mode="live-trading",
+        latest_hourly_rebalance_status=None,
+        latest_hourly_rebalance_at=None,
+        latest_hourly_rebalance_detail=None,
+    )
+    statements = []
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return record
+
+    class _Session:
+        def execute(self, statement):
+            statements.append(statement)
+            return _Result()
+
+        def add(self, _record):
+            raise AssertionError("existing state must be updated")
+
+    SyncPolymarketAutoLiveRepository(_Session()).save_state(  # type: ignore[arg-type]
+        1,
+        stale_worker_state,
+    )
+
+    assert "FOR UPDATE" in str(statements[0])
+    assert record.payload["latest_hourly_rebalance_status"] == "failed"
+    assert record.payload["latest_hourly_rebalance_at"] == "2026-09-11T02:49:00+00:00"
+    assert (
+        record.payload["latest_hourly_rebalance_detail"]
+        == "Live reconciliation was blocked."
+    )
 
 
 def test_record_to_decision_drops_malformed_legacy_order_plan():
