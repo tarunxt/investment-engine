@@ -6271,6 +6271,27 @@ def test_apply_state_to_record_normalizes_legacy_status_assignments():
     assert record.payload["status"] == "stopped"
 
 
+def test_durable_hourly_rebalance_columns_survive_legacy_payload_writes():
+    recorded_at = datetime.fromisoformat("2026-09-11T02:49:00+00:00")
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=True,
+        paused=False,
+        status="running",
+        mode="live-trading",
+        latest_hourly_rebalance_status="failed",
+        latest_hourly_rebalance_at=recorded_at,
+        latest_hourly_rebalance_detail="Live reconciliation was blocked.",
+        payload={},
+    )
+
+    state = record_to_state(record)
+
+    assert state.latest_hourly_rebalance_status == "failed"
+    assert state.latest_hourly_rebalance_at == recorded_at.isoformat()
+    assert state.latest_hourly_rebalance_detail == "Live reconciliation was blocked."
+
+
 def test_state_save_preserves_newer_external_hourly_rebalance_result():
     record = PolymarketAutoLiveStateRecord(
         user_id=1,
@@ -6314,6 +6335,10 @@ def test_state_save_preserves_newer_external_hourly_rebalance_result():
     assert "FOR UPDATE" in str(statements[0])
     assert record.payload["latest_hourly_rebalance_status"] == "failed"
     assert record.payload["latest_hourly_rebalance_at"] == "2026-09-11T02:49:00+00:00"
+    assert record.latest_hourly_rebalance_status == "failed"
+    assert record.latest_hourly_rebalance_at == datetime.fromisoformat(
+        "2026-09-11T02:49:00+00:00"
+    )
     assert (
         record.payload["latest_hourly_rebalance_detail"]
         == "Live reconciliation was blocked."
@@ -6367,6 +6392,10 @@ async def test_async_state_save_preserves_newer_external_hourly_rebalance_result
     assert "FOR UPDATE" in str(statements[0])
     assert record.payload["latest_hourly_rebalance_status"] == "failed"
     assert record.payload["latest_hourly_rebalance_at"] == "2026-09-11T02:49:00+00:00"
+    assert record.latest_hourly_rebalance_status == "failed"
+    assert record.latest_hourly_rebalance_at == datetime.fromisoformat(
+        "2026-09-11T02:49:00+00:00"
+    )
     assert (
         record.payload["latest_hourly_rebalance_detail"]
         == "Live reconciliation was blocked."

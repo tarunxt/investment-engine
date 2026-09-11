@@ -237,6 +237,16 @@ def record_to_state(record: PolymarketAutoLiveStateRecord | None) -> BullpenAuto
             "next_run_at": _isoformat(record.next_run_at),
         }
     )
+    if record.latest_hourly_rebalance_at is not None:
+        payload.update(
+            {
+                "latest_hourly_rebalance_status": record.latest_hourly_rebalance_status,
+                "latest_hourly_rebalance_at": _isoformat(
+                    record.latest_hourly_rebalance_at
+                ),
+                "latest_hourly_rebalance_detail": record.latest_hourly_rebalance_detail,
+            }
+        )
     payload["status"] = normalize_auto_live_status(payload.get("status"))
     return BullpenAutoLiveState.model_validate(payload)
 
@@ -417,6 +427,7 @@ def apply_state_to_record(
     record.next_run_at = _parse_datetime(state.next_run_at)
     payload = state_to_record_payload(state)
     existing_payload = record.payload if isinstance(record.payload, dict) else {}
+    durable_rebalance_at = record.latest_hourly_rebalance_at
     existing_rebalance_at = _parse_datetime(
         existing_payload.get("latest_hourly_rebalance_at")
     )
@@ -437,6 +448,22 @@ def apply_state_to_record(
         ):
             payload[key] = existing_payload.get(key)
     payload["status"] = normalized_status
+    effective_rebalance_at = _parse_datetime(
+        payload.get("latest_hourly_rebalance_at")
+    )
+    if effective_rebalance_at is not None and (
+        durable_rebalance_at is None
+        or effective_rebalance_at >= durable_rebalance_at
+    ):
+        durable_status = payload.get("latest_hourly_rebalance_status")
+        durable_detail = payload.get("latest_hourly_rebalance_detail")
+        record.latest_hourly_rebalance_status = (
+            str(durable_status) if durable_status is not None else None
+        )
+        record.latest_hourly_rebalance_at = effective_rebalance_at
+        record.latest_hourly_rebalance_detail = (
+            str(durable_detail) if durable_detail is not None else None
+        )
     record.payload = payload
 
 

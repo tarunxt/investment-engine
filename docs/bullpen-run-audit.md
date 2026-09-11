@@ -19,14 +19,17 @@ terminal attempt through the authenticated
 `POST /polymarket/auto-live/hourly-rebalance/result` route. The backend assigns
 the timestamp when it accepts either `completed` or `failed`; clients cannot
 backdate a result. The latest status, server timestamp, and optional compact
-detail are stored additively in the existing per-user Auto-Live state payload as
+detail are stored in dedicated additive columns on the existing per-user
+Auto-Live state row and mirrored into its compatible payload as
 `latest_hourly_rebalance_status`, `latest_hourly_rebalance_at`, and
 `latest_hourly_rebalance_detail`.
 
 The external result timestamp is monotonic across scheduler writes. Long-lived
 workers refresh and lock the state row before saving, and the persistence
 adapter retains a newer external result when an older in-memory scheduler state
-is written later. A Stage 1/2/3 progress save therefore cannot erase or rewind a
+is written later. Because legacy workers do not update the additive columns,
+even a process that began before this deployment cannot erase the authoritative
+marker. A Stage 1/2/3 progress save therefore cannot erase or rewind a
 completed/failed hourly-rebalance marker that the History endpoint accepted.
 
 The Run History header displays the external status and timestamp together. It
