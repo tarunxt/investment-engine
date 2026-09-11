@@ -2203,6 +2203,9 @@ active position must belong to the target set; the active count may be lower
 than the target count because safety and tradeability exclusions are allowed.
 # External Stage 1 clustering progress
 
+The progress proxy has a fixed circuit scope separate from wallet/CLI reads,
+so unrelated wallet timeouts cannot suppress healthy progress requests.
+
 Clustering progress is an additive, per-user/per-scan ActivityLog stream with
 resource `bullpen_clustering_progress`. The authenticated
 `/polymarket/auto-live/clustering/{run_id}/progress` GET/POST routes expose

@@ -105,3 +105,17 @@ test("database history routes use fixed circuit scopes distinct from wallet read
   assert.match(source, /path === "polymarket\/auto-live\/history\/event-trends"/);
   assert.match(source, /circuitScope: historyCircuitScope/);
 });
+
+test("clustering progress uses a bounded dedicated circuit across scan IDs", () => {
+  const source = read("../app/backend-api/[...path]/route.ts");
+  const parsed = ts.createSourceFile("route.ts", source, ts.ScriptTarget.Latest, true);
+  const fn = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "isClusteringProgressRead");
+  assert.ok(fn);
+  const js = ts.transpileModule(fn.getText(parsed), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  const classify = new Function(`const SAFE_FALLBACK_METHODS = new Set(["GET", "HEAD"]); ${js}; return isClusteringProgressRead;`)();
+  assert.equal(classify("GET", "polymarket/auto-live/clustering/scan-a/progress"), true);
+  assert.equal(classify("HEAD", "polymarket/auto-live/clustering/scan-b/progress"), true);
+  assert.equal(classify("POST", "polymarket/auto-live/clustering/scan-a/progress"), false);
+  assert.equal(classify("GET", "polymarket/auto-live/state"), false);
+  assert.match(source, /isClusteringProgressRead\(request.method, path\)\s*\? "polymarket\/auto-live\/clustering\/progress"/);
+});
