@@ -30,13 +30,14 @@ test("missing, invalid, due, past and claimable estimates never manufacture retu
 test("claim-date overrides are exact by market ID and three-field rows preserve History returns", () => {
   const base = { market_id: "1", event_name: "Example", cluster_id: "C01" };
   assert.equal(parseClusterJson(JSON.stringify([{ ...base, claim_date: null }]))[0].claim_date, null);
-  const rows = parseClusterJson(JSON.stringify([{ ...base, claim_date: "2026-09-12T12:30:00Z" }, { ...base, market_id: "2" }]));
+  const rows = parseClusterJson(JSON.stringify([{ ...base, claim_date: "2026-09-12T12:30:00Z" }, { ...base, market_id: "2" }, { ...base, market_id: "3", claim_date: null }]));
   assert.equal(rows[0].claim_date, "2026-09-12T12:30:00Z");
   assert.equal(rows[1].claim_date, undefined);
   for (const claim_date of ["2026-09-12", "2026-09-12T12:30:00", "September 12", 1789]) assert.throws(() => parseClusterJson(JSON.stringify([{ ...base, claim_date }])));
-  const projected = applyClaimReturns([{ ...event, returns_per_day: 999 }, { ...event, market_id: "2", returns_per_day: 999 }], rows, now);
+  const projected = applyClaimReturns([{ ...event, returns_per_day: 999 }, { ...event, market_id: "2", returns_per_day: 999 }, { ...event, market_id: "3", returns_per_day: 999 }], rows, now);
   assert.equal(projected[0].returns_per_day, 10);
   assert.equal(projected[1].returns_per_day, 999);
+  assert.equal(projected[2].returns_per_day, null);
   assert.deepEqual(arrangeClusterEvents(projected, new Map([["1", "C01"], ["2", "C01"]]), 2).map(x => x.market_id), ["2"]);
 });
 test("published clustering uses the workflow's exact four-field schema", () => {
