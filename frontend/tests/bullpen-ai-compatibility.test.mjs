@@ -1054,6 +1054,12 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
     currentOddsRouteSource,
     /allowRuntimeQuestionFallback:\s*false/,
   );
+  assert.match(currentOddsRouteSource, /MAX_CLOB_BOOKS_BATCH_SIZE = 25/);
+  assert.match(currentOddsRouteSource, /MAX_CONCURRENT_CLOB_BOOK_BATCHES = 4/);
+  assert.match(
+    currentOddsRouteSource,
+    /batchBooks = await fetchBooks\(batchGroup\[batchIndex\]\)/,
+  );
   assert.match(
     marketUrlsSource,
     /MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES = 4/,
