@@ -16,6 +16,7 @@ type ColumnKey =
   | "deadline"
   | "claimDate"
   | "score"
+  | "bought"
   | "currentOdds"
   | "llmOdds"
   | "returns"
@@ -50,23 +51,25 @@ const isAboveReturnsDivider = (event: BullpenEventTableSnapshot) =>
 const columns: Array<{ key: ColumnKey; label: string; width: number }> = [
   { key: "event", label: "Event", width: 330 }, { key: "deadline", label: "Deadline", width: 105 },
   { key: "claimDate", label: "Claim date", width: 120 },
-  { key: "score", label: "Score", width: 90 }, { key: "currentOdds", label: "Current Odds", width: 125 },
+  { key: "score", label: "Score", width: 90 }, { key: "bought", label: "Bought", width: 90 },
+  { key: "currentOdds", label: "Current Odds", width: 210 },
   { key: "llmOdds", label: "LLM Odds", width: 125 }, { key: "returns", label: "Returns/day", width: 110 },
   { key: "scans", label: "20 scans · newest to oldest", width: 420 },
   { key: "position", label: "Position", width: 165 }, { key: "amount", label: "Trade amount", width: 120 },
   { key: "volume", label: "Volume", width: 120 }, { key: "liquidity", label: "Liquidity", width: 120 },
 ];
 const columnKeysForVariant = (variant: BullpenEventTableVariant): ColumnKey[] => variant === "active-positions"
-  ? ["event", "deadline", "currentOdds", "llmOdds", "returns", "position"]
+  ? ["event", "deadline", "bought", "currentOdds", "llmOdds", "returns", "position"]
   : variant === "fresh-opportunities"
     ? ["event", "deadline", "currentOdds", "llmOdds", "returns", "amount", "volume", "liquidity"]
-    : ["event", "deadline", "claimDate", "score", "currentOdds", "llmOdds", "returns", "scans"];
+    : ["event", "deadline", "claimDate", "score", "bought", "currentOdds", "llmOdds", "returns", "scans"];
 const defaultsForVariant = (variant: BullpenEventTableVariant): Preferences => ({
   order: columnKeysForVariant(variant),
   widths: Object.fromEntries(columns.map(({ key, width }) => [key, width])) as Record<ColumnKey, number>,
   sort: { key: variant === "trends" ? "score" : "deadline", direction: variant === "trends" ? "desc" : "asc" },
 });
 const odds = (value?: number | null) => value == null ? "—" : `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}%`;
+const cents = (value?: number | null) => value == null ? "—" : `${value.toLocaleString("en-IN", { maximumFractionDigits: 2 })}c`;
 const formatTime = (value?: string | null) => formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", second: "2-digit" });
 const formatDeadline = (value?: string | null) => value ? formatApiTimestamp(value, { emptyValue: "—", timeZone: "Asia/Kolkata", timeZoneName: "short", year: undefined }) : "—";
 const scanColor = (score: number | null) => { if (score === null) return "rgb(203 213 225)"; const n = Math.max(0, Math.min(100, score)); const [a,b,p] = n <= 65 ? [[244,166,160],[255,255,255],(n-50)/15] : [[255,255,255],[82,183,126],(n-65)/35]; const progress = Math.max(0, Math.min(1,p)); return `rgb(${a.map((v,i) => Math.round(v + (b[i]-v)*progress)).join(" ")})`; };
@@ -102,7 +105,7 @@ export const hasHeldSideCurrentOddsBelowThreshold = (event: BullpenAutoLiveEvent
   if (!event.is_active_position) return false;
   const activePositionSide = event.active_position_side?.trim().toUpperCase();
   const heldSideCurrentOdds = activePositionSide === "YES" ? event.current_yes_odds : activePositionSide === "NO" ? event.current_no_odds : null;
-  return heldSideCurrentOdds != null && heldSideCurrentOdds < HELD_SIDE_ODDS_ALERT_THRESHOLD;
+  return heldSideCurrentOdds != null && heldSideCurrentOdds <= HELD_SIDE_ODDS_ALERT_THRESHOLD;
 };
 export const hasHeldSideOddsBelowThreshold = (event: BullpenAutoLiveEventTrend) => hasHeldSideLlmOddsBelowThreshold(event) || hasHeldSideCurrentOddsBelowThreshold(event);
 export const hasUnavailableReturnsForCurrentPosition = (event: BullpenAutoLiveEventTrend) => event.returns_per_day == null && Boolean(event.is_active_position || event.is_claimable_position);
@@ -122,7 +125,7 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
   const [hovered, setHovered] = useState<{ event: BullpenAutoLiveEventTrend; index: number } | null>(null);
   useEffect(() => { const timer = window.setTimeout(() => { try { const saved = JSON.parse(localStorage.getItem(storageKey) || "null") as Partial<Preferences> | null; if (saved?.order?.length === visibleColumns.length && saved.order.every(key => defaults.order.includes(key))) setPreferences({ order: saved.order, widths: { ...defaults.widths, ...saved.widths }, sort: saved.sort && defaults.order.includes(saved.sort.key) ? saved.sort : defaults.sort }); else setPreferences(defaults); } catch { setPreferences(defaults); } preferencesLoaded.current = true; }); return () => window.clearTimeout(timer); }, [defaults, storageKey, visibleColumns.length]);
   useEffect(() => { if (preferencesLoaded.current) localStorage.setItem(storageKey, JSON.stringify(preferences)); }, [preferences, storageKey]);
-  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const key = preferences.sort.key; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "claimDate" ? (event.claim_date ? Date.parse(event.claim_date) : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * (preferences.sort.direction === "asc" ? 1 : -1); }), [events, preferences.sort, showStrongestOnly]);
+  const sorted = useMemo(() => events.filter(event => !showStrongestOnly || hasStrongestLatestLlmOdds(event) || event.is_active_position || event.is_claimable_position).sort((a,b) => { const aExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(a); const bExpiredNotYetClaimable = isExpiredNotYetClaimablePosition(b); if (aExpiredNotYetClaimable !== bExpiredNotYetClaimable) return aExpiredNotYetClaimable ? -1 : 1; const aClaimable = Boolean(a.is_claimable_position); const bClaimable = Boolean(b.is_claimable_position); if (aClaimable !== bClaimable) return aClaimable ? -1 : 1; const aReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(a); const bReturnsUnavailable = hasUnavailableReturnsForCurrentPosition(b); if (aReturnsUnavailable !== bReturnsUnavailable) return aReturnsUnavailable ? -1 : 1; const key = preferences.sort.key; const value = (event: BullpenEventTableSnapshot): string | number => key === "event" ? event.market_title.toLocaleLowerCase() : key === "deadline" ? (event.close_time ? new Date(event.close_time).getTime() : Number.MAX_SAFE_INTEGER) : key === "claimDate" ? (event.claim_date ? Date.parse(event.claim_date) : Number.MAX_SAFE_INTEGER) : key === "score" ? event.score : key === "bought" ? event.position_average_price_cents ?? -1 : key === "currentOdds" ? event.current_yes_odds ?? -1 : key === "llmOdds" ? event.llm_yes_odds ?? -1 : key === "returns" ? event.returns_per_day ?? -1 : key === "position" ? event.position_exposure_usd ?? -1 : key === "amount" ? event.amount_to_be_invested ?? -1 : key === "volume" ? event.volume_usd ?? -1 : key === "liquidity" ? event.liquidity_usd ?? -1 : event.scan_scores.filter(v => v != null).length; const left=value(a), right=value(b); return (left < right ? -1 : left > right ? 1 : a.market_title.localeCompare(b.market_title)) * (preferences.sort.direction === "asc" ? 1 : -1); }), [events, preferences.sort, showStrongestOnly]);
   const showClusters = variant === "trends" && Boolean(clusters && onClusterEdit);
   const displayed = useMemo(() => {
     const arranged = arrangeClusterEvents(sorted, clusters ?? new Map(), showClusters ? clusterMode : 0);
@@ -139,6 +142,10 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
   const cell = (key: ColumnKey, event: BullpenEventTableSnapshot) => {
     const activePositionSide = event.is_active_position ? event.active_position_side?.trim().toUpperCase() : null;
     const heldSideBelowLlmThreshold = hasHeldSideLlmOddsBelowThreshold(event);
+    const heldSideCurrentOdds = activePositionSide === "YES" ? event.current_yes_odds : activePositionSide === "NO" ? event.current_no_odds : null;
+    const activeCurrentSideClass = heldSideCurrentOdds != null && heldSideCurrentOdds > HELD_SIDE_ODDS_ALERT_THRESHOLD
+      ? "rounded bg-green-600 px-1 py-0.5 font-black text-white ring-1 ring-green-200/80 shadow-sm dark:bg-green-400 dark:text-slate-950"
+      : "rounded bg-red-600 px-1 py-0.5 font-black text-white ring-1 ring-red-300 shadow-sm dark:bg-red-500 dark:text-white";
     const activeSideClass = heldSideBelowLlmThreshold
       ? "animate-pulse rounded bg-red-600 px-1 font-black text-white ring-2 ring-red-300 shadow-md shadow-red-950/60 dark:bg-red-500 dark:text-white dark:ring-red-200"
       : "rounded bg-green-600 px-1 text-white ring-1 ring-green-200/80 shadow-sm shadow-green-950/30 dark:bg-green-400 dark:text-slate-950 dark:ring-green-100";
@@ -149,7 +156,19 @@ export function BullpenEventTrendsTable({ events, variant = "trends", showStrong
     if (key === "deadline") return event.is_claimable_position ? <span className="inline-flex min-w-20 items-center justify-center rounded-lg bg-green-700 px-3 py-1.5 text-sm font-black uppercase tracking-wide text-white shadow-md ring-2 ring-green-300 dark:bg-green-500 dark:text-slate-950 dark:ring-green-200" title="This resolved winning position is available to claim now">Claim</span> : <span className="text-xs font-semibold" title={formatTime(event.close_time)}>{formatDeadline(event.close_time)}</span>;
     if (key === "claimDate") return <span className="text-xs font-semibold" title="Best-guess claim availability; not a guaranteed settlement time">{formatDeadline(event.claim_date)}</span>;
     if (key === "score") return onScore ? <button className="text-right text-xs font-bold underline decoration-dotted" onClick={() => onScore(event)}>{event.score.toFixed(2)}</button> : <span className="text-right text-xs font-bold">{event.score.toFixed(2)}</span>;
-    if (key === "currentOdds") return <span className="text-xs font-semibold">Yes {odds(event.current_yes_odds)}<br/>No {odds(event.current_no_odds)}</span>;
+    if (key === "bought") return <span className="text-xs font-semibold">{activePositionSide && event.position_average_price_cents != null ? <>{activePositionSide}<br/>{cents(event.position_average_price_cents)}</> : "—"}</span>;
+    if (key === "currentOdds") {
+      const quote = (side: "YES" | "NO") => {
+        const bid = side === "YES" ? event.current_yes_bid_cents : event.current_no_bid_cents;
+        const ask = side === "YES" ? event.current_yes_ask_cents : event.current_no_ask_cents;
+        const spread = side === "YES" ? event.current_yes_spread_cents : event.current_no_spread_cents;
+        const fallback = side === "YES" ? event.current_yes_odds : event.current_no_odds;
+        return bid != null || ask != null
+          ? `${side} ${cents(bid)} / ${cents(ask)}${spread == null ? "" : ` · Spread ${cents(spread)}`}`
+          : `${side} ${odds(fallback)}`;
+      };
+      return <span className="text-xs font-semibold"><span className={activePositionSide === "YES" ? activeCurrentSideClass : undefined} title={activePositionSide === "YES" ? "Invested side; green only when its executable bid is above 80c" : undefined}>{quote("YES")}</span><br/><span className={activePositionSide === "NO" ? activeCurrentSideClass : undefined} title={activePositionSide === "NO" ? "Invested side; green only when its executable bid is above 80c" : undefined}>{quote("NO")}</span></span>;
+    }
     if (key === "llmOdds") {
       if (event.llm_yes_odds == null && event.llm_no_odds == null) {
         return event.scan_llm_outputs?.[0]?.length && onLlm ? <button className="text-left text-xs font-semibold text-slate-500 underline decoration-dotted" title="No valid LLM odds were produced. Open the saved model output and failure reason." onClick={() => onLlm(questionFor(event))}>Not covered<br/>in latest scan</button> : <span className="text-xs font-semibold text-slate-500" title="This event was not covered by an LLM in the latest scan.">Not covered<br/>in latest scan</span>;

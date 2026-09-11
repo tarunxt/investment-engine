@@ -135,7 +135,11 @@ test("History refreshes each multi-outcome contract by exact market id", () => {
   assert.match(currentOddsRoute, /allowRuntimeQuestionFallback: false/);
   assert.match(currentOddsRoute, /exactNumericIdPaths: true/);
   assert.match(currentOddsRoute, /preferIndicativeOutcomePrices: true/);
-  assert.match(currentOddsRoute, /const resolvedByQuestionId = gammaMarkets/);
+  assert.match(currentOddsRoute, /const resolvedByQuestionId = await applyClobOrderBooks\(gammaMarkets\)/);
+  assert.match(currentOddsRoute, /yesBestBid: yesBid/);
+  assert.match(currentOddsRoute, /yesBestAsk: yesAsk/);
+  assert.match(currentOddsRoute, /noBestBid: noBid/);
+  assert.match(currentOddsRoute, /noBestAsk: noAsk/);
   assert.match(
     polymarketMarketUrls,
     /`\$\{POLYMARKET_GAMMA_MARKETS_URL\}\/\$\{encodeURIComponent\(id\)\}`/,
@@ -144,6 +148,25 @@ test("History refreshes each multi-outcome contract by exact market id", () => {
     currentOddsRoute,
     /gammaMarketsByLookupId\[question\.marketId \?\? question\.id\]/,
   );
+});
+
+test("History shows bought price and exact Bullpen bid/ask spreads", () => {
+  const trendsTable = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenEventTrendsTable.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(historyScreen, /position_average_price_cents:/);
+  assert.match(historyScreen, /currentPosition\.averagePrice \* 100/);
+  assert.match(historyScreen, /current_yes_bid_cents: market\?\.yesBestBid/);
+  assert.match(historyScreen, /current_no_ask_cents: market\?\.noBestAsk/);
+  assert.match(trendsTable, /\{ key: "bought", label: "Bought"/);
+  assert.match(trendsTable, /"score", "bought", "currentOdds"/);
+  assert.match(trendsTable, /Spread \$\{cents\(spread\)\}/);
+  assert.match(trendsTable, /heldSideCurrentOdds > HELD_SIDE_ODDS_ALERT_THRESHOLD/);
 });
 
 test("History keeps deadlines and Returns/day when the latest LLM scan is uncovered", () => {

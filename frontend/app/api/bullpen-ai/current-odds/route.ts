@@ -84,6 +84,7 @@ function logResolvedCategory(
 type ClobOrderBook = {
   asset_id?: string;
   asks?: Array<{ price?: string | number; size?: string | number }>;
+  bids?: Array<{ price?: string | number; size?: string | number }>;
 };
 
 const MAX_CLOB_BOOKS_BATCH_SIZE = 25;
@@ -95,6 +96,14 @@ function bestExecutableAsk(book: ClobOrderBook | undefined) {
     .filter((price) => Number.isFinite(price) && price >= 0 && price <= 1);
   if (asks.length === 0) return null;
   return Number((Math.min(...asks) * 100).toFixed(2));
+}
+
+function bestExecutableBid(book: ClobOrderBook | undefined) {
+  const bids = (book?.bids ?? [])
+    .map((level) => Number(level.price))
+    .filter((price) => Number.isFinite(price) && price >= 0 && price <= 1);
+  if (bids.length === 0) return null;
+  return Number((Math.max(...bids) * 100).toFixed(2));
 }
 
 async function applyClobOrderBooks(
@@ -175,12 +184,30 @@ async function applyClobOrderBooks(
       const noAsk = market.noTokenId
         ? bestExecutableAsk(books.get(market.noTokenId))
         : null;
+      const yesBid = market.yesTokenId
+        ? bestExecutableBid(books.get(market.yesTokenId))
+        : null;
+      const noBid = market.noTokenId
+        ? bestExecutableBid(books.get(market.noTokenId))
+        : null;
       return [
         questionId,
         {
           ...market,
           yesOdds: yesAsk ?? market.yesOdds,
           noOdds: noAsk ?? market.noOdds,
+          yesBestBid: yesBid,
+          yesBestAsk: yesAsk,
+          yesSpread:
+            yesBid !== null && yesAsk !== null
+              ? Number((yesAsk - yesBid).toFixed(2))
+              : null,
+          noBestBid: noBid,
+          noBestAsk: noAsk,
+          noSpread:
+            noBid !== null && noAsk !== null
+              ? Number((noAsk - noBid).toFixed(2))
+              : null,
         },
       ];
     }),
@@ -240,10 +267,11 @@ export async function POST(request: NextRequest) {
         return resolved ? [[question.id, resolved]] : [];
       }),
     ) as Record<string, ResolvedPolymarketMarket>;
-    // History's "Current Odds" are the displayed outcome probabilities, not
-    // the executable buy asks. Execution workflows obtain fresh quotes during
-    // their own preflight and must not leak the bid/ask spread into this label.
-    const resolvedByQuestionId = gammaMarkets;
+    // Return the exact contract's live CLOB quotes. The additional bid/ask
+    // fields let History show Bullpen's visible order-book spread, while the
+    // legacy yesOdds/noOdds fields remain executable buy asks for callers that
+    // have not adopted the richer quote shape yet.
+    const resolvedByQuestionId = await applyClobOrderBooks(gammaMarkets);
     questions.forEach((question) => {
       const resolved = resolvedByQuestionId[question.id];
       logResolvedCategory(question, resolved ?? null);
