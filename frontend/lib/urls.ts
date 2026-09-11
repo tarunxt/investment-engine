@@ -238,6 +238,8 @@ const bullpenAutoLiveApiUrls = {
   state: () => `${resolveApiBaseUrl()}/polymarket/auto-live/state`,
   hourlyRebalanceResult: () =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/hourly-rebalance/result`,
+  clusteringProgress: (runId: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/clustering/${encodeURIComponent(runId)}/progress`,
   settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
   history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
   historyEventTrends: () =>

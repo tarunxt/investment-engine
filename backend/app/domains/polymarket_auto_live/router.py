@@ -62,6 +62,8 @@ from app.domains.polymarket_auto_live.export_source import build_owned_stage_one
 from app.infrastructure.database.session import AsyncSessionLocal
 
 router = APIRouter(prefix="/polymarket/auto-live", tags=["polymarket"])
+from app.domains.polymarket_auto_live.clustering_progress import router as clustering_progress_router
+router.include_router(clustering_progress_router)
 logger = get_logger(__name__)
 
 # A persisted status read is two primary-key rows plus one indexed active-run

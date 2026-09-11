@@ -25,6 +25,7 @@ import type {
 } from "@/types/api";
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
+import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
 
 const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
 const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v1";
@@ -619,6 +620,7 @@ export function BullpenRunHistoryScreen() {
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="mx-auto max-w-[96rem] space-y-6">
+        <BullpenClusteringProgressHandoff />
         {portfolioReady ? (
           <BullpenHistoryPortfolio key={portfolioVersion} />
         ) : (
