@@ -9,6 +9,13 @@ const historyScreen = readFileSync(
   ),
   "utf8",
 );
+const polymarketMarketUrls = readFileSync(
+  new URL(
+    "../app/api/bullpen-ai/_lib/polymarketMarketUrls.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const scheduleCard = readFileSync(
   new URL(
     "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -126,6 +133,11 @@ test("History refreshes each multi-outcome contract by exact market id", () => {
     /marketUrl: question\.marketId \? null : question\.marketUrl/,
   );
   assert.match(currentOddsRoute, /allowRuntimeQuestionFallback: false/);
+  assert.match(currentOddsRoute, /exactNumericIdPaths: true/);
+  assert.match(
+    polymarketMarketUrls,
+    /`\$\{POLYMARKET_GAMMA_MARKETS_URL\}\/\$\{encodeURIComponent\(id\)\}`/,
+  );
   assert.match(currentOddsRoute, /MAX_CLOB_BOOKS_BATCH_SIZE = 25/);
   assert.match(currentOddsRoute, /MAX_CONCURRENT_CLOB_BOOK_BATCHES = 4/);
   assert.match(currentOddsRoute, /Promise\.allSettled\(\s*batchGroup\.map/);
