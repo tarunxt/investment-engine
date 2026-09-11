@@ -3053,6 +3053,13 @@ export interface BullpenAutoLiveEventTrend {
   scan_llm_outputs?: BullpenAutoLiveLlmOutput[][];
   current_yes_odds?: number | null;
   current_no_odds?: number | null;
+  current_yes_bid_cents?: number | null;
+  current_yes_ask_cents?: number | null;
+  current_yes_spread_cents?: number | null;
+  current_no_bid_cents?: number | null;
+  current_no_ask_cents?: number | null;
+  current_no_spread_cents?: number | null;
+  position_average_price_cents?: number | null;
   llm_yes_odds?: number | null;
   llm_no_odds?: number | null;
   returns_per_day?: number | null;

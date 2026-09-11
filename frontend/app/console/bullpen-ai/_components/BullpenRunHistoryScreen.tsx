@@ -134,6 +134,12 @@ async function fetchCurrentBullpenPositions() {
 type CurrentOrderBookMarket = {
   yesOdds?: number | null;
   noOdds?: number | null;
+  yesBestBid?: number | null;
+  yesBestAsk?: number | null;
+  yesSpread?: number | null;
+  noBestBid?: number | null;
+  noBestAsk?: number | null;
+  noSpread?: number | null;
 };
 
 type CurrentOrderBookOddsResponse = {
@@ -268,18 +274,29 @@ export function applyCurrentOrderBookOddsToEventTrends(
       const market = response.markets?.[
         historyCurrentOddsLookupId(event, index)
       ];
+      const activeSide = event.active_position_side?.trim().toUpperCase();
       const currentYesOdds =
-        typeof market?.yesOdds === "number"
-          ? market.yesOdds
+        activeSide === "YES" && typeof market?.yesBestBid === "number"
+          ? market.yesBestBid
+          : typeof market?.yesOdds === "number"
+            ? market.yesOdds
           : event.current_yes_odds ?? null;
       const currentNoOdds =
-        typeof market?.noOdds === "number"
-          ? market.noOdds
+        activeSide === "NO" && typeof market?.noBestBid === "number"
+          ? market.noBestBid
+          : typeof market?.noOdds === "number"
+            ? market.noOdds
           : event.current_no_odds ?? null;
       return {
         ...event,
         current_yes_odds: currentYesOdds,
         current_no_odds: currentNoOdds,
+        current_yes_bid_cents: market?.yesBestBid ?? null,
+        current_yes_ask_cents: market?.yesBestAsk ?? null,
+        current_yes_spread_cents: market?.yesSpread ?? null,
+        current_no_bid_cents: market?.noBestBid ?? null,
+        current_no_ask_cents: market?.noBestAsk ?? null,
+        current_no_spread_cents: market?.noSpread ?? null,
         returns_per_day: currentReturnsPerDay(
           event,
           currentYesOdds,
@@ -387,6 +404,10 @@ export function applyCurrentBullpenPositionsToEventTrends(
       active_position_side: activePosition
         ? resolveActivePositionSide(activePosition)
         : null,
+      position_average_price_cents:
+        currentPosition?.averagePrice == null
+          ? null
+          : Number((currentPosition.averagePrice * 100).toFixed(2)),
     };
 
     return {

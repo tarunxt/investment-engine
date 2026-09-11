@@ -2168,11 +2168,14 @@ available, then maps the result back to the
 caller's response key. `frontend/tests/bullpen-history-current-positions.test.mjs`
 and `frontend/tests/bullpen-ai-compatibility.test.mjs` enforce this contract.
 
-History's **Current Odds** column uses the exact contract's indicative outcome
-probabilities, matching the Yes/No prices displayed by Bullpen. It does not
-substitute executable buy asks, because doing so makes the bid/ask spread look
-like stale or internally inconsistent odds. Trading workflows continue to read
-fresh executable quotes during their separate preflight.
+History's **Current Odds** column uses the exact contract's live CLOB order
+book. Each outcome shows its executable best bid, best ask, and their spread,
+matching Bullpen's Order Book rather than Gamma's complementary indicative
+probabilities. For active positions, the held outcome is valued at its best bid
+and is highlighted green only when that executable exit price is above 80c;
+otherwise it is highlighted red. History also shows the position's original
+average fill price in the adjacent **Bought** column. Trading workflows still
+obtain fresh executable quotes during their separate action-time preflight.
 
 The Hourly Bullpen Rebalance target portfolio is the latest stable Cluster Top
 Events set with Returns/day strictly above 0.1%, filtered again by live Bullpen
