@@ -229,6 +229,7 @@ export async function POST(request: NextRequest) {
         allowPartialGammaLookups: true,
         includeEventSupplements: false,
         allowRuntimeQuestionFallback: false,
+        exactNumericIdPaths: true,
       },
     );
     const gammaMarkets = Object.fromEntries(

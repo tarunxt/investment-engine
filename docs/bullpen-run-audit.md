@@ -2149,6 +2149,9 @@ History current-odds refreshes must resolve every contract by its canonical
 numeric Polymarket market ID. The caller's synthetic response key is not a
 market identity. In particular, a shared multi-outcome event slug must never
 cause one sibling contract's CLOB odds to be displayed for another contract.
+For History, every numeric identity is fetched through Polymarket's dedicated
+`GET /markets/{id}` endpoint; repeated filters on the list endpoint are not an
+exact-identity transport.
 The current-odds route resolves by `marketId`, suppresses condition-id,
 parent-slug, URL, and runtime-title fallbacks when that canonical ID is
 available, then maps the result back to the

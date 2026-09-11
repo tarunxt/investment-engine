@@ -57,6 +57,7 @@ type PolymarketMarketResolutionOptions = {
   allowPartialGammaLookups?: boolean;
   backendAccessToken?: string | null;
   allowRuntimeQuestionFallback?: boolean;
+  exactNumericIdPaths?: boolean;
   includeEventSupplements?: boolean;
   maxRuntimeQuestionFallbacks?: number;
   runtimeSearch?: (
@@ -612,7 +613,55 @@ function normalizeResolvedMarket(
 
 async function fetchGammaMarketLookupBatch(
   questions: CanonicalizableQuestion[],
+  options: PolymarketMarketResolutionOptions = {},
 ) {
+  if (
+    options.exactNumericIdPaths &&
+    questions.every((question) => isNumericQuestionId(question.id))
+  ) {
+    const exactResults = await Promise.allSettled(
+      questions.map(async (question) => {
+        const id = question.id.trim();
+        const fetchExact = async () => {
+          const response = await fetch(
+            `${POLYMARKET_GAMMA_MARKETS_URL}/${encodeURIComponent(id)}`,
+            {
+              cache: "no-store",
+              headers: { accept: "application/json" },
+              signal: AbortSignal.timeout(8_000),
+            },
+          );
+          if (!response.ok) {
+            throw new Error(
+              `Polymarket Gamma market ${id} returned HTTP ${response.status}`,
+            );
+          }
+          const payload = await response.json();
+          if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+            throw new Error(`Polymarket Gamma returned no market for id ${id}`);
+          }
+          return payload as Record<string, unknown>;
+        };
+
+        try {
+          return await fetchExact();
+        } catch {
+          return fetchExact();
+        }
+      }),
+    );
+    const records = exactResults.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    if (records.length === 0 && !options.allowPartialGammaLookups) {
+      const failed = exactResults.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      throw failed?.reason ?? new Error("Polymarket Gamma exact lookups failed");
+    }
+    return records;
+  }
+
   const params = new URLSearchParams();
   const seenIds = new Set<string>();
   const seenSlugs = new Set<string>();
@@ -678,14 +727,17 @@ export async function resolvePolymarketMarkets<
   const recordsBySlug = new Map<string, Record<string, unknown>>();
   const recordsByConditionId = new Map<string, Record<string, unknown>>();
 
+  const lookupBatchSize = options.exactNumericIdPaths
+    ? MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES
+    : MAX_GAMMA_LOOKUP_BATCH_SIZE;
   const lookupBatches: CanonicalizableQuestion[][] = [];
   for (
     let index = 0;
     index < questions.length;
-    index += MAX_GAMMA_LOOKUP_BATCH_SIZE
+    index += lookupBatchSize
   ) {
     lookupBatches.push(
-      questions.slice(index, index + MAX_GAMMA_LOOKUP_BATCH_SIZE),
+      questions.slice(index, index + lookupBatchSize),
     );
   }
 
@@ -699,7 +751,7 @@ export async function resolvePolymarketMarkets<
       index + MAX_CONCURRENT_GAMMA_LOOKUP_BATCHES,
     );
     const lookupResults = await Promise.allSettled(
-      batchGroup.map((batch) => fetchGammaMarketLookupBatch(batch)),
+      batchGroup.map((batch) => fetchGammaMarketLookupBatch(batch, options)),
     );
     const recordsByBatch: Record<string, unknown>[][] = [];
 
@@ -714,7 +766,7 @@ export async function resolvePolymarketMarkets<
       }
       try {
         recordsByBatch.push(
-          await fetchGammaMarketLookupBatch(batchGroup[batchIndex]),
+          await fetchGammaMarketLookupBatch(batchGroup[batchIndex], options),
         );
       } catch {
         // Keep the other exact-identity results instead of failing the entire
