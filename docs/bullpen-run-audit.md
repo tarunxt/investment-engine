@@ -2142,3 +2142,31 @@ remain authoritative for those runs. No database schema change is needed.
 Deterministic validators: `frontend/tests/bullpen-claim-returns.test.mjs` and
 `frontend/tests/bullpen-event-clusters.test.mjs` cover math, timezones, nulls,
 identity mapping, import compatibility and ranking.
+
+## Exact live-odds identity and portfolio reconciliation (2026-09-11)
+
+History current-odds refreshes must resolve every contract by its canonical
+numeric Polymarket market ID. The caller's synthetic response key is not a
+market identity. In particular, a shared multi-outcome event slug must never
+cause one sibling contract's CLOB odds to be displayed for another contract.
+The current-odds route resolves by `marketId`, then maps the result back to the
+caller's response key. `frontend/tests/bullpen-history-current-positions.test.mjs`
+and `frontend/tests/bullpen-ai-compatibility.test.mjs` enforce this contract.
+
+The Hourly Bullpen Rebalance target portfolio is the latest stable Cluster Top
+Events set with Returns/day strictly above 0.1%, filtered again by live Bullpen
+tradeability and a selected-side quote of at least 75.0%. The 75.0% entry floor
+is the inverse of the strict held-side Safety Sell threshold and prevents a
+buy-then-immediate-sell loop. A market sold for safety is ineligible for
+repurchase during the same occurrence.
+
+Every occurrence explicitly reconciles every active position against that
+target set. A non-claimable, open and tradeable position that is no longer the
+top event for its cluster, has missing or at-most-0.1% Returns/day, or otherwise
+fails target eligibility is a full-position reconciliation Sell candidate even
+when settled cash is at least $5. Claimable, resolved, closed, untradeable and
+settlement-pending positions are reported separately and never forced through
+the Sell path. All new Sells remain subject to the existing combined preview
+and action-time confirmation. After authoritative outcomes, every retained
+active position must belong to the target set; the active count may be lower
+than the target count because safety and tradeability exclusions are allowed.
