@@ -59,6 +59,7 @@ type PolymarketMarketResolutionOptions = {
   allowRuntimeQuestionFallback?: boolean;
   exactNumericIdPaths?: boolean;
   includeEventSupplements?: boolean;
+  preferIndicativeOutcomePrices?: boolean;
   maxRuntimeQuestionFallbacks?: number;
   runtimeSearch?: (
     path: string,
@@ -568,6 +569,7 @@ async function fetchPolymarketEventSupplements(marketUrls: string[]) {
 function normalizeResolvedMarket(
   record: Record<string, unknown>,
   fallbackSlug: string | null = null,
+  preferIndicativeOutcomePrices = false,
 ): ResolvedPolymarketMarket | null {
   const id = readString(record, ["id"]);
   const conditionId = readString(record, ["conditionId", "condition_id"]);
@@ -578,10 +580,16 @@ function normalizeResolvedMarket(
   const rules = extractRulesText(record);
   const bestBidPrice = normalizePrice(parseNumber(record.bestBid));
   const bestAskPrice = normalizePrice(parseNumber(record.bestAsk));
-  const yesOdds =
-    bestAskPrice === null ? indicativeYesOdds : normalizeOdds(bestAskPrice);
-  const noOdds =
-    bestBidPrice === null ? indicativeNoOdds : normalizeOdds(1 - bestBidPrice);
+  const executableYesOdds =
+    bestAskPrice === null ? null : normalizeOdds(bestAskPrice);
+  const executableNoOdds =
+    bestBidPrice === null ? null : normalizeOdds(1 - bestBidPrice);
+  const yesOdds = preferIndicativeOutcomePrices
+    ? indicativeYesOdds ?? executableYesOdds
+    : executableYesOdds ?? indicativeYesOdds;
+  const noOdds = preferIndicativeOutcomePrices
+    ? indicativeNoOdds ?? executableNoOdds
+    : executableNoOdds ?? indicativeNoOdds;
   const { yesTokenId, noTokenId } = readOutcomeTokenIds(record);
   const category = formatPolymarketCategory(
     collectPolymarketCategoryLabels(record),
@@ -800,7 +808,11 @@ export async function resolvePolymarketMarkets<
       (question.slug ? recordsBySlug.get(question.slug.trim()) : undefined);
     if (!record) continue;
 
-    const resolved = normalizeResolvedMarket(record, question.slug?.trim() || null);
+    const resolved = normalizeResolvedMarket(
+      record,
+      question.slug?.trim() || null,
+      options.preferIndicativeOutcomePrices === true,
+    );
     if (resolved) {
       resolvedByQuestionId[question.id] = resolved;
       if (resolved.marketUrl) {
