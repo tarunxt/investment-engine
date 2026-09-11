@@ -23,6 +23,12 @@ detail are stored additively in the existing per-user Auto-Live state payload as
 `latest_hourly_rebalance_status`, `latest_hourly_rebalance_at`, and
 `latest_hourly_rebalance_detail`.
 
+The external result timestamp is monotonic across scheduler writes. Long-lived
+workers refresh and lock the state row before saving, and the persistence
+adapter retains a newer external result when an older in-memory scheduler state
+is written later. A Stage 1/2/3 progress save therefore cannot erase or rewind a
+completed/failed hourly-rebalance marker that the History endpoint accepted.
+
 The Run History header displays the external status and timestamp together. It
 falls back to the legacy internal `last_rebalance_at` value until the first
 external result is recorded. The internal Auto-Live rebalance timestamp remains

@@ -416,6 +416,26 @@ def apply_state_to_record(
     record.last_run_at = _parse_datetime(state.last_run_at)
     record.next_run_at = _parse_datetime(state.next_run_at)
     payload = state_to_record_payload(state)
+    existing_payload = record.payload if isinstance(record.payload, dict) else {}
+    existing_rebalance_at = _parse_datetime(
+        existing_payload.get("latest_hourly_rebalance_at")
+    )
+    incoming_rebalance_at = _parse_datetime(
+        payload.get("latest_hourly_rebalance_at")
+    )
+    if existing_rebalance_at is not None and (
+        incoming_rebalance_at is None
+        or existing_rebalance_at > incoming_rebalance_at
+    ):
+        # A Bullpen worker may save scheduler state that it hydrated before an
+        # external hourly workflow reported its result.  Never let that stale
+        # full-payload write erase or rewind the newer terminal marker.
+        for key in (
+            "latest_hourly_rebalance_status",
+            "latest_hourly_rebalance_at",
+            "latest_hourly_rebalance_detail",
+        ):
+            payload[key] = existing_payload.get(key)
     payload["status"] = normalized_status
     record.payload = payload
 
@@ -2151,7 +2171,17 @@ class SyncPolymarketAutoLiveRepository:
         apply_settings_to_record(record, settings)
 
     def save_state(self, user_id: int, state: BullpenAutoLiveState) -> None:
-        record = self.get_state_record(user_id)
+        # Workers retain a long-lived SQLAlchemy session. Refresh under a row
+        # lock so a stale identity-map copy cannot overwrite a newer external
+        # hourly-rebalance result committed by the API.
+        record = (
+            self.session.execute(
+                select(PolymarketAutoLiveStateRecord)
+                .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True, autoflush=False)
+            ).scalar_one_or_none()
+        )
         if record is None:
             record = PolymarketAutoLiveStateRecord(
                 user_id=user_id,
