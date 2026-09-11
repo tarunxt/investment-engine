@@ -180,6 +180,16 @@ window. Browser progress totals and the export ledger use the same multi-key
 market identity coalescing, so the displayed passed count matches the unique
 worksheet row count.
 
+The History summary treats the latest Stage 1 clustering and Bullpen rebalance
+labels as operational-status controls. Selecting either label opens a diagnostic
+dialog with the recorded state, timestamp, and the available source/run detail.
+When a completed Stage 1 is newer than the published clustering metadata, the
+dialog explains that the matching clustering result has not yet been published.
+The former manual “Record Hourly Rebalance Completed” and “Record Hourly
+Rebalance Failed” controls are intentionally absent: they only stamped the
+current time and could make an unexecuted workflow appear current. Rebalance
+status is now advanced only by the authenticated automation-result handoff.
+
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
 including independent previews and scheduled runs, use the saved value until it

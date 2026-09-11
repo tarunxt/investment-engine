@@ -420,8 +420,9 @@ export function BullpenRunHistoryScreen() {
   const [lastRebalanceAt, setLastRebalanceAt] = useState<string | null>(null);
   const [hourlyRebalanceStatus, setHourlyRebalanceStatus] = useState<"completed" | "failed" | null>(null);
   const [hourlyRebalanceAt, setHourlyRebalanceAt] = useState<string | null>(null);
-  const [hourlyRebalanceRecording, setHourlyRebalanceRecording] = useState(false);
-  const [hourlyRebalanceError, setHourlyRebalanceError] = useState<string | null>(null);
+  const [hourlyRebalanceDetail, setHourlyRebalanceDetail] = useState<string | null>(null);
+  const [hourlyRebalanceLastError, setHourlyRebalanceLastError] = useState<string | null>(null);
+  const [hourlyRebalanceLastAction, setHourlyRebalanceLastAction] = useState<string | null>(null);
   const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>(
     () => readCachedHistoryPage()?.items ?? [],
   );
@@ -475,6 +476,9 @@ export function BullpenRunHistoryScreen() {
         setLastRebalanceAt(runtimeState.last_rebalance_at ?? null);
         setHourlyRebalanceStatus(runtimeState.latest_hourly_rebalance_status ?? null);
         setHourlyRebalanceAt(runtimeState.latest_hourly_rebalance_at ?? null);
+        setHourlyRebalanceDetail(runtimeState.latest_hourly_rebalance_detail ?? null);
+        setHourlyRebalanceLastError(runtimeState.last_error ?? null);
+        setHourlyRebalanceLastAction(runtimeState.last_action ?? null);
       }
       const hasUsableCurrentPositions = Boolean(
         currentPositions &&
@@ -549,20 +553,6 @@ export function BullpenRunHistoryScreen() {
       `/console/bullpen-ai/runs/${encodeURIComponent(run.id)}`,
     );
 
-  const recordHourlyRebalance = async (status: "completed" | "failed") => {
-    setHourlyRebalanceRecording(true);
-    setHourlyRebalanceError(null);
-    try {
-      const runtimeState = await apiService.recordBullpenHourlyRebalanceResult(status);
-      setHourlyRebalanceStatus(runtimeState.latest_hourly_rebalance_status ?? status);
-      setHourlyRebalanceAt(runtimeState.latest_hourly_rebalance_at ?? null);
-    } catch (cause) {
-      setHourlyRebalanceError(formatUnknownError(cause));
-    } finally {
-      setHourlyRebalanceRecording(false);
-    }
-  };
-
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-8">
       <div className="mx-auto max-w-[96rem] space-y-6">
@@ -587,9 +577,9 @@ export function BullpenRunHistoryScreen() {
           lastRebalanceAt={lastRebalanceAt}
           hourlyRebalanceStatus={hourlyRebalanceStatus}
           hourlyRebalanceAt={hourlyRebalanceAt}
-          hourlyRebalanceRecording={hourlyRebalanceRecording}
-          hourlyRebalanceError={hourlyRebalanceError}
-          onRecordHourlyRebalance={(status) => void recordHourlyRebalance(status)}
+          hourlyRebalanceDetail={hourlyRebalanceDetail}
+          hourlyRebalanceLastError={hourlyRebalanceLastError}
+          hourlyRebalanceLastAction={hourlyRebalanceLastAction}
           latestRuns={latestRuns}
         />
       </div>
