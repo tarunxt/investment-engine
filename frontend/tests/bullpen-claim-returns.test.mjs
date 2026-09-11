@@ -39,10 +39,10 @@ test("claim-date overrides are exact by market ID and three-field rows preserve 
   assert.equal(projected[1].returns_per_day, 999);
   assert.deepEqual(arrangeClusterEvents(projected, new Map([["1", "C01"], ["2", "C01"]]), 2).map(x => x.market_id), ["2"]);
 });
-test("published clustering uses the workflow's exact three-field schema", () => {
+test("published clustering uses the workflow's exact four-field schema", () => {
   const rows = parseClusterJson(readFileSync(new URL("../data/bullpen-event-clusters.json", import.meta.url), "utf8"));
-  assert.equal(rows.length, 74);
+  assert.equal(rows.length, 83);
   for (const row of rows) {
-    assert.deepEqual(Object.keys(row).sort(), ["cluster_id", "event_name", "market_id"]);
+    assert.deepEqual(Object.keys(row).sort(), ["claim_date", "cluster_id", "event_name", "market_id"]);
   }
 });
