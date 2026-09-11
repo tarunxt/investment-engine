@@ -38,13 +38,15 @@ export function claimReturns(event: ClaimEvent, claimDate: string | null | undef
 }
 
 export function applyClaimReturns<T extends ClaimEvent>(events: T[], assignments: ClusterAssignment[], now: number) {
-  const claims = new Map(assignments.flatMap(row => row.claim_date ? [[row.market_id, row.claim_date] as const] : []));
+  const claims = new Map(assignments
+    .filter(row => row.claim_date !== undefined)
+    .map(row => [row.market_id, row.claim_date ?? null] as const));
   return events.map(event => {
     const claimDate = claims.get(event.market_id);
-    // Clustering output deliberately uses the portable three-field schema. Only
-    // replace the History API's authoritative Returns/day when an explicit,
-    // source-backed claim date is present.
-    if (claimDate) return { ...event, ...claimReturns(event, claimDate, now) };
+    // An explicit null is a researched "unavailable" estimate and must clear a
+    // stale backend projection. Legacy three-field rows still preserve the
+    // History API's authoritative Returns/day.
+    if (claims.has(event.market_id)) return { ...event, ...claimReturns(event, claimDate, now) };
     const sourceReturn = typeof event.returns_per_day === "number" && Number.isFinite(event.returns_per_day)
       ? event.returns_per_day : null;
     return { ...event, ...claimReturns(event, null, now), returns_per_day: sourceReturn };
