@@ -134,14 +134,12 @@ test("History refreshes each multi-outcome contract by exact market id", () => {
   );
   assert.match(currentOddsRoute, /allowRuntimeQuestionFallback: false/);
   assert.match(currentOddsRoute, /exactNumericIdPaths: true/);
+  assert.match(currentOddsRoute, /preferIndicativeOutcomePrices: true/);
+  assert.match(currentOddsRoute, /const resolvedByQuestionId = gammaMarkets/);
   assert.match(
     polymarketMarketUrls,
     /`\$\{POLYMARKET_GAMMA_MARKETS_URL\}\/\$\{encodeURIComponent\(id\)\}`/,
   );
-  assert.match(currentOddsRoute, /MAX_CLOB_BOOKS_BATCH_SIZE = 25/);
-  assert.match(currentOddsRoute, /MAX_CONCURRENT_CLOB_BOOK_BATCHES = 4/);
-  assert.match(currentOddsRoute, /Promise\.allSettled\(\s*batchGroup\.map/);
-  assert.match(currentOddsRoute, /batchBooks = await fetchBooks\(batchGroup\[batchIndex\]\)/);
   assert.match(
     currentOddsRoute,
     /gammaMarketsByLookupId\[question\.marketId \?\? question\.id\]/,
