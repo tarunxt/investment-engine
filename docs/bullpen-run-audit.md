@@ -189,6 +189,11 @@ The former manual “Record Hourly Rebalance Completed” and “Record Hourly
 Rebalance Failed” controls are intentionally absent: they only stamped the
 current time and could make an unexecuted workflow appear current. Rebalance
 status is now advanced only by the authenticated automation-result handoff.
+The dedicated Run History screen automatically reloads its current history
+page, event trends, live order books, active positions, portfolio, and runtime
+status every 60 seconds. A refresh-in-progress guard prevents timer and manual
+refresh requests from overlapping. This polling changes only the live console
+projection and does not mutate frozen run-audit snapshots.
 
 The maximum days-until-expiry window is also a persisted per-user Auto-Live
 setting, defaulting to 30 days for existing and new users. New Stage 1 scans,
