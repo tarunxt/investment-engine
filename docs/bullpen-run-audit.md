@@ -2211,7 +2211,9 @@ resource `bullpen_clustering_progress`. The authenticated
 `/polymarket/auto-live/clustering/{run_id}/progress` GET/POST routes expose
 collecting, researching, validating, deploying, verifying and terminal reports.
 Reports include an attempt UUID, monotonic sequence, server timestamp and detail.
-Writes lock the owned run and deduplicate repeated sequence numbers; they do not
+Writes verify run ownership and take a nonblocking PostgreSQL transaction lock
+scoped only to clustering reporters, avoiding the busy scan row lock. They
+deduplicate repeated sequence numbers; they do not
 alter the scan, scheduler state, cluster mapping or successful publication time.
 Frozen run audit snapshots and their schema remain unchanged.
 
