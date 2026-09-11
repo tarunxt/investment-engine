@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { formatUnknownError } from "@/lib/apiErrors";
@@ -30,6 +30,7 @@ const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
 const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v1";
 const HISTORY_READ_TIMEOUT_MS = 20_000;
 const HISTORY_READ_RETRY_DELAY_MS = 750;
+const RUN_HISTORY_AUTO_REFRESH_MS = 60_000;
 const HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult";
 
 type HourlyRebalanceResult = "completed" | "failed";
@@ -447,8 +448,11 @@ export function BullpenRunHistoryScreen() {
   const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>(
     () => readCachedHistoryPage()?.items ?? [],
   );
+  const refreshInProgress = useRef(false);
 
   const load = useCallback(async (pageNumber = 1) => {
+    if (refreshInProgress.current) return;
+    refreshInProgress.current = true;
     setLoading(true);
     setError(null);
     setTrendsError(null);
@@ -560,6 +564,7 @@ export function BullpenRunHistoryScreen() {
         `Run history is temporarily unavailable. ${formatUnknownError(cause)}`,
       );
     } finally {
+      refreshInProgress.current = false;
       setPortfolioReady(true);
       setLoading(false);
     }
@@ -568,6 +573,14 @@ export function BullpenRunHistoryScreen() {
   useEffect(() => {
     window.queueMicrotask(() => void load());
   }, [load]);
+
+  useEffect(() => {
+    const interval = window.setInterval(
+      () => void load(page?.page ?? 1),
+      RUN_HISTORY_AUTO_REFRESH_MS,
+    );
+    return () => window.clearInterval(interval);
+  }, [load, page?.page]);
 
   const openRun = (run: BullpenAutoLiveHistoryItem) =>
     router.push(
