@@ -41,11 +41,15 @@ test("Bullpen history modal loads a compact page and lazy selected-run detail", 
   assert.match(scheduleCard, /apiService\.getBullpenAutoLiveHistory\(/);
   assert.match(
     scheduleCard,
-    /apiService\.getBullpenAutoLiveRun\(item\.id,[\s\S]*?apiService\.getBullpenAutoLiveRunDecisions\(item\.id,/,
+    /const consoleDetail = await apiService\.getBullpenAutoLiveRunConsole\(/,
   );
   assert.match(
     scheduleCard,
-    /getBullpenAutoLiveRunConsole\(item\.id,[\s\S]*?const visibleDecisionIds = Array\.isArray\([\s\S]*?consoleDetail\.visible_decision_ids/,
+    /consoleDetail\.projection_available[\s\S]*?\[consoleDetail\.run, consoleDetail\.decisions\][\s\S]*?apiService\.getBullpenAutoLiveRun\(item\.id/,
+  );
+  assert.match(
+    scheduleCard,
+    /getBullpenAutoLiveRunConsole\([\s\S]*?const visibleDecisionIds = Array\.isArray\([\s\S]*?consoleDetail\.visible_decision_ids/,
   );
   assert.match(
     scheduleCard,

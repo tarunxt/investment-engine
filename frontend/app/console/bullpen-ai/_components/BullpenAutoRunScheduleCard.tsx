@@ -12232,33 +12232,30 @@ export function BullpenAutoRunScheduleCard({
       setRunHistoryDetailLoadingId(item.id);
       setRunHistoryError(null);
       try {
-        const [run, decisions, consoleDetail] = await Promise.all([
-          apiService.getBullpenAutoLiveRun(item.id, {
+        const consoleDetail = await apiService.getBullpenAutoLiveRunConsole(
+          item.id,
+          {
             signal: controller.signal,
             timeoutMs: 10_000,
-          }),
-          apiService.getBullpenAutoLiveRunDecisions(item.id, {
-            signal: controller.signal,
-            timeoutMs: 10_000,
-          }),
-          apiService
-            .getBullpenAutoLiveRunConsole(item.id, {
-              signal: controller.signal,
-              timeoutMs: 5_000,
-            })
-            .catch((nextError) => {
-              if (
-                controller.signal.aborted ||
-                isRequestAbort(nextError)
-              ) {
-                throw nextError;
-              }
-              // Legacy runs remain readable through the full frozen payload.
-              // For current projections this optional exact-run read supplies
-              // the authoritative visible decision IDs used below.
-              return null;
-            }),
-        ]);
+          },
+        );
+        if (controller.signal.aborted) return;
+        const [run, decisions] = consoleDetail.projection_available
+          ? [consoleDetail.run, consoleDetail.decisions]
+          : await Promise.all([
+              // Only legacy runs without a bounded projection may read the
+              // immutable payload. Current Stage 1 snapshots can contain
+              // hundreds of thousands of audited rows and must never make
+              // this request merely to open the console detail screen.
+              apiService.getBullpenAutoLiveRun(item.id, {
+                signal: controller.signal,
+                timeoutMs: 10_000,
+              }),
+              apiService.getBullpenAutoLiveRunDecisions(item.id, {
+                signal: controller.signal,
+                timeoutMs: 10_000,
+              }),
+            ]);
         if (controller.signal.aborted) return;
         const fullStage =
           buildBullpenAutoRunWorkflowView(run).stages.find(
@@ -12272,7 +12269,7 @@ export function BullpenAutoRunScheduleCard({
         });
         let decisionListTruncated = false;
         let decisionListLimit: number | undefined;
-        if (consoleDetail?.projection_available) {
+        if (consoleDetail.projection_available) {
           const projectedDecisions = Array.isArray(consoleDetail.decisions)
             ? consoleDetail.decisions
             : [];

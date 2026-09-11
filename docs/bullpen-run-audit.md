@@ -1357,8 +1357,13 @@ paginated, compact records from `GET /polymarket/auto-live/history`. It must not
 treat `BullpenAutoLiveSummary.recent_runs` or `recent_decisions` as authoritative
 history. The first page reads scalar run columns plus the additive
 `console_projection`; it does not select the full run `payload` or all decision
-rows. Selecting one run lazily loads the compatible `GET /runs/{id}` detail and
-the additive `GET /runs/{id}/decisions` detail.
+rows. Selecting one run first loads the bounded, exact-run
+`GET /runs/{id}/console` projection. When that projection is available, it is
+the authoritative console detail and the browser must not also request the
+immutable `GET /runs/{id}` payload: a complete Full Universe Stage 1 audit can
+contain hundreds of thousands of source rows. Only a legacy row explicitly
+returned with `projection_available=false` falls back to the compatible
+`GET /runs/{id}` and `GET /runs/{id}/decisions` detail resources.
 
 History requests bypass browser caches, preserve the current page if a refresh
 fails, and are cancelled when the dialog closes or the authenticated console is
