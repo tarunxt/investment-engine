@@ -6320,6 +6320,59 @@ def test_state_save_preserves_newer_external_hourly_rebalance_result():
     )
 
 
+@pytest.mark.anyio
+async def test_async_state_save_preserves_newer_external_hourly_rebalance_result():
+    record = PolymarketAutoLiveStateRecord(
+        user_id=1,
+        running=True,
+        paused=False,
+        status="running",
+        mode="live-trading",
+        payload={
+            "latest_hourly_rebalance_status": "failed",
+            "latest_hourly_rebalance_at": "2026-09-11T02:49:00+00:00",
+            "latest_hourly_rebalance_detail": "Live reconciliation was blocked.",
+        },
+    )
+    stale_worker_state = BullpenAutoLiveState(
+        running=True,
+        status="running",
+        mode="live-trading",
+        latest_hourly_rebalance_status=None,
+        latest_hourly_rebalance_at=None,
+        latest_hourly_rebalance_detail=None,
+    )
+    statements = []
+
+    class _Result:
+        def scalar_one_or_none(self):
+            return record
+
+    class _Session:
+        async def execute(self, statement):
+            statements.append(statement)
+            return _Result()
+
+        def add(self, _record):
+            raise AssertionError("existing state must be updated")
+
+        async def flush(self):
+            return None
+
+    await AsyncPolymarketAutoLiveRepository(_Session()).save_state(  # type: ignore[arg-type]
+        1,
+        stale_worker_state,
+    )
+
+    assert "FOR UPDATE" in str(statements[0])
+    assert record.payload["latest_hourly_rebalance_status"] == "failed"
+    assert record.payload["latest_hourly_rebalance_at"] == "2026-09-11T02:49:00+00:00"
+    assert (
+        record.payload["latest_hourly_rebalance_detail"]
+        == "Live reconciliation was blocked."
+    )
+
+
 def test_record_to_decision_drops_malformed_legacy_order_plan():
     executed_at = "2026-06-25T06:00:00+00:00"
     executed_at_dt = datetime.fromisoformat(executed_at)

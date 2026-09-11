@@ -622,7 +622,18 @@ class AsyncPolymarketAutoLiveRepository:
         await self.session.flush()
 
     async def save_state(self, user_id: int, state: BullpenAutoLiveState) -> None:
-        record = await self.get_state_record(user_id)
+        # API-owned scheduler paths can also retain an older identity-map copy
+        # while the external hourly workflow commits a newer terminal marker.
+        # Refresh under the same row lock used by synchronous workers before
+        # applying the full state payload.
+        record = (
+            await self.session.execute(
+                select(PolymarketAutoLiveStateRecord)
+                .where(PolymarketAutoLiveStateRecord.user_id == user_id)
+                .with_for_update()
+                .execution_options(populate_existing=True, autoflush=False)
+            )
+        ).scalar_one_or_none()
         if record is None:
             record = PolymarketAutoLiveStateRecord(
                 user_id=user_id,
