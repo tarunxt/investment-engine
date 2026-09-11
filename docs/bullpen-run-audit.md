@@ -2149,7 +2149,9 @@ History current-odds refreshes must resolve every contract by its canonical
 numeric Polymarket market ID. The caller's synthetic response key is not a
 market identity. In particular, a shared multi-outcome event slug must never
 cause one sibling contract's CLOB odds to be displayed for another contract.
-The current-odds route resolves by `marketId`, then maps the result back to the
+The current-odds route resolves by `marketId`, suppresses condition-id,
+parent-slug, URL, and runtime-title fallbacks when that canonical ID is
+available, then maps the result back to the
 caller's response key. `frontend/tests/bullpen-history-current-positions.test.mjs`
 and `frontend/tests/bullpen-ai-compatibility.test.mjs` enforce this contract.
 
