@@ -114,9 +114,14 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyContent, /return legacyCompletedAt \? formatTime\(legacyCompletedAt\) : "Not recorded"/);
   assert.match(historyContent, /`Pending since \$\{formatTime\(latestStage1CompletedAt\)\}`/);
   assert.match(historyContent, /metadata\.failed_at[\s\S]*?`Failed at \$\{formatTime\(metadata\.failed_at\)\}`/);
-  assert.match(historyContent, /Record Hourly Rebalance Completed/);
-  assert.match(historyContent, /Record Hourly Rebalance Failed/);
-  assert.match(historyScreen, /recordBullpenHourlyRebalanceResult\(status\)/);
+  assert.doesNotMatch(historyContent, /Record Hourly Rebalance Completed/);
+  assert.doesNotMatch(historyContent, /Record Hourly Rebalance Failed/);
+  assert.match(historyContent, /OperationalStatusDialog/);
+  assert.match(historyContent, /bullpen-operational-status-title/);
+  assert.match(historyContent, /title: "Latest Stage 1 Clustering"/);
+  assert.match(historyContent, /title: "Latest Bullpen Rebalance"/);
+  assert.match(historyContent, /Latest published run/);
+  assert.match(historyContent, /Reason/);
   assert.match(historyScreen, /HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult"/);
   assert.match(historyScreen, /value === "completed" \|\| value === "failed"/);
   assert.match(historyScreen, /recordBullpenHourlyRebalanceResult\([\s\S]*?requestedRebalanceResult/);
@@ -124,6 +129,7 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyScreen, /window\.history\.replaceState/);
   assert.match(historyScreen, /latest_hourly_rebalance_status/);
   assert.match(historyScreen, /latest_hourly_rebalance_at/);
+  assert.match(historyScreen, /latest_hourly_rebalance_detail/);
   assert.match(historyContent, /Latest Stage 2 LLM scan:/);
   assert.match(historyContent, /Latest Stage 3 completion:/);
   assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "scan"\)/);
