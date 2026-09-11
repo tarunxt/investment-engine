@@ -1363,7 +1363,8 @@ paginated, compact records from `GET /polymarket/auto-live/history`. It must not
 treat `BullpenAutoLiveSummary.recent_runs` or `recent_decisions` as authoritative
 history. The first page reads scalar run columns plus the additive
 `console_projection`; it does not select the full run `payload` or all decision
-rows. Selecting one run first loads the bounded, exact-run
+rows. Selecting one run in History, or opening the dedicated
+`/console/bullpen-ai/runs/{id}` page, first loads the bounded, exact-run
 `GET /runs/{id}/console` projection. When that projection is available, it is
 the authoritative console detail and the browser must not also request the
 immutable `GET /runs/{id}` payload: a complete Full Universe Stage 1 audit can
