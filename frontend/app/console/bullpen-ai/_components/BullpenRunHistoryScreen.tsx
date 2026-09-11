@@ -30,7 +30,11 @@ const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
 const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v1";
 const HISTORY_READ_TIMEOUT_MS = 20_000;
 const HISTORY_READ_RETRY_DELAY_MS = 750;
-const RUN_HISTORY_AUTO_REFRESH_MS = 60_000;
+const DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300;
+const MIN_RUN_HISTORY_REFRESH_SECONDS = 60;
+const MAX_RUN_HISTORY_REFRESH_SECONDS = 86_400;
+const RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY =
+  "bullpen-run-history-refresh-seconds-v1";
 const HOURLY_REBALANCE_RESULT_QUERY_PARAM = "hourlyRebalanceResult";
 
 type HourlyRebalanceResult = "completed" | "failed";
@@ -449,6 +453,31 @@ export function BullpenRunHistoryScreen() {
     () => readCachedHistoryPage()?.items ?? [],
   );
   const refreshInProgress = useRef(false);
+  const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(
+    DEFAULT_RUN_HISTORY_REFRESH_SECONDS,
+  );
+
+  useEffect(() => {
+    const savedSeconds = Number.parseInt(
+      window.localStorage.getItem(RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY) ?? "",
+      10,
+    );
+    if (
+      Number.isInteger(savedSeconds) &&
+      savedSeconds >= MIN_RUN_HISTORY_REFRESH_SECONDS &&
+      savedSeconds <= MAX_RUN_HISTORY_REFRESH_SECONDS
+    ) {
+      setRefreshIntervalSeconds(savedSeconds);
+    }
+  }, []);
+
+  const saveRefreshInterval = useCallback((seconds: number) => {
+    setRefreshIntervalSeconds(seconds);
+    window.localStorage.setItem(
+      RUN_HISTORY_REFRESH_SECONDS_STORAGE_KEY,
+      String(seconds),
+    );
+  }, []);
 
   const load = useCallback(async (pageNumber = 1) => {
     if (refreshInProgress.current) return;
@@ -577,10 +606,10 @@ export function BullpenRunHistoryScreen() {
   useEffect(() => {
     const interval = window.setInterval(
       () => void load(page?.page ?? 1),
-      RUN_HISTORY_AUTO_REFRESH_MS,
+      refreshIntervalSeconds * 1_000,
     );
     return () => window.clearInterval(interval);
-  }, [load, page?.page]);
+  }, [load, page?.page, refreshIntervalSeconds]);
 
   const openRun = (run: BullpenAutoLiveHistoryItem) =>
     router.push(
@@ -605,6 +634,8 @@ export function BullpenRunHistoryScreen() {
           error={error}
           trendsError={trendsError}
           onRefresh={() => void load(page?.page ?? 1)}
+          refreshIntervalSeconds={refreshIntervalSeconds}
+          onRefreshIntervalChange={saveRefreshInterval}
           onPage={(next) => void load(next)}
           onOpenRun={openRun}
           showFullScreen={false}
