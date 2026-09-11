@@ -230,6 +230,7 @@ export async function POST(request: NextRequest) {
         includeEventSupplements: false,
         allowRuntimeQuestionFallback: false,
         exactNumericIdPaths: true,
+        preferIndicativeOutcomePrices: true,
       },
     );
     const gammaMarkets = Object.fromEntries(
@@ -239,7 +240,10 @@ export async function POST(request: NextRequest) {
         return resolved ? [[question.id, resolved]] : [];
       }),
     ) as Record<string, ResolvedPolymarketMarket>;
-    const resolvedByQuestionId = await applyClobOrderBooks(gammaMarkets);
+    // History's "Current Odds" are the displayed outcome probabilities, not
+    // the executable buy asks. Execution workflows obtain fresh quotes during
+    // their own preflight and must not leak the bid/ask spread into this label.
+    const resolvedByQuestionId = gammaMarkets;
     questions.forEach((question) => {
       const resolved = resolvedByQuestionId[question.id];
       logResolvedCategory(question, resolved ?? null);
