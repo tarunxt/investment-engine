@@ -1059,6 +1059,8 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
     /Promise\.allSettled\(\s*batchGroup\.map/,
   );
   assert.match(currentOddsRouteSource, /conditionId:\s*string \| null/);
+  assert.match(currentOddsRouteSource, /marketId:\s*string \| null/);
+  assert.match(currentOddsRouteSource, /id: question\.marketId \?\? question\.id/);
   assert.match(currentOddsRouteSource, /record\.condition_id/);
   assert.match(currentOddsRouteSource, /fetchedAt: new Date\(\)\.toISOString\(\)/);
   assert.match(

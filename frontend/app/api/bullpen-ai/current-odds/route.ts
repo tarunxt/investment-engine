@@ -11,6 +11,7 @@ export const runtime = "nodejs";
 
 type LookupQuestion = {
   id: string;
+  marketId: string | null;
   conditionId: string | null;
   slug: string | null;
   marketUrl: string | null;
@@ -28,6 +29,12 @@ function normalizeLookupQuestion(value: unknown): LookupQuestion | null {
 
   return {
     id,
+    marketId:
+      typeof record.marketId === "string" && record.marketId.trim()
+        ? record.marketId.trim()
+        : typeof record.market_id === "string" && record.market_id.trim()
+          ? record.market_id.trim()
+          : null,
     conditionId:
       typeof record.conditionId === "string" && record.conditionId.trim()
         ? record.conditionId.trim()
@@ -156,13 +163,30 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const gammaMarkets = await resolvePolymarketMarketsWithQuestionFallback(
-      questions,
+    // `id` is the caller's response key. History deliberately uses a unique
+    // synthetic key, so resolving it directly used to discard the canonical
+    // numeric market id and fall back to the parent event slug. Multi-outcome
+    // events share that slug, which could apply a sibling contract's odds to
+    // every row. Resolve by the exact market id, then restore the response key.
+    const resolverQuestions = questions.map((question) => ({
+      ...question,
+      id: question.marketId ?? question.id,
+    }));
+    const gammaMarketsByLookupId =
+      await resolvePolymarketMarketsWithQuestionFallback(
+        resolverQuestions,
       {
         allowPartialGammaLookups: true,
         includeEventSupplements: false,
       },
     );
+    const gammaMarkets = Object.fromEntries(
+      questions.flatMap((question) => {
+        const resolved =
+          gammaMarketsByLookupId[question.marketId ?? question.id];
+        return resolved ? [[question.id, resolved]] : [];
+      }),
+    ) as Record<string, ResolvedPolymarketMarket>;
     const resolvedByQuestionId = await applyClobOrderBooks(gammaMarkets);
     questions.forEach((question) => {
       const resolved = resolvedByQuestionId[question.id];

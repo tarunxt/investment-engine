@@ -157,6 +157,7 @@ async function fetchCurrentOrderBookOdds(
 ): Promise<CurrentOrderBookOddsResponse> {
   const questions = trends.events.map((event, index) => ({
     id: historyCurrentOddsLookupId(event, index),
+    marketId: event.market_id,
     conditionId: event.condition_id ?? null,
     slug: event.slug ?? null,
     marketUrl: event.market_url ?? null,

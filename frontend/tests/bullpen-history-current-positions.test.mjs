@@ -103,8 +103,23 @@ test("History refreshes large current-odds sets in gateway-safe batches", () => 
   assert.match(historyScreen, /Object\.assign\(mergedMarkets, payload\.markets/);
   assert.match(historyScreen, /return \{ markets: mergedMarkets, fetchedAt \}/);
   assert.match(historyScreen, /historyCurrentOddsLookupId\(event, index\)/);
+  assert.match(historyScreen, /marketId: event\.market_id/);
   assert.match(scheduleCard, /stageOneActiveOddsLookupId\(position, index\)/);
   assert.match(scheduleCard, /stageOneCandidateOddsLookupId\(candidate, index\)/);
+});
+
+test("History refreshes each multi-outcome contract by exact market id", () => {
+  const currentOddsRoute = readFileSync(
+    new URL("../app/api/bullpen-ai/current-odds/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(currentOddsRoute, /marketId: string \| null/);
+  assert.match(currentOddsRoute, /id: question\.marketId \?\? question\.id/);
+  assert.match(
+    currentOddsRoute,
+    /gammaMarketsByLookupId\[question\.marketId \?\? question\.id\]/,
+  );
 });
 
 test("History keeps deadlines and Returns/day when the latest LLM scan is uncovered", () => {
