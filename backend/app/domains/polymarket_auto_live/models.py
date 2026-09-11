@@ -49,6 +49,15 @@ class PolymarketAutoLiveStateRecord(Base, TimestampMixin):
     next_run_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    latest_hourly_rebalance_status: Mapped[str | None] = mapped_column(
+        String(32), nullable=True
+    )
+    latest_hourly_rebalance_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    latest_hourly_rebalance_detail: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
     payload: Mapped[dict[str, object]] = mapped_column(JSON, default=dict, nullable=False)
 
     user: Mapped[User] = relationship()
