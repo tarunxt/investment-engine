@@ -2155,6 +2155,11 @@ available, then maps the result back to the
 caller's response key. `frontend/tests/bullpen-history-current-positions.test.mjs`
 and `frontend/tests/bullpen-ai-compatibility.test.mjs` enforce this contract.
 
+Executable CLOB order books are fetched in bounded token batches with one
+retry per failed batch. A timeout or oversized response can therefore fall
+back to Gamma prices for only the affected contracts instead of silently
+leaving the entire History table on stale indicative odds.
+
 The Hourly Bullpen Rebalance target portfolio is the latest stable Cluster Top
 Events set with Returns/day strictly above 0.1%, filtered again by live Bullpen
 tradeability and a selected-side quote of at least 75.0%. The 75.0% entry floor

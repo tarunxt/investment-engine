@@ -126,6 +126,10 @@ test("History refreshes each multi-outcome contract by exact market id", () => {
     /marketUrl: question\.marketId \? null : question\.marketUrl/,
   );
   assert.match(currentOddsRoute, /allowRuntimeQuestionFallback: false/);
+  assert.match(currentOddsRoute, /MAX_CLOB_BOOKS_BATCH_SIZE = 25/);
+  assert.match(currentOddsRoute, /MAX_CONCURRENT_CLOB_BOOK_BATCHES = 4/);
+  assert.match(currentOddsRoute, /Promise\.allSettled\(\s*batchGroup\.map/);
+  assert.match(currentOddsRoute, /batchBooks = await fetchBooks\(batchGroup\[batchIndex\]\)/);
   assert.match(
     currentOddsRoute,
     /gammaMarketsByLookupId\[question\.marketId \?\? question\.id\]/,

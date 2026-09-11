@@ -86,6 +86,9 @@ type ClobOrderBook = {
   asks?: Array<{ price?: string | number; size?: string | number }>;
 };
 
+const MAX_CLOB_BOOKS_BATCH_SIZE = 25;
+const MAX_CONCURRENT_CLOB_BOOK_BATCHES = 4;
+
 function bestExecutableAsk(book: ClobOrderBook | undefined) {
   const asks = (book?.asks ?? [])
     .map((level) => Number(level.price))
@@ -106,42 +109,82 @@ async function applyClobOrderBooks(
   );
   if (tokenIds.length === 0) return markets;
 
-  try {
+  const fetchBooks = async (batch: string[]) => {
     const response = await fetch("https://clob.polymarket.com/books", {
       method: "POST",
       cache: "no-store",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(tokenIds.map((token_id) => ({ token_id }))),
+      body: JSON.stringify(batch.map((token_id) => ({ token_id }))),
       signal: AbortSignal.timeout(8_000),
     });
-    if (!response.ok) return markets;
+    if (!response.ok) {
+      throw new Error(`Polymarket CLOB books returned HTTP ${response.status}`);
+    }
     const payload = (await response.json()) as ClobOrderBook[];
-    const books = new Map(
-      payload
-        .filter((book) => typeof book.asset_id === "string")
-        .map((book) => [book.asset_id as string, book]),
-    );
-    return Object.fromEntries(
-      Object.entries(markets).map(([questionId, market]) => {
-        const yesAsk = market.yesTokenId
-          ? bestExecutableAsk(books.get(market.yesTokenId))
-          : null;
-        const noAsk = market.noTokenId
-          ? bestExecutableAsk(books.get(market.noTokenId))
-          : null;
-        return [
-          questionId,
-          {
-            ...market,
-            yesOdds: yesAsk ?? market.yesOdds,
-            noOdds: noAsk ?? market.noOdds,
-          },
-        ];
-      }),
-    ) as Record<string, ResolvedPolymarketMarket>;
-  } catch {
-    return markets;
+    return Array.isArray(payload) ? payload : [];
+  };
+
+  const batches: string[][] = [];
+  for (
+    let index = 0;
+    index < tokenIds.length;
+    index += MAX_CLOB_BOOKS_BATCH_SIZE
+  ) {
+    batches.push(tokenIds.slice(index, index + MAX_CLOB_BOOKS_BATCH_SIZE));
   }
+
+  const books = new Map<string, ClobOrderBook>();
+  for (
+    let index = 0;
+    index < batches.length;
+    index += MAX_CONCURRENT_CLOB_BOOK_BATCHES
+  ) {
+    const batchGroup = batches.slice(
+      index,
+      index + MAX_CONCURRENT_CLOB_BOOK_BATCHES,
+    );
+    const results = await Promise.allSettled(
+      batchGroup.map((batch) => fetchBooks(batch)),
+    );
+    for (let batchIndex = 0; batchIndex < results.length; batchIndex += 1) {
+      const result = results[batchIndex];
+      let batchBooks: ClobOrderBook[] = [];
+      if (result.status === "fulfilled") {
+        batchBooks = result.value;
+      } else {
+        try {
+          batchBooks = await fetchBooks(batchGroup[batchIndex]);
+        } catch {
+          // Preserve Gamma odds for only the failed batch. Other contracts
+          // still receive exact executable CLOB asks.
+        }
+      }
+      for (const book of batchBooks) {
+        if (typeof book.asset_id === "string") {
+          books.set(book.asset_id, book);
+        }
+      }
+    }
+  }
+
+  return Object.fromEntries(
+    Object.entries(markets).map(([questionId, market]) => {
+      const yesAsk = market.yesTokenId
+        ? bestExecutableAsk(books.get(market.yesTokenId))
+        : null;
+      const noAsk = market.noTokenId
+        ? bestExecutableAsk(books.get(market.noTokenId))
+        : null;
+      return [
+        questionId,
+        {
+          ...market,
+          yesOdds: yesAsk ?? market.yesOdds,
+          noOdds: noAsk ?? market.noOdds,
+        },
+      ];
+    }),
+  ) as Record<string, ResolvedPolymarketMarket>;
 }
 
 export async function POST(request: NextRequest) {
