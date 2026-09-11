@@ -74,6 +74,13 @@ test("Bullpen history modal loads a compact page and lazy selected-run detail", 
   );
 });
 
+test("dedicated Bullpen run page prefers the bounded console projection", () => {
+  assert.match(
+    scheduleCard,
+    /const consoleDetail = await apiService\.getBullpenAutoLiveRunConsole\([\s\S]*?normalizedRunId[\s\S]*?consoleDetail\.projection_available[\s\S]*?\[consoleDetail\.run, consoleDetail\.decisions\][\s\S]*?apiService\.getBullpenAutoLiveRun\(normalizedRunId/,
+  );
+});
+
 test("Bullpen history requests bypass caches and remain abortable", () => {
   assert.match(
     apiService,

@@ -5876,27 +5876,30 @@ export function BullpenRunDetailScreen({ runId }: { runId: string }) {
 
     void (async () => {
       try {
-        const [run, decisions, consoleDetail] = await Promise.all([
-          apiService.getBullpenAutoLiveRun(normalizedRunId, {
+        const consoleDetail = await apiService.getBullpenAutoLiveRunConsole(
+          normalizedRunId,
+          {
             signal: controller.signal,
             timeoutMs: 10_000,
-          }),
-          apiService.getBullpenAutoLiveRunDecisions(normalizedRunId, {
-            signal: controller.signal,
-            timeoutMs: 10_000,
-          }),
-          apiService
-            .getBullpenAutoLiveRunConsole(normalizedRunId, {
-              signal: controller.signal,
-              timeoutMs: 5_000,
-            })
-            .catch((nextError) => {
-              if (controller.signal.aborted || isRequestAbort(nextError)) {
-                throw nextError;
-              }
-              return null;
-            }),
-        ]);
+          },
+        );
+        if (controller.signal.aborted) return;
+        const [run, decisions] = consoleDetail.projection_available
+          ? [consoleDetail.run, consoleDetail.decisions]
+          : await Promise.all([
+              // Only legacy runs without a bounded projection may read the
+              // immutable payload. Current Stage 1 snapshots can contain
+              // hundreds of thousands of audited rows and must never make
+              // this request merely to open the dedicated run page.
+              apiService.getBullpenAutoLiveRun(normalizedRunId, {
+                signal: controller.signal,
+                timeoutMs: 10_000,
+              }),
+              apiService.getBullpenAutoLiveRunDecisions(normalizedRunId, {
+                signal: controller.signal,
+                timeoutMs: 10_000,
+              }),
+            ]);
         if (controller.signal.aborted) return;
 
         const fullStage =
@@ -5912,7 +5915,7 @@ export function BullpenRunDetailScreen({ runId }: { runId: string }) {
         let decisionListTruncated = false;
         let decisionListLimit: number | undefined;
 
-        if (consoleDetail?.projection_available) {
+        if (consoleDetail.projection_available) {
           const projectedDecisions = Array.isArray(consoleDetail.decisions)
             ? consoleDetail.decisions
             : [];
