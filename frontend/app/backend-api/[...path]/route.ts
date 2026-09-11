@@ -239,6 +239,11 @@ function isBullpenHistoryRead(method: string, path: string) {
   );
 }
 
+function isClusteringProgressRead(method: string, path: string) {
+  return SAFE_FALLBACK_METHODS.has(method) &&
+    /^polymarket\/auto-live\/clustering\/[^/]+\/progress$/.test(path);
+}
+
 function isBullpenStageOneExcelDownload(method: string, path: string) {
   return (
     method === "GET" &&
@@ -368,10 +373,12 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   let outcome = "unreachable";
   let responseStatus: number | undefined;
   // Slow wallet/CLI reads must not open the circuit for healthy database-only
-  // history reads on the same backend origin. Use two fixed scopes so this
+  // history reads on the same backend origin. Use fixed scopes so this
   // registry remains bounded; never key circuit state by user or run ID.
   const historyCircuitScope =
-    SAFE_FALLBACK_METHODS.has(request.method) &&
+    isClusteringProgressRead(request.method, path)
+      ? "polymarket/auto-live/clustering/progress"
+      : SAFE_FALLBACK_METHODS.has(request.method) &&
     (path === "polymarket/auto-live/history" ||
       path === "polymarket/auto-live/history/event-trends")
       ? path

@@ -50,7 +50,7 @@ def test_delayed_duplicate_and_concurrent_reports_cannot_replace_current_progres
     from app.domains.polymarket_auto_live import clustering_progress as module
     attempt = uuid4()
     previous = {"attempt_id": str(attempt), "sequence": 3, "status": "deploying", "updated_at": datetime.now(UTC).isoformat(), "detail": "Deployment started"}
-    session = SimpleNamespace(add=Mock(), commit=AsyncMock())
+    session = SimpleNamespace(add=Mock(), commit=AsyncMock(), execute=AsyncMock(return_value=SimpleNamespace(scalar_one=lambda: True)))
     class Context:
         async def __aenter__(self):
             return session
@@ -63,6 +63,7 @@ def test_delayed_duplicate_and_concurrent_reports_cannot_replace_current_progres
     result = asyncio.run(module.record_clustering_progress(uuid4(), request, SimpleNamespace(id=1)))
     assert result["status"] == "deploying"
     session.add.assert_not_called()
+    module.owned_run.assert_awaited_once_with(session, 1, module.owned_run.call_args.args[2])
     with pytest.raises(HTTPException) as error:
         asyncio.run(module.record_clustering_progress(uuid4(), request.model_copy(update={"attempt_id": uuid4(), "sequence": 0, "status": "collecting"}), SimpleNamespace(id=1)))
     assert error.value.status_code == 409

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import JSON, cast, select
+from sqlalchemy import JSON, cast, func, select
 
 from app.domains.auth.dependencies import get_current_user
 from app.domains.auth.models import ActivityLog, User
@@ -78,8 +78,15 @@ async def get_clustering_progress(run_id: UUID, response: Response, current_user
 @router.post("/clustering/{run_id}/progress")
 async def record_clustering_progress(run_id: UUID, request: ClusteringProgressRequest, current_user: User = Depends(get_current_user)):
     async with AsyncSessionLocal() as session:
-        # Serialise reports for a scan, independently of scheduler snapshots.
-        await owned_run(session, current_user.id, run_id, lock=True)
+        # Never lock the busy scan row: scan/LLM persistence may hold it while
+        # this independent external job needs to report a blocker. A short,
+        # nonblocking transaction lock serialises only clustering reporters.
+        await owned_run(session, current_user.id, run_id)
+        acquired = (await session.execute(select(func.pg_try_advisory_xact_lock(
+            func.hashtextextended(f"clustering:{current_user.id}:{run_id}", 0)
+        )))).scalar_one()
+        if not acquired:
+            raise HTTPException(409, "A progress report is being saved; retry the same attempt and sequence")
         row = await latest_log(session, current_user.id, run_id, RESOURCE)
         previous = json.loads(row.details) if row else None
         if previous:
