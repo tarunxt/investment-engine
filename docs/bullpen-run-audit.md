@@ -2199,3 +2199,23 @@ the Sell path. All new Sells remain subject to the existing combined preview
 and action-time confirmation. After authoritative outcomes, every retained
 active position must belong to the target set; the active count may be lower
 than the target count because safety and tradeability exclusions are allowed.
+# External Stage 1 clustering progress
+
+Clustering progress is an additive, per-user/per-scan ActivityLog stream with
+resource `bullpen_clustering_progress`. The authenticated
+`/polymarket/auto-live/clustering/{run_id}/progress` GET/POST routes expose
+collecting, researching, validating, deploying, verifying and terminal reports.
+Reports include an attempt UUID, monotonic sequence, server timestamp and detail.
+Writes lock the owned run and deduplicate repeated sequence numbers; they do not
+alter the scan, scheduler state, cluster mapping or successful publication time.
+Frozen run audit snapshots and their schema remain unchanged.
+
+The History popup separately reads the scan's completion email outbox result and
+external job progress. Missing progress is explicitly unconfirmed, not running.
+Active reports older than ten minutes are marked stale, not automatically failed.
+The popup refreshes its lightweight status read every fifteen seconds while open,
+without refreshing wallet positions. Browser job reports use the History query
+parameters `clusteringStatus`, `clusteringRun`, `clusteringAttempt`,
+`clusteringSequence` and `clusteringDetail`; parameters are removed only after a
+successful authenticated POST. Actual completion still requires deployment of
+matching source metadata and production verification.
