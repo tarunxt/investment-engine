@@ -1,5 +1,1748 @@
 {
   "status": "completed",
-  "completed_at": "2026-09-10T17:59:30.074Z",
-  "source_commit": "6bdd03cee131a6c8dc195aabb48f1f8209bfda56"
+  "completed_at": "2026-09-11T02:16:29Z",
+  "source_commit": "dfe62e19837a67c0a2f34991bfaeebdb9d85c8a9",
+  "source_run_id": "c50be6b9-bbf3-4d50-8344-da83b7d9c8a4",
+  "source_stage1_completed_at": "2026-09-11T01:01:55.143700+00:00",
+  "filtered_count": 83,
+  "covered_unprocessed_run_ids": [
+    "5d2df610-a7ed-4953-9faa-055292b3a42e",
+    "c50be6b9-bbf3-4d50-8344-da83b7d9c8a4"
+  ],
+  "counts": {
+    "unique_inspected": 83,
+    "invalid_current_odds_excluded": 0,
+    "eligible": 83,
+    "classified": 83,
+    "unresolved": 0,
+    "clusters": 27
+  },
+  "unresolved_market_ids": [],
+  "claim_estimates": [
+    {
+      "market_id": "1193093",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1193094",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1193095",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1193096",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1193097",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1193098",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1193103",
+      "estimated_claim_at": "2026-10-16T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-prime-minister-of-sweden",
+        "https://www.government.se/government-of-sweden/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the post-election prime minister to be officially appointed and assume office; an interim or caretaker does not count. The estimate allows roughly one month for government formation after the 13 September election.",
+      "confidence": "low",
+      "conditional_assumptions": "A governing agreement is reached on a normal post-election timetable and the appointee assumes office before year-end.",
+      "plausible_range": {
+        "start": "2026-09-29T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2304227",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-2nd-place",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2304228",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-2nd-place",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2304229",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-2nd-place",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2304330",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-3rd-place",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2304331",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-3rd-place",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3092789",
+      "estimated_claim_at": "2026-09-28T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/osnabruck-mayoral-election-winner-20260723172818472",
+        "https://www.osnabrueck.de/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules name a 13 September first round and a 27 September runoff if nobody wins a majority. The estimate uses the runoff result plus normal publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No candidate wins outright in the first round; if one does, claimability may occur about two weeks earlier.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-10-01T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3092893",
+      "estimated_claim_at": "2026-09-28T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/salzgitter-mayoral-election-winner-20260723163216446",
+        "https://www.salzgitter.de/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The market resolves to the elected mayor from the 13 September vote, with a possible 27 September runoff. The estimate uses the conservative runoff path plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "A runoff is required; an outright first-round majority would allow earlier claimability.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-10-01T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3093137",
+      "estimated_claim_at": "2026-09-28T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/braunschweig-mayoral-election-winner-20260723164513786",
+        "https://www.braunschweig.de/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The market resolves to the elected mayor from the 13 September vote, with a possible 27 September runoff. The estimate uses the conservative runoff path plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "A runoff is required; an outright first-round majority would allow earlier claimability.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-10-01T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3479813",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-region-gotland"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Gotland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3479899",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-gavleborg-20260810081725342"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Gavleborg regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3479999",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-halland-20260810082025176"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Halland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3480007",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-halland-20260810082025176"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Halland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3480143",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-jamtland-harjedalen-20260810082228388"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Jamtland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3480144",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-jamtland-harjedalen-20260810082228388"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Jamtland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3480145",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-jamtland-harjedalen-20260810082228388"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Jamtland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3480146",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-jamtland-harjedalen-20260810082228388"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Jamtland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3480506",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-norrbotten-20260810083322343"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Norrbotten regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499248",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-kronoberg-20260810083306995"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Kronoberg regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499249",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-kronoberg-20260810083306995"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Kronoberg regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499319",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-sormland-20260810084413457"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Sormland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499320",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-sormland-20260810084413457"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Sormland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499322",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-sormland-20260810084413457"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Sormland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499453",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-vasterbotten-20260810084555417"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Vasterbotten regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3499521",
+      "estimated_claim_at": "2026-11-02T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/next-regional-board-chair-of-vastmanland-20260810084704952"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require the Vastmanland regional council to formally elect a chair who then officially assumes office; interim or caretaker office-holders do not count. The estimate allows several weeks for post-election coalition negotiations and the first formal council decision.",
+      "confidence": "low",
+      "conditional_assumptions": "The regional council completes coalition talks and elects a permanent chair during the normal autumn formation period.",
+      "plausible_range": {
+        "start": "2026-10-01T12:00:00Z",
+        "end": "2026-12-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3561698",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-5th-place-20260812164320200",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3561738",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-6th-place-20260812164320300",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3561739",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-6th-place-20260812164320300",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3561916",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-liberals-win-seats-20260812164320900",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562237",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-s-vote-share-20260812172636410",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562238",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-s-vote-share-20260812172636410",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562247",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-sd-vote-share-20260812172636420",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562248",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-sd-vote-share-20260812172636420",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562254",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-m-vote-share-20260812172636430",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562255",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-v-vote-share-20260812172636440",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562258",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-v-vote-share-20260812172636440",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562259",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-mp-vote-share-20260812172636450",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562262",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-mp-vote-share-20260812172636450",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562304",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-c-vote-share-20260812172636460",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562307",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-c-vote-share-20260812172636460",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562310",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-c-vote-share-20260812172636460",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3562363",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-kd-vote-share-20260812172636470",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3701624",
+      "estimated_claim_at": "2026-09-12T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/when-will-trump-announce-a-new-white-house-press-secretary",
+        "https://www.whitehouse.gov/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 9:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The observation window ends at 11:59 PM ET on 11 September. A qualifying official announcement is immediately observable, so the estimate adds a short publication and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "No ambiguous acting/interim announcement requires extended review.",
+      "plausible_range": {
+        "start": "2026-09-12T04:00:00Z",
+        "end": "2026-09-12T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3886972",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-orebropartiet-win-seats-20260825132452",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3953546",
+      "estimated_claim_at": "2026-09-12T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-x-lebanon-diplomatic-meeting-byptptpt-20260810145737299"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "This market observes qualifying official meetings through 11 September 11:59 PM ET. The estimate adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "No ambiguous or unofficial encounter requires extended review.",
+      "plausible_range": {
+        "start": "2026-09-12T04:00:00Z",
+        "end": "2026-09-12T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3953548",
+      "estimated_claim_at": "2026-09-14T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-x-lebanon-diplomatic-meeting-byptptpt-20260810145737299"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 14 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "This market observes qualifying official meetings through 13 September 11:59 PM ET. The estimate adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "No ambiguous or unofficial encounter requires extended review.",
+      "plausible_range": {
+        "start": "2026-09-14T04:00:00Z",
+        "end": "2026-09-14T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4046824",
+      "estimated_claim_at": "2026-09-12T04:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-russia-target-kyiv-on-september-2026"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The qualifying-action window is the 11 September Kyiv calendar day. The rules permit up to three full calendar days when reports conflict; the point estimate assumes an unambiguous overnight determination and normal oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "Official and credible reports do not materially conflict about occurrence, attribution, timing, or target.",
+      "plausible_range": {
+        "start": "2026-09-11T22:00:00Z",
+        "end": "2026-09-14T22:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4046825",
+      "estimated_claim_at": "2026-09-13T04:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-russia-target-kyiv-on-september-2026"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The qualifying-action window is the 12 September Kyiv calendar day. The rules permit up to three full calendar days when reports conflict; the point estimate assumes an unambiguous overnight determination and normal oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "Official and credible reports do not materially conflict about occurrence, attribution, timing, or target.",
+      "plausible_range": {
+        "start": "2026-09-12T22:00:00Z",
+        "end": "2026-09-15T22:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4167008",
+      "estimated_claim_at": null,
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/will-apple-release-a-foldable-iphone-before-2027",
+        "https://www.apple.com/newsroom/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 11 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The market deadline has passed, but History still shows a live unresolved price and no authoritative current proposal, challenge, dispute, or finalization state was available. A past estimate would be stale, so no claim date is published.",
+      "confidence": "low",
+      "conditional_assumptions": "A fresh oracle status or an actual claimable wallet state is required before estimating or recording claimability.",
+      "plausible_range": null,
+      "is_estimate": true
+    },
+    {
+      "market_id": "4175132",
+      "estimated_claim_at": "2026-09-26T00:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/israel-x-lebanon-effective-ceasefire-begins-byptptpt-2-week-pause"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "A qualifying 14-day no-action period may begin as late as 11 September and runs through noon ET on its fourteenth calendar day. The estimate adds time for evidence review and oracle finalization; conflicting reports can extend review by three full days.",
+      "confidence": "low",
+      "conditional_assumptions": "A qualifying quiet period starts by the deadline and is not interrupted by a later qualifying action.",
+      "plausible_range": {
+        "start": "2026-09-25T18:00:00Z",
+        "end": "2026-09-29T23:59:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4176861",
+      "estimated_claim_at": "2026-09-15T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
+        "https://www.the-numbers.com/",
+        "https://www.boxofficemojo.com/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 pm IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require final, non-estimate three-day opening-weekend figures for 11-13 September from The Numbers, with Box Office Mojo confirmation if ambiguous. The estimate targets the first post-weekend final-data cycle.",
+      "confidence": "medium",
+      "conditional_assumptions": "The Numbers publishes final figures on the usual Monday cycle and the two sources do not conflict.",
+      "plausible_range": {
+        "start": "2026-09-14T18:00:00Z",
+        "end": "2026-09-19T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4176862",
+      "estimated_claim_at": "2026-09-15T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
+        "https://www.the-numbers.com/",
+        "https://www.boxofficemojo.com/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 pm IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require final, non-estimate three-day opening-weekend figures for 11-13 September from The Numbers, with Box Office Mojo confirmation if ambiguous. The estimate targets the first post-weekend final-data cycle.",
+      "confidence": "medium",
+      "conditional_assumptions": "The Numbers publishes final figures on the usual Monday cycle and the two sources do not conflict.",
+      "plausible_range": {
+        "start": "2026-09-14T18:00:00Z",
+        "end": "2026-09-19T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4176863",
+      "estimated_claim_at": "2026-09-15T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
+        "https://www.the-numbers.com/",
+        "https://www.boxofficemojo.com/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 pm IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require final, non-estimate three-day opening-weekend figures for 11-13 September from The Numbers, with Box Office Mojo confirmation if ambiguous. The estimate targets the first post-weekend final-data cycle.",
+      "confidence": "medium",
+      "conditional_assumptions": "The Numbers publishes final figures on the usual Monday cycle and the two sources do not conflict.",
+      "plausible_range": {
+        "start": "2026-09-14T18:00:00Z",
+        "end": "2026-09-19T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4176864",
+      "estimated_claim_at": "2026-09-15T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
+        "https://www.the-numbers.com/",
+        "https://www.boxofficemojo.com/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 pm IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require final, non-estimate three-day opening-weekend figures for 11-13 September from The Numbers, with Box Office Mojo confirmation if ambiguous. The estimate targets the first post-weekend final-data cycle.",
+      "confidence": "medium",
+      "conditional_assumptions": "The Numbers publishes final figures on the usual Monday cycle and the two sources do not conflict.",
+      "plausible_range": {
+        "start": "2026-09-14T18:00:00Z",
+        "end": "2026-09-19T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4176865",
+      "estimated_claim_at": "2026-09-15T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
+        "https://www.the-numbers.com/",
+        "https://www.boxofficemojo.com/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 pm IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require final, non-estimate three-day opening-weekend figures for 11-13 September from The Numbers, with Box Office Mojo confirmation if ambiguous. The estimate targets the first post-weekend final-data cycle.",
+      "confidence": "medium",
+      "conditional_assumptions": "The Numbers publishes final figures on the usual Monday cycle and the two sources do not conflict.",
+      "plausible_range": {
+        "start": "2026-09-14T18:00:00Z",
+        "end": "2026-09-19T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4176866",
+      "estimated_claim_at": "2026-09-15T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
+        "https://www.the-numbers.com/",
+        "https://www.boxofficemojo.com/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 pm IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules require final, non-estimate three-day opening-weekend figures for 11-13 September from The Numbers, with Box Office Mojo confirmation if ambiguous. The estimate targets the first post-weekend final-data cycle.",
+      "confidence": "medium",
+      "conditional_assumptions": "The Numbers publishes final figures on the usual Monday cycle and the two sources do not conflict.",
+      "plausible_range": {
+        "start": "2026-09-14T18:00:00Z",
+        "end": "2026-09-19T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4192219",
+      "estimated_claim_at": "2026-09-13T04:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-next-mrbeast-video-on-week-1-20260905",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the YouTube view counter exactly seven days after the referenced upload. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-13T01:00:00Z",
+        "end": "2026-09-13T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4192220",
+      "estimated_claim_at": "2026-09-13T04:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-next-mrbeast-video-on-week-1-20260905",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the YouTube view counter exactly seven days after the referenced upload. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-13T01:00:00Z",
+        "end": "2026-09-13T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4192221",
+      "estimated_claim_at": "2026-09-13T04:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-next-mrbeast-video-on-week-1-20260905",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the YouTube view counter exactly seven days after the referenced upload. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-13T01:00:00Z",
+        "end": "2026-09-13T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4192222",
+      "estimated_claim_at": "2026-09-13T04:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-next-mrbeast-video-on-week-1-20260905",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the YouTube view counter exactly seven days after the referenced upload. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-13T01:00:00Z",
+        "end": "2026-09-13T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230319",
+      "estimated_claim_at": "2026-09-11T20:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/1-free-app-in-the-us-apple-app-store-on-september-11",
+        "https://apps.apple.com/us/charts/iphone"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the US iPhone Free Apps chart at 12:00 PM ET on 11 September and allow up to 48 hours if unavailable. The estimate assumes the chart is available on time and adds a short oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The official chart is available at noon ET; otherwise claimability may move toward the end of the range.",
+      "plausible_range": {
+        "start": "2026-09-11T17:00:00Z",
+        "end": "2026-09-13T22:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230345",
+      "estimated_claim_at": "2026-09-11T20:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/1-paid-app-in-the-us-apple-app-store-on-september-11",
+        "https://apps.apple.com/us/iphone/charts/36?chart=top-paid"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the US iPhone Paid Apps chart at 12:00 PM ET on 11 September and allow up to 48 hours if unavailable. The estimate assumes the chart is available on time and adds a short oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The official chart is available at noon ET; otherwise claimability may move toward the end of the range.",
+      "plausible_range": {
+        "start": "2026-09-11T17:00:00Z",
+        "end": "2026-09-13T22:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230347",
+      "estimated_claim_at": "2026-09-11T20:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/1-paid-app-in-the-us-apple-app-store-on-september-11",
+        "https://apps.apple.com/us/iphone/charts/36?chart=top-paid"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "The rules use the US iPhone Paid Apps chart at 12:00 PM ET on 11 September and allow up to 48 hours if unavailable. The estimate assumes the chart is available on time and adds a short oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The official chart is available at noon ET; otherwise claimability may move toward the end of the range.",
+      "plausible_range": {
+        "start": "2026-09-11T17:00:00Z",
+        "end": "2026-09-13T22:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230853",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/1-spotify-song-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization; the rules default to Other if the chart is still missing by 12 September 11:59 PM ET.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly global chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230855",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/1-spotify-song-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization; the rules default to Other if the chart is still missing by 12 September 11:59 PM ET.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly global chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230915",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/2-spotify-song-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization; the rules default to Other if the chart is still missing by 12 September 11:59 PM ET.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly global chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230917",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/2-spotify-song-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization; the rules default to Other if the chart is still missing by 12 September 11:59 PM ET.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly global chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230919",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/2-spotify-song-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization; the rules default to Other if the chart is still missing by 12 September 11:59 PM ET.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly global chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230936",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/1-spotify-song-in-the-us-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly US chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly US chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4230947",
+      "estimated_claim_at": "2026-09-12T02:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/2-spotify-song-in-the-us-this-week-september-11",
+        "https://open.spotify.com/genre/charts-tab"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 5:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "Spotify publishes the weekly US chart on Friday for the week labeled 11 September. The estimate allows publication, tie-breaking, and normal oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "Spotify publishes the official weekly US chart on its normal Friday cycle.",
+      "plausible_range": {
+        "start": "2026-09-11T16:00:00Z",
+        "end": "2026-09-13T08:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4439161",
+      "estimated_claim_at": "2026-09-12T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-video-day-6-20260910",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 9:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These markets share the same six-day YouTube view-count observation. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-12T05:00:00Z",
+        "end": "2026-09-12T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4439162",
+      "estimated_claim_at": "2026-09-12T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-video-day-6-20260910",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 9:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These markets share the same six-day YouTube view-count observation. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-12T05:00:00Z",
+        "end": "2026-09-12T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4439167",
+      "estimated_claim_at": "2026-09-12T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-video-day-6-20260910",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 9:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These markets share the same six-day YouTube view-count observation. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-12T05:00:00Z",
+        "end": "2026-09-12T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4439168",
+      "estimated_claim_at": "2026-09-12T08:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-mrbeast-video-day-6-20260910",
+        "https://www.youtube.com/@MrBeast"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 12 Sept 2026, 9:29:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These markets share the same six-day YouTube view-count observation. The estimate follows the displayed observation deadline and adds a short verification and oracle-finalization window.",
+      "confidence": "medium",
+      "conditional_assumptions": "The referenced long-form video remains available and its public view counter is readable at the observation time.",
+      "plausible_range": {
+        "start": "2026-09-12T05:00:00Z",
+        "end": "2026-09-12T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "811719",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-winner",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "811720",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-winner",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "811721",
+      "estimated_claim_at": "2026-09-15T12:00:00Z",
+      "research_at": "2026-09-11T02:16:29Z",
+      "source_urls": [
+        "https://polymarket.com/event/sweden-parliamentary-election-winner",
+        "https://www.val.se/"
+      ],
+      "verified_facts": [
+        "Cred-X History deadline: 13 Sept 2026, 5:30:00 am IST",
+        "Exact market name and canonical market ID were matched in the live all-events History view."
+      ],
+      "rationale": "These outcomes are determined by the same 13 September parliamentary-election result. The rules permit consensus reporting and defer to Valmyndigheten if ambiguous; the estimate allows the overnight count plus publication and oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "No material recount or unresolved tie delays the official seat and vote totals.",
+      "plausible_range": {
+        "start": "2026-09-14T06:00:00Z",
+        "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    }
+  ]
 }
