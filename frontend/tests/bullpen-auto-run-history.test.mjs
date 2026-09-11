@@ -130,6 +130,10 @@ test("Bullpen history shows scored event trends for exactly 20 newest-first scan
   assert.match(historyScreen, /latest_hourly_rebalance_status/);
   assert.match(historyScreen, /latest_hourly_rebalance_at/);
   assert.match(historyScreen, /latest_hourly_rebalance_detail/);
+  assert.match(historyScreen, /runtimeState\.last_error/);
+  assert.match(historyScreen, /runtimeState\.last_action/);
+  assert.match(historyContent, /Last runtime error/);
+  assert.match(historyContent, /Last runtime action/);
   assert.match(historyContent, /Latest Stage 2 LLM scan:/);
   assert.match(historyContent, /Latest Stage 3 completion:/);
   assert.match(historyContent, /findLatestOperationalStage\(operationalRuns, "scan"\)/);

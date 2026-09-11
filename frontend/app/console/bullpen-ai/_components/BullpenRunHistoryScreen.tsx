@@ -421,6 +421,8 @@ export function BullpenRunHistoryScreen() {
   const [hourlyRebalanceStatus, setHourlyRebalanceStatus] = useState<"completed" | "failed" | null>(null);
   const [hourlyRebalanceAt, setHourlyRebalanceAt] = useState<string | null>(null);
   const [hourlyRebalanceDetail, setHourlyRebalanceDetail] = useState<string | null>(null);
+  const [hourlyRebalanceLastError, setHourlyRebalanceLastError] = useState<string | null>(null);
+  const [hourlyRebalanceLastAction, setHourlyRebalanceLastAction] = useState<string | null>(null);
   const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>(
     () => readCachedHistoryPage()?.items ?? [],
   );
@@ -475,6 +477,8 @@ export function BullpenRunHistoryScreen() {
         setHourlyRebalanceStatus(runtimeState.latest_hourly_rebalance_status ?? null);
         setHourlyRebalanceAt(runtimeState.latest_hourly_rebalance_at ?? null);
         setHourlyRebalanceDetail(runtimeState.latest_hourly_rebalance_detail ?? null);
+        setHourlyRebalanceLastError(runtimeState.last_error ?? null);
+        setHourlyRebalanceLastAction(runtimeState.last_action ?? null);
       }
       const hasUsableCurrentPositions = Boolean(
         currentPositions &&
@@ -574,6 +578,8 @@ export function BullpenRunHistoryScreen() {
           hourlyRebalanceStatus={hourlyRebalanceStatus}
           hourlyRebalanceAt={hourlyRebalanceAt}
           hourlyRebalanceDetail={hourlyRebalanceDetail}
+          hourlyRebalanceLastError={hourlyRebalanceLastError}
+          hourlyRebalanceLastAction={hourlyRebalanceLastAction}
           latestRuns={latestRuns}
         />
       </div>
