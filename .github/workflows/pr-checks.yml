@@ -49,6 +49,7 @@ jobs:
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_polymarket_auto_live_stage1_runtime.py
+          backend/tests/test_polymarket_auto_live.py::test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_timeout
           backend/tests/test_polymarket_auto_live_lifecycle_safety.py
           backend/tests/test_polymarket_auto_live_run_recovery.py
           backend/tests/test_polymarket_auto_live_event_trends_stage2.py

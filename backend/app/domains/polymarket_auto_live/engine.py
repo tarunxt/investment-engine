@@ -5652,6 +5652,7 @@ class BullpenAutoLiveEngine:
         )
 
         latest_scan_progress: dict[str, object] = {}
+        stage1_candidate_scan_completed_at: str | None = None
 
         def report_stage1_progress(
             reason: str,
@@ -5661,7 +5662,22 @@ class BullpenAutoLiveEngine:
             commentary: list[str] | None = None,
             outputs: dict[str, object] | None = None,
         ) -> None:
+            existing_stage1 = next(
+                (
+                    stage
+                    for stage in run.stage_results
+                    if stage.stage_number == 1
+                    and stage.outputs.get("workflow_stage_key") == "scan"
+                ),
+                None,
+            )
             progress_outputs: dict[str, object] = {
+                **(
+                    existing_stage1.outputs
+                    if stage1_candidate_scan_completed_at is not None
+                    and existing_stage1 is not None
+                    else {}
+                ),
                 "progress_commentary": commentary or [reason],
             }
             if outputs:
@@ -5678,7 +5694,14 @@ class BullpenAutoLiveEngine:
                 build_workflow_stage_result(
                     stage_number=1,
                     workflow_stage_key="scan",
-                    phase_status="running",
+                    # Stage 1 is the candidate scan.  Once its filtered output is
+                    # durable, the independent wallet preflight must never turn
+                    # it back into a running stage or delay its completion event.
+                    phase_status=(
+                        "completed"
+                        if stage1_candidate_scan_completed_at is not None
+                        else "running"
+                    ),
                     status="pass",
                     reason=reason,
                     completed_items=completed_items,
@@ -5687,7 +5710,7 @@ class BullpenAutoLiveEngine:
                     outputs=progress_outputs,
                     guardrails_checked=global_guardrails,
                     started_at=stage1_stage_started_at,
-                    completed_at=None,
+                    completed_at=stage1_candidate_scan_completed_at,
                 ),
             )
             self._report_progress(progress_callback, run, state)
@@ -6231,8 +6254,9 @@ class BullpenAutoLiveEngine:
             self._report_progress(progress_callback, run, state)
             return EngineResult(run=run, decisions=[], state=state, positions=positions)
 
+        stage1_candidate_scan_completed_at = utc_now_iso()
         report_stage1_progress(
-            "Stage 1 candidate scan finished; waiting for the live wallet snapshot.",
+            "Stage 1 candidate scan completed; the live wallet preflight is continuing for Stage 2 and Stage 3.",
             completed_items=len(stage1_accepted_candidates),
             total_items=scanned_total_candidates,
             commentary=[
@@ -6246,8 +6270,11 @@ class BullpenAutoLiveEngine:
                 "scan_source_url": scan_source_url,
                 "scanned_candidates": scanned_total_candidates,
                 "accepted_candidates_count": len(stage1_accepted_candidates),
+                "accepted_candidates": stage1_accepted_candidates,
                 "rejected_candidates_count": len(stage1_rejected_candidates),
                 "wallet_snapshot_status": "refreshing",
+                "wallet_snapshot_required_for_stage1_completion": False,
+                "wallet_snapshot_required_for_stage3": True,
                 "scan_warning": scan_warning,
                 "scan_details": scan_details,
                 "scan_scope": scan_scope,
@@ -6289,13 +6316,28 @@ class BullpenAutoLiveEngine:
                     "wallet_recovery_max_age_seconds": stage1_wallet_recovery_max_age_seconds,
                 },
             )
+            recovery_task = asyncio.create_task(
+                _read_stage1_wallet_positions_recovery_snapshot(
+                    max_age_seconds=stage1_wallet_recovery_max_age_seconds,
+                )
+            )
             try:
-                recovered = await asyncio.wait_for(
-                    _read_stage1_wallet_positions_recovery_snapshot(
-                        max_age_seconds=stage1_wallet_recovery_max_age_seconds,
-                    ),
+                completed_recovery_tasks, _ = await asyncio.wait(
+                    {recovery_task},
                     timeout=stage1_wallet_recovery_timeout_seconds,
                 )
+                if recovery_task not in completed_recovery_tasks:
+                    # asyncio.wait_for waits for cancellation cleanup.  A
+                    # wedged Redis/CLI cleanup path could therefore defeat the
+                    # advertised timeout and leave Stage 1 visually running
+                    # for hours.  Detach cancellation so the workflow deadline
+                    # remains a real wall-clock bound.
+                    _cancel_background_task(recovery_task)
+                    raise TimeoutError(
+                        "Bounded shared Bullpen wallet recovery timed out after "
+                        f"{stage1_wallet_recovery_timeout_seconds} seconds."
+                    )
+                recovered = recovery_task.result()
                 if recovered.freshness_state not in {"fresh", "cached"}:
                     raise RuntimeError(
                         "Shared Bullpen wallet recovery returned a non-current snapshot."
@@ -7057,6 +7099,8 @@ class BullpenAutoLiveEngine:
                         if scan_scope == "full_universe"
                         else "trending"
                     ),
+                    "wallet_snapshot_required_for_stage1_completion": False,
+                    "wallet_snapshot_required_for_stage3": True,
                     "bullpen_trending_rows": bullpen_trending_rows,
                     "complete_catalogue_markets": complete_catalogue_markets,
                     **stage2_universe_status,
@@ -7078,6 +7122,7 @@ class BullpenAutoLiveEngine:
                 },
                 guardrails_checked=global_guardrails,
                 started_at=stage1_stage_started_at,
+                completed_at=stage1_candidate_scan_completed_at,
             ),
         )
         verified_portfolio_snapshot = (
@@ -7459,6 +7504,8 @@ class BullpenAutoLiveEngine:
                             if scan_scope == "full_universe"
                             else "trending"
                         ),
+                        "wallet_snapshot_required_for_stage1_completion": False,
+                        "wallet_snapshot_required_for_stage3": True,
                         "bullpen_trending_rows": bullpen_trending_rows,
                         "complete_catalogue_markets": complete_catalogue_markets,
                         "used_manual_console_rows": manual_console_rows_used,
@@ -7477,6 +7524,8 @@ class BullpenAutoLiveEngine:
                         "fixed_schedule_hours": list(CONSOLE_SCHEDULE_HOURS),
                     },
                     guardrails_checked=global_guardrails,
+                    started_at=stage1_stage_started_at,
+                    completed_at=stage1_candidate_scan_completed_at,
                 ),
             )
             self._report_progress(progress_callback, run, state)

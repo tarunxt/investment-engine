@@ -554,18 +554,25 @@ different caller produced it. Passive UI mount or interval polling is
 cache-only: it may wait for an already-running refresh to publish, but it must
 not acquire the refresh lock or start a new Bullpen CLI positions command on
 its own.
-When that forced fresh wallet snapshot fails for a non-transient reason, Stage 1
-must record a failed workflow stage with the sanitized wallet-refresh error, and
-the persisted Stage 2 and Stage 3 workflow results must remain explicitly blocked with
-`blocked_by_stage1_wallet_refresh=true` instead of continuing with fallback
-wallet rereads. A distinct Stage 1 handoff timeout or shared-lock timeout is handled differently: the
+Stage 1 completion is now the durable candidate-scan boundary. As soon as the
+filtered candidate output, counts, source identity, and completeness marker are
+persisted, Stage 1 records `phase_status="completed"` and emits its completion
+event. The Bullpen wallet snapshot remains an independently bounded preflight
+for active-position enrichment and Stage 3; it must not keep Stage 1 visually
+running or retract an already-published scan completion. Progress writes made
+while that preflight is still resolving preserve the original Stage 1
+`completed_at` and candidate outputs.
+
+When the forced fresh wallet snapshot or its shared-lock recovery fails, the
 worker records `wallet_snapshot_status="unavailable"`,
 `wallet_refresh_error`, and `stage2_candidate_only=true`, cancels the lingering
 wallet read, and proceeds with read-only Stage 2 candidate analysis. Its Stage 3
 result is explicitly blocked with `blocked_by_stage1_wallet_refresh=true`; it
 must plan or submit no orders and the run ends as `partial_success`. This keeps a
 slow shared wallet refresh from indefinitely preventing LLM review while
-preserving the fresh-wallet safety gate for execution.
+preserving the fresh-wallet safety gate for execution. Both the fast-path wait
+and the shared-snapshot recovery use detached wall-clock deadlines: cancellation
+cleanup in Redis or the CLI broker cannot extend those advertised budgets.
 
 A fresh wallet snapshot that is present but contains unresolved positive-exposure
 rows is not the same as a missing wallet snapshot. In that degraded-enrichment
