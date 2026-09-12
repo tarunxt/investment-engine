@@ -2233,3 +2233,19 @@ parameters `clusteringStatus`, `clusteringRun`, `clusteringAttempt`,
 `clusteringSequence` and `clusteringDetail`; parameters are removed only after a
 successful authenticated POST. Actual completion still requires deployment of
 matching source metadata and production verification.
+
+## Stage 1 completion and orphaned redelivery recovery (2026-09-12)
+
+Stage 1 is terminal once the candidate scan and filters are durably persisted;
+the parallel wallet snapshot remains a Stage 2/3 preflight and cannot hold the
+scan open. If a worker is restarted after that point, reconciliation preserves
+the completed scan counts and completion timestamp even when it must fail the
+parent run because the wallet preflight never finished.
+
+A genuinely queued or reserved delivery remains protected from stale-progress
+recovery. A `RESERVED` lifecycle that also contains prior worker-start or
+heartbeat evidence is different: it represents a regressed/redelivered task.
+After the heartbeat timeout and redelivery grace, it is terminalized as worker
+lost only when Celery inspection is completely negative and both the Redis
+execution lease and PostgreSQL advisory lock are confirmed absent. This closes
+the orphan without risking a second planner or order submission.

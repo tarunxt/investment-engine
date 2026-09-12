@@ -726,6 +726,84 @@ def test_reconcile_keeps_queued_task_waiting_past_progress_timeout():
     assert run.task_lifecycle.detail == "Queued — waiting for Auto-Live worker"
 
 
+def test_reconcile_recovers_orphaned_reserved_redelivery_and_preserves_stage1(
+    monkeypatch,
+):
+    run = BullpenAutoLiveRun(
+        id="run-orphaned-reserved",
+        triggered_by="scheduler",
+        status="running",
+        dry_run=False,
+        started_at="2026-07-05T12:00:00+00:00",
+        summary="Stage 1 candidate scan finished; waiting for the live wallet snapshot.",
+        task_lifecycle=BullpenAutoLiveTaskLifecycle(
+            state="RESERVED",
+            task_id="celery-redelivered",
+            queue="auto_live",
+            enqueued_at="2026-07-05T12:00:00+00:00",
+            worker_hostname="auto-live-worker@example",
+            worker_started_at="2026-07-05T12:01:00+00:00",
+            last_heartbeat_at="2026-07-05T12:20:00+00:00",
+            redelivery_count=1,
+        ),
+        stage_results=[
+            _stage_result(
+                stage_number=1,
+                workflow_stage_key="scan",
+                phase_status="running",
+                reason=(
+                    "Stage 1 candidate scan finished; waiting for the live wallet snapshot."
+                ),
+                outputs={
+                    "scanned_candidates": 207_433,
+                    "accepted_candidates_count": 159,
+                    "wallet_snapshot_status": "refreshing",
+                    "scan_progress": {
+                        "lastUpdatedAt": "2026-07-05T12:19:45+00:00",
+                    },
+                },
+                completed_at=None,
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.auto_live_run_execution_lease_is_live_sync",
+        lambda _run_id: False,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.run_recovery.auto_live_run_execution_advisory_lock_is_live_sync",
+        lambda _run_id: False,
+    )
+
+    recovered = reconcile_running_auto_live_run(
+        run,
+        started_at=datetime(2026, 7, 5, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 5, 12, 20, tzinfo=UTC),
+        now=datetime(2026, 7, 5, 12, 40, tzinfo=UTC),
+        task_snapshot=AutoLiveTaskRuntimeSnapshot(
+            task_id="celery-redelivered",
+            state="PENDING",
+            inspect_succeeded=True,
+            inspect_complete=True,
+        ),
+    )
+
+    assert recovered is run
+    assert recovered.status == "failed"
+    assert recovered.error_message is not None
+    assert "Worker heartbeat lost" in recovered.error_message
+    assert recovered.task_lifecycle is not None
+    assert recovered.task_lifecycle.state == "WORKER_LOST"
+    stage1 = recovered.stage_results[0]
+    assert stage1.status == "pass"
+    assert stage1.completed_at == "2026-07-05T12:19:45+00:00"
+    assert stage1.outputs["phase_status"] == "completed"
+    assert stage1.outputs["accepted_candidates_count"] == 159
+    assert stage1.outputs["wallet_snapshot_status"] == "unavailable"
+    assert stage1.outputs["wallet_snapshot_required_for_stage1_completion"] is False
+    assert stage1.outputs["wallet_snapshot_required_for_stage3"] is True
+
+
 def test_worker_lost_failure_waits_for_redelivery_grace_before_terminalizing():
     """Late-ack WorkerLostError is not final before a same-ID redelivery."""
 
