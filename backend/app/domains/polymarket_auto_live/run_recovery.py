@@ -356,6 +356,42 @@ def finalize_failed_run_progress(
     failure_message: str,
     completed_at: str,
 ) -> str:
+    # Stage 1 used to remain ``running`` while the independent wallet
+    # preflight finished.  If that worker dies after the candidate scan was
+    # durably persisted, preserve the completed scan instead of rewriting it
+    # as a failed stage during reconciliation.  Stage 2/3 still remain blocked
+    # because the wallet snapshot was not available.
+    for stage in run.stage_results:
+        stage_outputs = dict(stage.outputs)
+        if (
+            _stage_workflow_key(stage) == "scan"
+            and not _stage_terminal(stage)
+            and "candidate scan finished" in stage.reason.lower()
+            and _read_output_int(stage_outputs.get("scanned_candidates")) is not None
+            and _read_output_int(stage_outputs.get("accepted_candidates_count")) is not None
+        ):
+            scan_progress = stage_outputs.get("scan_progress")
+            scan_completed_at = (
+                scan_progress.get("lastUpdatedAt")
+                if isinstance(scan_progress, dict)
+                and isinstance(scan_progress.get("lastUpdatedAt"), str)
+                else completed_at
+            )
+            stage.outputs = {
+                **stage_outputs,
+                "phase_status": "completed",
+                "wallet_snapshot_status": "unavailable",
+                "wallet_snapshot_required_for_stage1_completion": False,
+                "wallet_snapshot_required_for_stage3": True,
+                "post_scan_failure_message": failure_message,
+            }
+            stage.status = "pass"
+            stage.reason = (
+                "Stage 1 candidate scan completed; the worker stopped during "
+                "the live wallet preflight."
+            )
+            stage.completed_at = scan_completed_at
+
     active_stage = next(
         (
             stage
@@ -884,7 +920,12 @@ def _build_stalled_run_failure_message(
     # long time.  Its lack of workflow-stage progress is expected; neither a
     # PENDING result nor a partial inspect reply proves it has died. A
     # matching terminal Celery result above remains authoritative.
-    if task_lifecycle_is_queue_waiting(run):
+    lifecycle_has_prior_worker_progress = bool(
+        lifecycle
+        and lifecycle.state == "RESERVED"
+        and (lifecycle.worker_started_at or lifecycle.last_heartbeat_at)
+    )
+    if task_lifecycle_is_queue_waiting(run) and not lifecycle_has_prior_worker_progress:
         return None
 
     if task_snapshot.is_live:
@@ -912,7 +953,9 @@ def _build_stalled_run_failure_message(
         # evidence can declare this worker lost.
         if not _inspect_has_complete_negative_evidence(task_snapshot):
             return None
-        if lifecycle is not None and lifecycle.state == "STARTED":
+        if lifecycle is not None and (
+            lifecycle.state == "STARTED" or lifecycle_has_prior_worker_progress
+        ):
             # The execution lease is renewed independently of the database
             # heartbeat.  In particular, an audit snapshot may momentarily
             # lock the run row and defer a heartbeat write.  A live (or
