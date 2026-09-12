@@ -1,0 +1,85 @@
+name: Diagnose Stage 1 Postdeploy
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/diagnose-stage1-postdeploy.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read current Stage 1 state
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 600s
+          command_timeout: 600s
+          script: |
+            set -euo pipefail
+            APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
+            [[ -d "$APP/backend" ]] || APP="/srv/investor"
+            APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
+            id "$APP_USER" >/dev/null 2>&1 || APP_USER="investor"
+            sudo -u "$APP_USER" -H bash -lc "
+              cd '$APP/backend'
+              set -a
+              source /etc/investor/backend.env
+              set +a
+              source .venv/bin/activate
+              PYTHONPATH=. python - <<'PY'
+            import json
+            from sqlalchemy import desc, select
+            from app.infrastructure.database.sync_session import SyncSessionLocal
+            from app.domains.polymarket_auto_live.models import PolymarketAutoLiveRunRecord
+            from app.domains.polymarket_auto_live.repository import record_to_run
+            from app.domains.polymarket_auto_live.run_lifecycle import get_auto_live_run_execution_lease_sync
+
+            with SyncSessionLocal() as session:
+                record = session.execute(
+                    select(PolymarketAutoLiveRunRecord)
+                    .order_by(desc(PolymarketAutoLiveRunRecord.started_at))
+                    .limit(1)
+                ).scalar_one()
+                run = record_to_run(record)
+                stage1 = next(
+                    (s for s in run.stage_results
+                     if s.outputs.get('workflow_stage_key') == 'scan'),
+                    None,
+                )
+                print(json.dumps({
+                    'run_id': run.id,
+                    'status': run.status,
+                    'started_at': run.started_at,
+                    'completed_at': run.completed_at,
+                    'summary': run.summary,
+                    'lifecycle': (
+                        run.task_lifecycle.model_dump(mode='json')
+                        if run.task_lifecycle else None
+                    ),
+                    'stage1': ({
+                        'phase_status': stage1.outputs.get('phase_status'),
+                        'reason': stage1.reason,
+                        'completed_at': stage1.completed_at,
+                        'accepted_candidates_count': stage1.outputs.get('accepted_candidates_count'),
+                        'scanned_candidates': stage1.outputs.get('scanned_candidates'),
+                        'wallet_snapshot_status': stage1.outputs.get('wallet_snapshot_status'),
+                        'wallet_recovery_status': stage1.outputs.get('wallet_recovery_status'),
+                        'wallet_recovery_error': stage1.outputs.get('wallet_recovery_error'),
+                    } if stage1 else None),
+                    'execution_lease': (
+                        get_auto_live_run_execution_lease_sync(run.id).__dict__
+                        if get_auto_live_run_execution_lease_sync(run.id) else None
+                    ),
+                }, default=str))
+            PY
+            "
+            sudo journalctl -u investor-celery-auto-live-worker --since "45 minutes ago" --no-pager |
+              grep -E "Stage 1 wallet|Auto-Live run|execute_polymarket_auto_live_run|reconcile_interrupted" |
+              tail -n 120 || true
