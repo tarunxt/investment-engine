@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Read current Stage 1 state
+      - name: Read current Stage 1 state (post-1078)
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -25,6 +25,7 @@ jobs:
             set -euo pipefail
             APP="${{ vars.EC2_APP_PATH || '/srv/investment-engine' }}"
             [[ -d "$APP/backend" ]] || APP="/srv/investor"
+            echo "production_head=$(git -C \"$APP\" rev-parse HEAD)"
             APP_USER="${{ vars.EC2_APP_USER || 'investment-engine' }}"
             id "$APP_USER" >/dev/null 2>&1 || APP_USER="investor"
             sudo -u "$APP_USER" -H bash -lc "
