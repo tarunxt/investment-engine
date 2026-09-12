@@ -2249,3 +2249,15 @@ After the heartbeat timeout and redelivery grace, it is terminalized as worker
 lost only when Celery inspection is completely negative and both the Redis
 execution lease and PostgreSQL advisory lock are confirmed absent. This closes
 the orphan without risking a second planner or order submission.
+
+
+## Cross-account Stage 1 clustering handoff (2026-09-12)
+
+Bullpen Stage 1 completion notifications use the exact subject reserved for the
+clustering webhook and route to the dedicated
+`BULLPEN_STAGE1_COMPLETION_RECIPIENT` inbox. The production-safe default is
+`tarunindian007@gmail.com`, which is monitored by the active ChatGPT Work
+webhook while SMTP continues to send from the 6893 account. Other completion,
+alert, and account emails retain their existing per-user recipient routing.
+The completion outbox, retry, preference, idempotency, and Delivery Audit
+semantics are unchanged.
