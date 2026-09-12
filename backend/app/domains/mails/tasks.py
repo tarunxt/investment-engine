@@ -35,6 +35,15 @@ def build_completion_email(data):
     return subject, html + f'<p><a href="{escape(history)}">Open History</a></p></body></html>', text
 
 
+def completion_recipients(data, user_email):
+    """Route only Bullpen Stage 1 handoffs to the cross-account webhook inbox."""
+    if data.get("segment") == "bullpen" and data.get("stage") == "scan":
+        recipient = str(settings.bullpen_stage1_completion_recipient or "").strip()
+        if recipient:
+            return (recipient,)
+    return (str(user_email),)
+
+
 @celery.task(bind=True, max_retries=3, default_retry_delay=60, queue="email",
              soft_time_limit=90, time_limit=120)
 def deliver_completion_email(self, event_id):
@@ -64,7 +73,7 @@ def deliver_completion_email(self, event_id):
                 session, user_id=row.user_id, action="mail.stage_completion",
                 trigger=f"{data['segment']} {data['label']}", category=MAIL_CATEGORY_RUNS,
                 completion_preference=f"completion.{data['segment']}.{data['stage']}",
-                recipients=(str(user.email),), subject=subject, html_content=html,
+                recipients=completion_recipients(data, user.email), subject=subject, html_content=html,
                 text_content=text, remarks="Automatic completion notification from committed workflow output.",
                 idempotency_key=f"completion:{event_id}", run_id=data["run_id"],
             )
