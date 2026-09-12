@@ -24,8 +24,8 @@
     "claim_date": "2026-10-16T12:00:00Z"
   },
   {
-    "event_name": "Will Nooshi Dadgostar be the next Prime Minister of Sweden?",
-    "market_id": "1193098",
+    "event_name": "Will Daniel Helldén be the next Prime Minister of Sweden?",
+    "market_id": "1193101",
     "cluster_id": "C01",
     "claim_date": "2026-10-16T12:00:00Z"
   },
@@ -36,525 +36,957 @@
     "claim_date": "2026-10-16T12:00:00Z"
   },
   {
+    "event_name": "Will John Shulli be the Republican nominee for Senate in Delaware?",
+    "market_id": "1427557",
+    "cluster_id": "C02",
+    "claim_date": "2026-09-16T08:00:00Z"
+  },
+  {
+    "event_name": "Will Michael Katz be the Republican nominee for Senate in Delaware?",
+    "market_id": "1427558",
+    "cluster_id": "C02",
+    "claim_date": "2026-09-16T08:00:00Z"
+  },
+  {
     "event_name": "Will the Swedish Social Democratic Party (S) win the second most seats in the 2026 Swedish parliamentary election?",
     "market_id": "2304227",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will the Sweden Democrats (SD) win the second most seats in the 2026 Swedish parliamentary election?",
     "market_id": "2304228",
-    "cluster_id": "C02",
-    "claim_date": "2026-09-15T12:00:00Z"
-  },
-  {
-    "event_name": "Will the Moderate Party (M) win the third most seats in the 2026 Swedish parliamentary election?",
-    "market_id": "2304331",
-    "cluster_id": "C02",
-    "claim_date": "2026-09-15T12:00:00Z"
-  },
-  {
-    "event_name": "Will Tidö parties win a majority in the 2026 Swedish parliamentary elections?",
-    "market_id": "2436390",
-    "cluster_id": "C02",
-    "claim_date": "2026-09-15T12:00:00Z"
-  },
-  {
-    "event_name": "Will Volker Bajus win the next Osnabrück mayoral election?",
-    "market_id": "3092789",
     "cluster_id": "C03",
-    "claim_date": "2026-09-28T12:00:00Z"
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Frank Klingebiel win the next Salzgitter mayoral election?",
-    "market_id": "3092893",
-    "cluster_id": "C04",
-    "claim_date": "2026-09-28T12:00:00Z"
+    "event_name": "Will the Swedish Social Democratic Party (S) win 110-114 seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3504083",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Thorsten Kornblum win the next Braunschweig mayoral election?",
-    "market_id": "3093137",
-    "cluster_id": "C05",
-    "claim_date": "2026-09-28T12:00:00Z"
+    "event_name": "Will the Moderate Party (M) win the fourth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561657",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Sara Unger be the next Regional Board Chair of Region Gotland?",
-    "market_id": "3479813",
-    "cluster_id": "C06",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Left Party (V) win the fourth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561659",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Mikaela Waltersson be the next Regional Board Chair of Region Halland?",
-    "market_id": "3479999",
-    "cluster_id": "C07",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Christian Democrats (KD) win the fourth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561660",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Per Svensson be the next Regional Board Chair of Region Halland?",
-    "market_id": "3480007",
-    "cluster_id": "C07",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Green Party (MP) win the fourth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561661",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Bengt Bergqvist be the next Regional Board Chair of Region Jämtland Härjedalen?",
-    "market_id": "3480143",
-    "cluster_id": "C08",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Liberals (L) win the fourth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561662",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Lars-Erik Olofsson be the next Regional Board Chair of Region Jämtland Härjedalen?",
-    "market_id": "3480144",
-    "cluster_id": "C08",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Swedish Social Democratic Party (S) win the fifth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561691",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Robert Hamberg be the next Regional Board Chair of Region Jämtland Härjedalen?",
-    "market_id": "3480145",
-    "cluster_id": "C08",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Moderate Party (M) win the fifth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561693",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will Elin Hoffner be the next Regional Board Chair of Region Jämtland Härjedalen?",
-    "market_id": "3480146",
-    "cluster_id": "C08",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Jimmy Ekström be the next Regional Board Chair of Region Jönköping County?",
-    "market_id": "3480184",
-    "cluster_id": "C09",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Tommie Ekered be the next Regional Board Chair of Region Jönköping County?",
-    "market_id": "3480188",
-    "cluster_id": "C09",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Anders Öberg be the next Regional Board Chair of Region Norrbotten?",
-    "market_id": "3480506",
-    "cluster_id": "C10",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Henrietta Modig Serrate be the next Regional Board Chair of Region Kronoberg?",
-    "market_id": "3499248",
-    "cluster_id": "C11",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Magnus Carlberg be the next Regional Board Chair of Region Kronoberg?",
-    "market_id": "3499249",
-    "cluster_id": "C11",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Elizabeth Peltola be the next Regional Board Chair of Region Kronoberg?",
-    "market_id": "3499250",
-    "cluster_id": "C11",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Anna Zelvin be the next Regional Board Chair of Region Kronoberg?",
-    "market_id": "3499253",
-    "cluster_id": "C11",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Robert Fredriksson be the next Regional Board Chair of Region Kronoberg?",
-    "market_id": "3499254",
-    "cluster_id": "C11",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Peter Olofsson be the next Regional Board Chair of Region Västerbotten?",
-    "market_id": "3499453",
-    "cluster_id": "C12",
-    "claim_date": "2026-11-02T12:00:00Z"
-  },
-  {
-    "event_name": "Will Mikael Andersson Elfgren be the next Regional Board Chair of Region Västmanland?",
-    "market_id": "3499521",
-    "cluster_id": "C13",
-    "claim_date": "2026-11-02T12:00:00Z"
+    "event_name": "Will the Christian Democrats (KD) win the fifth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561696",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will the Liberals (L) win the fifth most seats in the 2026 Swedish parliamentary election?",
     "market_id": "3561698",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will the Green Party (MP) win the sixth most seats in the 2026 Swedish parliamentary election?",
-    "market_id": "3561738",
-    "cluster_id": "C02",
+    "event_name": "Will the Centre Party (C) win the sixth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561735",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will the Liberals (L) win the sixth most seats in the 2026 Swedish parliamentary election?",
-    "market_id": "3561739",
-    "cluster_id": "C02",
+    "event_name": "Will the Christian Democrats (KD) win the sixth most seats in the 2026 Swedish parliamentary election?",
+    "market_id": "3561737",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
+  },
+  {
+    "event_name": "Sweden Parliamentary Election: Liberals Win Seats?",
+    "market_id": "3561916",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
+  },
+  {
+    "event_name": "Will Swedish Social Democratic Party (S) win less than 27% of all valid votes?",
+    "market_id": "3562235",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Swedish Social Democratic Party (S) win between 30% and 33% of all valid votes?",
     "market_id": "3562237",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Swedish Social Democratic Party (S) win at least 33% of all valid votes?",
     "market_id": "3562238",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Sweden Democrats (SD) win less than 16% of all valid votes?",
     "market_id": "3562247",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Sweden Democrats (SD) win between 16% and 18% of all valid votes?",
     "market_id": "3562248",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Moderate Party (M) win at least 20% of all valid votes?",
     "market_id": "3562254",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Left Party (V) win less than 5% of all valid votes?",
     "market_id": "3562255",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Left Party (V) win at least 9% of all valid votes?",
     "market_id": "3562258",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Green Party (MP) win less than 5% of all valid votes?",
     "market_id": "3562259",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Green Party (MP) win at least 9% of all valid votes?",
     "market_id": "3562262",
-    "cluster_id": "C02",
-    "claim_date": "2026-09-15T12:00:00Z"
-  },
-  {
-    "event_name": "Will Centre Party (C) win less than 5% of all valid votes?",
-    "market_id": "3562304",
-    "cluster_id": "C02",
-    "claim_date": "2026-09-15T12:00:00Z"
-  },
-  {
-    "event_name": "Will Centre Party (C) win between 5% and 7% of all valid votes?",
-    "market_id": "3562307",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Centre Party (C) win at least 9% of all valid votes?",
     "market_id": "3562310",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will Christian Democrats (KD) win less than 5% of all valid votes?",
     "market_id": "3562363",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Next White House Press Secretary announced by September 11, 2026?",
-    "market_id": "3701624",
-    "cluster_id": "C14",
-    "claim_date": "2026-09-12T08:00:00Z"
+    "event_name": "Will Christian Democrats (KD) win at least 9% of all valid votes?",
+    "market_id": "3562366",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Sweden Parliamentary Election: Örebropartiet Win Seats?",
     "market_id": "3886972",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Israel x Lebanon diplomatic meeting by September 11, 2026?",
-    "market_id": "3953546",
-    "cluster_id": "C15",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
-    "market_id": "3953548",
-    "cluster_id": "C15",
-    "claim_date": "2026-09-14T08:00:00Z"
-  },
-  {
-    "event_name": "Will Russia target Kyiv on September 11, 2026?",
-    "market_id": "4046824",
-    "cluster_id": "C16",
-    "claim_date": "2026-09-12T04:00:00Z"
-  },
-  {
-    "event_name": "Will Russia target Kyiv on September 12, 2026?",
-    "market_id": "4046825",
-    "cluster_id": "C17",
-    "claim_date": "2026-09-13T04:00:00Z"
-  },
-  {
-    "event_name": "Israel x Lebanon Effective Ceasefire by September 11?",
-    "market_id": "4175132",
-    "cluster_id": "C18",
-    "claim_date": "2026-09-26T00:00:00Z"
-  },
-  {
-    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be less than 38m?",
-    "market_id": "4176861",
-    "cluster_id": "C19",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 38m and 41m?",
-    "market_id": "4176862",
-    "cluster_id": "C19",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 41m and 44m?",
-    "market_id": "4176863",
-    "cluster_id": "C19",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 44m and 47m?",
-    "market_id": "4176864",
-    "cluster_id": "C19",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 47m and 51m?",
-    "market_id": "4176865",
-    "cluster_id": "C19",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be at least 51m?",
-    "market_id": "4176866",
-    "cluster_id": "C19",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 60 and 70 million views on week 1?",
-    "market_id": "4192219",
-    "cluster_id": "C20",
-    "claim_date": "2026-09-13T04:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 70 and 80 million views on week 1?",
-    "market_id": "4192220",
-    "cluster_id": "C20",
-    "claim_date": "2026-09-13T04:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 80 and 90 million views on week 1?",
-    "market_id": "4192221",
-    "cluster_id": "C20",
-    "claim_date": "2026-09-13T04:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get 90 million or more views on week 1?",
-    "market_id": "4192222",
-    "cluster_id": "C20",
-    "claim_date": "2026-09-13T04:00:00Z"
-  },
-  {
-    "event_name": "Will MapQuest GPS Navigation & Maps be #1 Free App in the US Apple App Store on September 11?",
-    "market_id": "4230319",
-    "cluster_id": "C21",
-    "claim_date": "2026-09-11T20:00:00Z"
-  },
-  {
-    "event_name": "Will Google Gemini be #1 Free App in the US Apple App Store on September 11?",
-    "market_id": "4230323",
-    "cluster_id": "C21",
-    "claim_date": "2026-09-11T20:00:00Z"
-  },
-  {
-    "event_name": "Will 7 Brew Coffee be #2 Free App in the US Apple App Store on September 11?",
-    "market_id": "4230335",
-    "cluster_id": "C21",
-    "claim_date": "2026-09-11T20:00:00Z"
-  },
-  {
-    "event_name": "Will Shadowrocket be #1 Paid App in the US Apple App Store on September 11?",
-    "market_id": "4230345",
-    "cluster_id": "C22",
-    "claim_date": "2026-09-11T20:00:00Z"
-  },
-  {
-    "event_name": "Will HotSchedules be #1 Paid App in the US Apple App Store on September 11?",
-    "market_id": "4230346",
-    "cluster_id": "C22",
-    "claim_date": "2026-09-11T20:00:00Z"
-  },
-  {
-    "event_name": "Will AnkiMobile Flashcards be #1 Paid App in the US Apple App Store on September 11?",
-    "market_id": "4230347",
-    "cluster_id": "C22",
-    "claim_date": "2026-09-11T20:00:00Z"
-  },
-  {
-    "event_name": "Will \"The One That Got Away - Katy Perry\" be the #1 song this week?",
-    "market_id": "4230855",
-    "cluster_id": "C23",
-    "claim_date": "2026-09-12T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Loser - Tame Impala\" be the #2 song this week?",
-    "market_id": "4230915",
-    "cluster_id": "C23",
-    "claim_date": "2026-09-12T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Earrings - Malcolm Todd\" be the #2 song this week?",
-    "market_id": "4230917",
-    "cluster_id": "C23",
-    "claim_date": "2026-09-12T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"The One That Got Away - Katy Perry\" be the #2 song this week?",
-    "market_id": "4230919",
-    "cluster_id": "C23",
-    "claim_date": "2026-09-12T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Choosin' Texas - Ella Langley\" be the #1 US song this week?",
-    "market_id": "4230936",
-    "cluster_id": "C24",
-    "claim_date": "2026-09-12T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Loser - Tame Impala\" be the #2 US song this week?",
-    "market_id": "4230947",
-    "cluster_id": "C24",
-    "claim_date": "2026-09-12T02:00:00Z"
-  },
-  {
-    "event_name": "Will the Swedish Social Democratic Party (S) win the popular vote in the 2026 Sweden parliamentary election by 10-13%?",
-    "market_id": "4389057",
-    "cluster_id": "C02",
+    "event_name": "Will voter turnout in the 2026 Sweden parliamentary election be 82-84%?",
+    "market_id": "4385988",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
-    "event_name": "Will \"Hope\" Opening Weekend Box Office be less than 6m?",
-    "market_id": "4408267",
-    "cluster_id": "C25",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 6m and 7m?",
-    "market_id": "4408268",
-    "cluster_id": "C25",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 7m and 8m?",
-    "market_id": "4408269",
-    "cluster_id": "C25",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 8m and 9m?",
-    "market_id": "4408270",
-    "cluster_id": "C25",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 9m and 10m?",
-    "market_id": "4408271",
-    "cluster_id": "C25",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Hope\" Opening Weekend Box Office be at least 10m?",
-    "market_id": "4408272",
-    "cluster_id": "C25",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get less than 75.0 million views on day 6?",
-    "market_id": "4439161",
-    "cluster_id": "C26",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 75.0 and 75.5 million views on day 6?",
-    "market_id": "4439162",
-    "cluster_id": "C26",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 75.5 and 76.0 million views on day 6?",
-    "market_id": "4439163",
-    "cluster_id": "C26",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 76.0 and 76.5 million views on day 6?",
-    "market_id": "4439164",
-    "cluster_id": "C26",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 76.5 and 77.0 million views on day 6?",
-    "market_id": "4439165",
-    "cluster_id": "C26",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Will MrBeast's next video get between 77.5 and 78.0 million views on day 6?",
-    "market_id": "4439167",
-    "cluster_id": "C26",
-    "claim_date": "2026-09-12T08:00:00Z"
-  },
-  {
-    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be between 11m and 12m?",
-    "market_id": "4439187",
-    "cluster_id": "C27",
-    "claim_date": "2026-09-15T02:00:00Z"
-  },
-  {
-    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be at least 12m?",
-    "market_id": "4439188",
-    "cluster_id": "C27",
-    "claim_date": "2026-09-15T02:00:00Z"
+    "event_name": "Will voter turnout in the 2026 Sweden parliamentary election be 88% or more?",
+    "market_id": "4385991",
+    "cluster_id": "C03",
+    "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will the Swedish Social Democratic Party (S) win the most seats in the 2026 Swedish parliamentary election?",
     "market_id": "811719",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will the Sweden Democrats (SD) win the most seats in the 2026 Swedish parliamentary election?",
     "market_id": "811720",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
   },
   {
     "event_name": "Will the Moderate Party (M) win the most seats in the 2026 Swedish parliamentary election?",
     "market_id": "811721",
-    "cluster_id": "C02",
+    "cluster_id": "C03",
     "claim_date": "2026-09-15T12:00:00Z"
+  },
+  {
+    "event_name": "Will “The Daily Show” win Emmys 2026: Outstanding variety series?",
+    "market_id": "2865401",
+    "cluster_id": "C04",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Jimmy Kimmel Live!” win Emmys 2026: Outstanding variety series?",
+    "market_id": "2865402",
+    "cluster_id": "C04",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Saturday Night Live” win Emmys 2026: Outstanding variety series?",
+    "market_id": "2865405",
+    "cluster_id": "C04",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Hannah Einbinder – “Hacks” win Emmys 2026: Outstanding supporting actress in a comedy series?",
+    "market_id": "2865493",
+    "cluster_id": "C05",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Michelle Pfeiffer – “Margo’s Got Money Troubles” win Emmys 2026: Outstanding supporting actress in a comedy series?",
+    "market_id": "2865496",
+    "cluster_id": "C05",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Quinta Brunson – “Abbott Elementary” win Emmys 2026: Outstanding lead actress in a comedy series?",
+    "market_id": "2865511",
+    "cluster_id": "C06",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Ayo Edebiri – “The Bear” win Emmys 2026: Outstanding lead actress in a comedy series?",
+    "market_id": "2865512",
+    "cluster_id": "C06",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Elle Fanning – “Margo’s Got Money Troubles” win Emmys 2026: Outstanding lead actress in a comedy series?",
+    "market_id": "2865513",
+    "cluster_id": "C06",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Lisa Kudrow – “The Comeback” win Emmys 2026: Outstanding lead actress in a comedy series?",
+    "market_id": "2865514",
+    "cluster_id": "C06",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Jean Smart – “Hacks” win Emmys 2026: Outstanding lead actress in a comedy series?",
+    "market_id": "2865515",
+    "cluster_id": "C06",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Fiona Dourif – “The Pitt” win Emmys 2026: Outstanding supporting actress in a drama series?",
+    "market_id": "2865655",
+    "cluster_id": "C07",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Allison Janney – “The Diplomat” win Emmys 2026: Outstanding supporting actress in a drama series?",
+    "market_id": "2865656",
+    "cluster_id": "C07",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Sepideh Moafi – “The Pitt” win Emmys 2026: Outstanding supporting actress in a drama series?",
+    "market_id": "2865660",
+    "cluster_id": "C07",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Karolina Wydra – “Pluribus” win Emmys 2026: Outstanding supporting actress in a drama series?",
+    "market_id": "2865662",
+    "cluster_id": "C07",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Rhea Seehorn – “Pluribus” win Emmys 2026: Outstanding lead actress in a drama series?",
+    "market_id": "2865719",
+    "cluster_id": "C08",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Rufus Sewell – “The Diplomat” win Emmys 2026: Outstanding lead actor in a drama series?",
+    "market_id": "2865738",
+    "cluster_id": "C09",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Dancing with the Stars” win Emmys 2026: Outstanding reality/competition series?",
+    "market_id": "2870610",
+    "cluster_id": "C10",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “RuPaul’s Drag Race” win Emmys 2026: Outstanding reality/competition series?",
+    "market_id": "2870611",
+    "cluster_id": "C10",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Survivor” win Emmys 2026: Outstanding reality/competition series?",
+    "market_id": "2870612",
+    "cluster_id": "C10",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Top Chef” win Emmys 2026: Outstanding reality/competition series?",
+    "market_id": "2870613",
+    "cluster_id": "C10",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “The Traitors” win Emmys 2026: Outstanding reality/competition series?",
+    "market_id": "2870614",
+    "cluster_id": "C10",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Abbott Elementary” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870630",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “The Bear” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870631",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Margo’s Got Money Troubles” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870632",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Nobody Wants This” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870633",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Only Murders in the Building” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870634",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Shrinking” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870635",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Widow’s Bay” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870636",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “Hacks” win Emmys 2026: Outstanding comedy series?",
+    "market_id": "2870637",
+    "cluster_id": "C11",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “The Pitt” win Emmys 2026: Outstanding drama series?",
+    "market_id": "2870649",
+    "cluster_id": "C12",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will “DTF St. Louis” win Emmys 2026: Outstanding limited or anthology series?",
+    "market_id": "2871922",
+    "cluster_id": "C13",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will HBO Max win the most Emmys?",
+    "market_id": "3008078",
+    "cluster_id": "C14",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Apple TV win the most Emmys?",
+    "market_id": "3008080",
+    "cluster_id": "C14",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Peacock win the most Emmys?",
+    "market_id": "3008084",
+    "cluster_id": "C14",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Robert Alferink win the next Osnabrück mayoral election?",
+    "market_id": "3092788",
+    "cluster_id": "C15",
+    "claim_date": "2026-09-28T12:00:00Z"
+  },
+  {
+    "event_name": "Will Volker Bajus win the next Osnabrück mayoral election?",
+    "market_id": "3092789",
+    "cluster_id": "C15",
+    "claim_date": "2026-09-28T12:00:00Z"
+  },
+  {
+    "event_name": "Will Frank Klingebiel win the next Salzgitter mayoral election?",
+    "market_id": "3092893",
+    "cluster_id": "C16",
+    "claim_date": "2026-09-28T12:00:00Z"
+  },
+  {
+    "event_name": "Will Thorsten Kornblum win the next Braunschweig mayoral election?",
+    "market_id": "3093137",
+    "cluster_id": "C17",
+    "claim_date": "2026-09-28T12:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hacks\" win 6 or 7 awards at the Emmys?",
+    "market_id": "3212518",
+    "cluster_id": "C18",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hacks\" win 10 or more awards at the Emmys?",
+    "market_id": "3212520",
+    "cluster_id": "C18",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will \"DTF St. Louis\" win 0 or 1 awards at the Emmys?",
+    "market_id": "3251500",
+    "cluster_id": "C19",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will \"Beef\" win 4 or 5 awards at the Emmys?",
+    "market_id": "3251509",
+    "cluster_id": "C20",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will \"Widow's Bay\" win 0 or 1 awards at the Emmys?",
+    "market_id": "3251519",
+    "cluster_id": "C21",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will \"Widow's Bay\" win 2 or 3 awards at the Emmys?",
+    "market_id": "3251520",
+    "cluster_id": "C21",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Pitt\" win 6 or 7 awards at the Emmys?",
+    "market_id": "3251528",
+    "cluster_id": "C22",
+    "claim_date": "2026-09-15T08:00:00Z"
+  },
+  {
+    "event_name": "Will Mikaela Waltersson be the next Regional Board Chair of Region Halland?",
+    "market_id": "3479999",
+    "cluster_id": "C23",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Per Svensson be the next Regional Board Chair of Region Halland?",
+    "market_id": "3480007",
+    "cluster_id": "C23",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Bengt Bergqvist be the next Regional Board Chair of Region Jämtland Härjedalen?",
+    "market_id": "3480143",
+    "cluster_id": "C24",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Robert Hamberg be the next Regional Board Chair of Region Jämtland Härjedalen?",
+    "market_id": "3480145",
+    "cluster_id": "C24",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Anders Öberg be the next Regional Board Chair of Region Norrbotten?",
+    "market_id": "3480506",
+    "cluster_id": "C25",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Henrietta Modig Serrate be the next Regional Board Chair of Region Kronoberg?",
+    "market_id": "3499248",
+    "cluster_id": "C26",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Ida Eriksson be the next Regional Board Chair of Region Kronoberg?",
+    "market_id": "3499252",
+    "cluster_id": "C26",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Kerstin Wiréhn be the next Regional Board Chair of Region Kronoberg?",
+    "market_id": "3499255",
+    "cluster_id": "C26",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Peter Olofsson be the next Regional Board Chair of Region Västerbotten?",
+    "market_id": "3499453",
+    "cluster_id": "C27",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Malin Gabrielsson be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499520",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Mikael Andersson Elfgren be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499521",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Heidi-Maria Wallinder be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499522",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Jenny Landernäs be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499523",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Lina Ekengren be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499524",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Barbro Larsson be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499525",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Ingvar Jonsson be the next Regional Board Chair of Region Västmanland?",
+    "market_id": "3499526",
+    "cluster_id": "C28",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Will Jenny Steen be the next Regional Board Chair of Region Örebro County?",
+    "market_id": "3499609",
+    "cluster_id": "C29",
+    "claim_date": "2026-11-02T12:00:00Z"
+  },
+  {
+    "event_name": "Next White House Press Secretary announced by September 11, 2026?",
+    "market_id": "3701624",
+    "cluster_id": "C30",
+    "claim_date": "2026-09-12T08:00:00Z"
+  },
+  {
+    "event_name": "Israel x Lebanon diplomatic meeting by September 11, 2026?",
+    "market_id": "3953546",
+    "cluster_id": "C31",
+    "claim_date": "2026-09-12T08:00:00Z"
+  },
+  {
+    "event_name": "Israel x Lebanon diplomatic meeting by September 13, 2026?",
+    "market_id": "3953548",
+    "cluster_id": "C31",
+    "claim_date": "2026-09-14T08:00:00Z"
+  },
+  {
+    "event_name": "Iran-Oman Hormuz Agreement by September 14?",
+    "market_id": "3956904",
+    "cluster_id": "C32",
+    "claim_date": "2026-09-15T10:00:00Z"
+  },
+  {
+    "event_name": "Will \"By Any Means\" score at least 60 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "3961770",
+    "cluster_id": "C33",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"By Any Means\" score at least 80 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "3961773",
+    "cluster_id": "C33",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"By Any Means\" score at least 85 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "3961774",
+    "cluster_id": "C33",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Fix\" score at least 70 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4036576",
+    "cluster_id": "C34",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Fix\" score at least 80 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4036577",
+    "cluster_id": "C34",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" score at least 70 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4036587",
+    "cluster_id": "C35",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" score at least 80 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4036588",
+    "cluster_id": "C35",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" score at least 90 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4036589",
+    "cluster_id": "C35",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will Russia target Kyiv on September 12, 2026?",
+    "market_id": "4046825",
+    "cluster_id": "C36",
+    "claim_date": "2026-09-13T04:00:00Z"
+  },
+  {
+    "event_name": "Will Russia target Kyiv on September 14, 2026?",
+    "market_id": "4046827",
+    "cluster_id": "C37",
+    "claim_date": "2026-09-15T04:00:00Z"
+  },
+  {
+    "event_name": "Israel x Lebanon Effective Ceasefire by September 11?",
+    "market_id": "4175132",
+    "cluster_id": "C38",
+    "claim_date": "2026-09-26T00:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be less than 38m?",
+    "market_id": "4176861",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 38m and 41m?",
+    "market_id": "4176862",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 41m and 44m?",
+    "market_id": "4176863",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 44m and 47m?",
+    "market_id": "4176864",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 47m and 51m?",
+    "market_id": "4176865",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be at least 51m?",
+    "market_id": "4176866",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be less than 32m?",
+    "market_id": "4439282",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be between 36m and 38m?",
+    "market_id": "4439288",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" Opening Weekend Box Office be at least 38m?",
+    "market_id": "4439289",
+    "cluster_id": "C39",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will claude-fable-5.1-max be the best AI model on September 14, 2026?",
+    "market_id": "4189084",
+    "cluster_id": "C40",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will claude-opus-5-high be the best AI model on September 14, 2026?",
+    "market_id": "4189085",
+    "cluster_id": "C40",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will claude-opus-5-max be the best AI model on September 14, 2026?",
+    "market_id": "4189086",
+    "cluster_id": "C40",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will claude-opus-4-6-high be the best AI model on September 14, 2026?",
+    "market_id": "4189087",
+    "cluster_id": "C40",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will any other model be the best AI model on September 14, 2026?",
+    "market_id": "4189088",
+    "cluster_id": "C40",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will MrBeast's next video get between 60 and 70 million views on week 1?",
+    "market_id": "4192219",
+    "cluster_id": "C41",
+    "claim_date": "2026-09-13T04:00:00Z"
+  },
+  {
+    "event_name": "Will MrBeast's next video get between 70 and 80 million views on week 1?",
+    "market_id": "4192220",
+    "cluster_id": "C41",
+    "claim_date": "2026-09-13T04:00:00Z"
+  },
+  {
+    "event_name": "Will MrBeast's next video get between 80 and 90 million views on week 1?",
+    "market_id": "4192221",
+    "cluster_id": "C41",
+    "claim_date": "2026-09-13T04:00:00Z"
+  },
+  {
+    "event_name": "Will MrBeast's next video get 90 million or more views on week 1?",
+    "market_id": "4192222",
+    "cluster_id": "C41",
+    "claim_date": "2026-09-13T04:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" score at least 60 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4199119",
+    "cluster_id": "C42",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"Practical Magic 2\" score at least 70 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4199120",
+    "cluster_id": "C42",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"Runner\" score at least 60 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4199122",
+    "cluster_id": "C43",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"Runner\" score at least 66 on the Rotten Tomatoes Tomatometer?",
+    "market_id": "4419240",
+    "cluster_id": "C43",
+    "claim_date": "2026-09-14T22:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" Opening Weekend Box Office be less than 4.5m?",
+    "market_id": "4386051",
+    "cluster_id": "C44",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" Opening Weekend Box Office be between 4.5m and 5.5m?",
+    "market_id": "4386052",
+    "cluster_id": "C44",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" Opening Weekend Box Office be between 5.5m and 6.5m?",
+    "market_id": "4386053",
+    "cluster_id": "C44",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" Opening Weekend Box Office be between 6.5m and 7.5m?",
+    "market_id": "4386054",
+    "cluster_id": "C44",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"The Uprising\" Opening Weekend Box Office be at least 7.5m?",
+    "market_id": "4386055",
+    "cluster_id": "C44",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Runner\" Opening Weekend Box Office be less than 3m?",
+    "market_id": "4386090",
+    "cluster_id": "C45",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Runner\" Opening Weekend Box Office be between 3m and 4m?",
+    "market_id": "4386091",
+    "cluster_id": "C45",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Runner\" Opening Weekend Box Office be between 4m and 5m?",
+    "market_id": "4386092",
+    "cluster_id": "C45",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will Spider-Man: Brand New Day overtake Star Wars: The Force Awakens by September 13, 2026?",
+    "market_id": "4386286",
+    "cluster_id": "C46",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hope\" Opening Weekend Box Office be less than 6m?",
+    "market_id": "4408267",
+    "cluster_id": "C47",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 6m and 7m?",
+    "market_id": "4408268",
+    "cluster_id": "C47",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 7m and 8m?",
+    "market_id": "4408269",
+    "cluster_id": "C47",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 8m and 9m?",
+    "market_id": "4408270",
+    "cluster_id": "C47",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hope\" Opening Weekend Box Office be between 9m and 10m?",
+    "market_id": "4408271",
+    "cluster_id": "C47",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Hope\" Opening Weekend Box Office be at least 10m?",
+    "market_id": "4408272",
+    "cluster_id": "C47",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will MrBeast Gaming's next video get between 7.5 and 10 million views on day 1?",
+    "market_id": "4439170",
+    "cluster_id": "C48",
+    "claim_date": null
+  },
+  {
+    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be less than 9m?",
+    "market_id": "4439184",
+    "cluster_id": "C49",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be between 9m and 10m?",
+    "market_id": "4439185",
+    "cluster_id": "C49",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be between 10m and 11m?",
+    "market_id": "4439186",
+    "cluster_id": "C49",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be between 11m and 12m?",
+    "market_id": "4439187",
+    "cluster_id": "C49",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will \"Spider-Man: Brand New Day\" 7th Weekend Box Office be at least 12m?",
+    "market_id": "4439188",
+    "cluster_id": "C49",
+    "claim_date": "2026-09-15T02:00:00Z"
+  },
+  {
+    "event_name": "Will Russia target Kyiv by September 14, 2026?",
+    "market_id": "4468907",
+    "cluster_id": "C50",
+    "claim_date": "2026-09-15T10:00:00Z"
+  },
+  {
+    "event_name": "Will Chris Coons be the Democratic nominee for Senate in Delaware?",
+    "market_id": "918248",
+    "cluster_id": "C51",
+    "claim_date": "2026-09-16T08:00:00Z"
+  },
+  {
+    "event_name": "Will Christopher Beardsley be the Democratic nominee for Senate in Delaware?",
+    "market_id": "918249",
+    "cluster_id": "C51",
+    "claim_date": "2026-09-16T08:00:00Z"
   }
 ]
