@@ -10,7 +10,7 @@ from app.domains.mails.completion_events import (
 from app.domains.mails.completion_preferences import (
     COMPLETION_CATALOG, COMPLETION_DEFAULTS, inherit_legacy_preferences, stock_run_preference,
 )
-from app.domains.mails.tasks import build_completion_email
+from app.domains.mails.tasks import build_completion_email, completion_recipients
 
 
 def scan(count=65):
@@ -111,6 +111,24 @@ def test_trigger_email_contains_exact_subject_and_scan_identity():
     assert 'Events that passed Filters: 65' in text
     assert '<script>' not in html
     assert '/console/bullpen-ai/history' in text
+
+
+def test_bullpen_stage_one_routes_to_cross_account_webhook_inbox(monkeypatch):
+    monkeypatch.setattr(
+        "app.domains.mails.tasks.settings.bullpen_stage1_completion_recipient",
+        "tarunindian007@gmail.com",
+    )
+    data = bullpen_completion_payloads(scan())["scan"]
+    assert completion_recipients(data, "tarun.singh6893@gmail.com") == (
+        "tarunindian007@gmail.com",
+    )
+
+
+def test_other_completion_mail_keeps_the_user_recipient():
+    data = {"segment": "bullpen", "stage": "llm"}
+    assert completion_recipients(data, "tarun.singh6893@gmail.com") == (
+        "tarun.singh6893@gmail.com",
+    )
 
 
 def test_stock_routing_respects_platform_and_stage():
