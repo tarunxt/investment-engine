@@ -72,6 +72,8 @@ class Settings(BaseSettings):
         default="AI Investment Platform",
         validation_alias=AliasChoices("SMTP_FROM_NAME", "EMAILS_FROM_NAME"),
     )
+    # Dedicated cross-account inbox monitored by the Stage 1 clustering webhook.
+    bullpen_stage1_completion_recipient: str = "tarunindian007@gmail.com"
     
     # Logging
     log_level: str = "INFO"
