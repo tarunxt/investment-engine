@@ -2349,6 +2349,19 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
         current_no_odds=88,
     )
     wallet_read_cancelled = asyncio.Event()
+    observed_stage1_progress: list[dict[str, object]] = []
+
+    def capture_progress(current_run, _current_state):
+        stage = next(
+            (
+                item
+                for item in current_run.stage_results
+                if item.outputs.get("workflow_stage_key") == "scan"
+            ),
+            None,
+        )
+        if stage is not None:
+            observed_stage1_progress.append(stage.model_dump(mode="json"))
 
     async def hang_wallet_refresh():
         if wallet_failure == "lock_timeout":
@@ -2385,6 +2398,10 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
     )
     monkeypatch.setattr(
         "app.domains.polymarket_auto_live.engine.console_stage1_wallet_refresh_timeout_seconds",
+        lambda: 0.01,
+    )
+    monkeypatch.setattr(
+        "app.domains.polymarket_auto_live.engine.console_stage1_wallet_recovery_timeout_seconds",
         lambda: 0.01,
     )
     monkeypatch.setattr(
@@ -2426,6 +2443,7 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
         run=_run_snapshot(),
         positions=[],
         historical_decisions=[],
+        progress_callback=capture_progress,
     )
 
     if expects_wallet_task_cancellation:
@@ -2449,12 +2467,21 @@ async def test_console_profile_runs_candidate_only_stage_2_after_wallet_handoff_
     assert result.run.status == "partial_success"
     assert result.decisions == []
     assert stage1.outputs["phase_status"] == "completed"
+    assert stage1.outputs["wallet_snapshot_required_for_stage1_completion"] is False
     assert stage1.outputs["wallet_snapshot_status"] == "unavailable"
     assert stage1.outputs["stage2_candidate_only"] is True
     assert stage2.outputs["phase_status"] == "completed"
     assert stage2.outputs["stage2_candidate_only"] is True
     assert stage3.outputs["phase_status"] == "blocked"
     assert stage3.outputs["blocked_by_stage1_wallet_refresh"] is True
+    scan_completion = next(
+        progress
+        for progress in observed_stage1_progress
+        if progress["outputs"].get("phase_status") == "completed"
+    )
+    assert scan_completion["completed_at"] is not None
+    assert scan_completion["outputs"]["wallet_snapshot_status"] == "refreshing"
+    assert len(scan_completion["outputs"]["accepted_candidates"]) == 1
 
 
 @pytest.mark.anyio
