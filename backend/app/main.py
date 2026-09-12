@@ -170,10 +170,45 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    logger.error("Unhandled exception", exc_info=exc)
+    correlation_id = getattr(request.state, "correlation_id", None) or str(uuid4())
+    request_path = request.url.path
+    error_type = type(exc).__name__
+    logger.error(
+        "Unhandled exception correlation_id=%s method=%s path=%s error_type=%s",
+        correlation_id,
+        request.method,
+        request_path,
+        error_type,
+        exc_info=exc,
+    )
+
+    is_bullpen_run_audit = request_path.startswith("/bullpen-ai/run-audits/")
+    if is_bullpen_run_audit:
+        message = "Bullpen run audit could not be generated"
+        resolution = (
+            "Retry the run-audit page once. If it fails again, use the correlation ID "
+            "below to inspect investor-backend logs, identify the exact failing "
+            "materialization/serialization step, fix that root cause, and then retry."
+        )
+    else:
+        message = "An unexpected error occurred"
+        resolution = (
+            "Retry the request once. If it persists, inspect backend logs using the "
+            "correlation ID below before making a code or data change."
+        )
+
     return JSONResponse(
         status_code=500,
-        content={"error": "INTERNAL_SERVER_ERROR", "message": "An unexpected error occurred"},
+        content={
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": message,
+            "details": {
+                "error_type": error_type,
+                "correlation_id": correlation_id,
+                "request_path": request_path,
+                "resolution": resolution,
+            },
+        },
     )
 
 
