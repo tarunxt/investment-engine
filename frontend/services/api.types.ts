@@ -282,6 +282,10 @@ export interface IApiService {
         runId: string,
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveConsoleRunDetail>;
+    getBullpenAutoLiveStageOneRun(
+        runId: string,
+        options?: ApiRequestControl,
+    ): Promise<BullpenAutoLiveRun>;
     getBullpenAutoLiveRunDecisions(
         runId: string,
         options?: ApiRequestControl,
