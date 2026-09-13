@@ -382,3 +382,18 @@ test("active run detail keeps polling the exact selected run and stops when hidd
   assert.match(scheduleCard, /mergeBullpenConsoleRunProjection/);
   assert.match(scheduleCard, /mergeBullpenConsoleDecisionProjection/);
 });
+
+test("console detail falls back to Stage 1 without the heavier decision projection", () => {
+  assert.match(
+    urls,
+    /runStageOne: \(runId: string\)[\s\S]*?encodeURIComponent\(runId\)\}\/stage-one/,
+  );
+  assert.match(
+    apiService,
+    /getBullpenAutoLiveStageOneRun\([\s\S]*?URLs\.bullpenAutoLive\.runStageOne\(runId\)[\s\S]*?\{ cache: "no-store", \.\.\.options \}/,
+  );
+  assert.match(
+    apiService,
+    /catch \(error\)[\s\S]*?getBullpenAutoLiveStageOneRun\(runId, options\)[\s\S]*?decisions: \[\][\s\S]*?projection_available: true/,
+  );
+});

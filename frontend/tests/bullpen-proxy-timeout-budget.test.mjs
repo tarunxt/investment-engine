@@ -15,7 +15,7 @@ test("Bullpen Auto-Live reads outlive the backend's bounded history deadline", (
 
   assert.match(backendSource, /DASHBOARD_SUMMARY_TIMEOUT_SECONDS = 4\.0/);
   assert.match(backendSource, /HISTORY_TIMEOUT_SECONDS = 12\.0/);
-  assert.match(backendSource, /CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 4\.0/);
+  assert.match(backendSource, /CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 12\.0/);
 
   assert.match(
     proxySource,

@@ -83,7 +83,11 @@ DASHBOARD_SUMMARY_SLOW_THRESHOLD_MS = 1_500.0
 # was briefly busy, so healthy reads were cancelled and surfaced as false
 # outages. Keep a firm deadline while allowing a short pool wait.
 HISTORY_TIMEOUT_SECONDS = 12.0
-CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 4.0
+# Exact-run reads share the same database pool as a running Full Universe scan.
+# Four seconds was short enough to turn healthy bounded projections into repeated
+# false 503s under pool pressure. Keep the browser request bounded while allowing
+# the same recovery budget already used by History.
+CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS = 12.0
 
 
 async def _get_bot(current_user: User):
@@ -951,6 +955,42 @@ async def download_auto_live_stage_one_excel(
         },
         background=BackgroundTask(remove_export, path),
     )
+
+
+@router.get(
+    "/runs/{run_id}/stage-one",
+    response_model=BullpenAutoLiveRun,
+)
+async def get_auto_live_stage_one_run_detail(
+    run_id: str,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+):
+    """Return complete bounded Stage 1 evidence without decision-row joins."""
+
+    started_at = time.perf_counter()
+    bot = await _get_bot(current_user)
+    try:
+        detail = await asyncio.wait_for(
+            bot.get_stage_one_run_detail(run_id),
+            timeout=CONSOLE_RUN_DETAIL_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Stage 1 run detail is temporarily delayed. Retry shortly.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=_http_error_detail(exc)) from exc
+
+    elapsed_ms = (time.perf_counter() - started_at) * 1000
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.headers["Vary"] = "Authorization, Cookie"
+    response.headers["Server-Timing"] = (
+        f"db;dur={elapsed_ms:.1f}, app;dur={elapsed_ms:.1f}"
+    )
+    return detail
 
 
 @router.get(

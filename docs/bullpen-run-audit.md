@@ -1392,8 +1392,17 @@ history. The first page reads scalar run columns plus the additive
 `console_projection`; it does not select the full run `payload` or all decision
 rows. Selecting one run in History, or opening the dedicated
 `/console/bullpen-ai/runs/{id}` page, first loads the bounded, exact-run
-`GET /runs/{id}/console` projection. When that projection is available, it is
-the authoritative console detail and the browser must not also request the
+`GET /runs/{id}/console` projection and the Stage 1-only
+`GET /runs/{id}/stage-one` projection independently. The Stage 1 resource reads
+only the owning run's bounded projection and never joins decision rows, so a
+busy decision query cannot hide a completed scan or its accepted candidates.
+Both server reads have the same bounded twelve-second recovery budget used by
+History. If the console detail is temporarily unavailable, the API client falls
+back to the independent authenticated Stage 1 resource, so the History dialog
+and dedicated run page still render completed scan evidence; later-stage
+decision detail remains unavailable until its independent read recovers. When the console
+projection is available, it is the authoritative later-stage detail and the
+browser must not also request the
 immutable `GET /runs/{id}` payload: a complete Full Universe Stage 1 audit can
 contain hundreds of thousands of source rows. Only a legacy row explicitly
 returned with `projection_available=false` falls back to the compatible

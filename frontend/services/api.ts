@@ -1839,12 +1839,49 @@ class apiServiceClass implements IApiService {
     );
   }
 
-  getBullpenAutoLiveRunConsole(
+  async getBullpenAutoLiveRunConsole(
     runId: string,
     options?: ApiRequestControl,
   ): Promise<BullpenAutoLiveConsoleRunDetail> {
-    return this.get<BullpenAutoLiveConsoleRunDetail>(
-      URLs.bullpenAutoLive.runConsole(runId),
+    try {
+      return await this.get<BullpenAutoLiveConsoleRunDetail>(
+        URLs.bullpenAutoLive.runConsole(runId),
+        { cache: "no-store", ...options },
+      );
+    } catch (error) {
+      if (
+        options?.signal?.aborted ||
+        (error instanceof APIError && error.status < 500) ||
+        (!(error instanceof APIError) && !(error instanceof NetworkError))
+      ) {
+        throw error;
+      }
+
+      // Stage 1 is durable scan evidence and must remain readable even when
+      // the heavier exact-run decision join is delayed by database pressure.
+      const run = await this.getBullpenAutoLiveStageOneRun(runId, options);
+      const generatedAt = new Date().toISOString();
+      return {
+        run,
+        decisions: [],
+        visible_decision_ids: [],
+        visible_decision_ids_truncated: false,
+        generated_at: generatedAt,
+        as_of: run.completed_at ?? run.started_at ?? generatedAt,
+        projection_version: 2,
+        projection_available: true,
+        decisions_limit: 0,
+        decisions_truncated: false,
+      };
+    }
+  }
+
+  getBullpenAutoLiveStageOneRun(
+    runId: string,
+    options?: ApiRequestControl,
+  ): Promise<BullpenAutoLiveRun> {
+    return this.get<BullpenAutoLiveRun>(
+      URLs.bullpenAutoLive.runStageOne(runId),
       { cache: "no-store", ...options },
     );
   }
