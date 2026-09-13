@@ -16,6 +16,8 @@ from app.domains.polymarket_auto_live.console_profile import (
 from app.domains.polymarket_auto_live.console_projection import (
     CONSOLE_PROJECTION_VERSION,
     build_verified_stage1_portfolio_snapshot,
+    canonical_workflow_stage_results,
+    workflow_stage_key,
 )
 from app.domains.polymarket_auto_live.config import (
     auto_live_backend_allows_execution,
@@ -910,6 +912,40 @@ class BullpenAutoLiveBot:
             projection_available=projection_available,
             decisions_limit=CONSOLE_RUN_DETAIL_DECISION_LIMIT,
             decisions_truncated=(visible_decision_ids_truncated or len(visible_decision_ids) > len(decisions)),
+        )
+
+    async def get_stage_one_run_detail(self, run_id: str) -> BullpenAutoLiveRun:
+        """Return Stage 1 evidence without joining or hydrating decision rows."""
+
+        async with AsyncSessionLocal() as session:
+            repo = AsyncPolymarketAutoLiveRepository(session)
+            snapshot = await repo.get_projected_run_for_user(self.user_id, run_id)
+        if snapshot is None:
+            raise ValueError("Auto-Live run not found.")
+
+        run, projection_available, _ = snapshot
+        if not projection_available:
+            raise ValueError("Stage 1 console projection is unavailable for this run.")
+        scan_stage = next(
+            (
+                stage
+                for stage in canonical_workflow_stage_results(run.stage_results)
+                if workflow_stage_key(stage) == "scan"
+            ),
+            None,
+        )
+        if scan_stage is None:
+            raise ValueError("Stage 1 evidence is unavailable for this run.")
+
+        return run.model_copy(
+            update={
+                "stage_results": [scan_stage],
+                "guardrail_checks": [],
+                "decision_ids": [],
+                "order_intent_ids": [],
+                "stage2_llm_targets_snapshot": None,
+                "audit_metadata": {},
+            }
         )
 
     async def list_run_decisions(self, run_id: str) -> list[BullpenAutoLiveDecision]:
