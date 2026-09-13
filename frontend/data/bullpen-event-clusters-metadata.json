@@ -1,12 +1,15 @@
+Warning: truncated output (original token count: 81189)
+Total output lines: 5497
+
 {
   "status": "completed",
-  "completed_at": "2026-09-13T07:14:54.278Z",
+  "completed_at": "2026-09-13T13:50:10.405Z",
   "source_commit": null,
-  "source_run_id": "cb1aa81e-d97c-4516-b753-bc4972cc22a6",
-  "source_stage1_completed_at": "2026-09-13T06:57:54.642111Z",
-  "filtered_count": 179,
-  "wake_email_filtered_count": 172,
-  "source_count_reconciliation": "The wake email reported 172, while the matched live Stage 1 panel, complete saved-source payload and fully loaded History table all authoritatively exposed the same 179 passed market IDs and names; 179 was used.",
+  "source_run_id": "3e824080-db9c-441f-a33f-19f0f6e3e857",
+  "source_stage1_completed_at": "2026-09-13T13:00:11.884728Z",
+  "filtered_count": 181,
+  "wake_email_filtered_count": 174,
+  "source_count_reconciliation": "The wake email reported 174. After the production read fix, the matched live Stage 1 panel and complete bounded projection authoritatively exposed 181 unique passed rows. The eligible clustering universe is the deduplicated union of those 181 rows and 179 retained History assignments: 216 unique positive-odds markets.",
   "covered_unprocessed_run_ids": [
     "5d2df610-a7ed-4953-9faa-055292b3a42e",
     "c50be6b9-bbf3-4d50-8344-da83b7d9c8a4",
@@ -16,15 +19,16 @@
     "b3c6af7c-387c-45e6-9be7-35ba325cf09b",
     "73e93746-dcf1-461b-964b-b6fdd848aeaa",
     "8704c66d-69e4-4641-8c0b-90f08e6b19dc",
-    "cb1aa81e-d97c-4516-b753-bc4972cc22a6"
+    "cb1aa81e-d97c-4516-b753-bc4972cc22a6",
+    "3e824080-db9c-441f-a33f-19f0f6e3e857"
   ],
   "counts": {
-    "unique_inspected": 179,
+    "unique_inspected": 216,
     "invalid_current_odds_excluded": 0,
-    "eligible": 179,
-    "classified": 179,
+    "eligible": 216,
+    "classified": 216,
     "unresolved": 0,
-    "clusters": 75
+    "clusters": 82
   },
   "unresolved_market_ids": [],
   "cluster_summaries": [
@@ -39,6 +43,15 @@
     },
     {
       "cluster_id": "C02",
+      "shared_cause": "The winner of the same 2026 Delaware Republican Senate primary",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "1427557",
+        "1427558"
+      ]
+    },
+    {
+      "cluster_id": "C03",
       "shared_cause": "Official results of the 13 September 2026 Swedish parliamentary election",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -47,7 +60,7 @@
       ]
     },
     {
-      "cluster_id": "C03",
+      "cluster_id": "C04",
       "shared_cause": "Independent resolution condition: Will the Bank of Brazil decrease the target for the Selic rate by 25 bps at the September meeting?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -55,17 +68,18 @@
       ]
     },
     {
-      "cluster_id": "C04",
+      "cluster_id": "C05",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding variety series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
+        "2865401",
         "2865402",
         "2865403",
         "2865405"
       ]
     },
     {
-      "cluster_id": "C05",
+      "cluster_id": "C06",
       "shared_cause": "Independent resolution condition: Will Nick Offerman – “Margo’s Got Money Troubles” win Emmys 2026: Outstanding supporting actor in a comedy series?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -73,31 +87,33 @@
       ]
     },
     {
-      "cluster_id": "C06",
+      "cluster_id": "C07",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding supporting actress in a comedy series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
         "2865492",
         "2865493",
         "2865494",
+        "2865495",
         "2865496",
         "2865497",
         "2865498"
       ]
     },
     {
-      "cluster_id": "C07",
+      "cluster_id": "C08",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding lead actress in a comedy series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
         "2865511",
         "2865512",
         "2865513",
+        "2865514",
         "2865515"
       ]
     },
     {
-      "cluster_id": "C08",
+      "cluster_id": "C09",
       "shared_cause": "Independent resolution condition: Will Fiona Dourif – “The Pitt” win Emmys 2026: Outstanding supporting actress in a drama series?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -105,7 +121,7 @@
       ]
     },
     {
-      "cluster_id": "C09",
+      "cluster_id": "C10",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding supporting actor in a drama series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -114,7 +130,7 @@
       ]
     },
     {
-      "cluster_id": "C10",
+      "cluster_id": "C11",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding lead actress in a drama series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -124,7 +140,7 @@
       ]
     },
     {
-      "cluster_id": "C11",
+      "cluster_id": "C12",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding lead actor in a drama series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -133,7 +149,7 @@
       ]
     },
     {
-      "cluster_id": "C12",
+      "cluster_id": "C13",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding comedy series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -147,7 +163,7 @@
       ]
     },
     {
-      "cluster_id": "C13",
+      "cluster_id": "C14",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding lead actress in a limited or anthology series or movie",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -156,7 +172,7 @@
       ]
     },
     {
-      "cluster_id": "C14",
+      "cluster_id": "C15",
       "shared_cause": "Independent resolution condition: Will Jason Bateman – “Black Rabbit” win Emmys 2026: Outstanding lead actor in a limited or anthology series or movie?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -164,7 +180,7 @@
       ]
     },
     {
-      "cluster_id": "C15",
+      "cluster_id": "C16",
       "shared_cause": "The winner of the same 2026 Emmy category:  Outstanding limited or anthology series",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -176,7 +192,7 @@
       ]
     },
     {
-      "cluster_id": "C16",
+      "cluster_id": "C17",
       "shared_cause": "Independent resolution condition: Will BARMM Grand Coalition (BGC) win the most seats in the 2026 BARMM Parliamentary Elections?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -184,7 +200,7 @@
       ]
     },
     {
-      "cluster_id": "C17",
+      "cluster_id": "C18",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/which-streaming-service-will-win-the-most-emmys-20260710203956416",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -194,7 +210,7 @@
       ]
     },
     {
-      "cluster_id": "C18",
+      "cluster_id": "C19",
       "shared_cause": "Independent resolution condition: Will Volker Bajus win the next Osnabrück mayoral election?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -202,7 +218,16 @@
       ]
     },
     {
-      "cluster_id": "C19",
+      "cluster_id": "C20",
+      "shared_cause": "The winner of the same 2026 Wolfsburg mayoral election",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "3092862",
+        "3092866"
+      ]
+    },
+    {
+      "cluster_id": "C21",
       "shared_cause": "Independent resolution condition: Will Frank Klingebiel win the next Salzgitter mayoral election?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -210,7 +235,7 @@
       ]
     },
     {
-      "cluster_id": "C20",
+      "cluster_id": "C22",
       "shared_cause": "Independent resolution condition: Will Thorsten Kornblum win the next Braunschweig mayoral election?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -218,15 +243,16 @@
       ]
     },
     {
-      "cluster_id": "C21",
+      "cluster_id": "C23",
       "shared_cause": "Independent resolution condition: Will Jessica Schülke win the next Hannover mayoral election?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
+        "3093194",
         "3093196"
       ]
     },
     {
-      "cluster_id": "C22",
+      "cluster_id": "C24",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/how-many-emmys-will-dtf-st-louis-win-20260730202918",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -235,7 +261,7 @@
       ]
     },
     {
-      "cluster_id": "C23",
+      "cluster_id": "C25",
       "shared_cause": "Independent resolution condition: Will \"Beef\" win 4 or 5 awards at the Emmys?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -243,7 +269,7 @@
       ]
     },
     {
-      "cluster_id": "C24",
+      "cluster_id": "C26",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/how-many-emmys-will-pluribus-win-20260730202918",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -252,15 +278,16 @@
       ]
     },
     {
-      "cluster_id": "C25",
+      "cluster_id": "C27",
       "shared_cause": "Independent resolution condition: Will \"Widow's Bay\" win 0 or 1 awards at the Emmys?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
-        "3251519"
+        "3251519",
+        "3251522"
       ]
     },
     {
-      "cluster_id": "C26",
+      "cluster_id": "C28",
       "shared_cause": "Independent resolution condition: Will \"The Pitt\" win 8 or 9 awards at the Emmys?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -268,7 +295,7 @@
       ]
     },
     {
-      "cluster_id": "C27",
+      "cluster_id": "C29",
       "shared_cause": "Independent resolution condition: Will SpaceX Starship Flight Test 14 launch by September 15?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -276,7 +303,7 @@
       ]
     },
     {
-      "cluster_id": "C28",
+      "cluster_id": "C30",
       "shared_cause": "Independent resolution condition: Will Björn Tenland Nurhadi be the next Regional Board Chair of Region Blekinge?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -284,7 +311,7 @@
       ]
     },
     {
-      "cluster_id": "C29",
+      "cluster_id": "C31",
       "shared_cause": "The same formal regional-council board-chair appointment",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -293,7 +320,7 @@
       ]
     },
     {
-      "cluster_id": "C30",
+      "cluster_id": "C32",
       "shared_cause": "Independent resolution condition: Will Per Svensson be the next Regional Board Chair of Region Halland?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -301,7 +328,7 @@
       ]
     },
     {
-      "cluster_id": "C31",
+      "cluster_id": "C33",
       "shared_cause": "Independent resolution condition: Will Bengt Bergqvist be the next Regional Board Chair of Region Jämtland Härjedalen?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -309,7 +336,7 @@
       ]
     },
     {
-      "cluster_id": "C32",
+      "cluster_id": "C34",
       "shared_cause": "The same formal regional-council board-chair appointment",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -323,7 +350,7 @@
       ]
     },
     {
-      "cluster_id": "C33",
+      "cluster_id": "C35",
       "shared_cause": "Independent resolution condition: Will Malin Sjölander be the next Regional Board Chair of Region Kalmar County?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -331,7 +358,7 @@
       ]
     },
     {
-      "cluster_id": "C34",
+      "cluster_id": "C36",
       "shared_cause": "Independent resolution condition: Will Anders Öberg be the next Regional Board Chair of Region Norrbotten?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -339,7 +366,7 @@
       ]
     },
     {
-      "cluster_id": "C35",
+      "cluster_id": "C37",
       "shared_cause": "The same formal regional-council board-chair appointment",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -349,7 +376,7 @@
       ]
     },
     {
-      "cluster_id": "C36",
+      "cluster_id": "C38",
       "shared_cause": "Independent resolution condition: Will Henrietta Modig Serrate be the next Regional Board Chair of Region Kronoberg?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -357,7 +384,7 @@
       ]
     },
     {
-      "cluster_id": "C37",
+      "cluster_id": "C39",
       "shared_cause": "Independent resolution condition: Will Helena Proos be the next Regional Board Chair of Region Uppsala?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -365,7 +392,7 @@
       ]
     },
     {
-      "cluster_id": "C38",
+      "cluster_id": "C40",
       "shared_cause": "Independent resolution condition: Will Åsa Johansson be the next Regional Board Chair of Region Värmland?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -373,7 +400,7 @@
       ]
     },
     {
-      "cluster_id": "C39",
+      "cluster_id": "C41",
       "shared_cause": "The same formal regional-council board-chair appointment",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -382,7 +409,7 @@
       ]
     },
     {
-      "cluster_id": "C40",
+      "cluster_id": "C42",
       "shared_cause": "Independent resolution condition: Will Jonny Lundin be the next Regional Board Chair of Region Västernorrland?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -390,7 +417,7 @@
       ]
     },
     {
-      "cluster_id": "C41",
+      "cluster_id": "C43",
       "shared_cause": "The same formal regional-council board-chair appointment",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -399,7 +426,7 @@
       ]
     },
     {
-      "cluster_id": "C42",
+      "cluster_id": "C44",
       "shared_cause": "Independent resolution condition: Will My Alnebratt be the next Regional Board Chair of Region Västra Götaland?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -407,7 +434,7 @@
       ]
     },
     {
-      "cluster_id": "C43",
+      "cluster_id": "C45",
       "shared_cause": "Independent resolution condition: Trump declassifies new UFO files by September 15?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -415,7 +442,7 @@
       ]
     },
     {
-      "cluster_id": "C44",
+      "cluster_id": "C46",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/okinawa-governor-election-winner-2026",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -424,7 +451,7 @@
       ]
     },
     {
-      "cluster_id": "C45",
+      "cluster_id": "C47",
       "shared_cause": "Independent resolution condition: US-Iran Hormuz Agreement by September 15?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -432,7 +459,7 @@
       ]
     },
     {
-      "cluster_id": "C46",
+      "cluster_id": "C48",
       "shared_cause": "Independent resolution condition: US announces end of Iranian blockade by September 14, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -440,7 +467,7 @@
       ]
     },
     {
-      "cluster_id": "C47",
+      "cluster_id": "C49",
       "shared_cause": "Independent resolution condition: Will Iran target Saudi Arabia by September 15, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -448,7 +475,7 @@
       ]
     },
     {
-      "cluster_id": "C48",
+      "cluster_id": "C50",
       "shared_cause": "Independent resolution condition: Will Iran target Oman by September 15, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -456,7 +483,15 @@
       ]
     },
     {
-      "cluster_id": "C49",
+      "cluster_id": "C51",
+      "shared_cause": "A qualifying Iranian military action targeting Qatar through 15 September 2026 AST",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "3711106"
+      ]
+    },
+    {
+      "cluster_id": "C52",
       "shared_cause": "Independent resolution condition: Will Russia and Ukraine hold any diplomatic meeting by September 15, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -464,7 +499,7 @@
       ]
     },
     {
-      "cluster_id": "C50",
+      "cluster_id": "C53",
       "shared_cause": "Independent resolution condition: Will Kyle Joseph win the 2026 Calgary-Shaw provincial by-election?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -472,7 +507,15 @@
       ]
     },
     {
-      "cluster_id": "C51",
+      "cluster_id": "C54",
+      "shared_cause": "A qualifying Israeli military action impacting Syria through 15 September 2026 local time",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "3861936"
+      ]
+    },
+    {
+      "cluster_id": "C55",
       "shared_cause": "Independent resolution condition: Moscow air traffic suspended by September 15?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -480,7 +523,7 @@
       ]
     },
     {
-      "cluster_id": "C52",
+      "cluster_id": "C56",
       "shared_cause": "Independent resolution condition: Israel x Lebanon diplomatic meeting by September 13, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -488,7 +531,7 @@
       ]
     },
     {
-      "cluster_id": "C53",
+      "cluster_id": "C57",
       "shared_cause": "Independent resolution condition: Will \"Fall 2: Deadpoint\" score at least 50 on the Rotten Tomatoes Tomatometer?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -496,7 +539,15 @@
       ]
     },
     {
-      "cluster_id": "C54",
+      "cluster_id": "C58",
+      "shared_cause": "The specified Rotten Tomatoes All Critics score snapshot for The Fix",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "4036577"
+      ]
+    },
+    {
+      "cluster_id": "C59",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/the-uprising-rotten-tomatoes-score-20260914",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -506,7 +557,7 @@
       ]
     },
     {
-      "cluster_id": "C55",
+      "cluster_id": "C60",
       "shared_cause": "Independent resolution condition: Will Russia target Kyiv on September 12, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -514,7 +565,7 @@
       ]
     },
     {
-      "cluster_id": "C56",
+      "cluster_id": "C61",
       "shared_cause": "Independent resolution condition: Will Russia target Kyiv on September 14, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -522,7 +573,7 @@
       ]
     },
     {
-      "cluster_id": "C57",
+      "cluster_id": "C62",
       "shared_cause": "The Numbers final three-day opening-weekend domestic gross for Practical Magic 2",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -536,7 +587,15 @@
       ]
     },
     {
-      "cluster_id": "C58",
+      "cluster_id": "C63",
+      "shared_cause": "Qualifying Israeli military action impacting Lebanon during 13 September 2026 IDT",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "4178255"
+      ]
+    },
+    {
+      "cluster_id": "C64",
       "shared_cause": "Independent resolution condition: Israel military action against Lebanon on September 14?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -544,7 +603,7 @@
       ]
     },
     {
-      "cluster_id": "C59",
+      "cluster_id": "C65",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/best-ai-model-on-september-14",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -556,7 +615,16 @@
       ]
     },
     {
-      "cluster_id": "C60",
+      "cluster_id": "C66",
+      "shared_cause": "Independent resolution condition: Will \"Practical Magic 2\" score at least 35 on the Rotten Tomatoes Tomatometer?",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "4199120",
+        "4419113"
+      ]
+    },
+    {
+      "cluster_id": "C67",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/billboard-hot-100-1-song-week-of-september-19",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -569,7 +637,7 @@
       ]
     },
     {
-      "cluster_id": "C61",
+      "cluster_id": "C68",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/billboard-200-1-album-week-of-september-19",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -580,7 +648,15 @@
       ]
     },
     {
-      "cluster_id": "C62",
+      "cluster_id": "C69",
+      "shared_cause": "The specified Rotten Tomatoes All Critics score snapshot for By Any Means",
+      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
+      "member_ids": [
+        "4368480"
+      ]
+    },
+    {
+      "cluster_id": "C70",
       "shared_cause": "The final three-day opening-weekend domestic gross for The Uprising",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -589,7 +665,7 @@
       ]
     },
     {
-      "cluster_id": "C63",
+      "cluster_id": "C71",
       "shared_cause": "The final three-day opening-weekend domestic gross for Runner",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -600,7 +676,7 @@
       ]
     },
     {
-      "cluster_id": "C64",
+      "cluster_id": "C72",
       "shared_cause": "Independent resolution condition: Will Spider-Man: Brand New Day overtake Star Wars: The Force Awakens by September 13, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -608,7 +684,7 @@
       ]
     },
     {
-      "cluster_id": "C65",
+      "cluster_id": "C73",
       "shared_cause": "The final three-day opening-weekend domestic gross for Hope",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -617,15 +693,7 @@
       ]
     },
     {
-      "cluster_id": "C66",
-      "shared_cause": "Independent resolution condition: Will \"Practical Magic 2\" score at least 35 on the Rotten Tomatoes Tomatometer?",
-      "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
-      "member_ids": [
-        "4419113"
-      ]
-    },
-    {
-      "cluster_id": "C67",
+      "cluster_id": "C74",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/runner-rotten-tomatoes-score-20260914",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -634,7 +702,7 @@
       ]
     },
     {
-      "cluster_id": "C68",
+      "cluster_id": "C75",
       "shared_cause": "The same specified Netflix Top 10 weekly chart update and its reported ranking values",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -644,11 +712,12 @@
         "4426577",
         "4426578",
         "4426579",
+        "4426581",
         "4427021"
       ]
     },
     {
-      "cluster_id": "C69",
+      "cluster_id": "C76",
       "shared_cause": "The same specified Netflix Top 10 weekly chart update and its reported ranking values",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -657,30 +726,35 @@
       ]
     },
     {
-      "cluster_id": "C70",
+      "cluster_id": "C77",
       "shared_cause": "The same specified Netflix Top 10 weekly chart update and its reported ranking values",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
         "4426958",
         "4426963",
+        "4426976",
         "4426977",
         "4426978",
+        "4426979",
+        "4426980",
         "4427029"
       ]
     },
     {
-      "cluster_id": "C71",
+      "cluster_id": "C78",
       "shared_cause": "The same specified Netflix Top 10 weekly chart update and its reported ranking values",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
         "4426990",
+        "4427004",
         "4427005",
         "4427006",
-        "4427007"
+        "4427007",
+        "4427009"
       ]
     },
     {
-      "cluster_id": "C72",
+      "cluster_id": "C79",
       "shared_cause": "The first-24-hour YouTube view count for MrBeast Gaming's same next qualifying video",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -688,11 +762,13 @@
         "4439170",
         "4439171",
         "4439172",
+        "4439173",
+        "4439174",
         "4439175"
       ]
     },
     {
-      "cluster_id": "C73",
+      "cluster_id": "C80",
       "shared_cause": "One exact exported market event and resolution condition: https://polymarket.com/event/spider-man-brand-new-day-7th-weekend-box-office",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -702,7 +778,7 @@
       ]
     },
     {
-      "cluster_id": "C74",
+      "cluster_id": "C81",
       "shared_cause": "Independent resolution condition: Will Iran target an Arab country by September 15, 2026?",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -710,7 +786,7 @@
       ]
     },
     {
-      "cluster_id": "C75",
+      "cluster_id": "C82",
       "shared_cause": "The same OpenRouter lab market-share ranking for 7–13 September 2026",
       "rationale": "Members share the same specific occurrence, decision, result, observation window or published source value. Differently dated observations and merely related topics remain separate.",
       "member_ids": [
@@ -726,10 +802,24 @@
         "4476061",
         "4476062",
         "4476063",
+        "4476074",
+        "4476076",
+        "4476078",
+        "4476081",
+        "4476084",
+        "4476085",
+        "4476092",
         "4476093",
         "4476094",
+        "4476095",
         "4476096",
-        "4476097"
+        "4476097",
+        "4476098",
+        "4476099",
+        "4476100",
+        "4476101",
+        "4476102",
+        "4476103"
       ]
     }
   ],
@@ -779,6 +869,46 @@
       "is_estimate": true
     },
     {
+      "market_id": "1427557",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/delaware-republican-senate-primary-winner"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 1427557, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T00:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The Delaware Republican primary winner should be known after the 15 September vote; the estimate allows election-night reporting and ordinary oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-16T01:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "1427558",
+      "estimated_claim_at": "2026-09-16T08:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/delaware-republican-senate-primary-winner"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 1427558, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T00:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The Delaware Republican primary winner should be known after the 15 September vote; the estimate allows election-night reporting and ordinary oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-16T01:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "2304228",
       "estimated_claim_at": "2026-09-15T12:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -819,6 +949,26 @@
       "plausible_range": {
         "start": "2026-09-15T20:00:00Z",
         "end": "2026-09-17T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2865401",
+      "estimated_claim_at": "2026-09-15T08:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/emmys-2026-outstanding-variety-series"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 2865401, exact name, positive finite Current Yes/No odds, close_time 2026-09-14T20:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The live 78th Primetime Emmy Awards and official Television Academy result determine this outcome; the estimate allows the ceremony to finish and the oracle to finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T03:00:00Z",
+        "end": "2026-09-16T12:00:00Z"
       },
       "is_estimate": true
     },
@@ -977,6 +1127,26 @@
       "is_estimate": true
     },
     {
+      "market_id": "2865495",
+      "estimated_claim_at": "2026-09-15T08:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/emmys-2026-outstanding-supporting-actress-in-a-comedy-series"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 2865495, exact name, positive finite Current Yes/No odds, close_time 2026-09-14T20:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The live 78th Primetime Emmy Awards and official Television Academy result determine this outcome; the estimate allows the ceremony to finish and the oracle to finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T03:00:00Z",
+        "end": "2026-09-16T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "2865496",
       "estimated_claim_at": "2026-09-15T08:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -1102,6 +1272,26 @@
       "rationale": "The live 78th Primetime Emmy Awards and official Television Academy results determine the category winner or award tally; the estimate allows the ceremony to finish and the result to finalize.",
       "confidence": "medium",
       "conditional_assumptions": "The ceremony occurs as scheduled and the Academy publishes an unambiguous result without oracle dispute.",
+      "plausible_range": {
+        "start": "2026-09-15T03:00:00Z",
+        "end": "2026-09-16T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "2865514",
+      "estimated_claim_at": "2026-09-15T08:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/emmys-2026-outstanding-lead-actress-in-a-comedy-series"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 2865514, exact name, positive finite Current Yes/No odds, close_time 2026-09-14T20:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The live 78th Primetime Emmy Awards and official Television Academy result determine this outcome; the estimate allows the ceremony to finish and the oracle to finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
       "plausible_range": {
         "start": "2026-09-15T03:00:00Z",
         "end": "2026-09-16T12:00:00Z"
@@ -1746,6 +1936,46 @@
       "is_estimate": true
     },
     {
+      "market_id": "3092862",
+      "estimated_claim_at": "2026-09-28T12:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/wolfsburg-mayoral-election-winner-20260723161010802"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 3092862, exact name, positive finite Current Yes/No odds, close_time 2026-09-13T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The rules provide a 27 September runoff if nobody wins a first-round majority on 13 September; the estimate follows the runoff and ordinary result/oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-27T18:00:00Z",
+        "end": "2026-09-30T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3092866",
+      "estimated_claim_at": "2026-09-28T12:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/wolfsburg-mayoral-election-winner-20260723161010802"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 3092866, exact name, positive finite Current Yes/No odds, close_time 2026-09-13T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The rules provide a 27 September runoff if nobody wins a first-round majority on 13 September; the estimate follows the runoff and ordinary result/oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-27T18:00:00Z",
+        "end": "2026-09-30T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "3092893",
       "estimated_claim_at": "2026-09-28T12:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -1783,6 +2013,26 @@
       "conditional_assumptions": "A runoff is required or the first-round result is not final enough to settle earlier; no recount or oracle dispute follows.",
       "plausible_range": {
         "start": "2026-09-14T00:00:00Z",
+        "end": "2026-09-30T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "3093194",
+      "estimated_claim_at": "2026-09-28T12:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/hannover-mayoral-election-winner-20260723155039214"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 3093194, exact name, positive finite Current Yes/No odds, close_time 2026-09-13T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The rules provide a 27 September runoff if nobody wins a first-round majority on 13 September; the estimate follows the runoff and ordinary result/oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-27T18:00:00Z",
         "end": "2026-09-30T18:00:00Z"
       },
       "is_estimate": true
@@ -1890,1252 +2140,7 @@
       "rationale": "The live 78th Primetime Emmy Awards and official Television Academy results determine the category winner or award tally; the estimate allows the ceremony to finish and the result to finalize.",
       "confidence": "medium",
       "conditional_assumptions": "The ceremony occurs as scheduled and the Academy publishes an unambiguous result without oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T03:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3251516",
-      "estimated_claim_at": "2026-09-15T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/how-many-emmys-will-pluribus-win-20260730202918",
-        "https://www.televisionacademy.com/awards/emmys"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 1:30:00 AM IST; exported ISO value: 2026-09-14T20:00:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The live 78th Primetime Emmy Awards and official Television Academy results determine the category winner or award tally; the estimate allows the ceremony to finish and the result to finalize.",
-      "confidence": "medium",
-      "conditional_assumptions": "The ceremony occurs as scheduled and the Academy publishes an unambiguous result without oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T03:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3251519",
-      "estimated_claim_at": "2026-09-15T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/how-many-emmys-will-widows-bay-win-20260730202918",
-        "https://www.televisionacademy.com/awards/emmys"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 1:30:00 AM IST; exported ISO value: 2026-09-14T20:00:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The live 78th Primetime Emmy Awards and official Television Academy results determine the category winner or award tally; the estimate allows the ceremony to finish and the result to finalize.",
-      "confidence": "medium",
-      "conditional_assumptions": "The ceremony occurs as scheduled and the Academy publishes an unambiguous result without oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T03:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3251529",
-      "estimated_claim_at": "2026-09-15T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/how-many-emmys-will-the-pitt-win-20260730202918",
-        "https://www.televisionacademy.com/awards/emmys"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 1:30:00 AM IST; exported ISO value: 2026-09-14T20:00:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The live 78th Primetime Emmy Awards and official Television Academy results determine the category winner or award tally; the estimate allows the ceremony to finish and the result to finalize.",
-      "confidence": "medium",
-      "conditional_assumptions": "The ceremony occurs as scheduled and the Academy publishes an unambiguous result without oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T03:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3404410",
-      "estimated_claim_at": "2026-09-16T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/spacex-starship-flight-test-14",
-        "https://www.youtube.com/c/SpaceX",
-        "https://www.spacex.com/launches/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 9:29:00 AM IST; exported ISO value: 2026-09-16T03:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The market observes whether Flight Test 14 leaves the launch pad through 15 September at 11:59 PM ET; the estimate follows the full window and confirmation from official SpaceX video or corroborating reports.",
-      "confidence": "medium",
-      "conditional_assumptions": "The launch or non-launch is unambiguous and no oracle dispute follows.",
-      "plausible_range": {
-        "start": "2026-09-16T04:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3479008",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-region-blekinge",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3479078",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-region-dalarna",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3479080",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-region-dalarna",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480007",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-halland-20260810082025176",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480143",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jamtland-harjedalen-20260810082228388",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480182",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480183",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480184",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480185",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480186",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480187",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480188",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-jonkoping-20260810082643442",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480219",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-region-kalmar-20260810082939125",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480506",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-norrbotten-20260810083322343",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480555",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-skane-20260810083549929",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480556",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-skane-20260810083549929",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3480557",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-skane-20260810083549929",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499248",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-kronoberg-20260810083306995",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499357",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-uppsala-20260810084452391",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499422",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-varmland-20260810084516812",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499452",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-vasterbotten-20260810084555417",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499453",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-vasterbotten-20260810084555417",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499488",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-vasternorrland-20260810084644138",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499521",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-vastmanland-20260810084704952",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499526",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-vastmanland-20260810084704952",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3499559",
-      "estimated_claim_at": "2026-11-02T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/next-regional-board-chair-of-vastra-gotaland-20260810084724228",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Resolution requires formal election by the relevant regional council and actual assumption of the regional-board chair office; the estimate allows coalition formation and the formal council appointment.",
-      "confidence": "medium",
-      "conditional_assumptions": "The regional council constitutes and appoints its chair on an ordinary post-election timetable without prolonged caretaker arrangements.",
-      "plausible_range": {
-        "start": "2026-09-28T12:00:00Z",
-        "end": "2026-12-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3502075",
-      "estimated_claim_at": "2026-09-16T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/trump-declassifies-new-ufo-files-byptptpt-20260810145949434",
-        "https://www.whitehouse.gov/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 9:29:00 AM IST; exported ISO value: 2026-09-16T03:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules observe qualifying new public declassification through 15 September at 11:59 PM ET; the estimate follows the full window and verification that the files were both newly public and within scope.",
-      "confidence": "medium",
-      "conditional_assumptions": "Official executive-branch records and credible reporting establish publication and scope without an oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-16T04:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3504083",
-      "estimated_claim_at": "2026-09-15T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/sweden-parliamentary-elections-social-democratic-party-of-seats-20260806100330525",
-        "https://val.se/english/election-results"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Official Swedish parliamentary results determine the seat-count and rank outcomes; the estimate allows election-night counting, official publication and ordinary oracle finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The official result is sufficiently clear without a recount or material correction.",
-      "plausible_range": {
-        "start": "2026-09-13T20:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3542662",
-      "estimated_claim_at": "2026-09-14T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/okinawa-governor-election-winner-2026",
-        "https://www.pref.okinawa.jp/kensei/senkyo/index.html"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Okinawa gubernatorial election winner is determined by the 13 September vote and official or consensus reporting; the estimate allows counting and ordinary oracle finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "A clear winner is reported without recount, legal delay or oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-13T12:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3542663",
-      "estimated_claim_at": "2026-09-14T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/okinawa-governor-election-winner-2026",
-        "https://www.pref.okinawa.jp/kensei/senkyo/index.html"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Okinawa gubernatorial election winner is determined by the 13 September vote and official or consensus reporting; the estimate allows counting and ordinary oracle finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "A clear winner is reported without recount, legal delay or oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-13T12:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3701629",
-      "estimated_claim_at": "2026-09-16T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/us-iran-hormuz-agreement-byptptpt-20260803235957575",
-        "https://www.state.gov/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 9:29:00 AM IST; exported ISO value: 2026-09-16T03:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules observe a qualifying official U.S.–Iran agreement on Strait of Hormuz traffic through 15 September at 11:59 PM ET; the estimate follows the full window and source verification.",
-      "confidence": "medium",
-      "conditional_assumptions": "An official announcement is clear enough to establish mutual commitments without extended adjudication.",
-      "plausible_range": {
-        "start": "2026-09-16T04:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3702042",
-      "estimated_claim_at": "2026-09-16T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/us-announces-end-of-iranian-blockade-byptptpt-20260713152715080"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 9:29:00 AM IST; exported ISO value: 2026-09-15T03:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The observation window runs through 14 September at 11:59 PM ET; the estimate begins after the full window and allows confirmation of a qualifying official U.S. announcement plus finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "No ambiguous or disputed announcement requires extended adjudication.",
-      "plausible_range": {
-        "start": "2026-09-15T04:00:00Z",
-        "end": "2026-09-17T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3710795",
-      "estimated_claim_at": "2026-09-16T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/will-iran-target-saudi-arabia-byptptpt"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 2:29:00 AM IST; exported ISO value: 2026-09-15T20:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The complete market-specific AST or GST observation window must elapse unless a qualifying Iranian strike is verified earlier; the estimate allows source review and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Public reporting can establish occurrence, attribution and timing without an oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T20:00:00Z",
-        "end": "2026-09-17T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3711103",
-      "estimated_claim_at": "2026-09-16T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/will-iran-target-oman-byptptpt"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 1:29:00 AM IST; exported ISO value: 2026-09-15T19:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The complete market-specific AST or GST observation window must elapse unless a qualifying Iranian strike is verified earlier; the estimate allows source review and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Public reporting can establish occurrence, attribution and timing without an oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T20:00:00Z",
-        "end": "2026-09-17T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3741669",
-      "estimated_claim_at": "2026-09-16T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/russia-x-ukraine-any-diplomatic-meeting-byptptpt-20260819",
-        "https://www.state.gov/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 9:29:00 AM IST; exported ISO value: 2026-09-16T03:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules observe a qualifying direct official Russia–Ukraine diplomatic meeting through 15 September at 11:59 PM ET; the estimate follows the full window and verification of the participants' official capacity.",
-      "confidence": "medium",
-      "conditional_assumptions": "Government statements or credible reporting establish a direct qualifying meeting and timing without dispute.",
-      "plausible_range": {
-        "start": "2026-09-16T04:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3760053",
-      "estimated_claim_at": "2026-09-16T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/calgary-shaw-provincial-by-election-winner",
-        "https://www.elections.ab.ca/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Calgary-Shaw winner is determined by the 14 September vote and credible reporting or Elections Alberta's official result; the estimate allows election-night counting and finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "A clear winner is reported without recount, legal delay or oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-15T03:00:00Z",
-        "end": "2026-09-18T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3861943",
-      "estimated_claim_at": "2026-09-16T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/moscow-air-traffic-suspended-byptptpt-20260824",
-        "https://favt.gov.ru/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 9:29:00 AM IST; exported ISO value: 2026-09-16T03:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules observe official restrictions at all three named Moscow airports through 15 September at 11:59 PM ET; the estimate follows the full window and verification of simultaneous qualifying suspensions.",
-      "confidence": "medium",
-      "conditional_assumptions": "Russian aviation or credible reporting is sufficient to determine all-airport coverage and timing without an oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-16T04:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3953548",
-      "estimated_claim_at": "2026-09-14T12:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/israel-x-lebanon-diplomatic-meeting-byptptpt-20260810145737299"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 14 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-13T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "A qualifying in-person diplomatic meeting must occur by 13 September at 11:59 PM ET; the estimate follows the full ET window, public acknowledgement and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Government or credible-media evidence is sufficient and no ambiguous indirect contact requires extended adjudication.",
-      "plausible_range": {
-        "start": "2026-09-14T04:00:00Z",
-        "end": "2026-09-15T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "3961776",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/fall-2-deadpoint-rotten-tomatoes-score",
-        "https://www.rottentomatoes.com/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The displayed All Critics Tomatometer at the market-specific 14 September ET check time determines the threshold; the estimate allows the scheduled snapshot and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Rotten Tomatoes displays the qualifying score at the check time and no source outage or dispute delays settlement.",
-      "plausible_range": {
-        "start": "2026-09-14T14:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4036587",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/the-uprising-rotten-tomatoes-score-20260914",
-        "https://www.rottentomatoes.com/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The displayed All Critics Tomatometer at the market-specific 14 September ET check time determines the threshold; the estimate allows the scheduled snapshot and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Rotten Tomatoes displays the qualifying score at the check time and no source outage or dispute delays settlement.",
-      "plausible_range": {
-        "start": "2026-09-14T14:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4046825",
-      "estimated_claim_at": "2026-09-16T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/will-russia-target-kyiv-on-september-2026"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 13 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-12T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Only qualifying Russian military action targeting Kyiv during the full 12 September Kyiv calendar day determines this market; the estimate follows the local-day boundary, evidence review and finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Public reporting is sufficient to determine occurrence, attribution and timing without a dispute.",
-      "plausible_range": {
-        "start": "2026-09-13T04:00:00Z",
-        "end": "2026-09-17T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4046827",
-      "estimated_claim_at": "2026-09-15T04:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/will-russia-target-kyiv-on-september-2026"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "Only qualifying Russian military action targeting Kyiv during the full 14 September Kyiv calendar day determines this market; the estimate follows the local-day boundary, evidence review and finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Public reporting is sufficient to determine occurrence, attribution and timing without a dispute.",
-      "plausible_range": {
-        "start": "2026-09-14T21:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4176861",
-      "estimated_claim_at": "2026-09-15T02:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
-        "https://www.the-numbers.com/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 13 Sep 2026, 5:30:00 PM IST; exported ISO value: 2026-09-13T12:00:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules require final, non-studio-estimate domestic figures through the 11–13 September weekend; the estimate allows Monday publication and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The Numbers publishes unambiguous final figures without a cross-source conflict or oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-14T18:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4176862",
-      "estimated_claim_at": "2026-09-15T02:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
-        "https://www.the-numbers.com/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 13 Sep 2026, 5:30:00 PM IST; exported ISO value: 2026-09-13T12:00:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules require final, non-studio-estimate domestic figures through the 11–13 September weekend; the estimate allows Monday publication and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The Numbers publishes unambiguous final figures without a cross-source conflict or oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-14T18:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4176863",
-      "estimated_claim_at": "2026-09-15T02:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/practical-magic-2-opening-weekend-box-office",
-        "https://www.the-numbers.com/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 13 Sep 2026, 5:30:00 PM IST; exported ISO value: 2026-09-13T12:00:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The rules require final, non-studio-estimate domestic figures through the 11–13 September weekend; the estimate allows Monday publication and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The Numbers publishes unambiguous final figures without a cross-source conflict or oracle dispute.",
-      "plausible_range": {
-        "start": "2026-09-14T18:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4178256",
-      "estimated_claim_at": "2026-09-15T08:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/israel-military-action-against-lebanon-onptptpt-20260903"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The market requires observing the full 14 September Israel Daylight Time calendar day for a qualifying impact in Lebanon; the estimate allows source confirmation and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Credible reporting establishes occurrence, attribution and timing without dispute.",
-      "plausible_range": {
-        "start": "2026-09-14T21:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4189084",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/best-ai-model-on-september-14",
-        "https://arena.ai/leaderboard/text/overall-no-style-control"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Text Arena Overall leaderboard with style control off is checked at 12:00 PM ET on 14 September; the estimate allows capture of the ranking and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The leaderboard is available, no eligible AutoEval ambiguity applies, and no oracle dispute follows.",
-      "plausible_range": {
-        "start": "2026-09-14T16:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4189085",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/best-ai-model-on-september-14",
-        "https://arena.ai/leaderboard/text/overall-no-style-control"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Text Arena Overall leaderboard with style control off is checked at 12:00 PM ET on 14 September; the estimate allows capture of the ranking and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The leaderboard is available, no eligible AutoEval ambiguity applies, and no oracle dispute follows.",
-      "plausible_range": {
-        "start": "2026-09-14T16:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4189086",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/best-ai-model-on-september-14",
-        "https://arena.ai/leaderboard/text/overall-no-style-control"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Text Arena Overall leaderboard with style control off is checked at 12:00 PM ET on 14 September; the estimate allows capture of the ranking and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The leaderboard is available, no eligible AutoEval ambiguity applies, and no oracle dispute follows.",
-      "plausible_range": {
-        "start": "2026-09-14T16:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4189087",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/best-ai-model-on-september-14",
-        "https://arena.ai/leaderboard/text/overall-no-style-control"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Text Arena Overall leaderboard with style control off is checked at 12:00 PM ET on 14 September; the estimate allows capture of the ranking and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The leaderboard is available, no eligible AutoEval ambiguity applies, and no oracle dispute follows.",
-      "plausible_range": {
-        "start": "2026-09-14T16:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4189088",
-      "estimated_claim_at": "2026-09-14T22:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/best-ai-model-on-september-14",
-        "https://arena.ai/leaderboard/text/overall-no-style-control"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 15 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-14T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The Text Arena Overall leaderboard with style control off is checked at 12:00 PM ET on 14 September; the estimate allows capture of the ranking and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "The leaderboard is available, no eligible AutoEval ambiguity applies, and no oracle dispute follows.",
-      "plausible_range": {
-        "start": "2026-09-14T16:00:00Z",
-        "end": "2026-09-16T12:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4231009",
-      "estimated_claim_at": "2026-09-16T04:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/billboard-hot-100-1-song-week-of-september-19",
-        "https://www.billboard.com/charts/hot-100/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-15T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The official Billboard Hot 100 chart titled week of 19 September is expected Tuesday; the estimate allows publication and ordinary finalization.",
-      "confidence": "medium",
-      "conditional_assumptions": "Billboard publishes on its normal Tuesday schedule without a holiday delay or correction.",
-      "plausible_range": {
-        "start": "2026-09-15T12:00:00Z",
-        "end": "2026-09-18T18:00:00Z"
-      },
-      "is_estimate": true
-    },
-    {
-      "market_id": "4231010",
-      "estimated_claim_at": "2026-09-16T04:00:00Z",
-      "research_at": "2026-09-13T07:14:54.278Z",
-      "source_urls": [
-        "https://polymarket.com/event/billboard-hot-100-1-song-week-of-september-19",
-        "https://www.billboard.com/charts/hot-100/"
-      ],
-      "verified_facts": [
-        "Cred-X Stage 1 deadline: 16 Sep 2026, 5:29:00 AM IST; exported ISO value: 2026-09-15T23:59:00+00:00.",
-        "Exact market name, canonical market ID, positive Current Yes/No odds, rules and resolution conditions were matched in the authoritative 179-row saved-source payload for completed Stage 1 run cb1aa81e-d97c-4516-b753-bc4972cc22a6.",
-        "The export exposed no live UMA proposal or finalization status; the estimate does not assume a proposal already exists."
-      ],
-      "rationale": "The official Billboard Hot 100 chart titled week of 19 September is expected Tuesday; the estimate allows publication and ordinary finalization.",
+      "p…21189 tokens truncated…ationale": "The official Billboard Hot 100 chart titled week of 19 September is expected Tuesday; the estimate allows publication and ordinary finalization.",
       "confidence": "medium",
       "conditional_assumptions": "Billboard publishes on its normal Tuesday schedule without a holiday delay or correction.",
       "plausible_range": {
@@ -3316,6 +2321,26 @@
       "conditional_assumptions": "Billboard publishes on its normal Tuesday schedule without a holiday delay or correction.",
       "plausible_range": {
         "start": "2026-09-15T12:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4368480",
+      "estimated_claim_at": "2026-09-14T22:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/by-any-means-rotten-tomatoes-score"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4368480, exact name, positive finite Current Yes/No odds, close_time 2026-09-14T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The market uses the displayed Rotten Tomatoes All Critics score at 10:00 AM ET on 14 September; the estimate allows the scheduled observation and ordinary oracle finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-14T14:00:00Z",
         "end": "2026-09-18T18:00:00Z"
       },
       "is_estimate": true
@@ -3761,6 +2786,26 @@
       "is_estimate": true
     },
     {
+      "market_id": "4426581",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-movie-this-week-20260915"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4426581, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "Netflix's specified Tuesday 15 September 3:00 PM ET Top 10 update determines the result; the estimate allows the named chart to publish and finalize.",
+      "confidence": "high",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T19:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "4426872",
       "estimated_claim_at": "2026-09-16T04:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -3849,6 +2894,26 @@
       "is_estimate": true
     },
     {
+      "market_id": "4426976",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-show-this-week-20260915"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4426976, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "Netflix's specified Tuesday 15 September 3:00 PM ET Top 10 update determines the result; the estimate allows the named chart to publish and finalize.",
+      "confidence": "high",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T19:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "4426977",
       "estimated_claim_at": "2026-09-16T04:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -3893,6 +2958,46 @@
       "is_estimate": true
     },
     {
+      "market_id": "4426979",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-show-this-week-20260915"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4426979, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "Netflix's specified Tuesday 15 September 3:00 PM ET Top 10 update determines the result; the estimate allows the named chart to publish and finalize.",
+      "confidence": "high",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T19:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4426980",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-global-netflix-show-this-week-20260915"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4426980, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "Netflix's specified Tuesday 15 September 3:00 PM ET Top 10 update determines the result; the estimate allows the named chart to publish and finalize.",
+      "confidence": "high",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T19:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "4426990",
       "estimated_claim_at": "2026-09-16T04:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -3908,6 +3013,26 @@
       "rationale": "The rules specify Netflix's Tuesday 15 September 3:00 PM ET Top 10 update; the estimate allows the named chart and view figures to publish and finalize.",
       "confidence": "high",
       "conditional_assumptions": "Netflix publishes the expected update without a source outage or later correction.",
+      "plausible_range": {
+        "start": "2026-09-15T19:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4427004",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-show-this-week-20260915"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4427004, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "Netflix's specified Tuesday 15 September 3:00 PM ET Top 10 update determines the result; the estimate allows the named chart to publish and finalize.",
+      "confidence": "high",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
       "plausible_range": {
         "start": "2026-09-15T19:00:00Z",
         "end": "2026-09-18T18:00:00Z"
@@ -3974,6 +3099,26 @@
       "rationale": "The rules specify Netflix's Tuesday 15 September 3:00 PM ET Top 10 update; the estimate allows the named chart and view figures to publish and finalize.",
       "confidence": "high",
       "conditional_assumptions": "Netflix publishes the expected update without a source outage or later correction.",
+      "plausible_range": {
+        "start": "2026-09-15T19:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4427009",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/what-will-be-the-2-us-netflix-show-this-week-20260915"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4427009, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "Netflix's specified Tuesday 15 September 3:00 PM ET Top 10 update determines the result; the estimate allows the named chart to publish and finalize.",
+      "confidence": "high",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
       "plausible_range": {
         "start": "2026-09-15T19:00:00Z",
         "end": "2026-09-18T18:00:00Z"
@@ -4110,6 +3255,46 @@
       "rationale": "The qualifying next MrBeast Gaming upload, 'I Survived 100 Days on One Block,' was verified on the official channel with uploadDate 2026-09-12T09:00:25-07:00; the rules require the first 24 hours to complete, after which the estimate allows view-count confirmation and ordinary oracle finalization.",
       "confidence": "medium",
       "conditional_assumptions": "The verified upload qualifies under the market rules, YouTube's 24-hour view count remains available, and no oracle dispute delays finalization.",
+      "plausible_range": {
+        "start": "2026-09-13T16:00:25Z",
+        "end": "2026-09-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4439173",
+      "estimated_claim_at": "2026-09-14T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-next-mrbeast-gaming-video-on-day-1-20260910"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4439173, exact name, positive finite Current Yes/No odds, close_time 2026-09-14T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same qualifying MrBeast Gaming upload and first-24-hour view count determine every bracket; the estimate reuses the verified upload timing and allows ordinary finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-13T16:00:25Z",
+        "end": "2026-09-15T12:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4439174",
+      "estimated_claim_at": "2026-09-14T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/of-views-of-next-mrbeast-gaming-video-on-day-1-20260910"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4439174, exact name, positive finite Current Yes/No odds, close_time 2026-09-14T23:59:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same qualifying MrBeast Gaming upload and first-24-hour view count determine every bracket; the estimate reuses the verified upload timing and allows ordinary finalization.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
       "plausible_range": {
         "start": "2026-09-13T16:00:25Z",
         "end": "2026-09-15T12:00:00Z"
@@ -4579,6 +3764,146 @@
       "is_estimate": true
     },
     {
+      "market_id": "4476074",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/2nd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476074, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476076",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/2nd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476076, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476078",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/2nd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476078, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476081",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/2nd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476081, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476084",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/2nd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476084, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476085",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/2nd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476085, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476092",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476092, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "4476093",
       "estimated_claim_at": "2026-09-16T04:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -4623,6 +3948,26 @@
       "is_estimate": true
     },
     {
+      "market_id": "4476095",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476095, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
       "market_id": "4476096",
       "estimated_claim_at": "2026-09-16T04:00:00Z",
       "research_at": "2026-09-13T07:14:54.278Z",
@@ -4660,6 +4005,126 @@
       "rationale": "The 7–13 September lab shares become resolution-ready when the following week's figures are first displayed; the estimate allows the 15 September update and ordinary finalization.",
       "confidence": "medium",
       "conditional_assumptions": "OpenRouter publishes the next weekly figures without an outage or material correction.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476098",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476098, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476099",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476099, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476100",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476100, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476101",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476101, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476102",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476102, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
+      "plausible_range": {
+        "start": "2026-09-15T16:00:00Z",
+        "end": "2026-09-18T18:00:00Z"
+      },
+      "is_estimate": true
+    },
+    {
+      "market_id": "4476103",
+      "estimated_claim_at": "2026-09-16T04:00:00Z",
+      "research_at": "2026-09-13T13:50:10.405Z",
+      "source_urls": [
+        "https://polymarket.com/event/3rd-ai-lab-by-openrouter-market-share-week-of-september-7"
+      ],
+      "verified_facts": [
+        "Cred-X recovered Stage 1 canonical market ID 4476103, exact name, positive finite Current Yes/No odds, close_time 2026-09-15T16:00:00+00:00, and resolution text for completed run 3e824080-db9c-441f-a33f-19f0f6e3e857.",
+        "The Stage 1 projection exposed no current oracle proposal, challenge, or finalization status; the timestamp remains an estimate and does not authorize claiming."
+      ],
+      "rationale": "The same OpenRouter lab-share chart for 7–13 September determines the ranking; the estimate allows the following weekly figures to publish and finalize.",
+      "confidence": "medium",
+      "conditional_assumptions": "The authoritative source publishes an unambiguous result and no dispute or correction extends finalization.",
       "plausible_range": {
         "start": "2026-09-15T16:00:00Z",
         "end": "2026-09-18T18:00:00Z"
