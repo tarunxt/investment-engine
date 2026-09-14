@@ -153,7 +153,10 @@ def fetch_public(source_id, client, now):
     feed = FEEDS[source_id]
     body, url = read_public(client, feed["url"])
     parser = feed["parser"]
-    if parser in {"espn", "tennis", "rugby", "nhl"}:
+    if parser.startswith("cricket-"):
+        from .cricket import parse_cricket
+        rows, date, season = parse_cricket(body, feed)
+    elif parser in {"espn", "tennis", "rugby", "nhl"}:
         data = json.loads(body)
         rows, date, season = parse_json(data, parser)
         if parser == "espn" and not any(r["played"] for r in rows):

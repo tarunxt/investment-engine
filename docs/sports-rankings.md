@@ -91,6 +91,44 @@ Availability is not a guarantee of live match coverage. Unsupported feeds show u
 
 ## API
 
+### Cricket coverage (14 September 2026)
+
+Twelve connected sources replace the six cricket reference-only entries. ICC
+server access was blocked, but Cricbuzz's public team-ranking pages supply men's
+Test (10 teams), ODI (20) and T20I (102), and women's ODI (16) and T20I (80).
+These are publisher snapshots, not permanent expected team counts. Missing
+ratings remain null and published tied ranks remain tied. There is no women's
+Test ICC team-ranking substitution. Public hydration JSON is decoded as data;
+scripts are never executed and private APIs/embedded credentials are not used.
+
+Official Hundred tables provide eight men's and eight women's teams. Official
+ECB tables provide 18 first-class county teams in separate divisions and 18
+List A One Day Cup teams in separate groups. Cricbuzz additionally supplies IPL
+2026 (10), CPL 2026 (7) and Abu Dhabi T10 2025 (8) league-stage tables. These
+named editions remain fixed and explicitly labelled; the 2025 T10 table is not
+presented as a 2026 competition. New editions need a verified catalogue entry.
+This covers every requested cricket format, not every domestic league worldwide.
+
+Published positions, points, matches and NRR are preserved, including official
+points adjustments. NRR is displayed separately from rating. A publisher's
+omitted publication date remains null; retrieval time is never substituted.
+The source-specific adapters validate scope, edition, groups, counts and ranks
+before atomic snapshot replacement. Failed refreshes retain the last good data.
+
+All cricket feeds join the existing 15-minute checks. A separate Celery Beat
+reconciliation runs daily at 03:10 UTC / 08:40 IST, fan-outs bounded independent
+source jobs, and is also available through **Reconcile all cricket now**.
+POST /api/sports-rankings/cricket/reconcile requires the existing session,
+rate-limits enqueue requests to once per minute and returns 202 immediately;
+external source requests never run in the page API. It refreshes all sources,
+including failed ones, and retains the existing per-source concurrency lock and
+60-second duplicate cooldown. Queued does not mean successful; each source's
+status, last check and successful retrieval are the reconciliation result.
+Public-page automation works for these sources, so no manual transcription or
+separate assistant reminder is needed. This does not enable trading analysis.
+
+### Endpoints
+
 All endpoints require the existing authenticated backend session via the BFF.
 
 * GET /api/sports-rankings: catalogue, sources, status and publication dates.

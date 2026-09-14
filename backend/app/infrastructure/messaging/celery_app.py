@@ -41,6 +41,7 @@ celery.conf.task_default_queue = "ai"
 
 celery.conf.task_routes = {
     "app.domains.sports_rankings.tasks.dispatch_refresh": {"queue": "beat"},
+    "app.domains.sports_rankings.tasks.reconcile_cricket": {"queue": "beat"},
     "app.domains.sports_rankings.tasks.refresh_source": {"queue": "ai"},
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.mails.tasks.deliver_completion_email": {"queue": "email"},
@@ -80,6 +81,10 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "cricket-rankings-daily-reconciliation": {
+        "task": "app.domains.sports_rankings.tasks.reconcile_cricket",
+        "schedule": crontab(minute=10, hour=3),
+    },
     "sports-rankings-refresh": {
         "task": "app.domains.sports_rankings.tasks.dispatch_refresh",
         "schedule": crontab(minute="*/15"),

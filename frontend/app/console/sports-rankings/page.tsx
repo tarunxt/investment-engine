@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { readRankingJson as read } from '@/lib/sportsRankingsApi';
 
-type RankingRow = { name: string; rank: number | null; points: number | null; imported_names: string[]; rating?: number; group?: string; record?: string; rank_label?: string; country?: string; played?: number; won?: number; drawn?: number; lost?: number; goal_difference?: number; roster?: string };
+type RankingRow = { name: string; rank: number | null; points: number | null; imported_names: string[]; rating?: number; nrr?: number; group?: string; record?: string; rank_label?: string; country?: string; played?: number; won?: number; drawn?: number; lost?: number; goal_difference?: number; roster?: string };
 type Competition = { id: string; code: string; code_verified?: boolean; name: string; sport: string; sport_id: string; category: string; scope: string; entry_kind: string; reference_url: string; source_id: string | null; status: string; ranking_kind: string; source_url: string | null; source_as_of: string | null; checked_at: string | null; successful_at: string | null; season: string | null; ranked_count: number; note: string; error: string | null; participants: { name: string; aliases: string[] }[]; events: { title: string; slug: string }[] };
 type Detail = Competition & { rows: RankingRow[] };
 const base = '/backend-api/api/sports-rankings';
@@ -84,6 +84,18 @@ export default function SportsRankingsPage() {
     finally { setRefreshing(false); }
   }
 
+  async function reconcileCricket() {
+    setRefreshing(true); setNotice('');
+    try {
+      const response = await fetch(base + '/cricket/reconcile', { method: 'POST', signal: AbortSignal.timeout(10000) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Unable to queue cricket reconciliation');
+      setNotice(`Reconciliation queued for ${data.sources} cricket sources. Results update here every minute; failed sources retain their last successful rankings.`);
+      reload();
+    } catch (e) { setNotice(e instanceof Error ? e.message : 'Reconciliation failed.'); }
+    finally { setRefreshing(false); }
+  }
+
   return <div className="mx-auto max-w-7xl space-y-6 p-4 text-slate-900 dark:text-slate-100 md:p-8">
     <header className="rounded-2xl bg-slate-950 p-6 text-white">
       <p className="text-xs uppercase tracking-widest text-sky-300">Data & Integrations</p>
@@ -99,6 +111,7 @@ export default function SportsRankingsPage() {
     </header>
     {(error || detailError) && <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-900">{error || detailError} {competitions.length > 0 && 'Last loaded data remains visible.'} <button className="underline" onClick={reload}>Retry</button></div>}
     {notice && <p role="status" className="rounded-lg border p-3 text-sm">{notice}</p>}
+    {filtered.some(c => c.category === 'Cricket') && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 text-sm"><p>Cricket sources are checked every 15 minutes, with a full reconciliation daily at 08:40 IST. You can also request one now.</p><button disabled={refreshing} onClick={reconcileCricket} className="rounded border px-3 py-2 disabled:opacity-50">{refreshing ? 'Queuing…' : 'Reconcile all cricket now'}</button></div>}
     <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
         <label className="block text-sm font-medium" htmlFor="competition-search">Find competition or participant</label>
@@ -137,8 +150,8 @@ export default function SportsRankingsPage() {
           {detail.rows.some(r => r.group) && <select aria-label="Filter by ranking group" className="w-full rounded-lg border bg-transparent p-2" value={group} onChange={e => setGroup(e.target.value)}>{['All groups', ...Array.from(new Set(detail.rows.map(r => r.group).filter((g): g is string => !!g)))].map(g => <option key={g}>{g}</option>)}</select>}
           <p className="text-xs text-slate-500">{rows.length} rows · “—” means no matched ranking, not rank zero.</p>
           <div className="max-h-[550px] overflow-auto"><table className="w-full text-left text-sm">
-            <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800"><tr>{['Rank / order', 'Team / player', 'Group', 'Rating', 'Points', 'Record / played', 'Imported name'].map(h => <th className="whitespace-nowrap p-3" key={h}>{h}</th>)}</tr></thead>
-            <tbody>{rows.map((r, i) => <tr key={`${r.name}-${i}`} className="border-b border-slate-100 dark:border-slate-800"><td className="p-3">{r.rank_label || r.rank || '—'}</td><td className="p-3 font-medium">{r.name}{r.roster && <p className="text-xs font-normal text-slate-500">{r.roster}</p>}</td><td className="p-3 text-xs">{r.group || '—'}</td><td className="p-3">{r.rating ?? '—'}</td><td className="p-3">{r.points ?? '—'}</td><td className="p-3">{r.record || r.played || '—'}</td><td className="p-3 text-xs">{r.imported_names.join(', ') || '—'}</td></tr>)}</tbody>
+            <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800"><tr>{['Rank / order', 'Team / player', 'Group', 'Rating', 'Points', ...(detail.category === 'Cricket' ? ['NRR'] : []), 'Record / played', 'Imported name'].map(h => <th className="whitespace-nowrap p-3" key={h}>{h}</th>)}</tr></thead>
+            <tbody>{rows.map((r, i) => <tr key={`${r.name}-${i}`} className="border-b border-slate-100 dark:border-slate-800"><td className="p-3">{r.rank_label || r.rank || '—'}</td><td className="p-3 font-medium">{r.name}{r.roster && <p className="text-xs font-normal text-slate-500">{r.roster}</p>}</td><td className="p-3 text-xs">{r.group || '—'}</td><td className="p-3">{r.rating ?? '—'}</td><td className="p-3">{r.points ?? '—'}</td>{detail.category === 'Cricket' && <td className="p-3">{r.nrr ?? '—'}</td>}<td className="p-3">{r.record || (r.played ?? '—')}</td><td className="p-3 text-xs">{r.imported_names.join(', ') || '—'}</td></tr>)}</tbody>
           </table>{!rows.length && <p className="p-6 text-sm">{detail.source_id ? 'No matching published rows yet. Check the source status above.' : 'Numeric rankings are not available here for this scope. The source link and ranking guidance above are available.'}</p>}</div>
           <details className="text-xs"><summary className="cursor-pointer">Imported events ({detail.events.length})</summary><ul className="mt-2 space-y-2">{detail.events.map((e, i) => <li key={i}><a className="underline" href={`https://polymarket.com/event/${e.slug}`} target="_blank" rel="noreferrer">{e.title}</a><p className="break-all text-slate-500">{e.slug}</p></li>)}</ul></details>
         </>}

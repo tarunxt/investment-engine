@@ -27,3 +27,28 @@ for kind, label in [("open", "Standard open"), ("women", "Standard women"), ("me
 add("netball-world", "netball", "World Netball national-team rankings", "https://netball.sport/events-and-results/world-rankings-hub/current-world-rankings/", "netball", note="World Netball's published national-team ranking. Rating and weighted ranking points are distinct values.")
 for discipline in ["outdoor", "indoor"]:
     add(f"fih-{discipline}", f"{'field' if discipline == 'outdoor' else 'indoor'}-hockey", f"FIH {discipline} rankings — published men's list", f"https://www.fih.hockey/{discipline}-hockey-rankings", "fih", note="The public page currently supplies the men's list. Women's rankings are not inferred from men's positions. Individual last-match dates are not ranking publication dates.")
+
+# Cricket has public web tables even when ICC's site rejects server requests.
+for gender, formats in [("men", ("test", "odi", "t20")), ("women", ("odi", "t20"))]:
+    for fmt in formats:
+        add(f"cricket-{gender}-{fmt}", f"{fmt}-cricket", f"ICC {gender}'s {fmt.upper()} team rankings — Cricbuzz",
+            f"https://www.cricbuzz.com/cricket-stats/icc-rankings/{gender}/teams", "cricket-rankings",
+            f"https://www.icc-cricket.com/rankings/team-rankings/{gender}s/{'t20i' if fmt == 't20' else fmt}",
+            note="ICC national-team rankings as published by Cricbuzz. Format and gender are separate. Rating, points and matches are publisher values. Cricbuzz does not supply a publication date for this table; retrieval time is shown separately.",
+            gender=gender, format=fmt, minimum=10)
+for gender in ["men", "women"]:
+    add(f"cricket-hundred-{gender}", "the-hundred", f"The Hundred — {gender}'s standings", "https://www.thehundred.com/standings", "cricket-hundred",
+        note="Official season league table, separately for men and women. Published position is not the final playoff result. NRR means net run rate, not a team rating.", gender=gender, minimum=8)
+for competition, label in [("county-championship", "County Championship — first-class divisions"), ("one-day-cup", "One Day Cup — List A groups")]:
+    add(f"cricket-{competition}", "domestic-cricket", label, f"https://www.ecb.co.uk/matches/{competition}/tables", "cricket-ecb",
+        note="Official ECB men's competition standings. Groups/divisions and season remain separate. Published points include the publisher's adjustments; no recalculation from match wins.", minimum=18)
+for key, sport, series, slug, name, minimum in [
+    ("t10", "t10-cricket", 11119, "abu-dhabi-t10-league-2025", "Abu Dhabi T10 League 2025", 8),
+    ("ipl", "t20-cricket", 9241, "indian-premier-league-2026", "Indian Premier League 2026", 10),
+    ("cpl", "t20-cricket", 12123, "caribbean-premier-league-2026", "Caribbean Premier League 2026", 7),
+]:
+    add(f"cricket-{key}", sport, name, f"https://www.cricbuzz.com/cricket-series/{series}/{slug}/points-table", "cricket-table",
+        note="Cricbuzz published league-stage order for this named edition, not a world ranking or playoff finish. Completed editions remain labelled by year; they are not automatically substituted for a new season. NRR is net run rate.",
+        series_id=series, series_name=name, minimum=minimum)
+
+CRICKET_SOURCE_IDS = {key for key in FEEDS if key.startswith("cricket-")}
