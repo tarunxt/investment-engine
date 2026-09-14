@@ -22,6 +22,7 @@ import {
   History,
   ExternalLink,
   FileSpreadsheet,
+  Filter,
   Info,
   Bot,
   RefreshCw,
@@ -33,6 +34,7 @@ import {
   PauseCircle,
   PlayCircle,
   ShieldAlert,
+  SlidersHorizontal,
   Square,
   X,
   Zap,
@@ -2242,6 +2244,86 @@ function StageOneRunStats({
       scanCompletedAt: stage.timerCompletedAt,
     });
   };
+
+  if (filtersOnly) {
+    const formattedPassedFilters = hideNumbers
+      ? "—"
+      : stats.passedFilters.toLocaleString("en-IN");
+    const formattedIncludedActive =
+      hideNumbers || includedActiveCount === null
+        ? "—"
+        : includedActiveCount.toLocaleString("en-IN");
+
+    return (
+      <div className="flex h-full flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => onOpenScanCandidateDialog?.(stage, "fresh-opportunities")}
+          disabled={!renderInteractiveRows || !onOpenScanCandidateDialog}
+          className="group flex w-full items-center gap-3 rounded-xl border border-emerald-200/80 bg-white/80 p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:bg-white hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:pointer-events-none"
+          aria-label={`Open ${stats.passedFilters} events that passed filters`}
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-200">
+            <Filter className="h-5 w-5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+              Passed filters
+            </span>
+            <span className="mt-0.5 block text-2xl font-bold tabular-nums text-emerald-950">
+              {formattedPassedFilters}
+            </span>
+          </span>
+          <ChevronDown className="h-4 w-4 -rotate-90 text-emerald-500 transition-transform group-hover:translate-x-0.5" />
+        </button>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-emerald-200/80 bg-emerald-100/65 p-3">
+            <div className="flex items-center gap-2 text-emerald-700">
+              <Wallet className="h-4 w-4" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.1em]">
+                Active included
+              </span>
+            </div>
+            <p className="mt-2 text-xl font-bold tabular-nums text-emerald-950">
+              {formattedIncludedActive}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={downloadFilteredEvents}
+            disabled={filteredDownloadUnavailable}
+            className="rounded-xl border border-emerald-200/80 bg-white/75 p-3 text-left transition hover:border-emerald-300 hover:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-45"
+            aria-label={`Download Excel with all ${stats.passedFilters} filtered events`}
+            title="Download filtered events Excel"
+          >
+            <div className="flex items-center gap-2 text-emerald-700">
+              <FileSpreadsheet className="h-4 w-4" />
+              <span className="text-[11px] font-semibold uppercase tracking-[0.1em]">
+                Export
+              </span>
+            </div>
+            <p className="mt-2 text-sm font-bold text-emerald-950">
+              Download Excel
+            </p>
+          </button>
+        </div>
+
+        {onOpenScanFilters ? (
+          <button
+            type="button"
+            onClick={onOpenScanFilters}
+            className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-emerald-800 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-300 focus:ring-offset-2"
+            aria-label="Open scan filters"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            View & edit filters
+          </button>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-0.5">
@@ -14818,13 +14900,36 @@ export function BullpenAutoRunScheduleCard({
                 const filterStage = independentStageOneView ?? stage;
                 const stats = getStageOneStats(filterStage);
                 return (
-                  <div key="scan" data-testid="bullpen-stage-one-filters" className="flex flex-col gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-emerald-950">Stage 1 · Filters</p>
-                    <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
-                      llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
-                      filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
-                      onOpenScanFilters={onOpenScanFilters} />
-                    <p className="text-xs font-semibold text-emerald-900">{stats.totalScanned}/{stats.totalScanned} events</p>
+                  <div key="scan" data-testid="bullpen-stage-one-filters" className="flex h-full min-h-[28rem] flex-col rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50 to-emerald-50/65 p-4 shadow-sm">
+                    <div className="mb-4 flex items-center gap-3">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-700 text-white shadow-sm shadow-emerald-900/15">
+                        <Filter className="h-4 w-4" />
+                      </span>
+                      <div>
+                        <p className="text-sm font-bold text-emerald-950">Stage 1 · Filters</p>
+                        <p className="text-xs text-emerald-700">Qualified event shortlist</p>
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
+                        llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
+                        filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
+                        onOpenScanFilters={onOpenScanFilters} />
+                    </div>
+                    <div className="mt-5 border-t border-emerald-200/80 pt-3">
+                      <div className="flex items-center justify-between gap-3 text-xs font-semibold text-emerald-900">
+                        <span className="inline-flex items-center gap-1.5">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          Scan coverage
+                        </span>
+                        <span className="tabular-nums">
+                          {stats.totalScanned.toLocaleString("en-IN")} / {stats.totalScanned.toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-emerald-200/80">
+                        <div className="h-full w-full rounded-full bg-emerald-600" />
+                      </div>
+                    </div>
                   </div>
                 );
               }
