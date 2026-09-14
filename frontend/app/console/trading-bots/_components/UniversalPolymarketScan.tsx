@@ -20,6 +20,16 @@ type UniversalScanSummary = {
   }>;
 };
 
+type UniversalScanPageResponse = {
+  error?: string;
+  retryReason?: string;
+  retryAfterMs?: number;
+  scanExportId?: string;
+  scanStartedAt?: string;
+  cumulativeTotalCandidates?: number;
+  nextCursor?: string;
+};
+
 function durationLabel(durationMs: number) {
   const totalSeconds = Math.max(0, Math.round(durationMs / 1_000));
   const hours = Math.floor(totalSeconds / 3_600);
@@ -33,6 +43,23 @@ async function fetchUniversalSnapshot(signal?: AbortSignal) {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error || "Could not load the universal scan.");
   return payload;
+}
+
+function waitForRetry(milliseconds: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const cancel = () => { clearTimeout(timer); reject(new DOMException("Stopped", "AbortError")); };
+    const timer = setTimeout(() => { signal.removeEventListener("abort", cancel); resolve(); }, milliseconds);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
+
+async function scanResponseJson(response: Response): Promise<UniversalScanPageResponse> {
+  const body = await response.text();
+  try {
+    return JSON.parse(body) as UniversalScanPageResponse;
+  } catch {
+    throw new Error(`Scan returned a non-JSON response (HTTP ${response.status}).`);
+  }
 }
 
 export function UniversalPolymarketScan() {
@@ -69,13 +96,27 @@ export function UniversalPolymarketScan() {
     setRunning(true); setError(null); setCount(0); setPages(0);
     const params = new URLSearchParams({ universal: "true" });
     let pageCount = 0;
+    let consecutiveFailures = 0;
     const started = Date.now();
     try {
       while (true) {
         if (Date.now() - started > 45 * 60 * 1000) throw new Error("Scan reached its 45-minute limit. The last completed scan remains available.");
-        const response = await fetch(`/api/bullpen-ai?${params}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: abort.signal });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || `Scan failed (HTTP ${response.status}).`);
+        let response: Response;
+        let result: UniversalScanPageResponse;
+        try {
+          response = await fetch(`/api/bullpen-ai?${params}`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: abort.signal });
+          result = await scanResponseJson(response);
+          if (!response.ok) throw new Error(typeof result.error === "string" ? result.error : `Scan failed (HTTP ${response.status}).`);
+          consecutiveFailures = 0;
+        } catch (requestError) {
+          if (abort.signal.aborted) throw requestError;
+          consecutiveFailures += 1;
+          if (consecutiveFailures > 8) throw requestError;
+          const delay = Math.min(15_000, 1_500 * 2 ** (consecutiveFailures - 1));
+          setError(`Temporary scan interruption. Retrying the current page (${consecutiveFailures}/8)…`);
+          await waitForRetry(delay, abort.signal);
+          continue;
+        }
         if (result.retryReason) setError(result.retryReason);
         else { setError(null); pageCount += 1; setPages(pageCount); }
         if (result.scanExportId) params.set("scanExportId", result.scanExportId);
@@ -83,11 +124,7 @@ export function UniversalPolymarketScan() {
         if (typeof result.cumulativeTotalCandidates === "number") setCount(result.cumulativeTotalCandidates);
         if (response.status !== 202) break;
         if (result.nextCursor) params.set("scanCursor", result.nextCursor);
-        await new Promise<void>((resolve, reject) => {
-          const cancel = () => { clearTimeout(timer); reject(new DOMException("Stopped", "AbortError")); };
-          const timer = setTimeout(() => { abort.signal.removeEventListener("abort", cancel); resolve(); }, result.retryAfterMs ?? 250);
-          abort.signal.addEventListener("abort", cancel, { once: true });
-        });
+        await waitForRetry(typeof result.retryAfterMs === "number" ? result.retryAfterMs : 250, abort.signal);
       }
       await loadSnapshot();
     } catch (error) {
