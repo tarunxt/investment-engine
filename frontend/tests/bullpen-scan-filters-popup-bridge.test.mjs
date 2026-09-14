@@ -20,6 +20,13 @@ const settingsSource = readFileSync(
   new URL("../lib/bullpenStageOneSettings.ts", import.meta.url),
   "utf8",
 );
+const scheduleCardSource = readFileSync(
+  new URL(
+    "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan controls are not rendered", () => {
   assert.match(
@@ -63,6 +70,17 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /saveFilterToggle\(id, event\.target\.checked\)/);
   assert.match(bridgeSource, /Apply \$\{detail\.label\} filter/);
   assert.match(bridgeSource, /every future Trending and Full Universe scan/);
+  assert.match(bridgeSource, />\s*Stage 1 scan scope\s*</);
+  assert.match(bridgeSource, /description: "Current Bullpen feed"/);
+  assert.match(bridgeSource, /label: "Full Universe"/);
+  assert.match(bridgeSource, /console_scan_scope: nextScope/);
+  assert.match(bridgeSource, /saveScanScope\(option\.value\)/);
+  assert.doesNotMatch(scheduleCardSource, />\s*Stage 1 scan scope\s*</);
+  assert.doesNotMatch(scheduleCardSource, /description: "Current Bullpen feed"/);
+  assert.match(
+    scheduleCardSource,
+    /BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT/,
+  );
   assert.match(settingsSource, /console_exclude_sports/);
   assert.match(settingsSource, /console_exclude_weather/);
   assert.match(settingsSource, /console_exclude_market_predictions/);

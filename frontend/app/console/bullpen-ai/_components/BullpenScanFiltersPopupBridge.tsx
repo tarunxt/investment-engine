@@ -78,6 +78,11 @@ export function BullpenScanFiltersPopupBridge() {
   const [reapplyDirty, setReapplyDirty] = useState(false);
   const [isReapplying, setIsReapplying] = useState(false);
   const [reapplyMessage, setReapplyMessage] = useState<string | null>(null);
+  const [scanScope, setScanScope] = useState<"trending" | "full_universe">(
+    "trending",
+  );
+  const [isScanScopeSaving, setIsScanScopeSaving] = useState(false);
+  const [scanScopeMessage, setScanScopeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadOddsFloor() {
@@ -113,6 +118,7 @@ export function BullpenScanFiltersPopupBridge() {
         setSavedRejectedThemePattern(savedThemePattern);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
         setFilterToggles(getBullpenScanFilterToggles(settings));
+        setScanScope(settings.console_scan_scope ?? "trending");
         publishStageOneSettings(settings);
         setReapplyDirty(false);
       } catch {
@@ -249,6 +255,31 @@ export function BullpenScanFiltersPopupBridge() {
       setFloorMessage("The odds floor could not be saved. Please try again.");
     } finally {
       setIsFloorSaving(false);
+    }
+  }
+
+  async function saveScanScope(nextScope: "trending" | "full_universe") {
+    if (nextScope === scanScope || isScanScopeSaving) return;
+    const previousScope = scanScope;
+    setScanScope(nextScope);
+    setIsScanScopeSaving(true);
+    setScanScopeMessage(null);
+    try {
+      const settings = await apiService.updateBullpenAutoLiveSettings({
+        console_scan_scope: nextScope,
+      });
+      setScanScope(settings.console_scan_scope ?? nextScope);
+      publishStageOneSettings(settings);
+      setScanScopeMessage(
+        nextScope === "full_universe"
+          ? "Full Universe saved. Future manual and scheduled runs will exhaustively scan the catalogue."
+          : "Trending saved. Future manual and scheduled runs will use the current Bullpen feed.",
+      );
+    } catch {
+      setScanScope(previousScope);
+      setScanScopeMessage("The scan scope could not be saved. Please try again.");
+    } finally {
+      setIsScanScopeSaving(false);
     }
   }
 
@@ -418,6 +449,74 @@ export function BullpenScanFiltersPopupBridge() {
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
             <div className="space-y-3">
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
+                <fieldset>
+                  <legend className="font-semibold text-slate-950 dark:text-slate-50">
+                    Stage 1 scan scope
+                  </legend>
+                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                    Choose whether Stage 1 scans the current Bullpen feed or every available Polymarket market.
+                  </p>
+                  <div
+                    className="mt-4 grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-inner dark:border-slate-700 dark:bg-slate-900"
+                    aria-label="Bullpen scan scope"
+                  >
+                    {(
+                      [
+                        {
+                          value: "trending",
+                          label: "Trending",
+                          description: "Current Bullpen feed",
+                        },
+                        {
+                          value: "full_universe",
+                          label: "Full Universe",
+                          description: "All Polymarket markets",
+                        },
+                      ] as const
+                    ).map((option) => {
+                      const checked = scanScope === option.value;
+                      return (
+                        <label
+                          key={option.value}
+                          className={`relative cursor-pointer rounded-lg px-3 py-2 text-center transition ${
+                            checked
+                              ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-50 dark:ring-slate-700"
+                              : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                          } ${isFloorLoading || isScanScopeSaving ? "cursor-wait opacity-60" : ""}`}
+                        >
+                          <input
+                            type="radio"
+                            name="bullpen-scan-scope"
+                            value={option.value}
+                            checked={checked}
+                            disabled={isFloorLoading || isScanScopeSaving}
+                            onChange={() => void saveScanScope(option.value)}
+                            className="sr-only"
+                          />
+                          <span className="block text-sm font-semibold">
+                            {option.label}
+                          </span>
+                          <span className="mt-0.5 block text-[11px] font-medium">
+                            {option.description}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                    {scanScope === "full_universe"
+                      ? "Exhaustive keyset pagination is required. If enumeration is incomplete, active positions remain monitored but new purchases are blocked."
+                      : "Uses the existing Trending workflow without changing its filters or downstream stages."}
+                    {isScanScopeSaving ? " Saving preference…" : ""}
+                  </p>
+                  {scanScopeMessage ? (
+                    <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">
+                      {scanScopeMessage}
+                    </p>
+                  ) : null}
+                </fieldset>
+              </div>
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div className="max-w-xl">

@@ -75,6 +75,7 @@ import {
   shouldUseVerifiedStage1PortfolioFallback,
 } from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
+import { BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT } from "@/lib/bullpenStageOneSettings";
 import {
   mergeBullpenConsoleDecisionProjection,
   mergeBullpenConsoleRunProjection,
@@ -11188,8 +11189,6 @@ export function BullpenAutoRunScheduleCard({
   const [consoleScanScope, setConsoleScanScope] = useState<
     "trending" | "full_universe"
   >("trending");
-  const [consoleScanScopeSaveBusy, setConsoleScanScopeSaveBusy] =
-    useState(false);
   const [schedulePickerValue, setSchedulePickerValue] = useState("");
   const [scheduleRefreshInput, setScheduleRefreshInput] = useState("60");
   const [scheduleSettingsDirty, setScheduleSettingsDirty] = useState(false);
@@ -11618,42 +11617,28 @@ export function BullpenAutoRunScheduleCard({
     visiblePersistedAutoRunStatus?.settings.console_scan_scope,
   ]);
 
-  async function handleConsoleScanScopeChange(
-    nextScope: "trending" | "full_universe",
-  ) {
-    if (nextScope === consoleScanScope || consoleScanScopeSaveBusy) return;
-    const previousScope = consoleScanScope;
-    setConsoleScanScope(nextScope);
-    setConsoleScanScopeSaveBusy(true);
-    setError(null);
-    try {
-      await apiService.updateBullpenAutoLiveSettings({
-        console_scan_scope: nextScope,
-      });
-      setSummary((currentSummary) =>
-        currentSummary
-          ? {
-              ...currentSummary,
-              settings: {
-                ...currentSummary.settings,
-                console_scan_scope: nextScope,
-              },
-            }
-          : currentSummary,
+  useEffect(() => {
+    const handleStageOneSettingsUpdated = (event: Event) => {
+      const nextScope = (
+        event as CustomEvent<{
+          console_scan_scope?: "trending" | "full_universe";
+        }>
+      ).detail?.console_scan_scope;
+      if (nextScope === "trending" || nextScope === "full_universe") {
+        setConsoleScanScope(nextScope);
+      }
+    };
+    window.addEventListener(
+      BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+      handleStageOneSettingsUpdated,
+    );
+    return () => {
+      window.removeEventListener(
+        BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+        handleStageOneSettingsUpdated,
       );
-      void refreshPersistedAutoRunStatus();
-      setNotice(
-        nextScope === "full_universe"
-          ? "Full Universe saved. Future manual and scheduled runs will exhaustively scan the catalogue."
-          : "Trending saved. Future manual and scheduled runs will use the existing Bullpen feed.",
-      );
-    } catch (nextError) {
-      setConsoleScanScope(previousScope);
-      setError(normalizeError(nextError));
-    } finally {
-      setConsoleScanScopeSaveBusy(false);
-    }
-  }
+    };
+  }, []);
 
   useEffect(() => {
     const nextTargets = summary?.settings.console_llm_targets ?? [];
@@ -14222,70 +14207,6 @@ export function BullpenAutoRunScheduleCard({
         ) : null}
 
         <div className="rounded-2xl border border-white/70 bg-white/80 p-4">
-          <fieldset className="mb-4">
-            <legend className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-              Stage 1 scan scope
-            </legend>
-            <div
-              className="mt-2 grid max-w-xl grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-inner"
-              aria-label="Bullpen scan scope"
-            >
-              {(
-                [
-                  {
-                    value: "trending",
-                    label: "Trending",
-                    description: "Current Bullpen feed",
-                  },
-                  {
-                    value: "full_universe",
-                    label: "Full Universe",
-                    description: "All Polymarket markets",
-                  },
-                ] as const
-              ).map((option) => {
-                const checked = consoleScanScope === option.value;
-                return (
-                  <label
-                    key={option.value}
-                    className={`relative cursor-pointer rounded-lg px-3 py-2 text-center transition ${
-                      checked
-                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200"
-                        : "text-slate-500 hover:text-slate-800"
-                    } ${
-                      action !== null || consoleScanScopeSaveBusy
-                        ? "cursor-wait opacity-60"
-                        : ""
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="bullpen-scan-scope"
-                      value={option.value}
-                      checked={checked}
-                      disabled={action !== null || consoleScanScopeSaveBusy}
-                      onChange={() =>
-                        void handleConsoleScanScopeChange(option.value)
-                      }
-                      className="sr-only"
-                    />
-                    <span className="block text-sm font-semibold">
-                      {option.label}
-                    </span>
-                    <span className="mt-0.5 block text-[11px] font-medium">
-                      {option.description}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-xs leading-5 text-slate-500">
-              {consoleScanScope === "full_universe"
-                ? "Exhaustive keyset pagination is required. If enumeration is incomplete, active positions remain monitored but new purchases are blocked."
-                : "Uses the existing Trending workflow without changing its filters or downstream stages."}
-              {consoleScanScopeSaveBusy ? " Saving preference…" : ""}
-            </p>
-          </fieldset>
           <div className="grid gap-3 lg:grid-cols-3">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">

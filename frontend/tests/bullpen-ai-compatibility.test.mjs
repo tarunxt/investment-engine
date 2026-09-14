@@ -468,12 +468,19 @@ test("Bullpen auto-run persists Trending and Full Universe scan scope", () => {
     ),
     "utf8",
   );
+  const scanFiltersPopupSource = readFileSync(
+    new URL(
+      "../app/console/bullpen-ai/_components/BullpenScanFiltersPopupBridge.tsx",
+      import.meta.url,
+    ),
+    "utf8",
+  );
 
-  assert.match(autoRunCardSource, /name="bullpen-scan-scope"/);
-  assert.match(autoRunCardSource, /label: "Trending"/);
-  assert.match(autoRunCardSource, /label: "Full Universe"/);
+  assert.match(scanFiltersPopupSource, /name="bullpen-scan-scope"/);
+  assert.match(scanFiltersPopupSource, /label: "Trending"/);
+  assert.match(scanFiltersPopupSource, /label: "Full Universe"/);
   assert.match(
-    autoRunCardSource,
+    scanFiltersPopupSource,
     /updateBullpenAutoLiveSettings\(\{\s*console_scan_scope:\s*nextScope,/,
   );
   assert.match(
@@ -481,7 +488,8 @@ test("Bullpen auto-run persists Trending and Full Universe scan scope", () => {
     /buildConsoleSettingsUpdate\(\s*latestConsoleOrderUsd,\s*consoleScanScope,/,
   );
   assert.match(autoRunCardSource, /FULL Universe|Full Universe/i);
-  assert.match(autoRunCardSource, /new purchases are blocked/);
+  assert.match(scanFiltersPopupSource, /new purchases are blocked/);
+  assert.doesNotMatch(autoRunCardSource, /name="bullpen-scan-scope"/);
 });
 
 test("Bullpen Full Universe result snapshots survive browser refresh", () => {
