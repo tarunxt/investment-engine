@@ -4623,6 +4623,7 @@ function BullpenAiPageContent({
       ) : null}
 
       <BullpenAutoRunScheduleCard
+        workspaceProfile={workspaceProfile}
         independentScanSnapshot={activeCurrentSnapshot}
         onRunIndependentStageOne={async (signal, onProgress) => {
           const result = await executeBullpenScan({

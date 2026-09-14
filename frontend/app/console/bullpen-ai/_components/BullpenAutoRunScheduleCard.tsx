@@ -78,7 +78,10 @@ import {
   shouldUseVerifiedStage1PortfolioFallback,
 } from "@/lib/bullpenVerifiedPortfolio";
 import { formatUnknownError, splitApiErrorSummary } from "@/lib/apiErrors";
-import { BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT } from "@/lib/bullpenStageOneSettings";
+import {
+  BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+  type BullpenWorkspaceProfile,
+} from "@/lib/bullpenStageOneSettings";
 import {
   mergeBullpenConsoleDecisionProjection,
   mergeBullpenConsoleRunProjection,
@@ -251,6 +254,7 @@ const BULLPEN_LAST_LLM_TARGET_STORAGE_KEY =
   "investment-engine:bullpen-ai:last-llm-target:v1";
 
 type BullpenAutoRunScheduleCardProps = {
+  workspaceProfile?: BullpenWorkspaceProfile;
   onRunCompleted?: () => void | Promise<void>;
   onRefreshPortfolioPositions?: () => void | Promise<void>;
   buildRunNowRequest?: () =>
@@ -2126,6 +2130,7 @@ function StageOneRunStats({
   onOpenScanCandidateDialog,
   onOpenScanFilters,
   onRecoverLegacyExport,
+  workspaceProfile = "bullpen007",
 }: {
   stage: WorkflowStageView;
   llmStage?: WorkflowStageView;
@@ -2142,6 +2147,7 @@ function StageOneRunStats({
   onRecoverLegacyExport?: (
     exportScope: "filtered" | "all-scanned",
   ) => void;
+  workspaceProfile?: BullpenWorkspaceProfile;
 }) {
   const stats = getStageOneStats(stage);
   const includedActiveCount = getStageOneIncludedActiveCount(
@@ -2191,7 +2197,11 @@ function StageOneRunStats({
   const downloadAllScannedEvents = () => {
     if (isIndependentStageOne) {
       if (independentExportId) {
-        downloadIndependentStageOneExcel(independentExportId);
+        downloadIndependentStageOneExcel(
+          independentExportId,
+          "all-scanned",
+          workspaceProfile,
+        );
       } else {
         onRecoverLegacyExport?.("all-scanned");
       }
@@ -2229,7 +2239,11 @@ function StageOneRunStats({
   const downloadFilteredEvents = () => {
     if (isIndependentStageOne) {
       if (independentExportId) {
-        downloadIndependentStageOneExcel(independentExportId, "filtered");
+        downloadIndependentStageOneExcel(
+          independentExportId,
+          "filtered",
+          workspaceProfile,
+        );
       } else {
         onRecoverLegacyExport?.("filtered");
       }
@@ -4432,12 +4446,14 @@ function StageOneOutputDialog({
   state,
   onClose,
   onRecoverLegacyExport,
+  workspaceProfile = "bullpen007",
 }: {
   state: ScanCandidateDialogState;
   onClose: () => void;
   onRecoverLegacyExport?: (
     exportScope: "filtered" | "all-scanned",
   ) => void;
+  workspaceProfile?: BullpenWorkspaceProfile;
 }) {
   const [isReturnsPerDayFormulaDialogOpen, setIsReturnsPerDayFormulaDialogOpen] =
     useState(false);
@@ -4640,7 +4656,11 @@ function StageOneOutputDialog({
   });
   const downloadFilteredEvents = () => {
     if (state.scanExportId) {
-      downloadIndependentStageOneExcel(state.scanExportId, state.mode === "all-scanned" ? "all-scanned" : "filtered");
+      downloadIndependentStageOneExcel(
+        state.scanExportId,
+        state.mode === "all-scanned" ? "all-scanned" : "filtered",
+        workspaceProfile,
+      );
       return;
     }
     if (state.isIndependentStageOne && onRecoverLegacyExport) {
@@ -11082,6 +11102,7 @@ function BullpenPortfolioSnapshot({
 }
 
 export function BullpenAutoRunScheduleCard({
+  workspaceProfile = "bullpen007",
   onRunCompleted,
   onRefreshPortfolioPositions,
   buildRunNowRequest,
@@ -13569,6 +13590,7 @@ export function BullpenAutoRunScheduleCard({
             downloadIndependentStageOneExcel(
               result.snapshot.scanExportId,
               downloadScope,
+              workspaceProfile,
             );
           } else {
             setIndependentStageOneError(
@@ -14914,7 +14936,8 @@ export function BullpenAutoRunScheduleCard({
                       <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                         filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
-                        onOpenScanFilters={onOpenScanFilters} />
+                        onOpenScanFilters={onOpenScanFilters}
+                        workspaceProfile={workspaceProfile} />
                     </div>
                     <div className="mt-5 border-t border-emerald-200/80 pt-3">
                       <div className="flex items-center justify-between gap-3 text-xs font-semibold text-emerald-900">
@@ -15136,6 +15159,7 @@ export function BullpenAutoRunScheduleCard({
                           onRecoverLegacyExport={(exportScope) =>
                             void handleIndependentStageOneScan(exportScope)
                           }
+                          workspaceProfile={workspaceProfile}
                         />
                       ) : null}
                       {stageTwoBypassed ? (
@@ -15596,6 +15620,7 @@ export function BullpenAutoRunScheduleCard({
           <StageOneOutputDialog
             state={scanCandidateDialog}
             onClose={() => setScanCandidateDialog(null)}
+            workspaceProfile={workspaceProfile}
             onRecoverLegacyExport={(exportScope) =>
               void handleIndependentStageOneScan(exportScope)
             }

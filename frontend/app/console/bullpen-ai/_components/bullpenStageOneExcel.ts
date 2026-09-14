@@ -261,9 +261,13 @@ export async function downloadCompleteStageOneRunExcel(runId: string, scope: "fi
 export function downloadIndependentStageOneExcel(
   exportId: string,
   exportScope: "filtered" | "all-scanned" = "all-scanned",
+  workspaceProfile: "bullpen007" | "bullpen-sports" = "bullpen007",
 ) {
   const link = document.createElement("a");
   const params = new URLSearchParams({ exportId, scope: exportScope });
+  if (workspaceProfile !== "bullpen007") {
+    params.set("workspaceProfile", workspaceProfile);
+  }
   link.href = `/api/bullpen-ai/stage-one.xlsx?${params.toString()}`;
   link.download = `bullpen-stage-1-${exportScope}-events.xlsx`;
   document.body.appendChild(link);

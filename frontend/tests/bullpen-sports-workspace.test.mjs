@@ -34,6 +34,19 @@ test("workspace filters and saved snapshots are independently namespaced", () =>
   assert.match(apiRoute, /forkUniversalScan\([\s\S]*?sessionOwner/);
 });
 
+test("Bullpen Sports Excel downloads preserve the workspace owner namespace", () => {
+  const client = read("../app/console/bullpen-ai/_components/BullpenAiPageClient.tsx");
+  const card = read("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx");
+  const download = read("../app/console/bullpen-ai/_components/bullpenStageOneExcel.ts");
+  const route = read("../app/api/bullpen-ai/stage-one.xlsx/route.ts");
+
+  assert.match(client, /BullpenAutoRunScheduleCard[\s\S]*?workspaceProfile=\{workspaceProfile\}/);
+  assert.match(card, /downloadIndependentStageOneExcel\([\s\S]*?workspaceProfile/);
+  assert.match(download, /params\.set\("workspaceProfile", workspaceProfile\)/);
+  assert.match(route, /workspaceProfile[\s\S]*?bullpen-sports[\s\S]*?ownerKey/);
+  assert.match(route, /`\$\{sessionOwner\}:\$\{workspaceProfile\}`/);
+});
+
 test("the shared popup displays and enforces sports moneyline market rules", () => {
   const bridge = read("../app/console/bullpen-ai/_components/BullpenScanFiltersPopupBridge.tsx");
   const filters = read("../lib/bullpen-ai.ts");

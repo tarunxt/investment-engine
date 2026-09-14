@@ -8,7 +8,10 @@ settings and filtered export ownership are namespaced by workspace profile, so
 changing a Bullpen Sports filter cannot mutate Bullpen 007's filter set or its
 saved shortlist. Both workspaces call the exact same Stage 1 Scan Filters popup;
 the scan-scope selector is intentionally managed outside that popup. Bullpen
-Sports defaults to including sports and to the Full Universe scope. A run
+Sports defaults to including sports and to the Full Universe scope. An Excel
+download carries the same workspace profile through the browser request and
+server-side export lookup, so a Sports export cannot be opened against the
+Bullpen 007 owner namespace. A run
 started from either workspace records
 `console_profile.workspace_profile` in the existing immutable run payload; the
 candidate rows, filter outcome, formulas, and audit schema remain otherwise
