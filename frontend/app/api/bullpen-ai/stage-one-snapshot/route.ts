@@ -15,6 +15,7 @@ import {
   openLatestStageOneGammaExport,
   openUniversalScan,
   type StageOneGammaExportRow,
+  parseStageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +64,7 @@ export async function GET(request: NextRequest) {
       });
       for await (const line of lines) {
         if (!line) continue;
-        const row = JSON.parse(line) as StageOneGammaExportRow;
+        const row = parseStageOneGammaExportRow(line);
         if (row.scanStatus === "passed") {
           acceptedCount += 1;
           if (accepted.length < MAX_ROWS_PER_STATUS) accepted.push(row.candidate);
