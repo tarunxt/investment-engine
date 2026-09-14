@@ -29,6 +29,12 @@ jobs:
             sudo pg_lsclusters || true
             sudo systemctl list-jobs --no-pager
             sudo systemctl show 'postgresql@*' --property=Id,ActiveState,SubState,Result,TimeoutStopUSec --no-pager
+            sudo systemctl show postgresql@18-main --property=MemoryCurrent,MemoryPeak,MemoryHigh,MemoryMax,OOMPolicy,Restart,KillSignal --no-pager
+            sudo journalctl -k --since '-40 minutes' --no-pager | grep -E 'oom-kill|Killed process|Out of memory|Memory cgroup out of memory' | tail -n 12 || true
+            for setting in shared_buffers work_mem maintenance_work_mem max_connections max_parallel_workers_per_gather; do
+              echo "$setting"
+              sudo -u postgres /usr/lib/postgresql/18/bin/postgres -D /var/lib/postgresql/18/main -c config_file=/etc/postgresql/18/main/postgresql.conf -C "$setting"
+            done
             ps -eo comm,pid,ppid,etime,args | awk '$1 == "postgres" {print}'
             sudo journalctl -u 'postgresql@*' --since '-40 minutes' -n 80 -o cat --no-pager
             sudo tail -n 300 /var/log/postgresql/postgresql-*-main.log | grep -E 'LOG:.*(shutdown|shut down|ready to accept|checkpoint|starting PostgreSQL)|FATAL:.*(shutdown|shutting down)|PANIC:' | tail -n 35 || true
