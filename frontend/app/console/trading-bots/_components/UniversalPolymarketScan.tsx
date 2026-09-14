@@ -8,8 +8,36 @@ function dateLabel(value: string) {
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "medium", timeZone: "Asia/Kolkata" }).format(new Date(value));
 }
 
+type UniversalScanSummary = {
+  completedAt: string;
+  durationMs: number;
+  totalEvents: number;
+  tables: Array<{
+    key: string;
+    title: string;
+    description: string;
+    rows: Array<{ label: string; count: number }>;
+  }>;
+};
+
+function durationLabel(durationMs: number) {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return [hours ? `${hours}h` : "", minutes ? `${minutes}m` : "", `${seconds}s`].filter(Boolean).join(" ");
+}
+
+async function fetchUniversalSnapshot(signal?: AbortSignal) {
+  const response = await fetch("/api/bullpen-ai/stage-one-snapshot?universal=true", { cache: "no-store", signal });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "Could not load the universal scan.");
+  return payload;
+}
+
 export function UniversalPolymarketScan() {
   const [snapshot, setSnapshot] = useState<BullpenScanSnapshot | null>(null);
+  const [summary, setSummary] = useState<UniversalScanSummary | null>(null);
   const [running, setRunning] = useState(false);
   const [count, setCount] = useState(0);
   const [pages, setPages] = useState(0);
@@ -18,14 +46,20 @@ export function UniversalPolymarketScan() {
   const controller = useRef<AbortController | null>(null);
 
   async function loadSnapshot() {
-    const response = await fetch("/api/bullpen-ai/stage-one-snapshot?universal=true", { cache: "no-store" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Could not load the universal scan.");
+    const payload = await fetchUniversalSnapshot();
     setSnapshot(payload.snapshot ?? null);
+    setSummary(payload.universalSummary ?? null);
   }
   useEffect(() => {
-    void loadSnapshot().catch(error => setError(String(error.message)));
-    return () => controller.current?.abort();
+    const abort = new AbortController();
+    void fetchUniversalSnapshot(abort.signal).then(payload => {
+      setSnapshot(payload.snapshot ?? null);
+      setSummary(payload.universalSummary ?? null);
+    }).catch(error => {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setError(String(error.message));
+    });
+    return () => { abort.abort(); controller.current?.abort(); };
   }, []);
 
   async function scan() {
@@ -72,11 +106,27 @@ export function UniversalPolymarketScan() {
           <button type="button" disabled={!snapshot} aria-label="Open latest saved Universal Polymarket Scan" onClick={() => setShowSaved(true)} className="border-l border-blue-400 px-2 disabled:opacity-40"><Menu className="h-4 w-4" /></button>
         </div>
       </div>
-      {snapshot && <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button type="button" onClick={() => setShowSaved(true)} className="rounded-lg bg-emerald-600 px-4 py-2 text-left text-sm font-semibold text-white">Scan dated {dateLabel(snapshot.scannedAt)}<span className="block text-xs">{snapshot.totalCandidates.toLocaleString("en-IN")} markets · {snapshot.pagesScanned} pages · Complete</span></button>
-        <a href={`/api/bullpen-ai/stage-one.xlsx?exportId=${snapshot.scanExportId}&universal=true&scope=all-scanned`} className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-800"><FileSpreadsheet className="h-4 w-4" />Download all scanned events</a>
-      </div>}
-      <p role="status" className="mt-4 text-sm font-semibold text-emerald-900">{running ? `${count.toLocaleString("en-IN")} events scanned · ${pages} pages` : snapshot ? `Total Events Scanned: ${snapshot.totalCandidates.toLocaleString("en-IN")}` : "No completed universal scan yet. Select Scan Now to capture the Full Universe."}</p>
+      {snapshot && <>
+        <dl className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Last stage run</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</dd></div>
+          <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Time taken</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{summary ? durationLabel(summary.durationMs) : "Calculating…"}</dd></div>
+          <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Total Events Scanned</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{snapshot.totalCandidates.toLocaleString("en-IN")}</dd></div>
+        </dl>
+        <div className="mt-4 flex justify-end">
+          <a href={`/api/bullpen-ai/stage-one.xlsx?exportId=${snapshot.scanExportId}&universal=true&scope=all-scanned`} className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-800"><FileSpreadsheet className="h-4 w-4" />Download all scanned events</a>
+        </div>
+        {summary && <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          {summary.tables.map(table => <article key={table.key} className="overflow-hidden rounded-xl border border-emerald-200 bg-white/90">
+            <div className="border-b border-emerald-100 px-4 py-3"><h3 className="font-semibold text-emerald-950">{table.title}</h3><p className="mt-0.5 text-xs text-emerald-700">{table.description}</p></div>
+            <div className="overflow-x-auto"><table className="w-full text-sm">
+              <thead><tr className="bg-emerald-50 text-left text-xs uppercase tracking-wide text-emerald-700"><th className="px-4 py-2 font-semibold">Breakdown</th><th className="px-4 py-2 text-right font-semibold">Events</th><th className="px-4 py-2 text-right font-semibold">Share</th></tr></thead>
+              <tbody className="divide-y divide-emerald-100">{table.rows.filter(row => row.count > 0).map(row => <tr key={row.label}><td className="px-4 py-2 text-slate-700">{row.label}</td><td className="px-4 py-2 text-right font-medium tabular-nums text-slate-900">{row.count.toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right tabular-nums text-slate-500">{summary.totalEvents ? `${(row.count * 100 / summary.totalEvents).toFixed(1)}%` : "0.0%"}</td></tr>)}</tbody>
+              <tfoot><tr className="bg-emerald-50 font-semibold text-emerald-950"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right tabular-nums">{table.rows.reduce((total, row) => total + row.count, 0).toLocaleString("en-IN")}</td><td className="px-4 py-2 text-right">100%</td></tr></tfoot>
+            </table></div>
+          </article>)}
+        </div>}
+      </>}
+      <p role="status" className="mt-4 text-sm font-semibold text-emerald-900">{running ? `${count.toLocaleString("en-IN")} events scanned · ${pages} pages` : snapshot ? "Latest Full Universe scan is complete." : "No completed universal scan yet. Select Scan Now to capture the Full Universe."}</p>
       {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
       {showSaved && snapshot && <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/50 p-4">
         <div role="dialog" aria-modal="true" aria-label="Latest saved Universal Polymarket Scan" className="max-h-[80vh] w-full max-w-3xl overflow-auto rounded-2xl bg-white p-6">
