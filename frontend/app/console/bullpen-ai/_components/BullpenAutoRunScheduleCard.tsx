@@ -14827,11 +14827,19 @@ export function BullpenAutoRunScheduleCard({
                       <LogIn className="h-5 w-5" />
                     </button>
                   ) : null}
-                  <div className="flex items-start justify-between gap-3">
+                  <div
+                    className={
+                      stage.key === "scan"
+                        ? "relative"
+                        : "flex items-start justify-between gap-3"
+                    }
+                  >
                     <div
-                      className={`min-w-0 flex-1 space-y-1 ${canOpenInputs ? "pl-12" : ""}`}
+                      className={`${stage.key === "scan" ? "w-full" : "min-w-0 flex-1"} space-y-1 ${canOpenInputs ? "pl-12" : ""}`}
                     >
-                      <div className="flex items-center gap-2">
+                      <div
+                        className={`flex items-center gap-2 ${stage.key === "scan" ? "pr-24" : ""}`}
+                      >
                         <p
                           className={`text-sm font-semibold ${toneClasses.text}`}
                         >
@@ -14849,12 +14857,14 @@ export function BullpenAutoRunScheduleCard({
                         ) : null}
                       </div>
                       {stage.subtitle ? (
-                        <p className={`text-xs leading-5 ${toneClasses.muted}`}>
+                        <p
+                          className={`text-xs leading-5 ${stage.key === "scan" ? "pr-24" : ""} ${toneClasses.muted}`}
+                        >
                           {stage.subtitle}
                         </p>
                       ) : null}
                       {stage.key === "scan" && onRunIndependentStageOne ? (
-                        <div className="flex max-w-full flex-wrap items-center gap-2 pt-2">
+                        <div className="flex max-w-full flex-wrap items-center gap-2 pt-6">
                           <button
                             type="button"
                             onClick={() => setStageOneResultSource("original")}
@@ -14951,7 +14961,9 @@ export function BullpenAutoRunScheduleCard({
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex flex-col items-end gap-2">
+                    <div
+                      className={`flex flex-col items-end gap-2 ${stage.key === "scan" ? "absolute right-0 top-0" : ""}`}
+                    >
                       <div className="flex items-center gap-1.5">
                         {stageTwoBypassed ? (
                           <button
