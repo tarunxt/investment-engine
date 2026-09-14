@@ -21,6 +21,12 @@ while read -r pg_version pg_cluster pg_port _rest; do
   pg_state="$(sudo systemctl show "$pg_unit" -p ActiveState --value)"
   # Recover only the diagnosed OOM shutdown, never an intentional maintenance stop.
   if [[ "$pg_result" == oom-kill && "$pg_state" == deactivating ]]; then
+    # During deployment the checkout already contains the guarded query. Start
+    # that backend now so the old HTTP process cannot repeat the OOM in the
+    # interval between database recovery and the normal service promotion.
+    if [[ "${1:-}" == --restart-backend ]]; then
+      sudo systemctl restart --no-block investor-backend.service
+    fi
     pg_data="/var/lib/postgresql/${pg_version}/${pg_cluster}"
     pg_ctl="/usr/lib/postgresql/${pg_version}/bin/pg_ctl"
     echo "Recovering PostgreSQL OOM shutdown: $pg_unit"

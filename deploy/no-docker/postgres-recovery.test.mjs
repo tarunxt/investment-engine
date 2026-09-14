@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
-function simulate(scenario) {
+function simulate(scenario, args = []) {
   const dir = mkdtempSync(join(tmpdir(), 'pg-recovery-'));
   const scripts = {
     pg_lsclusters: 'echo "18 main 5432 online postgres data log"',
@@ -23,7 +23,7 @@ esac`,
   };
   try {
     for (const [name, body] of Object.entries(scripts)) writeFileSync(join(dir, name), '#!/bin/bash\n' + body + '\n', { mode: 0o755 });
-    const result = spawnSync('bash', ['deploy/no-docker/scripts/configure-postgres-recovery.sh'], {
+    const result = spawnSync('bash', ['deploy/no-docker/scripts/configure-postgres-recovery.sh', ...args], {
       cwd: new URL('../../', import.meta.url), encoding: 'utf8',
       env: { ...process.env, PATH: dir + ':' + process.env.PATH, TEST_DIR: dir, SCENARIO: scenario },
     });
@@ -49,4 +49,9 @@ test('intentional maintenance stop is left stopped', () => {
   const result = simulate('maintenance');
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.commands, /pg_ctl|systemctl start /);
+});
+test('deployment replaces the failing HTTP process before database recovery', () => {
+  const result = simulate('oom', ['--restart-backend']);
+  assert.equal(result.status, 0);
+  assert.ok(result.commands.indexOf('restart --no-block investor-backend.service') < result.commands.indexOf('-m fast'));
 });
