@@ -61,6 +61,10 @@ All endpoints require the existing authenticated backend session via the BFF.
 
 Name normalization is Unicode-aware, case/diacritic/punctuation insensitive,
 with explicit aliases only. It never removes academy, gender or youth qualifiers.
+aliases.json contains 66 competition-scoped football name mappings reviewed against
+the connected feed labels on 14 September 2026 (for example Manchester City FC to
+Man City). Original imported names remain visible beside the provider's ranked name.
+Aliases do not assert tournament entry or merge youth/academy/women's teams.
 Absent names remain null-ranked; inferred prefix/name matches are not trading authorization.
 The future analysis consumer must explicitly reject ambiguous, missing, stale or
 failed rankings and distinguish official rankings from derived performance order.

@@ -93,3 +93,18 @@ def test_ambiguous_alias_does_not_choose_arbitrary_team():
     c = {'participants': [{'name': 'United', 'aliases': ['United A', 'United B']}]}
     snap = SimpleNamespace(rows=[{'name': 'United A', 'rank': 1}, {'name': 'United B', 'rank': 2}])
     assert ranking_rows(c, snap)[-1]['match_status'] == 'ambiguous'
+
+
+@pytest.mark.parametrize('imported,provider', [
+    ('Manchester City FC', 'Man City'),
+    ('Manchester United FC', 'Man United'),
+    ('Brighton & Hove Albion FC', 'Brighton'),
+    ('Coventry City FC', 'Coventry'),
+])
+def test_explicit_feed_alias_resolves_imported_name(imported, provider):
+    snap = SimpleNamespace(rows=[{'name': provider, 'rank': 1, 'points': 9}], status='ready', checked_at=datetime.now(UTC), source_as_of='2026-09-06')
+    result = resolve(RankingQuery(code='epl', name=imported), {'football-data-E0': snap})
+    assert result['match_status'] == 'matched'
+    assert result['candidates'][0]['name'] == provider
+    assert result['candidates'][0]['rank'] == 1
+    assert resolve(RankingQuery(code='wsl', name=imported), {'football-data-E0': snap})['candidates'] == []

@@ -4,6 +4,10 @@ import unicodedata
 from pathlib import Path
 
 CATALOGUE = json.loads(Path(__file__).with_name("catalogue.json").read_text())
+ALIASES = json.loads(Path(__file__).with_name("aliases.json").read_text())
+for competition in CATALOGUE:
+    for participant in competition["participants"]:
+        participant["aliases"] = ALIASES.get(competition["code"], {}).get(participant["name"], participant["aliases"])
 FOOTBALL_DIVISIONS = {
     "E0", "E1", "D1", "D2", "I1", "I2", "SP1", "SP2", "F1",
     "N1", "B1", "P1", "T1", "G1",
