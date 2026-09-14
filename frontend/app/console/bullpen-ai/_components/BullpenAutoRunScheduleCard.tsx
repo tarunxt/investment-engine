@@ -14829,7 +14829,7 @@ export function BullpenAutoRunScheduleCard({
                   ) : null}
                   <div className="flex items-start justify-between gap-3">
                     <div
-                      className={`space-y-1 ${canOpenInputs ? "pl-12" : ""}`}
+                      className={`min-w-0 flex-1 space-y-1 ${canOpenInputs ? "pl-12" : ""}`}
                     >
                       <div className="flex items-center gap-2">
                         <p
@@ -14859,7 +14859,7 @@ export function BullpenAutoRunScheduleCard({
                             type="button"
                             onClick={() => setStageOneResultSource("original")}
                             disabled={isIndependentStageOneScanning}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+                            className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 ${
                               stageOneResultSource === "original"
                                 ? "border-blue-700 bg-blue-700 text-white shadow-sm"
                                 : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
@@ -14877,7 +14877,7 @@ export function BullpenAutoRunScheduleCard({
                             <button
                               type="button"
                               onClick={() => void handleIndependentStageOneScan()}
-                              className={`px-3 py-1.5 transition focus:outline-none ${
+                              className={`px-2 py-1.5 transition focus:outline-none ${
                                 isIndependentStageOneScanning
                                   ? "hover:bg-red-700"
                                   : "hover:bg-blue-700"
