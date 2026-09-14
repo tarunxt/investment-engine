@@ -2270,3 +2270,11 @@ webhook while SMTP continues to send from the 6893 account. Other completion,
 alert, and account emails retain their existing per-user recipient routing.
 The completion outbox, retry, preference, idempotency, and Delivery Audit
 semantics are unchanged.
+# Sports Rankings phase 1
+
+The independent Sports Rankings repository is reference-only. No Bullpen stage
+reads its rankings yet, and no existing execution or frozen audit schema changes.
+Future consumption must capture source_id, source_as_of, successful_at,
+content_hash, competition ID, Polymarket prefix, name match status and ranking
+kind in a versioned audit input. Derived results order must not be represented
+as official league rank. See sports-rankings.md.

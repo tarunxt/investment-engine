@@ -51,6 +51,7 @@ from app.domains.cost_drivers.models import (
     TrafficCostRollup,
 )
 from app.domains.fx_rates.models import FxRate
+from app.domains.sports_rankings.models import SportsRankingSnapshot
 from app.domains.google_sheets.models import (
     GoogleSheetsAppConfig,
     GoogleSheetsCredential,
@@ -80,6 +81,7 @@ from app.domains.zerodha.models import ZerodhaCredential, ZerodhaPortfolioSnapsh
 from app.infrastructure.database.outbox.models import OutboxMessage
 
 __all__ = [
+    "SportsRankingSnapshot",
     "Bullpen008ContingentExitActivationRecord",
     "Bullpen008ContingentExitPolicyRecord",
     "Bullpen008DailyEquityBaselineRecord",

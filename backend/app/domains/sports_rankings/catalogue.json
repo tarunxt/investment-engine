@@ -1,0 +1,4173 @@
+[
+  {
+    "id": "nfl",
+    "code": "nfl",
+    "name": "National Football League",
+    "sport": "American football",
+    "reference_url": "https://www.nfl.com/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Bears",
+        "aliases": []
+      },
+      {
+        "name": "Panthers",
+        "aliases": []
+      },
+      {
+        "name": "Bills",
+        "aliases": []
+      },
+      {
+        "name": "Texans",
+        "aliases": []
+      },
+      {
+        "name": "Browns",
+        "aliases": []
+      },
+      {
+        "name": "Jaguars",
+        "aliases": []
+      },
+      {
+        "name": "Buccaneers",
+        "aliases": []
+      },
+      {
+        "name": "Bengals",
+        "aliases": []
+      },
+      {
+        "name": "Falcons",
+        "aliases": []
+      },
+      {
+        "name": "Steelers",
+        "aliases": []
+      },
+      {
+        "name": "Jets",
+        "aliases": []
+      },
+      {
+        "name": "Titans",
+        "aliases": []
+      },
+      {
+        "name": "Ravens",
+        "aliases": []
+      },
+      {
+        "name": "Colts",
+        "aliases": []
+      },
+      {
+        "name": "Saints",
+        "aliases": []
+      },
+      {
+        "name": "Lions",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "nfl-chi-car-2026-09-13",
+        "title": "Bears vs. Panthers"
+      },
+      {
+        "slug": "nfl-buf-hou-2026-09-13",
+        "title": "Bills vs. Texans"
+      },
+      {
+        "slug": "nfl-cle-jax-2026-09-13",
+        "title": "Browns vs. Jaguars"
+      },
+      {
+        "slug": "nfl-tb-cin-2026-09-13",
+        "title": "Buccaneers vs. Bengals"
+      },
+      {
+        "slug": "nfl-atl-pit-2026-09-13",
+        "title": "Falcons vs. Steelers"
+      },
+      {
+        "slug": "nfl-nyj-ten-2026-09-13",
+        "title": "Jets vs. Titans"
+      },
+      {
+        "slug": "nfl-bal-ind-2026-09-13",
+        "title": "Ravens vs. Colts"
+      },
+      {
+        "slug": "nfl-no-det-2026-09-13",
+        "title": "Saints vs. Lions"
+      }
+    ]
+  },
+  {
+    "id": "cs2-european-pro-league-series-9-group-b",
+    "code": "cs2",
+    "name": "European Pro League Series 9 Group B",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Bebop",
+        "aliases": []
+      },
+      {
+        "name": "Misa Esports",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-bbp-mis-2026-09-13",
+        "title": "Counter-Strike: Bebop vs Misa Esports (BO3) - European Pro League Series 9 Group B"
+      }
+    ]
+  },
+  {
+    "id": "cs2-cct-europe-challengers-series-playoffs",
+    "code": "cs2",
+    "name": "CCT Europe Challengers Series Playoffs",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Bushido Wildcats",
+        "aliases": []
+      },
+      {
+        "name": "megoshort",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-bw-meg1-2026-09-13",
+        "title": "Counter-Strike: Bushido Wildcats vs megoshort (BO3) - CCT Europe Challengers Series Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "cs2-esea-advanced-europe-playoffs",
+    "code": "cs2",
+    "name": "ESEA Advanced Europe Playoffs",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Falcons Force",
+        "aliases": []
+      },
+      {
+        "name": "NAVI Junior",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-fal-navij1-2026-09-11",
+        "title": "Counter-Strike: Falcons Force vs NAVI Junior (BO3) - ESEA Advanced Europe Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "cs2-nodwin-clutch-series-play-in",
+    "code": "cs2",
+    "name": "NODWIN Clutch Series Play-In",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "G2 Ares",
+        "aliases": []
+      },
+      {
+        "name": "WBT Academy",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-g2a-wbta-2026-09-13",
+        "title": "Counter-Strike: G2 Ares vs WBT Academy (BO3) - NODWIN Clutch Series Play-In"
+      }
+    ]
+  },
+  {
+    "id": "cs2-cis-lan-championship-group-a",
+    "code": "cs2",
+    "name": "CIS LAN Championship Group A",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "INOX Division",
+        "aliases": []
+      },
+      {
+        "name": "ex-RUBY",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-inox-ruby1-2026-09-13",
+        "title": "Counter-Strike: INOX Division vs ex-RUBY (BO3) - CIS LAN Championship Group A"
+      }
+    ]
+  },
+  {
+    "id": "cs2-roman-imperium-cup-playoffs",
+    "code": "cs2",
+    "name": "Roman Imperium Cup Playoffs",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Iberian Soul",
+        "aliases": []
+      },
+      {
+        "name": "6666",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-is-6666-2026-09-13",
+        "title": "Counter-Strike: Iberian Soul vs 6666 (BO3) - Roman Imperium Cup Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "cs2-cct-europe-series-8-playoffs",
+    "code": "cs2",
+    "name": "CCT Europe Series #8 Playoffs",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Sinners",
+        "aliases": []
+      },
+      {
+        "name": "Nemiga",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-sin2-nemi1-2026-09-13",
+        "title": "Counter-Strike: Sinners vs Nemiga (BO3) - CCT Europe Series #8 Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "cs2-cct-europe-closed-qualifier-series-9-group-b",
+    "code": "cs2",
+    "name": "CCT Europe Closed Qualifier: Series #9 Group B",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Spirit Academy",
+        "aliases": []
+      },
+      {
+        "name": "Saint Sinners",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-tsa-ssins-2026-09-13",
+        "title": "Counter-Strike: Spirit Academy vs Saint Sinners (BO3) - CCT Europe Closed Qualifier: Series #9 Group B"
+      }
+    ]
+  },
+  {
+    "id": "cs2-cct-europe-contenders-9-playoffs",
+    "code": "cs2",
+    "name": "CCT Europe Contenders #9 Playoffs",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "The Golden Horde",
+        "aliases": []
+      },
+      {
+        "name": "BOJONG",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-thegol-bojong-2026-09-12",
+        "title": "Counter-Strike: The Golden Horde vs BOJONG (BO3) - CCT Europe Contenders #9 Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "cs2-thunderpick-world-championship-closed-qualifier-playoffs",
+    "code": "cs2",
+    "name": "Thunderpick World Championship Closed Qualifier Playoffs",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Virtus.pro",
+        "aliases": []
+      },
+      {
+        "name": "Heroic",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-vp-hero-2026-09-13",
+        "title": "Counter-Strike: Virtus.pro vs Heroic (BO3) - Thunderpick World Championship Closed Qualifier Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "cs2-exort-fiesta-group-stage",
+    "code": "cs2",
+    "name": "Exort Fiesta Group Stage",
+    "sport": "Counter-Strike 2",
+    "reference_url": "https://github.com/ValveSoftware/counter-strike_regional_standings",
+    "source_id": "valve-global",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "WRAITH PCIFIC",
+        "aliases": []
+      },
+      {
+        "name": "Honvéd",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cs2-wraith-hon1-2026-09-13",
+        "title": "Counter-Strike: WRAITH PCIFIC vs Honvéd (BO3) - Exort Fiesta Group Stage"
+      }
+    ]
+  },
+  {
+    "id": "dota2-blast-slam-europe-closed-qualifier-playoffs",
+    "code": "dota2",
+    "name": "BLAST Slam Europe Closed Qualifier Playoffs",
+    "sport": "Dota 2",
+    "reference_url": "https://www.gosugamers.net/dota2/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Dawn Bulls",
+        "aliases": []
+      },
+      {
+        "name": "Klim Sani4",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "dota2-dawnbu-ks-2026-09-13",
+        "title": "Dota 2: Dawn Bulls vs Klim Sani4 (BO3) - BLAST Slam Europe Closed Qualifier Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "dota2-winline-star-series-group-b",
+    "code": "dota2",
+    "name": "Winline Star Series Group B",
+    "sport": "Dota 2",
+    "reference_url": "https://www.gosugamers.net/dota2/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Recrent Club",
+        "aliases": []
+      },
+      {
+        "name": "Stariy Bog Club",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "dota2-recren1-stariy-2026-09-13",
+        "title": "Dota 2: Recrent Club vs Stariy Bog Club (BO3) - Winline Star Series Group B"
+      }
+    ]
+  },
+  {
+    "id": "dota2-blast-slam-southeast-asia-closed-qualifier-playoffs",
+    "code": "dota2",
+    "name": "BLAST Slam Southeast Asia Closed Qualifier Playoffs",
+    "sport": "Dota 2",
+    "reference_url": "https://www.gosugamers.net/dota2/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Team Nemesis",
+        "aliases": []
+      },
+      {
+        "name": "Team Bored",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "dota2-nem-bored-2026-09-13",
+        "title": "Dota 2: Team Nemesis vs Team Bored (BO3) - BLAST Slam Southeast Asia Closed Qualifier Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "dota2-epl-world-series-southeast-asia-group-stage",
+    "code": "dota2",
+    "name": "EPL World Series Southeast Asia Group Stage",
+    "sport": "Dota 2",
+    "reference_url": "https://www.gosugamers.net/dota2/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "ЯЧЁ123",
+        "aliases": []
+      },
+      {
+        "name": "Carstensz",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "dota2-y123-carst-2026-09-10",
+        "title": "Dota 2: ЯЧЁ123 vs Carstensz (BO3) - EPL World Series Southeast Asia Group Stage"
+      }
+    ]
+  },
+  {
+    "id": "hok-arena-of-glory-group-stage-1",
+    "code": "hok",
+    "name": "Arena of Glory Group Stage 1",
+    "sport": "Honor of Kings",
+    "reference_url": "https://liquipedia.net/honorofkings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Team Secret",
+        "aliases": []
+      },
+      {
+        "name": "Rex Regum Qeon VN",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "hok-ts-rrqvn-2026-09-13",
+        "title": "Honor of Kings: Team Secret vs Rex Regum Qeon VN (BO5) - Arena of Glory Group Stage 1"
+      }
+    ]
+  },
+  {
+    "id": "hok-kpl-growth-league-playoffs",
+    "code": "hok",
+    "name": "KPL Growth League Playoffs",
+    "sport": "Honor of Kings",
+    "reference_url": "https://liquipedia.net/honorofkings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "UU Gamers",
+        "aliases": []
+      },
+      {
+        "name": "Qing Jiu Club",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "hok-uug-qingji-2026-09-13",
+        "title": "Honor of Kings: UU Gamers vs Qing Jiu Club (BO7) - KPL Growth League Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "atp-istanbul-3",
+    "code": "atp",
+    "name": "Istanbul 3",
+    "sport": "Tennis",
+    "reference_url": "https://www.atptour.com/en/rankings/singles",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Christian Langmo",
+        "aliases": []
+      },
+      {
+        "name": "Arda Azkara",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "atp-langmo-azkara-2026-09-06",
+        "title": "Istanbul 3: Christian Langmo vs Arda Azkara"
+      }
+    ]
+  },
+  {
+    "id": "khl",
+    "code": "khl",
+    "name": "Kontinental Hockey League",
+    "sport": "Ice hockey",
+    "reference_url": "https://en.khl.ru/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Avangard Omsk",
+        "aliases": []
+      },
+      {
+        "name": "Metallurg Magnitogorsk",
+        "aliases": []
+      },
+      {
+        "name": "CSKA Moscow",
+        "aliases": []
+      },
+      {
+        "name": "Lokomotiv Yaroslavl",
+        "aliases": []
+      },
+      {
+        "name": "Neftekhimik Nizhnekamsk",
+        "aliases": []
+      },
+      {
+        "name": "Admiral Vladivostok",
+        "aliases": []
+      },
+      {
+        "name": "Sibir Novosibirsk",
+        "aliases": []
+      },
+      {
+        "name": "Avtomobilist Yekaterinburg",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "khl-ava-met-2026-09-13",
+        "title": "KHL: Avangard Omsk vs. Metallurg Magnitogorsk"
+      },
+      {
+        "slug": "khl-csk-lok-2026-09-13",
+        "title": "KHL: CSKA Moscow vs. Lokomotiv Yaroslavl"
+      },
+      {
+        "slug": "khl-nef-adm-2026-09-13",
+        "title": "KHL: Neftekhimik Nizhnekamsk vs. Admiral Vladivostok"
+      },
+      {
+        "slug": "khl-sib-avt-2026-09-13",
+        "title": "KHL: Sibir Novosibirsk vs. Avtomobilist Yekaterinburg"
+      }
+    ]
+  },
+  {
+    "id": "lol-hitpoint-masters-playoffs",
+    "code": "lol",
+    "name": "Hitpoint Masters Playoffs",
+    "sport": "League of Legends",
+    "reference_url": "https://lolesports.com/en-US/gpr",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Meavedron",
+        "aliases": []
+      },
+      {
+        "name": "BRUTE",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "lol-mea-brt-2026-09-10",
+        "title": "LoL: Meavedron vs BRUTE (BO5) - Hitpoint Masters Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "lol-vcs-finals-regular-season",
+    "code": "lol",
+    "name": "VCS Finals Regular Season",
+    "sport": "League of Legends",
+    "reference_url": "https://lolesports.com/en-US/gpr",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Saigon Warriors",
+        "aliases": []
+      },
+      {
+        "name": "1TAP Dino",
+        "aliases": []
+      },
+      {
+        "name": "Saigon Dino",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "lol-sgw-dino1-2026-09-13",
+        "title": "LoL: Saigon Warriors vs 1TAP Dino (BO3) - VCS Finals Regular Season"
+      },
+      {
+        "slug": "lol-sgw-dino-2026-09-13",
+        "title": "LoL: Saigon Warriors vs Saigon Dino (BO3) - VCS Finals Regular Season"
+      }
+    ]
+  },
+  {
+    "id": "itf-m25-plaisir-h",
+    "code": "itf",
+    "name": "M25 Plaisir + H",
+    "sport": "Tennis",
+    "reference_url": "https://www.atptour.com/en/rankings/singles",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Lilian Chidekh",
+        "aliases": []
+      },
+      {
+        "name": "Florian Kaiser",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "itf-chidek-kaise-2026-09-06",
+        "title": "M25 Plaisir + H: Lilian Chidekh vs Florian Kaiser"
+      }
+    ]
+  },
+  {
+    "id": "itf-m25-pozzuoli",
+    "code": "itf",
+    "name": "M25 Pozzuoli",
+    "sport": "Tennis",
+    "reference_url": "https://www.atptour.com/en/rankings/singles",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Filippo Pecorini",
+        "aliases": []
+      },
+      {
+        "name": "Roberto D Ambrosio",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "itf-pecori-ambrosi-2026-09-06",
+        "title": "M25 Pozzuoli: Filippo Pecorini vs Roberto D Ambrosio"
+      }
+    ]
+  },
+  {
+    "id": "mlbb-mlbb-super-league-thailand-regular-season",
+    "code": "mlbb",
+    "name": "MLBB Super League Thailand Regular Season",
+    "sport": "Mobile Legends",
+    "reference_url": "https://www.gosugamers.net/mobile-legends/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Leon Esports",
+        "aliases": []
+      },
+      {
+        "name": "SOLYX",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "mlbb-leo-slx-2026-09-13",
+        "title": "Mobile Legends Bang Bang: Leon Esports vs SOLYX (BO3) - MLBB Super League Thailand Regular Season"
+      }
+    ]
+  },
+  {
+    "id": "mlbb-mpl-indonesia-regular-season",
+    "code": "mlbb",
+    "name": "MPL Indonesia Regular Season",
+    "sport": "Mobile Legends",
+    "reference_url": "https://www.gosugamers.net/mobile-legends/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "ONIC",
+        "aliases": []
+      },
+      {
+        "name": "Alter Ego",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "mlbb-onic-ae-2026-09-13",
+        "title": "Mobile Legends Bang Bang: ONIC vs Alter Ego (BO3) - MPL Indonesia Regular Season"
+      }
+    ]
+  },
+  {
+    "id": "mlbb-mlbb-continental-championships-regular-season",
+    "code": "mlbb",
+    "name": "MLBB Continental Championships Regular Season",
+    "sport": "Mobile Legends",
+    "reference_url": "https://www.gosugamers.net/mobile-legends/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Rune Eaters Esports",
+        "aliases": []
+      },
+      {
+        "name": "Cyber Hero",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "mlbb-re1-ch-2026-09-13",
+        "title": "Mobile Legends Bang Bang: Rune Eaters Esports vs Cyber Hero (BO3) - MLBB Continental Championships Regular Season"
+      }
+    ]
+  },
+  {
+    "id": "mlbb-mpl-philippines-regular-season",
+    "code": "mlbb",
+    "name": "MPL Philippines Regular Season",
+    "sport": "Mobile Legends",
+    "reference_url": "https://www.gosugamers.net/mobile-legends/rankings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Team Falcons PH",
+        "aliases": []
+      },
+      {
+        "name": "Aurora Gaming PH",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "mlbb-falcon-ar-2026-09-13",
+        "title": "Mobile Legends Bang Bang: Team Falcons PH vs Aurora Gaming PH (BO3) - MPL Philippines Regular Season"
+      }
+    ]
+  },
+  {
+    "id": "r6siege-cn-league-stage-2-group-stage",
+    "code": "r6siege",
+    "name": "CN League Stage 2 Group Stage",
+    "sport": "Rainbow Six Siege",
+    "reference_url": "https://liquipedia.net/rainbowsix/Global_Standings",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "One Coin",
+        "aliases": []
+      },
+      {
+        "name": "LGD Gaming",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "r6siege-oc1-lgd-2026-09-13",
+        "title": "Rainbow Six Siege: One Coin vs LGD Gaming (BO3) - CN League Stage 2 Group Stage"
+      }
+    ]
+  },
+  {
+    "id": "wta-us-open-juniors-girls",
+    "code": "wta",
+    "name": "US Open Juniors, Girls",
+    "sport": "Tennis",
+    "reference_url": "https://www.itftennis.com/en/rankings/world-tennis-tour-junior-rankings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Lani Chang",
+        "aliases": []
+      },
+      {
+        "name": "Jana Kovackova",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "wta-chan-kovacko-2026-09-06",
+        "title": "US Open Juniors, Girls: Lani Chang vs Jana Kovackova"
+      }
+    ]
+  },
+  {
+    "id": "val-china-evolution-series-act-3-playoffs",
+    "code": "val",
+    "name": "China Evolution Series Act 3 Playoffs",
+    "sport": "Valorant",
+    "reference_url": "https://valorantesports.com/gpr",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "KeepBest Gaming",
+        "aliases": []
+      },
+      {
+        "name": "FunPlus Phoenix",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "val-kbg-fpx-2026-09-13",
+        "title": "Valorant: KeepBest Gaming vs FunPlus Phoenix (BO5) - China Evolution Series Act 3 Playoffs"
+      }
+    ]
+  },
+  {
+    "id": "itf-w50-evora",
+    "code": "itf",
+    "name": "W50 Evora",
+    "sport": "Tennis",
+    "reference_url": "https://www.wtatennis.com/rankings/singles",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Maria Toma",
+        "aliases": []
+      },
+      {
+        "name": "Sachia Vickery",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "itf-toma-vicke-2026-09-06",
+        "title": "W50 Evora: Maria Toma vs Sachia Vickery"
+      }
+    ]
+  },
+  {
+    "id": "fro1",
+    "code": "fro1",
+    "name": "Faroe Islands Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/faroe-islands/premier-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "07 Vestur Sorvagur",
+        "aliases": []
+      },
+      {
+        "name": "AB Argir",
+        "aliases": []
+      },
+      {
+        "name": "B36 Torshavn",
+        "aliases": []
+      },
+      {
+        "name": "Eb/Streymur",
+        "aliases": []
+      },
+      {
+        "name": "HB Torshavn",
+        "aliases": []
+      },
+      {
+        "name": "KI Klaksvik",
+        "aliases": []
+      },
+      {
+        "name": "NSI Runavik",
+        "aliases": []
+      },
+      {
+        "name": "Skala IF",
+        "aliases": []
+      },
+      {
+        "name": "Tofta Itrottarfelag B68",
+        "aliases": []
+      },
+      {
+        "name": "Vikingur Gota",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "fro1-ves-ki-2026-09-13",
+        "title": "Will 07 Vestur Sorvagur win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-arg-b68-2026-09-11",
+        "title": "Will AB Argir win on 2026-09-11?"
+      },
+      {
+        "slug": "fro1-ebs-b36-2026-09-13",
+        "title": "Will B36 Torshavn win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-ebs-b36-2026-09-13",
+        "title": "Will Eb/Streymur win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-sif-hb-2026-09-13",
+        "title": "Will HB Torshavn win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-ves-ki-2026-09-13",
+        "title": "Will KI Klaksvik win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-nsi-got-2026-09-13",
+        "title": "Will NSI Runavik win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-sif-hb-2026-09-13",
+        "title": "Will Skala IF win on 2026-09-13?"
+      },
+      {
+        "slug": "fro1-arg-b68-2026-09-11",
+        "title": "Will Tofta Itrottarfelag B68 win on 2026-09-11?"
+      },
+      {
+        "slug": "fro1-nsi-got-2026-09-13",
+        "title": "Will Vikingur Gota win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "bl2",
+    "code": "bl2",
+    "name": "German 2. Bundesliga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/germany/2-bundesliga/standings/",
+    "source_id": "football-data-D2",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "1. FC Heidenheim",
+        "aliases": []
+      },
+      {
+        "name": "FC Energie Cottbus",
+        "aliases": []
+      },
+      {
+        "name": "Hertha BSC",
+        "aliases": []
+      },
+      {
+        "name": "Holstein Kiel",
+        "aliases": []
+      },
+      {
+        "name": "Karlsruher SC",
+        "aliases": []
+      },
+      {
+        "name": "VfL Osnabrück",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "bl2-hei-ksv-2026-09-13",
+        "title": "Will 1. FC Heidenheim win on 2026-09-13?"
+      },
+      {
+        "slug": "bl2-ksc-fce-2026-09-13",
+        "title": "Will FC Energie Cottbus win on 2026-09-13?"
+      },
+      {
+        "slug": "bl2-vfl-ber-2026-09-13",
+        "title": "Will Hertha BSC win on 2026-09-13?"
+      },
+      {
+        "slug": "bl2-hei-ksv-2026-09-13",
+        "title": "Will Holstein Kiel win on 2026-09-13?"
+      },
+      {
+        "slug": "bl2-ksc-fce-2026-09-13",
+        "title": "Will Karlsruher SC win on 2026-09-13?"
+      },
+      {
+        "slug": "bl2-vfl-ber-2026-09-13",
+        "title": "Will VfL Osnabrück win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "sea",
+    "code": "sea",
+    "name": "Italian Serie A",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/italy/serie-a/standings/",
+    "source_id": "football-data-I1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "AC Monza",
+        "aliases": []
+      },
+      {
+        "name": "Bologna FC 1909",
+        "aliases": []
+      },
+      {
+        "name": "SSC Napoli",
+        "aliases": []
+      },
+      {
+        "name": "US Lecce",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "sea-lec-mon-2026-09-13",
+        "title": "Will AC Monza win on 2026-09-13?"
+      },
+      {
+        "slug": "sea-nap-bol-2026-09-13",
+        "title": "Will Bologna FC 1909 win on 2026-09-13?"
+      },
+      {
+        "slug": "sea-nap-bol-2026-09-13",
+        "title": "Will SSC Napoli win on 2026-09-13?"
+      },
+      {
+        "slug": "sea-lec-mon-2026-09-13",
+        "title": "Will US Lecce win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "gre1",
+    "code": "gre1",
+    "name": "Greek Super League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/greece/super-league/standings/",
+    "source_id": "football-data-G1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "AE Kifisia FC",
+        "aliases": []
+      },
+      {
+        "name": "AEK Athens",
+        "aliases": []
+      },
+      {
+        "name": "APO Levadiakos FC",
+        "aliases": []
+      },
+      {
+        "name": "Aris Thessaloniki",
+        "aliases": []
+      },
+      {
+        "name": "Asteras Tripolis",
+        "aliases": []
+      },
+      {
+        "name": "PAE PS Kalamata",
+        "aliases": []
+      },
+      {
+        "name": "PAOK Thessaloniki",
+        "aliases": []
+      },
+      {
+        "name": "Volos NPS",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "gre1-kif-lev-2026-09-13",
+        "title": "Will AE Kifisia FC win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-ast-aek-2026-09-13",
+        "title": "Will AEK Athens win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-kif-lev-2026-09-13",
+        "title": "Will APO Levadiakos FC win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-paok-aris-2026-09-13",
+        "title": "Will Aris Thessaloniki win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-ast-aek-2026-09-13",
+        "title": "Will Asteras Tripolis win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-kal-vol-2026-09-13",
+        "title": "Will PAE PS Kalamata win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-paok-aris-2026-09-13",
+        "title": "Will PAOK Thessaloniki win on 2026-09-13?"
+      },
+      {
+        "slug": "gre1-kal-vol-2026-09-13",
+        "title": "Will Volos NPS win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "nor",
+    "code": "nor",
+    "name": "Norwegian Eliteserien",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/norway/eliteserien/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Aalesunds FK",
+        "aliases": []
+      },
+      {
+        "name": "Fredrikstad FK",
+        "aliases": []
+      },
+      {
+        "name": "Hamarkameratene",
+        "aliases": []
+      },
+      {
+        "name": "IK Start",
+        "aliases": []
+      },
+      {
+        "name": "KFUM-Kameratene Oslo",
+        "aliases": []
+      },
+      {
+        "name": "Kristiansund BK",
+        "aliases": []
+      },
+      {
+        "name": "Molde FK",
+        "aliases": []
+      },
+      {
+        "name": "SK Brann",
+        "aliases": []
+      },
+      {
+        "name": "Sarpsborg 08 FF",
+        "aliases": []
+      },
+      {
+        "name": "Viking FK",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "nor-kfu-aal-2026-09-13",
+        "title": "Will Aalesunds FK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-ffk-sar-2026-09-13",
+        "title": "Will Fredrikstad FK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-ham-mol-2026-09-13",
+        "title": "Will Hamarkameratene win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-ik-bra-2026-09-13",
+        "title": "Will IK Start win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-kfu-aal-2026-09-13",
+        "title": "Will KFUM-Kameratene Oslo win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-vik-kbk-2026-09-13",
+        "title": "Will Kristiansund BK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-ham-mol-2026-09-13",
+        "title": "Will Molde FK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-ik-bra-2026-09-13",
+        "title": "Will SK Brann win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-ffk-sar-2026-09-13",
+        "title": "Will Sarpsborg 08 FF win on 2026-09-13?"
+      },
+      {
+        "slug": "nor-vik-kbk-2026-09-13",
+        "title": "Will Viking FK win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "den",
+    "code": "den",
+    "name": "Danish Superliga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/denmark/superliga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Aarhus GF",
+        "aliases": []
+      },
+      {
+        "name": "FC Nordsjælland",
+        "aliases": []
+      },
+      {
+        "name": "Lyngby BK",
+        "aliases": []
+      },
+      {
+        "name": "Odense BK",
+        "aliases": []
+      },
+      {
+        "name": "Randers FC",
+        "aliases": []
+      },
+      {
+        "name": "Silkeborg IF",
+        "aliases": []
+      },
+      {
+        "name": "Sønderjyske Fodbold",
+        "aliases": []
+      },
+      {
+        "name": "Viborg FF",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "den-nor-agf-2026-09-13",
+        "title": "Will Aarhus GF win on 2026-09-13?"
+      },
+      {
+        "slug": "den-nor-agf-2026-09-13",
+        "title": "Will FC Nordsjælland win on 2026-09-13?"
+      },
+      {
+        "slug": "den-lyn-sjs-2026-09-13",
+        "title": "Will Lyngby BK win on 2026-09-13?"
+      },
+      {
+        "slug": "den-ran-ode-2026-09-13",
+        "title": "Will Odense BK win on 2026-09-13?"
+      },
+      {
+        "slug": "den-ran-ode-2026-09-13",
+        "title": "Will Randers FC win on 2026-09-13?"
+      },
+      {
+        "slug": "den-sif-vib-2026-09-13",
+        "title": "Will Silkeborg IF win on 2026-09-13?"
+      },
+      {
+        "slug": "den-lyn-sjs-2026-09-13",
+        "title": "Will Sønderjyske Fodbold win on 2026-09-13?"
+      },
+      {
+        "slug": "den-sif-vib-2026-09-13",
+        "title": "Will Viborg FF win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "nor2",
+    "code": "nor2",
+    "name": "Norwegian OBOS-ligaen",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/norway/obos-ligaen/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Aasane Fotball",
+        "aliases": []
+      },
+      {
+        "name": "Egersunds IK",
+        "aliases": []
+      },
+      {
+        "name": "FK Haugesund",
+        "aliases": []
+      },
+      {
+        "name": "Hoedd IL",
+        "aliases": []
+      },
+      {
+        "name": "Kongsvinger IL Toppfotball",
+        "aliases": []
+      },
+      {
+        "name": "Lyn 1896 FK",
+        "aliases": []
+      },
+      {
+        "name": "Moss FK",
+        "aliases": []
+      },
+      {
+        "name": "Odds BK",
+        "aliases": []
+      },
+      {
+        "name": "Ranheim",
+        "aliases": []
+      },
+      {
+        "name": "Raufoss IL",
+        "aliases": []
+      },
+      {
+        "name": "Sandnes Ulf",
+        "aliases": []
+      },
+      {
+        "name": "Sogndal Fotball",
+        "aliases": []
+      },
+      {
+        "name": "Stroemmen IF",
+        "aliases": []
+      },
+      {
+        "name": "Stroemsgodset IF",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "nor2-ran-asa-2026-09-13",
+        "title": "Will Aasane Fotball win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-eik-kil-2026-09-13",
+        "title": "Will Egersunds IK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-mfk-hau-2026-09-13",
+        "title": "Will FK Haugesund win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-hod-lyn-2026-09-13",
+        "title": "Will Hoedd IL win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-eik-kil-2026-09-13",
+        "title": "Will Kongsvinger IL Toppfotball win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-hod-lyn-2026-09-13",
+        "title": "Will Lyn 1896 FK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-mfk-hau-2026-09-13",
+        "title": "Will Moss FK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-rau-odd-2026-09-13",
+        "title": "Will Odds BK win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-ran-asa-2026-09-13",
+        "title": "Will Ranheim win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-rau-odd-2026-09-13",
+        "title": "Will Raufoss IL win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-sif-san-2026-09-13",
+        "title": "Will Sandnes Ulf win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-sog-str-2026-09-13",
+        "title": "Will Sogndal Fotball win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-sog-str-2026-09-13",
+        "title": "Will Stroemmen IF win on 2026-09-13?"
+      },
+      {
+        "slug": "nor2-sif-san-2026-09-13",
+        "title": "Will Stroemsgodset IF win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "spl",
+    "code": "spl",
+    "name": "Saudi Pro League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/saudi-arabia/saudi-professional-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Abha Saudi Club",
+        "aliases": []
+      },
+      {
+        "name": "Al Diraiyah Saudi Club",
+        "aliases": []
+      },
+      {
+        "name": "Al Fateh Saudi Club",
+        "aliases": []
+      },
+      {
+        "name": "Al Kholood Saudi Club",
+        "aliases": []
+      },
+      {
+        "name": "Al Riyadh Saudi Club",
+        "aliases": []
+      },
+      {
+        "name": "NEOM SC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "spl-dir-abh-2026-09-13",
+        "title": "Will Abha Saudi Club win on 2026-09-13?"
+      },
+      {
+        "slug": "spl-dir-abh-2026-09-13",
+        "title": "Will Al Diraiyah Saudi Club win on 2026-09-13?"
+      },
+      {
+        "slug": "spl-neo-fat-2026-09-13",
+        "title": "Will Al Fateh Saudi Club win on 2026-09-13?"
+      },
+      {
+        "slug": "spl-riy-kho-2026-09-13",
+        "title": "Will Al Kholood Saudi Club win on 2026-09-13?"
+      },
+      {
+        "slug": "spl-riy-kho-2026-09-13",
+        "title": "Will Al Riyadh Saudi Club win on 2026-09-13?"
+      },
+      {
+        "slug": "spl-neo-fat-2026-09-13",
+        "title": "Will NEOM SC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "ja2",
+    "code": "ja2",
+    "name": "Japanese J2 League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/japan/j2-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Albirex Niigata",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "ja2-alb-mon-2026-09-13",
+        "title": "Will Albirex Niigata win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "slo",
+    "code": "slo",
+    "name": "Slovenian PrvaLiga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/slovenia/prva-liga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Aluminij Kidricevo",
+        "aliases": []
+      },
+      {
+        "name": "Mura Murska Sobota",
+        "aliases": []
+      },
+      {
+        "name": "NK Maribor",
+        "aliases": []
+      },
+      {
+        "name": "NK Radomlje",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "slo-mur-alu-2026-09-13",
+        "title": "Will Aluminij Kidricevo win on 2026-09-13?"
+      },
+      {
+        "slug": "slo-mur-alu-2026-09-13",
+        "title": "Will Mura Murska Sobota win on 2026-09-13?"
+      },
+      {
+        "slug": "slo-rad-nkm-2026-09-13",
+        "title": "Will NK Maribor win on 2026-09-13?"
+      },
+      {
+        "slug": "slo-rad-nkm-2026-09-13",
+        "title": "Will NK Radomlje win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "tur",
+    "code": "tur",
+    "name": "Turkish Super Lig",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/turkey/super-lig/standings/",
+    "source_id": "football-data-T1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Amed Sportif",
+        "aliases": []
+      },
+      {
+        "name": "Galatasaray SK",
+        "aliases": []
+      },
+      {
+        "name": "Gençlerbirliği SK",
+        "aliases": []
+      },
+      {
+        "name": "Kasımpaşa SK",
+        "aliases": []
+      },
+      {
+        "name": "Kocaelispor",
+        "aliases": []
+      },
+      {
+        "name": "Rams Başakşehir FK",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "tur-ame-iba-2026-09-13",
+        "title": "Will Amed Sportif win on 2026-09-13?"
+      },
+      {
+        "slug": "tur-gal-koc-2026-09-13",
+        "title": "Will Galatasaray SK win on 2026-09-13?"
+      },
+      {
+        "slug": "tur-gen-kas-2026-09-13",
+        "title": "Will Gençlerbirliği SK win on 2026-09-13?"
+      },
+      {
+        "slug": "tur-gen-kas-2026-09-13",
+        "title": "Will Kasımpaşa SK win on 2026-09-13?"
+      },
+      {
+        "slug": "tur-gal-koc-2026-09-13",
+        "title": "Will Kocaelispor win on 2026-09-13?"
+      },
+      {
+        "slug": "tur-ame-iba-2026-09-13",
+        "title": "Will Rams Başakşehir FK win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "aze1",
+    "code": "aze1",
+    "name": "Azerbaijan Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/azerbaijan/premier-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Araz Nakhchivan PFK",
+        "aliases": []
+      },
+      {
+        "name": "Qarabag FK",
+        "aliases": []
+      },
+      {
+        "name": "Turan Tovuz",
+        "aliases": []
+      },
+      {
+        "name": "Zira FK",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "aze1-pfk-tto-2026-09-13",
+        "title": "Will Araz Nakhchivan PFK win on 2026-09-13?"
+      },
+      {
+        "slug": "aze1-zir-qar-2026-09-13",
+        "title": "Will Qarabag FK win on 2026-09-13?"
+      },
+      {
+        "slug": "aze1-pfk-tto-2026-09-13",
+        "title": "Will Turan Tovuz win on 2026-09-13?"
+      },
+      {
+        "slug": "aze1-zir-qar-2026-09-13",
+        "title": "Will Zira FK win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "wsl",
+    "code": "wsl",
+    "name": "English Women's Super League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/england/wsl/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Arsenal WFC",
+        "aliases": []
+      },
+      {
+        "name": "Aston Villa WFC",
+        "aliases": []
+      },
+      {
+        "name": "Birmingham City WFC",
+        "aliases": []
+      },
+      {
+        "name": "Brighton and Hove Albion WFC",
+        "aliases": []
+      },
+      {
+        "name": "Charlton Athletic",
+        "aliases": []
+      },
+      {
+        "name": "Chelsea FC",
+        "aliases": []
+      },
+      {
+        "name": "Crystal Palace",
+        "aliases": []
+      },
+      {
+        "name": "Everton FC",
+        "aliases": []
+      },
+      {
+        "name": "Liverpool LFC",
+        "aliases": []
+      },
+      {
+        "name": "Manchester City WFC",
+        "aliases": []
+      },
+      {
+        "name": "Tottenham Hotspur FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "wsl-ars-cry-2026-09-13",
+        "title": "Will Arsenal WFC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-avl-mci-2026-09-13",
+        "title": "Will Aston Villa WFC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-brm-brh-2026-09-13",
+        "title": "Will Birmingham City WFC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-brm-brh-2026-09-13",
+        "title": "Will Brighton and Hove Albion WFC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-eve-cha-2026-09-13",
+        "title": "Will Charlton Athletic win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-mnu-cfc-2026-09-13",
+        "title": "Will Chelsea FC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-ars-cry-2026-09-13",
+        "title": "Will Crystal Palace win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-eve-cha-2026-09-13",
+        "title": "Will Everton FC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-lfc-tot-2026-09-13",
+        "title": "Will Liverpool LFC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-avl-mci-2026-09-13",
+        "title": "Will Manchester City WFC win on 2026-09-13?"
+      },
+      {
+        "slug": "wsl-lfc-tot-2026-09-13",
+        "title": "Will Tottenham Hotspur FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "gtm",
+    "code": "gtm",
+    "name": "Guatemala Liga Nacional",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/guatemala/liga-nacional/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Aurora FC",
+        "aliases": []
+      },
+      {
+        "name": "CSD Mixco",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "gtm-mix-aur-2026-09-13",
+        "title": "Will Aurora FC win on 2026-09-13?"
+      },
+      {
+        "slug": "gtm-mix-aur-2026-09-13",
+        "title": "Will CSD Mixco win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "aut",
+    "code": "aut",
+    "name": "Austrian Bundesliga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/austria/bundesliga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Austria Lustenau",
+        "aliases": []
+      },
+      {
+        "name": "FK Austria Wien",
+        "aliases": []
+      },
+      {
+        "name": "LASK Linz",
+        "aliases": []
+      },
+      {
+        "name": "SK Sturm Graz",
+        "aliases": []
+      },
+      {
+        "name": "TSV Hartberg",
+        "aliases": []
+      },
+      {
+        "name": "WSG Tirol",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "aut-fak-alu-2026-09-13",
+        "title": "Will Austria Lustenau win on 2026-09-13?"
+      },
+      {
+        "slug": "aut-fak-alu-2026-09-13",
+        "title": "Will FK Austria Wien win on 2026-09-13?"
+      },
+      {
+        "slug": "aut-stu-ask-2026-09-13",
+        "title": "Will LASK Linz win on 2026-09-13?"
+      },
+      {
+        "slug": "aut-stu-ask-2026-09-13",
+        "title": "Will SK Sturm Graz win on 2026-09-13?"
+      },
+      {
+        "slug": "aut-wsg-htb-2026-09-13",
+        "title": "Will TSV Hartberg win on 2026-09-13?"
+      },
+      {
+        "slug": "aut-wsg-htb-2026-09-13",
+        "title": "Will WSG Tirol win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "nwsl",
+    "code": "nwsl",
+    "name": "National Women's Soccer League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/usa/nwsl-women/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Boston Legacy FC",
+        "aliases": []
+      },
+      {
+        "name": "Washington Spirit",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "nwsl-spi-bos-2026-09-13",
+        "title": "Will Boston Legacy FC win on 2026-09-13?"
+      },
+      {
+        "slug": "nwsl-spi-bos-2026-09-13",
+        "title": "Will Washington Spirit win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "bul",
+    "code": "bul",
+    "name": "Bulgarian First League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/bulgaria/parva-liga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Botev Plovdiv",
+        "aliases": []
+      },
+      {
+        "name": "FK Spartak 1918 Varna",
+        "aliases": []
+      },
+      {
+        "name": "PFC Levski Sofia",
+        "aliases": []
+      },
+      {
+        "name": "PFC Lokomotiv Plovdiv",
+        "aliases": []
+      },
+      {
+        "name": "PFC Slavia Sofia",
+        "aliases": []
+      },
+      {
+        "name": "POFC Botev Vratsa",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "bul-bot-lok-2026-09-13",
+        "title": "Will Botev Plovdiv win on 2026-09-13?"
+      },
+      {
+        "slug": "bul-sla-var-2026-09-13",
+        "title": "Will FK Spartak 1918 Varna win on 2026-09-13?"
+      },
+      {
+        "slug": "bul-bvr-lev-2026-09-13",
+        "title": "Will PFC Levski Sofia win on 2026-09-13?"
+      },
+      {
+        "slug": "bul-bot-lok-2026-09-13",
+        "title": "Will PFC Lokomotiv Plovdiv win on 2026-09-13?"
+      },
+      {
+        "slug": "bul-sla-var-2026-09-13",
+        "title": "Will PFC Slavia Sofia win on 2026-09-13?"
+      },
+      {
+        "slug": "bul-bvr-lev-2026-09-13",
+        "title": "Will POFC Botev Vratsa win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "epl",
+    "code": "epl",
+    "name": "English Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/england/premier-league/standings/",
+    "source_id": "football-data-E0",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Brighton & Hove Albion FC",
+        "aliases": []
+      },
+      {
+        "name": "Coventry City FC",
+        "aliases": []
+      },
+      {
+        "name": "Manchester City FC",
+        "aliases": []
+      },
+      {
+        "name": "Manchester United FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "epl-cov-bri-2026-09-13",
+        "title": "Will Brighton & Hove Albion FC win on 2026-09-13?"
+      },
+      {
+        "slug": "epl-cov-bri-2026-09-13",
+        "title": "Will Coventry City FC win on 2026-09-13?"
+      },
+      {
+        "slug": "epl-mun-mac-2026-09-13",
+        "title": "Will Manchester City FC win on 2026-09-13?"
+      },
+      {
+        "slug": "epl-mun-mac-2026-09-13",
+        "title": "Will Manchester United FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "tur2",
+    "code": "tur2",
+    "name": "Turkish 1. Lig",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/turkey/1-lig/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Bursaspor",
+        "aliases": []
+      },
+      {
+        "name": "Esenler Erokspor",
+        "aliases": []
+      },
+      {
+        "name": "Fatih Karagumruk Istanbul",
+        "aliases": []
+      },
+      {
+        "name": "Igdir FK",
+        "aliases": []
+      },
+      {
+        "name": "Manisa Futbol Kulubu",
+        "aliases": []
+      },
+      {
+        "name": "Mardin 1969 Spor",
+        "aliases": []
+      },
+      {
+        "name": "Muglaspor",
+        "aliases": []
+      },
+      {
+        "name": "Sivasspor",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "tur2-bur-ese-2026-09-13",
+        "title": "Will Bursaspor win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-bur-ese-2026-09-13",
+        "title": "Will Esenler Erokspor win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-kar-man-2026-09-13",
+        "title": "Will Fatih Karagumruk Istanbul win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-igd-mar-2026-09-13",
+        "title": "Will Igdir FK win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-kar-man-2026-09-13",
+        "title": "Will Manisa Futbol Kulubu win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-igd-mar-2026-09-13",
+        "title": "Will Mardin 1969 Spor win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-siv-mug-2026-09-13",
+        "title": "Will Muglaspor win on 2026-09-13?"
+      },
+      {
+        "slug": "tur2-siv-mug-2026-09-13",
+        "title": "Will Sivasspor win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "kor2",
+    "code": "kor2",
+    "name": "South Korean K League 2",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/south-korea/k-league-2/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Busan IPark",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "kor2-bus-gim-2026-09-13",
+        "title": "Will Busan IPark win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "arg",
+    "code": "arg",
+    "name": "Argentina Liga Profesional",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/argentina/liga-profesional/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CA Belgrano",
+        "aliases": []
+      },
+      {
+        "name": "CA Rosario Central",
+        "aliases": []
+      },
+      {
+        "name": "CA Sarmiento",
+        "aliases": []
+      },
+      {
+        "name": "CA Tigre",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "arg-cas-bel-2026-09-13",
+        "title": "Will CA Belgrano win on 2026-09-13?"
+      },
+      {
+        "slug": "arg-tig-ros-2026-09-13",
+        "title": "Will CA Rosario Central win on 2026-09-13?"
+      },
+      {
+        "slug": "arg-cas-bel-2026-09-13",
+        "title": "Will CA Sarmiento win on 2026-09-13?"
+      },
+      {
+        "slug": "arg-tig-ros-2026-09-13",
+        "title": "Will CA Tigre win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "uru1",
+    "code": "uru1",
+    "name": "Uruguayan Primera Division",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/uruguay/primera-division/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CA Cerro",
+        "aliases": []
+      },
+      {
+        "name": "CA Juventud de Las Piedras",
+        "aliases": []
+      },
+      {
+        "name": "CA Progreso",
+        "aliases": []
+      },
+      {
+        "name": "Danubio FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "uru1-pro-cer-2026-09-13",
+        "title": "Will CA Cerro win on 2026-09-13?"
+      },
+      {
+        "slug": "uru1-juv-dan-2026-09-13",
+        "title": "Will CA Juventud de Las Piedras win on 2026-09-13?"
+      },
+      {
+        "slug": "uru1-pro-cer-2026-09-13",
+        "title": "Will CA Progreso win on 2026-09-13?"
+      },
+      {
+        "slug": "uru1-juv-dan-2026-09-13",
+        "title": "Will Danubio FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "argpn",
+    "code": "argpn",
+    "name": "Argentina Primera Nacional",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/argentina/primera-nacional/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CA San Miguel",
+        "aliases": []
+      },
+      {
+        "name": "Club Atletico Los Andes",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "argpn-ala-casm-2026-09-13",
+        "title": "Will CA San Miguel win on 2026-09-13?"
+      },
+      {
+        "slug": "argpn-ala-casm-2026-09-13",
+        "title": "Will Club Atletico Los Andes win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "es2",
+    "code": "es2",
+    "name": "Spanish Segunda Division",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/spain/laliga2/standings/",
+    "source_id": "football-data-SP2",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CD Eldense",
+        "aliases": []
+      },
+      {
+        "name": "CE Sabadell FC",
+        "aliases": []
+      },
+      {
+        "name": "RCD Mallorca",
+        "aliases": []
+      },
+      {
+        "name": "Real Oviedo",
+        "aliases": []
+      },
+      {
+        "name": "Real Sporting de Gijón",
+        "aliases": []
+      },
+      {
+        "name": "Real Valladolid CF",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "es2-spo-eld-2026-09-13",
+        "title": "Will CD Eldense win on 2026-09-13?"
+      },
+      {
+        "slug": "es2-rm-sab-2026-09-13",
+        "title": "Will CE Sabadell FC win on 2026-09-13?"
+      },
+      {
+        "slug": "es2-rm-sab-2026-09-13",
+        "title": "Will RCD Mallorca win on 2026-09-13?"
+      },
+      {
+        "slug": "es2-vld-ovi-2026-09-13",
+        "title": "Will Real Oviedo win on 2026-09-13?"
+      },
+      {
+        "slug": "es2-spo-eld-2026-09-13",
+        "title": "Will Real Sporting de Gijón win on 2026-09-13?"
+      },
+      {
+        "slug": "es2-vld-ovi-2026-09-13",
+        "title": "Will Real Valladolid CF win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "per1",
+    "code": "per1",
+    "name": "Peruvian Liga 1",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/peru/liga-1/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CD Garcilaso",
+        "aliases": []
+      },
+      {
+        "name": "CD Moquegua",
+        "aliases": []
+      },
+      {
+        "name": "CS Cristal",
+        "aliases": []
+      },
+      {
+        "name": "Sport Boys Association",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "per1-sba-cdg-2026-09-13",
+        "title": "Will CD Garcilaso win on 2026-09-13?"
+      },
+      {
+        "slug": "per1-cdm-csc-2026-09-12",
+        "title": "Will CD Moquegua win on 2026-09-12?"
+      },
+      {
+        "slug": "per1-cdm-csc-2026-09-12",
+        "title": "Will CS Cristal win on 2026-09-12?"
+      },
+      {
+        "slug": "per1-sba-cdg-2026-09-13",
+        "title": "Will Sport Boys Association win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "chi1",
+    "code": "chi1",
+    "name": "Chilean Primera Division",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/chile/liga-de-primera/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CD La Serena",
+        "aliases": []
+      },
+      {
+        "name": "CF Universidad de Chile",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "chi1-cls-cud-2026-09-13",
+        "title": "Will CD La Serena win on 2026-09-13?"
+      },
+      {
+        "slug": "chi1-cls-cud-2026-09-13",
+        "title": "Will CF Universidad de Chile win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "por",
+    "code": "por",
+    "name": "Portuguese Primeira Liga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/portugal/liga-portugal/standings/",
+    "source_id": "football-data-P1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CD Santa Clara",
+        "aliases": []
+      },
+      {
+        "name": "FC Arouca",
+        "aliases": []
+      },
+      {
+        "name": "Gil Vicente FC",
+        "aliases": []
+      },
+      {
+        "name": "Sport Lisboa e Benfica",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "por-aro-cds-2026-09-13",
+        "title": "Will CD Santa Clara win on 2026-09-13?"
+      },
+      {
+        "slug": "por-aro-cds-2026-09-13",
+        "title": "Will FC Arouca win on 2026-09-13?"
+      },
+      {
+        "slug": "por-ben-gil-2026-09-13",
+        "title": "Will Gil Vicente FC win on 2026-09-13?"
+      },
+      {
+        "slug": "por-ben-gil-2026-09-13",
+        "title": "Will Sport Lisboa e Benfica win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "ecu1",
+    "code": "ecu1",
+    "name": "Ecuador LigaPro",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/ecuador/liga-pro/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "CD Tecnico Universitario",
+        "aliases": []
+      },
+      {
+        "name": "Leones Futbol Club",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "ecu1-leo-tec-2026-09-13",
+        "title": "Will CD Tecnico Universitario win on 2026-09-13?"
+      },
+      {
+        "slug": "ecu1-leo-tec-2026-09-13",
+        "title": "Will Leones Futbol Club win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "sclc",
+    "code": "sclc",
+    "name": "Scottish League Cup",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/scotland/league-cup/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Celtic Glasgow",
+        "aliases": []
+      },
+      {
+        "name": "Glasgow Rangers",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "sclc-rfc-cel-2026-09-13",
+        "title": "Will Celtic Glasgow win on 2026-09-13?"
+      },
+      {
+        "slug": "sclc-rfc-cel-2026-09-13",
+        "title": "Will Glasgow Rangers win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "u20wwc",
+    "code": "u20wwc",
+    "name": "FIFA U-20 Women's World Cup",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/world/world-cup-women-u20/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "China PR",
+        "aliases": []
+      },
+      {
+        "name": "Colombia",
+        "aliases": []
+      },
+      {
+        "name": "Costa Rica",
+        "aliases": []
+      },
+      {
+        "name": "DPR Korea",
+        "aliases": []
+      },
+      {
+        "name": "Nigeria",
+        "aliases": []
+      },
+      {
+        "name": "Portugal U20",
+        "aliases": []
+      },
+      {
+        "name": "Spain",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "u20wwc-chn-esp-2026-09-13",
+        "title": "Will China PR win on 2026-09-13?"
+      },
+      {
+        "slug": "u20wwc-col-dpr-2026-09-13",
+        "title": "Will Colombia win on 2026-09-13?"
+      },
+      {
+        "slug": "u20wwc-por-crc-2026-09-13",
+        "title": "Will Costa Rica win on 2026-09-13?"
+      },
+      {
+        "slug": "u20wwc-col-dpr-2026-09-13",
+        "title": "Will DPR Korea win on 2026-09-13?"
+      },
+      {
+        "slug": "u20wwc-ngr-new-2026-09-13",
+        "title": "Will Nigeria win on 2026-09-13?"
+      },
+      {
+        "slug": "u20wwc-por-crc-2026-09-13",
+        "title": "Will Portugal U20 win on 2026-09-13?"
+      },
+      {
+        "slug": "u20wwc-chn-esp-2026-09-13",
+        "title": "Will Spain win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "tha1",
+    "code": "tha1",
+    "name": "Thai League 1",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/thailand/thai-league-1/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Chonburi FC",
+        "aliases": []
+      },
+      {
+        "name": "Prachuap FC",
+        "aliases": []
+      },
+      {
+        "name": "Rayong FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "tha1-cho-ray-2026-09-13",
+        "title": "Will Chonburi FC win on 2026-09-13?"
+      },
+      {
+        "slug": "tha1-pra-suk-2026-09-13",
+        "title": "Will Prachuap FC win on 2026-09-13?"
+      },
+      {
+        "slug": "tha1-cho-ray-2026-09-13",
+        "title": "Will Rayong FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "bel1",
+    "code": "bel1",
+    "name": "Belgian Pro League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/belgium/jupiler-pro-league/standings/",
+    "source_id": "football-data-B1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Club Brugge",
+        "aliases": []
+      },
+      {
+        "name": "KAA Gent",
+        "aliases": []
+      },
+      {
+        "name": "KRC Genk",
+        "aliases": []
+      },
+      {
+        "name": "KV Kortrijk",
+        "aliases": []
+      },
+      {
+        "name": "RAAL La Louviere",
+        "aliases": []
+      },
+      {
+        "name": "Royal Antwerp FC",
+        "aliases": []
+      },
+      {
+        "name": "Royal Charleroi SC",
+        "aliases": []
+      },
+      {
+        "name": "SV Zulte Waregem",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "bel1-bru-rafc-2026-09-13",
+        "title": "Will Club Brugge win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-gen-kaa-2026-09-13",
+        "title": "Will KAA Gent win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-gen-kaa-2026-09-13",
+        "title": "Will KRC Genk win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-raal-kor-2026-09-13",
+        "title": "Will KV Kortrijk win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-raal-kor-2026-09-13",
+        "title": "Will RAAL La Louviere win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-bru-rafc-2026-09-13",
+        "title": "Will Royal Antwerp FC win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-zul-rch-2026-09-13",
+        "title": "Will Royal Charleroi SC win on 2026-09-13?"
+      },
+      {
+        "slug": "bel1-zul-rch-2026-09-13",
+        "title": "Will SV Zulte Waregem win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "bel2",
+    "code": "bel2",
+    "name": "Belgian Challenger Pro League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/belgium/challenger-pro-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Club NXT",
+        "aliases": []
+      },
+      {
+        "name": "KAS Eupen",
+        "aliases": []
+      },
+      {
+        "name": "Patro Eisden Maasmechelen",
+        "aliases": []
+      },
+      {
+        "name": "RFC Liege",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "bel2-rfcl-nxt-2026-09-13",
+        "title": "Will Club NXT win on 2026-09-13?"
+      },
+      {
+        "slug": "bel2-pma-eup-2026-09-13",
+        "title": "Will KAS Eupen win on 2026-09-13?"
+      },
+      {
+        "slug": "bel2-pma-eup-2026-09-13",
+        "title": "Will Patro Eisden Maasmechelen win on 2026-09-13?"
+      },
+      {
+        "slug": "bel2-rfcl-nxt-2026-09-13",
+        "title": "Will RFC Liege win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "chl2",
+    "code": "chl2",
+    "name": "Chilean Primera B",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/chile/primera-b/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Curico Unido",
+        "aliases": []
+      },
+      {
+        "name": "Deportes Magallanes",
+        "aliases": []
+      },
+      {
+        "name": "Puerto Montt",
+        "aliases": []
+      },
+      {
+        "name": "San Marcos de Arica",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "chl2-sma-cur-2026-09-13",
+        "title": "Will Curico Unido win on 2026-09-13?"
+      },
+      {
+        "slug": "chl2-mag-pum-2026-09-13",
+        "title": "Will Deportes Magallanes win on 2026-09-13?"
+      },
+      {
+        "slug": "chl2-mag-pum-2026-09-13",
+        "title": "Will Puerto Montt win on 2026-09-13?"
+      },
+      {
+        "slug": "chl2-sma-cur-2026-09-13",
+        "title": "Will San Marcos de Arica win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "fl1",
+    "code": "fl1",
+    "name": "French Ligue 1",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/france/ligue-1/standings/",
+    "source_id": "football-data-F1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "ES Troyes AC",
+        "aliases": []
+      },
+      {
+        "name": "Le Mans FC",
+        "aliases": []
+      },
+      {
+        "name": "Lille OSC",
+        "aliases": []
+      },
+      {
+        "name": "Racing Club de Lens",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "fl1-lil-tro-2026-09-13",
+        "title": "Will ES Troyes AC win on 2026-09-13?"
+      },
+      {
+        "slug": "fl1-lmf-rcl-2026-09-13",
+        "title": "Will Le Mans FC win on 2026-09-13?"
+      },
+      {
+        "slug": "fl1-lil-tro-2026-09-13",
+        "title": "Will Lille OSC win on 2026-09-13?"
+      },
+      {
+        "slug": "fl1-lmf-rcl-2026-09-13",
+        "title": "Will Racing Club de Lens win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "ltu1",
+    "code": "ltu1",
+    "name": "Lithuanian A Lyga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/lithuania/a-lyga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FA Siauliai",
+        "aliases": []
+      },
+      {
+        "name": "FC Hegelmann Kaunas",
+        "aliases": []
+      },
+      {
+        "name": "FK Kauno Zalgiris",
+        "aliases": []
+      },
+      {
+        "name": "FK Panevezys",
+        "aliases": []
+      },
+      {
+        "name": "FK Suduva Marijampole",
+        "aliases": []
+      },
+      {
+        "name": "Vilnius FK Zalgiris",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "ltu1-sia-heg-2026-09-13",
+        "title": "Will FA Siauliai win on 2026-09-13?"
+      },
+      {
+        "slug": "ltu1-sia-heg-2026-09-13",
+        "title": "Will FC Hegelmann Kaunas win on 2026-09-13?"
+      },
+      {
+        "slug": "ltu1-fkp-kaz-2026-09-13",
+        "title": "Will FK Kauno Zalgiris win on 2026-09-13?"
+      },
+      {
+        "slug": "ltu1-fkp-kaz-2026-09-13",
+        "title": "Will FK Panevezys win on 2026-09-13?"
+      },
+      {
+        "slug": "ltu1-sud-zal-2026-09-13",
+        "title": "Will FK Suduva Marijampole win on 2026-09-13?"
+      },
+      {
+        "slug": "ltu1-sud-zal-2026-09-13",
+        "title": "Will Vilnius FK Zalgiris win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "kaz1",
+    "code": "kaz1",
+    "name": "Kazakhstan Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/kazakhstan/premier-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Altai Oskemen",
+        "aliases": []
+      },
+      {
+        "name": "FC Irtysh Pavlodar",
+        "aliases": []
+      },
+      {
+        "name": "FC Kairat Almaty",
+        "aliases": []
+      },
+      {
+        "name": "Tobol Kostanay",
+        "aliases": []
+      },
+      {
+        "name": "Ulytau FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "kaz1-uly-alt-2026-09-13",
+        "title": "Will FC Altai Oskemen win on 2026-09-13?"
+      },
+      {
+        "slug": "kaz1-irt-okz-2026-09-13",
+        "title": "Will FC Irtysh Pavlodar win on 2026-09-13?"
+      },
+      {
+        "slug": "kaz1-alm-tob-2026-09-13",
+        "title": "Will FC Kairat Almaty win on 2026-09-13?"
+      },
+      {
+        "slug": "kaz1-alm-tob-2026-09-13",
+        "title": "Will Tobol Kostanay win on 2026-09-13?"
+      },
+      {
+        "slug": "kaz1-uly-alt-2026-09-13",
+        "title": "Will Ulytau FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "rou1",
+    "code": "rou1",
+    "name": "Romanian SuperLiga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/romania/superliga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Argeș Pitești",
+        "aliases": []
+      },
+      {
+        "name": "FC Botoşani",
+        "aliases": []
+      },
+      {
+        "name": "FC Corvinul 1921 Hunedoara",
+        "aliases": []
+      },
+      {
+        "name": "Universitatea Craiova CS",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "rou1-fap-fcb-2026-09-13",
+        "title": "Will FC Argeș Pitești win on 2026-09-13?"
+      },
+      {
+        "slug": "rou1-fap-fcb-2026-09-13",
+        "title": "Will FC Botoşani win on 2026-09-13?"
+      },
+      {
+        "slug": "rou1-cor-ucc-2026-09-13",
+        "title": "Will FC Corvinul 1921 Hunedoara win on 2026-09-13?"
+      },
+      {
+        "slug": "rou1-cor-ucc-2026-09-13",
+        "title": "Will Universitatea Craiova CS win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "lal",
+    "code": "lal",
+    "name": "Spanish LaLiga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/spain/laliga/standings/",
+    "source_id": "football-data-SP1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Barcelona",
+        "aliases": []
+      },
+      {
+        "name": "Getafe CF",
+        "aliases": []
+      },
+      {
+        "name": "Levante UD",
+        "aliases": []
+      },
+      {
+        "name": "Málaga CF",
+        "aliases": []
+      },
+      {
+        "name": "RC Celta de Vigo",
+        "aliases": []
+      },
+      {
+        "name": "RC Deportivo A Coruña",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "lal-lev-bar-2026-09-13",
+        "title": "Will FC Barcelona win on 2026-09-13?"
+      },
+      {
+        "slug": "lal-get-dep-2026-09-13",
+        "title": "Will Getafe CF win on 2026-09-13?"
+      },
+      {
+        "slug": "lal-lev-bar-2026-09-13",
+        "title": "Will Levante UD win on 2026-09-13?"
+      },
+      {
+        "slug": "lal-cel-mala-2026-09-13",
+        "title": "Will Málaga CF win on 2026-09-13?"
+      },
+      {
+        "slug": "lal-cel-mala-2026-09-13",
+        "title": "Will RC Celta de Vigo win on 2026-09-13?"
+      },
+      {
+        "slug": "lal-get-dep-2026-09-13",
+        "title": "Will RC Deportivo A Coruña win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "sui",
+    "code": "sui",
+    "name": "Swiss Super League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/switzerland/super-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Basel 1893",
+        "aliases": []
+      },
+      {
+        "name": "FC Luzern",
+        "aliases": []
+      },
+      {
+        "name": "FC Vaduz",
+        "aliases": []
+      },
+      {
+        "name": "FC Zurich",
+        "aliases": []
+      },
+      {
+        "name": "Lausanne-Sport",
+        "aliases": []
+      },
+      {
+        "name": "Servette Geneva",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "sui-luz-fcb-2026-09-13",
+        "title": "Will FC Basel 1893 win on 2026-09-13?"
+      },
+      {
+        "slug": "sui-luz-fcb-2026-09-13",
+        "title": "Will FC Luzern win on 2026-09-13?"
+      },
+      {
+        "slug": "sui-fcz-vad-2026-09-13",
+        "title": "Will FC Vaduz win on 2026-09-13?"
+      },
+      {
+        "slug": "sui-fcz-vad-2026-09-13",
+        "title": "Will FC Zurich win on 2026-09-13?"
+      },
+      {
+        "slug": "sui-lau-ser-2026-09-13",
+        "title": "Will Lausanne-Sport win on 2026-09-13?"
+      },
+      {
+        "slug": "sui-lau-ser-2026-09-13",
+        "title": "Will Servette Geneva win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "bun",
+    "code": "bun",
+    "name": "German Bundesliga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/germany/bundesliga/standings/",
+    "source_id": "football-data-D1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Bayern München",
+        "aliases": []
+      },
+      {
+        "name": "Hamburger SV",
+        "aliases": []
+      },
+      {
+        "name": "RB Leipzig",
+        "aliases": []
+      },
+      {
+        "name": "SV 07 Elversberg",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "bun-elv-bay-2026-09-13",
+        "title": "Will FC Bayern München win on 2026-09-13?"
+      },
+      {
+        "slug": "bun-lei-hsv-2026-09-13",
+        "title": "Will Hamburger SV win on 2026-09-13?"
+      },
+      {
+        "slug": "bun-lei-hsv-2026-09-13",
+        "title": "Will RB Leipzig win on 2026-09-13?"
+      },
+      {
+        "slug": "bun-elv-bay-2026-09-13",
+        "title": "Will SV 07 Elversberg win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "ned2",
+    "code": "ned2",
+    "name": "Dutch Eerste Divisie",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/netherlands/eerste-divisie/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Den Bosch",
+        "aliases": []
+      },
+      {
+        "name": "FC Volendam",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "ned2-vol-dbo-2026-09-13",
+        "title": "Will FC Den Bosch win on 2026-09-13?"
+      },
+      {
+        "slug": "ned2-vol-dbo-2026-09-13",
+        "title": "Will FC Volendam win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "cze1",
+    "code": "cze1",
+    "name": "Czech First League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/czech-republic/chance-liga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Hradec Králové",
+        "aliases": []
+      },
+      {
+        "name": "FC Viktoria Plzeň",
+        "aliases": []
+      },
+      {
+        "name": "FC Zlín",
+        "aliases": []
+      },
+      {
+        "name": "FK Pardubice",
+        "aliases": []
+      },
+      {
+        "name": "FK Teplice",
+        "aliases": []
+      },
+      {
+        "name": "SK Sigma Olomouc",
+        "aliases": []
+      },
+      {
+        "name": "SK Slavia Praha",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "cze1-fcz-fhk-2026-09-13",
+        "title": "Will FC Hradec Králové win on 2026-09-13?"
+      },
+      {
+        "slug": "cze1-fvp-sso-2026-09-13",
+        "title": "Will FC Viktoria Plzeň win on 2026-09-13?"
+      },
+      {
+        "slug": "cze1-fcz-fhk-2026-09-13",
+        "title": "Will FC Zlín win on 2026-09-13?"
+      },
+      {
+        "slug": "cze1-fbo-fkp-2026-09-13",
+        "title": "Will FK Pardubice win on 2026-09-13?"
+      },
+      {
+        "slug": "cze1-fkt-ssp-2026-09-13",
+        "title": "Will FK Teplice win on 2026-09-13?"
+      },
+      {
+        "slug": "cze1-fvp-sso-2026-09-13",
+        "title": "Will SK Sigma Olomouc win on 2026-09-13?"
+      },
+      {
+        "slug": "cze1-fkt-ssp-2026-09-13",
+        "title": "Will SK Slavia Praha win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "est1",
+    "code": "est1",
+    "name": "Estonian Meistriliiga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/estonia/meistriliiga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Kuressaare",
+        "aliases": []
+      },
+      {
+        "name": "Harju JK Laagri",
+        "aliases": []
+      },
+      {
+        "name": "Paide Linnameeskond",
+        "aliases": []
+      },
+      {
+        "name": "Tartu JK Tammeka",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "est1-kur-tar-2026-09-13",
+        "title": "Will FC Kuressaare win on 2026-09-13?"
+      },
+      {
+        "slug": "est1-pai-har-2026-09-13",
+        "title": "Will Harju JK Laagri win on 2026-09-13?"
+      },
+      {
+        "slug": "est1-pai-har-2026-09-13",
+        "title": "Will Paide Linnameeskond win on 2026-09-13?"
+      },
+      {
+        "slug": "est1-kur-tar-2026-09-13",
+        "title": "Will Tartu JK Tammeka win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "lva1",
+    "code": "lva1",
+    "name": "Latvian Virsliga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/latvia/virsliga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC RFS",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "lva1-bfc-rfs-2026-09-13",
+        "title": "Will FC RFS win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "ere",
+    "code": "ere",
+    "name": "Dutch Eredivisie",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/netherlands/eredivisie/standings/",
+    "source_id": "football-data-N1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FC Utrecht",
+        "aliases": []
+      },
+      {
+        "name": "Feyenoord Rotterdam",
+        "aliases": []
+      },
+      {
+        "name": "PEC Zwolle",
+        "aliases": []
+      },
+      {
+        "name": "PSV",
+        "aliases": []
+      },
+      {
+        "name": "SC Heerenveen",
+        "aliases": []
+      },
+      {
+        "name": "Sparta Rotterdam",
+        "aliases": []
+      },
+      {
+        "name": "Telstar 1963",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "ere-exc-utr-2026-09-13",
+        "title": "Will FC Utrecht win on 2026-09-13?"
+      },
+      {
+        "slug": "ere-zwo-fey-2026-09-13",
+        "title": "Will Feyenoord Rotterdam win on 2026-09-13?"
+      },
+      {
+        "slug": "ere-zwo-fey-2026-09-13",
+        "title": "Will PEC Zwolle win on 2026-09-13?"
+      },
+      {
+        "slug": "ere-psv-spa-2026-09-13",
+        "title": "Will PSV win on 2026-09-13?"
+      },
+      {
+        "slug": "ere-her1-tel-2026-09-13",
+        "title": "Will SC Heerenveen win on 2026-09-13?"
+      },
+      {
+        "slug": "ere-psv-spa-2026-09-13",
+        "title": "Will Sparta Rotterdam win on 2026-09-13?"
+      },
+      {
+        "slug": "ere-her1-tel-2026-09-13",
+        "title": "Will Telstar 1963 win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "isl1",
+    "code": "isl1",
+    "name": "Iceland Besta deild",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/iceland/besta-deild-karla/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FH Hafnarfjordur",
+        "aliases": []
+      },
+      {
+        "name": "IA Akranes",
+        "aliases": []
+      },
+      {
+        "name": "IBV Vestmannaeyjar",
+        "aliases": []
+      },
+      {
+        "name": "KA Akureyri",
+        "aliases": []
+      },
+      {
+        "name": "KR Reykjavik",
+        "aliases": []
+      },
+      {
+        "name": "Stjarnan Gardabae",
+        "aliases": []
+      },
+      {
+        "name": "Thor Akureyri",
+        "aliases": []
+      },
+      {
+        "name": "Valur Reykjavik",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "isl1-haf-aku-2026-09-13",
+        "title": "Will FH Hafnarfjordur win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-krr-akr-2026-09-13",
+        "title": "Will IA Akranes win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-stj-ves-2026-09-13",
+        "title": "Will IBV Vestmannaeyjar win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-haf-aku-2026-09-13",
+        "title": "Will KA Akureyri win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-krr-akr-2026-09-13",
+        "title": "Will KR Reykjavik win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-stj-ves-2026-09-13",
+        "title": "Will Stjarnan Gardabae win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-val-tha-2026-09-13",
+        "title": "Will Thor Akureyri win on 2026-09-13?"
+      },
+      {
+        "slug": "isl1-val-tha-2026-09-13",
+        "title": "Will Valur Reykjavik win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "rus",
+    "code": "rus",
+    "name": "Russian Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/russia/premier-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FK Akron Tolyatti",
+        "aliases": []
+      },
+      {
+        "name": "FK Dinamo Makhachkala",
+        "aliases": []
+      },
+      {
+        "name": "FK Krasnodar",
+        "aliases": []
+      },
+      {
+        "name": "FK Rostov",
+        "aliases": []
+      },
+      {
+        "name": "FK Spartak Moskva",
+        "aliases": []
+      },
+      {
+        "name": "RFK Akhmat Groznyi",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "rus-kra-akr-2026-09-13",
+        "title": "Will FK Akron Tolyatti win on 2026-09-13?"
+      },
+      {
+        "slug": "rus-ter-mak-2026-09-13",
+        "title": "Will FK Dinamo Makhachkala win on 2026-09-13?"
+      },
+      {
+        "slug": "rus-kra-akr-2026-09-13",
+        "title": "Will FK Krasnodar win on 2026-09-13?"
+      },
+      {
+        "slug": "rus-spa-ros-2026-09-13",
+        "title": "Will FK Rostov win on 2026-09-13?"
+      },
+      {
+        "slug": "rus-spa-ros-2026-09-13",
+        "title": "Will FK Spartak Moskva win on 2026-09-13?"
+      },
+      {
+        "slug": "rus-ter-mak-2026-09-13",
+        "title": "Will RFK Akhmat Groznyi win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "srb",
+    "code": "srb",
+    "name": "Serbian SuperLiga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/serbia/super-liga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FK Crvena Zvezda Belgrade",
+        "aliases": []
+      },
+      {
+        "name": "FK IMT Novi Beograd",
+        "aliases": []
+      },
+      {
+        "name": "FK Partizan Belgrade",
+        "aliases": []
+      },
+      {
+        "name": "FK Radnicki Nis",
+        "aliases": []
+      },
+      {
+        "name": "FK Vojvodina Novi Sad",
+        "aliases": []
+      },
+      {
+        "name": "OFK Beograd",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "srb-imt-czv-2026-09-13",
+        "title": "Will FK Crvena Zvezda Belgrade win on 2026-09-13?"
+      },
+      {
+        "slug": "srb-imt-czv-2026-09-13",
+        "title": "Will FK IMT Novi Beograd win on 2026-09-13?"
+      },
+      {
+        "slug": "srb-par-voj-2026-09-13",
+        "title": "Will FK Partizan Belgrade win on 2026-09-13?"
+      },
+      {
+        "slug": "srb-rdn-obe-2026-09-13",
+        "title": "Will FK Radnicki Nis win on 2026-09-13?"
+      },
+      {
+        "slug": "srb-par-voj-2026-09-13",
+        "title": "Will FK Vojvodina Novi Sad win on 2026-09-13?"
+      },
+      {
+        "slug": "srb-rdn-obe-2026-09-13",
+        "title": "Will OFK Beograd win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "ukr1",
+    "code": "ukr1",
+    "name": "Ukrainian Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/ukraine/premier-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FK Polissia",
+        "aliases": []
+      },
+      {
+        "name": "FK Zorya Luhansk",
+        "aliases": []
+      },
+      {
+        "name": "FSK Bukovyna Chernivtsi",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "ukr1-pol-liv-2026-09-13",
+        "title": "Will FK Polissia win on 2026-09-13?"
+      },
+      {
+        "slug": "ukr1-buk-zor-2026-09-13",
+        "title": "Will FK Zorya Luhansk win on 2026-09-13?"
+      },
+      {
+        "slug": "ukr1-buk-zor-2026-09-13",
+        "title": "Will FSK Bukovyna Chernivtsi win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "svk1",
+    "code": "svk1",
+    "name": "Slovak Nike Liga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/slovakia/nike-liga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "FK Železiarne Podbrezová",
+        "aliases": []
+      },
+      {
+        "name": "KFC Komárno",
+        "aliases": []
+      },
+      {
+        "name": "MŠK Žilina",
+        "aliases": []
+      },
+      {
+        "name": "ŠK Slovan Bratislava",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "svk1-pod-kom-2026-09-13",
+        "title": "Will FK Železiarne Podbrezová win on 2026-09-13?"
+      },
+      {
+        "slug": "svk1-pod-kom-2026-09-13",
+        "title": "Will KFC Komárno win on 2026-09-13?"
+      },
+      {
+        "slug": "svk1-sba-zil-2026-09-13",
+        "title": "Will MŠK Žilina win on 2026-09-13?"
+      },
+      {
+        "slug": "svk1-sba-zil-2026-09-13",
+        "title": "Will ŠK Slovan Bratislava win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "swe2",
+    "code": "swe2",
+    "name": "Swedish Superettan",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/sweden/superettan/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Falkenbergs FF",
+        "aliases": []
+      },
+      {
+        "name": "IFK Norrkoping FK",
+        "aliases": []
+      },
+      {
+        "name": "IK Oddevold",
+        "aliases": []
+      },
+      {
+        "name": "Ljungskile SK",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "swe2-lsk-fff-2026-09-13",
+        "title": "Will Falkenbergs FF win on 2026-09-13?"
+      },
+      {
+        "slug": "swe2-nkp-odd-2026-09-13",
+        "title": "Will IFK Norrkoping FK win on 2026-09-13?"
+      },
+      {
+        "slug": "swe2-nkp-odd-2026-09-13",
+        "title": "Will IK Oddevold win on 2026-09-13?"
+      },
+      {
+        "slug": "swe2-lsk-fff-2026-09-13",
+        "title": "Will Ljungskile SK win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "fin1",
+    "code": "fin1",
+    "name": "Finnish Veikkausliiga",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/finland/veikkausliiga/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "HJK Helsinki",
+        "aliases": []
+      },
+      {
+        "name": "Kuopion Palloseura",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "fin1-kups-hjk-2026-09-13",
+        "title": "Will HJK Helsinki win on 2026-09-13?"
+      },
+      {
+        "slug": "fin1-kups-hjk-2026-09-13",
+        "title": "Will Kuopion Palloseura win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "hr1",
+    "code": "hr1",
+    "name": "Croatian HNL",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/croatia/hnl/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "HNK Hajduk Split",
+        "aliases": []
+      },
+      {
+        "name": "NK Istra 1961",
+        "aliases": []
+      },
+      {
+        "name": "NK Rudeš",
+        "aliases": []
+      },
+      {
+        "name": "NK Slaven Belupo",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "hr1-haj-sla-2026-09-13",
+        "title": "Will HNK Hajduk Split win on 2026-09-13?"
+      },
+      {
+        "slug": "hr1-ist-rud-2026-09-13",
+        "title": "Will NK Istra 1961 win on 2026-09-13?"
+      },
+      {
+        "slug": "hr1-ist-rud-2026-09-13",
+        "title": "Will NK Rudeš win on 2026-09-13?"
+      },
+      {
+        "slug": "hr1-haj-sla-2026-09-13",
+        "title": "Will NK Slaven Belupo win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "swe",
+    "code": "swe",
+    "name": "Swedish Allsvenskan",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/sweden/allsvenskan/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Hammarby IF",
+        "aliases": []
+      },
+      {
+        "name": "IF Brommapojkarna",
+        "aliases": []
+      },
+      {
+        "name": "IF Elfsborg",
+        "aliases": []
+      },
+      {
+        "name": "Kalmar FF",
+        "aliases": []
+      },
+      {
+        "name": "Malmo FF",
+        "aliases": []
+      },
+      {
+        "name": "Orgryte IS",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "swe-hif-bro-2026-09-13",
+        "title": "Will Hammarby IF win on 2026-09-13?"
+      },
+      {
+        "slug": "swe-hif-bro-2026-09-13",
+        "title": "Will IF Brommapojkarna win on 2026-09-13?"
+      },
+      {
+        "slug": "swe-elf-kal-2026-09-13",
+        "title": "Will IF Elfsborg win on 2026-09-13?"
+      },
+      {
+        "slug": "swe-elf-kal-2026-09-13",
+        "title": "Will Kalmar FF win on 2026-09-13?"
+      },
+      {
+        "slug": "swe-mal-org-2026-09-13",
+        "title": "Will Malmo FF win on 2026-09-13?"
+      },
+      {
+        "slug": "swe-mal-org-2026-09-13",
+        "title": "Will Orgryte IS win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "isr",
+    "code": "isr",
+    "name": "Israeli Premier League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/israel/ligat-haal/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Hapoel Be`er Sheva FC",
+        "aliases": []
+      },
+      {
+        "name": "Hapoel Petah Tikva FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "isr-pet-hbs-2026-09-13",
+        "title": "Will Hapoel Be`er Sheva FC win on 2026-09-13?"
+      },
+      {
+        "slug": "isr-pet-hbs-2026-09-13",
+        "title": "Will Hapoel Petah Tikva FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "saf1",
+    "code": "saf1",
+    "name": "South African Premiership",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/south-africa/premiership/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Kruger United",
+        "aliases": []
+      },
+      {
+        "name": "Lamontville Golden Arrows",
+        "aliases": []
+      },
+      {
+        "name": "Milford FC",
+        "aliases": []
+      },
+      {
+        "name": "Richards Bay FC",
+        "aliases": []
+      },
+      {
+        "name": "Siwelele FC",
+        "aliases": []
+      },
+      {
+        "name": "TS Galaxy FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "saf1-gal-kru-2026-09-13",
+        "title": "Will Kruger United win on 2026-09-13?"
+      },
+      {
+        "slug": "saf1-siw-gar-2026-09-13",
+        "title": "Will Lamontville Golden Arrows win on 2026-09-13?"
+      },
+      {
+        "slug": "saf1-mil-ric-2026-09-13",
+        "title": "Will Milford FC win on 2026-09-13?"
+      },
+      {
+        "slug": "saf1-mil-ric-2026-09-13",
+        "title": "Will Richards Bay FC win on 2026-09-13?"
+      },
+      {
+        "slug": "saf1-siw-gar-2026-09-13",
+        "title": "Will Siwelele FC win on 2026-09-13?"
+      },
+      {
+        "slug": "saf1-gal-kru-2026-09-13",
+        "title": "Will TS Galaxy FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "pol",
+    "code": "pol",
+    "name": "Polish Ekstraklasa",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/poland/ekstraklasa/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Legia Warszawa",
+        "aliases": []
+      },
+      {
+        "name": "Pogon Szczecin",
+        "aliases": []
+      },
+      {
+        "name": "Widzew Lodz",
+        "aliases": []
+      },
+      {
+        "name": "Wieczysta Krakow",
+        "aliases": []
+      },
+      {
+        "name": "Wisla Plock",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "pol-leg-wlo-2026-09-13",
+        "title": "Will Legia Warszawa win on 2026-09-13?"
+      },
+      {
+        "slug": "pol-psz-wie-2026-09-13",
+        "title": "Will Pogon Szczecin win on 2026-09-13?"
+      },
+      {
+        "slug": "pol-leg-wlo-2026-09-13",
+        "title": "Will Widzew Lodz win on 2026-09-13?"
+      },
+      {
+        "slug": "pol-psz-wie-2026-09-13",
+        "title": "Will Wieczysta Krakow win on 2026-09-13?"
+      },
+      {
+        "slug": "pol-plo-cra-2026-09-13",
+        "title": "Will Wisla Plock win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "itsb",
+    "code": "itsb",
+    "name": "Italian Serie B",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/italy/serie-b/standings/",
+    "source_id": "football-data-I2",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Mantova 1911",
+        "aliases": []
+      },
+      {
+        "name": "Palermo FC",
+        "aliases": []
+      },
+      {
+        "name": "UC Sampdoria",
+        "aliases": []
+      },
+      {
+        "name": "US Avellino 1912",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "itsb-man-sam-2026-09-13",
+        "title": "Will Mantova 1911 win on 2026-09-13?"
+      },
+      {
+        "slug": "itsb-ave-pal-2026-09-13",
+        "title": "Will Palermo FC win on 2026-09-13?"
+      },
+      {
+        "slug": "itsb-man-sam-2026-09-13",
+        "title": "Will UC Sampdoria win on 2026-09-13?"
+      },
+      {
+        "slug": "itsb-ave-pal-2026-09-13",
+        "title": "Will US Avellino 1912 win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "chi2",
+    "code": "chi2",
+    "name": "China League One",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/china/league-one/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Meizhou Hakka",
+        "aliases": []
+      },
+      {
+        "name": "Nanjing City",
+        "aliases": []
+      },
+      {
+        "name": "Nantong Zhiyun",
+        "aliases": []
+      },
+      {
+        "name": "Shenzhen Juniors FC",
+        "aliases": []
+      },
+      {
+        "name": "Shijiazhuang Gongfu FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "chi2-mei-nac-2026-09-13",
+        "title": "Will Meizhou Hakka win on 2026-09-13?"
+      },
+      {
+        "slug": "chi2-mei-nac-2026-09-13",
+        "title": "Will Nanjing City win on 2026-09-13?"
+      },
+      {
+        "slug": "chi2-wux-nan-2026-09-13",
+        "title": "Will Nantong Zhiyun win on 2026-09-13?"
+      },
+      {
+        "slug": "chi2-shi-she-2026-09-13",
+        "title": "Will Shenzhen Juniors FC win on 2026-09-13?"
+      },
+      {
+        "slug": "chi2-shi-she-2026-09-13",
+        "title": "Will Shijiazhuang Gongfu FC win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "idn1",
+    "code": "idn1",
+    "name": "Indonesia Super League",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/indonesia/super-league/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Persebaya Surabaya",
+        "aliases": []
+      },
+      {
+        "name": "Psim Yogyakarta",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "idn1-ps-yog-2026-09-13",
+        "title": "Will Persebaya Surabaya win on 2026-09-13?"
+      },
+      {
+        "slug": "idn1-ps-yog-2026-09-13",
+        "title": "Will Psim Yogyakarta win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "idn2",
+    "code": "idn2",
+    "name": "Indonesia Liga 2",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/indonesia/liga-2/standings/",
+    "source_id": null,
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Rans Nusantara",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "idn2-ran-bal-2026-09-13",
+        "title": "Will Rans Nusantara win on 2026-09-13?"
+      }
+    ]
+  },
+  {
+    "id": "elc",
+    "code": "elc",
+    "name": "English Championship",
+    "sport": "Football",
+    "reference_url": "https://www.flashscore.com/football/england/championship/standings/",
+    "source_id": "football-data-E1",
+    "mapping_status": "inferred_from_import",
+    "participants": [
+      {
+        "name": "Sheffield United FC",
+        "aliases": []
+      },
+      {
+        "name": "Wolverhampton Wanderers FC",
+        "aliases": []
+      }
+    ],
+    "events": [
+      {
+        "slug": "elc-she-wol-2026-09-13",
+        "title": "Will Sheffield United FC win on 2026-09-13?"
+      },
+      {
+        "slug": "elc-she-wol-2026-09-13",
+        "title": "Will Wolverhampton Wanderers FC win on 2026-09-13?"
+      }
+    ]
+  }
+]

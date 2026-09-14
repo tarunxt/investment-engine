@@ -40,6 +40,8 @@ celery.conf.task_queues = (
 celery.conf.task_default_queue = "ai"
 
 celery.conf.task_routes = {
+    "app.domains.sports_rankings.tasks.dispatch_refresh": {"queue": "beat"},
+    "app.domains.sports_rankings.tasks.refresh_source": {"queue": "ai"},
     "app.domains.jobs.tasks.*": {"queue": "ai"},
     "app.domains.mails.tasks.deliver_completion_email": {"queue": "email"},
     "app.domains.mails.tasks.recover_completion_emails": {"queue": "beat"},
@@ -78,6 +80,10 @@ celery.conf.update(
     enable_utc=True
 )
 celery.conf.beat_schedule = {
+    "sports-rankings-refresh": {
+        "task": "app.domains.sports_rankings.tasks.dispatch_refresh",
+        "schedule": crontab(minute="*/15"),
+    },
     "completion-mail-outbox-recovery": {
         "task": "app.domains.mails.tasks.recover_completion_emails",
         "schedule": crontab(minute="*"),
@@ -154,6 +160,7 @@ except ValueError:
 celery.conf.worker_prefetch_multiplier = _prefetch_multiplier
 
 celery.autodiscover_tasks([
+    "app.domains.sports_rankings",
     "app.domains.jobs",
     "app.domains.auth",
     "app.domains.mails",
