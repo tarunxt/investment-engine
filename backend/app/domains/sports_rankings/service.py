@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 from .catalogue import CATALOGUE, normalize_name, source_kind
+from .feeds import FEEDS
 
 
 def source_status(snapshot, source_id):
@@ -30,11 +31,12 @@ def summary(competition, snapshot=None):
         "error": snapshot.error if snapshot else None,
         "ranked_count": len(snapshot.rows) if snapshot else 0,
         "note": (
+            FEEDS[source_id]["note"] if source_id in FEEDS else
             "Calculated from completed results: 3 points per win, 1 per draw; sorted by points, goal difference, goals scored. Excludes deductions, head-to-head rules and playoff adjustments. Not official standings."
             if (source_id or "").startswith("football-data-") else
             "Game-wide ranking; a published team is not necessarily entered in this tournament."
             if source_id == "valve-global" else
-            "No supported free feed is connected. Reference link and imported participant names are retained; ranking is unavailable."
+            "No validated automatic ranking feed is connected for this scope. Open the source for its ranking or competition results. No numeric positions are invented."
         ),
     }
 
@@ -60,4 +62,14 @@ def resolve(query, snapshots):
         for row in ranking_rows(c, snap):
             if normalize_name(query.name) in {normalize_name(n) for n in [row["name"], *row["imported_names"]]}:
                 candidates.append({"competition_id": c["id"], "competition": c["name"], "code": c["code"], "source_id": c["source_id"], "status": source_status(snap, c["source_id"]), "ranking_kind": source_kind(c["source_id"]), "source_as_of": snap.source_as_of if snap else None, **row})
+    # A master list and an imported tournament can refer to the same source row.
+    # Collapse only identical source identities; never merge rating systems/groups.
+    unique = {}
+    for row in candidates:
+        key = (row['source_id'] or row['competition_id'], row.get('group'), normalize_name(row['name']), row.get('roster'), row.get('rank'))
+        if key not in unique:
+            unique[key] = {**row, 'competition_ids': [row['competition_id']]}
+        else:
+            unique[key]['competition_ids'].append(row['competition_id'])
+    candidates = list(unique.values())
     return {"match_status": "matched" if len(candidates) == 1 else "ambiguous" if candidates else "unmatched", "candidates": candidates, "automatic_analysis_enabled": False}

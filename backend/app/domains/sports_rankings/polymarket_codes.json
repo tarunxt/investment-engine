@@ -1,0 +1,354 @@
+{
+  "lal": {
+    "name": "LaLiga",
+    "series": "10193"
+  },
+  "lol": {
+    "name": "LoL",
+    "series": "10311"
+  },
+  "pol": {
+    "name": "Ekstraklasa",
+    "series": "12320"
+  },
+  "uru1": {
+    "name": "Uruguayan Primera Divisi\u00f3n",
+    "series": "11862"
+  },
+  "ecu1": {
+    "name": "LigaPro Serie A",
+    "series": "11863"
+  },
+  "elc": {
+    "name": "EFL Championship",
+    "series": "10355"
+  },
+  "ere": {
+    "name": "Eredivisie",
+    "series": "10286"
+  },
+  "es2": {
+    "name": "LaLiga2",
+    "series": "10672"
+  },
+  "sui": {
+    "name": "Swiss Super League",
+    "series": "12319"
+  },
+  "tur": {
+    "name": "S\u00fcper Lig",
+    "series": "10292"
+  },
+  "fin1": {
+    "name": "Veikkausliiga",
+    "series": "11864"
+  },
+  "isl1": {
+    "name": "Besta deild karla",
+    "series": "11865"
+  },
+  "kaz1": {
+    "name": "Kazakhstan Premier League",
+    "series": "11867"
+  },
+  "afl": {
+    "name": "AFL",
+    "series": "12563"
+  },
+  "den": {
+    "name": "Danish Superliga",
+    "series": "10363"
+  },
+  "nor2": {
+    "name": "OBOS-ligaen",
+    "series": "11871"
+  },
+  "swe2": {
+    "name": "Superettan",
+    "series": "11872"
+  },
+  "est1": {
+    "name": "Premium Liiga",
+    "series": "11873"
+  },
+  "aut": {
+    "name": "Austria Bundesliga",
+    "series": "11636"
+  },
+  "fro1": {
+    "name": "Betri deildin",
+    "series": "11878"
+  },
+  "dota2": {
+    "name": "Dota 2",
+    "series": "10309"
+  },
+  "chi2": {
+    "name": "China League One",
+    "series": "11880"
+  },
+  "kor2": {
+    "name": "K League 2",
+    "series": "11879"
+  },
+  "lva1": {
+    "name": "Virsl\u012bga",
+    "series": "11874"
+  },
+  "ltu1": {
+    "name": "A Lyga",
+    "series": "11875"
+  },
+  "chl2": {
+    "name": "Primera B (Chile)",
+    "series": "11882"
+  },
+  "saf1": {
+    "name": "South Africa Premiership",
+    "series": "12360"
+  },
+  "u20wwc": {
+    "name": "FIFA U-20 Women's World Cup",
+    "series": "12804"
+  },
+  "fl1": {
+    "name": "Ligue 1",
+    "series": "10195"
+  },
+  "hok": {
+    "name": "Honor of Kings",
+    "series": "10434"
+  },
+  "hr1": {
+    "name": "Prva Liga",
+    "series": "11451"
+  },
+  "gtm": {
+    "name": "Liga Nacional de Guatemala",
+    "series": "11438"
+  },
+  "ned2": {
+    "name": "Eerste Divisie",
+    "series": "12353"
+  },
+  "bul": {
+    "name": "efbet Liga",
+    "series": "11643"
+  },
+  "slo": {
+    "name": "Slovenia PrvaLiga",
+    "series": "11641"
+  },
+  "sclc": {
+    "name": "Scotland League Cup",
+    "series": "12321"
+  },
+  "gre1": {
+    "name": "Greece Super League",
+    "series": "12356"
+  },
+  "isr": {
+    "name": "Israeli Premier League",
+    "series": "11638"
+  },
+  "darts": {
+    "name": "Darts",
+    "series": "12754,12755"
+  },
+  "bun": {
+    "name": "Bundesliga",
+    "series": "10194"
+  },
+  "mlbb": {
+    "name": "Mobile Legends: Bang Bang",
+    "series": "10426"
+  },
+  "wsl": {
+    "name": "Women's Super League",
+    "series": "12596"
+  },
+  "tha1": {
+    "name": "Thai League 1",
+    "series": "12597"
+  },
+  "idn1": {
+    "name": "Indonesia Liga 1",
+    "series": "12598"
+  },
+  "idn2": {
+    "name": "Indonesia Liga 2",
+    "series": "12599"
+  },
+  "srb": {
+    "name": "Serbian SuperLiga",
+    "series": "11639"
+  },
+  "bl2": {
+    "name": "2. Bundesliga",
+    "series": "10670"
+  },
+  "chess": {
+    "name": "Chess",
+    "series": "11480"
+  },
+  "tur2": {
+    "name": "Turkey 1. Lig",
+    "series": "12362"
+  },
+  "aze1": {
+    "name": "Azerbaijan Premier League",
+    "series": "12547"
+  },
+  "argpn": {
+    "name": "Primera Nacional",
+    "series": "11861"
+  },
+  "bel1": {
+    "name": "Belgium Pro League",
+    "series": "12351"
+  },
+  "bel2": {
+    "name": "Challenger Pro League",
+    "series": "12352"
+  },
+  "r6siege": {
+    "name": "Rainbow Six Siege",
+    "series": "10432"
+  },
+  "rl": {
+    "name": "Rocket League",
+    "series": "10433"
+  },
+  "itsb": {
+    "name": "Serie B",
+    "series": "10676"
+  },
+  "swe": {
+    "name": "Allsvenskan",
+    "series": "11637"
+  },
+  "ja2": {
+    "name": "J2 League",
+    "series": "10443"
+  },
+  "nor": {
+    "name": "Eliteserien",
+    "series": "10362"
+  },
+  "rus": {
+    "name": "Russian Premier League",
+    "series": "10306"
+  },
+  "spl": {
+    "name": "Saudi Pro League",
+    "series": "10361"
+  },
+  "svk1": {
+    "name": "Nik\u00e9 liga",
+    "series": "11452"
+  },
+  "ow": {
+    "name": "Overwatch",
+    "series": "10430"
+  },
+  "por": {
+    "name": "Primeira Liga",
+    "series": "10330"
+  },
+  "sc2": {
+    "name": "StarCraft II",
+    "series": "10435"
+  },
+  "wta": {
+    "name": "WTA Tour",
+    "series": "10366"
+  },
+  "ukr1": {
+    "name": "Ukrainian Premier League",
+    "series": "11241"
+  },
+  "arg": {
+    "name": "Liga Profesional de F\u00fatbol",
+    "series": "10285"
+  },
+  "atp": {
+    "name": "ATP Tour",
+    "series": "10365"
+  },
+  "val": {
+    "name": "Valorant",
+    "series": "10369"
+  },
+  "cs2": {
+    "name": "CS2",
+    "series": "10310"
+  },
+  "fifa": {
+    "name": "EA Sports FC",
+    "series": "10428"
+  },
+  "nba": {
+    "name": "NBA",
+    "series": "10345"
+  },
+  "mlb": {
+    "name": "MLB",
+    "series": "3"
+  },
+  "khl": {
+    "name": "KHL",
+    "series": "10700"
+  },
+  "nwsl": {
+    "name": "NWSL",
+    "series": "11462"
+  },
+  "nhl": {
+    "name": "NHL",
+    "series": "10346"
+  },
+  "nfl": {
+    "name": "NFL",
+    "series": "10187"
+  },
+  "sea": {
+    "name": "Serie A",
+    "series": "10203"
+  },
+  "chi1": {
+    "name": "Liga de Primera",
+    "series": "10965"
+  },
+  "cze1": {
+    "name": "Chance Liga",
+    "series": "10970"
+  },
+  "itf": {
+    "name": "ITF",
+    "series": "11634"
+  },
+  "per1": {
+    "name": "Liga 1",
+    "series": "10967"
+  },
+  "rou1": {
+    "name": "SuperLiga",
+    "series": "10971"
+  },
+  "ufc": {
+    "name": "UFC",
+    "series": "10500"
+  },
+  "wnba": {
+    "name": "WNBA",
+    "series": "10105"
+  },
+  "cfl": {
+    "name": "CFL",
+    "series": "11839"
+  },
+  "epl": {
+    "name": "Premier League",
+    "series": "10188"
+  }
+}
