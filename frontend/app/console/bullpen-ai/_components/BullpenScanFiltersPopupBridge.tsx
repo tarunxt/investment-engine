@@ -176,7 +176,7 @@ export function BullpenScanFiltersPopupBridge() {
   }, [detailId]);
 
   async function reapplyFilters() {
-    if (!reapplyDirty || isReapplying) return;
+    if (isReapplying || isFloorLoading) return;
     if (!Number.isInteger(maxClosingDays) || maxClosingDays < 1) {
       setReapplyMessage("Enter a valid whole-number expiry window first.");
       return;
@@ -420,11 +420,9 @@ export function BullpenScanFiltersPopupBridge() {
               <button
                 type="button"
                 onClick={() => void reapplyFilters()}
-                disabled={!reapplyDirty || isReapplying || isFloorLoading}
+                disabled={isReapplying || isFloorLoading}
                 className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-sm font-semibold text-white transition ${
-                  reapplyDirty
-                    ? "bg-blue-600 hover:bg-blue-700"
-                    : "bg-slate-400"
+                  "bg-blue-600 hover:bg-blue-700"
                 } disabled:cursor-not-allowed disabled:opacity-70`}
               >
                 {isReapplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
