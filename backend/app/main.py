@@ -21,6 +21,7 @@ from app.core.seed import seed_system_prompts
 from app.domains.ai_providers.router import router as providers_router
 from app.domains.api_usage.router import router as api_usage_router
 from app.domains.auth.router import router as auth_router
+from app.domains.sports_rankings.router import router as sports_rankings_router
 from app.domains.bullpen_run_audit.router import router as bullpen_run_audit_router
 from app.domains.bullpen008.router import router as bullpen008_router
 from app.domains.bullpen_trade_analysis.router import (
@@ -279,6 +280,7 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
+app.include_router(sports_rankings_router)
 app.include_router(bullpen_run_audit_router)
 app.include_router(bullpen008_router)
 app.include_router(bullpen_trade_analysis_router)

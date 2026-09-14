@@ -249,6 +249,15 @@ export const SIDEBAR_SECTIONS = [
                 title: 'Open the database viewer',
             },
             {
+                type: 'item',
+                id: 'sports-rankings',
+                name: 'Sports Rankings',
+                href: '/console/sports-rankings',
+                icon: Database,
+                matchMode: 'prefix',
+                title: 'Sports competitions, teams and ranking sources',
+            },
+            {
                 type: 'group',
                 id: 'integrations',
                 name: 'Integrations',
