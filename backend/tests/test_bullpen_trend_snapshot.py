@@ -34,3 +34,6 @@ def test_overlay_sql_selects_candidates_without_rejected_scan_or_inputs():
     assert "rejected_candidates" not in sql and "scan_export_data" not in sql
     assert "ORDER BY trend_stage.ordinality" in sql
     assert sql.count("FROM runs") == 1
+    # CASE must guard the expensive expansion, including for a single huge run.
+    assert "CASE WHEN (pg_column_size(runs.payload) <= 262144) THEN (SELECT" in sql
+    assert sql.index("pg_column_size") < sql.index("json_array_elements")

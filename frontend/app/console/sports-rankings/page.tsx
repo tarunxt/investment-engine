@@ -1,17 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { readRankingJson as read } from '@/lib/sportsRankingsApi';
 
 type RankingRow = { name: string; rank: number | null; points: number | null; imported_names: string[]; rating?: number; group?: string; record?: string; rank_label?: string; country?: string; played?: number; won?: number; drawn?: number; lost?: number; goal_difference?: number; roster?: string };
 type Competition = { id: string; code: string; code_verified?: boolean; name: string; sport: string; sport_id: string; category: string; scope: string; entry_kind: string; reference_url: string; source_id: string | null; status: string; ranking_kind: string; source_url: string | null; source_as_of: string | null; checked_at: string | null; successful_at: string | null; season: string | null; ranked_count: number; note: string; error: string | null; participants: { name: string; aliases: string[] }[]; events: { title: string; slug: string }[] };
 type Detail = Competition & { rows: RankingRow[] };
 const base = '/backend-api/api/sports-rankings';
 
-async function read<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(base + path, { cache: 'no-store', signal });
-  if (!response.ok) throw new Error(response.status === 401 ? 'Please sign in to view rankings.' : `Rankings request failed (${response.status}). Please retry.`);
-  return response.json();
-}
 function stamp(value: string | null) {
   return value ? new Date(value).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) + ' IST' : 'Not yet checked';
 }
@@ -31,6 +27,7 @@ export default function SportsRankingsPage() {
   const [teamQuery, setTeamQuery] = useState('');
   const [importedOnly, setImportedOnly] = useState(false);
   const [error, setError] = useState('');
+  const [detailError, setDetailError] = useState('');
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -67,10 +64,10 @@ export default function SportsRankingsPage() {
     if (!activeId) return;
     const controller = new AbortController();
     read<Detail>('/competitions/' + encodeURIComponent(activeId), controller.signal)
-      .then(setDetail)
-      .catch(e => { if (!controller.signal.aborted) setError(e.message); });
+      .then(data => { setDetail(data); setDetailError(''); })
+      .catch(e => { if (!controller.signal.aborted) setDetailError(e.message); });
     return () => controller.abort();
-  }, [activeId, competitions]);
+  }, [activeId, competitions, version]);
   const rows = useMemo(() => (detail?.rows || []).filter(r =>
     (!importedOnly || r.imported_names.length > 0) && (group === 'All groups' || r.group === group) && `${r.name} ${r.country || ''} ${r.imported_names.join(' ')}`.toLowerCase().includes(teamQuery.toLowerCase())
   ), [detail, importedOnly, teamQuery, group]);
@@ -93,14 +90,14 @@ export default function SportsRankingsPage() {
       <h1 className="mt-2 text-3xl font-semibold">Sports Rankings</h1>
       <p className="mt-3 max-w-3xl text-sm text-slate-300">Competition and participant repository for Polymarket matching. Supported feeds are checked every 15 minutes; the page updates every minute. Trading analysis is not enabled in this phase.</p>
       <div className="mt-5 flex flex-wrap gap-6 text-sm">
-        <span><strong className="text-xl">{new Set(competitions.map(c => c.sport_id)).size}</strong> sports / disciplines</span>
-        <span><strong className="text-xl">{new Set(competitions.map(c => c.code).filter(Boolean)).size}</strong> Polymarket prefixes</span>
-        <span><strong className="text-xl">{competitions.length}</strong> ranking / competition lists</span>
-        <span><strong className="text-xl">{new Set(competitions.flatMap(c => c.source_id ? [c.source_id] : [])).size}</strong> connected feeds</span>
-        <span><strong className="text-xl">{new Set(competitions.filter(c => c.status === 'ready').map(c => c.source_id)).size}</strong> feeds ready</span>
+        <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.map(c => c.sport_id)).size}</strong> sports / disciplines</span>
+        <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.map(c => c.code).filter(Boolean)).size}</strong> Polymarket prefixes</span>
+        <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : competitions.length}</strong> ranking / competition lists</span>
+        <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.flatMap(c => c.source_id ? [c.source_id] : [])).size}</strong> connected feeds</span>
+        <span><strong className="text-xl">{!competitions.length && (loading || error) ? '—' : new Set(competitions.filter(c => c.status === 'ready').map(c => c.source_id)).size}</strong> feeds ready</span>
       </div>
     </header>
-    {error && <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-900">{error} <button className="underline" onClick={reload}>Retry</button></div>}
+    {(error || detailError) && <div role="alert" className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-900">{error || detailError} {competitions.length > 0 && 'Last loaded data remains visible.'} <button className="underline" onClick={reload}>Retry</button></div>}
     {notice && <p role="status" className="rounded-lg border p-3 text-sm">{notice}</p>}
     <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-900">
@@ -116,11 +113,11 @@ export default function SportsRankingsPage() {
             <div className="flex items-center justify-between gap-2"><code className="text-xs text-blue-600 dark:text-blue-300">{c.code || 'No verified code'}</code><Status value={c.status} /></div>
             <p className="mt-2 text-sm font-medium">{c.name}</p><p className="mt-1 text-xs text-slate-500">{c.sport} · {c.ranked_count} published rows{c.participants.length ? ` · ${c.participants.length} imported names` : ''}</p>
           </button>)}
-          {!loading && !filtered.length && <p className="p-3 text-sm">No matching competitions.</p>}
+          {!loading && !filtered.length && <p className="p-3 text-sm">{error && !competitions.length ? 'The repository could not be loaded yet.' : 'No matching competitions.'}</p>}
         </div>
       </aside>
       <section className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-700 dark:bg-slate-900">
-        {!activeId ? <p>No ranking lists match your filters.</p> : !detail ? <p>Loading rankings…</p> : <>
+        {!activeId ? <p>{loading ? 'Loading repository…' : error && !competitions.length ? 'Waiting for the rankings service to recover. This page retries automatically.' : 'No ranking lists match your filters.'}</p> : !detail ? <p>{detailError || 'Loading rankings…'}</p> : <>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><p className="text-xs text-slate-500">{detail.category} · {detail.sport} · <code>{detail.code || 'No verified Polymarket code'}</code></p><h2 className="mt-1 text-xl font-semibold">{detail.name}</h2><p className="mt-1 text-sm">{detail.ranking_kind} {detail.season && `· ${detail.season}`}</p></div>
             <Status value={detail.status} />

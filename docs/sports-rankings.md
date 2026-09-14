@@ -62,6 +62,14 @@ Only teams represented in completed matches can be included in that table.
 
 ## Refresh and reliability
 
+The 14 September outage was caused by host memory exhaustion and PostgreSQL
+remaining in an OOM-triggered shutdown, rather than a ranking-feed parser.
+Ranking reads have a separate proxy circuit and bounded transient retries;
+loaded rows remain visible during refresh errors. A failed initial load is not
+reported as an empty repository. Database shutdown/connection errors return a
+retryable 503 without exposing driver details. See the runtime recovery policy
+and the bounded legacy trend overlay in `docs/bullpen-run-audit.md`.
+
 Celery Beat dispatches every 15 minutes, independently of open browser tabs.
 Each source runs separately on the existing ai worker queue with 70/80-second
 soft/hard limits, two retries and backoff. PostgreSQL row locks prevent overlapping

@@ -58,6 +58,7 @@ from app.domains.zerodha.router import router as zerodha_router
 from app.domains.zerodha.events_router import router as zerodha_events_router
 from app.domains.zerodha.threats_router import router as zerodha_threats_router
 from app.infrastructure.database.session import AsyncSessionLocal, async_engine
+from app.infrastructure.database.errors import database_is_unavailable
 from app.shared.exceptions import AppException
 
 # Ensure all ORM models are registered with the shared metadata.
@@ -171,6 +172,13 @@ async def app_exception_handler(request: Request, exc: AppException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
+    if database_is_unavailable(exc):
+        logger.error("Database unavailable", exc_info=exc)
+        return JSONResponse(
+            status_code=503,
+            headers={"Retry-After": "3", "Cache-Control": "no-store"},
+            content={"error": "DATABASE_UNAVAILABLE", "message": "The service is temporarily unavailable. Please retry shortly."},
+        )
     logger.error("Unhandled exception", exc_info=exc)
     return JSONResponse(
         status_code=500,
