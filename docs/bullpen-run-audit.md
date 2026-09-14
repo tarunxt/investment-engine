@@ -2316,6 +2316,13 @@ Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
 
+The shared scan overview derives a versioned, read-only summary from every row
+in the completed universal ledger. It records completion time and scan duration,
+then accounts for the same total across six display breakdowns: category, expiry,
+odds profile, total volume, liquidity, and market structure. The summary is cached
+on the completed export metadata and does not alter source rows, workflow filters,
+or frozen Stage 1 audit snapshots.
+
 Universal raw ledgers use lossless per-row compression (`compressedRowV1`).
 Readers accept both compressed and legacy JSONL rows, preserving every exported
 field and deterministic byte-offset re-filtering. The common scan does not write

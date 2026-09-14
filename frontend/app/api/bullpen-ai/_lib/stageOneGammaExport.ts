@@ -11,6 +11,7 @@ import type {
   BullpenScanFilters,
   ScanMode,
 } from "@/lib/bullpen-ai";
+import type { UniversalScanSummary } from "./universalScanSummary";
 
 const EXPORT_DIRECTORY = join(tmpdir(), "credx-bullpen-stage-one-exports");
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
@@ -50,6 +51,7 @@ export type StageOneGammaExportMetadata = {
   rejectedCount?: number;
   acceptedSample?: BullpenQuestion[];
   rejectedSample?: Array<BullpenQuestion & { filterReasons: string[] }>;
+  universalSummary?: UniversalScanSummary;
   reapplyState?: {
     filterHash: string;
     byteOffset: number;
@@ -144,6 +146,23 @@ async function readMetadata(exportId: string) {
 async function saveMetadata(metadata: StageOneGammaExportMetadata) {
   const paths = exportPaths(metadata.exportId);
   await writeFile(paths.metadata, JSON.stringify(metadata), "utf8");
+}
+
+export async function cacheUniversalScanSummary({
+  metadata,
+  ownerKey,
+  summary,
+}: {
+  metadata: StageOneGammaExportMetadata;
+  ownerKey: string;
+  summary: UniversalScanSummary;
+}) {
+  const current = await readMetadata(metadata.exportId);
+  if (current.ownerHash !== ownerHash(ownerKey)) {
+    throw new Error("Stage 1 export does not belong to this session.");
+  }
+  if (!current.completed || current.updatedAt !== metadata.updatedAt) return;
+  await saveMetadata({ ...current, universalSummary: summary });
 }
 
 export async function appendStageOneGammaExportPage({

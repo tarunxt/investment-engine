@@ -12,11 +12,12 @@ import {
 import { createBackendSessionContext } from "../_lib/serverBackendSession";
 import {
   cacheStageOneGammaExportSummary,
+  cacheUniversalScanSummary,
   openLatestStageOneGammaExport,
   openUniversalScan,
-  type StageOneGammaExportRow,
   parseStageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
+import { createUniversalScanSummaryAccumulator } from "../_lib/universalScanSummary";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,10 +32,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const latest = request.nextUrl.searchParams.get("universal") === "true"
+    const isUniversal = request.nextUrl.searchParams.get("universal") === "true";
+    const ownerKey = (session.sessionSubject ?? session.sessionGeneration) + (isUniversal ? ":universal" : "");
+    const latest = isUniversal
       ? await openUniversalScan(session.sessionSubject ?? session.sessionGeneration)
       : await openLatestStageOneGammaExport({
-      ownerKey: (session.sessionSubject ?? session.sessionGeneration) + (request.nextUrl.searchParams.get("universal") === "true" ? ":universal" : ""),
+      ownerKey,
     });
     if (!latest) {
       return NextResponse.json(
@@ -77,12 +80,26 @@ export async function GET(request: NextRequest) {
       }
       await cacheStageOneGammaExportSummary({
         metadata: latest.metadata,
-        ownerKey: (session.sessionSubject ?? session.sessionGeneration) + (request.nextUrl.searchParams.get("universal") === "true" ? ":universal" : ""),
+        ownerKey,
         acceptedCount,
         rejectedCount,
         acceptedSample: accepted,
         rejectedSample: rejected,
       }).catch(() => undefined);
+    }
+
+    let universalSummary = isUniversal ? latest.metadata.universalSummary : undefined;
+    if (isUniversal && (!universalSummary || universalSummary.totalEvents !== latest.metadata.rowCount)) {
+      const summary = createUniversalScanSummaryAccumulator({
+        startedAt: latest.metadata.scannedAt ?? latest.metadata.createdAt,
+        completedAt: latest.metadata.updatedAt,
+      });
+      const lines = createInterface({ input: createReadStream(latest.rowsPath, { encoding: "utf8" }), crlfDelay: Infinity });
+      for await (const line of lines) {
+        if (line) summary.add(parseStageOneGammaExportRow(line).candidate);
+      }
+      universalSummary = summary.finish();
+      await cacheUniversalScanSummary({ metadata: latest.metadata, ownerKey, summary: universalSummary }).catch(() => undefined);
     }
 
     const mode = latest.metadata.mode ?? "30-days";
@@ -111,7 +128,7 @@ export async function GET(request: NextRequest) {
       `bullpen-server-${latest.metadata.exportId}`,
     );
     return NextResponse.json(
-      { snapshot },
+      { snapshot, universalSummary },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error: unknown) {
