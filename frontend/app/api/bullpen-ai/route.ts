@@ -54,6 +54,9 @@ type FilterableBullpenQuestion = Omit<BullpenQuestion, "category"> & {
   category: string | null;
   _categorySearchText: string;
   _searchText: string;
+  _eventSlug: string | null;
+  _feeType: string | null;
+  _sportsMarketType: string | null;
   _customExcludeSportsKeywords: string[];
   _customExcludeWeatherKeywords: string[];
   _customExcludeMarketPredictionsKeywords: string[];
@@ -962,6 +965,9 @@ function normalizeGammaMarket(
     resolutionSource: null,
     _categorySearchText: categorySearchText,
     _searchText: searchText,
+    _eventSlug: eventSlug,
+    _feeType: readString(record, ["feeType"]),
+    _sportsMarketType: readString(record, ["sportsMarketType"]),
     _customExcludeSportsKeywords: [],
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],
@@ -1089,6 +1095,9 @@ function normalizeQuestion(
     resolutionSource: null,
     _categorySearchText: categorySearchText,
     _searchText: searchText,
+    _eventSlug: eventSlug,
+    _feeType: readString(record, ["feeType"]),
+    _sportsMarketType: readString(record, ["sportsMarketType"]),
     _customExcludeSportsKeywords: [],
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],
@@ -1155,6 +1164,25 @@ function getFilterReasons(
   }
   if (filters.excludeSports && isSportsQuestion(question)) {
     reasons.push("Excluded sports market.");
+  }
+  if (filters.sportsMoneylineOnly) {
+    if ((question._eventSlug || "").trim().toLowerCase().endsWith("draw")) {
+      reasons.push('Excluded sports event whose event slug ends with "draw".');
+    }
+    if (
+      !["sports_fees_v2", "sports_fees_v3"].includes(
+        (question._feeType || "").trim().toLowerCase(),
+      )
+    ) {
+      reasons.push(
+        "Excluded sports market without feeType sports_fees_v2 or sports_fees_v3.",
+      );
+    }
+    if ((question._sportsMarketType || "").trim().toLowerCase() !== "moneyline") {
+      reasons.push(
+        "Excluded sports market whose sportsMarketType is not moneyline.",
+      );
+    }
   }
   if (filters.excludeWeather && isWeatherQuestion(question)) {
     reasons.push("Excluded weather market.");
@@ -1262,6 +1290,14 @@ function hydrateStoredCandidateForFiltering(
       question.slug,
       question.outcomeLabels.join(" "),
     ]),
+    _eventSlug:
+      readString(event, EVENT_SLUG_KEYS) ??
+      readString(market, EVENT_SLUG_KEYS) ??
+      null,
+    _feeType: readString(market, ["feeType"]) ?? readString(event, ["feeType"]),
+    _sportsMarketType:
+      readString(market, ["sportsMarketType"]) ??
+      readString(event, ["sportsMarketType"]),
     _customExcludeSportsKeywords: filters.customExcludeSportsKeywords,
     _customExcludeWeatherKeywords: filters.customExcludeWeatherKeywords,
     _customExcludeMarketPredictionsKeywords:
@@ -1287,6 +1323,9 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
   const {
     _categorySearchText,
     _searchText,
+    _eventSlug,
+    _feeType,
+    _sportsMarketType,
     _customExcludeSportsKeywords,
     _customExcludeWeatherKeywords,
     _customExcludeMarketPredictionsKeywords,
@@ -1296,6 +1335,9 @@ function stripFilterMetadata(question: FilterableBullpenQuestion): BullpenQuesti
   } = question;
   void _categorySearchText;
   void _searchText;
+  void _eventSlug;
+  void _feeType;
+  void _sportsMarketType;
   void _customExcludeSportsKeywords;
   void _customExcludeWeatherKeywords;
   void _customExcludeMarketPredictionsKeywords;
@@ -1597,6 +1639,9 @@ function activePositionCandidate(position: BullpenActivePositionView): Filterabl
     ...publicQuestion,
     _categorySearchText: "",
     _searchText: "",
+    _eventSlug: null,
+    _feeType: null,
+    _sportsMarketType: null,
     _customExcludeSportsKeywords: [],
     _customExcludeWeatherKeywords: [],
     _customExcludeMarketPredictionsKeywords: [],

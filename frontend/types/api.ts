@@ -2354,6 +2354,7 @@ export interface BullpenAutoLiveSettings {
   console_max_spread_cents: number;
   console_rejected_theme_pattern: string;
   console_exclude_sports: boolean;
+  console_sports_moneyline_only: boolean;
   console_exclude_weather: boolean;
   console_exclude_market_predictions: boolean;
   console_exclude_tweet_count_questions: boolean;

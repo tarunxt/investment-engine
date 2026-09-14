@@ -90,6 +90,7 @@ _FILTER_PROFILE_FIELDS = {
     "console_max_spread_cents",
     "console_rejected_theme_pattern",
     "console_exclude_sports",
+    "console_sports_moneyline_only",
     "console_exclude_weather",
     "console_exclude_market_predictions",
     "console_exclude_tweet_count_questions",
@@ -118,6 +119,7 @@ def _effective_filter_profile_settings(
     if profile == "bullpen-sports":
         default_overlay = {
             "console_exclude_sports": False,
+            "console_sports_moneyline_only": True,
             "console_scan_scope": "full_universe",
         }
     saved_overlay = settings.console_filter_profiles.get(profile, {})
@@ -539,6 +541,7 @@ async def get_stage1_scan_preview(current_user: User = Depends(get_current_user)
         max_spread_cents=settings.console_max_spread_cents,
         rejected_theme_pattern=settings.console_rejected_theme_pattern,
         exclude_sports=settings.console_exclude_sports,
+        sports_moneyline_only=settings.console_sports_moneyline_only,
         exclude_weather=settings.console_exclude_weather,
         exclude_market_predictions=settings.console_exclude_market_predictions,
         exclude_tweet_count_questions=(

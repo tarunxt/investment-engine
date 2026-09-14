@@ -730,6 +730,7 @@ def console_market_filter_reasons(
     max_spread_cents: float = 10,
     rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
     exclude_sports: bool = True,
+    sports_moneyline_only: bool = False,
     exclude_weather: bool = True,
     exclude_market_predictions: bool = True,
     exclude_tweet_count_questions: bool = True,
@@ -770,6 +771,23 @@ def console_market_filter_reasons(
                 break
     if exclude_sports and is_sports_market_text(search_text):
         reasons.append("Excluded sports market.")
+    if sports_moneyline_only:
+        raw_market = market.raw if isinstance(market.raw, dict) else {}
+        event_slug = (market.event_slug or "").strip().lower()
+        fee_type = str(raw_market.get("feeType") or "").strip().lower()
+        sports_market_type = str(
+            raw_market.get("sportsMarketType") or ""
+        ).strip().lower()
+        if event_slug.endswith("draw"):
+            reasons.append('Excluded sports event whose event slug ends with "draw".')
+        if fee_type not in {"sports_fees_v2", "sports_fees_v3"}:
+            reasons.append(
+                "Excluded sports market without feeType sports_fees_v2 or sports_fees_v3."
+            )
+        if sports_market_type != "moneyline":
+            reasons.append(
+                "Excluded sports market whose sportsMarketType is not moneyline."
+            )
     if exclude_weather and _includes_any(search_text, WEATHER_KEYWORDS):
         reasons.append("Excluded weather market.")
     if exclude_market_predictions and (
@@ -975,6 +993,7 @@ def _build_cli_console_scan_result(
     max_spread_cents: float = 10,
     rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
     exclude_sports: bool = True,
+    sports_moneyline_only: bool = False,
     exclude_weather: bool = True,
     exclude_market_predictions: bool = True,
     exclude_tweet_count_questions: bool = True,
@@ -1011,6 +1030,7 @@ def _build_cli_console_scan_result(
                 max_spread_cents=max_spread_cents,
                 rejected_theme_pattern=rejected_theme_pattern,
                 exclude_sports=exclude_sports,
+                sports_moneyline_only=sports_moneyline_only,
                 exclude_weather=exclude_weather,
                 exclude_market_predictions=exclude_market_predictions,
                 exclude_tweet_count_questions=exclude_tweet_count_questions,
@@ -1062,6 +1082,7 @@ async def scan_console_profile_markets(
     max_spread_cents: float = 10,
     rejected_theme_pattern: str = "crypto prices|twitter|Mentions",
     exclude_sports: bool = True,
+    sports_moneyline_only: bool = False,
     exclude_weather: bool = True,
     exclude_market_predictions: bool = True,
     exclude_tweet_count_questions: bool = True,
@@ -1101,6 +1122,7 @@ async def scan_console_profile_markets(
             max_spread_cents=max_spread_cents,
             rejected_theme_pattern=rejected_theme_pattern,
             exclude_sports=exclude_sports,
+            sports_moneyline_only=sports_moneyline_only,
             exclude_weather=exclude_weather,
             exclude_market_predictions=exclude_market_predictions,
             exclude_tweet_count_questions=exclude_tweet_count_questions,
@@ -1155,6 +1177,7 @@ async def scan_console_profile_markets(
                 max_spread_cents=max_spread_cents,
                 rejected_theme_pattern=rejected_theme_pattern,
                 exclude_sports=exclude_sports,
+                sports_moneyline_only=sports_moneyline_only,
                 exclude_weather=exclude_weather,
                 exclude_market_predictions=exclude_market_predictions,
                 exclude_tweet_count_questions=exclude_tweet_count_questions,
@@ -2348,4 +2371,3 @@ async def enrich_console_wallet_positions_authoritatively(
         "lookup_duration_ms": lookup_duration_ms,
         "lookup_errors": lookup_errors,
     }
-

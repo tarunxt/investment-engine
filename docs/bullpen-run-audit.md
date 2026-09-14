@@ -2356,3 +2356,13 @@ Readers accept both compressed and legacy JSONL rows, preserving every exported
 field and deterministic byte-offset re-filtering. The common scan does not write
 a duplicate all-passed ledger. Starting its replacement discards only incomplete
 owner-scoped captures; completed evidence remains selectable.
+
+### Bullpen Sports moneyline filter
+
+Bullpen Sports applies an additional immutable filter to its fork of the shared
+Universal Polymarket Scan. A candidate passes only when its event slug does not
+end in `draw`, `market.feeType` is `sports_fees_v2` or `sports_fees_v3`, and
+`market.sportsMarketType` is `moneyline`. The browser reapply path and canonical
+server-side console filter emit matching rejection reasons. Bullpen 007 keeps its
+existing filter behavior because the rule is enabled only by the
+`bullpen-sports` profile.

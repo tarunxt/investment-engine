@@ -81,6 +81,7 @@ export const BULLPEN_AI_AUTO_LIVE_SAFE_DEFAULTS: BullpenAutoLiveSettings = {
   console_max_spread_cents: 10,
   console_rejected_theme_pattern: "crypto prices|twitter|Mentions",
   console_exclude_sports: true,
+  console_sports_moneyline_only: false,
   console_exclude_weather: true,
   console_exclude_market_predictions: true,
   console_exclude_tweet_count_questions: true,

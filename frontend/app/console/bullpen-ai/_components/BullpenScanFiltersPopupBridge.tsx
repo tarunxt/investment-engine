@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, Info, Loader2, X } from "lucide-react";
+import { Check, Info, Loader2, Trophy, X } from "lucide-react";
 
 import {
   BULLPEN_SCAN_FILTER_DETAILS,
@@ -689,6 +689,63 @@ export function BullpenScanFiltersPopupBridge({
                   </p>
                 ) : null}
               </div>
+              {workspaceProfile === "bullpen-sports" ? (
+                <section
+                  aria-labelledby="sports-event-filters-heading"
+                  className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 dark:border-blue-500/40 dark:bg-blue-950/30"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm">
+                      <Trophy className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                    <div>
+                      <h3
+                        id="sports-event-filters-heading"
+                        className="font-semibold text-slate-950 dark:text-slate-50"
+                      >
+                        Sports event filters
+                      </h3>
+                      <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                        Bullpen Sports keeps only head-to-head moneyline markets. All three rules must pass.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-2">
+                    {[
+                      {
+                        label: "Event slug",
+                        value: 'Must not end with "draw"',
+                      },
+                      {
+                        label: "market.feeType",
+                        value: "sports_fees_v2 or sports_fees_v3",
+                      },
+                      {
+                        label: "market.sportsMarketType",
+                        value: "moneyline",
+                      },
+                    ].map((rule) => (
+                      <div
+                        key={rule.label}
+                        className="flex items-center gap-3 rounded-xl border border-blue-200/80 bg-white px-3 py-3 dark:border-blue-700/60 dark:bg-slate-950"
+                      >
+                        <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-white">
+                          <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0 text-sm">
+                          <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">
+                            {rule.label}
+                          </span>
+                          <span className="mx-2 text-slate-400">·</span>
+                          <span className="text-slate-600 dark:text-slate-300">
+                            {rule.value}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
               {FILTER_ORDER.map((id) => {
                 const detail = BULLPEN_SCAN_FILTER_DETAILS[id];
                 const enabled = filterToggles[id];

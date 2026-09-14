@@ -231,6 +231,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     console_max_spread_cents: float = Field(default=10, ge=0)
     console_rejected_theme_pattern: str = "crypto prices|twitter|Mentions"
     console_exclude_sports: bool = True
+    console_sports_moneyline_only: bool = False
     console_exclude_weather: bool = True
     console_exclude_market_predictions: bool = True
     console_exclude_tweet_count_questions: bool = True
@@ -458,6 +459,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     console_max_spread_cents: float | None = Field(default=None, ge=0)
     console_rejected_theme_pattern: str | None = None
     console_exclude_sports: bool | None = None
+    console_sports_moneyline_only: bool | None = None
     console_exclude_weather: bool | None = None
     console_exclude_market_predictions: bool | None = None
     console_exclude_tweet_count_questions: bool | None = None
