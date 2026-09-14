@@ -1,0 +1,41 @@
+name: Inspect Rankings Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/fix-ranking-errors]
+    paths: [.github/workflows/inspect-ranking-runtime.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect database availability and bounded error diagnostics
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 180s
+          script: |
+            set -eu
+            df -h /
+            free -h
+            uptime
+            sudo systemctl show investor-backend investor-celery-worker investor-celery-auto-live-worker --property=Id,ActiveState,MemoryCurrent,TasksCurrent --no-pager
+            sudo -u postgres psql -X -d postgres -P pager=off -c "SHOW max_connections; SELECT state, wait_event_type, wait_event, count(*) FROM pg_stat_activity GROUP BY 1,2,3 ORDER BY 4 DESC;" || true
+            sudo journalctl -u investor-backend -u postgresql --since '-20 minutes' -n 15000 -o cat --no-pager | python3 -c '
+            import collections,json,re,sys
+            counts=collections.Counter()
+            errors=[]
+            for line in sys.stdin:
+                for kind in re.findall(r"\b[A-Za-z]+(?:Error|Timeout)\b",line): counts[kind]+=1
+                if re.search(r"remaining connection slots|too many clients|QueuePool limit|No space left|database system is|out of shared memory|CannotConnectNowError|TooManyConnectionsError|ConnectionRefusedError|could not (?:connect|write|open)|server closed the connection",line,re.I):
+                    line=re.sub(r"(?:postgres|redis|https?)[^\s]*://[^\s]+","[redacted-url]",line)
+                    errors.append(line.strip()[:450])
+            print(json.dumps({"exception_counts":counts,"database_errors":errors[-30:]},indent=2))'
+            curl -sS --max-time 8 http://127.0.0.1:8000/health/ready || true
