@@ -12,6 +12,10 @@ const ledger = await import(`data:text/javascript;base64,${Buffer.from(js).toStr
 
 test("workflow filters are isolated and incomplete scans never replace a completed universal capture", async () => {
   try {
+    const large = { candidate: { id: "large", question: "a".repeat(10000) }, event: { description: "data".repeat(10000) }, market: {}, scanStatus: "passed", filterReasons: [] };
+    const packed = ledger.serializeStageOneGammaExportRow(large, true);
+    assert.ok(packed.length < JSON.stringify(large).length / 10);
+    assert.deepEqual(ledger.parseStageOneGammaExportRow(packed), large);
     const rows = ["a", "b"].map(id => ({ candidate: { id, question: id }, event: {}, market: {}, scanStatus: "passed", filterReasons: [] }));
     const raw = await ledger.appendStageOneGammaExportPage({ exportId: null, ownerKey: "test:universal", pageKey: "first", rows, completed: true });
     const first = await ledger.forkUniversalScan("test");

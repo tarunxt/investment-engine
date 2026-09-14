@@ -2315,3 +2315,9 @@ that workflow output, while the source identifier records the common capture.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
+
+Universal raw ledgers use lossless per-row compression (`compressedRowV1`).
+Readers accept both compressed and legacy JSONL rows, preserving every exported
+field and deterministic byte-offset re-filtering. The common scan does not write
+a duplicate all-passed ledger. Starting its replacement discards only incomplete
+owner-scoped captures; completed evidence remains selectable.

@@ -10,6 +10,7 @@ import { createBackendSessionContext } from "../_lib/serverBackendSession";
 import {
   openStageOneGammaExport,
   type StageOneGammaExportRow,
+  parseStageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
 
 export const dynamic = "force-dynamic";
@@ -71,7 +72,7 @@ async function forEachRow(
   let index = 0;
   for await (const line of lines) {
     if (!line) continue;
-    await visitor(JSON.parse(line) as StageOneGammaExportRow, index++);
+    await visitor(parseStageOneGammaExportRow(line), index++);
   }
   return index;
 }

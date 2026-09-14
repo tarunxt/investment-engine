@@ -1,3 +1,4 @@
+import { deflateSync, inflateSync } from "node:zlib";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -117,7 +118,7 @@ async function removeExport(exportId: string) {
   ]);
 }
 
-async function cleanupSupersededOwnerExports(ownerKey: string) {
+async function cleanupSupersededOwnerExports(ownerKey: string, preserveCompleted = false) {
   const expectedOwnerHash = ownerHash(ownerKey);
   const names = await readdir(EXPORT_DIRECTORY).catch(() => [] as string[]);
   await Promise.all(
@@ -127,7 +128,7 @@ async function cleanupSupersededOwnerExports(ownerKey: string) {
         const exportId = name.slice(0, -".json".length);
         if (!EXPORT_ID_PATTERN.test(exportId)) return;
         const metadata = await readMetadata(exportId).catch(() => null);
-        if (metadata?.ownerHash === expectedOwnerHash) {
+        if (metadata?.ownerHash === expectedOwnerHash && !(preserveCompleted && metadata.completed)) {
           await removeExport(exportId);
         }
       }),
@@ -180,7 +181,7 @@ export async function appendStageOneGammaExportPage({
     // Only the latest exhaustive scan is selectable in the console. Retaining
     // every superseded raw Gamma ledger can consume several gigabytes and
     // eventually makes the next scan fail with EDQUOT (-122).
-    if (!ownerKey.endsWith(":universal")) await cleanupSupersededOwnerExports(ownerKey);
+    await cleanupSupersededOwnerExports(ownerKey, ownerKey.endsWith(":universal"));
     metadata = {
       exportId: resolvedExportId,
       ownerHash: ownerHash(ownerKey),
@@ -217,13 +218,13 @@ export async function appendStageOneGammaExportPage({
       keys.forEach((key) => identityKeys.add(key));
       return true;
     });
-    const payload = uniqueRows.map((row) => JSON.stringify(row)).join("\n");
+    const payload = uniqueRows.map((row) => serializeStageOneGammaExportRow(row, ownerKey.endsWith(":universal"))).join("\n");
     if (payload) await appendFile(paths.rows, `${payload}\n`, "utf8");
     const filteredPayload = uniqueRows
       .filter((row) => row.scanStatus === "passed")
       .map((row) => JSON.stringify(row))
       .join("\n");
-    if (filteredPayload) {
+    if (filteredPayload && !ownerKey.endsWith(":universal")) {
       await appendFile(paths.filteredRows, `${filteredPayload}\n`, "utf8");
     }
     metadata.rowCount += uniqueRows.length;
@@ -338,7 +339,7 @@ export async function readStageOneGammaExport({
   const rows = raw
     .split("\n")
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as StageOneGammaExportRow);
+    .map((line) => parseStageOneGammaExportRow(line));
   return { metadata, rows };
 }
 
@@ -426,7 +427,7 @@ export async function reapplyStageOneGammaExportFilters({
   try {
     for await (const line of lines) {
       if (!line) continue;
-      const row = JSON.parse(line) as StageOneGammaExportRow;
+      const row = parseStageOneGammaExportRow(line);
       const filterReasons = row.forceIncludedPosition || row.forceIncluded
         ? []
         : evaluate(row.candidate, row.market, row.event);
@@ -534,7 +535,7 @@ export async function openUniversalScan(ownerKey: string) {
     const lines = createInterface({ input: createReadStream(original.rowsPath, { encoding: "utf8" }), crlfDelay: Infinity });
     for await (const line of lines) {
       if (!line) continue;
-      const row = JSON.parse(line) as StageOneGammaExportRow;
+      const row = parseStageOneGammaExportRow(line);
       if (row.event.source === "active_wallet_position" || row.market.source === "active_wallet_position") continue;
       const rawRow = { ...row, scanStatus: "passed", filterReasons: [], forceIncluded: false, forceIncludedPosition: false };
       rowCount += 1;
@@ -542,11 +543,11 @@ export async function openUniversalScan(ownerKey: string) {
         if (typeof value === "string" && value.trim()) identityKeys.add(value.trim().toLowerCase());
       }
       if (acceptedSample.length < 500) acceptedSample.push(row.candidate);
-      buffer += `${JSON.stringify(rawRow)}\n`;
+      buffer += `${serializeStageOneGammaExportRow(rawRow as StageOneGammaExportRow, true)}\n`;
       if (buffer.length >= 1_000_000) { await appendFile(paths.rows, buffer, "utf8"); buffer = ""; }
     }
     if (buffer) await appendFile(paths.rows, buffer, "utf8");
-    await copyFile(paths.rows, paths.filteredRows);
+    await writeFile(paths.filteredRows, "", "utf8");
     await saveMetadata({ ...original.metadata, exportId, ownerHash: ownerHash(`${ownerKey}:universal`),
       sourceScanExportId: undefined, filterPending: false, reapplyState: undefined,
       identityKeys: [...identityKeys], rowCount, acceptedCount: rowCount, rejectedCount: 0, acceptedSample, rejectedSample: [] });
@@ -554,4 +555,17 @@ export async function openUniversalScan(ownerKey: string) {
   })();
   universalImports.set(ownerKey, importOriginal);
   try { return await importOriginal; } finally { universalImports.delete(ownerKey); }
+}
+
+// Per-row compression retains every raw field while keeping chunked re-filter
+// byte offsets valid. Legacy plain JSONL rows remain readable.
+export function serializeStageOneGammaExportRow(row: StageOneGammaExportRow, compressed = false) {
+  const json = JSON.stringify(row);
+  return compressed ? JSON.stringify({ compressedRowV1: deflateSync(Buffer.from(json), { level: 1 }).toString("base64") }) : json;
+}
+export function parseStageOneGammaExportRow(line: string): StageOneGammaExportRow {
+  const row = JSON.parse(line);
+  return typeof row.compressedRowV1 === "string"
+    ? JSON.parse(inflateSync(Buffer.from(row.compressedRowV1, "base64")).toString("utf8"))
+    : row;
 }
