@@ -503,6 +503,9 @@ jobs:
               chmod 0644 "$remote_artifact" "$remote_artifact.sha256"
             fi
 
+            if [[ "$DEPLOY_SCOPE" != "frontend-only" ]]; then
+              bash "$APP_ROOT/deploy/no-docker/scripts/configure-postgres-recovery.sh"
+            fi
             if [[ "$DEPLOY_SCOPE" != "frontend-only" ]] && command -v pg_isready >/dev/null 2>&1 && ! pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
               echo "==> PostgreSQL is not ready; restarting it after disk recovery"
               sudo systemctl restart postgresql

@@ -1,5 +1,5 @@
 """Small, read-only compatibility overlays for the event-trend endpoint."""
-from sqlalchemy import JSON, column, func, select
+from sqlalchemy import JSON, case, column, func, select
 from sqlalchemy.dialects.postgresql import aggregate_order_by
 
 
@@ -49,6 +49,11 @@ def frozen_trend_stages(record):
             "started_at", "completed_at",
         ) for item in (key, stage[key])
     ], "outputs", projected_outputs)
-    return select(func.json_agg(
+    overlay = select(func.json_agg(
         aggregate_order_by(projected, stages.c.ordinality), type_=JSON,
     )).select_from(stages).correlate(record).scalar_subquery()
+    # A single full-universe JSON value can require gigabytes to expand in
+    # PostgreSQL even though the projected response is small. Inspect its stored
+    # size BEFORE any JSON extraction; WHERE alone does not guarantee evaluation
+    # order. Oversized legacy runs keep their existing bounded console projection.
+    return case((func.pg_column_size(record.payload) <= 262_144, overlay), else_=None)

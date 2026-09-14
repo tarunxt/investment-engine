@@ -48,6 +48,7 @@ jobs:
           pytest -q
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_master.py
+          backend/tests/test_database_outage.py
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_polymarket_auto_live_stage1_runtime.py
@@ -77,6 +78,7 @@ jobs:
         run: |
           bash -n \
             deploy/no-docker/redeploy.sh \
+            deploy/no-docker/scripts/configure-postgres-recovery.sh \
             deploy/no-docker/package-frontend-artifact.sh \
             deploy/no-docker/scripts/run-frontend.sh \
             scripts/release-prod.sh
@@ -88,6 +90,7 @@ jobs:
             scripts/check-javascript-budgets.test.mjs \
             scripts/high-traffic-response-inventory.test.mjs \
             deploy/no-docker/frontend-artifact.test.mjs \
+            deploy/no-docker/postgres-recovery.test.mjs \
             deploy/no-docker/redeploy-contract.test.mjs \
             deploy/no-docker/redeploy-transaction.test.mjs \
             deploy/no-docker/repair-next-runtime-artifacts.test.mjs
@@ -119,6 +122,7 @@ jobs:
         run: >-
           node --test
           tests/api-read-fallbacks.test.mjs
+          tests/sports-rankings-recovery.test.mjs
           tests/bounded-api-transport.test.mjs
           tests/bullpen-proxy-timeout-budget.test.mjs
           tests/bullpen-history-portfolio.test.mjs

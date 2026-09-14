@@ -15,6 +15,11 @@ EnvironmentFile=__BACKEND_ENV_FILE__
 ExecStart=__APP_ROOT__/deploy/no-docker/scripts/run-celery-auto-live-worker.sh
 Restart=always
 RestartSec=5
+# Contain a large scan in its worker instead of exhausting the database host.
+# Existing late acknowledgement, run leases and watchdogs handle worker loss.
+MemoryAccounting=true
+MemoryHigh=1536M
+MemoryMax=2048M
 TimeoutStartSec=60
 # Let a warm Celery shutdown finish a short Stage 1/2 section before systemd
 # escalates.  If it cannot, late ack/redelivery plus the run lease recover it.

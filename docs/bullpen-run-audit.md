@@ -1676,6 +1676,29 @@ presentation and consensus-validation rule over already-frozen output fields; it
 does not rewrite historical snapshots or change their schema version.
 # Run-history event trend presentation
 
+## 14 September 2026 memory outage protection
+
+A PostgreSQL OOM was traced to the legacy `trend_stage` compatibility query:
+expanding one very large frozen scan consumed gigabytes despite a small final
+response. The overlay now uses a SQL CASE before JSON extraction and only expands
+payloads with stored size at most 256 KiB. Larger snapshots continue using the
+existing bounded console projection; they can have partial historical candidate
+coverage. Frozen audit snapshots, hashes, decisions and raw exports are preserved.
+No earlier audit fact or missing model output is rewritten or inferred.
+
+The planning-worker service now has a 1.5 GiB memory pressure threshold and a
+2 GiB hard limit so an oversized task cannot exhaust the entire database host.
+The existing late-acknowledgement, execution leases and worker-loss lifecycle
+remain authoritative; exceeding the worker limit can interrupt a large task.
+This changes runtime containment, not order decisions or automatic retry policy.
+
+Production deployment installs PostgreSQL `OOMPolicy=continue` so PostgreSQL can
+perform its native child-crash recovery, plus `Restart=on-failure` for loss of the
+server itself and SIGINT for normal fast shutdown. A cluster already stuck in a
+confirmed OOM shutdown is recovered with bounded native shutdown and WAL replay;
+intentional maintenance stops are not restarted by this guard. Data files are
+never removed or reset.
+
 The Run History dialog includes a read-only, backward-compatible trend view over
 the latest 20 saved scans, including successful and failed runs. It does not
 alter any frozen audit snapshot or Bullpen stage formula. For each event, the

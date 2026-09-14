@@ -252,6 +252,7 @@ function isBullpenStageOneExcelDownload(method: string, path: string) {
 }
 
 function getProxyAttemptTimeoutMs(method: string, path: string) {
+  if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return 4_000;
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {
     return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
@@ -288,6 +289,7 @@ function getProxyAttemptTimeoutMs(method: string, path: string) {
 }
 
 function getProxyTotalTimeoutMs(method: string, path: string) {
+  if (SAFE_FALLBACK_METHODS.has(method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))) return 6_000;
   if (/^polymarket\/auto-live\/runs\/[^/]+\/stage-one-export$/.test(path)) return 30_000;
   if (isBullpenStageOneExcelDownload(method, path)) {
     return BULLPEN_STAGE_ONE_EXCEL_TIMEOUT_MS;
@@ -376,7 +378,9 @@ async function proxyBackendRequest(request: NextRequest, context: RouteContext) 
   // history reads on the same backend origin. Use fixed scopes so this
   // registry remains bounded; never key circuit state by user or run ID.
   const historyCircuitScope =
-    isClusteringProgressRead(request.method, path)
+    SAFE_FALLBACK_METHODS.has(request.method) && (path === "api/sports-rankings" || path.startsWith("api/sports-rankings/"))
+      ? "api/sports-rankings"
+      : isClusteringProgressRead(request.method, path)
       ? "polymarket/auto-live/clustering/progress"
       : SAFE_FALLBACK_METHODS.has(request.method) &&
     (path === "polymarket/auto-live/history" ||
