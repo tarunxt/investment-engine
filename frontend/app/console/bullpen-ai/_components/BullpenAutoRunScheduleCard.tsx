@@ -14821,6 +14821,7 @@ export function BullpenAutoRunScheduleCard({
                   <div key="scan" data-testid="bullpen-stage-one-filters" className="flex flex-col gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
                     <p className="text-sm font-semibold text-emerald-950">Stage 1 · Filters</p>
                     <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
+                      llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
                       filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
                       onOpenScanFilters={onOpenScanFilters} />
                     <p className="text-xs font-semibold text-emerald-900">{stats.totalScanned}/{stats.totalScanned} events</p>
