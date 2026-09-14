@@ -39,12 +39,13 @@ test("Bullpen Sports Excel downloads preserve the workspace owner namespace", ()
   const card = read("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx");
   const download = read("../app/console/bullpen-ai/_components/bullpenStageOneExcel.ts");
   const route = read("../app/api/bullpen-ai/stage-one.xlsx/route.ts");
-  const browserRoute = read("../app/downloads/bullpen-stage-one.xlsx/route.ts");
+  const browserRoute = read("../app/downloads/bullpen-stage-one/route.ts");
 
   assert.match(client, /BullpenAutoRunScheduleCard[\s\S]*?workspaceProfile=\{workspaceProfile\}/);
   assert.match(card, /downloadIndependentStageOneExcel\([\s\S]*?workspaceProfile/);
   assert.match(download, /params\.set\("workspaceProfile", workspaceProfile\)/);
-  assert.match(download, /\/downloads\/bullpen-stage-one\.xlsx/);
+  assert.match(download, /\/downloads\/bullpen-stage-one\?/);
+  assert.doesNotMatch(download, /\/downloads\/bullpen-stage-one\.xlsx/);
   assert.match(route, /workspaceProfile[\s\S]*?bullpen-sports[\s\S]*?ownerKey/);
   assert.match(route, /`\$\{sessionOwner\}:\$\{workspaceProfile\}`/);
   assert.match(browserRoute, /downloadStageOneExcel\(request\)/);
