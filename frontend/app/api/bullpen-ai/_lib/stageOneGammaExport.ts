@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -28,6 +28,8 @@ export type StageOneGammaExportRow = {
 };
 
 export type StageOneGammaExportMetadata = {
+  filterPending?: boolean;
+  sourceScanExportId?: string;
   exportId: string;
   ownerHash: string;
   createdAt: string;
@@ -178,7 +180,7 @@ export async function appendStageOneGammaExportPage({
     // Only the latest exhaustive scan is selectable in the console. Retaining
     // every superseded raw Gamma ledger can consume several gigabytes and
     // eventually makes the next scan fail with EDQUOT (-122).
-    await cleanupSupersededOwnerExports(ownerKey);
+    if (!ownerKey.endsWith(":universal")) await cleanupSupersededOwnerExports(ownerKey);
     metadata = {
       exportId: resolvedExportId,
       ownerHash: ownerHash(ownerKey),
@@ -302,7 +304,7 @@ export async function openLatestStageOneGammaExport({
           const exportId = name.slice(0, -".json".length);
           if (!EXPORT_ID_PATTERN.test(exportId)) return null;
           const metadata = await readMetadata(exportId).catch(() => null);
-          return metadata?.completed && metadata.ownerHash === expectedOwnerHash
+          return metadata?.completed && !metadata.filterPending && metadata.ownerHash === expectedOwnerHash
             ? metadata
             : null;
         }),
@@ -482,6 +484,7 @@ export async function reapplyStageOneGammaExportFilters({
   const updatedMetadata: StageOneGammaExportMetadata = {
     ...metadata,
     reapplyState: undefined,
+    filterPending: false,
     filters,
     updatedAt: new Date().toISOString(),
     acceptedCount: state.acceptedCount,
@@ -491,4 +494,60 @@ export async function reapplyStageOneGammaExportFilters({
   };
   await saveMetadata(updatedMetadata);
   return { completed: true as const, metadata: updatedMetadata };
+}
+
+// A workflow owns its filter output; the shared capture is never re-filtered in place.
+export async function forkUniversalScan(ownerKey: string, sourceExportId?: string) {
+  const source = sourceExportId
+    ? await openStageOneGammaExport({ exportId: sourceExportId, ownerKey: `${ownerKey}:universal` })
+    : await openUniversalScan(ownerKey);
+  if (!source || !source.metadata.completed) throw new Error("Run Universal Polymarket Scan in Trading Bots first.");
+  const exportId = randomUUID();
+  const paths = exportPaths(exportId);
+  await copyFile(source.rowsPath, paths.rows);
+  await writeFile(paths.filteredRows, "", "utf8");
+  await saveMetadata({ ...source.metadata, exportId, ownerHash: ownerHash(ownerKey),
+    sourceScanExportId: source.metadata.exportId, filterPending: true, updatedAt: new Date().toISOString(),
+    acceptedCount: 0, rejectedCount: 0, acceptedSample: [], rejectedSample: [], reapplyState: undefined });
+  return exportId;
+}
+
+const universalImports = new Map<string, Promise<Awaited<ReturnType<typeof openLatestStageOneGammaExport>>>>();
+
+// Preserve the user's existing completed capture when moving the scan surface.
+// Reset workflow classifications and drop synthetic wallet-only rows.
+export async function openUniversalScan(ownerKey: string) {
+  const current = await openLatestStageOneGammaExport({ ownerKey: `${ownerKey}:universal` });
+  if (current) return current;
+  const pending = universalImports.get(ownerKey);
+  if (pending) return pending;
+  const importOriginal = (async () => {
+    const original = await openLatestStageOneGammaExport({ ownerKey });
+    if (!original) return null;
+    const exportId = randomUUID();
+    const paths = exportPaths(exportId);
+    await writeFile(paths.rows, "", "utf8");
+    let buffer = "";
+    let rowCount = 0;
+    const acceptedSample: BullpenQuestion[] = [];
+    const lines = createInterface({ input: createReadStream(original.rowsPath, { encoding: "utf8" }), crlfDelay: Infinity });
+    for await (const line of lines) {
+      if (!line) continue;
+      const row = JSON.parse(line) as StageOneGammaExportRow;
+      if (row.event.source === "active_wallet_position" || row.market.source === "active_wallet_position") continue;
+      const rawRow = { ...row, scanStatus: "passed", filterReasons: [], forceIncluded: false, forceIncludedPosition: false };
+      rowCount += 1;
+      if (acceptedSample.length < 500) acceptedSample.push(row.candidate);
+      buffer += `${JSON.stringify(rawRow)}\n`;
+      if (buffer.length >= 1_000_000) { await appendFile(paths.rows, buffer, "utf8"); buffer = ""; }
+    }
+    if (buffer) await appendFile(paths.rows, buffer, "utf8");
+    await copyFile(paths.rows, paths.filteredRows);
+    await saveMetadata({ ...original.metadata, exportId, ownerHash: ownerHash(`${ownerKey}:universal`),
+      sourceScanExportId: undefined, filterPending: false, reapplyState: undefined,
+      rowCount, acceptedCount: rowCount, rejectedCount: 0, acceptedSample, rejectedSample: [] });
+    return openLatestStageOneGammaExport({ ownerKey: `${ownerKey}:universal` });
+  })();
+  universalImports.set(ownerKey, importOriginal);
+  try { return await importOriginal; } finally { universalImports.delete(ownerKey); }
 }

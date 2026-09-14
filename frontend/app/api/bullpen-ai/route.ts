@@ -16,6 +16,7 @@ import {
 } from "./_lib/serverBackendSession";
 import {
   appendStageOneGammaExportPage,
+  forkUniversalScan,
   reapplyStageOneGammaExportFilters,
   type StageOneGammaExportRow,
 } from "./_lib/stageOneGammaExport";
@@ -1478,6 +1479,7 @@ async function buildResponse({
   warning,
   details,
   forcedIdentityKeys = new Set<string>(),
+  unfiltered = false,
 }: {
   mode: ScanMode;
   sourceUrl: string;
@@ -1488,6 +1490,7 @@ async function buildResponse({
   warning?: string;
   details?: string;
   forcedIdentityKeys?: Set<string>;
+  unfiltered?: boolean;
 }) {
   const candidatesWithFilters = candidates.map((question) => ({
     ...question,
@@ -1501,7 +1504,7 @@ async function buildResponse({
   }));
   const evaluatedCandidates = candidatesWithFilters.map((question) => ({
     question,
-    filterReasons: questionIdentityKeys(question).some((key) =>
+    filterReasons: unfiltered || questionIdentityKeys(question).some((key) =>
       forcedIdentityKeys.has(key),
     )
       ? []
@@ -1611,6 +1614,10 @@ async function handleScan(
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
   const searchParams = request.nextUrl.searchParams;
+  const universal = searchParams.get("universal") === "true";
+  const sessionOwner = backendSession.sessionSubject ?? backendSession.sessionGeneration;
+  const scanOwner = universal ? `${sessionOwner}:universal` : sessionOwner;
+  if (universal) activePositions = [];
   const mode: ScanMode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
   const filters = normalizeBullpenScanFilters(mode, searchParams);
@@ -1625,7 +1632,7 @@ async function handleScan(
       : new Date().toISOString();
   const cursor = searchParams.get("scanCursor");
   const requestedExportId = searchParams.get("scanExportId");
-  const reapplyExportId = searchParams.get("reapplyExportId");
+  let reapplyExportId = searchParams.get("reapplyExportId");
   const reapplyCursorValue = searchParams.get("reapplyCursor");
   const reapplyCursor = reapplyCursorValue === null
     ? undefined
@@ -1635,15 +1642,26 @@ async function handleScan(
   );
 
   try {
+    if (universal && (reapplyExportId || searchParams.get("useUniversal") === "true")) {
+      return NextResponse.json({ error: "Universal captures cannot be filtered in place." }, { status: 400 });
+    }
+    if (searchParams.get("useUniversal") === "true" && !reapplyExportId) {
+      reapplyExportId = await forkUniversalScan(sessionOwner);
+      await appendStageOneGammaExportPage({ exportId: reapplyExportId, ownerKey: sessionOwner,
+        pageKey: "__WORKFLOW_ACTIVE_POSITIONS__", completed: true,
+        rows: activePositions.map(position => ({ candidate: stripFilterMetadata(activePositionCandidate(position)),
+          event: { source: "active_wallet_position" }, market: {}, scanStatus: "passed" as const,
+          filterReasons: [], forceIncluded: true, forceIncludedPosition: true })) });
+    }
     if (reapplyExportId) {
       const reapplyResult = await reapplyStageOneGammaExportFilters({
         exportId: reapplyExportId,
         ownerKey:
-          backendSession.sessionSubject ?? backendSession.sessionGeneration,
+          scanOwner,
         filters,
         cursor: Number.isFinite(reapplyCursor) ? reapplyCursor : undefined,
         evaluate: (candidate, market, event) =>
-          getFilterReasons(
+          questionIdentityKeys(candidate).some(key => forcedIdentityKeys.has(key)) ? [] : getFilterReasons(
             hydrateStoredCandidateForFiltering(candidate, filters, market, event),
             mode,
             filters,
@@ -1654,6 +1672,7 @@ async function handleScan(
         return NextResponse.json(
           {
             status: "reapplying",
+            scanExportId: metadata.exportId,
             retryAfterMs: 100,
             reapplyCursor: metadata.reapplyState?.processedCount ?? 0,
             processedCandidates: metadata.reapplyState?.processedCount ?? 0,
@@ -1676,6 +1695,7 @@ async function handleScan(
         totalRejectedQuestions: metadata.rejectedCount ?? 0,
         pagesScanned: metadata.processedPages.length,
         scanExportId: metadata.exportId,
+        sourceScanExportId: metadata.sourceScanExportId,
         details:
           "Reapplied saved Stage 1 filters to the existing Full Universe data without fetching Gamma again.",
       });
@@ -1720,6 +1740,7 @@ async function handleScan(
       filters,
       candidates: sortQuestions(resultCandidates),
       forcedIdentityKeys,
+      unfiltered: universal,
       ...(nextCursor
         ? {}
         : {
@@ -1773,7 +1794,7 @@ async function handleScan(
       : await appendStageOneGammaExportPage({
           exportId: requestedExportId,
           ownerKey:
-            backendSession.sessionSubject ?? backendSession.sessionGeneration,
+            scanOwner,
           pageKey: cursor || "__FIRST__",
         rows: exportRows,
         completed: nextCursor === null,
@@ -1791,6 +1812,7 @@ async function handleScan(
       scanStartedAt: scannedAt,
       nextCursor,
       scanExportId: exportState.exportId,
+      cumulativeTotalCandidates: exportState.rowCount,
       ...(nextCursor
         ? {
             status: "scanning",

@@ -13,6 +13,7 @@ import { createBackendSessionContext } from "../_lib/serverBackendSession";
 import {
   cacheStageOneGammaExportSummary,
   openLatestStageOneGammaExport,
+  openUniversalScan,
   type StageOneGammaExportRow,
 } from "../_lib/stageOneGammaExport";
 
@@ -29,8 +30,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const latest = await openLatestStageOneGammaExport({
-      ownerKey: session.sessionSubject ?? session.sessionGeneration,
+    const latest = request.nextUrl.searchParams.get("universal") === "true"
+      ? await openUniversalScan(session.sessionSubject ?? session.sessionGeneration)
+      : await openLatestStageOneGammaExport({
+      ownerKey: (session.sessionSubject ?? session.sessionGeneration) + (request.nextUrl.searchParams.get("universal") === "true" ? ":universal" : ""),
     });
     if (!latest) {
       return NextResponse.json(
@@ -73,7 +76,7 @@ export async function GET(request: NextRequest) {
       }
       await cacheStageOneGammaExportSummary({
         metadata: latest.metadata,
-        ownerKey: session.sessionSubject ?? session.sessionGeneration,
+        ownerKey: (session.sessionSubject ?? session.sessionGeneration) + (request.nextUrl.searchParams.get("universal") === "true" ? ":universal" : ""),
         acceptedCount,
         rejectedCount,
         acceptedSample: accepted,
@@ -100,6 +103,7 @@ export async function GET(request: NextRequest) {
         totalAcceptedQuestions: acceptedCount,
         totalRejectedQuestions: rejectedCount,
         scanExportId: latest.metadata.exportId,
+        sourceScanExportId: latest.metadata.sourceScanExportId,
         details:
           "Latest completed Stage 1 snapshot synchronized from the server across devices.",
       },

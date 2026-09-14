@@ -1456,6 +1456,7 @@ function buildIndependentStageOneView(
       independent_stage1_scan: true,
       snapshot_id: snapshot.snapshotId,
       scan_export_id: snapshot.scanExportId ?? null,
+      source_scan_export_id: snapshot.sourceScanExportId ?? null,
       scanned_at: snapshot.scannedAt,
       scanned_candidates: snapshot.totalCandidates,
       total_items: snapshot.totalCandidates,
@@ -2118,6 +2119,7 @@ function StageOneRunStats({
   decisions = [],
   run = null,
   hideNumbers = false,
+  filtersOnly = false,
   renderInteractiveRows = false,
   onOpenScanCandidateDialog,
   onOpenScanFilters,
@@ -2128,6 +2130,7 @@ function StageOneRunStats({
   decisions?: BullpenAutoLiveDecision[];
   run?: BullpenAutoLiveRun | null;
   hideNumbers?: boolean;
+  filtersOnly?: boolean;
   renderInteractiveRows?: boolean;
   onOpenScanCandidateDialog?: (
     stage: WorkflowStageView,
@@ -2242,6 +2245,7 @@ function StageOneRunStats({
 
   return (
     <div className="space-y-0.5">
+      {!filtersOnly ? <>
       {scanScope ? (
         <div className="pb-1 text-xs font-semibold text-slate-700">
           Scan: {scanScope === "full_universe" ? "Full Universe" : "Trending"}
@@ -2344,6 +2348,7 @@ function StageOneRunStats({
           </button>
         </div>
       )}
+      </> : null}
       {renderInteractiveRows && onOpenScanCandidateDialog ? (
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -14809,6 +14814,19 @@ export function BullpenAutoRunScheduleCard({
                   (item) => item.key === "invest" && item.state === "current",
                 );
 
+              if (["scan"].includes(stage.key)) {
+                const filterStage = independentStageOneView ?? stage;
+                const stats = getStageOneStats(filterStage);
+                return (
+                  <div key="scan" data-testid="bullpen-stage-one-filters" className="flex flex-col gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+                    <p className="text-sm font-semibold text-emerald-950">Stage 1 · Filters</p>
+                    <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
+                      filtersOnly renderInteractiveRows onOpenScanCandidateDialog={openScanCandidateDialog}
+                      onOpenScanFilters={onOpenScanFilters} />
+                    <p className="text-xs font-semibold text-emerald-900">{stats.totalScanned}/{stats.totalScanned} events</p>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={stage.key}
@@ -14853,103 +14871,7 @@ export function BullpenAutoRunScheduleCard({
                           {stage.subtitle}
                         </p>
                       ) : null}
-                      {stage.key === "scan" && onRunIndependentStageOne ? (
-                        <div className="flex max-w-full flex-wrap items-center gap-2 pt-2">
-                          <button
-                            type="button"
-                            onClick={() => setStageOneResultSource("original")}
-                            disabled={isIndependentStageOneScanning}
-                            className={`rounded-lg border px-2 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 ${
-                              stageOneResultSource === "original"
-                                ? "border-blue-700 bg-blue-700 text-white shadow-sm"
-                                : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
-                            }`}
-                          >
-                            Original
-                          </button>
-                          <div
-                            className={`inline-flex overflow-hidden rounded-lg border text-xs font-semibold text-white shadow-sm transition focus-within:ring-2 ${
-                              isIndependentStageOneScanning
-                                ? "border-red-700 bg-red-600 focus-within:ring-red-300"
-                                : "border-blue-700 bg-blue-600 focus-within:ring-blue-300"
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => void handleIndependentStageOneScan()}
-                              className={`px-2 py-1.5 transition focus:outline-none ${
-                                isIndependentStageOneScanning
-                                  ? "hover:bg-red-700"
-                                  : "hover:bg-blue-700"
-                              }`}
-                              aria-live="polite"
-                              aria-label={
-                                isIndependentStageOneScanning
-                                  ? "Stop Stage 1 scan"
-                                  : "Start Stage 1 scan"
-                              }
-                              title={
-                                isIndependentStageOneScanning
-                                  ? "Click to stop scanning"
-                                  : "Start a fresh Stage 1 scan"
-                              }
-                            >
-                              {isIndependentStageOneScanning
-                                ? "Scanning"
-                                : "Scan Now"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setStageOneResultSource("independent")
-                              }
-                              disabled={
-                                !independentScanSnapshot ||
-                                isIndependentStageOneScanning
-                              }
-                              className={`inline-flex w-8 items-center justify-center border-l transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
-                                isIndependentStageOneScanning
-                                  ? "border-red-500 hover:bg-red-700"
-                                  : "border-blue-500 hover:bg-blue-700"
-                              }`}
-                              aria-label="Open latest saved Stage 1 scan"
-                              title="Open latest saved Stage 1 scan"
-                            >
-                              <Menu className="h-3.5 w-3.5" aria-hidden="true" />
-                            </button>
-                          </div>
-                          {independentScanSnapshot ? (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setStageOneResultSource("independent")
-                              }
-                              disabled={isIndependentStageOneScanning}
-                              className={`basis-full rounded-lg border border-emerald-700 bg-emerald-600 px-3 py-1.5 text-left text-xs font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 ${
-                                stageOneResultSource === "independent"
-                                  ? "ring-2 ring-emerald-300 ring-offset-1"
-                                  : ""
-                              }`}
-                            >
-                              {independentScanSnapshot.isPartial
-                                ? "Partial scan dated "
-                                : "Scan dated "}
-                              {formatIstDateTime(independentScanSnapshot.scannedAt)}
-                              <span className="mt-0.5 block text-[10px] font-medium opacity-90">
-                                {independentScanSnapshot.totalCandidates.toLocaleString("en-IN")} markets
-                                {independentScanSnapshot.pagesScanned
-                                  ? ` · ${independentScanSnapshot.pagesScanned} pages`
-                                  : ""}
-                              </span>
-                            </button>
-                          ) : null}
-                          {independentStageOneError ? (
-                            <p className="basis-full text-[11px] font-semibold leading-4 text-red-700">
-                              {independentStageOneError}
-                            </p>
-                          ) : null}
-                        </div>
-                      ) : null}
+
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <div className="flex items-center gap-1.5">
