@@ -1,0 +1,39 @@
+name: Recover Rankings Database After OOM
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/fix-ranking-errors]
+    paths: [.github/workflows/recover-ranking-database.yml]
+permissions:
+  contents: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Recover the diagnosed PostgreSQL OOM shutdown
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 180s
+          script: |
+            set -eu
+            unit=postgresql@18-main.service
+            if pg_isready -h 127.0.0.1 -p 5432 >/dev/null 2>&1; then
+              echo 'Database is ready; no recovery restart needed.'
+              exit 0
+            fi
+            test "$(sudo systemctl show "$unit" -p Result --value)" = oom-kill
+            test "$(sudo systemctl show "$unit" -p ActiveState --value)" = deactivating
+            echo 'Confirmed failed OOM shutdown. Attempting PostgreSQL fast shutdown.'
+            if ! sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /var/lib/postgresql/18/main -m fast -w -t 30 stop; then
+              echo 'Fast shutdown did not finish; requesting PostgreSQL immediate shutdown and WAL recovery.'
+              sudo -u postgres /usr/lib/postgresql/18/bin/pg_ctl -D /var/lib/postgresql/18/main -m immediate -w -t 20 stop
+            fi
+            sudo systemctl reset-failed "$unit"
+            timeout 45 sudo systemctl start "$unit"
+            pg_isready -h 127.0.0.1 -p 5432
+            sudo -u postgres psql -X -d postgres -Atc 'SELECT 1;'
+            curl -fsS --max-time 8 http://127.0.0.1:8000/health/ready
