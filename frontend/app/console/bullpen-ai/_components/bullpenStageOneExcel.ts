@@ -263,14 +263,62 @@ export function downloadIndependentStageOneExcel(
   exportScope: "filtered" | "all-scanned" = "all-scanned",
   workspaceProfile: "bullpen007" | "bullpen-sports" = "bullpen007",
 ) {
-  const link = document.createElement("a");
   const params = new URLSearchParams({ exportId, scope: exportScope });
   if (workspaceProfile !== "bullpen007") {
     params.set("workspaceProfile", workspaceProfile);
   }
-  link.href = `/console/bullpen-ai/export-stage-one?${params.toString()}`;
-  link.download = `bullpen-stage-1-${exportScope}-events.xlsx`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  const exportUrl = `/console/bullpen-ai/export-stage-one?${params.toString()}`;
+  const filename = `bullpen-stage-1-${exportScope}-events.xlsx`;
+
+  if (exportScope === "all-scanned") {
+    const link = document.createElement("a");
+    link.href = exportUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return;
+  }
+
+  const notice = document.createElement("div");
+  notice.setAttribute("role", "status");
+  notice.style.cssText =
+    "position:fixed;bottom:24px;right:24px;z-index:9999;max-width:420px;padding:16px;border:1px solid #34d399;border-radius:12px;background:#ecfdf5;color:#064e3b;box-shadow:0 4px 12px #0002";
+  notice.textContent = "Preparing filtered events Excel…";
+  document.body.appendChild(notice);
+
+  void fetch(exportUrl, {
+    credentials: "same-origin",
+    cache: "no-store",
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(
+          payload?.error || `Excel export failed (${response.status}).`,
+        );
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+      notice.textContent = "Excel is ready. Download started.";
+      window.setTimeout(() => notice.remove(), 10_000);
+    })
+    .catch((error: unknown) => {
+      notice.style.borderColor = "#f59e0b";
+      notice.style.background = "#fffbeb";
+      notice.style.color = "#78350f";
+      notice.textContent =
+        error instanceof Error
+          ? error.message
+          : "Excel export failed. Please try again.";
+    });
 }

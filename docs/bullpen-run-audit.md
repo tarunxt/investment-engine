@@ -14,8 +14,10 @@ server-side export lookup, so a Sports export cannot be opened against the
 Bullpen 007 owner namespace. The browser uses the authenticated
 `/console/bullpen-ai/export-stage-one` route so content blockers do not
 intercept the workbook as API, downloads-directory, or `.xlsx` navigation. The
-response still declares the Excel
-MIME type and `.xlsx` attachment filename. A run
+filtered export is fetched in-page and converted to a browser-local Blob before
+the save begins, avoiding content-blocker navigation entirely and surfacing any
+server rejection in the console. The response still declares the Excel MIME
+type and `.xlsx` attachment filename. A run
 started from either workspace records
 `console_profile.workspace_profile` in the existing immutable run payload; the
 candidate rows, filter outcome, formulas, and audit schema remain otherwise

@@ -46,6 +46,9 @@ test("Bullpen Sports Excel downloads preserve the workspace owner namespace", ()
   assert.match(download, /params\.set\("workspaceProfile", workspaceProfile\)/);
   assert.match(download, /\/console\/bullpen-ai\/export-stage-one\?/);
   assert.doesNotMatch(download, /\/api\/|\/downloads\/|\.xlsx\?/);
+  assert.match(download, /fetch\(exportUrl,[\s\S]*?response\.blob\(\)/);
+  assert.match(download, /URL\.createObjectURL\(blob\)/);
+  assert.match(download, /payload\?\.error \|\| `Excel export failed/);
   assert.match(route, /workspaceProfile[\s\S]*?bullpen-sports[\s\S]*?ownerKey/);
   assert.match(route, /`\$\{sessionOwner\}:\$\{workspaceProfile\}`/);
   assert.match(browserRoute, /downloadStageOneExcel\(request\)/);
