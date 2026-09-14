@@ -29,6 +29,7 @@ import {
   Loader2,
   LogIn,
   LogOut,
+  Menu,
   PauseCircle,
   PlayCircle,
   ShieldAlert,
@@ -11104,20 +11105,9 @@ export function BullpenAutoRunScheduleCard({
   const [timerNowMs, setTimerNowMs] = useState(() => Date.now());
   const [scanCandidateDialog, setScanCandidateDialog] =
     useState<ScanCandidateDialogState | null>(null);
-  const [stageOneResultSelection, setStageOneResultSelection] = useState<{
-    source: "original" | "independent";
-    snapshotId: string | null;
-  }>({ source: "original", snapshotId: null });
-  const stageOneResultSource =
-    independentScanSnapshot &&
-    independentScanSnapshot.snapshotId !== stageOneResultSelection.snapshotId
-      ? "independent"
-      : stageOneResultSelection.source;
-  const setStageOneResultSource = (source: "original" | "independent") =>
-    setStageOneResultSelection({
-      source,
-      snapshotId: independentScanSnapshot?.snapshotId ?? null,
-    });
+  const [stageOneResultSource, setStageOneResultSource] = useState<
+    "original" | "independent"
+  >("original");
   const [isIndependentStageOneScanning, setIsIndependentStageOneScanning] =
     useState(false);
   const [independentStageOneStartedAt, setIndependentStageOneStartedAt] =
@@ -14865,67 +14855,94 @@ export function BullpenAutoRunScheduleCard({
                       ) : null}
                       {stage.key === "scan" && onRunIndependentStageOne ? (
                         <div className="flex max-w-full flex-wrap items-center gap-2 pt-2">
-                          {independentScanSnapshot ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => setStageOneResultSource("original")}
-                                disabled={isIndependentStageOneScanning}
-                                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 ${
-                                  stageOneResultSource === "original"
-                                    ? "border-blue-700 bg-blue-700 text-white shadow-sm"
-                                    : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
-                                }`}
-                              >
-                                Original
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setStageOneResultSource("independent")
-                                }
-                                disabled={isIndependentStageOneScanning}
-                                className={`max-w-full rounded-lg border border-emerald-700 bg-emerald-600 px-3 py-1.5 text-left text-xs font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 ${
-                                  stageOneResultSource === "independent"
-                                    ? "ring-2 ring-emerald-300 ring-offset-1"
-                                    : ""
-                                }`}
-                              >
-                                {independentScanSnapshot.isPartial
-                                  ? "Partial scan dated "
-                                  : "Scan dated "}
-                                {formatIstDateTime(independentScanSnapshot.scannedAt)}
-                                <span className="mt-0.5 block text-[10px] font-medium opacity-90">
-                                  {independentScanSnapshot.totalCandidates.toLocaleString("en-IN")} markets
-                                  {independentScanSnapshot.pagesScanned
-                                    ? ` · ${independentScanSnapshot.pagesScanned} pages`
-                                    : ""}
-                                </span>
-                              </button>
-                            </>
-                          ) : null}
                           <button
                             type="button"
-                            onClick={() => void handleIndependentStageOneScan()}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 ${
-                              isIndependentStageOneScanning
-                                ? "border-red-700 bg-red-600 hover:bg-red-700 focus:ring-red-300"
-                                : "border-blue-700 bg-blue-600 hover:bg-blue-700 focus:ring-blue-300"
+                            onClick={() => setStageOneResultSource("original")}
+                            disabled={isIndependentStageOneScanning}
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+                              stageOneResultSource === "original"
+                                ? "border-blue-700 bg-blue-700 text-white shadow-sm"
+                                : "border-blue-200 bg-white text-blue-700 hover:bg-blue-50"
                             }`}
-                            aria-live="polite"
-                            aria-label={
-                              isIndependentStageOneScanning
-                                ? "Stop Stage 1 scan"
-                                : "Start Stage 1 scan"
-                            }
-                            title={
-                              isIndependentStageOneScanning
-                                ? "Click to stop scanning"
-                                : "Start a fresh Stage 1 scan"
-                            }
                           >
-                            {isIndependentStageOneScanning ? "Scanning" : "Scan"}
+                            Original
                           </button>
+                          <div
+                            className={`inline-flex overflow-hidden rounded-lg border text-xs font-semibold text-white shadow-sm transition focus-within:ring-2 ${
+                              isIndependentStageOneScanning
+                                ? "border-red-700 bg-red-600 focus-within:ring-red-300"
+                                : "border-blue-700 bg-blue-600 focus-within:ring-blue-300"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => void handleIndependentStageOneScan()}
+                              className={`px-3 py-1.5 transition focus:outline-none ${
+                                isIndependentStageOneScanning
+                                  ? "hover:bg-red-700"
+                                  : "hover:bg-blue-700"
+                              }`}
+                              aria-live="polite"
+                              aria-label={
+                                isIndependentStageOneScanning
+                                  ? "Stop Stage 1 scan"
+                                  : "Start Stage 1 scan"
+                              }
+                              title={
+                                isIndependentStageOneScanning
+                                  ? "Click to stop scanning"
+                                  : "Start a fresh Stage 1 scan"
+                              }
+                            >
+                              {isIndependentStageOneScanning
+                                ? "Scanning"
+                                : "Scan Now"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setStageOneResultSource("independent")
+                              }
+                              disabled={
+                                !independentScanSnapshot ||
+                                isIndependentStageOneScanning
+                              }
+                              className={`inline-flex w-8 items-center justify-center border-l transition focus:outline-none disabled:cursor-not-allowed disabled:opacity-50 ${
+                                isIndependentStageOneScanning
+                                  ? "border-red-500 hover:bg-red-700"
+                                  : "border-blue-500 hover:bg-blue-700"
+                              }`}
+                              aria-label="Open latest saved Stage 1 scan"
+                              title="Open latest saved Stage 1 scan"
+                            >
+                              <Menu className="h-3.5 w-3.5" aria-hidden="true" />
+                            </button>
+                          </div>
+                          {independentScanSnapshot ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setStageOneResultSource("independent")
+                              }
+                              disabled={isIndependentStageOneScanning}
+                              className={`basis-full rounded-lg border border-emerald-700 bg-emerald-600 px-3 py-1.5 text-left text-xs font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 ${
+                                stageOneResultSource === "independent"
+                                  ? "ring-2 ring-emerald-300 ring-offset-1"
+                                  : ""
+                              }`}
+                            >
+                              {independentScanSnapshot.isPartial
+                                ? "Partial scan dated "
+                                : "Scan dated "}
+                              {formatIstDateTime(independentScanSnapshot.scannedAt)}
+                              <span className="mt-0.5 block text-[10px] font-medium opacity-90">
+                                {independentScanSnapshot.totalCandidates.toLocaleString("en-IN")} markets
+                                {independentScanSnapshot.pagesScanned
+                                  ? ` · ${independentScanSnapshot.pagesScanned} pages`
+                                  : ""}
+                              </span>
+                            </button>
+                          ) : null}
                           {independentStageOneError ? (
                             <p className="basis-full text-[11px] font-semibold leading-4 text-red-700">
                               {independentStageOneError}

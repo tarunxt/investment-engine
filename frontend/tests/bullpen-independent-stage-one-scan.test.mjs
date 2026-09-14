@@ -48,13 +48,26 @@ const stageOneSettingsSource = fs.readFileSync(
 
 test("Stage 1 exposes isolated Original, saved scan, and rescan controls", () => {
   assert.match(cardSource, />\s*Original\s*</);
+  assert.match(
+    cardSource,
+    /useState<\s*"original" \| "independent"\s*>\("original"\)/,
+  );
   assert.match(cardSource, /Partial scan dated/);
   assert.match(cardSource, /independentScanSnapshot\.totalCandidates\.toLocaleString/);
-  assert.match(cardSource, /isIndependentStageOneScanning \? "Scanning" : "Scan"/);
+  assert.match(cardSource, /:\s*"Scan Now"/);
+  assert.match(cardSource, /aria-label="Open latest saved Stage 1 scan"/);
+  assert.match(
+    cardSource,
+    /aria-label="Open latest saved Stage 1 scan"[\s\S]{0,300}<Menu/,
+  );
+  assert.match(
+    cardSource,
+    /onClick=\{\(\) =>\s*setStageOneResultSource\("independent"\)\s*\}/,
+  );
   assert.match(cardSource, /border-red-700 bg-red-600/);
   assert.match(cardSource, /border-blue-700 bg-blue-600/);
   assert.match(cardSource, /border-emerald-700 bg-emerald-600/);
-  assert.match(cardSource, /isIndependentStageOneActive[\s\S]{0,200}\? "yellow"/);
+  assert.match(cardSource, /isStageOneActive \|\| isIncompleteUniverse[\s\S]{0,80}\? "yellow"/);
   assert.match(cardSource, /displayedStageTimerStartedAt/);
 });
 
@@ -79,7 +92,10 @@ test("active independent Stage 1 shows live page progress instead of stale total
   assert.match(cardSource, /markets scanned · Page/);
   assert.match(cardSource, /Last update/);
   assert.match(cardSource, /Retry attempts:/);
-  assert.match(cardSource, /isIndependentStageOneActive \? \(/);
+  assert.match(
+    cardSource,
+    /const displayedScanProgress = isIndependentStageOneActive[\s\S]{0,100}\? independentStageOneProgress/,
+  );
   assert.match(pageSource, /completedPages \+= 1/);
   assert.match(pageSource, /options\?\.onProgress\?\./);
   assert.match(pageSource, /status: isRetryingPage \? "retrying" : "scanning"/);
@@ -122,10 +138,7 @@ test("latest completed Stage 1 snapshot synchronizes across browsers and devices
   assert.match(pageSource, /document\.addEventListener\("visibilitychange"/);
   assert.match(pageSource, /window\.addEventListener\("focus"/);
   assert.match(pageSource, /server synchronization fails/);
-  assert.match(
-    cardSource,
-    /independentScanSnapshot\.snapshotId !== stageOneResultSelection\.snapshotId[\s\S]{0,100}\? "independent"/,
-  );
+  assert.doesNotMatch(cardSource, /stageOneResultSelection/);
   assert.match(
     cardSource,
     /const showStageNumbers =[\s\S]{0,220}stageOneResultSource === "independent"[\s\S]{0,100}independentStageOneView !== null/,
@@ -277,7 +290,10 @@ test("independent Stage 1 Excel uses its own complete export instead of a stale 
   );
   assert.match(cardSource, /downloadIndependentStageOneExcel\(independentExportId, "filtered"\)/);
   assert.match(cardSource, /onRecoverLegacyExport\?\.\("filtered"\)/);
-  assert.match(cardSource, /state\.scanExportId, "filtered"/);
+  assert.match(
+    cardSource,
+    /state\.scanExportId, state\.mode === "all-scanned" \? "all-scanned" : "filtered"/,
+  );
   assert.match(downloadSource, /new URLSearchParams\(\{ exportId, scope: exportScope \}\)/);
   assert.match(excelSource, /\.\.\.LEGACY_HEADERS, \.\.\.gammaHeaders/);
   assert.match(excelSource, /event\.\$\{key\}/);
