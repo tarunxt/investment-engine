@@ -529,6 +529,7 @@ export async function openUniversalScan(ownerKey: string) {
     await writeFile(paths.rows, "", "utf8");
     let buffer = "";
     let rowCount = 0;
+    const identityKeys = new Set<string>();
     const acceptedSample: BullpenQuestion[] = [];
     const lines = createInterface({ input: createReadStream(original.rowsPath, { encoding: "utf8" }), crlfDelay: Infinity });
     for await (const line of lines) {
@@ -537,6 +538,9 @@ export async function openUniversalScan(ownerKey: string) {
       if (row.event.source === "active_wallet_position" || row.market.source === "active_wallet_position") continue;
       const rawRow = { ...row, scanStatus: "passed", filterReasons: [], forceIncluded: false, forceIncludedPosition: false };
       rowCount += 1;
+      for (const value of [row.candidate.conditionId, row.candidate.marketId, row.candidate.slug, row.candidate.id]) {
+        if (typeof value === "string" && value.trim()) identityKeys.add(value.trim().toLowerCase());
+      }
       if (acceptedSample.length < 500) acceptedSample.push(row.candidate);
       buffer += `${JSON.stringify(rawRow)}\n`;
       if (buffer.length >= 1_000_000) { await appendFile(paths.rows, buffer, "utf8"); buffer = ""; }
@@ -545,7 +549,7 @@ export async function openUniversalScan(ownerKey: string) {
     await copyFile(paths.rows, paths.filteredRows);
     await saveMetadata({ ...original.metadata, exportId, ownerHash: ownerHash(`${ownerKey}:universal`),
       sourceScanExportId: undefined, filterPending: false, reapplyState: undefined,
-      rowCount, acceptedCount: rowCount, rejectedCount: 0, acceptedSample, rejectedSample: [] });
+      identityKeys: [...identityKeys], rowCount, acceptedCount: rowCount, rejectedCount: 0, acceptedSample, rejectedSample: [] });
     return openLatestStageOneGammaExport({ ownerKey: `${ownerKey}:universal` });
   })();
   universalImports.set(ownerKey, importOriginal);

@@ -26,5 +26,13 @@ test("workflow filters are isolated and incomplete scans never replace a complet
     await ledger.appendStageOneGammaExportPage({ exportId: null, ownerKey: "test:universal", pageKey: "first", rows: [], completed: false });
     assert.equal((await ledger.openLatestStageOneGammaExport({ ownerKey: "test:universal" })).metadata.exportId, raw.exportId);
     await assert.rejects(ledger.forkUniversalScan("other", raw.exportId), /does not belong/);
+    const walletRow = { candidate: { id: "wallet", question: "wallet" }, event: { source: "active_wallet_position" }, market: {}, scanStatus: "passed", filterReasons: [], forceIncludedPosition: true };
+    await ledger.appendStageOneGammaExportPage({ exportId: null, ownerKey: "legacy", pageKey: "first", rows: [...rows, walletRow], completed: true });
+    const migrated = await ledger.openUniversalScan("legacy");
+    assert.equal(migrated.metadata.rowCount, 2);
+    assert.ok(!migrated.metadata.identityKeys.includes("wallet"));
+    const workflow = await ledger.forkUniversalScan("legacy");
+    const augmented = await ledger.appendStageOneGammaExportPage({ exportId: workflow, ownerKey: "legacy", pageKey: "wallet", rows: [walletRow], completed: true });
+    assert.equal(augmented.rowCount, 3);
   } finally { await rm(scratch, { recursive: true, force: true }); }
 });
