@@ -268,7 +268,7 @@ export function downloadIndependentStageOneExcel(
   if (workspaceProfile !== "bullpen007") {
     params.set("workspaceProfile", workspaceProfile);
   }
-  link.href = `/downloads/bullpen-stage-one?${params.toString()}`;
+  link.href = `/console/bullpen-ai/export-stage-one?${params.toString()}`;
   link.download = `bullpen-stage-1-${exportScope}-events.xlsx`;
   document.body.appendChild(link);
   link.click();

@@ -12,8 +12,9 @@ Sports defaults to including sports and to the Full Universe scope. An Excel
 download carries the same workspace profile through the browser request and
 server-side export lookup, so a Sports export cannot be opened against the
 Bullpen 007 owner namespace. The browser uses the authenticated
-`/downloads/bullpen-stage-one` route so content blockers do not intercept the
-workbook as API or `.xlsx` navigation. The response still declares the Excel
+`/console/bullpen-ai/export-stage-one` route so content blockers do not
+intercept the workbook as API, downloads-directory, or `.xlsx` navigation. The
+response still declares the Excel
 MIME type and `.xlsx` attachment filename. A run
 started from either workspace records
 `console_profile.workspace_profile` in the existing immutable run payload; the
