@@ -33,9 +33,18 @@ export async function GET(request: NextRequest) {
 
   try {
     const isUniversal = request.nextUrl.searchParams.get("universal") === "true";
-    const ownerKey = (session.sessionSubject ?? session.sessionGeneration) + (isUniversal ? ":universal" : "");
+    const sessionOwner = session.sessionSubject ?? session.sessionGeneration;
+    const workspaceProfile =
+      request.nextUrl.searchParams.get("workspaceProfile") === "bullpen-sports"
+        ? "bullpen-sports"
+        : "bullpen007";
+    const ownerKey = isUniversal
+      ? `${sessionOwner}:universal`
+      : workspaceProfile === "bullpen007"
+        ? sessionOwner
+        : `${sessionOwner}:${workspaceProfile}`;
     const latest = isUniversal
-      ? await openUniversalScan(session.sessionSubject ?? session.sessionGeneration)
+      ? await openUniversalScan(sessionOwner)
       : await openLatestStageOneGammaExport({
       ownerKey,
     });

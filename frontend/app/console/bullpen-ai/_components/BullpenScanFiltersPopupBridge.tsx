@@ -12,7 +12,9 @@ import {
   BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
   BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
   BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+  getBullpenStageOneEventNames,
   getBullpenScanFilterToggles,
+  type BullpenWorkspaceProfile,
   type BullpenScanFilterToggleState,
 } from "@/lib/bullpenStageOneSettings";
 import { BullpenScanFilterDetailsDialog } from "./BullpenScanFilterDetailsDialog";
@@ -36,15 +38,31 @@ const DEFAULT_FILTER_TOGGLES: BullpenScanFilterToggleState = {
   excludeOthers: true,
 };
 
-function publishStageOneSettings(settings: BullpenAutoLiveSettings) {
+function publishStageOneSettings(
+  settings: BullpenAutoLiveSettings,
+  eventName: string,
+) {
   window.dispatchEvent(
-    new CustomEvent(BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT, {
+    new CustomEvent(eventName, {
       detail: settings,
     }),
   );
 }
 
-export function BullpenScanFiltersPopupBridge() {
+export function BullpenScanFiltersPopupBridge({
+  workspaceProfile = "bullpen007",
+}: {
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
+  const eventNames = workspaceProfile === "bullpen007"
+    ? {
+        settingsUpdated: BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+        reapplyFilters: BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
+        reapplyFinished: BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
+      }
+    : getBullpenStageOneEventNames(workspaceProfile);
+  const settingsProfile =
+    workspaceProfile === "bullpen007" ? undefined : workspaceProfile;
   const [isOpen, setIsOpen] = useState(false);
   const [detailId, setDetailId] = useState<BullpenScanFilterDetailId | null>(null);
   const [oddsFloor, setOddsFloor] = useState(1);
@@ -91,7 +109,10 @@ export function BullpenScanFiltersPopupBridge() {
       setClosingDaysMessage(null);
       setFilterMessage(null);
       try {
-        const settings = await apiService.getBullpenAutoLiveSettings();
+        const settings = await apiService.getBullpenAutoLiveSettings(
+          undefined,
+          settingsProfile,
+        );
         const saved = settings.console_min_market_odds ?? 1;
         const savedHighest = settings.console_min_highest_market_odds ?? 90;
         const savedClosingDays = settings.console_max_closing_days ?? 30;
@@ -119,7 +140,7 @@ export function BullpenScanFiltersPopupBridge() {
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
         setFilterToggles(getBullpenScanFilterToggles(settings));
         setScanScope(settings.console_scan_scope ?? "trending");
-        publishStageOneSettings(settings);
+        publishStageOneSettings(settings, eventNames.settingsUpdated);
         setReapplyDirty(false);
       } catch {
         setFloorMessage("Could not load the saved odds thresholds. Defaults 1% and 90% are shown.");
@@ -162,14 +183,14 @@ export function BullpenScanFiltersPopupBridge() {
       );
     };
     window.addEventListener(
-      BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
+      eventNames.reapplyFinished,
       handleReapplyFinished,
     );
     return () => {
       document.removeEventListener("click", handleClick, true);
       document.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener(
-        BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
+        eventNames.reapplyFinished,
         handleReapplyFinished,
       );
     };
@@ -212,10 +233,10 @@ export function BullpenScanFiltersPopupBridge() {
             filterToggles[id as BullpenScanFilterDetailId],
           ]),
         ),
-      } as BullpenAutoLiveSettingsUpdate);
-      publishStageOneSettings(settings);
+      } as BullpenAutoLiveSettingsUpdate, settingsProfile);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       window.dispatchEvent(
-        new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT, {
+        new CustomEvent(eventNames.reapplyFilters, {
           detail: settings,
         }),
       );
@@ -240,8 +261,8 @@ export function BullpenScanFiltersPopupBridge() {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_min_market_odds: oddsFloor,
         console_min_highest_market_odds: highestOddsFloor,
-      });
-      publishStageOneSettings(settings);
+      }, settingsProfile);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       const saved = settings.console_min_market_odds;
       const savedHighest = settings.console_min_highest_market_odds;
       setOddsFloor(saved);
@@ -267,9 +288,9 @@ export function BullpenScanFiltersPopupBridge() {
     try {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_scan_scope: nextScope,
-      });
+      }, settingsProfile);
       setScanScope(settings.console_scan_scope ?? nextScope);
-      publishStageOneSettings(settings);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       setScanScopeMessage(
         nextScope === "full_universe"
           ? "Full Universe saved. Future manual and scheduled runs will exhaustively scan the catalogue."
@@ -293,8 +314,8 @@ export function BullpenScanFiltersPopupBridge() {
     try {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_max_closing_days: maxClosingDays,
-      });
-      publishStageOneSettings(settings);
+      }, settingsProfile);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       const saved = settings.console_max_closing_days;
       setMaxClosingDays(saved);
       setSavedMaxClosingDays(saved);
@@ -322,8 +343,8 @@ export function BullpenScanFiltersPopupBridge() {
         console_min_volume_24hr_usd: minVolume24hrUsd,
         console_max_spread_cents: maxSpreadCents,
         console_rejected_theme_pattern: rejectedThemePattern,
-      });
-      publishStageOneSettings(settings);
+      }, settingsProfile);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       setMinVolumeUsd(settings.console_min_volume_usd);
       setSavedMinVolumeUsd(settings.console_min_volume_usd);
       setMinLiquidityUsd(settings.console_min_liquidity_usd);
@@ -347,9 +368,9 @@ export function BullpenScanFiltersPopupBridge() {
     try {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         console_custom_exclude_phrases: phrases,
-      });
+      }, settingsProfile);
       setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
-      publishStageOneSettings(settings);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       setFloorMessage("Saved. Future Stage 1 scans will filter out these words and phrases.");
     } catch {
       setFloorMessage("The custom exclusions could not be saved. Please try again.");
@@ -369,10 +390,10 @@ export function BullpenScanFiltersPopupBridge() {
     try {
       const settings = await apiService.updateBullpenAutoLiveSettings({
         [settingKey]: enabled,
-      } as BullpenAutoLiveSettingsUpdate);
+      } as BullpenAutoLiveSettingsUpdate, settingsProfile);
       const savedToggles = getBullpenScanFilterToggles(settings);
       setFilterToggles(savedToggles);
-      publishStageOneSettings(settings);
+      publishStageOneSettings(settings, eventNames.settingsUpdated);
       setFilterMessage(
         `${BULLPEN_SCAN_FILTER_DETAILS[id].label} is now ${savedToggles[id] ? "applied" : "not applied"} to every future Trending and Full Universe scan.`,
       );

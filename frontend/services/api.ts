@@ -1779,17 +1779,22 @@ class apiServiceClass implements IApiService {
 
   getBullpenAutoLiveSettings(
     options?: ApiRequestControl,
+    profile?: string,
   ): Promise<BullpenAutoLiveSettings> {
     return this.get<BullpenAutoLiveSettings>(
-      URLs.bullpenAutoLive.settings(),
+      URLs.bullpenAutoLive.settings(profile),
       { cache: "no-store", ...options },
     );
   }
 
   updateBullpenAutoLiveSettings(
     data: BullpenAutoLiveSettingsUpdate,
+    profile?: string,
   ): Promise<BullpenAutoLiveSettings> {
-    return this.put<BullpenAutoLiveSettings>(URLs.bullpenAutoLive.settings(), data);
+    return this.put<BullpenAutoLiveSettings>(
+      URLs.bullpenAutoLive.settings(profile),
+      data,
+    );
   }
 
   resetBullpenAutoLiveSettings(): Promise<BullpenAutoLiveSettings> {

@@ -9,6 +9,38 @@ export const BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT =
 export const BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT =
   "bullpen-stage-one-reapply-finished";
 
+export type BullpenWorkspaceProfile = "bullpen007" | "bullpen-sports";
+
+export const DEFAULT_BULLPEN_WORKSPACE_PROFILE: BullpenWorkspaceProfile =
+  "bullpen007";
+
+export function getBullpenStageOneEventNames(
+  profile: BullpenWorkspaceProfile,
+) {
+  if (profile === DEFAULT_BULLPEN_WORKSPACE_PROFILE) {
+    return {
+      settingsUpdated: BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT,
+      reapplyFilters: BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
+      reapplyFinished: BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT,
+    };
+  }
+
+  return {
+    settingsUpdated: `${BULLPEN_STAGE_ONE_SETTINGS_UPDATED_EVENT}:${profile}`,
+    reapplyFilters: `${BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT}:${profile}`,
+    reapplyFinished: `${BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT}:${profile}`,
+  };
+}
+
+export function scopeBullpenWorkspaceStorageKey(
+  key: string,
+  profile: BullpenWorkspaceProfile,
+) {
+  return profile === DEFAULT_BULLPEN_WORKSPACE_PROFILE
+    ? key
+    : `${key}:${profile}`;
+}
+
 export const BULLPEN_SCAN_FILTER_SETTING_KEYS = {
   excludeSports: "console_exclude_sports",
   excludeWeather: "console_exclude_weather",

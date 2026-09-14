@@ -1,5 +1,17 @@
 # Bullpen Run Audit
 
+## Bullpen workspace filter profiles (2026-09-14)
+
+Bullpen 007 and Bullpen Sports render the same shared workspace widgets and
+consume the same completed Universal Polymarket Scan. Their Stage 1 filter
+settings and filtered export ownership are namespaced by workspace profile, so
+changing a Bullpen Sports filter cannot mutate Bullpen 007's filter set or its
+saved shortlist. Bullpen Sports defaults to including sports and to the Full
+Universe scope. A run started from either workspace records
+`console_profile.workspace_profile` in the existing immutable run payload; the
+candidate rows, filter outcome, formulas, and audit schema remain otherwise
+unchanged and backward compatible (`bullpen007` is the default for older runs).
+
 ## Scheduled-slot preemption
 
 Every enabled Auto-Live schedule slot creates a new durable run even when the

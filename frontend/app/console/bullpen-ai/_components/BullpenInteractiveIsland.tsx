@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import type { BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
 
 const BullpenAiPageClient = dynamic(() => import("./BullpenAiPageClient"), {
   ssr: false,
@@ -12,10 +13,14 @@ const BullpenAiPageClient = dynamic(() => import("./BullpenAiPageClient"), {
   ),
 });
 
-export function BullpenInteractiveIsland() {
+export function BullpenInteractiveIsland({
+  workspaceProfile = "bullpen007",
+}: {
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
   return (
-    <div data-bullpen-workspace="mounted">
-      <BullpenAiPageClient />
+    <div data-bullpen-workspace="mounted" data-workspace-profile={workspaceProfile}>
+      <BullpenAiPageClient workspaceProfile={workspaceProfile} />
     </div>
   );
 }

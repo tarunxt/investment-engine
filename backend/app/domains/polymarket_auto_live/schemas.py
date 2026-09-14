@@ -238,6 +238,12 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     console_only_binary_yes_no: bool = True
     console_exclude_custom_phrases: bool = True
     console_custom_exclude_phrases: list[str] = Field(default_factory=list)
+    # Named Bullpen workspaces share the canonical execution engine while
+    # retaining independent Stage 1 filter values. Keeping these overlays in
+    # the existing JSON settings record is additive and migration-free.
+    console_filter_profiles: dict[str, dict[str, object]] = Field(
+        default_factory=dict
+    )
     returns_per_day_formula: str = (
         "=(100-CURRENT_CHOSEN_SIDE_BULLPEN_ODDS)/(DAYS_UNTIL_CLOSE+4)"
     )
@@ -614,6 +620,7 @@ class BullpenAutoLiveConsoleCandidateInput(BaseModel):
 
 
 class BullpenAutoLiveConsoleRunContext(BaseModel):
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] = "bullpen007"
     source_label: str | None = None
     source_url: str | None = None
     scanned_at: str | None = None

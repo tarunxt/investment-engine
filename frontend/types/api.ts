@@ -2493,6 +2493,7 @@ export interface BullpenAutoLiveConsoleCandidateInput {
 }
 
 export interface BullpenAutoLiveConsoleRunContext {
+  workspace_profile?: "bullpen007" | "bullpen-sports";
   source_label?: string | null;
   source_url?: string | null;
   scanned_at?: string | null;

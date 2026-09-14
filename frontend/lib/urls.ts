@@ -240,7 +240,10 @@ const bullpenAutoLiveApiUrls = {
     `${resolveApiBaseUrl()}/polymarket/auto-live/hourly-rebalance/result`,
   clusteringProgress: (runId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/clustering/${encodeURIComponent(runId)}/progress`,
-  settings: () => `${resolveApiBaseUrl()}/polymarket/auto-live/settings`,
+  settings: (profile?: string) =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/settings${
+      profile ? `?profile=${encodeURIComponent(profile)}` : ""
+    }`,
   history: () => `${resolveApiBaseUrl()}/polymarket/auto-live/history`,
   historyEventTrends: () =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/history/event-trends`,
@@ -631,6 +634,7 @@ export const URLs = {
       polymarketBot: () => "/console/polymarket-bot",
       polymarketDirectBot: () => "/console/polymarket-direct-bot",
       bullpenAi: () => "/console/bullpen-ai",
+      bullpenSports: () => "/console/bullpen-sports",
       bullpen008: () => "/console/bullpen008",
       bullpen008History: () => "/console/bullpen-ai/008history",
       bullpen008AnalyseEvents: () => "/console/bullpen008/analyse-events",
@@ -646,6 +650,9 @@ export const URLs = {
       bullpenAiAutoLive: () => "/console/trading-bots/bullpen-ai-auto-live",
       bullpenAi30Days: () => "/console/bullpen-ai?tab=30-days",
       bullpenAiEndOfMonth: () => "/console/bullpen-ai?tab=end-of-month",
+      bullpenSports30Days: () => "/console/bullpen-sports?tab=30-days",
+      bullpenSportsEndOfMonth: () =>
+        "/console/bullpen-sports?tab=end-of-month",
       googleSheets: () => "/console/google-sheets",
       apis: () => "/console/apis",
       llms: () => "/console/llms",

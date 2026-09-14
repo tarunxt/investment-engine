@@ -532,10 +532,14 @@ export async function reapplyStageOneGammaExportFilters({
 }
 
 // A workflow owns its filter output; the shared capture is never re-filtered in place.
-export async function forkUniversalScan(ownerKey: string, sourceExportId?: string) {
+export async function forkUniversalScan(
+  ownerKey: string,
+  sourceExportId?: string,
+  universalOwnerKey = ownerKey,
+) {
   const source = sourceExportId
-    ? await openStageOneGammaExport({ exportId: sourceExportId, ownerKey: `${ownerKey}:universal` })
-    : await openUniversalScan(ownerKey);
+    ? await openStageOneGammaExport({ exportId: sourceExportId, ownerKey: `${universalOwnerKey}:universal` })
+    : await openUniversalScan(universalOwnerKey);
   if (!source || !source.metadata.completed) throw new Error("Run Universal Polymarket Scan in Trading Bots first.");
   const exportId = randomUUID();
   const paths = exportPaths(exportId);

@@ -135,6 +135,17 @@ export const SIDEBAR_SECTIONS = [
                     },
                     {
                         type: 'item',
+                        id: 'bullpen-sports',
+                        name: 'Bullpen Sports',
+                        href: URLs.routes.console.bullpenSports(),
+                        matchMode: 'prefix',
+                        badge: {
+                            label: 'Sports',
+                            variant: 'review',
+                        },
+                    },
+                    {
+                        type: 'item',
                         id: 'bullpen008',
                         name: 'Bullpen 008',
                         href: URLs.routes.console.bullpen008(),

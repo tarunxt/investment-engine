@@ -1616,7 +1616,14 @@ async function handleScan(
   const searchParams = request.nextUrl.searchParams;
   const universal = searchParams.get("universal") === "true";
   const sessionOwner = backendSession.sessionSubject ?? backendSession.sessionGeneration;
-  const scanOwner = universal ? `${sessionOwner}:universal` : sessionOwner;
+  const requestedWorkspaceProfile = searchParams.get("workspaceProfile");
+  const workspaceProfile = requestedWorkspaceProfile === "bullpen-sports"
+    ? "bullpen-sports"
+    : "bullpen007";
+  const workflowOwner = workspaceProfile === "bullpen007"
+    ? sessionOwner
+    : `${sessionOwner}:${workspaceProfile}`;
+  const scanOwner = universal ? `${sessionOwner}:universal` : workflowOwner;
   if (universal) activePositions = [];
   const mode: ScanMode =
     searchParams.get("mode") === "end-of-month" ? "end-of-month" : "30-days";
@@ -1646,8 +1653,10 @@ async function handleScan(
       return NextResponse.json({ error: "Universal captures cannot be filtered in place." }, { status: 400 });
     }
     if (searchParams.get("useUniversal") === "true" && !reapplyExportId) {
-      reapplyExportId = await forkUniversalScan(sessionOwner);
-      await appendStageOneGammaExportPage({ exportId: reapplyExportId, ownerKey: sessionOwner,
+      reapplyExportId = workspaceProfile === "bullpen007"
+        ? await forkUniversalScan(sessionOwner)
+        : await forkUniversalScan(workflowOwner, undefined, sessionOwner);
+      await appendStageOneGammaExportPage({ exportId: reapplyExportId, ownerKey: workflowOwner,
         pageKey: "__WORKFLOW_ACTIVE_POSITIONS__", completed: true,
         rows: activePositions.map(position => ({ candidate: stripFilterMetadata(activePositionCandidate(position)),
           event: { source: "active_wallet_position" }, market: {}, scanStatus: "passed" as const,
