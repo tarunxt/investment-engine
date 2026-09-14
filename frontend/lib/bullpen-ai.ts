@@ -155,6 +155,7 @@ export type ScanResult = {
   totalAcceptedQuestions?: number;
   totalRejectedQuestions?: number;
   scanExportId?: string | null;
+  sourceScanExportId?: string | null;
 };
 
 export type BullpenScanSnapshot = Omit<ScanResult, "questions"> & {

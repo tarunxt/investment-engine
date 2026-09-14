@@ -2301,3 +2301,17 @@ Future consumption must capture source_id, source_as_of, successful_at,
 content_hash, competition ID, Polymarket prefix, name match status and ranking
 kind in a versioned audit input. Derived results order must not be represented
 as official league rank. See sports-rankings.md.
+
+### Universal scan and workflow filter lineage
+
+The Trading Bots overview owns the unfiltered Universal Polymarket Scan controls.
+The authenticated capture uses the same exhaustive Gamma keyset pagination and
+raw export ledger in a separate owner namespace. Bullpen 007 filter reapplication
+forks the completed capture, adds its wallet positions, and writes its own filtered
+output; it never rewrites the universal source. New filter snapshots carry
+`sourceScanExportId`, mapped to `source_scan_export_id` in Stage 1 display outputs,
+alongside the existing `scan_export_id`. Counts and exported evidence belong to
+that workflow output, while the source identifier records the common capture.
+Existing frozen auto-run audits and legacy scan APIs retain their current schema
+and meaning. Bullpen 008 can consume the same capture through the shared scan
+contract when its workflow is connected.

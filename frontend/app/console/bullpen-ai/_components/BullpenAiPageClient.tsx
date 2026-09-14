@@ -3267,424 +3267,61 @@ function BullpenAiPageContent() {
     signal?: AbortSignal;
     onProgress?: (progress: BullpenIndependentStageOneProgress) => void;
   }) {
-    let scanFilters = options?.filtersOverride ?? activeFilters;
-    const scanAbortController = new AbortController();
-    const pageSignal = pageRequestAbortControllerRef.current?.signal;
-    const callerSignal = options?.signal;
-    const abortScan = () => scanAbortController.abort();
-    if (pageSignal?.aborted || callerSignal?.aborted) {
-      abortScan();
-    } else {
-      pageSignal?.addEventListener("abort", abortScan, { once: true });
-      callerSignal?.addEventListener("abort", abortScan, { once: true });
-    }
-    const scanSignal = scanAbortController.signal;
-    try {
-      const settings = await apiService.getBullpenAutoLiveSettings({
-        signal: scanSignal,
-      });
-      scanFilters = applyBullpenStageOneSettings(scanFilters, settings);
-    } catch (settingsError) {
-      if (scanSignal.aborted || isBullpenRequestAbort(settingsError)) {
-        throw settingsError;
-      }
-      // Preserve the last synchronized in-memory settings if a transient
-      // settings read fails; the scan API still receives every filter value.
-    }
-    const params = buildBullpenScanQueryParams(activeMode, scanFilters);
+    const signal = options?.signal ?? pageRequestAbortControllerRef.current?.signal;
     setScanningMode(activeMode);
-    setMessagesByMode((current) => ({ ...current, [activeMode]: null }));
-    setInvestmentMessagesByMode((current) => ({ ...current, [activeMode]: null }));
-    const positionsRefreshTask = refreshBullpenPositions({
-      suppressAutoClaim: true,
-      refreshMode: "passive",
-      callerSource: "ui-scan-preflight",
-    }).catch((error) => ({
-      positions: activePositions,
-      error: `Failed to refresh Bullpen wallet positions during scan: ${normalizeError(error)}.`,
-    }));
-    const scanRequestStartedAt = Date.now();
-    const acceptedQuestionsByKey = new Map<string, ScanResult["questions"][number]>();
-    const rejectedQuestionsByKey = new Map<
-      string,
-      NonNullable<ScanResult["rejectedQuestions"]>[number]
-    >();
-    const canonicalKeyByIdentity = new Map<string, string>();
-    const questionKey = (question: ScanResult["questions"][number]) => {
-      const identityKeys = [
-        question.conditionId,
-        question.marketId,
-        question.slug,
-        question.id,
-      ]
-        .filter((value): value is string => typeof value === "string" && Boolean(value.trim()))
-        .map((value) => value.trim().toLowerCase());
-      const canonicalKey =
-        identityKeys
-          .map((key) => canonicalKeyByIdentity.get(key))
-          .find((key): key is string => Boolean(key)) ??
-        identityKeys[0] ??
-        "unknown-market";
-      identityKeys.forEach((key) => canonicalKeyByIdentity.set(key, canonicalKey));
-      return canonicalKey;
-    };
-    let receivedResultChunk = false;
-    let chunkedTotalCandidates = 0;
-    let completedPages = 0;
-    let retryCount = 0;
-    let scanCursor: string | null = null;
-    let scanStartedAt: string | null = null;
-    let scanExportId: string | null = null;
-    let scanResponse: { response: Response; payload: ScanResult } | null = null;
-
     try {
-      const refreshedPositions = await positionsRefreshTask;
-      const scanActivePositions = refreshedPositions.positions.filter(
-        isActiveBullpenPosition,
-      );
+      let filters = options?.filtersOverride ?? activeFilters;
+      if (!options?.filtersOverride) {
+        const settings = await apiService.getBullpenAutoLiveSettings({ signal });
+        filters = applyBullpenStageOneSettings(filters, settings);
+      }
+      const positions = await refreshBullpenPositions({ suppressAutoClaim: true, refreshMode: "passive", callerSource: "ui-filter-preflight" });
+      const params = buildBullpenScanQueryParams(activeMode, filters);
+      params.set("useUniversal", "true");
+      const started = Date.now();
       while (true) {
-        const requestedCursor = scanCursor;
-        const scanParams = new URLSearchParams(params);
-        if (scanCursor) scanParams.set("scanCursor", scanCursor);
-        if (scanStartedAt) scanParams.set("scanStartedAt", scanStartedAt);
-        if (scanExportId) scanParams.set("scanExportId", scanExportId);
-        try {
-          scanResponse = await fetchBullpenUiJson<ScanResult>(
-            `/api/bullpen-ai?${scanParams.toString()}`,
-            {
-              cache: "no-store",
-              signal: scanSignal,
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ activePositions: scanActivePositions }),
-            },
-            BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
-          );
-        } catch (scanPollError) {
-          if (scanSignal.aborted || isBullpenRequestAbort(scanPollError)) {
-            throw scanPollError;
-          }
-          const pollErrorMessage = normalizeError(scanPollError);
-          const retryablePollFailure =
-            /unexpected token|not valid json|http (?:429|502|503|504)|failed to fetch|network error/i.test(
-              pollErrorMessage,
-            );
-          if (
-            retryablePollFailure &&
-            Date.now() - scanRequestStartedAt <
-              BULLPEN_SCAN_REQUEST_TIMEOUT_MS
-          ) {
-            retryCount += 1;
-            options?.onProgress?.({
-              scannedMarkets: chunkedTotalCandidates,
-              completedPages,
-              currentPage: completedPages + 1,
-              retryCount,
-              status: "retrying",
-              lastUpdatedAt: new Date().toISOString(),
-              message: `Page ${completedPages + 1} request failed (${pollErrorMessage}). Retrying automatically...`,
-            });
-            await waitForBullpenPollDelay(
-              BULLPEN_SCAN_TRANSIENT_RETRY_MS,
-              scanSignal,
-            );
-            continue;
-          }
-          throw scanPollError;
-        }
-        const pendingPayload = scanResponse.payload as ScanResult & {
-          status?: string;
-          retryAfterMs?: number;
-          resultChunk?: boolean;
-          nextCursor?: string | null;
-          scanStartedAt?: string | null;
-          scanExportId?: string | null;
-          retryReason?: string | null;
-        };
-        if (pendingPayload.resultChunk) {
-          receivedResultChunk = true;
-          for (const question of pendingPayload.questions || []) {
-            const key = questionKey(question);
-            acceptedQuestionsByKey.set(key, question);
-            rejectedQuestionsByKey.delete(key);
-          }
-          for (const question of pendingPayload.rejectedQuestions || []) {
-            const key = questionKey(question);
-            if (!acceptedQuestionsByKey.has(key)) {
-              rejectedQuestionsByKey.set(key, question);
-            }
-          }
-          chunkedTotalCandidates =
-            acceptedQuestionsByKey.size + rejectedQuestionsByKey.size;
-          if (!pendingPayload.retryReason) {
-            completedPages += 1;
-          }
-        }
-        scanCursor = pendingPayload.nextCursor ?? null;
-        scanStartedAt = pendingPayload.scanStartedAt ?? scanStartedAt;
-        scanExportId = pendingPayload.scanExportId ?? scanExportId;
-        const isRetryingPage = Boolean(
-          pendingPayload.retryReason ||
-            (scanResponse.response.status === 202 &&
-              pendingPayload.status === "scanning" &&
-              pendingPayload.nextCursor === requestedCursor &&
-              (pendingPayload.totalCandidates || 0) === 0),
+        if (Date.now() - started >= BULLPEN_SCAN_REQUEST_TIMEOUT_MS) throw new Error("Filtering the shared scan timed out.");
+        const result = await fetchBullpenUiJson<ScanResult & { status?: string; reapplyCursor?: number; processedCandidates?: number }>(
+          `/api/bullpen-ai?${params.toString()}`,
+          { cache: "no-store", signal, method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ activePositions: positions.positions.filter(isActiveBullpenPosition) }) },
+          BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
         );
-        if (isRetryingPage) retryCount += 1;
-        options?.onProgress?.({
-          scannedMarkets: chunkedTotalCandidates,
-          completedPages,
-          currentPage:
-            scanResponse.response.status === 202 ? completedPages + 1 : completedPages,
-          retryCount,
-          status: isRetryingPage ? "retrying" : "scanning",
-          lastUpdatedAt: new Date().toISOString(),
-          message: isRetryingPage
-            ? `${pendingPayload.retryReason || `Polymarket Gamma did not complete page ${completedPages + 1}.`} Retrying automatically...`
-            : scanResponse.response.status === 202
-              ? `Page ${completedPages} completed. Scanning page ${completedPages + 1}...`
-              : `Full Universe scan completed across ${completedPages} pages.`,
-        });
-        if (
-          scanResponse.response.status !== 202 ||
-          pendingPayload.status !== "scanning"
-        ) {
-          break;
+        if (!result.response.ok || result.payload.error) throw new Error(result.payload.error || "Could not filter the shared scan.");
+        if (result.response.status !== 202) {
+          const snapshot = createBullpenScanSnapshot(result.payload);
+          syncBullpenScanSnapshot(snapshot, options);
+          setMessagesByMode(current => ({ ...current, [activeMode]: null }));
+          return { snapshot, error: null };
         }
-        if (
-          Date.now() - scanRequestStartedAt >=
-          BULLPEN_SCAN_REQUEST_TIMEOUT_MS
-        ) {
-          throw new RequestTimeoutError(
-            "GET",
-            `/api/bullpen-ai?${params.toString()}`,
-            BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
-          );
-        }
-        await waitForBullpenPollDelay(
-          pendingPayload.retryAfterMs ?? BULLPEN_SCAN_POLL_MS,
-          scanSignal,
-        );
+        if (result.payload.reapplyCursor == null || !result.payload.scanExportId) throw new Error("The filter operation did not return a continuation cursor.");
+        params.set("reapplyCursor", String(result.payload.reapplyCursor));
+        params.set("reapplyExportId", result.payload.scanExportId);
+        options?.onProgress?.({ scannedMarkets: result.payload.processedCandidates ?? 0,
+          completedPages: 0, currentPage: 0, retryCount: 0, status: "scanning",
+          lastUpdatedAt: new Date().toISOString(), message: `Filtering ${result.payload.processedCandidates}/${result.payload.totalCandidates} captured events` });
       }
-      if (!scanResponse) {
-        throw new Error("Bullpen scan ended without returning a result.");
-      }
-      const chunkedQuestions = Array.from(acceptedQuestionsByKey.values());
-      const chunkedRejectedQuestions = Array.from(
-        rejectedQuestionsByKey.values(),
-      );
-      const { response } = scanResponse;
-      const payload = receivedResultChunk
-        ? {
-            ...scanResponse.payload,
-            totalCandidates: chunkedTotalCandidates,
-            questions: chunkedQuestions,
-            rejectedQuestions: chunkedRejectedQuestions,
-            pagesScanned: completedPages,
-            totalRejectedQuestions: chunkedRejectedQuestions.length,
-            scanExportId,
-          }
-        : scanResponse.payload;
-      const isSuccessfulScan = response.ok && !payload.error;
-
-      const nextSnapshot = isSuccessfulScan
-        ? createBullpenScanSnapshot({
-            ...payload,
-            questions: payload.questions.slice(0, SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS),
-            rejectedQuestions: (payload.rejectedQuestions ?? []).slice(
-              0,
-              SCAN_SNAPSHOT_MAX_REJECTED_ROWS,
-            ),
-            totalAcceptedQuestions: payload.questions.length,
-            totalRejectedQuestions: payload.rejectedQuestions?.length ?? 0,
-          })
-        : null;
-      if (nextSnapshot) {
-        syncBullpenScanSnapshot(nextSnapshot, {
-          resetSelections: options?.resetSelections,
-          archivePrevious: options?.archivePrevious,
-        });
-      }
-
-      const message =
-        !response.ok || payload.error
-          ? payload.error || "Bullpen scan failed."
-          : payload.warning
-            ? payload.warning
-            : payload.questions.length === 0
-              ? "No Bullpen questions matched the current scan filters. Adjust the filters or rerun later."
-              : null;
-      setMessagesByMode((current) => ({
-        ...current,
-        [activeMode]: message,
-      }));
-
-      return {
-        snapshot: nextSnapshot,
-        error: !isSuccessfulScan
-          ? payload.error || "Bullpen scan failed."
-          : null,
-      };
-    } catch (scanError) {
-      void positionsRefreshTask;
-      const chunkedQuestions = Array.from(acceptedQuestionsByKey.values());
-      const chunkedRejectedQuestions = Array.from(
-        rejectedQuestionsByKey.values(),
-      );
-      const wasStopped = scanSignal.aborted || isBullpenRequestAbort(scanError);
-      const message =
-        wasStopped
-          ? "Scan stopped by user."
-          : scanError instanceof Error
-          ? scanError.message
-          : "Bullpen scan failed.";
-      const partialSnapshot =
-        receivedResultChunk && scanResponse
-          ? createBullpenScanSnapshot({
-              ...scanResponse.payload,
-              scannedAt: scanStartedAt ?? scanResponse.payload.scannedAt,
-              totalCandidates: chunkedTotalCandidates,
-              questions: chunkedQuestions.slice(0, SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS),
-              rejectedQuestions: chunkedRejectedQuestions.slice(0, SCAN_SNAPSHOT_MAX_REJECTED_ROWS),
-              error: undefined,
-              warning: `${message} Saved partial results from ${chunkedTotalCandidates.toLocaleString("en-IN")} scanned markets across ${completedPages} completed pages.`,
-              details:
-                chunkedQuestions.length > SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS ||
-                chunkedRejectedQuestions.length > SCAN_SNAPSHOT_MAX_REJECTED_ROWS
-                  ? `The browser snapshot retains up to ${SCAN_SNAPSHOT_MAX_ACCEPTED_ROWS.toLocaleString("en-IN")} passed and filtered rows for inspection; complete passed and filtered totals are retained.`
-                  : scanResponse.payload.details,
-              isPartial: true,
-              interruptionReason: message,
-              pagesScanned: completedPages,
-              totalAcceptedQuestions: chunkedQuestions.length,
-              totalRejectedQuestions: chunkedRejectedQuestions.length,
-              scanExportId,
-            })
-          : null;
-      if (partialSnapshot) {
-        syncBullpenScanSnapshot(partialSnapshot, {
-          resetSelections: options?.resetSelections,
-          archivePrevious: options?.archivePrevious,
-        });
-      }
-      setMessagesByMode((current) => ({
-        ...current,
-        [activeMode]: partialSnapshot
-          ? partialSnapshot.warning ?? message
-          : wasStopped
-            ? null
-            : message,
-      }));
-      return {
-        snapshot: partialSnapshot,
-        error: wasStopped ? null : message,
-      };
-    } finally {
-      pageSignal?.removeEventListener("abort", abortScan);
-      callerSignal?.removeEventListener("abort", abortScan);
-      setScanningMode(null);
-    }
+    } catch (error) {
+      const message = signal?.aborted ? "Filtering stopped." : formatUnknownError(error);
+      setMessagesByMode(current => ({ ...current, [activeMode]: message }));
+      return { snapshot: null, error: message };
+    } finally { setScanningMode(null); }
   }
 
   async function runScan() {
     await executeBullpenScan({ resetSelections: true });
   }
 
-  const reapplyExistingStageOneFilters = useEffectEvent(
-    async (settings: BullpenAutoLiveSettings) => {
-      const exportId = activeCurrentSnapshot?.scanExportId;
-      if (!exportId) {
-        window.dispatchEvent(
-          new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
-            detail: {
-              success: false,
-              message: "No completed Full Universe data is available. Run Full Universe Scan first.",
-            },
-          }),
-        );
-        return;
-      }
-      const filters = applyBullpenStageOneSettings(activeFilters, settings);
-      const params = buildBullpenScanQueryParams(activeMode, filters);
-      params.set("reapplyExportId", exportId);
-      try {
-        let reapplyCursor: number | null = null;
-        let response: Response;
-        let payload: ScanResult;
-        while (true) {
-          const requestParams = new URLSearchParams(params);
-          if (reapplyCursor !== null) {
-            requestParams.set("reapplyCursor", String(reapplyCursor));
-          }
-          const result = await fetchBullpenUiJson<ScanResult & {
-            status?: string;
-            reapplyCursor?: number;
-          }>(
-            `/api/bullpen-ai?${requestParams.toString()}`,
-            {
-              cache: "no-store",
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ activePositions: openActivePositions }),
-            },
-            BULLPEN_SCAN_REQUEST_TIMEOUT_MS,
-          );
-          response = result.response;
-          payload = result.payload;
-          if (response.status !== 202 || result.payload.status !== "reapplying") {
-            break;
-          }
-          reapplyCursor = result.payload.reapplyCursor ?? null;
-          if (reapplyCursor === null) {
-            throw new Error("The stored-universe re-filter did not return a progress cursor.");
-          }
-        }
-        if (!response.ok || payload.error) {
-          throw new Error(payload.error || "The stored Full Universe data could not be re-filtered.");
-        }
-        const nextSnapshot = createBullpenScanSnapshot(payload);
-        syncBullpenScanSnapshot(nextSnapshot, {
-          resetSelections: true,
-          archivePrevious: false,
-        });
-        window.dispatchEvent(
-          new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
-            detail: {
-              success: true,
-              message: `Reapplied filters to ${payload.totalCandidates.toLocaleString("en-IN")} stored markets. Events passing filters: ${(
-                activeCurrentSnapshot.totalAcceptedQuestions ?? activeCurrentSnapshot.questions.length
-              ).toLocaleString("en-IN")} before → ${(
-                payload.totalAcceptedQuestions ?? payload.questions.length
-              ).toLocaleString("en-IN")} after. The filtered Excel has been rebuilt.`,
-            },
-          }),
-        );
-      } catch (error) {
-        window.dispatchEvent(
-          new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
-            detail: { success: false, message: formatUnknownError(error) },
-          }),
-        );
-      }
-    },
-  );
+  const reapplyExistingStageOneFilters = useEffectEvent(async (settings: BullpenAutoLiveSettings) => {
+    const result = await executeBullpenScan({ filtersOverride: applyBullpenStageOneSettings(activeFilters, settings), resetSelections: true, archivePrevious: false });
+    window.dispatchEvent(new CustomEvent(BULLPEN_STAGE_ONE_REAPPLY_FINISHED_EVENT, {
+      detail: { success: !result.error, message: result.error ?? `Applied filters to ${result.snapshot?.totalCandidates.toLocaleString("en-IN")} shared events. Events passing filters: ${result.snapshot?.totalAcceptedQuestions ?? result.snapshot?.questions.length ?? 0}.` },
+    }));
+  });
 
   useEffect(() => {
-    const handleReapply = (event: Event) => {
-      void reapplyExistingStageOneFilters(
-        (event as CustomEvent<BullpenAutoLiveSettings>).detail,
-      );
-    };
-    window.addEventListener(
-      BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
-      handleReapply,
-    );
-    return () => {
-      window.removeEventListener(
-        BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT,
-        handleReapply,
-      );
-    };
+    const handleReapply = (event: Event) => { void reapplyExistingStageOneFilters((event as CustomEvent<BullpenAutoLiveSettings>).detail); };
+    window.addEventListener(BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT, handleReapply);
+    return () => window.removeEventListener(BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT, handleReapply);
   }, []);
 
   async function runLlm(targets: ProviderModelTarget[]) {

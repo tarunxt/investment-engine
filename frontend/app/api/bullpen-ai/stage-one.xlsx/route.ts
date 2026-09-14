@@ -283,7 +283,7 @@ export async function GET(request: NextRequest) {
   }
   const scope: ExportScope = requestedScope;
   try {
-    const { metadata, rowsPath, filteredRowsPath } = await openStageOneGammaExport({ exportId, ownerKey: session.sessionSubject ?? session.sessionGeneration });
+    const { metadata, rowsPath, filteredRowsPath } = await openStageOneGammaExport({ exportId, ownerKey: (session.sessionSubject ?? session.sessionGeneration) + (request.nextUrl.searchParams.get("universal") === "true" ? ":universal" : "") });
     if (!metadata.rowCount) return NextResponse.json({ error: "This Stage 1 scan has no retained rows." }, { status: 409 });
     if (!metadata.completed) return NextResponse.json({ error: "This Stage 1 scan is still running." }, { status: 409 });
     const preparedFilteredRows = scope === "filtered"

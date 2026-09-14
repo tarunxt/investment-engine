@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { UniversalPolymarketScan } from "./UniversalPolymarketScan";
 import { startTransition, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -1063,6 +1064,8 @@ export function TradingBotsOverviewPage() {
           ))}
         </div>
       </div>
+
+      <UniversalPolymarketScan />
 
       {liveWarnings.length > 0 ? (
         <div className="rounded-[28px] border border-rose-200 bg-rose-50/90 px-5 py-4 shadow-[0_18px_48px_-36px_rgba(225,29,72,0.6)]">
