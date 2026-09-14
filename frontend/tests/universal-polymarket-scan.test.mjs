@@ -7,7 +7,10 @@ import ts from "typescript";
 
 const source = await readFile(new URL("../app/api/bullpen-ai/_lib/stageOneGammaExport.ts", import.meta.url), "utf8");
 const scratch = await mkdtemp(join(tmpdir(), "universal-scan-test-"));
-const js = ts.transpileModule(source.replace('join(tmpdir(), "credx-bullpen-stage-one-exports")', JSON.stringify(scratch)), { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
+const testSource = source
+  .replace('process.env.BULLPEN_STAGE_ONE_EXPORT_DIRECTORY?.trim()', JSON.stringify(scratch))
+  .replace('join(tmpdir(), "credx-bullpen-stage-one-exports")', JSON.stringify(scratch));
+const js = ts.transpileModule(testSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } }).outputText;
 const ledger = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
 
 test("workflow filters are isolated and incomplete scans never replace a completed universal capture", async () => {
@@ -27,6 +30,7 @@ test("workflow filters are isolated and incomplete scans never replace a complet
     assert.equal(one.metadata.sourceScanExportId, raw.exportId);
     const universal = await ledger.openLatestStageOneGammaExport({ ownerKey: "test:universal" });
     assert.equal(universal.metadata.acceptedCount, 2);
+    assert.equal(universal.metadata.universalSource, true);
     await ledger.appendStageOneGammaExportPage({ exportId: null, ownerKey: "test:universal", pageKey: "first", rows: [], completed: false });
     assert.equal((await ledger.openLatestStageOneGammaExport({ ownerKey: "test:universal" })).metadata.exportId, raw.exportId);
     await assert.rejects(ledger.forkUniversalScan("other", raw.exportId), /does not belong/);
@@ -38,5 +42,7 @@ test("workflow filters are isolated and incomplete scans never replace a complet
     const workflow = await ledger.forkUniversalScan("legacy");
     const augmented = await ledger.appendStageOneGammaExportPage({ exportId: workflow, ownerKey: "legacy", pageKey: "wallet", rows: [walletRow], completed: true });
     assert.equal(augmented.rowCount, 3);
+    const workflowExport = await ledger.openStageOneGammaExport({ exportId: workflow, ownerKey: "legacy" });
+    assert.equal(workflowExport.metadata.universalSource, false);
   } finally { await rm(scratch, { recursive: true, force: true }); }
 });

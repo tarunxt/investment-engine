@@ -2323,6 +2323,12 @@ odds profile, total volume, liquidity, and market structure. The summary is cach
 on the completed export metadata and does not alter source rows, workflow filters,
 or frozen Stage 1 audit snapshots.
 
+Production stores the shared completed ledger under the frontend service user's
+durable data directory (or `BULLPEN_STAGE_ONE_EXPORT_DIRECTORY` when configured),
+so a frontend deployment or restart cannot erase it. Completed universal ledgers
+are retained until a replacement completes; ordinary workflow exports keep the
+existing bounded retention policy.
+
 Universal raw ledgers use lossless per-row compression (`compressedRowV1`).
 Readers accept both compressed and legacy JSONL rows, preserving every exported
 field and deterministic byte-offset re-filtering. The common scan does not write

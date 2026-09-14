@@ -2,7 +2,7 @@ import { deflateSync, inflateSync } from "node:zlib";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
@@ -13,7 +13,10 @@ import type {
 } from "@/lib/bullpen-ai";
 import type { UniversalScanSummary } from "./universalScanSummary";
 
-const EXPORT_DIRECTORY = join(tmpdir(), "credx-bullpen-stage-one-exports");
+const EXPORT_DIRECTORY = process.env.BULLPEN_STAGE_ONE_EXPORT_DIRECTORY?.trim() ||
+  (process.env.NODE_ENV === "production"
+    ? join(homedir(), ".local", "share", "credx-bullpen-stage-one-exports")
+    : join(tmpdir(), "credx-bullpen-stage-one-exports"));
 const EXPORT_RETENTION_MS = 24 * 60 * 60 * 1_000;
 const ORPHAN_EXPORT_GRACE_MS = 2 * 60 * 1_000;
 const EXPORT_ID_PATTERN = /^[0-9a-f-]{36}$/;
@@ -30,6 +33,7 @@ export type StageOneGammaExportRow = {
 };
 
 export type StageOneGammaExportMetadata = {
+  universalSource?: boolean;
   filterPending?: boolean;
   sourceScanExportId?: string;
   exportId: string;
@@ -95,8 +99,14 @@ async function cleanupExpiredExports() {
       const counterpart = match
         ? `${match[1]}.${match[2] === "json" ? "jsonl" : "json"}`
         : null;
+      const exportMetadata = match
+        ? await readMetadata(match[1]).catch(() => null)
+        : null;
+      const isDurableUniversal = Boolean(
+        exportMetadata?.universalSource && exportMetadata.completed,
+      );
       const isExpired = Boolean(
-        details && now - details.mtimeMs > EXPORT_RETENTION_MS,
+        details && !isDurableUniversal && now - details.mtimeMs > EXPORT_RETENTION_MS,
       );
       const isAbandonedOrphan = Boolean(
         details &&
@@ -120,7 +130,7 @@ async function removeExport(exportId: string) {
   ]);
 }
 
-async function cleanupSupersededOwnerExports(ownerKey: string, preserveCompleted = false) {
+async function cleanupSupersededOwnerExports(ownerKey: string, preserveCompleted = false, keepExportId?: string) {
   const expectedOwnerHash = ownerHash(ownerKey);
   const names = await readdir(EXPORT_DIRECTORY).catch(() => [] as string[]);
   await Promise.all(
@@ -129,6 +139,7 @@ async function cleanupSupersededOwnerExports(ownerKey: string, preserveCompleted
       .map(async (name) => {
         const exportId = name.slice(0, -".json".length);
         if (!EXPORT_ID_PATTERN.test(exportId)) return;
+        if (exportId === keepExportId) return;
         const metadata = await readMetadata(exportId).catch(() => null);
         if (metadata?.ownerHash === expectedOwnerHash && !(preserveCompleted && metadata.completed)) {
           await removeExport(exportId);
@@ -204,6 +215,7 @@ export async function appendStageOneGammaExportPage({
     metadata = {
       exportId: resolvedExportId,
       ownerHash: ownerHash(ownerKey),
+      universalSource: ownerKey.endsWith(":universal"),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       rowCount: 0,
@@ -278,6 +290,9 @@ export async function appendStageOneGammaExportPage({
   metadata.completed ||= completed;
   metadata.updatedAt = new Date().toISOString();
   await saveMetadata(metadata);
+  if (metadata.completed && metadata.universalSource) {
+    await cleanupSupersededOwnerExports(ownerKey, false, metadata.exportId);
+  }
   return { exportId: resolvedExportId, rowCount: metadata.rowCount };
 }
 
@@ -527,7 +542,7 @@ export async function forkUniversalScan(ownerKey: string, sourceExportId?: strin
   await copyFile(source.rowsPath, paths.rows);
   await writeFile(paths.filteredRows, "", "utf8");
   await saveMetadata({ ...source.metadata, exportId, ownerHash: ownerHash(ownerKey),
-    sourceScanExportId: source.metadata.exportId, filterPending: true, updatedAt: new Date().toISOString(),
+    universalSource: false, sourceScanExportId: source.metadata.exportId, filterPending: true, updatedAt: new Date().toISOString(),
     acceptedCount: 0, rejectedCount: 0, acceptedSample: [], rejectedSample: [], reapplyState: undefined });
   return exportId;
 }
@@ -568,7 +583,7 @@ export async function openUniversalScan(ownerKey: string) {
     if (buffer) await appendFile(paths.rows, buffer, "utf8");
     await writeFile(paths.filteredRows, "", "utf8");
     await saveMetadata({ ...original.metadata, exportId, ownerHash: ownerHash(`${ownerKey}:universal`),
-      sourceScanExportId: undefined, filterPending: false, reapplyState: undefined,
+      universalSource: true, sourceScanExportId: undefined, filterPending: false, reapplyState: undefined,
       identityKeys: [...identityKeys], rowCount, acceptedCount: rowCount, rejectedCount: 0, acceptedSample, rejectedSample: [] });
     return openLatestStageOneGammaExport({ ownerKey: `${ownerKey}:universal` });
   })();
