@@ -1,0 +1,228 @@
+{
+  "bl2": {
+    "1. FC Heidenheim": [
+      "Heidenheim"
+    ],
+    "FC Energie Cottbus": [
+      "Cottbus"
+    ],
+    "Hertha BSC": [
+      "Hertha"
+    ],
+    "Karlsruher SC": [
+      "Karlsruhe"
+    ],
+    "VfL Osnabrück": [
+      "Osnabruck"
+    ]
+  },
+  "sea": {
+    "AC Monza": [
+      "Monza"
+    ],
+    "Bologna FC 1909": [
+      "Bologna"
+    ],
+    "SSC Napoli": [
+      "Napoli"
+    ],
+    "US Lecce": [
+      "Lecce"
+    ]
+  },
+  "gre1": {
+    "AE Kifisia FC": [
+      "Kifisia"
+    ],
+    "AEK Athens": [
+      "AEK"
+    ],
+    "APO Levadiakos FC": [
+      "Levadeiakos"
+    ],
+    "Aris Thessaloniki": [
+      "Aris"
+    ],
+    "PAE PS Kalamata": [
+      "Kalamata"
+    ],
+    "PAOK Thessaloniki": [
+      "PAOK"
+    ],
+    "Volos NPS": [
+      "Volos NFC"
+    ]
+  },
+  "tur": {
+    "Amed Sportif": [
+      "Amedspor"
+    ],
+    "Galatasaray SK": [
+      "Galatasaray"
+    ],
+    "Gençlerbirliği SK": [
+      "Genclerbirligi"
+    ],
+    "Kasımpaşa SK": [
+      "Kasimpasa"
+    ],
+    "Rams Başakşehir FK": [
+      "Buyuksehyr"
+    ]
+  },
+  "epl": {
+    "Brighton & Hove Albion FC": [
+      "Brighton"
+    ],
+    "Coventry City FC": [
+      "Coventry"
+    ],
+    "Manchester City FC": [
+      "Man City"
+    ],
+    "Manchester United FC": [
+      "Man United"
+    ]
+  },
+  "es2": {
+    "CD Eldense": [
+      "Eldense"
+    ],
+    "CE Sabadell FC": [
+      "Sabadell"
+    ],
+    "RCD Mallorca": [
+      "Mallorca"
+    ],
+    "Real Oviedo": [
+      "Oviedo"
+    ],
+    "Real Sporting de Gijón": [
+      "Sp Gijon"
+    ],
+    "Real Valladolid CF": [
+      "Valladolid"
+    ]
+  },
+  "por": {
+    "CD Santa Clara": [
+      "Santa Clara"
+    ],
+    "FC Arouca": [
+      "Arouca"
+    ],
+    "Gil Vicente FC": [
+      "Gil Vicente"
+    ],
+    "Sport Lisboa e Benfica": [
+      "Benfica"
+    ]
+  },
+  "bel1": {
+    "KAA Gent": [
+      "Gent"
+    ],
+    "KRC Genk": [
+      "Genk"
+    ],
+    "KV Kortrijk": [
+      "Kortrijk"
+    ],
+    "Royal Antwerp FC": [
+      "Antwerp"
+    ],
+    "Royal Charleroi SC": [
+      "Charleroi"
+    ],
+    "SV Zulte Waregem": [
+      "Waregem"
+    ]
+  },
+  "fl1": {
+    "ES Troyes AC": [
+      "Troyes"
+    ],
+    "Le Mans FC": [
+      "Le Mans"
+    ],
+    "Lille OSC": [
+      "Lille"
+    ],
+    "Racing Club de Lens": [
+      "Lens"
+    ]
+  },
+  "lal": {
+    "FC Barcelona": [
+      "Barcelona"
+    ],
+    "Getafe CF": [
+      "Getafe"
+    ],
+    "Levante UD": [
+      "Levante"
+    ],
+    "Málaga CF": [
+      "Malaga"
+    ],
+    "RC Celta de Vigo": [
+      "Celta"
+    ],
+    "RC Deportivo A Coruña": [
+      "La Coruna"
+    ]
+  },
+  "bun": {
+    "FC Bayern München": [
+      "Bayern Munich"
+    ],
+    "Hamburger SV": [
+      "Hamburg"
+    ],
+    "SV 07 Elversberg": [
+      "Elversberg"
+    ]
+  },
+  "ere": {
+    "FC Utrecht": [
+      "Utrecht"
+    ],
+    "Feyenoord Rotterdam": [
+      "Feyenoord"
+    ],
+    "PEC Zwolle": [
+      "Zwolle"
+    ],
+    "PSV": [
+      "PSV Eindhoven"
+    ],
+    "SC Heerenveen": [
+      "Heerenveen"
+    ],
+    "Telstar 1963": [
+      "Telstar"
+    ]
+  },
+  "itsb": {
+    "Mantova 1911": [
+      "Mantova"
+    ],
+    "Palermo FC": [
+      "Palermo"
+    ],
+    "UC Sampdoria": [
+      "Sampdoria"
+    ],
+    "US Avellino 1912": [
+      "Avellino"
+    ]
+  },
+  "elc": {
+    "Sheffield United FC": [
+      "Sheffield United"
+    ],
+    "Wolverhampton Wanderers FC": [
+      "Wolves"
+    ]
+  }
+}
