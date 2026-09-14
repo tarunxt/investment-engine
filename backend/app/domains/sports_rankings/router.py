@@ -61,3 +61,24 @@ async def refresh(query: RefreshRequest):
         get_logger(__name__).exception("Sports ranking enqueue failed")
         raise HTTPException(503, "Refresh queue unavailable") from exc
     return {"status": "queued", "source_id": query.source_id}
+
+
+@router.post("/cricket/reconcile", status_code=202)
+async def reconcile_all_cricket():
+    from redis.asyncio import Redis
+    from app.core.config import settings
+    from .tasks import reconcile_cricket
+    from .feeds import CRICKET_SOURCE_IDS
+    import asyncio
+    try:
+        async with Redis.from_url(settings.redis_url, socket_timeout=2, socket_connect_timeout=2) as redis:
+            if not await redis.set("sports-rankings:enqueue:cricket-all", "1", nx=True, ex=60):
+                raise HTTPException(429, "Cricket reconciliation already requested", headers={"Retry-After": "60"})
+        await asyncio.to_thread(reconcile_cricket.apply_async, retry=False)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        from app.core.logging import get_logger
+        get_logger(__name__).exception("Cricket reconciliation enqueue failed")
+        raise HTTPException(503, "Cricket reconciliation queue unavailable") from exc
+    return {"status": "queued", "sources": len(CRICKET_SOURCE_IDS)}

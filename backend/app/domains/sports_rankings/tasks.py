@@ -12,6 +12,7 @@ from app.infrastructure.messaging.celery_app import celery
 from .catalogue import SOURCE_IDS
 from .models import SportsRankingSnapshot
 from .providers import fetch_source
+from .feeds import CRICKET_SOURCE_IDS
 
 logger = get_logger(__name__)
 
@@ -40,6 +41,18 @@ def dispatch_refresh(self):
             refresh_source.delay(source_id)
     except Exception as exc:
         logger.exception("Sports ranking dispatch failed")
+        raise self.retry(exc=exc, countdown=60)
+
+
+@celery.task(bind=True, max_retries=2, soft_time_limit=20, time_limit=25)
+def reconcile_cricket(self):
+    """Daily full-source reconciliation, also available on demand from the UI."""
+    try:
+        for source_id in sorted(CRICKET_SOURCE_IDS):
+            refresh_source.apply_async(args=[source_id], retry=False)
+        return {"status": "queued", "sources": len(CRICKET_SOURCE_IDS)}
+    except Exception as exc:
+        logger.exception("Cricket reconciliation dispatch failed")
         raise self.retry(exc=exc, countdown=60)
 
 

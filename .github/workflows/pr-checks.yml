@@ -48,6 +48,7 @@ jobs:
           pytest -q
           backend/tests/test_sports_rankings.py
           backend/tests/test_sports_master.py
+          backend/tests/test_cricket_rankings.py
           backend/tests/test_database_outage.py
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py

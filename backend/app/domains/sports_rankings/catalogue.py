@@ -28,5 +28,7 @@ def normalize_name(value: str) -> str:
 
 def source_kind(source_id):
     if source_id in FEEDS:
+        if FEEDS[source_id]["parser"] in {"cricket-table", "cricket-hundred", "cricket-ecb"}:
+            return "Published competition standings"
         return "Derived group standings" if FEEDS[source_id]["parser"] == "espn" else "Published ranking"
     return "Derived results table" if (source_id or "").startswith("football-data-") else "Valve global ranking" if source_id == "valve-global" else "Reference only"
