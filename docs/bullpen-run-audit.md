@@ -2334,6 +2334,11 @@ rate-limit, network, or malformed-response interruptions. Page-key deduplication
 makes these retries idempotent; after eight consecutive failures the run stops
 and leaves the last completed common scan untouched.
 
+After the terminal page is durable, the browser also retries summary hydration
+while the server performs any one-time legacy aggregation. A gateway timeout in
+that read phase therefore shows a finalizing state instead of misreporting the
+completed capture as failed.
+
 Universal raw ledgers use lossless per-row compression (`compressedRowV1`).
 Readers accept both compressed and legacy JSONL rows, preserving every exported
 field and deterministic byte-offset re-filtering. The common scan does not write

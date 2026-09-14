@@ -22,6 +22,7 @@ test("a stopped capture stays separate from completed workflow inputs", () => {
   assert.match(shared, /45 \* 60 \* 1000/);
   assert.match(shared, /Temporary scan interruption\. Retrying the current page/);
   assert.match(shared, /consecutiveFailures > 8/);
+  assert.match(shared, /Scan saved\. Finalizing breakdown tables/);
 });
 test("Bullpen manual actions filter a shared capture with an isolated continuation ID", () => {
   assert.match(page, /params\.set\("useUniversal", "true"\)/);

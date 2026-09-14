@@ -40,7 +40,13 @@ function durationLabel(durationMs: number) {
 
 async function fetchUniversalSnapshot(signal?: AbortSignal) {
   const response = await fetch("/api/bullpen-ai/stage-one-snapshot?universal=true", { cache: "no-store", signal });
-  const payload = await response.json();
+  const body = await response.text();
+  let payload: { snapshot?: BullpenScanSnapshot | null; universalSummary?: UniversalScanSummary | null; error?: string };
+  try {
+    payload = JSON.parse(body) as typeof payload;
+  } catch {
+    throw new Error(`Universal scan summary returned a non-JSON response (HTTP ${response.status}).`);
+  }
   if (!response.ok) throw new Error(payload.error || "Could not load the universal scan.");
   return payload;
 }
@@ -72,10 +78,20 @@ export function UniversalPolymarketScan() {
   const [showSaved, setShowSaved] = useState(false);
   const controller = useRef<AbortController | null>(null);
 
-  async function loadSnapshot() {
-    const payload = await fetchUniversalSnapshot();
-    setSnapshot(payload.snapshot ?? null);
-    setSummary(payload.universalSummary ?? null);
+  async function loadSnapshot(signal: AbortSignal) {
+    for (let attempt = 1; attempt <= 8; attempt += 1) {
+      try {
+        const payload = await fetchUniversalSnapshot(signal);
+        setSnapshot(payload.snapshot ?? null);
+        setSummary(payload.universalSummary ?? null);
+        setError(null);
+        return;
+      } catch (snapshotError) {
+        if (signal.aborted || attempt === 8) throw snapshotError;
+        setError(`Scan saved. Finalizing breakdown tables (${attempt}/8)…`);
+        await waitForRetry(Math.min(15_000, 2_000 * attempt), signal);
+      }
+    }
   }
   useEffect(() => {
     const abort = new AbortController();
@@ -126,7 +142,7 @@ export function UniversalPolymarketScan() {
         if (result.nextCursor) params.set("scanCursor", result.nextCursor);
         await waitForRetry(typeof result.retryAfterMs === "number" ? result.retryAfterMs : 250, abort.signal);
       }
-      await loadSnapshot();
+      await loadSnapshot(abort.signal);
     } catch (error) {
       setError(abort.signal.aborted ? "Scan stopped. Only completed scans are available to workflows." : error instanceof Error ? error.message : String(error));
     } finally { controller.current = null; setRunning(false); }
