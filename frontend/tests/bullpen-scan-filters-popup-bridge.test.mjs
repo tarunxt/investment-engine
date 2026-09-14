@@ -54,7 +54,7 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /crypto prices\|twitter\|Mentions/);
   assert.match(bridgeSource, /"Reapply Filters"/);
   assert.match(bridgeSource, /bg-blue-600/);
-  assert.match(bridgeSource, /bg-slate-400/);
+  assert.match(bridgeSource, /disabled=\{isReapplying \|\| isFloorLoading\}/);
   assert.match(bridgeSource, /BULLPEN_STAGE_ONE_REAPPLY_FILTERS_EVENT/);
   assert.match(bridgeSource, />\s*Maximum days until expiry\s*</);
   assert.match(bridgeSource, /Save window/);
