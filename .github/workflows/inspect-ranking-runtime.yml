@@ -31,6 +31,12 @@ jobs:
             sudo systemctl show 'postgresql@*' --property=Id,ActiveState,SubState,Result,TimeoutStopUSec --no-pager
             sudo systemctl show postgresql@18-main --property=MemoryCurrent,MemoryPeak,MemoryHigh,MemoryMax,OOMPolicy,Restart,KillSignal --no-pager
             sudo journalctl -k --since '-40 minutes' --no-pager | grep -E 'oom-kill|Killed process|Out of memory|Memory cgroup out of memory' | tail -n 12 || true
+            sudo journalctl -u investor-celery-auto-live-worker --since '2026-09-14 07:37:00' --until '2026-09-14 07:42:00' -o cat --no-pager | grep -E 'Task app\..*(received|succeeded|raised|retry)|exited with|WorkerLostError' | tail -n 18 || true
+            sudo cat /var/log/postgresql/postgresql-18-main.log | python3 -c '
+            import re,sys
+            for line in sys.stdin:
+                if "2026-09-14 07:4" in line and "Failed process was running:" in line:
+                    print({"time":line[:23],"query_tables":re.findall(r"(?:FROM|JOIN|UPDATE|INTO)\s+([a-zA-Z_][a-zA-Z0-9_.]*)",line),"query_length":len(line)})'
             for setting in shared_buffers work_mem maintenance_work_mem max_connections max_parallel_workers_per_gather; do
               echo "$setting"
               sudo -u postgres /usr/lib/postgresql/18/bin/postgres -D /var/lib/postgresql/18/main -c config_file=/etc/postgresql/18/main/postgresql.conf -C "$setting"
