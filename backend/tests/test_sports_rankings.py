@@ -3,15 +3,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.domains.sports_rankings.catalogue import CATALOGUE, SOURCE_IDS, normalize_name
+from app.domains.sports_rankings.catalogue import CATALOGUE, IMPORTED_CATALOGUE, SOURCE_IDS, normalize_name
 from app.domains.sports_rankings.providers import parse_football, parse_valve
 from app.domains.sports_rankings.schemas import RankingQuery
 from app.domains.sports_rankings.service import ranking_rows, resolve, source_status
 
 
 def test_complete_import():
-    assert len(CATALOGUE) == 95
-    assert len({c['code'] for c in CATALOGUE}) == 75
+    assert len(IMPORTED_CATALOGUE) == 95
+    assert len({c['code'] for c in IMPORTED_CATALOGUE}) == 75
     assert sum(len(c['events']) for c in CATALOGUE) == 346
     assert sum(len(c['participants']) for c in CATALOGUE) == 388
     assert len({c['id'] for c in CATALOGUE}) == len(CATALOGUE)

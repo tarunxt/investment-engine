@@ -7,6 +7,8 @@ import re
 import httpx
 
 from .catalogue import SOURCE_IDS, normalize_name
+from .feeds import FEEDS
+from .public_providers import fetch_public
 
 VALVE_API = "https://api.github.com/repos/ValveSoftware/counter-strike_regional_standings"
 VALVE_RAW = "https://raw.githubusercontent.com/ValveSoftware/counter-strike_regional_standings"
@@ -103,6 +105,8 @@ def fetch_source(source_id, now=None):
         raise ValueError("Unknown ranking source")
     now = now or datetime.now(UTC)
     with httpx.Client(timeout=12, follow_redirects=False, headers={"User-Agent": "Cred-X-SportsRankings/1.0", "Accept": "application/json,text/csv,text/plain"}) as client:
+        if source_id in FEEDS:
+            return fetch_public(source_id, client, now)
         if source_id == "valve-global":
             # Discover the latest year from the publisher, including across New Year.
             years = json.loads(read_response(client, f"{VALVE_API}/contents/live"))

@@ -16,6 +16,23 @@ from .providers import fetch_source
 logger = get_logger(__name__)
 
 
+# Populate new sources after deployment without waiting for the next quarter hour.
+# A shared cooldown prevents multiple worker services from dispatching duplicates.
+from celery.signals import worker_ready
+
+
+@worker_ready.connect
+def prime_rankings_on_start(sender=None, **kwargs):
+    from redis import Redis
+    from app.core.config import settings
+    try:
+        with Redis.from_url(settings.redis_url, socket_timeout=2, socket_connect_timeout=2) as redis:
+            if redis.set("sports-rankings:startup:v2", "1", nx=True, ex=300):
+                dispatch_refresh.apply_async(retry=False)
+    except Exception:
+        logger.exception("Sports ranking startup dispatch failed; scheduled refresh remains enabled")
+
+
 @celery.task(bind=True, max_retries=2, soft_time_limit=20, time_limit=25)
 def dispatch_refresh(self):
     try:

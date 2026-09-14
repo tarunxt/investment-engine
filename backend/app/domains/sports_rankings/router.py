@@ -8,6 +8,8 @@ from .catalogue import CATALOGUE, REFRESH_SECONDS, SOURCE_IDS
 from .models import SportsRankingSnapshot
 from .schemas import RankingQuery, RefreshRequest
 from .service import ranking_rows, resolve, summary
+from .master import SPORTS
+from .classification import MatchCandidate, classify
 
 router = APIRouter(prefix="/api/sports-rankings", tags=["sports-rankings"], dependencies=[Depends(get_current_user)])
 
@@ -16,7 +18,12 @@ router = APIRouter(prefix="/api/sports-rankings", tags=["sports-rankings"], depe
 async def catalogue(response: Response, db: AsyncSession = Depends(get_async_db)):
     response.headers["Cache-Control"] = "private, no-store"
     snapshots = {s.source_id: s for s in (await db.scalars(select(SportsRankingSnapshot))).all()}
-    return {"schema_version": 1, "refresh_seconds": REFRESH_SECONDS, "automatic_analysis_enabled": False, "competitions": [summary(c, snapshots.get(c["source_id"])) for c in CATALOGUE]}
+    return {"schema_version": 2, "sports": SPORTS, "refresh_seconds": REFRESH_SECONDS, "automatic_analysis_enabled": False, "competitions": [summary(c, snapshots.get(c["source_id"])) for c in CATALOGUE]}
+
+
+@router.post("/classify")
+async def classify_match(query: MatchCandidate):
+    return classify(query)
 
 
 @router.get("/competitions/{competition_id}")

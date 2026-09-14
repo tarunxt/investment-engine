@@ -47,6 +47,7 @@ jobs:
         run: >-
           pytest -q
           backend/tests/test_sports_rankings.py
+          backend/tests/test_sports_master.py
           backend/tests/test_completion_notifications.py
           backend/tests/test_dashboard_summary.py
           backend/tests/test_polymarket_auto_live_stage1_runtime.py

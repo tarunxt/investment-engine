@@ -1,0 +1,124 @@
+# Stable internal IDs are NOT Polymarket codes. id|category|sport|ranking scope|reference URL
+soccer|Football|Association football / soccer|FIFA national-team rankings; domestic clubs use their league table, separately by season and gender|https://inside.fifa.com/fifa-world-ranking
+futsal|Football|Futsal|FIFA men's and women's futsal rankings, separately|https://inside.fifa.com/fifa-rankings/futsal-world-ranking
+beach-soccer|Football|Beach soccer|Beach Soccer Worldwide national-team and club rankings, separately|https://beachsoccer.com/rankings
+american-football|Football|American football|NFL conference standings; college football uses its own standings/polls|https://www.nfl.com/standings/
+canadian-football|Football|Canadian football|CFL season/division standings|https://www.cfl.ca/standings/
+arena-football|Football|Arena football|League-specific season standings; no combined ranking across arena leagues|https://goifl.com/standings.aspx
+australian-rules|Football|Australian rules football|AFL and AFLW ladders, separately by competition and season|https://www.afl.com.au/ladder
+gaelic-football|Football|Gaelic football|GAA competition/division league tables; not a universal county ranking|https://www.gaa.ie/fixtures-results
+rugby-union|Football|Rugby union|World Rugby men's and women's national-team rankings, separately|https://www.world.rugby/rankings
+rugby-league|Football|Rugby league|IRL international rankings; clubs use their competition table|https://www.intrl.sport/world-rankings
+rugby-sevens|Football|Rugby sevens|SVNS season standings by gender; do not substitute rugby union rankings|https://www.svns.com/en/standings
+flag-football|Football|Flag football|IFAF discipline/gender-specific rankings or tournament standings|https://www.americanfootball.sport/
+test-cricket|Cricket|Test cricket|ICC men's Test team rankings; no substitution for formats without an ICC team list|https://www.icc-cricket.com/rankings/team-rankings/mens/test
+odi-cricket|Cricket|One-Day cricket / ODI|ICC men's and women's ODI team rankings, separately|https://www.icc-cricket.com/rankings/team-rankings/mens/odi
+t20-cricket|Cricket|T20 cricket|ICC T20I team rankings for internationals; franchise teams use tournament tables|https://www.icc-cricket.com/rankings/team-rankings/mens/t20i
+t10-cricket|Cricket|T10 cricket|Tournament/season points table; no universal T10 team ranking|https://ttensports.com/
+the-hundred|Cricket|The Hundred|Men's and women's competition tables, separately by season|https://www.thehundred.com/standings
+domestic-cricket|Cricket|Domestic first-class/List A cricket|Competition/division points table; first-class and List A remain separate|https://www.ecb.co.uk/matches/county-championship/tables
+basketball|Basketball|Basketball|NBA/WNBA standings and FIBA national-team rankings are separate scopes|https://www.fiba.basketball/en/ranking
+basketball-3x3|Basketball|3×3 basketball|FIBA 3x3 federation, team and individual rankings, separately|https://fiba3x3.com/en/rankings.html
+baseball|Baseball|Baseball|MLB league/division standings; WBSC national-team rankings are separate|https://www.mlb.com/standings
+softball|Baseball|Softball|WBSC men's and women's softball national-team rankings, separately|https://www.wbsc.org/en/rankings
+baseball5|Baseball|Baseball5|WBSC Baseball5 mixed national-team ranking|https://www.wbsc.org/en/rankings
+ice-hockey|Hockey|Ice hockey|NHL/KHL league tables and IIHF national-team rankings are separate scopes|https://www.iihf.com/en/worldranking
+field-hockey|Hockey|Field hockey|FIH outdoor men's and women's national-team rankings, separately|https://www.fih.hockey/outdoor-hockey-rankings
+indoor-hockey|Hockey|Indoor hockey|FIH indoor men's and women's national-team rankings, separately|https://www.fih.hockey/indoor-hockey-rankings
+roller-hockey|Hockey|Roller hockey|Discipline-specific championship/league standings; rink and inline hockey differ|https://www.worldskate.org/
+bandy|Hockey|Bandy|FIB championship standings by division/gender; no single verified live ranking feed|https://www.worldbandy.com/
+indoor-volleyball|Volleyball|Indoor volleyball|FIVB men's and women's national-team world rankings, separately|https://www.fivb.com/volleyball/rankings/
+beach-volleyball|Volleyball|Beach volleyball|FIVB pair world rankings by gender; preserve the exact pair|https://www.fivb.com/beach-volleyball/rankings/
+snow-volleyball|Volleyball|Snow volleyball|CEV/FIVB tour standings by gender and season|https://www.cev.eu/snow/
+indoor-handball|Handball|Indoor handball|IHF championship or domestic league standings; historical federation rankings are not current team strength|https://www.ihf.info/competitions
+beach-handball|Handball|Beach handball|IHF beach championship/tour standings by gender; not indoor handball rankings|https://www.ihf.info/competitions
+water-polo|Water sports|Water polo|World Aquatics competition standings by gender; league clubs require league tables|https://www.worldaquatics.com/water-polo
+canoe-polo|Water sports|Canoe polo|ICF world rankings by gender and age; separate senior and U21 lists|https://www.canoeicf.com/disciplines/canoe-polo/world-rankings
+field-lacrosse|Lacrosse|Field lacrosse|World Lacrosse championship rankings by gender and format|https://worldlacrosse.sport/
+box-lacrosse|Lacrosse|Box lacrosse|World Lacrosse box championship or NLL league standings|https://www.nll.com/standings/
+sixes-lacrosse|Lacrosse|Sixes lacrosse|World Lacrosse Sixes tournament standings; do not use field/box positions|https://worldlacrosse.sport/sixes/
+kabaddi|South Asian|Kabaddi|Pro Kabaddi season standings or national-team tournament results|https://www.prokabaddi.com/standings
+kho-kho|South Asian|Kho-kho|Competition-specific points tables; no verified universal team ranking|https://www.ultimatekhokho.com/
+field-archery-teams|South Asian|Field archery team matches|World Archery field competition results by team/bow class; not target individual rankings|https://www.worldarchery.sport/competition
+tennis-singles|Racket|Tennis singles|ATP and WTA singles rankings, separately; juniors use ITF junior rankings|https://www.atptour.com/en/rankings/singles
+tennis-doubles|Racket|Tennis doubles|ATP/WTA individual doubles rankings differ from pair/team race rankings|https://www.atptour.com/en/rankings/doubles
+badminton-singles|Racket|Badminton singles|BWF men's and women's singles world rankings, separately|https://bwfbadminton.com/rankings/
+badminton-doubles|Racket|Badminton doubles|BWF men's, women's and mixed doubles pair rankings, separately|https://bwfbadminton.com/rankings/
+table-tennis-singles|Racket|Table tennis singles|ITTF/WTT men's and women's singles rankings, separately|https://www.ittf.com/rankings/
+table-tennis-doubles|Racket|Table tennis doubles|ITTF/WTT doubles and mixed doubles pair rankings, separately|https://www.ittf.com/rankings/
+squash|Racket|Squash|PSA men's and women's world rankings, separately|https://www.psasquashtour.com/rankings/
+padel|Racket|Padel|FIP men's and women's player rankings; player rank is not a pair rank|https://www.padelfip.com/fip-rankings/
+pickleball-singles|Racket|Pickleball singles|PPA/APP singles tour rankings or DUPR ratings, separately by gender/provider|https://www.ppatour.com/player-rankings/
+pickleball-doubles|Racket|Pickleball doubles|PPA/APP gender/mixed doubles rankings; retain individual-versus-pair scope|https://www.ppatour.com/player-rankings/
+racquetball|Racket|Racquetball|IRT/LPRT/IRF rankings by gender and singles/doubles discipline|https://www.internationalracquetball.com/
+real-tennis|Racket|Real tennis|IRTPA professional rankings; domestic handicaps are a different measure|https://www.irtpa.com/
+platform-tennis|Racket|Platform tennis|APTA rankings by gender, age and competition|https://www.platformtennis.org/
+boxing|Combat|Boxing|WBC/WBA/IBF/WBO division rankings, separately by sanctioning body, gender and weight|https://wbcboxing.com/en/main-ratings/
+mma|Combat|Mixed martial arts / MMA|Promotion and weight-class rankings; pound-for-pound lists are not division ranks|https://www.ufc.com/rankings
+kickboxing|Combat|Kickboxing|GLORY/ONE/WAKO rankings by promotion, rules, gender and weight class|https://glorykickboxing.com/fighters
+muay-thai|Combat|Muay Thai|Stadium/promotion/WBC MuayThai rankings by gender and weight; no combined list|https://www.wbcmuaythai.com/rankings/
+professional-wrestling|Combat|Professional wrestling|Promotion-specific results/storylines; no standardized competitive ability ranking|https://www.wwe.com/superstars
+freestyle-wrestling|Combat|Freestyle wrestling|UWW freestyle rankings by gender and weight class|https://uww.org/athletes-results
+greco-roman-wrestling|Combat|Greco-Roman wrestling|UWW Greco-Roman rankings by weight class; separate from freestyle|https://uww.org/athletes-results
+sumo|Combat|Sumo wrestling|Japan Sumo Association banzuke by division and tournament; ordinal hierarchy is not points|https://www.sumo.or.jp/EnHonbashoBanzuke/index/
+judo|Combat|Judo|IJF world ranking by gender and weight class|https://www.ijf.org/wrl
+taekwondo|Combat|Taekwondo|World Taekwondo world/Olympic rankings by gender and weight class|https://www.worldtaekwondo.org/ranking/ranking.html
+karate-kumite|Combat|Karate kumite|WKF kumite rankings by age, gender and weight class; exclude kata|https://www.wkf.net/ranking
+brazilian-jiu-jitsu|Combat|Brazilian jiu-jitsu|IBJJF rankings by gi/no-gi, belt, age, gender and weight|https://ibjjf.com/ranking
+submission-grappling|Combat|Submission grappling|ADCC/UWW/promotion-specific results; no universal cross-rules ranking|https://adcombat.com/
+sambo|Combat|Sambo|FIAS rankings by sport/combat sambo, gender and weight class|https://sambo.sport/en/rating/
+fencing|Combat|Fencing|FIE individual/team rankings by weapon and gender|https://fie.org/athletes
+arm-wrestling|Combat|Arm wrestling|WAF/IFA/promotion results by arm, gender and weight; no unified universal list|https://www.waf-armwrestling.com/
+snooker|Cue sports|Snooker|WST official two-year ranking; one-year list and amateur lists differ|https://www.wst.tv/rankings/
+pool|Cue sports|Pool|WPA/Matchroom discipline-specific rankings; 8-ball, 9-ball and team results differ|https://wpapool.com/rankings/
+english-billiards|Cue sports|English billiards|World Billiards ranking list|https://world-billiards.com/rankings/
+carom-billiards|Cue sports|Carom billiards|UMB three-cushion and other discipline rankings separately|https://www.umb-carom.org/
+darts|Precision|Darts|PDC Order of Merit; women's/WDF rankings are separate lists|https://www.pdc.tv/rankings
+ten-pin-bowling|Precision|Ten-pin bowling match play|PBA/IBF tour rankings for the relevant competition; only explicit match-play markets|https://www.pba.com/players
+lawn-bowls|Precision|Lawn bowls|World Bowls/World Bowls Tour rankings by format; individual and team scope differs|https://www.worldbowls.com/
+bocce|Precision|Bocce|Confederation/discipline-specific championship results, not one universal team list|https://www.cmb-principautedemonaco.com/
+petanque|Precision|Pétanque|FIPJP championship results by gender/format; no verified universal live ranking|https://fipjp.org/
+curling|Precision|Curling|World Curling national and tour team rankings, separately by gender/mixed doubles|https://worldcurling.org/worldrankings/
+archery-match-play|Precision|Archery match play|World Archery rankings by bow, gender and individual/team; head-to-head stage only|https://www.worldarchery.sport/world-ranking
+shooting-match-play|Precision|Shooting match play|ISSF event-specific rankings; qualify only an explicit two-side match, not a multi-athlete final|https://www.issf-sports.org/athletes/world-ranking
+chess|Mind sports|Chess|FIDE standard, rapid and blitz ratings, separately; top lists are not all rated players|https://ratings.fide.com/top_lists.phtml
+go|Mind sports|Go|Professional rating systems differ by federation; EGF ratings cover European play|https://www.europeangodatabase.eu/EGD/
+shogi|Mind sports|Shogi|Japan Shogi Association class/tournament records; no universal official Elo list|https://www.shogi.or.jp/match/
+xiangqi|Mind sports|Xiangqi|Federation-specific player ratings and championship results|https://www.wxf-xiangqi.org/
+draughts|Mind sports|Draughts/checkers|FMJD ratings for international draughts; English checkers requires its own list|https://www.fmjd.org/rat.html
+bridge|Mind sports|Bridge team match|WBF masterpoints/rankings; player points are not a current team-strength rank|https://www.worldbridge.org/rankings/
+backgammon|Mind sports|Backgammon|Federation/tour ratings; no universal cross-provider list|https://www.wbif.net/
+netball|Other|Netball|World Netball national-team ranking; club competitions use league tables|https://netball.sport/events-and-results/world-rankings-hub/current-world-rankings/
+sepak-takraw|Other|Sepak takraw|ISTAF competition standings by regu/team and gender|https://sepaktakraw.org/
+floorball|Other|Floorball|IFF men's/women's national-team ranking and competition standings, separately|https://www.floorball.sport/
+ultimate|Other|Ultimate frisbee|WFDF federation ranking and division-specific competition standings differ|https://wfdf.sport/world-rankings/
+tug-of-war|Other|Tug of war|TWIF championship results by indoor/outdoor, gender and weight class|https://tugofwar-twif.org/
+hurling|Other|Hurling|GAA competition/division league tables; not Gaelic football tables|https://www.gaa.ie/fixtures-results
+camogie|Other|Camogie|Camogie Association competition/division standings|https://camogie.ie/fixtures-results/
+polo|Other|Polo|Player handicaps and tournament team standings are different measures|https://www.fippolo.com/
+horseball|Other|Horseball|FIHB world horseball ranking and competition standings|https://www.fihb.net/
+roller-derby|Other|Roller derby|WFTDA/MRDA association-specific team rankings|https://wftda.com/rankings/
+footvolley|Other|Footvolley|Tour/federation-specific pair standings; no verified universal ranking feed|https://www.footvolley.net/
+teqball|Other|Teqball|FITEQ singles, doubles and mixed doubles rankings, separately|https://www.fiteq.org/rankings
+roundnet|Other|Spikeball/roundnet|Roundnet federation/tour rankings by division and exact pair|https://www.roundnetfederation.org/
+league-of-legends|Esports|League of Legends|Riot competition/split standings in Events and Standings; cross-region team ratings are separate|https://lolesports.com/
+dota2|Esports|Dota 2|Tournament standings and circuit rankings; no single official global team ladder|https://liquipedia.net/dota2/Main_Page
+cs2|Esports|Counter-Strike 2|Valve regional/global team ranking; retain roster identity|https://github.com/ValveSoftware/counter-strike_regional_standings
+valorant|Esports|Valorant|VCT region/season standings and circuit points|https://valorantesports.com/
+overwatch|Esports|Overwatch|OWCS region/season standings|https://esports.overwatch.com/
+rainbow-six|Esports|Rainbow Six Siege|Regional league standings and Six Invitational circuit points|https://www.ubisoft.com/en-us/esports/rainbow-six/siege
+call-of-duty|Esports|Call of Duty|Call of Duty League season standings|https://www.callofdutyleague.com/en-us/standings
+rocket-league|Esports|Rocket League|RLCS region/season points standings|https://www.rocketleague.com/en/competitive
+mobile-legends|Esports|Mobile Legends|MPL regional season standings and tournament results|https://www.mobilelegends.com/
+honor-of-kings|Esports|Honor of Kings|KPL/other circuit standings; Arena of Valor is a different game|https://www.honorofkings.com/
+pubg-h2h|Esports|PUBG/Battle Royale head-to-head|Circuit standings only as context; ordinary multi-team battle royale markets excluded|https://pubgesports.com/
+starcraft2|Esports|StarCraft II|Circuit points/player ratings by tournament and season|https://liquipedia.net/starcraft2/Main_Page
+ea-sports-fc|Esports|EA Sports FC / FIFA|FC Pro circuit/competition standings; not FIFA national football rankings|https://www.ea.com/games/ea-sports-fc/fc-pro
+efootball|Esports|eFootball|eFootball competition standings; not association football rankings|https://www.konami.com/efootball/
+madden|Esports|Madden NFL|Madden Championship Series standings; not NFL team standings|https://www.ea.com/games/madden-nfl
+nba2k|Esports|NBA 2K|NBA 2K competition standings; not NBA basketball team standings|https://nba.2k.com/
+fighting-games|Esports|Fighting games—Tekken, Street Fighter, Mortal Kombat|Keep game/title, circuit and season separate; no combined fighting-game ranking|https://liquipedia.net/fighters/Main_Page
+hearthstone|Esports|Hearthstone|Competitive circuit standings; ladder rank is a distinct measure|https://hearthstone.blizzard.com/en-us/esports
+pokemon|Esports|Pokémon competitive|Play Pokémon championship points by video-game/TCG and age division|https://www.pokemon.com/us/play-pokemon/leaderboards
+age-of-empires|Esports|Age of Empires|Game/version and 1v1/team ladder or tournament rating separately|https://www.ageofempires.com/stats/
+golf-match-play|Other|Golf match play|OWGR men's and Rolex women's rankings as context; only explicit two-side match play qualifies|https://www.owgr.com/current-world-ranking
