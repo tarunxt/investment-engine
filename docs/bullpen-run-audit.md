@@ -2329,6 +2329,11 @@ so a frontend deployment or restart cannot erase it. Completed universal ledgers
 are retained until a replacement completes; ordinary workflow exports keep the
 existing bounded retention policy.
 
+The browser scanner retries the same cursor after bounded gateway, timeout,
+rate-limit, network, or malformed-response interruptions. Page-key deduplication
+makes these retries idempotent; after eight consecutive failures the run stops
+and leaves the last completed common scan untouched.
+
 Universal raw ledgers use lossless per-row compression (`compressedRowV1`).
 Readers accept both compressed and legacy JSONL rows, preserving every exported
 field and deterministic byte-offset re-filtering. The common scan does not write
