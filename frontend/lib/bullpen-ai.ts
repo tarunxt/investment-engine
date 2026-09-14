@@ -116,6 +116,7 @@ export type BullpenScanFilters = {
   maxSpreadCents: number;
   rejectedThemePattern: string;
   targetDate: string;
+  applyYesNoOddsThresholds: boolean;
   sportsMoneylineOnly: boolean;
   excludeSports: boolean;
   excludeWeather: boolean;
@@ -450,6 +451,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     maxSpreadCents: 10,
     rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
+    applyYesNoOddsThresholds: true,
     sportsMoneylineOnly: false,
     excludeSports: true,
     excludeWeather: true,
@@ -475,6 +477,7 @@ export const DEFAULT_BULLPEN_SCAN_FILTERS: Record<
     maxSpreadCents: 10,
     rejectedThemePattern: "crypto prices|twitter|Mentions",
     targetDate: END_OF_MONTH_DATE,
+    applyYesNoOddsThresholds: true,
     sportsMoneylineOnly: false,
     excludeSports: true,
     excludeWeather: true,
@@ -570,6 +573,10 @@ export function normalizeBullpenScanFilters(
       searchParams.get("targetDate"),
       defaults.targetDate,
     ),
+    applyYesNoOddsThresholds: parseBooleanSearchParam(
+      searchParams.get("applyYesNoOddsThresholds"),
+      defaults.applyYesNoOddsThresholds,
+    ),
     sportsMoneylineOnly: parseBooleanSearchParam(
       searchParams.get("sportsMoneylineOnly"),
       defaults.sportsMoneylineOnly,
@@ -651,6 +658,10 @@ export function buildBullpenScanQueryParams(
   params.set("maxSpreadCents", String(filters.maxSpreadCents));
   params.set("rejectedThemePattern", filters.rejectedThemePattern);
   params.set("targetDate", filters.targetDate);
+  params.set(
+    "applyYesNoOddsThresholds",
+    String(filters.applyYesNoOddsThresholds),
+  );
   params.set("sportsMoneylineOnly", String(filters.sportsMoneylineOnly));
   params.set("excludeSports", String(filters.excludeSports));
   params.set("excludeWeather", String(filters.excludeWeather));

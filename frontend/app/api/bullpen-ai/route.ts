@@ -1234,7 +1234,7 @@ function getFilterReasons(
         : `Excluded market below the ${filters.minNoOdds}% No odds floor.`,
     );
   }
-  if (filters.minLowerOutcomeOdds > 0) {
+  if (filters.applyYesNoOddsThresholds && filters.minLowerOutcomeOdds > 0) {
     const lowerOutcomeOdds =
       question.yesOdds === null || question.noOdds === null
         ? null
@@ -1247,7 +1247,7 @@ function getFilterReasons(
       );
     }
   }
-  if (filters.minHigherOutcomeOdds > 0) {
+  if (filters.applyYesNoOddsThresholds && filters.minHigherOutcomeOdds > 0) {
     const higherOutcomeOdds =
       question.yesOdds === null || question.noOdds === null
         ? null

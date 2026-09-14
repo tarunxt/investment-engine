@@ -723,6 +723,7 @@ def console_market_filter_reasons(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     min_highest_market_odds: float = 90,
+    apply_yes_no_odds_thresholds: bool = True,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
     min_volume_usd: float = 100,
     min_liquidity_usd: float = 100,
@@ -813,16 +814,17 @@ def console_market_filter_reasons(
         market.current_no_odds,
     ):
         reasons.append("Excluded unclear non-binary market.")
-    if market.current_yes_odds is None or market.current_no_odds is None:
-        reasons.append("Excluded market without both Yes and No odds.")
-    elif min(market.current_yes_odds, market.current_no_odds) <= min_market_odds:
-        reasons.append(
-            f"Excluded because min(Yes, No) must be above {min_market_odds:g}%."
-        )
-    elif max(market.current_yes_odds, market.current_no_odds) <= min_highest_market_odds:
-        reasons.append(
-            f"Excluded because max(Yes, No) must be above {min_highest_market_odds:g}%."
-        )
+    if apply_yes_no_odds_thresholds:
+        if market.current_yes_odds is None or market.current_no_odds is None:
+            reasons.append("Excluded market without both Yes and No odds.")
+        elif min(market.current_yes_odds, market.current_no_odds) <= min_market_odds:
+            reasons.append(
+                f"Excluded because min(Yes, No) must be above {min_market_odds:g}%."
+            )
+        elif max(market.current_yes_odds, market.current_no_odds) <= min_highest_market_odds:
+            reasons.append(
+                f"Excluded because max(Yes, No) must be above {min_highest_market_odds:g}%."
+            )
     if not market.close_time:
         reasons.append("Excluded market without a close time.")
     else:
@@ -986,6 +988,7 @@ def _build_cli_console_scan_result(
     scanned_at: str,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     min_highest_market_odds: float = 90,
+    apply_yes_no_odds_thresholds: bool = True,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
     min_volume_usd: float = 100,
     min_liquidity_usd: float = 100,
@@ -1023,6 +1026,7 @@ def _build_cli_console_scan_result(
                 now=now,
                 min_market_odds=min_market_odds,
                 min_highest_market_odds=min_highest_market_odds,
+                apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
                 max_closing_days=max_closing_days,
                 min_volume_usd=min_volume_usd,
                 min_liquidity_usd=min_liquidity_usd,
@@ -1075,6 +1079,7 @@ async def scan_console_profile_markets(
     now: datetime,
     min_market_odds: float = CONSOLE_MIN_MARKET_ODDS,
     min_highest_market_odds: float = 90,
+    apply_yes_no_odds_thresholds: bool = True,
     max_closing_days: int = CONSOLE_SCAN_WINDOW_DAYS,
     min_volume_usd: float = 100,
     min_liquidity_usd: float = 100,
@@ -1115,6 +1120,7 @@ async def scan_console_profile_markets(
             scanned_at=scanned_at,
             min_market_odds=min_market_odds,
             min_highest_market_odds=min_highest_market_odds,
+            apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
             max_closing_days=max_closing_days,
             min_volume_usd=min_volume_usd,
             min_liquidity_usd=min_liquidity_usd,
@@ -1170,6 +1176,7 @@ async def scan_console_profile_markets(
                 now=now,
                 min_market_odds=min_market_odds,
                 min_highest_market_odds=min_highest_market_odds,
+                apply_yes_no_odds_thresholds=apply_yes_no_odds_thresholds,
                 max_closing_days=max_closing_days,
                 min_volume_usd=min_volume_usd,
                 min_liquidity_usd=min_liquidity_usd,

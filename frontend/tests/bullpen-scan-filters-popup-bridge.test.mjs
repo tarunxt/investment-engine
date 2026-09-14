@@ -61,6 +61,8 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /Save thresholds/);
   assert.match(bridgeSource, /Minimum value of min\(Yes, No Odds\)/);
   assert.match(bridgeSource, /Minimum value of max\(Yes, No Odds\)/);
+  assert.match(bridgeSource, /Apply Yes\/No odds thresholds filter/);
+  assert.match(bridgeSource, /console_apply_yes_no_odds_thresholds/);
   assert.doesNotMatch(bridgeSource, /Default: <code>crypto prices/);
   assert.match(bridgeSource, /updateBullpenAutoLiveSettings/);
   assert.match(bridgeSource, /console_custom_exclude_phrases/);
@@ -70,11 +72,9 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
   assert.match(bridgeSource, /saveFilterToggle\(id, event\.target\.checked\)/);
   assert.match(bridgeSource, /Apply \$\{detail\.label\} filter/);
   assert.match(bridgeSource, /every future Trending and Full Universe scan/);
-  assert.match(bridgeSource, />\s*Stage 1 scan scope\s*</);
-  assert.match(bridgeSource, /description: "Current Bullpen feed"/);
-  assert.match(bridgeSource, /label: "Full Universe"/);
-  assert.match(bridgeSource, /console_scan_scope: nextScope/);
-  assert.match(bridgeSource, /saveScanScope\(option\.value\)/);
+  assert.doesNotMatch(bridgeSource, />\s*Stage 1 scan scope\s*</);
+  assert.doesNotMatch(bridgeSource, /aria-label="Bullpen scan scope"/);
+  assert.doesNotMatch(bridgeSource, /saveScanScope/);
   assert.doesNotMatch(scheduleCardSource, />\s*Stage 1 scan scope\s*</);
   assert.doesNotMatch(scheduleCardSource, /description: "Current Bullpen feed"/);
   assert.match(
@@ -92,5 +92,6 @@ test("Bullpen Stage 1 Filters trigger opens a popup even when legacy scan contro
 
 test("Bullpen page shell always mounts the scan filter popup bridge", () => {
   assert.match(shellSource, /import \{ BullpenScanFiltersPopupBridge \}/);
-  assert.match(shellSource, /<BullpenScanFiltersPopupBridge \/>/);
+  assert.match(shellSource, /<BullpenScanFiltersPopupBridge workspaceProfile=\{workspaceProfile\} \/>/);
+  assert.doesNotMatch(shellSource, /workspaceProfile === "bullpen007"/);
 });

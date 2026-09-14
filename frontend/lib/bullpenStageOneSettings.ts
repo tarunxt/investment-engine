@@ -94,6 +94,8 @@ export function applyBullpenStageOneSettings(
     minNoOdds: 0,
     minLowerOutcomeOdds: settings.console_min_market_odds ?? 1,
     minHigherOutcomeOdds: settings.console_min_highest_market_odds ?? 90,
+    applyYesNoOddsThresholds:
+      settings.console_apply_yes_no_odds_thresholds ?? true,
     sportsMoneylineOnly: settings.console_sports_moneyline_only ?? false,
     excludeSports: toggles.excludeSports,
     excludeWeather: toggles.excludeWeather,

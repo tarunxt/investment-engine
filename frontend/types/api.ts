@@ -2347,6 +2347,7 @@ export interface BullpenAutoLiveSettings {
   console_order_usd: number;
   console_min_market_odds: number;
   console_min_highest_market_odds: number;
+  console_apply_yes_no_odds_thresholds: boolean;
   console_max_closing_days: number;
   console_min_volume_usd: number;
   console_min_liquidity_usd: number;

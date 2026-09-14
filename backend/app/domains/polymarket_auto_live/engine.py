@@ -5764,6 +5764,9 @@ class BullpenAutoLiveEngine:
                         now=now,
                         min_market_odds=settings.console_min_market_odds,
                         min_highest_market_odds=settings.console_min_highest_market_odds,
+                        apply_yes_no_odds_thresholds=(
+                            settings.console_apply_yes_no_odds_thresholds
+                        ),
                         max_closing_days=settings.console_max_closing_days,
                         min_volume_usd=settings.console_min_volume_usd,
                         min_liquidity_usd=settings.console_min_liquidity_usd,
@@ -5771,6 +5774,7 @@ class BullpenAutoLiveEngine:
                         max_spread_cents=settings.console_max_spread_cents,
                         rejected_theme_pattern=settings.console_rejected_theme_pattern,
                         exclude_sports=settings.console_exclude_sports,
+                        sports_moneyline_only=settings.console_sports_moneyline_only,
                         exclude_weather=settings.console_exclude_weather,
                         exclude_market_predictions=(
                             settings.console_exclude_market_predictions
@@ -6061,6 +6065,9 @@ class BullpenAutoLiveEngine:
                     now=now,
                     min_market_odds=settings.console_min_market_odds,
                     min_highest_market_odds=settings.console_min_highest_market_odds,
+                    apply_yes_no_odds_thresholds=(
+                        settings.console_apply_yes_no_odds_thresholds
+                    ),
                     max_closing_days=settings.console_max_closing_days,
                     min_volume_usd=settings.console_min_volume_usd,
                     min_liquidity_usd=settings.console_min_liquidity_usd,
@@ -6068,6 +6075,7 @@ class BullpenAutoLiveEngine:
                     max_spread_cents=settings.console_max_spread_cents,
                     rejected_theme_pattern=settings.console_rejected_theme_pattern,
                     exclude_sports=settings.console_exclude_sports,
+                    sports_moneyline_only=settings.console_sports_moneyline_only,
                     exclude_weather=settings.console_exclude_weather,
                     exclude_market_predictions=(
                         settings.console_exclude_market_predictions

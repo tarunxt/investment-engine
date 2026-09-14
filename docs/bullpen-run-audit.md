@@ -6,8 +6,10 @@ Bullpen 007 and Bullpen Sports render the same shared workspace widgets and
 consume the same completed Universal Polymarket Scan. Their Stage 1 filter
 settings and filtered export ownership are namespaced by workspace profile, so
 changing a Bullpen Sports filter cannot mutate Bullpen 007's filter set or its
-saved shortlist. Bullpen Sports defaults to including sports and to the Full
-Universe scope. A run started from either workspace records
+saved shortlist. Both workspaces call the exact same Stage 1 Scan Filters popup;
+the scan-scope selector is intentionally managed outside that popup. Bullpen
+Sports defaults to including sports and to the Full Universe scope. A run
+started from either workspace records
 `console_profile.workspace_profile` in the existing immutable run payload; the
 candidate rows, filter outcome, formulas, and audit schema remain otherwise
 unchanged and backward compatible (`bullpen007` is the default for older runs).
@@ -2357,12 +2359,16 @@ field and deterministic byte-offset re-filtering. The common scan does not write
 a duplicate all-passed ledger. Starting its replacement discards only incomplete
 owner-scoped captures; completed evidence remains selectable.
 
-### Bullpen Sports moneyline filter
+### Shared sports and Yes/No filter controls
 
-Bullpen Sports applies an additional immutable filter to its fork of the shared
-Universal Polymarket Scan. A candidate passes only when its event slug does not
-end in `draw`, `market.feeType` is `sports_fees_v2` or `sports_fees_v3`, and
+Every Bullpen workspace renders the same Sports event filters section. Its
+`Exclude sports` checkbox remains profile-specific; whenever sports are
+included, a candidate passes only when its event slug does not end in `draw`,
+`market.feeType` is `sports_fees_v2` or `sports_fees_v3`, and
 `market.sportsMarketType` is `moneyline`. The browser reapply path and canonical
-server-side console filter emit matching rejection reasons. Bullpen 007 keeps its
-existing filter behavior because the rule is enabled only by the
-`bullpen-sports` profile.
+server-side console filter emit matching rejection reasons.
+
+The shared Yes/No odds thresholds section has its own profile-specific enable
+checkbox. Disabling it bypasses both lower-side and higher-side odds thresholds
+in browser reapplies, manual scans, and scheduled scans while preserving the
+saved numeric values for later re-enabling.

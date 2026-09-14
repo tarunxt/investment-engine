@@ -99,3 +99,27 @@ def test_sports_profile_rejects_wrong_fee_or_market_type() -> None:
 
     assert any("feeType sports_fees_v2 or sports_fees_v3" in reason for reason in reasons)
     assert any("sportsMarketType is not moneyline" in reason for reason in reasons)
+
+
+def test_yes_no_odds_thresholds_can_be_disabled() -> None:
+    market = _sports_market()
+    market.current_yes_odds = None
+    market.current_no_odds = None
+
+    enabled_reasons = console_market_filter_reasons(
+        market,
+        now=datetime.now(UTC),
+        exclude_sports=False,
+        sports_moneyline_only=True,
+        apply_yes_no_odds_thresholds=True,
+    )
+    disabled_reasons = console_market_filter_reasons(
+        market,
+        now=datetime.now(UTC),
+        exclude_sports=False,
+        sports_moneyline_only=True,
+        apply_yes_no_odds_thresholds=False,
+    )
+
+    assert any("without both Yes and No odds" in reason for reason in enabled_reasons)
+    assert not any("odds" in reason.lower() for reason in disabled_reasons)

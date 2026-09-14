@@ -224,6 +224,7 @@ class BullpenAutoLiveSettingsBase(BaseModel):
     # to clear their independently editable strict thresholds.
     console_min_market_odds: float = Field(default=1, ge=0, lt=50)
     console_min_highest_market_odds: float = Field(default=90, ge=50, lt=100)
+    console_apply_yes_no_odds_thresholds: bool = True
     console_max_closing_days: int = Field(default=30, ge=1)
     console_min_volume_usd: float = Field(default=100, ge=0)
     console_min_liquidity_usd: float = Field(default=100, ge=0)
@@ -452,6 +453,7 @@ class BullpenAutoLiveSettingsUpdate(BaseModel):
     console_order_usd: float | None = Field(default=None, gt=0)
     console_min_market_odds: float | None = Field(default=None, ge=0, lt=50)
     console_min_highest_market_odds: float | None = Field(default=None, ge=50, lt=100)
+    console_apply_yes_no_odds_thresholds: bool | None = None
     console_max_closing_days: int | None = Field(default=None, ge=1)
     console_min_volume_usd: float | None = Field(default=None, ge=0)
     console_min_liquidity_usd: float | None = Field(default=None, ge=0)

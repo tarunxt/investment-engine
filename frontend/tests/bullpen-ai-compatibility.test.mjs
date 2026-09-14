@@ -460,7 +460,7 @@ test("Bullpen auto-run cannot enable a future schedule without Stage 2 LLM targe
   );
 });
 
-test("Bullpen auto-run persists Trending and Full Universe scan scope", () => {
+test("Bullpen auto-run persists scan scope outside the shared filters popup", () => {
   const autoRunCardSource = readFileSync(
     new URL(
       "../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx",
@@ -476,19 +476,15 @@ test("Bullpen auto-run persists Trending and Full Universe scan scope", () => {
     "utf8",
   );
 
-  assert.match(scanFiltersPopupSource, /name="bullpen-scan-scope"/);
-  assert.match(scanFiltersPopupSource, /label: "Trending"/);
-  assert.match(scanFiltersPopupSource, /label: "Full Universe"/);
-  assert.match(
-    scanFiltersPopupSource,
-    /updateBullpenAutoLiveSettings\(\{\s*console_scan_scope:\s*nextScope,/,
-  );
+  assert.doesNotMatch(scanFiltersPopupSource, /name="bullpen-scan-scope"/);
+  assert.doesNotMatch(scanFiltersPopupSource, /Stage 1 scan scope/);
+  assert.doesNotMatch(scanFiltersPopupSource, /console_scan_scope:\s*nextScope/);
   assert.match(
     autoRunCardSource,
     /buildConsoleSettingsUpdate\(\s*latestConsoleOrderUsd,\s*consoleScanScope,/,
   );
   assert.match(autoRunCardSource, /FULL Universe|Full Universe/i);
-  assert.match(scanFiltersPopupSource, /new purchases are blocked/);
+  assert.doesNotMatch(scanFiltersPopupSource, /new purchases are blocked/);
   assert.doesNotMatch(autoRunCardSource, /name="bullpen-scan-scope"/);
 });
 

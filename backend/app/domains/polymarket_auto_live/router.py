@@ -83,6 +83,7 @@ _NAMED_FILTER_PROFILES = {"bullpen-sports"}
 _FILTER_PROFILE_FIELDS = {
     "console_min_market_odds",
     "console_min_highest_market_odds",
+    "console_apply_yes_no_odds_thresholds",
     "console_max_closing_days",
     "console_min_volume_usd",
     "console_min_liquidity_usd",
@@ -534,6 +535,9 @@ async def get_stage1_scan_preview(current_user: User = Depends(get_current_user)
         now=datetime.now(UTC),
         min_market_odds=settings.console_min_market_odds,
         min_highest_market_odds=settings.console_min_highest_market_odds,
+        apply_yes_no_odds_thresholds=(
+            settings.console_apply_yes_no_odds_thresholds
+        ),
         max_closing_days=settings.console_max_closing_days,
         min_volume_usd=settings.console_min_volume_usd,
         min_liquidity_usd=settings.console_min_liquidity_usd,

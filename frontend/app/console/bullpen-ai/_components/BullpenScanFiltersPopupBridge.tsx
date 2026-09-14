@@ -26,7 +26,9 @@ import type {
 
 const FILTER_ORDER = Object.keys(
   BULLPEN_SCAN_FILTER_DETAILS,
-) as BullpenScanFilterDetailId[];
+).filter((id) => id !== "excludeSports") as BullpenScanFilterDetailId[];
+
+const SPORTS_FILTER_DETAIL = BULLPEN_SCAN_FILTER_DETAILS.excludeSports;
 
 const DEFAULT_FILTER_TOGGLES: BullpenScanFilterToggleState = {
   excludeSports: true,
@@ -69,6 +71,9 @@ export function BullpenScanFiltersPopupBridge({
   const [savedOddsFloor, setSavedOddsFloor] = useState(1);
   const [highestOddsFloor, setHighestOddsFloor] = useState(90);
   const [savedHighestOddsFloor, setSavedHighestOddsFloor] = useState(90);
+  const [oddsThresholdsEnabled, setOddsThresholdsEnabled] = useState(true);
+  const [isOddsThresholdToggleSaving, setIsOddsThresholdToggleSaving] =
+    useState(false);
   const [maxClosingDays, setMaxClosingDays] = useState(30);
   const [savedMaxClosingDays, setSavedMaxClosingDays] = useState(30);
   const [minVolumeUsd, setMinVolumeUsd] = useState(100);
@@ -96,11 +101,6 @@ export function BullpenScanFiltersPopupBridge({
   const [reapplyDirty, setReapplyDirty] = useState(false);
   const [isReapplying, setIsReapplying] = useState(false);
   const [reapplyMessage, setReapplyMessage] = useState<string | null>(null);
-  const [scanScope, setScanScope] = useState<"trending" | "full_universe">(
-    "trending",
-  );
-  const [isScanScopeSaving, setIsScanScopeSaving] = useState(false);
-  const [scanScopeMessage, setScanScopeMessage] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadOddsFloor() {
@@ -120,6 +120,9 @@ export function BullpenScanFiltersPopupBridge({
         setSavedOddsFloor(saved);
         setHighestOddsFloor(savedHighest);
         setSavedHighestOddsFloor(savedHighest);
+        setOddsThresholdsEnabled(
+          settings.console_apply_yes_no_odds_thresholds ?? true,
+        );
         setMaxClosingDays(savedClosingDays);
         setSavedMaxClosingDays(savedClosingDays);
         const savedVolume = settings.console_min_volume_usd ?? 100;
@@ -139,7 +142,6 @@ export function BullpenScanFiltersPopupBridge({
         setSavedRejectedThemePattern(savedThemePattern);
         setCustomExcludePhrases(settings.console_custom_exclude_phrases ?? []);
         setFilterToggles(getBullpenScanFilterToggles(settings));
-        setScanScope(settings.console_scan_scope ?? "trending");
         publishStageOneSettings(settings, eventNames.settingsUpdated);
         setReapplyDirty(false);
       } catch {
@@ -202,11 +204,19 @@ export function BullpenScanFiltersPopupBridge({
       setReapplyMessage("Enter a valid whole-number expiry window first.");
       return;
     }
-    if (!Number.isFinite(oddsFloor) || oddsFloor < 0 || oddsFloor >= 50) {
+    if (
+      oddsThresholdsEnabled &&
+      (!Number.isFinite(oddsFloor) || oddsFloor < 0 || oddsFloor >= 50)
+    ) {
       setReapplyMessage("Enter a valid minimum lower-side odds value from 0 up to 49.9% first.");
       return;
     }
-    if (!Number.isFinite(highestOddsFloor) || highestOddsFloor < 50 || highestOddsFloor >= 100) {
+    if (
+      oddsThresholdsEnabled &&
+      (!Number.isFinite(highestOddsFloor) ||
+        highestOddsFloor < 50 ||
+        highestOddsFloor >= 100)
+    ) {
       setReapplyMessage("Enter a valid minimum higher-side odds value from 50 up to 99.9% first.");
       return;
     }
@@ -221,6 +231,7 @@ export function BullpenScanFiltersPopupBridge({
         console_max_closing_days: maxClosingDays,
         console_min_market_odds: oddsFloor,
         console_min_highest_market_odds: highestOddsFloor,
+        console_apply_yes_no_odds_thresholds: oddsThresholdsEnabled,
         console_min_volume_usd: minVolumeUsd,
         console_min_liquidity_usd: minLiquidityUsd,
         console_min_volume_24hr_usd: minVolume24hrUsd,
@@ -279,28 +290,31 @@ export function BullpenScanFiltersPopupBridge({
     }
   }
 
-  async function saveScanScope(nextScope: "trending" | "full_universe") {
-    if (nextScope === scanScope || isScanScopeSaving) return;
-    const previousScope = scanScope;
-    setScanScope(nextScope);
-    setIsScanScopeSaving(true);
-    setScanScopeMessage(null);
+  async function saveOddsThresholdsEnabled(enabled: boolean) {
+    if (isOddsThresholdToggleSaving) return;
+    const previous = oddsThresholdsEnabled;
+    setOddsThresholdsEnabled(enabled);
+    setIsOddsThresholdToggleSaving(true);
+    setFloorMessage(null);
+    setReapplyDirty(true);
     try {
-      const settings = await apiService.updateBullpenAutoLiveSettings({
-        console_scan_scope: nextScope,
-      }, settingsProfile);
-      setScanScope(settings.console_scan_scope ?? nextScope);
+      const settings = await apiService.updateBullpenAutoLiveSettings(
+        { console_apply_yes_no_odds_thresholds: enabled },
+        settingsProfile,
+      );
+      const saved = settings.console_apply_yes_no_odds_thresholds ?? enabled;
+      setOddsThresholdsEnabled(saved);
       publishStageOneSettings(settings, eventNames.settingsUpdated);
-      setScanScopeMessage(
-        nextScope === "full_universe"
-          ? "Full Universe saved. Future manual and scheduled runs will exhaustively scan the catalogue."
-          : "Trending saved. Future manual and scheduled runs will use the current Bullpen feed.",
+      setFloorMessage(
+        saved
+          ? "Yes/No odds thresholds are enabled for future Stage 1 scans."
+          : "Yes/No odds thresholds are disabled for future Stage 1 scans.",
       );
     } catch {
-      setScanScope(previousScope);
-      setScanScopeMessage("The scan scope could not be saved. Please try again.");
+      setOddsThresholdsEnabled(previous);
+      setFloorMessage("The Yes/No odds threshold choice could not be saved. Please try again.");
     } finally {
-      setIsScanScopeSaving(false);
+      setIsOddsThresholdToggleSaving(false);
     }
   }
 
@@ -469,74 +483,6 @@ export function BullpenScanFiltersPopupBridge({
           <div className="flex-1 overflow-y-auto px-6 py-5">
             <div className="space-y-3">
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
-                <fieldset>
-                  <legend className="font-semibold text-slate-950 dark:text-slate-50">
-                    Stage 1 scan scope
-                  </legend>
-                  <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                    Choose whether Stage 1 scans the current Bullpen feed or every available Polymarket market.
-                  </p>
-                  <div
-                    className="mt-4 grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-100 p-1 shadow-inner dark:border-slate-700 dark:bg-slate-900"
-                    aria-label="Bullpen scan scope"
-                  >
-                    {(
-                      [
-                        {
-                          value: "trending",
-                          label: "Trending",
-                          description: "Current Bullpen feed",
-                        },
-                        {
-                          value: "full_universe",
-                          label: "Full Universe",
-                          description: "All Polymarket markets",
-                        },
-                      ] as const
-                    ).map((option) => {
-                      const checked = scanScope === option.value;
-                      return (
-                        <label
-                          key={option.value}
-                          className={`relative cursor-pointer rounded-lg px-3 py-2 text-center transition ${
-                            checked
-                              ? "bg-white text-slate-950 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-50 dark:ring-slate-700"
-                              : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
-                          } ${isFloorLoading || isScanScopeSaving ? "cursor-wait opacity-60" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name="bullpen-scan-scope"
-                            value={option.value}
-                            checked={checked}
-                            disabled={isFloorLoading || isScanScopeSaving}
-                            onChange={() => void saveScanScope(option.value)}
-                            className="sr-only"
-                          />
-                          <span className="block text-sm font-semibold">
-                            {option.label}
-                          </span>
-                          <span className="mt-0.5 block text-[11px] font-medium">
-                            {option.description}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                  <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                    {scanScope === "full_universe"
-                      ? "Exhaustive keyset pagination is required. If enumeration is incomplete, active positions remain monitored but new purchases are blocked."
-                      : "Uses the existing Trending workflow without changing its filters or downstream stages."}
-                    {isScanScopeSaving ? " Saving preference…" : ""}
-                  </p>
-                  {scanScopeMessage ? (
-                    <p className="mt-2 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">
-                      {scanScopeMessage}
-                    </p>
-                  ) : null}
-                </fieldset>
-              </div>
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div className="max-w-xl">
                     <p className="font-semibold text-slate-950 dark:text-slate-50">
@@ -617,16 +563,34 @@ export function BullpenScanFiltersPopupBridge({
                 </div>
                 {additionalFiltersMessage ? <p className="mt-3 text-xs font-medium text-slate-700 dark:text-slate-200" role="status">{additionalFiltersMessage}</p> : null}
               </div>
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 dark:border-emerald-500/40 dark:bg-emerald-950/30">
+              <div className={`rounded-2xl border px-4 py-4 ${
+                oddsThresholdsEnabled
+                  ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-950/30"
+                  : "border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/70"
+              }`}>
                 <div className="space-y-4">
-                  <div>
-                    <p className="font-semibold text-slate-950 dark:text-slate-50">
-                      Yes/No odds thresholds
-                    </p>
-                    <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                      Both conditions must pass. Values are saved for every future Stage 1 scan.
-                    </p>
-                  </div>
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      checked={oddsThresholdsEnabled}
+                      disabled={isFloorLoading || isOddsThresholdToggleSaving}
+                      onChange={(event) =>
+                        void saveOddsThresholdsEnabled(event.target.checked)
+                      }
+                      aria-label="Apply Yes/No odds thresholds filter"
+                      className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border-slate-300 text-emerald-700 focus:ring-2 focus:ring-emerald-300 disabled:cursor-wait"
+                    />
+                    <span>
+                      <span className="block font-semibold text-slate-950 dark:text-slate-50">
+                        Yes/No odds thresholds
+                      </span>
+                      <span className="mt-1 block text-sm leading-6 text-slate-600 dark:text-slate-300">
+                        {oddsThresholdsEnabled
+                          ? "Both conditions must pass. Values are saved for every future Stage 1 scan."
+                          : "Disabled. Yes/No odds thresholds are not applied to Stage 1 scans."}
+                      </span>
+                    </span>
+                  </label>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
                       i) Minimum value of min(Yes, No Odds) &gt;
@@ -638,7 +602,7 @@ export function BullpenScanFiltersPopupBridge({
                           max={49.9}
                           step={0.1}
                           value={oddsFloor}
-                          disabled={isFloorLoading || isFloorSaving}
+                          disabled={isFloorLoading || isFloorSaving || !oddsThresholdsEnabled}
                           onChange={(event) => {
                             setOddsFloor(Number(event.target.value));
                             setReapplyDirty(true);
@@ -659,7 +623,7 @@ export function BullpenScanFiltersPopupBridge({
                         max={99.9}
                         step={0.1}
                         value={highestOddsFloor}
-                        disabled={isFloorLoading || isFloorSaving}
+                        disabled={isFloorLoading || isFloorSaving || !oddsThresholdsEnabled}
                         onChange={(event) => {
                           setHighestOddsFloor(Number(event.target.value));
                           setReapplyDirty(true);
@@ -675,7 +639,7 @@ export function BullpenScanFiltersPopupBridge({
                     <button
                       type="button"
                       onClick={() => void saveOddsFloor()}
-                      disabled={isFloorLoading || isFloorSaving || (oddsFloor === savedOddsFloor && highestOddsFloor === savedHighestOddsFloor)}
+                      disabled={isFloorLoading || isFloorSaving || !oddsThresholdsEnabled || (oddsFloor === savedOddsFloor && highestOddsFloor === savedHighestOddsFloor)}
                       className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {isFloorSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -689,8 +653,7 @@ export function BullpenScanFiltersPopupBridge({
                   </p>
                 ) : null}
               </div>
-              {workspaceProfile === "bullpen-sports" ? (
-                <section
+              <section
                   aria-labelledby="sports-event-filters-heading"
                   className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 dark:border-blue-500/40 dark:bg-blue-950/30"
                 >
@@ -706,9 +669,50 @@ export function BullpenScanFiltersPopupBridge({
                         Sports event filters
                       </h3>
                       <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                        Bullpen Sports keeps only head-to-head moneyline markets. All three rules must pass.
+                        When sports are included, only head-to-head moneyline markets pass these shared rules.
                       </p>
                     </div>
+                  </div>
+                  <div
+                    className={`mt-4 flex w-full items-start gap-4 rounded-xl border px-3 py-3 text-left transition ${
+                      filterToggles.excludeSports
+                        ? "border-emerald-200 bg-emerald-50 dark:border-emerald-500/40 dark:bg-emerald-950/30"
+                        : "border-blue-200/80 bg-white dark:border-blue-700/60 dark:bg-slate-950"
+                    }`}
+                  >
+                    <label className="mt-0.5 inline-flex shrink-0 cursor-pointer items-center">
+                      <input
+                        type="checkbox"
+                        checked={filterToggles.excludeSports}
+                        disabled={isFloorLoading || savingFilterId !== null}
+                        onChange={(event) => {
+                          setReapplyDirty(true);
+                          void saveFilterToggle("excludeSports", event.target.checked);
+                        }}
+                        aria-label={`Apply ${SPORTS_FILTER_DETAIL.label} filter`}
+                        className="h-5 w-5 cursor-pointer rounded border-slate-300 text-emerald-700 focus:ring-2 focus:ring-emerald-300 disabled:cursor-wait"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setDetailId("excludeSports")}
+                      className="min-w-0 flex-1 text-left focus:outline-none focus-visible:rounded-lg focus-visible:ring-2 focus-visible:ring-blue-300"
+                    >
+                      <p className="font-semibold text-slate-950 dark:text-slate-50">
+                        {SPORTS_FILTER_DETAIL.label}
+                      </p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+                        {SPORTS_FILTER_DETAIL.description}
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDetailId("excludeSports")}
+                      aria-label={`View ${SPORTS_FILTER_DETAIL.label} filter details`}
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-blue-200 bg-white text-slate-500 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300 dark:border-blue-700 dark:bg-slate-950 dark:text-slate-300"
+                    >
+                      <Info className="h-4 w-4" />
+                    </button>
                   </div>
                   <div className="mt-4 grid gap-2">
                     {[
@@ -745,7 +749,6 @@ export function BullpenScanFiltersPopupBridge({
                     ))}
                   </div>
                 </section>
-              ) : null}
               {FILTER_ORDER.map((id) => {
                 const detail = BULLPEN_SCAN_FILTER_DETAILS[id];
                 const enabled = filterToggles[id];
