@@ -1132,6 +1132,7 @@ async def scan_candidate_markets(
     rejected_callback: Callable[[ScanRejectedMarket], None] | None = None,
     accepted_callback: Callable[[ScannedMarket], None] | None = None,
     page_cache_key: str | None = None,
+    retain_candidates: bool = True,
 ) -> ScanResult:
     existing_position_slugs = existing_position_slugs or set()
     accepted: list[ScannedMarket] = []
@@ -1246,7 +1247,8 @@ async def scan_candidate_markets(
                     continue
                 if accepted_callback is not None:
                     accepted_callback(normalized)
-                accepted.append(normalized)
+                if retain_candidates:
+                    accepted.append(normalized)
             completed_pages += 1
             if progress_callback is not None:
                 progress_callback(len(seen_market_ids), completed_pages)
@@ -1324,4 +1326,3 @@ async def scan_candidate_markets(
             else None
         ),
     )
-

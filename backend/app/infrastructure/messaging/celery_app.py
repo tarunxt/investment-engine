@@ -59,6 +59,8 @@ celery.conf.task_routes = {
     "app.domains.polymarket_auto_live.tasks.reconcile_auto_live_run_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_all_pending_auto_live_orders": {"queue": "beat"},
     "app.domains.polymarket_auto_live.tasks.reconcile_interrupted_auto_live_runs_after_startup_grace": {"queue": AUTO_LIVE_QUEUE},
+    "app.domains.trading_bots.tasks.execute_universal_polymarket_scan": {"queue": AUTO_LIVE_QUEUE},
+    "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans": {"queue": "beat"},
     "app.domains.bullpen_run_audit.tasks.generate_bullpen_run_audit_feedback": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.refresh_bullpen_run_audit_snapshot": {"queue": "ai"},
     "app.domains.bullpen_run_audit.tasks.prune_unreferenced_bullpen_run_audit_blobs": {"queue": "beat"},
@@ -115,6 +117,10 @@ celery.conf.beat_schedule = {
         # minute-only beat tick can miss that timestamp for almost a full minute
         # when the user starts just after the tick, so scan due runs frequently
         # while the actual planning work stays isolated on ``auto_live``.
+        "schedule": schedule(run_every=10.0),
+    },
+    "universal-polymarket-scan-due-run-scan": {
+        "task": "app.domains.trading_bots.tasks.enqueue_due_universal_polymarket_scans",
         "schedule": schedule(run_every=10.0),
     },
     "bullpen008-shadow-due-run-scan": {
@@ -177,6 +183,7 @@ celery.autodiscover_tasks([
     "app.domains.dashboard",
     "app.domains.fx_rates",
     "app.domains.polymarket_auto_live",
+    "app.domains.trading_bots",
     "app.domains.zerodha",
     "app.infrastructure.database.outbox",
 ])

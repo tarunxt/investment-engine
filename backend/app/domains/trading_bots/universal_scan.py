@@ -1,0 +1,391 @@
+"""Durable scheduling and export storage for the shared Universal Polymarket Scan."""
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import zlib
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.domains.polymarket_auto_live.models import (
+    PolymarketAutoLiveSettingsRecord,
+    PolymarketAutoLiveStateRecord,
+)
+
+SETTINGS_KEY = "universal_scan_auto_run"
+STATE_KEY = "universal_scan_auto_run"
+DEFAULT_START_AT = "2026-08-22T12:30:00+00:00"  # 18:00 IST
+DEFAULT_REFRESH_MINUTES = 360
+MAX_HISTORY = 25
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def parse_datetime(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def next_scheduled_time(reference: datetime, *, start_at: str, refresh_minutes: int) -> datetime:
+    anchor = parse_datetime(start_at) or parse_datetime(DEFAULT_START_AT)
+    assert anchor is not None
+    interval = timedelta(minutes=max(1, refresh_minutes))
+    reference = reference.astimezone(UTC)
+    if reference < anchor:
+        return anchor
+    elapsed = reference - anchor
+    cycles = int(elapsed.total_seconds() // interval.total_seconds()) + 1
+    return anchor + cycles * interval
+
+
+def _settings_record(session: Session, user_id: int) -> PolymarketAutoLiveSettingsRecord:
+    record = session.get(PolymarketAutoLiveSettingsRecord, user_id)
+    if record is None:
+        record = PolymarketAutoLiveSettingsRecord(user_id=user_id, payload={})
+        session.add(record)
+        session.flush()
+    return record
+
+
+def _state_record(session: Session, user_id: int) -> PolymarketAutoLiveStateRecord:
+    record = session.get(PolymarketAutoLiveStateRecord, user_id)
+    if record is None:
+        record = PolymarketAutoLiveStateRecord(user_id=user_id, payload={})
+        session.add(record)
+        session.flush()
+    return record
+
+
+def read_settings(record: PolymarketAutoLiveSettingsRecord | None) -> dict[str, Any]:
+    saved = record.payload.get(SETTINGS_KEY) if record and isinstance(record.payload, dict) else None
+    saved = saved if isinstance(saved, dict) else {}
+    refresh = saved.get("refresh_minutes", DEFAULT_REFRESH_MINUTES)
+    return {
+        "enabled": bool(saved.get("enabled", False)),
+        "start_at": saved.get("start_at") if parse_datetime(saved.get("start_at")) else DEFAULT_START_AT,
+        "refresh_minutes": max(1, int(refresh)) if isinstance(refresh, (int, float)) else DEFAULT_REFRESH_MINUTES,
+    }
+
+
+def read_state(record: PolymarketAutoLiveStateRecord | None) -> dict[str, Any]:
+    saved = record.payload.get(STATE_KEY) if record and isinstance(record.payload, dict) else None
+    saved = saved if isinstance(saved, dict) else {}
+    history = saved.get("history")
+    return {
+        "running": bool(saved.get("running", False)),
+        "run_id": saved.get("run_id"),
+        "next_run_at": saved.get("next_run_at"),
+        "last_run_at": saved.get("last_run_at"),
+        "last_completed_at": saved.get("last_completed_at"),
+        "last_failed_at": saved.get("last_failed_at"),
+        "last_error": saved.get("last_error"),
+        "history": history[:MAX_HISTORY] if isinstance(history, list) else [],
+    }
+
+
+def save_settings(session: Session, user_id: int, settings: dict[str, Any]) -> None:
+    record = _settings_record(session, user_id)
+    record.payload = {**(record.payload or {}), SETTINGS_KEY: settings}
+
+
+def save_state(session: Session, user_id: int, state: dict[str, Any]) -> None:
+    record = _state_record(session, user_id)
+    record.payload = {**(record.payload or {}), STATE_KEY: state}
+
+
+def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
+    settings = read_settings(session.get(PolymarketAutoLiveSettingsRecord, user_id))
+    state = read_state(session.get(PolymarketAutoLiveStateRecord, user_id))
+    return {**settings, **state}
+
+
+def update_schedule(
+    session: Session,
+    user_id: int,
+    *,
+    enabled: bool | None = None,
+    start_at: str | None = None,
+    refresh_minutes: int | None = None,
+) -> dict[str, Any]:
+    settings = read_settings(_settings_record(session, user_id))
+    state = read_state(_state_record(session, user_id))
+    if start_at is not None:
+        parsed = parse_datetime(start_at)
+        if parsed is None:
+            raise ValueError("Auto-run start time must be a valid ISO timestamp.")
+        settings["start_at"] = parsed.isoformat()
+    if refresh_minutes is not None:
+        if refresh_minutes < 1:
+            raise ValueError("Refresh duration must be at least one minute.")
+        settings["refresh_minutes"] = refresh_minutes
+    if enabled is not None:
+        settings["enabled"] = enabled
+    state["next_run_at"] = (
+        next_scheduled_time(
+            utc_now(),
+            start_at=settings["start_at"],
+            refresh_minutes=settings["refresh_minutes"],
+        ).isoformat()
+        if settings["enabled"]
+        else None
+    )
+    save_settings(session, user_id, settings)
+    save_state(session, user_id, state)
+    return {**settings, **state}
+
+
+def due_user_ids(session: Session, now: datetime) -> list[int]:
+    rows = session.scalars(select(PolymarketAutoLiveSettingsRecord)).all()
+    due: list[int] = []
+    for row in rows:
+        settings = read_settings(row)
+        if not settings["enabled"]:
+            continue
+        state_record = session.get(PolymarketAutoLiveStateRecord, row.user_id)
+        state = read_state(state_record)
+        if state["running"]:
+            started_at = parse_datetime(state["last_run_at"])
+            if started_at is None or now - started_at <= timedelta(minutes=55):
+                continue
+            stale_run_id = str(state.get("run_id") or f"stale-{row.user_id}")
+            finish_run(
+                session,
+                row.user_id,
+                stale_run_id,
+                error="Universal Scan worker exceeded its 55-minute recovery window.",
+            )
+            state = read_state(session.get(PolymarketAutoLiveStateRecord, row.user_id))
+        next_at = parse_datetime(state["next_run_at"])
+        if next_at is None:
+            state["next_run_at"] = next_scheduled_time(
+                now - timedelta(seconds=1),
+                start_at=settings["start_at"],
+                refresh_minutes=settings["refresh_minutes"],
+            ).isoformat()
+            save_state(session, row.user_id, state)
+            next_at = parse_datetime(state["next_run_at"])
+        if next_at is not None and next_at <= now:
+            due.append(row.user_id)
+    return due
+
+
+def mark_queued(session: Session, user_id: int, run_id: str, *, triggered_by: str) -> dict[str, Any]:
+    state = read_state(_state_record(session, user_id))
+    if state["running"]:
+        return state
+    now = utc_now().isoformat()
+    state.update({"running": True, "run_id": run_id, "last_run_at": now, "last_error": None})
+    state["history"] = ([{
+        "id": run_id,
+        "status": "queued",
+        "triggered_by": triggered_by,
+        "started_at": now,
+        "completed_at": None,
+        "total_events": None,
+        "error": None,
+    }] + state["history"])[:MAX_HISTORY]
+    save_state(session, user_id, state)
+    return state
+
+
+def mark_started(session: Session, user_id: int, run_id: str) -> bool:
+    state = read_state(_state_record(session, user_id))
+    if not state["running"] or state["run_id"] != run_id:
+        return False
+    state["history"] = [
+        {**item, "status": "running"}
+        if isinstance(item, dict) and item.get("id") == run_id
+        else item
+        for item in state["history"]
+    ]
+    save_state(session, user_id, state)
+    return True
+
+
+def finish_run(
+    session: Session,
+    user_id: int,
+    run_id: str,
+    *,
+    total_events: int | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    settings = read_settings(_settings_record(session, user_id))
+    state = read_state(_state_record(session, user_id))
+    finished_at = utc_now().isoformat()
+    status = "failed" if error else "completed"
+    history = []
+    found = False
+    for item in state["history"]:
+        if isinstance(item, dict) and item.get("id") == run_id:
+            history.append({**item, "status": status, "completed_at": finished_at,
+                            "total_events": total_events, "error": error})
+            found = True
+        else:
+            history.append(item)
+    if not found:
+        history.insert(0, {"id": run_id, "status": status, "triggered_by": "scheduler",
+                           "started_at": state.get("last_run_at"), "completed_at": finished_at,
+                           "total_events": total_events, "error": error})
+    state.update({
+        "running": False,
+        "run_id": None,
+        "last_completed_at": None if error else finished_at,
+        "last_failed_at": finished_at if error else state.get("last_failed_at"),
+        "last_error": error,
+        "history": history[:MAX_HISTORY],
+        "next_run_at": next_scheduled_time(
+            utc_now(), start_at=settings["start_at"], refresh_minutes=settings["refresh_minutes"]
+        ).isoformat() if settings["enabled"] else None,
+    })
+    save_state(session, user_id, state)
+    return state
+
+
+def export_directory() -> Path:
+    configured = os.environ.get("BULLPEN_STAGE_ONE_EXPORT_DIRECTORY", "").strip()
+    return Path(configured) if configured else Path.home() / ".local/share/credx-bullpen-stage-one-exports"
+
+
+class UniversalExportWriter:
+    def __init__(self, user_id: int, *, started_at: datetime):
+        self.user_id = user_id
+        self.started_at = started_at
+        self.export_id = str(uuid4())
+        self.directory = export_directory()
+        self.rows_path = self.directory / f"{self.export_id}.jsonl"
+        self.filtered_path = self.directory / f"{self.export_id}.filtered.jsonl"
+        self.metadata_path = self.directory / f"{self.export_id}.json"
+        self.handle = None
+        self.count = 0
+        self.sample: list[dict[str, Any]] = []
+        self.identity_keys: set[str] = set()
+        self.pages = 0
+
+    def __enter__(self) -> "UniversalExportWriter":
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.handle = self.rows_path.open("x", encoding="utf-8")
+        self.filtered_path.write_text("", encoding="utf-8")
+        return self
+
+    def add(self, market: Any) -> None:
+        raw = market.raw if isinstance(market.raw, dict) else {}
+        event = raw.get("_export_event") if isinstance(raw.get("_export_event"), dict) else {}
+        market_raw = {key: value for key, value in raw.items() if key not in {"_export_event", "events", "_scan_export_data"}}
+        condition_id = market_raw.get("conditionId") or market_raw.get("condition_id")
+        question_id = market_raw.get("questionID") or market_raw.get("question_id")
+        close = parse_datetime(market.close_time)
+        days = ((close - self.started_at).total_seconds() / 86400) if close else None
+        candidate = {
+            "id": str(question_id or condition_id or market.market_id),
+            "question": market.question,
+            "conditionId": str(condition_id) if condition_id else None,
+            "marketId": market.market_id,
+            "questionId": str(question_id) if question_id else None,
+            "closeTime": market.close_time,
+            "category": market.theme,
+            "yesOdds": market.current_yes_odds,
+            "noOdds": market.current_no_odds,
+            "volume": str(market.volume_usd) if market.volume_usd is not None else None,
+            "liquidity": str(market.liquidity_usd) if market.liquidity_usd is not None else None,
+            "volume24hr": str(market.volume_24hr_usd) if market.volume_24hr_usd is not None else None,
+            "spreadCents": market.spread_cents,
+            "sourceUrl": "https://gamma-api.polymarket.com/events/keyset",
+            "slug": market.slug,
+            "marketUrl": market.market_url,
+            "outcomeLabels": list(market.outcome_labels),
+            "outcomeCount": len(market.outcome_labels),
+            "isBinaryYesNo": {label.strip().lower() for label in market.outcome_labels} == {"yes", "no"},
+            "daysUntilClose": days,
+            "rules": market.description,
+            "marketContext": market_raw.get("description"),
+            "resolutionSource": market_raw.get("resolutionSource") or event.get("resolutionSource"),
+        }
+        row = {"candidate": candidate, "event": event, "market": market_raw,
+               "scanStatus": "passed", "filterReasons": [],
+               "forceIncluded": False, "forceIncludedPosition": False}
+        encoded = base64.b64encode(zlib.compress(
+            json.dumps(row, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 1
+        )).decode("ascii")
+        assert self.handle is not None
+        self.handle.write(json.dumps({"compressedRowV1": encoded}, separators=(",", ":")) + "\n")
+        self.count += 1
+        if len(self.sample) < 500:
+            self.sample.append(candidate)
+        for value in (condition_id, market.market_id, market.slug, candidate["id"]):
+            if value:
+                self.identity_keys.add(str(value).strip().lower())
+
+    def set_pages(self, _count: int, pages: int) -> None:
+        self.pages = pages
+
+    def complete(self) -> None:
+        assert self.handle is not None
+        self.handle.flush()
+        os.fsync(self.handle.fileno())
+        self.handle.close()
+        self.handle = None
+        completed_at = utc_now().isoformat()
+        metadata = {
+            "exportId": self.export_id,
+            "ownerHash": hashlib.sha256(f"{self.user_id}:universal".encode()).hexdigest(),
+            "universalSource": True,
+            "filterPending": False,
+            "createdAt": self.started_at.isoformat(),
+            "updatedAt": completed_at,
+            "scannedAt": self.started_at.isoformat(),
+            "rowCount": self.count,
+            "completed": True,
+            "processedPages": [f"__AUTO_{number:06d}__" for number in range(1, self.pages + 1)],
+            "identityKeys": sorted(self.identity_keys),
+            "mode": "30-days",
+            "sourceUrl": "https://gamma-api.polymarket.com/events/keyset",
+            "sourceLabel": "Polymarket Gamma API",
+            "acceptedCount": self.count,
+            "rejectedCount": 0,
+            "acceptedSample": self.sample,
+            "rejectedSample": [],
+        }
+        temporary = self.metadata_path.with_suffix(".json.tmp")
+        temporary.write_text(json.dumps(metadata, separators=(",", ":")), encoding="utf-8")
+        temporary.replace(self.metadata_path)
+        self._cleanup_previous()
+
+    def _cleanup_previous(self) -> None:
+        owner_hash = hashlib.sha256(f"{self.user_id}:universal".encode()).hexdigest()
+        for metadata_path in self.directory.glob("*.json"):
+            if metadata_path == self.metadata_path:
+                continue
+            try:
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if metadata.get("ownerHash") != owner_hash or not metadata.get("universalSource"):
+                continue
+            old_id = metadata_path.stem
+            for suffix in (".json", ".jsonl", ".filtered.jsonl"):
+                (self.directory / f"{old_id}{suffix}").unlink(missing_ok=True)
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        if self.handle is not None:
+            self.handle.close()
+        if exc_type is not None:
+            self.rows_path.unlink(missing_ok=True)
+            self.filtered_path.unlink(missing_ok=True)
+            self.metadata_path.unlink(missing_ok=True)

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, Menu, X } from "lucide-react";
 import type { BullpenScanSnapshot } from "@/lib/bullpen-ai";
+import { UniversalScanAutoRunCard } from "./UniversalScanAutoRunCard";
 
 function dateLabel(value: string) {
   return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "medium", timeZone: "Asia/Kolkata" }).format(new Date(value));
@@ -104,6 +105,16 @@ export function UniversalPolymarketScan() {
     });
     return () => { abort.abort(); controller.current?.abort(); };
   }, []);
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const abort = new AbortController();
+      void fetchUniversalSnapshot(abort.signal).then(payload => {
+        setSnapshot(payload.snapshot ?? null);
+        setSummary(payload.universalSummary ?? null);
+      }).catch(() => undefined);
+    }, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   async function scan() {
     if (controller.current) { controller.current.abort(); return; }
@@ -159,6 +170,7 @@ export function UniversalPolymarketScan() {
           <button type="button" disabled={!snapshot} aria-label="Open latest saved Universal Polymarket Scan" onClick={() => setShowSaved(true)} className="border-l border-blue-400 px-2 disabled:opacity-40"><Menu className="h-4 w-4" /></button>
         </div>
       </div>
+      <UniversalScanAutoRunCard />
       {snapshot && <>
         <dl className="mt-5 grid gap-3 sm:grid-cols-3">
           <div className="rounded-xl border border-emerald-200 bg-white/80 p-4"><dt className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Last stage run</dt><dd className="mt-1 text-sm font-semibold text-emerald-950">{dateLabel(summary?.completedAt ?? snapshot.scannedAt)}</dd></div>
