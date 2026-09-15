@@ -64,7 +64,7 @@ test("an active workflow owns its yellow Stage 1 tile and reports live progress"
     card,
     /workflowRunForMonitor\?\.request_context\?\.console_profile\?\.scanned_at/,
   );
-  assert.match(card, /universalTriggerStatus\?\.last_run_at/);
+  assert.match(card, /universalTriggerStatus\?\.last_completed_run_started_at/);
   assert.match(card, /latestUniversalScanPredatesWorkflow/);
 });
 
