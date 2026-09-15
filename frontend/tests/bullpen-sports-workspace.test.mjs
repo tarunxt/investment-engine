@@ -47,6 +47,11 @@ test("both shared workflow screens show the three Stage 1 triggers without the l
   assert.match(types, /"universal_scan"/);
   assert.doesNotMatch(card, /Auto Runs Started/);
   assert.doesNotMatch(card, /scheduleSavedSummary/);
+  assert.match(card, /queueBullpenWorkflowRunNow\(\{[\s\S]*?workspace_profile: workspaceProfile/);
+  assert.doesNotMatch(
+    card.match(/async function handleStartAutoRunNow\(\)[\s\S]*?async function handleStopAutoRuns/)?.[0] ?? "",
+    /buildRunNowRequest|executeBullpenScan/,
+  );
 });
 
 test("Bullpen Sports is directly below Bullpen 007 in navigation", () => {
