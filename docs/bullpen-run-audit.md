@@ -2342,6 +2342,9 @@ snapshot has a source export ID but predates the explicit timestamp field, the
 snapshot API resolves the completion time from that retained universal export.
 If that legacy export has already rotated out, it falls back to the latest saved
 Universal scan completion time instead of presenting an unknown timestamp.
+When a newer device-local workflow snapshot wins during hydration, the client
+still enriches its missing source completion time from the synchronized server
+snapshot instead of discarding the recovered lineage.
 Counts and exported evidence belong to
 that workflow output, while the source identifier records the common capture.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema

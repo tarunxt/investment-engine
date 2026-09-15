@@ -1266,7 +1266,22 @@ function mergeLatestServerManualSnapshot(
     previous &&
     Date.parse(previous.scannedAt) >= Date.parse(serverSnapshot.scannedAt)
   ) {
-    return stored;
+    if (
+      previous.sourceScanCompletedAt ||
+      !serverSnapshot.sourceScanCompletedAt
+    ) {
+      return stored;
+    }
+    return {
+      ...stored,
+      [mode]: {
+        ...stored[mode],
+        current: {
+          ...previous,
+          sourceScanCompletedAt: serverSnapshot.sourceScanCompletedAt,
+        },
+      },
+    };
   }
   return {
     ...stored,

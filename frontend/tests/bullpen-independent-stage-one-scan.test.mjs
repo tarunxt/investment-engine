@@ -39,6 +39,10 @@ test("filtered evidence retains source lineage and server synchronization", () =
   assert.match(card, /Universal Polymarket Scan:/);
   assert.match(card, /Filters run:/);
   assert.match(page, /\/api\/bullpen-ai\/stage-one-snapshot/);
+  assert.match(
+    page,
+    /sourceScanCompletedAt: serverSnapshot\.sourceScanCompletedAt/,
+  );
   assert.match(route, /sourceScanExportId: metadata\.sourceScanExportId/);
   assert.match(route, /sourceScanCompletedAt: metadata\.sourceScanCompletedAt/);
   assert.match(route, /filtersCompletedAt: metadata\.filtersCompletedAt/);
