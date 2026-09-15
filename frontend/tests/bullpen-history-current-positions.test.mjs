@@ -34,7 +34,7 @@ const dedicatedRunPage = readFileSync(
 test("History opens a dedicated run-details screen instead of a popup", () => {
   assert.match(
     historyScreen,
-    /\/console\/bullpen-ai\/runs\/\$\{encodeURIComponent\(run\.id\)\}/,
+    /bullpenWorkspaceRunPath\(workspaceProfile, run\.id\)/,
   );
   assert.doesNotMatch(historyScreen, /runDetails=/);
   assert.doesNotMatch(
@@ -44,7 +44,7 @@ test("History opens a dedicated run-details screen instead of a popup", () => {
   assert.match(dedicatedRunPage, /useParams/);
   assert.match(
     dedicatedRunPage,
-    /<BullpenRunDetailScreen runId=\{runId \?\? ""\} \/>/,
+    /<BullpenRunDetailScreen[\s\S]*?runId=\{runId \?\? ""\}[\s\S]*?workspaceProfile=\{workspaceProfile\}/,
   );
   assert.match(scheduleCard, /export function BullpenRunDetailScreen/);
   assert.match(scheduleCard, /presentation="page"/);
@@ -73,8 +73,8 @@ test("History keeps usable run or trend data when the sibling request times out"
   assert.match(historyScreen, /readHistoryWithRetry/);
   assert.match(historyScreen, /HISTORY_READ_RETRY_DELAY_MS = 750/);
   assert.match(historyScreen, /historyAndTrendsPromise/);
-  assert.match(historyScreen, /cacheHistoryPage\(pageResult\.value\)/);
-  assert.match(historyScreen, /readCachedHistoryPage\(\)/);
+  assert.match(historyScreen, /cacheHistoryPage\(pageResult\.value, workspaceProfile\)/);
+  assert.match(historyScreen, /readCachedHistoryPage\(workspaceProfile\)/);
   assert.match(historyScreen, /pageResult\.status === "fulfilled"/);
   assert.match(historyScreen, /trendsResult\.status === "fulfilled"/);
   assert.match(historyScreen, /setTrendsError/);

@@ -5,7 +5,7 @@ from app.domains.polymarket_auto_live.history_projection import history_console_
 from datetime import UTC, datetime
 from math import ceil
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Iterable, Mapping, Sequence
+from typing import TYPE_CHECKING, Iterable, Literal, Mapping, Sequence
 
 from pydantic import ValidationError
 from sqlalchemy import Select, and_, desc, exists, func, inspect, or_, select
@@ -88,6 +88,21 @@ VALID_AUTO_LIVE_STATUSES = {
     "not-configured",
 }
 ACTIVE_AUTO_LIVE_RUN_STATUSES = ("running", "confirming")
+BullpenHistoryWorkspaceProfile = Literal["bullpen007", "bullpen-sports"]
+
+
+def _history_workspace_filter(
+    record: type[PolymarketAutoLiveRunRecord],
+    workspace_profile: BullpenHistoryWorkspaceProfile,
+) -> object:
+    """Assign durable runs to one console workflow, including legacy 007 rows."""
+
+    profile = record.payload["request_context"]["console_profile"][
+        "workspace_profile"
+    ].as_string()
+    if workspace_profile == "bullpen-sports":
+        return profile == "bullpen-sports"
+    return or_(profile == "bullpen007", profile.is_(None))
 TERMINAL_AUTO_LIVE_INTENT_STATUSES = frozenset(
     {
         "CONFIRMED",
@@ -1261,17 +1276,21 @@ class AsyncPolymarketAutoLiveRepository:
         *,
         page: int,
         size: int,
+        workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
     ) -> BullpenAutoLiveHistoryPage:
         """Return bounded history rows without loading ``run.payload``."""
 
         normalized_page = max(1, page)
         normalized_size = max(1, min(size, CONSOLE_HISTORY_MAX_SIZE))
         record = PolymarketAutoLiveRunRecord
+        filters = [record.user_id == user_id]
+        if workspace_profile is not None:
+            filters.append(_history_workspace_filter(record, workspace_profile))
         total = int(
             await self.session.scalar(
                 select(func.count())
                 .select_from(record)
-                .where(record.user_id == user_id)
+                .where(*filters)
             )
             or 0
         )
@@ -1294,7 +1313,7 @@ class AsyncPolymarketAutoLiveRepository:
                     history_console_projection(record).label("console_projection"),
                     record.updated_at,
                 )
-                .where(record.user_id == user_id)
+                .where(*filters)
                 .order_by(desc(record.started_at), desc(record.created_at))
                 .offset((normalized_page - 1) * normalized_size)
                 .limit(normalized_size)
@@ -1321,7 +1340,13 @@ class AsyncPolymarketAutoLiveRepository:
             generated_at=utc_now().isoformat(),
         )
 
-    async def list_recent_event_trends(self, user_id: int, *, scan_count: int = 20) -> BullpenAutoLiveEventTrendsResponse:
+    async def list_recent_event_trends(
+        self,
+        user_id: int,
+        *,
+        scan_count: int = 20,
+        workspace_profile: BullpenHistoryWorkspaceProfile | None = None,
+    ) -> BullpenAutoLiveEventTrendsResponse:
         """Aggregate the latest Stage 2 LLM scans, with decision rows as fallback.
 
         The heatmap represents LLM scans, not only Stage 3 decisions. A run can
@@ -1336,6 +1361,9 @@ class AsyncPolymarketAutoLiveRepository:
         decision = PolymarketAutoLiveDecisionRecord
         normalized_scan_count = max(1, min(scan_count, 20))
         trend_generated_at = utc_now()
+        run_filters = [run.user_id == user_id]
+        if workspace_profile is not None:
+            run_filters.append(_history_workspace_filter(run, workspace_profile))
         returns_formula = record_to_settings(
             await self.get_settings_record(user_id)
         ).returns_per_day_formula
@@ -1347,7 +1375,7 @@ class AsyncPolymarketAutoLiveRepository:
                 run.completed_at,
                 run.updated_at,
             )
-            .where(run.user_id == user_id)
+            .where(*run_filters)
             .order_by(desc(run.started_at), desc(run.created_at))
             .limit(normalized_scan_count)
         )).all()

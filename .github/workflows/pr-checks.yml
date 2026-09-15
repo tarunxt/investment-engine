@@ -57,6 +57,7 @@ jobs:
           backend/tests/test_polymarket_auto_live_lifecycle_safety.py
           backend/tests/test_polymarket_auto_live_run_recovery.py
           backend/tests/test_polymarket_auto_live_event_trends_stage2.py
+          backend/tests/test_polymarket_auto_live_history_workspaces.py
           backend/tests/test_bullpen_trend_snapshot.py
           backend/tests/test_polymarket_auto_live_router.py
           backend/tests/test_polymarket_auto_live_console_projection.py
@@ -135,6 +136,7 @@ jobs:
           tests/auto-rebalance-provider-errors-ist.test.mjs
           tests/bullpen-auto-run-status.test.mjs
           tests/bullpen-auto-run-history.test.mjs
+          tests/bullpen-sports-workspace.test.mjs
           tests/bullpen-event-clusters.test.mjs
           tests/bullpen-claim-returns.test.mjs
 

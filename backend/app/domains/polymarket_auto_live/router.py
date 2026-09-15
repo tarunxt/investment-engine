@@ -891,6 +891,7 @@ async def _read_history(
     page: int = 1,
     size: int = 20,
     event_trends: bool = False,
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = None,
 ) -> BullpenAutoLiveHistoryPage | BullpenAutoLiveEventTrendsResponse:
     """Authenticate and read using one checkout, inside the route deadline.
 
@@ -902,8 +903,16 @@ async def _read_history(
         user_id = await _resolve_persisted_status_user_id(credentials, session)
         repo = AsyncPolymarketAutoLiveRepository(session)
         if event_trends:
-            return await repo.list_recent_event_trends(user_id)
-        return await repo.list_run_history_page(user_id, page=page, size=size)
+            return await repo.list_recent_event_trends(
+                user_id,
+                workspace_profile=workspace_profile,
+            )
+        return await repo.list_run_history_page(
+            user_id,
+            page=page,
+            size=size,
+            workspace_profile=workspace_profile,
+        )
 
 
 @router.get("/history", response_model=BullpenAutoLiveHistoryPage)
@@ -911,6 +920,10 @@ async def list_auto_live_history(
     response: Response,
     page: int = Query(default=1, ge=1),
     size: int = Query(default=20, ge=1, le=50),
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = Query(
+        default=None,
+        description="Restrict runs to one Bullpen console workflow.",
+    ),
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Return a compact, database-paginated run list for the History dialog."""
@@ -918,7 +931,12 @@ async def list_auto_live_history(
     started_at = time.perf_counter()
     try:
         history = await asyncio.wait_for(
-            _read_history(credentials, page=page, size=size),
+            _read_history(
+                credentials,
+                page=page,
+                size=size,
+                workspace_profile=workspace_profile,
+            ),
             timeout=HISTORY_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError as exc:
@@ -940,12 +958,20 @@ async def list_auto_live_history(
 @router.get("/history/event-trends", response_model=BullpenAutoLiveEventTrendsResponse)
 async def list_auto_live_history_event_trends(
     response: Response,
+    workspace_profile: Literal["bullpen007", "bullpen-sports"] | None = Query(
+        default=None,
+        description="Restrict scans to one Bullpen console workflow.",
+    ),
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ):
     """Return the strongest-side score heatmap for the latest 20 scans."""
     try:
         trends = await asyncio.wait_for(
-            _read_history(credentials, event_trends=True),
+            _read_history(
+                credentials,
+                event_trends=True,
+                workspace_profile=workspace_profile,
+            ),
             timeout=HISTORY_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError as exc:

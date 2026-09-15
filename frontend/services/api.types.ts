@@ -271,10 +271,15 @@ export interface IApiService {
       includeDetails?: boolean,
     ): Promise<BullpenAutoLiveRun[]>;
     getBullpenAutoLiveHistory(
-        params?: { page?: number; size?: number },
+        params?: {
+          page?: number;
+          size?: number;
+          workspaceProfile?: "bullpen007" | "bullpen-sports";
+        },
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveHistoryPage>;
     getBullpenAutoLiveHistoryEventTrends(
+        params?: { workspaceProfile?: "bullpen007" | "bullpen-sports" },
         options?: ApiRequestControl,
     ): Promise<BullpenAutoLiveEventTrendsResponse>;
     getBullpenAutoLiveRun(runId: string, options?: ApiRequestControl): Promise<BullpenAutoLiveRun>;

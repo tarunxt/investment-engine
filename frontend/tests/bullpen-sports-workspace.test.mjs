@@ -14,6 +14,25 @@ test("Bullpen Sports reuses the shared Bullpen workspace", () => {
   assert.match(shell, /BullpenScanFiltersPopupBridge workspaceProfile/);
 });
 
+test("Bullpen Sports owns its History and run-detail routes", () => {
+  const historyPage = read("../app/console/bullpen-sports/history/page.tsx");
+  const runPage = read("../app/console/bullpen-sports/runs/[runId]/page.tsx");
+  const routes = read("../lib/bullpenWorkspaceRoutes.ts");
+  const card = read("../app/console/bullpen-ai/_components/BullpenAutoRunScheduleCard.tsx");
+  const history = read("../app/console/bullpen-ai/_components/BullpenRunHistoryScreen.tsx");
+  const api = read("../services/api.ts");
+
+  assert.match(historyPage, /workspaceProfile="bullpen-sports"/);
+  assert.match(runPage, /workspaceProfile="bullpen-sports"/);
+  assert.match(routes, /"\/console\/bullpen-sports"/);
+  assert.match(card, /window\.open\(bullpenWorkspaceHistoryPath\(workspaceProfile\)/);
+  assert.match(card, /workspaceProfile[\s\S]*?getBullpenAutoLiveHistoryEventTrends/);
+  assert.match(history, /workspaceCacheKey\(HISTORY_PAGE_CACHE_KEY, profile\)/);
+  assert.match(history, /workspaceCacheKey\(EVENT_TRENDS_CACHE_KEY, profile\)/);
+  assert.match(history, /bullpenWorkspaceRunPath\(workspaceProfile, run\.id\)/);
+  assert.match(api, /query\.set\("workspace_profile", params\.workspaceProfile\)/);
+});
+
 test("Bullpen Sports is directly below Bullpen 007 in navigation", () => {
   const navigation = read("../app/console/_components/sidebarNavigationConfig.ts");
   assert.match(

@@ -26,9 +26,11 @@ import type {
 import { BullpenHistoryPortfolio } from "./BullpenHistoryPortfolio";
 import { BullpenRunHistoryContent } from "./BullpenRunHistoryContent";
 import { BullpenClusteringProgressHandoff } from "./BullpenClusteringProgress";
+import type { BullpenWorkspaceProfile } from "@/lib/bullpenStageOneSettings";
+import { bullpenWorkspaceRunPath } from "@/lib/bullpenWorkspaceRoutes";
 
-const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v1";
-const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v1";
+const EVENT_TRENDS_CACHE_KEY = "bullpen-auto-live-event-trends-v2";
+const HISTORY_PAGE_CACHE_KEY = "bullpen-auto-live-history-page-v2";
 const HISTORY_READ_TIMEOUT_MS = 20_000;
 const HISTORY_READ_RETRY_DELAY_MS = 750;
 const DEFAULT_RUN_HISTORY_REFRESH_SECONDS = 300;
@@ -54,11 +56,19 @@ function clearHourlyRebalanceResultRequest() {
   window.history.replaceState(window.history.state, "", url);
 }
 
-function readCachedHistoryPage(): BullpenAutoLiveHistoryPage | null {
+function workspaceCacheKey(key: string, profile: BullpenWorkspaceProfile) {
+  return `${key}:${profile}`;
+}
+
+function readCachedHistoryPage(
+  profile: BullpenWorkspaceProfile,
+): BullpenAutoLiveHistoryPage | null {
   if (typeof window === "undefined") return null;
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(HISTORY_PAGE_CACHE_KEY) || "null",
+      window.localStorage.getItem(
+        workspaceCacheKey(HISTORY_PAGE_CACHE_KEY, profile),
+      ) || "null",
     ) as BullpenAutoLiveHistoryPage | null;
     return parsed?.page === 1 && Array.isArray(parsed.items) ? parsed : null;
   } catch {
@@ -66,10 +76,16 @@ function readCachedHistoryPage(): BullpenAutoLiveHistoryPage | null {
   }
 }
 
-function cacheHistoryPage(page: BullpenAutoLiveHistoryPage) {
+function cacheHistoryPage(
+  page: BullpenAutoLiveHistoryPage,
+  profile: BullpenWorkspaceProfile,
+) {
   if (page.page !== 1) return;
   try {
-    window.localStorage.setItem(HISTORY_PAGE_CACHE_KEY, JSON.stringify(page));
+    window.localStorage.setItem(
+      workspaceCacheKey(HISTORY_PAGE_CACHE_KEY, profile),
+      JSON.stringify(page),
+    );
   } catch {
     // Storage can be unavailable in private/restricted browser contexts.
   }
@@ -95,11 +111,15 @@ async function readHistoryWithRetry<T>(load: () => Promise<T>): Promise<T> {
   }
 }
 
-function readCachedEventTrends(): BullpenAutoLiveEventTrendsResponse | null {
+function readCachedEventTrends(
+  profile: BullpenWorkspaceProfile,
+): BullpenAutoLiveEventTrendsResponse | null {
   if (typeof window === "undefined") return null;
   try {
     const parsed = JSON.parse(
-      window.localStorage.getItem(EVENT_TRENDS_CACHE_KEY) || "null",
+      window.localStorage.getItem(
+        workspaceCacheKey(EVENT_TRENDS_CACHE_KEY, profile),
+      ) || "null",
     ) as BullpenAutoLiveEventTrendsResponse | null;
     return parsed && Array.isArray(parsed.events) ? parsed : null;
   } catch {
@@ -107,9 +127,15 @@ function readCachedEventTrends(): BullpenAutoLiveEventTrendsResponse | null {
   }
 }
 
-function cacheEventTrends(trends: BullpenAutoLiveEventTrendsResponse) {
+function cacheEventTrends(
+  trends: BullpenAutoLiveEventTrendsResponse,
+  profile: BullpenWorkspaceProfile,
+) {
   try {
-    window.localStorage.setItem(EVENT_TRENDS_CACHE_KEY, JSON.stringify(trends));
+    window.localStorage.setItem(
+      workspaceCacheKey(EVENT_TRENDS_CACHE_KEY, profile),
+      JSON.stringify(trends),
+    );
   } catch {
     // Storage can be unavailable in private/restricted browser contexts.
   }
@@ -431,13 +457,19 @@ export function applyCurrentBullpenPositionsToEventTrends(
   return { ...trends, events };
 }
 
-export function BullpenRunHistoryScreen() {
+export function BullpenRunHistoryScreen({
+  workspaceProfile = "bullpen007",
+}: {
+  workspaceProfile?: BullpenWorkspaceProfile;
+}) {
   const router = useRouter();
   const [page, setPage] =
-    useState<BullpenAutoLiveHistoryPage | null>(() => readCachedHistoryPage());
+    useState<BullpenAutoLiveHistoryPage | null>(() =>
+      readCachedHistoryPage(workspaceProfile),
+    );
   const [trends, setTrends] =
     useState<BullpenAutoLiveEventTrendsResponse | null>(() =>
-      readCachedEventTrends(),
+      readCachedEventTrends(workspaceProfile),
     );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -451,7 +483,7 @@ export function BullpenRunHistoryScreen() {
   const [hourlyRebalanceLastError, setHourlyRebalanceLastError] = useState<string | null>(null);
   const [hourlyRebalanceLastAction, setHourlyRebalanceLastAction] = useState<string | null>(null);
   const [latestRuns, setLatestRuns] = useState<BullpenAutoLiveHistoryItem[]>(
-    () => readCachedHistoryPage()?.items ?? [],
+    () => readCachedHistoryPage(workspaceProfile)?.items ?? [],
   );
   const refreshInProgress = useRef(false);
   const [refreshIntervalSeconds, setRefreshIntervalSeconds] = useState(
@@ -497,7 +529,7 @@ export function BullpenRunHistoryScreen() {
         const [pageResult] = await Promise.allSettled([
           readHistoryWithRetry(() =>
             apiService.getBullpenAutoLiveHistory(
-              { page: pageNumber, size: 20 },
+              { page: pageNumber, size: 20, workspaceProfile },
               historyRequestOptions,
             ),
           ),
@@ -505,6 +537,7 @@ export function BullpenRunHistoryScreen() {
         const [trendsResult] = await Promise.allSettled([
           readHistoryWithRetry(() =>
             apiService.getBullpenAutoLiveHistoryEventTrends(
+              { workspaceProfile },
               historyRequestOptions,
             ),
           ),
@@ -546,10 +579,11 @@ export function BullpenRunHistoryScreen() {
         setPage(pageResult.value);
         if (pageResult.value.page === 1) {
           setLatestRuns(pageResult.value.items);
-          cacheHistoryPage(pageResult.value);
+          cacheHistoryPage(pageResult.value, workspaceProfile);
         }
       } else {
-        const cachedPage = pageNumber === 1 ? readCachedHistoryPage() : null;
+        const cachedPage =
+          pageNumber === 1 ? readCachedHistoryPage(workspaceProfile) : null;
         if (cachedPage) {
           setPage(cachedPage);
           setLatestRuns(cachedPage.items);
@@ -577,9 +611,9 @@ export function BullpenRunHistoryScreen() {
             )
           : positionTrends;
         setTrends(nextTrends);
-        cacheEventTrends(nextTrends);
+        cacheEventTrends(nextTrends, workspaceProfile);
       } else {
-        const cachedTrends = readCachedEventTrends();
+        const cachedTrends = readCachedEventTrends(workspaceProfile);
         if (cachedTrends) {
           setTrends(cachedTrends);
         } else {
@@ -598,7 +632,7 @@ export function BullpenRunHistoryScreen() {
       setPortfolioReady(true);
       setLoading(false);
     }
-  }, []);
+  }, [workspaceProfile]);
 
   useEffect(() => {
     window.queueMicrotask(() => void load());
@@ -614,7 +648,7 @@ export function BullpenRunHistoryScreen() {
 
   const openRun = (run: BullpenAutoLiveHistoryItem) =>
     router.push(
-      `/console/bullpen-ai/runs/${encodeURIComponent(run.id)}`,
+      bullpenWorkspaceRunPath(workspaceProfile, run.id),
     );
 
   return (
