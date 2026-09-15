@@ -11128,7 +11128,6 @@ export function BullpenAutoRunScheduleCard({
   workspaceProfile = "bullpen007",
   onRunCompleted,
   onRefreshPortfolioPositions,
-  buildRunNowRequest,
   activePositions = [],
   activePositionsSummary = null,
   positionsSource = null,
@@ -13124,58 +13123,39 @@ export function BullpenAutoRunScheduleCard({
       if (abortIfStartCancelled()) return;
 
       setStartNowProgress(
-        `Running fresh Stage 1 filters for ${
+        `Queueing Stage 1 filters for ${
           workspaceProfile === "bullpen-sports"
             ? "Bullpen Sports"
             : "Bullpen 007"
-        }…`,
+        } on the latest completed Universal Scan…`,
       );
-      const runNowRequest = await buildRunNowRequest?.();
-      if (abortIfStartCancelled()) return;
-      if (!runNowRequest?.console_profile) {
-        throw new Error(
-          "The workflow-specific Stage 1 filters did not produce a runnable snapshot.",
-        );
-      }
-      if (
-        runNowRequest.console_profile.workspace_profile !== workspaceProfile
-      ) {
-        throw new Error(
-          "The Stage 1 snapshot belongs to a different workflow. Refresh this workflow and try again.",
-        );
-      }
-      setStartNowProgress(
-        `Queueing only ${
-          workspaceProfile === "bullpen-sports"
-            ? "Bullpen Sports"
-            : "Bullpen 007"
-        } from its fresh Stage 1 result…`,
-      );
-      const run = await apiService.runBullpenAutoLiveOnce(runNowRequest);
+      const queued = await apiService.queueBullpenWorkflowRunNow({
+        workspace_profile: workspaceProfile,
+      });
       void refreshPersistedAutoRunStatus();
       if (abortIfStartCancelled()) return;
-      setPendingRunId(run.id);
-      setRunNowStartedAt(run.started_at ?? new Date().toISOString());
+      setPendingRunId(queued.run_id);
+      setRunNowStartedAt(queued.queued_at);
       setStartNowProgress(
-        "Run queued. Fetching live backend status and worker stage updates…",
+        "Stage 1 queued. It will start as soon as the guarded workflow lane is available…",
       );
       void loadSummary({
         preserveLoading: true,
-        nextPendingRunId: run.id,
+        nextPendingRunId: queued.run_id,
       });
       setStartNowProgress(
-        "Auto Run started. Live worker progress is now shown below.",
+        "Auto Run queued. Live worker progress will appear below when Stage 1 starts.",
       );
       startNowProgressTimeoutRef.current = window.setTimeout(() => {
         setStartNowProgress(null);
         startNowProgressTimeoutRef.current = null;
       }, 5_000);
       setNotice(
-        `Started only ${
+        `Queued only ${
           workspaceProfile === "bullpen-sports"
             ? "Bullpen Sports"
             : "Bullpen 007"
-        } from fresh Stage 1 filters with ${formatMoney(
+        } on the latest Universal Scan with ${formatMoney(
           latestConsoleOrderUsd,
         )} per new opportunity.`,
       );
