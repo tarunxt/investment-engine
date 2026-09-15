@@ -1,7 +1,7 @@
 """Add Universal Scan state independent of Bullpen Auto-Live.
 
 Revision ID: universal_scan_001
-Revises: sports_rankings_001
+Revises: history_ws_001
 """
 
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 
 revision = "universal_scan_001"
-down_revision = "sports_rankings_001"
+down_revision = "history_ws_001"
 branch_labels = None
 depends_on = None
 
