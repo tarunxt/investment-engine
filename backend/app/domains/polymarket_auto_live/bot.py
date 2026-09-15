@@ -296,6 +296,14 @@ def build_initial_scan_stage_result(
     if console_profile is not None:
         if console_profile.snapshot_id:
             outputs["snapshot_id"] = console_profile.snapshot_id
+        if console_profile.scanned_at:
+            outputs["scanned_at"] = console_profile.scanned_at
+        if console_profile.source_scan_completed_at:
+            outputs["source_scan_completed_at"] = (
+                console_profile.source_scan_completed_at
+            )
+        if console_profile.filters_completed_at:
+            outputs["filters_completed_at"] = console_profile.filters_completed_at
         if console_profile.mode:
             outputs["mode"] = console_profile.mode
         if console_profile.source_label:

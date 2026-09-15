@@ -5672,12 +5672,7 @@ class BullpenAutoLiveEngine:
                 None,
             )
             progress_outputs: dict[str, object] = {
-                **(
-                    existing_stage1.outputs
-                    if stage1_candidate_scan_completed_at is not None
-                    and existing_stage1 is not None
-                    else {}
-                ),
+                **(existing_stage1.outputs if existing_stage1 is not None else {}),
                 "progress_commentary": commentary or [reason],
             }
             if outputs:
@@ -6048,10 +6043,22 @@ class BullpenAutoLiveEngine:
                 report_stage1_progress(
                     message,
                     completed_items=scanned_markets,
+                    total_items=(
+                        manual_console_context.total_candidates
+                        if manual_console_context is not None
+                        and manual_console_context.total_candidates > 0
+                        else None
+                    ),
                     outputs={
                         "scan_scope": scan_scope,
                         "scan_progress": {
                             "scannedMarkets": scanned_markets,
+                            "totalMarkets": (
+                                manual_console_context.total_candidates
+                                if manual_console_context is not None
+                                and manual_console_context.total_candidates > 0
+                                else None
+                            ),
                             "completedPages": completed_pages,
                             "currentPage": completed_pages,
                             "lastUpdatedAt": datetime.now(UTC).isoformat(),

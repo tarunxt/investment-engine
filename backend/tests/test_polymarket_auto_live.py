@@ -877,6 +877,9 @@ def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
         console_profile=BullpenAutoLiveConsoleRunContext(
             source_label="Saved Bullpen table",
             snapshot_id="snapshot-1",
+            scanned_at="2026-06-25T04:55:00+00:00",
+            source_scan_completed_at="2026-06-25T04:56:00+00:00",
+            filters_completed_at="2026-06-25T04:57:00+00:00",
             mode="30-days",
             total_candidates=12,
             candidate_rows=[
@@ -905,6 +908,13 @@ def test_initial_scan_stage_result_starts_immediately_for_manual_console_rows():
     assert stage.outputs["completed_items"] == 0
     assert stage.outputs["total_items"] == 12
     assert stage.outputs["selected_manual_candidate_count"] == 1
+    assert stage.outputs["snapshot_id"] == "snapshot-1"
+    assert stage.outputs["scanned_at"] == "2026-06-25T04:55:00+00:00"
+    assert (
+        stage.outputs["source_scan_completed_at"]
+        == "2026-06-25T04:56:00+00:00"
+    )
+    assert stage.outputs["filters_completed_at"] == "2026-06-25T04:57:00+00:00"
 
 
 @pytest.mark.anyio

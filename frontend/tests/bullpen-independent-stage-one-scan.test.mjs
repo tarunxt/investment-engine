@@ -50,3 +50,19 @@ test("filtered evidence retains source lineage and server synchronization", () =
   assert.match(snapshotRoute, /sourceScanCompletedAt = source\?\.metadata\.updatedAt/);
   assert.match(snapshotRoute, /openUniversalScan\(sessionOwner\)/);
 });
+
+test("an active workflow owns its yellow Stage 1 tile and reports live progress", () => {
+  assert.match(card, /isStageOneActive \? stage : independentStageOneView \?\? stage/);
+  assert.match(card, /data-stage-state=\{isStageOneActive \? "working" : stage\.state\}/);
+  assert.match(card, /data-testid="bullpen-stage-one-live-progress"/);
+  assert.match(card, /scanProgressPercent/);
+  assert.match(card, /Filter progress/);
+  assert.match(card, /totalMarkets/);
+});
+
+test("live run selection is isolated to the current workflow", () => {
+  assert.match(card, /function runBelongsToWorkspace/);
+  assert.match(card, /runWorkspace \?\? "bullpen007"/);
+  assert.match(card, /getVisibleRun\(\s*summary,\s*pendingRunId,\s*workspaceProfile/);
+  assert.match(card, /runBelongsToWorkspace\(run, workspaceProfile\)/);
+});

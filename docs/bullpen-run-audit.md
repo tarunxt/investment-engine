@@ -15,6 +15,16 @@ values remain valid. The workflow UI reads workspace-scoped History for passed,
 failed, running, and latest-attempt evidence and shows the next Universal Scan
 and workflow schedule timestamps in the **Stage 1 Trigger Monitor**.
 
+The live dashboard projection preserves this lineage while Stage 1 is running:
+`snapshot_id`, `scanned_at`, `source_scan_completed_at`, and
+`filters_completed_at` remain available in compact responses. Its additive
+`scan_progress.totalMarkets` value accompanies `scannedMarkets` and page data so
+the console can render a determinate percentage without changing frozen audit
+facts. Active-run selection is workspace-scoped (legacy rows default to
+`bullpen007`); therefore a Bullpen 007 worker can never make the Bullpen Sports
+Stage 1 tile appear active. A running Stage 1 uses the yellow working treatment
+and current-run progress rather than the prior completed independent snapshot.
+
 ## Workflow-owned History views
 
 Bullpen History reads are scoped by the compact indexed `workspace_profile`

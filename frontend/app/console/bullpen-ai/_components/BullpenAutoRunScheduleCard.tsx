@@ -10219,24 +10219,36 @@ function runNeedsBullpenLogin(run: BullpenAutoLiveRun | null) {
   );
 }
 
+function runBelongsToWorkspace(
+  run: BullpenAutoLiveRun | null | undefined,
+  workspaceProfile: BullpenWorkspaceProfile,
+) {
+  if (!run) return false;
+  const runWorkspace = run.request_context?.console_profile?.workspace_profile;
+  return (runWorkspace ?? "bullpen007") === workspaceProfile;
+}
+
 function getVisibleRun(
   summary: BullpenAutoLiveSummaryResponse | null,
   pendingRunId: string | null,
+  workspaceProfile: BullpenWorkspaceProfile,
 ) {
   if (!summary) return null;
   if (pendingRunId) {
     const recentRun = summary.recent_runs.find(
-      (run) => run.id === pendingRunId,
+      (run) => run.id === pendingRunId && runBelongsToWorkspace(run, workspaceProfile),
     );
     return recentRun
       ? reconcileBullpenConsoleRunCopies(recentRun, summary.latest_run)
-      : summary.latest_run?.id === pendingRunId
+      : summary.latest_run?.id === pendingRunId &&
+          runBelongsToWorkspace(summary.latest_run, workspaceProfile)
         ? summary.latest_run
         : null;
   }
   if (
-    summary.latest_run?.status === "running" ||
-    summary.latest_run?.status === "confirming"
+    runBelongsToWorkspace(summary.latest_run, workspaceProfile) &&
+    (summary.latest_run?.status === "running" ||
+      summary.latest_run?.status === "confirming")
   ) {
     const recentCopy = summary.recent_runs.find(
       (run) => run.id === summary.latest_run?.id,
@@ -10246,7 +10258,9 @@ function getVisibleRun(
       : summary.latest_run;
   }
   const runningRun = summary.recent_runs.find(
-    (run) => run.status === "running" || run.status === "confirming",
+    (run) =>
+      runBelongsToWorkspace(run, workspaceProfile) &&
+      (run.status === "running" || run.status === "confirming"),
   );
   if (runningRun) return runningRun;
 
@@ -10254,7 +10268,10 @@ function getVisibleRun(
   // console still needs the most recent completed run payload so the parent can
   // rebuild the Events Summary and Events to invest in tables with persisted LLM
   // odds/returns until a newer scan replaces them.
-  if (summary.latest_run?.status === "completed") {
+  if (
+    runBelongsToWorkspace(summary.latest_run, workspaceProfile) &&
+    summary.latest_run?.status === "completed"
+  ) {
     const recentCopy = summary.recent_runs.find(
       (run) => run.id === summary.latest_run?.id,
     );
@@ -10262,7 +10279,10 @@ function getVisibleRun(
       ? reconcileBullpenConsoleRunCopies(recentCopy, summary.latest_run)
       : summary.latest_run;
   }
-  return summary.recent_runs.find((run) => run.status === "completed") ?? null;
+  return summary.recent_runs.find(
+    (run) =>
+      runBelongsToWorkspace(run, workspaceProfile) && run.status === "completed",
+  ) ?? null;
 }
 
 function getWorkflowToneClasses(tone: "yellow" | "green" | "blue" | "red" | "slate") {
@@ -12250,6 +12270,7 @@ export function BullpenAutoRunScheduleCard({
       const projectedTrackedRun = getVisibleRun(
         nextSummary,
         resolvedPendingRunId,
+        workspaceProfile,
       );
       const evidencePreservingSummary = preserveCompletedStageEvidence(
         summary,
@@ -12259,6 +12280,7 @@ export function BullpenAutoRunScheduleCard({
       const evidencePreservingTrackedRun = getVisibleRun(
         evidencePreservingSummary,
         resolvedPendingRunId,
+        workspaceProfile,
       );
       const visiblePayload = mergeTerminalRunEvidence(
         evidencePreservingSummary,
@@ -13428,7 +13450,9 @@ export function BullpenAutoRunScheduleCard({
         preserveLoading: true,
         nextPendingRunId: null,
       }).then((nextSummary) => {
-        const stillActiveRun = nextSummary ? getVisibleRun(nextSummary, null) : null;
+        const stillActiveRun = nextSummary
+          ? getVisibleRun(nextSummary, null, workspaceProfile)
+          : null;
         if (!stillActiveRun || !isActivelyWorkingRunStatus(stillActiveRun.status)) {
           return;
         }
@@ -13485,7 +13509,11 @@ export function BullpenAutoRunScheduleCard({
     optimisticSchedulerState?.paused ?? confirmedSchedulerPaused;
   const scheduleSettingsPending =
     scheduleSettingsDirty || scheduleSettingsSaveBusy;
-  const visibleRunCandidate = getVisibleRun(summary, pendingRunId);
+  const visibleRunCandidate = getVisibleRun(
+    summary,
+    pendingRunId,
+    workspaceProfile,
+  );
   const visibleRun =
     visibleRunCandidate && killedRunIds.has(visibleRunCandidate.id)
       ? null
@@ -13493,11 +13521,18 @@ export function BullpenAutoRunScheduleCard({
   // Terminal failed/partial runs fall back to `latestRun` below rather than
   // `getVisibleRun`. Reconcile that path too, otherwise Stage 3's compact
   // update can replace the richer Stage 1/2 counts shown in the monitor.
-  const latestRun = summary?.latest_run
+  const latestWorkspaceRun = summary
+    ? runBelongsToWorkspace(summary.latest_run, workspaceProfile)
+      ? summary.latest_run
+      : summary.recent_runs.find((run) =>
+          runBelongsToWorkspace(run, workspaceProfile),
+        ) ?? null
+    : null;
+  const latestRun = latestWorkspaceRun
     ? reconcileBullpenConsoleRunCopies(
-        summary.recent_runs.find((run) => run.id === summary.latest_run?.id) ??
-          summary.latest_run,
-        summary.latest_run,
+        summary?.recent_runs.find((run) => run.id === latestWorkspaceRun.id) ??
+          latestWorkspaceRun,
+        latestWorkspaceRun,
       )
     : null;
   const workflowRun =
@@ -13776,7 +13811,9 @@ export function BullpenAutoRunScheduleCard({
     latestRun && !isActivelyWorkingRunStatus(latestRun.status)
       ? latestRun
       : summary?.recent_runs.find(
-          (run) => !isActivelyWorkingRunStatus(run.status),
+          (run) =>
+            runBelongsToWorkspace(run, workspaceProfile) &&
+            !isActivelyWorkingRunStatus(run.status),
         ) ?? null;
   const latestTerminalRunSummary = latestTerminalRun
     ? getRunSummaryDetails(latestTerminalRun.summary)
@@ -14985,6 +15022,15 @@ export function BullpenAutoRunScheduleCard({
                     status: "scanning",
                     retryCount: 0,
                   };
+              const scanProgressScanned = displayedScanProgress?.scannedMarkets ?? 0;
+              const scanProgressTotal =
+                readStageOutputNumber(autoScanProgress?.totalMarkets) ??
+                readStageOutputNumber(stage.outputs.total_items) ??
+                workflowRunForMonitor?.request_context?.console_profile?.total_candidates ??
+                null;
+              const scanProgressPercent = scanProgressTotal && scanProgressTotal > 0
+                ? Math.min(100, Math.max(0, (scanProgressScanned / scanProgressTotal) * 100))
+                : 0;
               const isIncompleteUniverse = stage.key === "scan" &&
                 stage.outputs.scan_scope === "full_universe" &&
                 stage.outputs.scan_completeness !== "complete" &&
@@ -15024,7 +15070,7 @@ export function BullpenAutoRunScheduleCard({
                 isIncompleteUniverse
                   ? 0
                   : isStageOneActive
-                  ? 100
+                  ? scanProgressPercent
                   : immediateSuccess || investPreviewFinished
                   ? 100
                   : stage.progressPercent;
@@ -15032,7 +15078,7 @@ export function BullpenAutoRunScheduleCard({
                 isIncompleteUniverse
                   ? "Partial results · full catalogue not verified"
                   : isStageOneActive
-                  ? `${displayedScanProgress?.scannedMarkets.toLocaleString("en-IN") ?? "0"} markets scanned · Page ${displayedScanProgress?.currentPage ?? 1}`
+                  ? `${scanProgressScanned.toLocaleString("en-IN")}${scanProgressTotal ? ` / ${scanProgressTotal.toLocaleString("en-IN")}` : ""} markets scanned · ${scanProgressPercent.toFixed(1)}% · Page ${displayedScanProgress?.currentPage ?? 1}`
                   : investPreviewFinished && stage.key === "invest"
                   ? "Finished"
                   : stage.progressLabel;
@@ -15053,29 +15099,30 @@ export function BullpenAutoRunScheduleCard({
                 );
 
               if (["scan"].includes(stage.key)) {
-                const filterStage = independentStageOneView ?? stage;
+                const filterStage = isStageOneActive ? stage : independentStageOneView ?? stage;
                 const stats = getStageOneStats(filterStage);
-                const universalScanCompletedAt = readStageOutputString(
-                  filterStage.outputs.source_scan_completed_at,
-                );
+                const universalScanAt =
+                  readStageOutputString(filterStage.outputs.scanned_at) ??
+                  readStageOutputString(filterStage.outputs.source_scan_completed_at);
                 const filtersCompletedAt =
                   readStageOutputString(filterStage.outputs.filters_completed_at) ??
                   filterStage.timerCompletedAt ??
                   readStageOutputString(filterStage.outputs.scanned_at);
                 return (
-                  <div key="scan" data-testid="bullpen-stage-one-filters" className="flex h-full min-h-[28rem] flex-col rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50 to-emerald-50/65 p-4 shadow-sm">
-                    <div className="mb-4 flex items-center gap-3">
-                      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-700 text-white shadow-sm shadow-emerald-900/15">
-                        <Filter className="h-4 w-4" />
-                      </span>
-                      <div>
-                        <p className="text-sm font-bold text-emerald-950">Stage 1 · Filters</p>
-                        <p className="text-xs text-emerald-700">Qualified event shortlist</p>
-                        <div className="mt-1.5 space-y-0.5 text-xs text-emerald-800">
+                  <div key="scan" data-testid="bullpen-stage-one-filters" data-stage-state={isStageOneActive ? "working" : stage.state} className={`flex h-full min-h-[28rem] flex-col rounded-2xl border p-4 shadow-sm transition ${toneClasses.container}`}>
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className={`flex h-9 w-9 items-center justify-center rounded-xl text-white shadow-sm ${isStageOneActive ? "bg-amber-500 shadow-amber-900/15" : "bg-emerald-700 shadow-emerald-900/15"}`}>
+                          <Filter className="h-4 w-4" />
+                        </span>
+                        <div>
+                        <p className={`text-sm font-bold ${toneClasses.text}`}>Stage 1 · Filters</p>
+                        <p className={`text-xs ${toneClasses.muted}`}>Qualified event shortlist</p>
+                        <div className={`mt-1.5 space-y-0.5 text-xs ${toneClasses.muted}`}>
                           <p>
                             <span className="font-semibold">Universal Polymarket Scan:</span>{" "}
                             <span className="tabular-nums">
-                              {formatIstDateTime(universalScanCompletedAt)}
+                              {formatIstDateTime(universalScanAt)}
                             </span>
                           </p>
                           <p>
@@ -15086,7 +15133,39 @@ export function BullpenAutoRunScheduleCard({
                           </p>
                         </div>
                       </div>
+                      </div>
+                      {isStageOneActive ? (
+                        <div className="flex flex-col items-end gap-1.5">
+                          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] ${toneClasses.badge}`}>
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            Working
+                          </span>
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${toneClasses.badge}`}>
+                            <Clock3 className="h-3 w-3" />
+                            {formatStageElapsedTime(displayedStageTimerStartedAt, null, timerNowMs)}
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
+                    {isStageOneActive ? (
+                      <div className="mb-4 rounded-xl border border-amber-300 bg-white/65 px-3 py-3 text-amber-950 shadow-sm" aria-live="polite" data-testid="bullpen-stage-one-live-progress">
+                        <p className="text-xs font-semibold">
+                          {displayedScanProgress?.message ?? "Starting Stage 1 filters…"}
+                        </p>
+                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold tabular-nums">
+                          <span>{stageProgressLabel}</span>
+                          <span>Updated {(() => {
+                            const updatedAt = Date.parse(displayedScanProgress?.lastUpdatedAt ?? "");
+                            if (!Number.isFinite(updatedAt)) return "just now";
+                            const seconds = Math.max(0, Math.floor((timerNowMs - updatedAt) / 1_000));
+                            return seconds < 2 ? "just now" : `${seconds}s ago`;
+                          })()}</span>
+                        </div>
+                        <div className={`mt-2 h-2 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
+                          <div className={`h-full rounded-full transition-[width] duration-500 ${toneClasses.progress}`} style={{ width: `${stageProgressPercent}%` }} />
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="flex-1">
                       <StageOneRunStats stage={filterStage} run={workflowRunForMonitor} decisions={investRunDecisions}
                         llmStage={filterStage === workflowStage ? workflowView.stages.find(item => item.key === "llm") : undefined}
@@ -15094,18 +15173,24 @@ export function BullpenAutoRunScheduleCard({
                         onOpenScanFilters={onOpenScanFilters}
                         workspaceProfile={workspaceProfile} />
                     </div>
-                    <div className="mt-5 border-t border-emerald-200/80 pt-3">
-                      <div className="flex items-center justify-between gap-3 text-xs font-semibold text-emerald-900">
+                    <div className={`mt-5 border-t pt-3 ${isStageOneActive ? "border-amber-200/80" : "border-emerald-200/80"}`}>
+                      <div className={`flex items-center justify-between gap-3 text-xs font-semibold ${toneClasses.text}`}>
                         <span className="inline-flex items-center gap-1.5">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-                          Scan coverage
+                          {isStageOneActive ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600" />
+                          ) : (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                          )}
+                          {isStageOneActive ? "Filter progress" : "Scan coverage"}
                         </span>
                         <span className="tabular-nums">
-                          {stats.totalScanned.toLocaleString("en-IN")} / {stats.totalScanned.toLocaleString("en-IN")}
+                          {isStageOneActive
+                            ? `${scanProgressScanned.toLocaleString("en-IN")} / ${scanProgressTotal?.toLocaleString("en-IN") ?? "—"}`
+                            : `${stats.totalScanned.toLocaleString("en-IN")} / ${stats.totalScanned.toLocaleString("en-IN")}`}
                         </span>
                       </div>
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-emerald-200/80">
-                        <div className="h-full w-full rounded-full bg-emerald-600" />
+                      <div className={`mt-2 h-1.5 overflow-hidden rounded-full ${toneClasses.progressTrack}`}>
+                        <div className={`h-full rounded-full transition-[width] duration-500 ${toneClasses.progress}`} style={{ width: `${isStageOneActive ? stageProgressPercent : 100}%` }} />
                       </div>
                     </div>
                   </div>
