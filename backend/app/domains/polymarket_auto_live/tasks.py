@@ -596,6 +596,7 @@ def queue_bullpen_workflow_trigger_batch(
     triggered_by: str,
     batch_id: str,
     universal_export_id: str | None = None,
+    workspace_profiles: tuple[str, ...] = WORKFLOW_TRIGGER_PROFILES,
 ) -> None:
     dispatch_bullpen_workflow_trigger_batch.apply_async(
         kwargs={
@@ -604,6 +605,7 @@ def queue_bullpen_workflow_trigger_batch(
             "batch_id": batch_id,
             "universal_export_id": universal_export_id,
             "profile_index": 0,
+            "workspace_profiles": list(workspace_profiles),
         },
         queue=AUTO_LIVE_QUEUE,
     )
@@ -622,6 +624,7 @@ def dispatch_bullpen_workflow_trigger_batch(
     batch_id: str,
     universal_export_id: str | None = None,
     profile_index: int = 0,
+    workspace_profiles: list[str] | None = None,
 ) -> dict[str, object]:
     """Serially start each workspace from one immutable Universal Scan.
 
@@ -630,12 +633,18 @@ def dispatch_bullpen_workflow_trigger_batch(
     cancel, skip, or overwrite another workflow's Stage 1.
     """
 
-    if profile_index >= len(WORKFLOW_TRIGGER_PROFILES):
+    resolved_profiles = tuple(workspace_profiles or WORKFLOW_TRIGGER_PROFILES)
+    if any(profile not in WORKFLOW_TRIGGER_PROFILES for profile in resolved_profiles):
+        raise ValueError("Unknown Bullpen workflow trigger profile.")
+    if profile_index >= len(resolved_profiles):
         return {"status": "completed", "batch_id": batch_id}
-    workspace_profile = WORKFLOW_TRIGGER_PROFILES[profile_index]
-    run_id = "wf-" + hashlib.sha256(
-        f"{user_id}:{triggered_by}:{batch_id}:{workspace_profile}".encode()
-    ).hexdigest()[:48]
+    workspace_profile = resolved_profiles[profile_index]
+    run_id = bullpen_workflow_trigger_run_id(
+        user_id=user_id,
+        triggered_by=triggered_by,
+        batch_id=batch_id,
+        workspace_profile=workspace_profile,
+    )
 
     with SyncSessionLocal() as session:
         existing = session.get(PolymarketAutoLiveRunRecord, run_id)
@@ -660,6 +669,7 @@ def dispatch_bullpen_workflow_trigger_batch(
                 "batch_id": batch_id,
                 "universal_export_id": universal_export_id,
                 "profile_index": profile_index + 1,
+                "workspace_profiles": list(resolved_profiles),
             },
             countdown=1,
             queue=AUTO_LIVE_QUEUE,
@@ -728,6 +738,7 @@ def dispatch_bullpen_workflow_trigger_batch(
             "batch_id": batch_id,
             "universal_export_id": snapshot_id,
             "profile_index": profile_index,
+            "workspace_profiles": list(resolved_profiles),
         },
         countdown=WORKFLOW_TRIGGER_RECHECK_SECONDS,
         queue=AUTO_LIVE_QUEUE,
@@ -737,6 +748,18 @@ def dispatch_bullpen_workflow_trigger_batch(
         "workspace_profile": workspace_profile,
         "run_id": run.id,
     }
+
+
+def bullpen_workflow_trigger_run_id(
+    *,
+    user_id: int,
+    triggered_by: str,
+    batch_id: str,
+    workspace_profile: str,
+) -> str:
+    return "wf-" + hashlib.sha256(
+        f"{user_id}:{triggered_by}:{batch_id}:{workspace_profile}".encode()
+    ).hexdigest()[:48]
 
 
 @celery.task(
