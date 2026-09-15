@@ -97,6 +97,11 @@ def read_state(record: PolymarketAutoLiveStateRecord | None) -> dict[str, Any]:
         "last_completed_at": saved.get("last_completed_at"),
         "last_failed_at": saved.get("last_failed_at"),
         "last_error": saved.get("last_error"),
+        "last_total_events": (
+            int(saved["last_total_events"])
+            if isinstance(saved.get("last_total_events"), (int, float))
+            else None
+        ),
         "progress_events": int(saved.get("progress_events", 0) or 0),
         "progress_pages": int(saved.get("progress_pages", 0) or 0),
         "estimated_total_events": (
@@ -141,31 +146,14 @@ def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
         ).isoformat()
         save_settings(session, user_id, settings)
         save_state(session, user_id, state)
+    if settings["enabled"] and not state["running"] and parse_datetime(state["next_run_at"]) is None:
+        state["next_run_at"] = next_scheduled_time(
+            utc_now(),
+            start_at=settings["start_at"],
+            refresh_minutes=settings["refresh_minutes"],
+        ).isoformat()
+        save_state(session, user_id, state)
     return {**settings, **state}
-
-
-def latest_export_total(user_id: int) -> int | None:
-    owner_hash = hashlib.sha256(f"{user_id}:universal".encode()).hexdigest()
-    latest: tuple[datetime, int] | None = None
-    for path in export_directory().glob("*.json"):
-        try:
-            metadata = json.loads(path.read_text(encoding="utf-8"))
-            completed_at = parse_datetime(metadata.get("updatedAt"))
-            row_count = metadata.get("rowCount")
-        except (OSError, ValueError):
-            continue
-        if (
-            metadata.get("ownerHash") != owner_hash
-            or not metadata.get("universalSource")
-            or not metadata.get("completed")
-            or completed_at is None
-            or not isinstance(row_count, (int, float))
-        ):
-            continue
-        candidate = (completed_at, int(row_count))
-        if latest is None or candidate[0] > latest[0]:
-            latest = candidate
-    return latest[1] if latest else None
 
 
 def update_schedule(
@@ -252,7 +240,7 @@ def mark_queued(session: Session, user_id: int, run_id: str, *, triggered_by: st
         "last_error": None,
         "progress_events": 0,
         "progress_pages": 0,
-        "estimated_total_events": latest_export_total(user_id),
+        "estimated_total_events": state["last_total_events"],
         "progress_message": "Queued for the Universal Scan worker.",
     })
     state["history"] = ([{
@@ -379,6 +367,11 @@ def finish_run(
         "kill_requested": False,
         "run_id": None,
         "last_completed_at": finished_at if not error and not cancelled else state.get("last_completed_at"),
+        "last_total_events": (
+            total_events
+            if not error and not cancelled and total_events is not None
+            else state.get("last_total_events")
+        ),
         "last_failed_at": finished_at if error and not cancelled else state.get("last_failed_at"),
         "last_error": error if not cancelled else None,
         "progress_events": total_events if total_events is not None else state.get("progress_events", 0),
