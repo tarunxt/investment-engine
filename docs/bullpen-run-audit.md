@@ -2340,11 +2340,19 @@ workflow filter completion time as `filtersCompletedAt` /
 below its qualified-shortlist label across Bullpen workflows. When an older filter
 snapshot has a source export ID but predates the explicit timestamp field, the
 snapshot API resolves the completion time from that retained universal export.
+If that legacy export has already rotated out, it falls back to the latest saved
+Universal scan completion time instead of presenting an unknown timestamp.
 Counts and exported evidence belong to
 that workflow output, while the source identifier records the common capture.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
+
+`Start Auto Run Now` is an immediate workflow-scoped action. It first reapplies
+the selected workspace's Stage 1 filters to the shared Universal scan, validates
+the resulting `workspace_profile`, and queues that explicit frozen candidate set.
+It does not start, stop, enable, or reschedule the shared recurring scheduler;
+`Enable Auto Runs` remains the separate scheduling control.
 
 The shared scan overview derives a versioned, read-only summary from every row
 in the completed universal ledger. It records completion time and scan duration,

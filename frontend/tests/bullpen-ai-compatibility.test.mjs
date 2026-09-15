@@ -412,7 +412,18 @@ test("Bullpen x AI auto-run Now controls keep a run-on-enable sentinel without p
   assert.match(autoRunCardSource, /const normalizedStart = startWasNow \? "" : scheduleStartInput\.trim\(\);/);
   assert.match(
     autoRunCardSource,
-    /async function handleStartAutoRunNow\(\)[\s\S]*?startBullpenAutoLive\(\);[\s\S]*?runBullpenAutoLiveOnce\(\);/,
+    /async function handleStartAutoRunNow\(\)[\s\S]*?Running fresh Stage 1 filters[\s\S]*?buildRunNowRequest\?\.\(\)[\s\S]*?runBullpenAutoLiveOnce\(runNowRequest\)/,
+  );
+  const startNowHandler = autoRunCardSource.match(
+    /async function handleStartAutoRunNow\(\) \{[\s\S]*?\n  async function handleStopAutoRuns/,
+  )?.[0] ?? "";
+  assert.doesNotMatch(startNowHandler, /startBullpenAutoLive\(\)/);
+  assert.doesNotMatch(startNowHandler, /stopBullpenAutoLive\(\)/);
+  assert.doesNotMatch(startNowHandler, /buildConsoleSettingsUpdate\(/);
+  assert.match(startNowHandler, /buildImmediateRunSettingsUpdate\(/);
+  assert.match(
+    startNowHandler,
+    /runNowRequest\.console_profile\.workspace_profile !== workspaceProfile/,
   );
   assert.match(
     autoRunCardSource,
@@ -481,7 +492,7 @@ test("Bullpen auto-run persists scan scope outside the shared filters popup", ()
   assert.doesNotMatch(scanFiltersPopupSource, /console_scan_scope:\s*nextScope/);
   assert.match(
     autoRunCardSource,
-    /buildConsoleSettingsUpdate\(\s*latestConsoleOrderUsd,\s*consoleScanScope,/,
+    /buildImmediateRunSettingsUpdate\(\s*latestConsoleOrderUsd,\s*consoleScanScope,/,
   );
   assert.match(autoRunCardSource, /FULL Universe|Full Universe/i);
   assert.doesNotMatch(scanFiltersPopupSource, /new purchases are blocked/);
@@ -1032,7 +1043,7 @@ test("Bullpen x AI stage refreshes keep fresh opportunities and active positions
 
   assert.match(
     bullpenAiPageSource,
-    /const positionsRefreshTask = refreshBullpenPositions\(\{\s*suppressAutoClaim: true,/,
+    /const \[refreshedQuestionsResult, refreshedPositionsResult\] =\s*await Promise\.all\(\[[\s\S]*?refreshBullpenPositions\(\{\s*suppressAutoClaim: true,/,
   );
   assert.match(
     bullpenAiPageSource,
