@@ -33,8 +33,12 @@ test("Universal Scan renders its isolated Bullpen-style auto-run controls", () =
   assert.doesNotMatch(shared, /One Full Universe capture/);
   assert.match(shared, /Last Universal Scan/);
   assert.doesNotMatch(shared, /Last stage run/);
+  assert.match(shared, /Started: \{dateLabel\(snapshot\.scannedAt\)\}/);
+  assert.match(shared, /Completed\/Failed:/);
+  assert.doesNotMatch(shared, />Original<\/button>/);
   assert.match(shared, /status\.last_completed_at/);
   assert.match(shared, /border-emerald-200 bg-emerald-50/);
+  assert.match(card, /status\?\.enabled \? "bg-red-700" : "bg-slate-950"/);
 });
 
 test("Universal Scan uses a dedicated recurring worker task", () => {
