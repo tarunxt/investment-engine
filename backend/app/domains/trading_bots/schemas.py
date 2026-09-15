@@ -80,3 +80,32 @@ class TradingBotOverviewCard(BaseModel):
 class TradingBotsOverviewResponse(BaseModel):
     generated_at: str
     bots: list[TradingBotOverviewCard] = Field(default_factory=list)
+
+
+class UniversalScanHistoryItem(BaseModel):
+    id: str
+    status: Literal["queued", "running", "completed", "failed"]
+    triggered_by: Literal["manual", "scheduler"]
+    started_at: str | None = None
+    completed_at: str | None = None
+    total_events: int | None = None
+    error: str | None = None
+
+
+class UniversalScanAutoRunStatus(BaseModel):
+    enabled: bool
+    running: bool
+    run_id: str | None = None
+    start_at: str
+    refresh_minutes: int
+    next_run_at: str | None = None
+    last_run_at: str | None = None
+    last_completed_at: str | None = None
+    last_failed_at: str | None = None
+    last_error: str | None = None
+    history: list[UniversalScanHistoryItem] = Field(default_factory=list)
+
+
+class UniversalScanScheduleUpdate(BaseModel):
+    start_at: str | None = None
+    refresh_minutes: int | None = Field(default=None, ge=1, le=10_080)
