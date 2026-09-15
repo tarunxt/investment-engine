@@ -15103,7 +15103,11 @@ export function BullpenAutoRunScheduleCard({
                 const stats = getStageOneStats(filterStage);
                 const universalScanAt =
                   readStageOutputString(filterStage.outputs.scanned_at) ??
-                  readStageOutputString(filterStage.outputs.source_scan_completed_at);
+                  readStageOutputString(filterStage.outputs.source_scan_completed_at) ??
+                  workflowRunForMonitor?.request_context?.console_profile?.scanned_at ??
+                  workflowRunForMonitor?.request_context?.console_profile
+                    ?.source_scan_completed_at ??
+                  null;
                 const filtersCompletedAt =
                   readStageOutputString(filterStage.outputs.filters_completed_at) ??
                   filterStage.timerCompletedAt ??

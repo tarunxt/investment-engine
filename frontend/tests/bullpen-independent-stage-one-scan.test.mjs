@@ -58,6 +58,10 @@ test("an active workflow owns its yellow Stage 1 tile and reports live progress"
   assert.match(card, /scanProgressPercent/);
   assert.match(card, /Filter progress/);
   assert.match(card, /totalMarkets/);
+  assert.match(
+    card,
+    /workflowRunForMonitor\?\.request_context\?\.console_profile\?\.scanned_at/,
+  );
 });
 
 test("live run selection is isolated to the current workflow", () => {
