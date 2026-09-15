@@ -139,6 +139,15 @@ def save_state(session: Session, user_id: int, state: dict[str, Any]) -> None:
 def status_for_user(session: Session, user_id: int) -> dict[str, Any]:
     settings = read_settings(session.get(UniversalScanSettingsRecord, user_id))
     state = read_state(session.get(UniversalScanStateRecord, user_id))
+    completed_export = latest_completed_universal_export(user_id)
+    if completed_export is not None:
+        completed_metadata, _ = completed_export
+        completed_scan_started_at = (
+            completed_metadata.get("scannedAt")
+            or completed_metadata.get("createdAt")
+        )
+        if isinstance(completed_scan_started_at, str):
+            state["last_completed_run_started_at"] = completed_scan_started_at
     latest_history = state["history"][0] if state["history"] else None
     last_run_at = parse_datetime(state["last_run_at"])
     configured_start = parse_datetime(settings["start_at"])

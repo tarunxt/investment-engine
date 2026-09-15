@@ -2401,7 +2401,9 @@ Stage 1 snapshot both exist, the card displays the newer timestamped evidence.
 The successful Universal scheduler run's paired start time is used only as a
 guarded legacy fallback when that same run's completion predates the workflow
 start. A later failed or cancelled Universal attempt can never replace this
-lineage.
+lineage. The status endpoint resolves this start timestamp from the immutable
+completed export metadata, with the bounded run history used only as a legacy
+fallback.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
