@@ -43,6 +43,8 @@ test("Start Auto Run Now enables and re-anchors the recurring schedule", () => {
   );
   assert.match(router, /enabled=True/);
   assert.match(router, /start_at=utc_now\(\)\.replace\(microsecond=0\)\.isoformat\(\)/);
+  assert.match(router, /background_tasks\.add_task/);
+  assert.match(router, /dispatch_universal_scan/);
 });
 
 test("queueing stays fast and reuses the prior completed total for progress", () => {

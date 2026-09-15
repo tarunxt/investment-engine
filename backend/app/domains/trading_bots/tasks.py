@@ -29,7 +29,11 @@ class UniversalScanCancelled(RuntimeError):
     """Raised when the operator kills the active Universal Scan."""
 
 
-def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object]:
+def prepare_universal_scan(
+    user_id: int,
+    *,
+    triggered_by: str,
+) -> tuple[dict[str, object], bool]:
     run_id = f"universal-scan-{uuid4().hex}"
     with SyncSessionLocal() as session:
         record = session.scalar(
@@ -39,9 +43,13 @@ def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object
         )
         state = read_state(record)
         if state["running"]:
-            return state
+            return state, False
         state = mark_queued(session, user_id, run_id, triggered_by=triggered_by)
         session.commit()
+    return state, True
+
+
+def dispatch_universal_scan(user_id: int, run_id: str) -> None:
     try:
         execute_universal_polymarket_scan.apply_async(args=[user_id, run_id])
     except Exception as exc:
@@ -49,6 +57,12 @@ def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object
             finish_run(session, user_id, run_id, error=f"Could not queue Universal Scan: {exc}")
             session.commit()
         raise
+
+
+def queue_universal_scan(user_id: int, *, triggered_by: str) -> dict[str, object]:
+    state, should_dispatch = prepare_universal_scan(user_id, triggered_by=triggered_by)
+    if should_dispatch:
+        dispatch_universal_scan(user_id, str(state["run_id"]))
     return state
 
 
