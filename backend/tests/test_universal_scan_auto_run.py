@@ -7,7 +7,11 @@ import zlib
 from types import SimpleNamespace
 
 from app.domains.polymarket_auto_live.console_profile import scan_console_profile_markets
-from app.domains.trading_bots.universal_scan import next_scheduled_time, read_state
+from app.domains.trading_bots.universal_scan import (
+    latest_completed_universal_export,
+    next_scheduled_time,
+    read_state,
+)
 
 
 def test_universal_scan_schedule_stays_anchored_to_configured_start():
@@ -121,6 +125,10 @@ def test_workflow_stage1_filters_the_saved_universal_scan(tmp_path, monkeypatch)
         + "\n",
         encoding="utf-8",
     )
+
+    completed_export = latest_completed_universal_export(user_id)
+    assert completed_export is not None
+    assert completed_export[0]["scannedAt"] == now.isoformat()
 
     result = asyncio.run(
         scan_console_profile_markets(
