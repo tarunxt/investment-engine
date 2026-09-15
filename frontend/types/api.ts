@@ -2523,7 +2523,7 @@ export interface BullpenWorkflowRunNowRequest {
 }
 
 export interface BullpenWorkflowRunNowResponse {
-  status: "queued";
+  status: "started" | "queued";
   run_id: string;
   workspace_profile: "bullpen007" | "bullpen-sports";
   universal_export_id: string;
