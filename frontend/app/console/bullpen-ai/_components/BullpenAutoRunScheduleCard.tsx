@@ -1463,6 +1463,8 @@ function buildIndependentStageOneView(
       snapshot_id: snapshot.snapshotId,
       scan_export_id: snapshot.scanExportId ?? null,
       source_scan_export_id: snapshot.sourceScanExportId ?? null,
+      source_scan_completed_at: snapshot.sourceScanCompletedAt ?? null,
+      filters_completed_at: snapshot.filtersCompletedAt ?? snapshot.scannedAt,
       scanned_at: snapshot.scannedAt,
       scanned_candidates: snapshot.totalCandidates,
       total_items: snapshot.totalCandidates,
@@ -14921,6 +14923,13 @@ export function BullpenAutoRunScheduleCard({
               if (["scan"].includes(stage.key)) {
                 const filterStage = independentStageOneView ?? stage;
                 const stats = getStageOneStats(filterStage);
+                const universalScanCompletedAt = readStageOutputString(
+                  filterStage.outputs.source_scan_completed_at,
+                );
+                const filtersCompletedAt =
+                  readStageOutputString(filterStage.outputs.filters_completed_at) ??
+                  filterStage.timerCompletedAt ??
+                  readStageOutputString(filterStage.outputs.scanned_at);
                 return (
                   <div key="scan" data-testid="bullpen-stage-one-filters" className="flex h-full min-h-[28rem] flex-col rounded-2xl border border-emerald-200 bg-gradient-to-b from-emerald-50 to-emerald-50/65 p-4 shadow-sm">
                     <div className="mb-4 flex items-center gap-3">
@@ -14930,6 +14939,20 @@ export function BullpenAutoRunScheduleCard({
                       <div>
                         <p className="text-sm font-bold text-emerald-950">Stage 1 · Filters</p>
                         <p className="text-xs text-emerald-700">Qualified event shortlist</p>
+                        <div className="mt-1.5 space-y-0.5 text-xs text-emerald-800">
+                          <p>
+                            <span className="font-semibold">Universal Polymarket Scan:</span>{" "}
+                            <span className="tabular-nums">
+                              {formatIstDateTime(universalScanCompletedAt)}
+                            </span>
+                          </p>
+                          <p>
+                            <span className="font-semibold">Filters run:</span>{" "}
+                            <span className="tabular-nums">
+                              {formatIstDateTime(filtersCompletedAt)}
+                            </span>
+                          </p>
+                        </div>
                       </div>
                     </div>
                     <div className="flex-1">

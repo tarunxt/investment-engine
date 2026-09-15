@@ -2333,7 +2333,11 @@ raw export ledger in a separate owner namespace. Bullpen 007 filter reapplicatio
 forks the completed capture, adds its wallet positions, and writes its own filtered
 output; it never rewrites the universal source. New filter snapshots carry
 `sourceScanExportId`, mapped to `source_scan_export_id` in Stage 1 display outputs,
-alongside the existing `scan_export_id`. Counts and exported evidence belong to
+alongside the existing `scan_export_id`. They also retain the completed universal
+capture time as `sourceScanCompletedAt` / `source_scan_completed_at` and the
+workflow filter completion time as `filtersCompletedAt` /
+`filters_completed_at`. The shared Stage 1 card displays both timestamps directly
+below its qualified-shortlist label across Bullpen workflows. Counts and exported evidence belong to
 that workflow output, while the source identifier records the common capture.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan

@@ -131,6 +131,12 @@ export async function GET(request: NextRequest) {
         totalRejectedQuestions: rejectedCount,
         scanExportId: latest.metadata.exportId,
         sourceScanExportId: latest.metadata.sourceScanExportId,
+        sourceScanCompletedAt:
+          latest.metadata.sourceScanCompletedAt ??
+          (isUniversal ? latest.metadata.updatedAt : null),
+        filtersCompletedAt: isUniversal
+          ? null
+          : latest.metadata.filtersCompletedAt ?? latest.metadata.updatedAt,
         details:
           "Latest completed Stage 1 snapshot synchronized from the server across devices.",
       },

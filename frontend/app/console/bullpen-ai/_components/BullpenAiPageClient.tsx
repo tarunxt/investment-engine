@@ -1032,6 +1032,8 @@ function buildBullpenAutoRunRequest({
       source_label: snapshot.sourceLabel,
       source_url: snapshot.sourceUrl,
       scanned_at: snapshot.scannedAt,
+      source_scan_completed_at: snapshot.sourceScanCompletedAt ?? null,
+      filters_completed_at: snapshot.filtersCompletedAt ?? snapshot.scannedAt,
       snapshot_id: snapshot.snapshotId,
       mode,
       total_candidates: snapshot.totalCandidates,

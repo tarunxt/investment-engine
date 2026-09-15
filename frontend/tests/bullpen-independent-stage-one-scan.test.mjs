@@ -33,6 +33,12 @@ test("Bullpen manual actions filter a shared capture with an isolated continuati
 });
 test("filtered evidence retains source lineage and server synchronization", () => {
   assert.match(card, /source_scan_export_id: snapshot\.sourceScanExportId/);
+  assert.match(card, /source_scan_completed_at: snapshot\.sourceScanCompletedAt/);
+  assert.match(card, /filters_completed_at: snapshot\.filtersCompletedAt/);
+  assert.match(card, /Universal Polymarket Scan:/);
+  assert.match(card, /Filters run:/);
   assert.match(page, /\/api\/bullpen-ai\/stage-one-snapshot/);
   assert.match(route, /sourceScanExportId: metadata\.sourceScanExportId/);
+  assert.match(route, /sourceScanCompletedAt: metadata\.sourceScanCompletedAt/);
+  assert.match(route, /filtersCompletedAt: metadata\.filtersCompletedAt/);
 });

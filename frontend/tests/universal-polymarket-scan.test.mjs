@@ -29,6 +29,8 @@ test("workflow filters are isolated and incomplete scans never replace a complet
     assert.equal(two.metadata.acceptedSample[0].id, "b");
     assert.equal(one.metadata.sourceScanExportId, raw.exportId);
     const universal = await ledger.openLatestStageOneGammaExport({ ownerKey: "test:universal" });
+    assert.equal(one.metadata.sourceScanCompletedAt, universal.metadata.updatedAt);
+    assert.equal(one.metadata.filtersCompletedAt, one.metadata.updatedAt);
     assert.equal(universal.metadata.acceptedCount, 2);
     assert.equal(universal.metadata.universalSource, true);
     await ledger.appendStageOneGammaExportPage({ exportId: null, ownerKey: "test:universal", pageKey: "first", rows: [], completed: false });
