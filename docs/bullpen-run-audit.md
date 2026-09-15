@@ -2337,7 +2337,10 @@ alongside the existing `scan_export_id`. They also retain the completed universa
 capture time as `sourceScanCompletedAt` / `source_scan_completed_at` and the
 workflow filter completion time as `filtersCompletedAt` /
 `filters_completed_at`. The shared Stage 1 card displays both timestamps directly
-below its qualified-shortlist label across Bullpen workflows. Counts and exported evidence belong to
+below its qualified-shortlist label across Bullpen workflows. When an older filter
+snapshot has a source export ID but predates the explicit timestamp field, the
+snapshot API resolves the completion time from that retained universal export.
+Counts and exported evidence belong to
 that workflow output, while the source identifier records the common capture.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
