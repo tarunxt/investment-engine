@@ -57,7 +57,7 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
         self.assertNotIn("buildRunNowRequest", handler)
         self.assertNotIn("executeBullpenScan", handler)
 
-    def test_manual_workflow_queue_pins_one_profile_and_waits_for_lane(self) -> None:
+    def test_manual_workflow_start_persists_immediately_or_queues_when_lane_busy(self) -> None:
         router_source = (
             ROOT / "backend/app/domains/polymarket_auto_live/router.py"
         ).read_text(encoding="utf-8")
@@ -65,6 +65,10 @@ class AutoLiveTriggerUnificationTests(unittest.TestCase):
             '@router.post("/start"', 1
         )[0]
         self.assertIn("latest_completed_universal_export", route)
+        self.assertIn("await bot.run_once", route)
+        self.assertIn("except AutoLiveExecutionLaneBusy", route)
+        self.assertIn("client_run_id=run_id", route)
+        self.assertIn("snapshot_id=export_id", route)
         self.assertIn("universal_export_id=export_id", route)
         self.assertIn("workspace_profiles=(request.workspace_profile,)", route)
 
