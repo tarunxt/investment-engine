@@ -58,6 +58,8 @@ import {
     BullpenAutoLiveHistoryPage,
     BullpenAutoLiveRunOrdersResponse,
     BullpenAutoLiveRunOnceRequest,
+    BullpenWorkflowRunNowRequest,
+    BullpenWorkflowRunNowResponse,
     BullpenAutoLiveDecision,
     BullpenAutoLivePersistedStatus,
     BullpenAutoLiveState,
@@ -338,6 +340,9 @@ export interface IApiService {
     ): Promise<BullpenRunAuditFeedbackDetail>;
     exportBullpenRunAudit(runId: string): Promise<Record<string, unknown>>;
     runBullpenAutoLiveOnce(data?: BullpenAutoLiveRunOnceRequest): Promise<BullpenAutoLiveRun>;
+    queueBullpenWorkflowRunNow(
+        data: BullpenWorkflowRunNowRequest,
+    ): Promise<BullpenWorkflowRunNowResponse>;
     startBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     stopBullpenAutoLive(): Promise<BullpenAutoLiveState>;
     pauseBullpenAutoLive(): Promise<BullpenAutoLiveState>;
