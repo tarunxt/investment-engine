@@ -318,6 +318,7 @@ type UniversalScanTriggerStatus = {
   next_run_at?: string | null;
   last_run_at?: string | null;
   last_completed_at?: string | null;
+  last_completed_run_started_at?: string | null;
   last_failed_at?: string | null;
   last_error?: string | null;
   running?: boolean;
@@ -15146,7 +15147,7 @@ export function BullpenAutoRunScheduleCard({
                 const universalScanCompletedAt =
                   universalTriggerStatus?.last_completed_at ?? null;
                 const universalScanStartedAt =
-                  universalTriggerStatus?.last_run_at ?? null;
+                  universalTriggerStatus?.last_completed_run_started_at ?? null;
                 const workflowStartedMs = workflowStartedAt
                   ? Date.parse(workflowStartedAt)
                   : Number.NaN;

@@ -4,9 +4,10 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import zlib
+from types import SimpleNamespace
 
 from app.domains.polymarket_auto_live.console_profile import scan_console_profile_markets
-from app.domains.trading_bots.universal_scan import next_scheduled_time
+from app.domains.trading_bots.universal_scan import next_scheduled_time, read_state
 
 
 def test_universal_scan_schedule_stays_anchored_to_configured_start():
@@ -27,6 +28,38 @@ def test_universal_scan_schedule_stays_anchored_to_configured_start():
         start_at=start,
         refresh_minutes=360,
     ) == datetime(2026, 9, 15, 18, 30, tzinfo=UTC)
+
+
+def test_status_pairs_the_latest_successful_scan_with_its_own_start_time():
+    state = read_state(
+        SimpleNamespace(
+            payload={
+                "universal_scan_auto_run": {
+                    "last_run_at": "2026-09-15T18:03:44+00:00",
+                    "last_completed_at": "2026-09-15T12:11:26+00:00",
+                    "history": [
+                        {
+                            "id": "failed-later",
+                            "status": "failed",
+                            "started_at": "2026-09-15T18:03:44+00:00",
+                        },
+                        {
+                            "id": "successful-source",
+                            "status": "completed",
+                            "started_at": "2026-09-15T12:03:41+00:00",
+                            "completed_at": "2026-09-15T12:11:26+00:00",
+                        },
+                    ],
+                }
+            }
+        )
+    )
+
+    assert state["last_run_at"] == "2026-09-15T18:03:44+00:00"
+    assert (
+        state["last_completed_run_started_at"]
+        == "2026-09-15T12:03:41+00:00"
+    )
 
 
 def test_workflow_stage1_filters_the_saved_universal_scan(tmp_path, monkeypatch):

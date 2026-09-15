@@ -88,6 +88,16 @@ def read_state(record: UniversalScanStateRecord | None) -> dict[str, Any]:
     saved = record.payload.get(STATE_KEY) if record and isinstance(record.payload, dict) else None
     saved = saved if isinstance(saved, dict) else {}
     history = saved.get("history")
+    completed_run_started_at = next(
+        (
+            item.get("started_at")
+            for item in history
+            if isinstance(item, dict)
+            and item.get("status") == "completed"
+            and isinstance(item.get("started_at"), str)
+        ),
+        None,
+    ) if isinstance(history, list) else None
     return {
         "running": bool(saved.get("running", False)),
         "paused": bool(saved.get("paused", False)),
@@ -96,6 +106,7 @@ def read_state(record: UniversalScanStateRecord | None) -> dict[str, Any]:
         "next_run_at": saved.get("next_run_at"),
         "last_run_at": saved.get("last_run_at"),
         "last_completed_at": saved.get("last_completed_at"),
+        "last_completed_run_started_at": completed_run_started_at,
         "last_failed_at": saved.get("last_failed_at"),
         "last_error": saved.get("last_error"),
         "last_total_events": (

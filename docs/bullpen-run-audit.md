@@ -2398,8 +2398,10 @@ fall back into Bullpen 007 history. The compact run projection also carries that
 non-sensitive workspace owner explicitly so the dashboard makes the same choice
 as the server-side History query. If a completed auto run and a saved independent
 Stage 1 snapshot both exist, the card displays the newer timestamped evidence.
-The Universal scheduler's start time is used only as a guarded legacy fallback
-when its completion predates the workflow start.
+The successful Universal scheduler run's paired start time is used only as a
+guarded legacy fallback when that same run's completion predates the workflow
+start. A later failed or cancelled Universal attempt can never replace this
+lineage.
 Existing frozen auto-run audits and legacy scan APIs retain their current schema
 and meaning. Bullpen 008 can consume the same capture through the shared scan
 contract when its workflow is connected.
