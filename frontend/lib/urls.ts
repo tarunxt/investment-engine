@@ -272,6 +272,8 @@ const bullpenAutoLiveApiUrls = {
   cancelOrder: (intentId: string) =>
     `${resolveApiBaseUrl()}/polymarket/auto-live/orders/${intentId}/cancel`,
   runOnce: () => `${resolveApiBaseUrl()}/polymarket/auto-live/run-once`,
+  workflowRunNow: () =>
+    `${resolveApiBaseUrl()}/polymarket/auto-live/workflow-run-now`,
   start: () => `${resolveApiBaseUrl()}/polymarket/auto-live/start`,
   stop: () => `${resolveApiBaseUrl()}/polymarket/auto-live/stop`,
   pause: () => `${resolveApiBaseUrl()}/polymarket/auto-live/pause`,
